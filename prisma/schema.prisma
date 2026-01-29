@@ -32,6 +32,10 @@ model User {
   event_favorites       event_favorites[]
   event_ratings         event_ratings[]
   event_reports         event_reports[]
+
+  // Mobile API relations
+  mobile_refresh_tokens mobile_refresh_tokens[]
+  user_interests        user_interests[]
 }
 
 model Account {
@@ -163,6 +167,7 @@ model categories {
   parent      categories?         @relation("CategoryHierarchy", fields: [parent_id], references: [id])
   children    categories[]        @relation("CategoryHierarchy")
   events      event_categories[]
+  user_interests user_interests[]
 }
 
 model event_categories {
@@ -357,6 +362,33 @@ model recurring_events {
 
   // Relations
   parent_event      events   @relation(fields: [parent_event_id], references: [id], onDelete: Cascade)
+}
+
+model mobile_refresh_tokens {
+  id          String    @id @default(uuid()) @db.Uuid
+  user_id     String
+  token_hash  String    @unique
+  device_info Json?
+  expires_at  DateTime  @db.Timestamptz(6)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  revoked_at  DateTime? @db.Timestamptz(6)
+
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([expires_at])
+}
+
+model user_interests {
+  id          String     @id @default(uuid()) @db.Uuid
+  user_id     String
+  category_id String     @db.Uuid
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+
+  user        User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  category    categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, category_id])
 }
 
 // Enums

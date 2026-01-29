@@ -1,0 +1,207 @@
+import { NextRequest } from "next/server"
+import { db } from "@/lib/db"
+import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { haversineDistance } from "@/lib/geo"
+import {
+  successResponse,
+  unauthorizedResponse,
+  notFoundResponse,
+  serverErrorResponse,
+} from "@/lib/api-response"
+
+interface RouteParams {
+  params: Promise<{ eventId: string }>
+}
+
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { eventId } = await params
+
+    // Get authenticated user
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) {
+      return unauthorizedResponse("Invalid or expired token")
+    }
+
+    // Parse optional coordinates from query
+    const searchParams = request.nextUrl.searchParams
+    const userLat = searchParams.get("lat")
+      ? parseFloat(searchParams.get("lat")!)
+      : undefined
+    const userLon = searchParams.get("lon")
+      ? parseFloat(searchParams.get("lon")!)
+      : undefined
+
+    // Fetch event with all related data
+    const event = await db.events.findUnique({
+      where: { id: eventId, deleted_at: null },
+      include: {
+        organizer: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            email: true,
+          },
+        },
+        details: true,
+        categories: {
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                description: true,
+                icon: true,
+              },
+            },
+          },
+        },
+        media: {
+          orderBy: { order: "asc" },
+        },
+        chat_group: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            member_count: true,
+          },
+        },
+        _count: {
+          select: {
+            check_ins: {
+              where: { status: "checked_in" },
+            },
+            favorites: true,
+            ratings: true,
+          },
+        },
+      },
+    })
+
+    if (!event) {
+      return notFoundResponse("Event not found")
+    }
+
+    // Get user's relationship with this event
+    const [userFavorite, userRating, userCheckIn] = await Promise.all([
+      db.event_favorites.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+      }),
+      db.event_ratings.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+      }),
+      db.event_check_ins.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+      }),
+    ])
+
+    // Calculate average rating
+    const avgRating = await db.event_ratings.aggregate({
+      where: { event_id: eventId },
+      _avg: { rating: true },
+    })
+
+    // Calculate distance if coordinates provided
+    let distance: number | null = null
+    if (
+      userLat !== undefined &&
+      userLon !== undefined &&
+      event.latitude &&
+      event.longitude
+    ) {
+      distance = haversineDistance(
+        userLat,
+        userLon,
+        event.latitude,
+        event.longitude
+      )
+    }
+
+    return successResponse({
+      id: event.id,
+      slug: event.slug,
+      title: event.title,
+      description: event.description,
+      shortDescription: event.short_description,
+      coverImageUrl: event.cover_image_url,
+      startTime: event.start_time,
+      endTime: event.end_time,
+      timezone: event.timezone,
+      status: event.status,
+      visibility: event.visibility,
+      venueName: event.venue_name,
+      address: event.address,
+      city: event.city,
+      state: event.state,
+      country: event.country,
+      postalCode: event.postal_code,
+      latitude: event.latitude,
+      longitude: event.longitude,
+      maxCapacity: event.max_capacity,
+      currentCapacity: event.current_capacity,
+      checkInRadius: event.check_in_radius,
+      isFeatured: event.is_featured,
+      isRecurring: event.is_recurring,
+      externalLink: event.external_link,
+      createdAt: event.created_at,
+      organizer: event.organizer,
+      details: event.details
+        ? {
+            fullDescription: event.details.full_description,
+            houseRules: event.details.house_rules,
+            cancellationPolicy: event.details.cancellation_policy,
+            additionalInfo: event.details.additional_info,
+            faq: event.details.faq,
+            accessibilityInfo: event.details.accessibility_info,
+            covidGuidelines: event.details.covid_guidelines,
+          }
+        : null,
+      categories: event.categories.map((c) => c.category),
+      media: event.media.map((m) => ({
+        id: m.id,
+        type: m.type,
+        url: m.url,
+        thumbnailUrl: m.thumbnail_url,
+        title: m.title,
+        description: m.description,
+        order: m.order,
+      })),
+      chatGroup: event.chat_group,
+      stats: {
+        checkInCount: event._count.check_ins,
+        favoriteCount: event._count.favorites,
+        ratingCount: event._count.ratings,
+        averageRating: avgRating._avg.rating,
+      },
+      userStatus: {
+        isFavorited: !!userFavorite,
+        isCheckedIn: userCheckIn?.status === "checked_in",
+        checkInStatus: userCheckIn?.status || null,
+        userRating: userRating?.rating || null,
+        userReview: userRating?.review || null,
+      },
+      distance,
+    })
+  } catch (error) {
+    console.error("Get event error:", error)
+    return serverErrorResponse("Failed to get event")
+  }
+}

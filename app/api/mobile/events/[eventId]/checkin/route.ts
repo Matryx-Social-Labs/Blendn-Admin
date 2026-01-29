@@ -1,0 +1,172 @@
+import { NextRequest } from "next/server"
+import { db } from "@/lib/db"
+import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { haversineDistanceMeters } from "@/lib/geo"
+import {
+  successResponse,
+  validationErrorResponse,
+  unauthorizedResponse,
+  notFoundResponse,
+  errorResponse,
+  serverErrorResponse,
+} from "@/lib/api-response"
+import { checkinSchema } from "@/lib/validations/event"
+
+interface RouteParams {
+  params: Promise<{ eventId: string }>
+}
+
+export async function POST(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { eventId } = await params
+
+    // Get authenticated user
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) {
+      return unauthorizedResponse("Invalid or expired token")
+    }
+
+    const body = await request.json()
+
+    // Validate input
+    const parsed = checkinSchema.safeParse(body)
+    if (!parsed.success) {
+      return validationErrorResponse(parsed.error)
+    }
+
+    const { latitude, longitude, deviceInfo } = parsed.data
+
+    // Fetch event
+    const event = await db.events.findUnique({
+      where: { id: eventId, deleted_at: null },
+    })
+
+    if (!event) {
+      return notFoundResponse("Event not found")
+    }
+
+    // Check if event is published
+    if (event.status !== "published") {
+      return errorResponse("Cannot check in to an unpublished event")
+    }
+
+    // Check if event has started
+    const now = new Date()
+    if (now < event.start_time) {
+      return errorResponse("Event has not started yet")
+    }
+
+    // Check if event has ended
+    if (now > event.end_time) {
+      return errorResponse("Event has already ended")
+    }
+
+    // Validate location if event has coordinates
+    if (event.latitude && event.longitude) {
+      const distanceMeters = haversineDistanceMeters(
+        latitude,
+        longitude,
+        event.latitude,
+        event.longitude
+      )
+
+      // check_in_radius is stored in meters
+      if (distanceMeters > event.check_in_radius) {
+        return errorResponse(
+          `You must be within ${event.check_in_radius} meters of the event to check in. You are currently ${Math.round(distanceMeters)} meters away.`
+        )
+      }
+    }
+
+    // Check capacity
+    if (event.max_capacity && event.current_capacity >= event.max_capacity) {
+      return errorResponse("Event is at full capacity")
+    }
+
+    // Create or update check-in
+    const checkIn = await db.event_check_ins.upsert({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: authUser.userId,
+        },
+      },
+      create: {
+        event_id: eventId,
+        user_id: authUser.userId,
+        status: "checked_in",
+        check_in_time: now,
+        latitude,
+        longitude,
+        device_info: deviceInfo,
+      },
+      update: {
+        status: "checked_in",
+        check_in_time: now,
+        latitude,
+        longitude,
+        device_info: deviceInfo,
+        updated_at: now,
+      },
+    })
+
+    // Update event capacity
+    await db.events.update({
+      where: { id: eventId },
+      data: {
+        current_capacity: {
+          increment: 1,
+        },
+      },
+    })
+
+    // Add user to chat group if exists
+    const chatGroup = await db.chat_groups.findUnique({
+      where: { event_id: eventId },
+    })
+
+    if (chatGroup) {
+      await db.chat_group_members.upsert({
+        where: {
+          chat_group_id_user_id: {
+            chat_group_id: chatGroup.id,
+            user_id: authUser.userId,
+          },
+        },
+        create: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+          role: "member",
+          status: "active",
+        },
+        update: {
+          status: "active",
+          updated_at: now,
+        },
+      })
+
+      // Update member count
+      await db.chat_groups.update({
+        where: { id: chatGroup.id },
+        data: {
+          member_count: {
+            increment: 1,
+          },
+        },
+      })
+    }
+
+    return successResponse({
+      checkIn: {
+        id: checkIn.id,
+        status: checkIn.status,
+        checkInTime: checkIn.check_in_time,
+        eventId: checkIn.event_id,
+      },
+      message: "Successfully checked in",
+    })
+  } catch (error) {
+    console.error("Check-in error:", error)
+    return serverErrorResponse("Failed to check in")
+  }
+}
