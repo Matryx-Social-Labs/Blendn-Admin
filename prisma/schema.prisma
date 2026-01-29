@@ -1,0 +1,424 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// NextAuth.js models
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?   // hashed password for credentials
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  profile       profiles?
+
+  // Event relations
+  organized_events       events[]
+  event_check_ins       event_check_ins[]
+  chat_messages         chat_messages[]
+  chat_group_memberships chat_group_members[]
+  message_reactions     message_reactions[]
+  event_favorites       event_favorites[]
+  event_ratings         event_ratings[]
+  event_reports         event_reports[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Application models
+model profiles {
+  id         String   @id
+  phone      String?
+  name       String?
+  age        Int?
+  location   String?
+  interests  String[]
+  onboarded  Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  user       User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model events {
+  id                String         @id @default(uuid()) @db.Uuid
+  slug              String         @unique
+  title             String
+  description       String
+  short_description String?
+  latitude          Float?
+  longitude         Float?
+  address           String?
+  venue_name        String?
+  city              String?
+  state             String?
+  country           String?
+  postal_code       String?
+  start_time        DateTime       @db.Timestamptz(6)
+  end_time          DateTime       @db.Timestamptz(6)
+  timezone          String
+  status            event_status   @default(draft)
+  visibility        visibility_type @default(public)
+  max_capacity      Int?
+  current_capacity  Int            @default(0)
+  created_at        DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime       @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime?      @db.Timestamptz(6)
+  organizer_id      String
+  cover_image_url   String?
+  external_link     String?
+  is_featured       Boolean        @default(false)
+  is_recurring      Boolean        @default(false)
+  check_in_radius   Float          @default(30)
+
+  // Relations
+  organizer         User           @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
+  details           event_details?
+  check_ins         event_check_ins[]
+  chat_group        chat_groups?
+  media             event_media[]
+  categories        event_categories[]
+  favorites         event_favorites[]
+  ratings           event_ratings[]
+  reports           event_reports[]
+  recurring_pattern recurring_events?
+
+  @@index([latitude, longitude])
+  @@index([status, start_time])
+  @@index([organizer_id])
+}
+
+model event_details {
+  id                  String   @id @default(uuid()) @db.Uuid
+  event_id            String   @unique @db.Uuid
+  full_description    String
+  house_rules         String?
+  cancellation_policy String?
+  additional_info     Json?
+  faq                 Json?
+  accessibility_info  Json?
+  covid_guidelines    String?
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  event              events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+}
+
+model categories {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  description String?
+  icon        String?
+  parent_id   String?  @db.Uuid
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  parent      categories?         @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children    categories[]        @relation("CategoryHierarchy")
+  events      event_categories[]
+}
+
+model event_categories {
+  event_id    String   @db.Uuid
+  category_id String   @db.Uuid
+  primary     Boolean  @default(false)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  event       events     @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  category    categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@id([event_id, category_id])
+}
+
+model event_media {
+  id            String      @id @default(uuid()) @db.Uuid
+  event_id      String      @db.Uuid
+  type          media_type
+  url           String
+  thumbnail_url String?
+  title         String?
+  description   String?
+  order         Int         @default(0)
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime    @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  event         events      @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id, order])
+}
+
+model event_check_ins {
+  id              String          @id @default(uuid()) @db.Uuid
+  event_id        String          @db.Uuid
+  user_id         String
+  status          check_in_status @default(pending)
+  check_in_time   DateTime?       @db.Timestamptz(6)
+  check_out_time  DateTime?       @db.Timestamptz(6)
+  latitude        Float?
+  longitude       Float?
+  device_info     Json?
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime        @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  event           events          @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([event_id, status])
+  @@index([user_id])
+}
+
+model chat_groups {
+  id              String            @id @default(uuid()) @db.Uuid
+  event_id        String            @unique @db.Uuid
+  type            chat_group_type   @default(event)
+  name            String
+  description     String?
+  rules           String?
+  status          chat_group_status @default(active)
+  member_count    Int               @default(0)
+  last_message_at DateTime?         @db.Timestamptz(6)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
+  deleted_at      DateTime?         @db.Timestamptz(6)
+
+  // Relations
+  event           events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  messages        chat_messages[]
+  members         chat_group_members[]
+
+  @@index([status])
+}
+
+model chat_messages {
+  id              String           @id @default(uuid()) @db.Uuid
+  chat_group_id   String           @db.Uuid
+  user_id         String
+  parent_id       String?          @db.Uuid
+  type            message_type     @default(text)
+  content         String
+  metadata        Json?
+  is_edited       Boolean          @default(false)
+  edited_at       DateTime?        @db.Timestamptz(6)
+  is_pinned       Boolean          @default(false)
+  created_at      DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime         @default(now()) @db.Timestamptz(6)
+  deleted_at      DateTime?        @db.Timestamptz(6)
+
+  // Relations
+  chat_group      chat_groups      @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  parent_message  chat_messages?   @relation("MessageReplies", fields: [parent_id], references: [id])
+  replies         chat_messages[]  @relation("MessageReplies")
+  reactions       message_reactions[]
+
+  @@index([chat_group_id, created_at])
+  @@index([user_id])
+}
+
+model chat_group_members {
+  id                      String                @id @default(uuid()) @db.Uuid
+  chat_group_id          String                @db.Uuid
+  user_id                String
+  role                   member_role           @default(member)
+  status                 member_status         @default(active)
+  last_read_message_id   String?              @db.Uuid
+  notification_preferences Json                @default("{}")
+  joined_at              DateTime              @default(now()) @db.Timestamptz(6)
+  created_at             DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime              @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  chat_group             chat_groups           @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
+  user                   User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([chat_group_id, user_id])
+  @@index([user_id])
+}
+
+model message_reactions {
+  id          String   @id @default(uuid()) @db.Uuid
+  message_id  String   @db.Uuid
+  user_id     String
+  emoji       String
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  message     chat_messages @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([message_id, user_id, emoji])
+}
+
+model event_favorites {
+  id         String   @id @default(uuid()) @db.Uuid
+  event_id   String   @db.Uuid
+  user_id    String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  event      events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+}
+
+model event_ratings {
+  id         String   @id @default(uuid()) @db.Uuid
+  event_id   String   @db.Uuid
+  user_id    String
+  rating     Int
+  review     String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  event      events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+}
+
+model event_reports {
+  id          String        @id @default(uuid()) @db.Uuid
+  event_id    String        @db.Uuid
+  user_id     String
+  reason      String
+  description String?
+  status      report_status @default(pending)
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime      @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  event       events        @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model recurring_events {
+  id                String   @id @default(uuid()) @db.Uuid
+  parent_event_id   String   @unique @db.Uuid
+  recurrence_pattern Json
+  start_date        DateTime @db.Date
+  end_date          DateTime @db.Date
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  parent_event      events   @relation(fields: [parent_event_id], references: [id], onDelete: Cascade)
+}
+
+// Enums
+enum event_status {
+  draft
+  published
+  cancelled
+  completed
+}
+
+enum visibility_type {
+  public
+  private
+  unlisted
+}
+
+enum media_type {
+  image
+  video
+  document
+}
+
+enum check_in_status {
+  pending
+  checked_in
+  checked_out
+  cancelled
+}
+
+enum chat_group_type {
+  event
+  private
+  announcement
+}
+
+enum chat_group_status {
+  active
+  archived
+  locked
+}
+
+enum message_type {
+  text
+  image
+  video
+  system
+}
+
+enum member_role {
+  member
+  moderator
+  admin
+}
+
+enum member_status {
+  active
+  muted
+  banned
+}
+
+enum report_status {
+  pending
+  reviewed
+  resolved
+}
