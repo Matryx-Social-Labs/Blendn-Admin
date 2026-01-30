@@ -1,0 +1,276 @@
+import { NextRequest } from "next/server"
+import { z } from "zod"
+import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { db } from "@/lib/db"
+import { emitChatMessage } from "@/lib/socket-server"
+import {
+  successResponse,
+  errorResponse,
+  unauthorizedResponse,
+  forbiddenResponse,
+  notFoundResponse,
+  validationErrorResponse,
+  serverErrorResponse,
+} from "@/lib/api-response"
+
+const sendMessageSchema = z.object({
+  content: z.string().min(1, "Message content is required").max(4000),
+  type: z.enum(["text", "image", "video"]).default("text"),
+  metadata: z.record(z.any()).optional(),
+  parentId: z.string().uuid().optional(),
+})
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ chatGroupId: string }> }
+) {
+  try {
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return unauthorizedResponse("Authentication required")
+    }
+
+    const { chatGroupId } = await params
+    const { searchParams } = new URL(request.url)
+
+    // Validate chatGroupId is a valid UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(chatGroupId)) {
+      return errorResponse("Invalid chat group ID format", 400)
+    }
+
+    // Pagination params
+    const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100)
+    const before = searchParams.get("before") // cursor for pagination
+
+    // Check if chat group exists and user is a member
+    const chatGroup = await db.chat_groups.findUnique({
+      where: { id: chatGroupId },
+      include: {
+        members: {
+          where: { user_id: user.userId },
+        },
+      },
+    })
+
+    if (!chatGroup) {
+      return notFoundResponse("Chat group not found")
+    }
+
+    // Check if user is a member
+    const isMember = chatGroup.members.length > 0
+    if (!isMember) {
+      return forbiddenResponse("You are not a member of this chat group")
+    }
+
+    // Build query for messages
+    const whereClause: any = {
+      chat_group_id: chatGroupId,
+      deleted_at: null,
+    }
+
+    // If cursor provided, get messages before that message
+    if (before) {
+      const cursorMessage = await db.chat_messages.findUnique({
+        where: { id: before },
+        select: { created_at: true },
+      })
+
+      if (cursorMessage) {
+        whereClause.created_at = { lt: cursorMessage.created_at }
+      }
+    }
+
+    // Fetch messages
+    const messages = await db.chat_messages.findMany({
+      where: whereClause,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+          },
+        },
+        reactions: {
+          select: {
+            id: true,
+            emoji: true,
+            user_id: true,
+          },
+        },
+        parent_message: {
+          select: {
+            id: true,
+            content: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: {
+            replies: true,
+          },
+        },
+      },
+      orderBy: { created_at: "desc" },
+      take: limit + 1, // Fetch one extra to check if there are more
+    })
+
+    // Check if there are more messages
+    const hasMore = messages.length > limit
+    const messagesToReturn = hasMore ? messages.slice(0, limit) : messages
+
+    // Reverse to get chronological order (oldest first within the batch)
+    messagesToReturn.reverse()
+
+    return successResponse({
+      messages: messagesToReturn,
+      pagination: {
+        hasMore,
+        nextCursor: hasMore ? messagesToReturn[0]?.id : null,
+      },
+    })
+  } catch (error) {
+    console.error("Get chat messages error:", error)
+    return serverErrorResponse("Failed to get messages")
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ chatGroupId: string }> }
+) {
+  try {
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return unauthorizedResponse("Authentication required")
+    }
+
+    const { chatGroupId } = await params
+
+    // Validate chatGroupId is a valid UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(chatGroupId)) {
+      return errorResponse("Invalid chat group ID format", 400)
+    }
+
+    const body = await request.json()
+
+    // Validate request body
+    const validation = sendMessageSchema.safeParse(body)
+    if (!validation.success) {
+      return validationErrorResponse(validation.error)
+    }
+
+    const { content, type, metadata, parentId } = validation.data
+
+    // Check if chat group exists and user is a member
+    const chatGroup = await db.chat_groups.findUnique({
+      where: { id: chatGroupId },
+      include: {
+        members: {
+          where: { user_id: user.userId },
+        },
+      },
+    })
+
+    if (!chatGroup) {
+      return notFoundResponse("Chat group not found")
+    }
+
+    // Check if user is a member
+    const membership = chatGroup.members[0]
+    if (!membership) {
+      return forbiddenResponse("You are not a member of this chat group")
+    }
+
+    // Check if user is muted or banned
+    if (membership.status === "muted") {
+      return forbiddenResponse("You are muted in this chat group")
+    }
+    if (membership.status === "banned") {
+      return forbiddenResponse("You are banned from this chat group")
+    }
+
+    // Check if chat group is locked
+    if (chatGroup.status === "locked") {
+      return forbiddenResponse("This chat group is locked")
+    }
+
+    // If replying, verify parent message exists in this group
+    if (parentId) {
+      const parentMessage = await db.chat_messages.findFirst({
+        where: {
+          id: parentId,
+          chat_group_id: chatGroupId,
+          deleted_at: null,
+        },
+      })
+
+      if (!parentMessage) {
+        return errorResponse("Parent message not found", 400)
+      }
+    }
+
+    // Create the message
+    const message = await db.chat_messages.create({
+      data: {
+        chat_group_id: chatGroupId,
+        user_id: user.userId,
+        content,
+        type,
+        metadata: metadata || undefined,
+        parent_id: parentId || null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+          },
+        },
+        parent_message: {
+          select: {
+            id: true,
+            content: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    // Update chat group's last_message_at
+    await db.chat_groups.update({
+      where: { id: chatGroupId },
+      data: { last_message_at: new Date() },
+    })
+
+    // Emit real-time message
+    emitChatMessage(chatGroupId, {
+      id: message.id,
+      content: message.content,
+      type: message.type,
+      userId: message.user_id,
+      userName: message.user.name || "Unknown",
+      userImage: message.user.image || undefined,
+      createdAt: message.created_at.toISOString(),
+      parentId: message.parent_id || undefined,
+    })
+
+    return successResponse(message, 201)
+  } catch (error) {
+    console.error("Send message error:", error)
+    return serverErrorResponse("Failed to send message")
+  }
+}

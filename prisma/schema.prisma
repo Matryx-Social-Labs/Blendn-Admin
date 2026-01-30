@@ -36,6 +36,8 @@ model User {
   // Mobile API relations
   mobile_refresh_tokens mobile_refresh_tokens[]
   user_interests        user_interests[]
+  oauth_accounts        user_oauth_accounts[]
+  push_tokens           push_tokens[]
 }
 
 model Account {
@@ -389,6 +391,34 @@ model user_interests {
   category    categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, category_id])
+}
+
+model user_oauth_accounts {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String
+  provider    String   // 'google', 'apple'
+  provider_id String
+  email       String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([provider, provider_id])
+  @@index([user_id])
+}
+
+model push_tokens {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String
+  token       String
+  platform    String   // 'ios', 'android'
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, token])
+  @@index([user_id])
 }
 
 // Enums
