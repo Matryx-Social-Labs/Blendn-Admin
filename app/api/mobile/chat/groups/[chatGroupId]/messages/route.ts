@@ -3,6 +3,7 @@ import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
 import { emitChatMessage } from "@/lib/socket-server"
+import { notifyGroupMessage } from "@/lib/push-notifications"
 import {
   successResponse,
   errorResponse,
@@ -267,6 +268,22 @@ export async function POST(
       createdAt: message.created_at.toISOString(),
       parentId: message.parent_id || undefined,
     })
+
+    // Send push notifications to group members (async, don't await)
+    db.chat_group_members
+      .findMany({
+        where: { chat_group_id: chatGroupId, status: "active" },
+        select: { user_id: true },
+      })
+      .then((members) => {
+        const memberIds = members.map((m) => m.user_id)
+        const senderName = message.user.name || "Someone"
+        const groupName = chatGroup.name || "Group Chat"
+        const messagePreview = type === "text" ? content : type === "image" ? "📷 Photo" : "🎥 Video"
+
+        return notifyGroupMessage(memberIds, senderName, groupName, messagePreview, chatGroupId, user.userId)
+      })
+      .catch((err) => console.error("Push notification failed:", err))
 
     return successResponse(message, 201)
   } catch (error) {

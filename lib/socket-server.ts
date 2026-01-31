@@ -58,6 +58,33 @@ export interface ServerToClientEvents {
     action: "add" | "remove"
   }) => void
 
+  // Private messaging
+  "private:message": (data: {
+    conversationId: string
+    message: {
+      id: string
+      conversationId: string
+      senderId: string
+      sender: { id: string; name: string | null; image: string | null }
+      text: string | null
+      mediaUrl: string | null
+      mediaType: string | null
+      isRead: boolean
+      createdAt: Date
+    }
+  }) => void
+  "private:typing": (data: {
+    conversationId: string
+    userId: string
+    userName: string
+    isTyping: boolean
+  }) => void
+  "private:read": (data: {
+    conversationId: string
+    messageIds: string[]
+    readBy: string
+  }) => void
+
   // System events
   error: (data: { message: string; code?: string }) => void
   connected: (data: { userId: string }) => void
@@ -69,10 +96,17 @@ export interface ClientToServerEvents {
   "leave:event": (eventId: string) => void
   "join:chat": (chatGroupId: string) => void
   "leave:chat": (chatGroupId: string) => void
+  "join:conversation": (conversationId: string) => void
+  "leave:conversation": (conversationId: string) => void
 
   // Chat actions
   "chat:startTyping": (chatGroupId: string) => void
   "chat:stopTyping": (chatGroupId: string) => void
+
+  // Private messaging actions
+  "private:startTyping": (conversationId: string) => void
+  "private:stopTyping": (conversationId: string) => void
+  "private:markRead": (conversationId: string, messageIds: string[]) => void
 
   // Ping for connection health
   ping: () => void
@@ -182,6 +216,46 @@ export function initSocketServer(httpServer: HttpServer): Server {
         userId: authSocket.data.userId,
         userName: authSocket.data.email.split("@")[0],
         isTyping: false,
+      })
+    })
+
+    // Private conversation room handlers
+    authSocket.on("join:conversation", (conversationId) => {
+      const room = `conversation:${conversationId}`
+      authSocket.join(room)
+      console.log(`User ${authSocket.data.userId} joined ${room}`)
+    })
+
+    authSocket.on("leave:conversation", (conversationId) => {
+      const room = `conversation:${conversationId}`
+      authSocket.leave(room)
+      console.log(`User ${authSocket.data.userId} left ${room}`)
+    })
+
+    // Private messaging typing indicators
+    authSocket.on("private:startTyping", (conversationId) => {
+      authSocket.to(`conversation:${conversationId}`).emit("private:typing", {
+        conversationId,
+        userId: authSocket.data.userId,
+        userName: authSocket.data.email.split("@")[0],
+        isTyping: true,
+      })
+    })
+
+    authSocket.on("private:stopTyping", (conversationId) => {
+      authSocket.to(`conversation:${conversationId}`).emit("private:typing", {
+        conversationId,
+        userId: authSocket.data.userId,
+        userName: authSocket.data.email.split("@")[0],
+        isTyping: false,
+      })
+    })
+
+    authSocket.on("private:markRead", (conversationId, messageIds) => {
+      authSocket.to(`conversation:${conversationId}`).emit("private:read", {
+        conversationId,
+        messageIds,
+        readBy: authSocket.data.userId,
       })
     })
 
@@ -320,4 +394,37 @@ export function emitToUser(
   if (!io) return
 
   io.to(`user:${userId}`).emit(event, data)
+}
+
+/**
+ * Emit a private message to conversation participants
+ */
+export function emitPrivateMessage(
+  conversationId: string,
+  recipientId: string,
+  message: {
+    id: string
+    conversationId: string
+    senderId: string
+    sender: { id: string; name: string | null; image: string | null }
+    text: string | null
+    mediaUrl: string | null
+    mediaType: string | null
+    isRead: boolean
+    createdAt: Date
+  }
+): void {
+  if (!io) return
+
+  // Emit to conversation room (for active viewers)
+  io.to(`conversation:${conversationId}`).emit("private:message", {
+    conversationId,
+    message,
+  })
+
+  // Also emit to recipient's personal room (for notification if not in conversation)
+  io.to(`user:${recipientId}`).emit("private:message", {
+    conversationId,
+    message,
+  })
 }

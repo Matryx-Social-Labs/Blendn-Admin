@@ -2,6 +2,8 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { haversineDistanceMeters } from "@/lib/geo"
+import { emitEventCheckIn } from "@/lib/socket-server"
+import { notifyEventCheckIn } from "@/lib/push-notifications"
 import {
   successResponse,
   validationErrorResponse,
@@ -155,6 +157,44 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         },
       })
     }
+
+    // Get user profile for socket emit
+    const userProfile = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { name: true, image: true },
+    })
+
+    // Emit real-time check-in event
+    emitEventCheckIn(
+      eventId,
+      authUser.userId,
+      userProfile?.name || "Unknown",
+      userProfile?.image || undefined
+    )
+
+    // Send push notifications to other checked-in users (async, don't await)
+    db.event_check_ins
+      .findMany({
+        where: {
+          event_id: eventId,
+          status: "checked_in",
+          user_id: { not: authUser.userId },
+        },
+        select: { user_id: true },
+      })
+      .then((checkIns) => {
+        const userIds = checkIns.map((c) => c.user_id)
+        if (userIds.length > 0) {
+          return notifyEventCheckIn(
+            userIds,
+            userProfile?.name || "Someone",
+            event.title,
+            eventId,
+            authUser.userId
+          )
+        }
+      })
+      .catch((err) => console.error("Push notification failed:", err))
 
     return successResponse({
       checkIn: {

@@ -38,6 +38,11 @@ model User {
   user_interests        user_interests[]
   oauth_accounts        user_oauth_accounts[]
   push_tokens           push_tokens[]
+
+  // Private messaging
+  conversations_as_user1 private_conversations[] @relation("ConversationUser1")
+  conversations_as_user2 private_conversations[] @relation("ConversationUser2")
+  sent_private_messages  private_messages[] @relation("PrivateMessageSender")
 }
 
 model Account {
@@ -78,16 +83,18 @@ model VerificationToken {
 
 // Application models
 model profiles {
-  id         String   @id
-  phone      String?
-  name       String?
-  age        Int?
-  location   String?
-  interests  String[]
-  onboarded  Boolean  @default(false)
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  updated_at DateTime @default(now()) @db.Timestamptz(6)
-  user       User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id           String   @id
+  phone        String?
+  name         String?
+  age          Int?
+  location     String?
+  interests    String[]
+  onboarded    Boolean  @default(false)
+  push_token   String?  // Expo push notification token
+  push_platform String? // 'ios' or 'android'
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+  user         User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
 model events {
@@ -419,6 +426,44 @@ model push_tokens {
 
   @@unique([user_id, token])
   @@index([user_id])
+}
+
+// Private Messaging
+model private_conversations {
+  id           String   @id @default(uuid()) @db.Uuid
+  user1_id     String
+  user2_id     String
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+  last_message_at DateTime? @db.Timestamptz(6)
+
+  user1        User     @relation("ConversationUser1", fields: [user1_id], references: [id], onDelete: Cascade)
+  user2        User     @relation("ConversationUser2", fields: [user2_id], references: [id], onDelete: Cascade)
+  messages     private_messages[]
+
+  @@unique([user1_id, user2_id])
+  @@index([user1_id])
+  @@index([user2_id])
+  @@index([last_message_at])
+}
+
+model private_messages {
+  id              String   @id @default(uuid()) @db.Uuid
+  conversation_id String   @db.Uuid
+  sender_id       String
+  message_text    String?
+  media_url       String?
+  media_type      media_type?
+  is_read         Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  conversation    private_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender          User     @relation("PrivateMessageSender", fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id])
+  @@index([sender_id])
+  @@index([created_at])
 }
 
 // Enums
