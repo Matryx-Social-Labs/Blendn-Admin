@@ -14,8 +14,15 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { signupSchema } from "@/lib/validations/auth"
+import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 
 export async function POST(request: NextRequest) {
+  // Apply rate limiting
+  const rateLimitResult = rateLimit(request, createAuthRateLimit("signup"))
+  if (rateLimitResult) {
+    return rateLimitResult
+  }
+
   try {
     const body = await request.json()
 

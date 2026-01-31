@@ -14,6 +14,7 @@ import {
   validationErrorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 
 const googleAuthSchema = z.object({
   idToken: z.string().min(1, "ID token is required"),
@@ -27,6 +28,12 @@ const googleAuthSchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
+  // Apply rate limiting
+  const rateLimitResult = rateLimit(request, createAuthRateLimit("google"))
+  if (rateLimitResult) {
+    return rateLimitResult
+  }
+
   try {
     const body = await request.json()
 
