@@ -28,16 +28,15 @@ export async function GET(request: NextRequest) {
       return notFoundResponse("User not found")
     }
 
+    // Return user directly (not wrapped in { user: ... })
     return successResponse({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        emailVerified: user.emailVerified,
-        image: user.image,
-        createdAt: user.createdAt,
-        profile: user.profile,
-      },
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      emailVerified: user.emailVerified,
+      image: user.image,
+      createdAt: user.createdAt,
+      profile: user.profile,
     })
   } catch (error) {
     console.error("Session error:", error)
