@@ -53,7 +53,7 @@ const data = {
     {
       title: "Users",
       url: "/dashboard/users",
-      icon: IconChartBar,
+      icon: IconUsers,
     },
     {
       title: "Analytics",

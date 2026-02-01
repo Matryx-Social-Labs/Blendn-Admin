@@ -1,0 +1,264 @@
+"use server"
+
+import { db } from "@/lib/db"
+import { revalidatePath } from "next/cache"
+
+export interface UserWithProfile {
+  id: string
+  name: string | null
+  email: string
+  emailVerified: Date | null
+  image: string | null
+  createdAt: Date
+  updatedAt: Date
+  profile: {
+    id: string
+    phone: string | null
+    age: number | null
+    location: string | null
+    interests: string[]
+    onboarded: boolean
+    created_at: Date
+  } | null
+  _count: {
+    organized_events: number
+    event_check_ins: number
+    event_favorites: number
+    chat_messages: number
+  }
+}
+
+export async function getUsers(
+  search?: string,
+  status?: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<{ users: UserWithProfile[]; total: number }> {
+  try {
+    const where: any = {}
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+        {
+          profile: {
+            phone: { contains: search, mode: "insensitive" },
+          },
+        },
+      ]
+    }
+
+    if (status === "onboarded") {
+      where.profile = { onboarded: true }
+    } else if (status === "not-onboarded") {
+      where.OR = [
+        { profile: { is: null } },
+        { profile: { onboarded: false } },
+      ]
+    } else if (status === "verified") {
+      where.emailVerified = { not: null }
+    } else if (status === "unverified") {
+      where.emailVerified = null
+    }
+
+    const [users, total] = await Promise.all([
+      db.user.findMany({
+        where,
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: "desc" },
+        include: {
+          profile: {
+            select: {
+              id: true,
+              phone: true,
+              age: true,
+              location: true,
+              interests: true,
+              onboarded: true,
+              created_at: true,
+            },
+          },
+          _count: {
+            select: {
+              organized_events: true,
+              event_check_ins: true,
+              event_favorites: true,
+              chat_messages: true,
+            },
+          },
+        },
+      }),
+      db.user.count({ where }),
+    ])
+
+    return { users, total }
+  } catch (error) {
+    console.error("Error fetching users:", error)
+    throw new Error("Failed to fetch users")
+  }
+}
+
+export async function getUserById(id: string): Promise<UserWithProfile | null> {
+  try {
+    const user = await db.user.findUnique({
+      where: { id },
+      include: {
+        profile: {
+          select: {
+            id: true,
+            phone: true,
+            age: true,
+            location: true,
+            interests: true,
+            onboarded: true,
+            created_at: true,
+          },
+        },
+        _count: {
+          select: {
+            organized_events: true,
+            event_check_ins: true,
+            event_favorites: true,
+            chat_messages: true,
+          },
+        },
+      },
+    })
+
+    return user
+  } catch (error) {
+    console.error("Error fetching user:", error)
+    throw new Error("Failed to fetch user")
+  }
+}
+
+export async function updateUser(
+  id: string,
+  data: {
+    name?: string
+    email?: string
+    profile?: {
+      phone?: string | null
+      age?: number | null
+      location?: string | null
+      interests?: string[]
+      onboarded?: boolean
+    }
+  }
+) {
+  try {
+    const updateData: any = {}
+    if (data.name !== undefined) updateData.name = data.name
+    if (data.email !== undefined) updateData.email = data.email
+
+    if (data.profile) {
+      updateData.profile = {
+        upsert: {
+          create: {
+            phone: data.profile.phone,
+            age: data.profile.age,
+            location: data.profile.location,
+            interests: data.profile.interests || [],
+            onboarded: data.profile.onboarded ?? false,
+          },
+          update: {
+            phone: data.profile.phone,
+            age: data.profile.age,
+            location: data.profile.location,
+            interests: data.profile.interests,
+            onboarded: data.profile.onboarded,
+          },
+        },
+      }
+    }
+
+    const user = await db.user.update({
+      where: { id },
+      data: updateData,
+      include: {
+        profile: true,
+      },
+    })
+
+    revalidatePath("/dashboard/users")
+    return { success: true, user }
+  } catch (error) {
+    console.error("Error updating user:", error)
+    throw new Error("Failed to update user")
+  }
+}
+
+export async function deleteUser(id: string) {
+  try {
+    await db.user.delete({
+      where: { id },
+    })
+
+    revalidatePath("/dashboard/users")
+    return { success: true }
+  } catch (error) {
+    console.error("Error deleting user:", error)
+    throw new Error("Failed to delete user")
+  }
+}
+
+export async function toggleUserOnboarded(id: string, onboarded: boolean) {
+  try {
+    await db.profiles.updateMany({
+      where: { id },
+      data: { onboarded },
+    })
+
+    revalidatePath("/dashboard/users")
+    return { success: true }
+  } catch (error) {
+    console.error("Error updating user onboarding status:", error)
+    throw new Error("Failed to update user onboarding status")
+  }
+}
+
+export async function getUserStats() {
+  try {
+    const [
+      totalUsers,
+      onboardedUsers,
+      verifiedUsers,
+      usersThisMonth,
+      usersLastMonth,
+    ] = await Promise.all([
+      db.user.count(),
+      db.profiles.count({ where: { onboarded: true } }),
+      db.user.count({ where: { emailVerified: { not: null } } }),
+      db.user.count({
+        where: {
+          createdAt: {
+            gte: new Date(new Date().setDate(1)),
+          },
+        },
+      }),
+      db.user.count({
+        where: {
+          createdAt: {
+            gte: new Date(new Date().setMonth(new Date().getMonth() - 1, 1)),
+            lt: new Date(new Date().setDate(1)),
+          },
+        },
+      }),
+    ])
+
+    return {
+      totalUsers,
+      onboardedUsers,
+      verifiedUsers,
+      usersThisMonth,
+      usersLastMonth,
+      onboardingRate: totalUsers > 0 ? Math.round((onboardedUsers / totalUsers) * 100) : 0,
+      verificationRate: totalUsers > 0 ? Math.round((verifiedUsers / totalUsers) * 100) : 0,
+    }
+  } catch (error) {
+    console.error("Error fetching user stats:", error)
+    throw new Error("Failed to fetch user stats")
+  }
+}
