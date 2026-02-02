@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
   successResponse,
+  errorResponse,
   validationErrorResponse,
   unauthorizedResponse,
   notFoundResponse,
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
 
     // Can't create conversation with yourself
     if (otherUserId === authUser.userId) {
-      return validationErrorResponse("Cannot create conversation with yourself")
+      return errorResponse("Cannot create conversation with yourself")
     }
 
     // Check if other user exists
