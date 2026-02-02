@@ -43,6 +43,10 @@ model User {
   conversations_as_user1 private_conversations[] @relation("ConversationUser1")
   conversations_as_user2 private_conversations[] @relation("ConversationUser2")
   sent_private_messages  private_messages[] @relation("PrivateMessageSender")
+
+  // Message requests
+  sent_message_requests     message_requests[] @relation("MessageRequestSender")
+  received_message_requests message_requests[] @relation("MessageRequestRecipient")
 }
 
 model Account {
@@ -528,4 +532,29 @@ enum report_status {
   pending
   reviewed
   resolved
+}
+
+enum message_request_status {
+  pending
+  accepted
+  declined
+  blocked
+}
+
+// Message Requests
+model message_requests {
+  id            String                 @id @default(uuid()) @db.Uuid
+  sender_id     String
+  recipient_id  String
+  status        message_request_status @default(pending)
+  message       String?
+  created_at    DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime               @default(now()) @db.Timestamptz(6)
+  responded_at  DateTime?              @db.Timestamptz(6)
+
+  sender    User @relation("MessageRequestSender", fields: [sender_id], references: [id], onDelete: Cascade)
+  recipient User @relation("MessageRequestRecipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+
+  @@unique([sender_id, recipient_id])
+  @@index([recipient_id, status])
 }

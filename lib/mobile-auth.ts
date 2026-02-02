@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken"
 import { createHash } from "crypto"
-import { db } from "@/lib/db"
+import { db } from "./db"
 import { Prisma } from "@prisma/client"
 
 const JWT_SECRET = process.env.MOBILE_JWT_SECRET!
