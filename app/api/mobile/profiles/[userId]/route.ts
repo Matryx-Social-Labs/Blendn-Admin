@@ -85,7 +85,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { name, phone, age, location, interests, photos, onboarded } = parsed.data
+    const { name, phone, age, location, interests, onboarded } = parsed.data
 
     // Update user name if provided
     if (name !== undefined) {
@@ -105,7 +105,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         age,
         location,
         interests: interests || [],
-        photos: photos || [],
         onboarded: onboarded ?? false,
       },
       update: {
@@ -114,7 +113,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(age !== undefined && { age }),
         ...(location !== undefined && { location }),
         ...(interests !== undefined && { interests }),
-        ...(photos !== undefined && { photos }),
         ...(onboarded !== undefined && { onboarded }),
         updated_at: new Date(),
       },

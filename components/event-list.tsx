@@ -1,10 +1,15 @@
 "use client"
 
-import { DataTable } from "@/components/data-table"
-import { ColumnDef } from "@tanstack/react-table"
 import { format } from "date-fns"
-import { Button } from "@/components/ui/button"
-import { ArrowUpDown } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 interface Event {
   id: string
@@ -18,59 +23,49 @@ interface Event {
   max_capacity?: number
 }
 
-const columns: ColumnDef<Event>[] = [
-  {
-    accessorKey: "title",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Title
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      )
-    },
-  },
-  {
-    accessorKey: "start_time",
-    header: "Start Time",
-    cell: ({ row }) => {
-      return format(new Date(row.getValue("start_time")), "PPp")
-    },
-  },
-  {
-    accessorKey: "end_time",
-    header: "End Time",
-    cell: ({ row }) => {
-      return format(new Date(row.getValue("end_time")), "PPp")
-    },
-  },
-  {
-    accessorKey: "venue_name",
-    header: "Venue",
-  },
-  {
-    accessorKey: "status",
-    header: "Status",
-  },
-  {
-    accessorKey: "current_capacity",
-    header: "Capacity",
-    cell: ({ row }) => {
-      const maxCapacity = row.original.max_capacity
-      return maxCapacity
-        ? `${row.getValue("current_capacity")} / ${maxCapacity}`
-        : row.getValue("current_capacity")
-    },
-  },
-]
-
 export function EventList({ events }: { events: Event[] }) {
   return (
     <div className="container mx-auto py-10">
-      <DataTable columns={columns} data={events} />
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Title</TableHead>
+              <TableHead>Start Time</TableHead>
+              <TableHead>End Time</TableHead>
+              <TableHead>Venue</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Capacity</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {events.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-24 text-center">
+                  No events found.
+                </TableCell>
+              </TableRow>
+            ) : (
+              events.map((event) => (
+                <TableRow key={event.id}>
+                  <TableCell className="font-medium">{event.title}</TableCell>
+                  <TableCell>{format(new Date(event.start_time), "PPp")}</TableCell>
+                  <TableCell>{format(new Date(event.end_time), "PPp")}</TableCell>
+                  <TableCell>{event.venue_name || "-"}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{event.status}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    {event.max_capacity
+                      ? `${event.current_capacity} / ${event.max_capacity}`
+                      : event.current_capacity}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 } 

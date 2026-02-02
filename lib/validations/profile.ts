@@ -6,7 +6,6 @@ export const updateProfileSchema = z.object({
   age: z.number().int().min(13).max(120).optional().nullable(),
   location: z.string().max(200).optional().nullable(),
   interests: z.array(z.string()).optional(),
-  photos: z.array(z.string().url()).optional(),
   onboarded: z.boolean().optional(),
 })
 
