@@ -3,16 +3,23 @@ import { createHash } from "crypto"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
 
-const JWT_SECRET = process.env.MOBILE_JWT_SECRET!
+let cachedJwtSecret: string | null = null
+function getJwtSecret(): string {
+  if (cachedJwtSecret) {
+    return cachedJwtSecret
+  }
+  const secret = process.env.MOBILE_JWT_SECRET
+  if (!secret) {
+    throw new Error("MOBILE_JWT_SECRET environment variable is not set")
+  }
+  cachedJwtSecret = secret
+  return secret
+}
 const GOOGLE_CLIENT_IDS = [
   process.env.GOOGLE_WEB_CLIENT_ID,
   process.env.GOOGLE_IOS_CLIENT_ID,
   process.env.GOOGLE_ANDROID_CLIENT_ID,
 ].filter(Boolean) as string[]
-
-if (!JWT_SECRET) {
-  throw new Error("MOBILE_JWT_SECRET environment variable is not set")
-}
 
 const ACCESS_TOKEN_EXPIRY = "15m"
 const REFRESH_TOKEN_EXPIRY = "30d"
@@ -38,7 +45,7 @@ export function signAccessToken(userId: string, email: string): string {
     email,
     type: "access",
   }
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRY })
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: ACCESS_TOKEN_EXPIRY })
 }
 
 /**
@@ -50,7 +57,7 @@ export function signRefreshToken(userId: string, email: string): string {
     email,
     type: "refresh",
   }
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRY })
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: REFRESH_TOKEN_EXPIRY })
 }
 
 /**
@@ -58,7 +65,7 @@ export function signRefreshToken(userId: string, email: string): string {
  */
 export function verifyAccessToken(token: string): DecodedToken | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as DecodedToken
+    const decoded = jwt.verify(token, getJwtSecret()) as DecodedToken
     if (decoded.type !== "access") {
       return null
     }
@@ -105,7 +112,7 @@ export async function verifyRefreshToken(
 ): Promise<DecodedToken | null> {
   try {
     // First verify the JWT signature and expiry
-    const decoded = jwt.verify(token, JWT_SECRET) as DecodedToken
+    const decoded = jwt.verify(token, getJwtSecret()) as DecodedToken
     if (decoded.type !== "refresh") {
       return null
     }
