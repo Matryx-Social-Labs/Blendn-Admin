@@ -96,7 +96,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     // Update or create profile
-    const profile = await db.profiles.upsert({
+    await db.profiles.upsert({
       where: { id: userId },
       create: {
         id: userId,

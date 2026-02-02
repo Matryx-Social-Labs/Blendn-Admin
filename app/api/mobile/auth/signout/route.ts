@@ -2,7 +2,6 @@ import { NextRequest } from "next/server"
 import {
   getAuthenticatedUser,
   revokeUserRefreshTokens,
-  extractBearerToken,
   revokeRefreshToken,
 } from "@/lib/mobile-auth"
 import {

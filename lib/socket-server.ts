@@ -389,7 +389,7 @@ export function emitChatReaction(
 export function emitToUser(
   userId: string,
   event: keyof ServerToClientEvents,
-  data: any
+  data: unknown
 ): void {
   if (!io) return
 

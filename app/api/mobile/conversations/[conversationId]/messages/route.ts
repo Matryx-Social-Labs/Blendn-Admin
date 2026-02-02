@@ -31,7 +31,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
     const { searchParams } = new URL(request.url)
-    const page = parseInt(searchParams.get("page") || "1")
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100)
     const before = searchParams.get("before") // cursor for pagination
 
@@ -57,7 +56,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // Build query
-    const whereClause: any = { conversation_id: conversationId }
+    const whereClause: Record<string, unknown> = { conversation_id: conversationId }
     if (before) {
       whereClause.created_at = { lt: new Date(before) }
     }
@@ -152,12 +151,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Not authorized to send messages to this conversation")
     }
 
-    // Get sender info
-    const sender = await db.user.findUnique({
-      where: { id: authUser.userId },
-      select: { id: true, name: true, image: true },
-    })
-
     // Create the message
     const message = await db.private_messages.create({
       data: {
@@ -165,7 +158,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         sender_id: authUser.userId,
         message_text: text,
         media_url: mediaUrl,
-        media_type: mediaType as any,
+        media_type: mediaType as "text" | "image" | "video" | "audio" | null,
       },
       include: {
         sender: {

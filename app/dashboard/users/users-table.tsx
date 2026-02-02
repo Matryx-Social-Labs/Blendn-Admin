@@ -22,14 +22,10 @@ import {
   IconDotsVertical,
   IconEdit,
   IconLayoutColumns,
-  IconMail,
   IconMapPin,
   IconPhone,
   IconSearch,
   IconTrash,
-  IconUserCheck,
-  IconUserX,
-  IconUsers,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 
@@ -78,6 +74,90 @@ interface UsersTableProps {
   data: UserWithProfile[]
   total: number
   onRefresh?: () => void
+}
+
+// Actions cell component - extracted to comply with React hooks rules
+function ActionsCell({ row, table }: { row: { original: UserWithProfile }, table: { options: { meta?: { onRefresh?: () => void } } } }) {
+  const user = row.original
+  const [isEditOpen, setIsEditOpen] = React.useState(false)
+  const [isDeleteOpen, setIsDeleteOpen] = React.useState(false)
+  const [isLoading, setIsLoading] = React.useState(false)
+
+  const handleDelete = async () => {
+    setIsLoading(true)
+    try {
+      await deleteUser(user.id)
+      toast.success("User deleted successfully")
+      setIsDeleteOpen(false)
+      table.options.meta?.onRefresh?.()
+    } catch {
+      toast.error("Failed to delete user")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
+            size="icon"
+          >
+            <IconDotsVertical />
+            <span className="sr-only">Open menu</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
+            <IconEdit className="mr-2 size-4" />
+            Edit
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => setIsDeleteOpen(true)}
+          >
+            <IconTrash className="mr-2 size-4" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <EditUserDialog
+        user={user}
+        open={isEditOpen}
+        onOpenChange={setIsEditOpen}
+        onSuccess={() => table.options.meta?.onRefresh?.()}
+      />
+
+      <Sheet open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Delete User</SheetTitle>
+            <SheetDescription>
+              Are you sure you want to delete {user.name || user.email}? This action
+              cannot be undone.
+            </SheetDescription>
+          </SheetHeader>
+          <SheetFooter>
+            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isLoading}
+            >
+              {isLoading ? "Deleting..." : "Delete"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+    </>
+  )
 }
 
 const columns: ColumnDef<UserWithProfile>[] = [
@@ -233,88 +313,7 @@ const columns: ColumnDef<UserWithProfile>[] = [
   },
   {
     id: "actions",
-    cell: ({ row, table }) => {
-      const user = row.original
-      const [isEditOpen, setIsEditOpen] = React.useState(false)
-      const [isDeleteOpen, setIsDeleteOpen] = React.useState(false)
-      const [isLoading, setIsLoading] = React.useState(false)
-
-      const handleDelete = async () => {
-        setIsLoading(true)
-        try {
-          await deleteUser(user.id)
-          toast.success("User deleted successfully")
-          setIsDeleteOpen(false)
-          ;(table.options.meta as any)?.onRefresh?.()
-        } catch (error) {
-          toast.error("Failed to delete user")
-        } finally {
-          setIsLoading(false)
-        }
-      }
-
-      return (
-        <>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
-                size="icon"
-              >
-                <IconDotsVertical />
-                <span className="sr-only">Open menu</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
-                <IconEdit className="mr-2 size-4" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => setIsDeleteOpen(true)}
-              >
-                <IconTrash className="mr-2 size-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <EditUserDialog
-            user={user}
-            open={isEditOpen}
-            onOpenChange={setIsEditOpen}
-            onSuccess={() => (table.options.meta as any)?.onRefresh?.()}
-          />
-
-          <Sheet open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-            <SheetContent>
-              <SheetHeader>
-                <SheetTitle>Delete User</SheetTitle>
-                <SheetDescription>
-                  Are you sure you want to delete {user.name || user.email}? This action
-                  cannot be undone.
-                </SheetDescription>
-              </SheetHeader>
-              <SheetFooter>
-                <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleDelete}
-                  disabled={isLoading}
-                >
-                  {isLoading ? "Deleting..." : "Delete"}
-                </Button>
-              </SheetFooter>
-            </SheetContent>
-          </Sheet>
-        </>
-      )
-    },
+    cell: ({ row, table }) => <ActionsCell row={row} table={table} />,
   },
 ]
 
@@ -353,7 +352,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess }: EditUserDialogP
       toast.success("User updated successfully")
       onOpenChange(false)
       onSuccess()
-    } catch (error) {
+    } catch {
       toast.error("Failed to update user")
     } finally {
       setIsLoading(false)
@@ -440,7 +439,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess }: EditUserDialogP
   )
 }
 
-export function UsersTable({ data, total, onRefresh }: UsersTableProps) {
+export function UsersTable({ data, onRefresh }: UsersTableProps) {
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>({})

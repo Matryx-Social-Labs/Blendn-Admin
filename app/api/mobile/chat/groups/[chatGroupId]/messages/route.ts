@@ -65,7 +65,7 @@ export async function GET(
     }
 
     // Build query for messages
-    const whereClause: any = {
+    const whereClause: Record<string, unknown> = {
       chat_group_id: chatGroupId,
       deleted_at: null,
     }

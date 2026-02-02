@@ -49,7 +49,6 @@ export type UploadFolder = "profile" | "chat" | "events"
 function generateKey(folder: UploadFolder, filename: string, userId: string): string {
   const timestamp = Date.now()
   const random = Math.random().toString(36).substring(2, 8)
-  const extension = filename.split(".").pop() || ""
   const sanitizedName = filename
     .replace(/[^a-zA-Z0-9.-]/g, "_")
     .substring(0, 50)

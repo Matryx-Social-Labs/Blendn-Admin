@@ -35,7 +35,7 @@ export async function getUsers(
   offset: number = 0
 ): Promise<{ users: UserWithProfile[]; total: number }> {
   try {
-    const where: any = {}
+    const where: Record<string, unknown> = {}
 
     if (search) {
       where.OR = [
@@ -149,7 +149,7 @@ export async function updateUser(
   }
 ) {
   try {
-    const updateData: any = {}
+    const updateData: Record<string, unknown> = {}
     if (data.name !== undefined) updateData.name = data.name
     if (data.email !== undefined) updateData.email = data.email
 

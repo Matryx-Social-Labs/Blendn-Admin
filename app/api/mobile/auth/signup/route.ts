@@ -8,7 +8,6 @@ import {
 } from "@/lib/mobile-auth"
 import {
   successResponse,
-  errorResponse,
   validationErrorResponse,
   conflictResponse,
   serverErrorResponse,

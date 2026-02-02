@@ -3,7 +3,7 @@
  * https://docs.expo.dev/push-notifications/sending-notifications/
  */
 
-import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceipt } from "expo-server-sdk"
+import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk"
 import { db } from "./db"
 
 // Create a new Expo SDK client
