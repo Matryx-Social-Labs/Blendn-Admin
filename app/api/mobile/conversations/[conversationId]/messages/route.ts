@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { media_type } from "@prisma/client"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
   successResponse,
@@ -158,7 +159,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         sender_id: authUser.userId,
         message_text: text,
         media_url: mediaUrl,
-        media_type: mediaType as "text" | "image" | "video" | "audio" | null,
+        media_type: mediaType as media_type | null,
       },
       include: {
         sender: {
