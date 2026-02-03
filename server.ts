@@ -21,7 +21,11 @@ if (!dev) {
 const app = next({ dev, hostname, port })
 const handle = app.getRequestHandler()
 
+console.log(`> Starting server in ${dev ? 'development' : 'production'} mode...`)
+console.log(`> Preparing Next.js app...`)
+
 app.prepare().then(() => {
+  console.log(`> Next.js app ready`)
   // Create HTTP server
   const httpServer = createServer((req, res) => {
     handle(req, res)
@@ -63,4 +67,7 @@ app.prepare().then(() => {
 ╚═══════════════════════════════════════════════════╝
     `)
   })
+}).catch((err) => {
+  console.error('> Failed to start server:', err)
+  process.exit(1)
 })
