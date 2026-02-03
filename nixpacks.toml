@@ -16,4 +16,4 @@ cmds = [
 cacheDirectories = [".next/cache"]
 
 [start]
-cmd = "npm run start"
+cmd = "echo '=== Starting server ===' && ls -la dist/ && ls -la .next/ && node dist/server.js"

@@ -6,13 +6,13 @@ node_modules
 # Testing
 coverage
 
-# Next.js
-.next
+# Next.js (keep .next - needed for production)
+# .next - DO NOT IGNORE - built during Docker build
 out
 
 # Production
 build
-dist
+# dist - DO NOT IGNORE - server.js built during Docker build
 
 # Misc
 .DS_Store
