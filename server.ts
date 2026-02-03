@@ -4,7 +4,8 @@ import { initSocketServer } from "./lib/socket-server"
 
 // Environment configuration
 const dev = process.env.NODE_ENV !== "production"
-const hostname = process.env.HOSTNAME || "0.0.0.0"
+// Always bind to 0.0.0.0 in production (Railway sets HOSTNAME to container name, not bind address)
+const hostname = dev ? (process.env.HOSTNAME || "localhost") : "0.0.0.0"
 const port = parseInt(process.env.PORT || "3000", 10)
 
 console.log(`[${new Date().toISOString()}] > Server startup initiated`)
