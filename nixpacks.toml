@@ -4,12 +4,16 @@
 [phases.setup]
 nixPkgs = ["nodejs_20", "npm-9_x"]
 
+[phases.install]
+cmds = ["npm install --legacy-peer-deps"]
+cacheDirectories = []
+
 [phases.build]
 cmds = [
-  "npm ci",
   "npx prisma generate",
   "npm run build"
 ]
+cacheDirectories = [".next/cache"]
 
 [start]
 cmd = "npm run start"
