@@ -97,7 +97,24 @@ export async function GET(request: NextRequest) {
     // Fetch events
     let events = await db.events.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        short_description: true,
+        cover_image_url: true,
+        start_time: true,
+        end_time: true,
+        timezone: true,
+        venue_name: true,
+        address: true,
+        city: true,
+        state: true,
+        country: true,
+        latitude: true,
+        longitude: true,
+        status: true,
+        is_featured: true,
         organizer: {
           select: {
             id: true,
@@ -106,7 +123,7 @@ export async function GET(request: NextRequest) {
           },
         },
         categories: {
-          include: {
+          select: {
             category: {
               select: {
                 id: true,
@@ -118,6 +135,13 @@ export async function GET(request: NextRequest) {
           },
         },
         media: {
+          select: {
+            id: true,
+            url: true,
+            thumbnail_url: true,
+            type: true,
+            order: true,
+          },
           orderBy: { order: "asc" },
           take: 5,
         },

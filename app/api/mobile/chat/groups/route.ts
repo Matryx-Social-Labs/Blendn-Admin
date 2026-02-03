@@ -76,83 +76,144 @@ export async function GET(request: NextRequest) {
       take: limit,
     })
 
-    // Get unread counts for each group
-    const groupsWithUnread = await Promise.all(
-      memberships.map(async (membership) => {
-        let unreadCount = 0
+    // Batch fetch all data in 3 queries instead of N*3 queries
+    const chatGroupIds = memberships.map((m) => m.chat_group_id)
 
-        if (membership.last_read_message_id) {
-          // Get the timestamp of the last read message
-          const lastReadMessage = await db.chat_messages.findUnique({
-            where: { id: membership.last_read_message_id },
-            select: { created_at: true },
+    // 1. Batch fetch last read messages (single query)
+    const lastReadMessageIds = memberships
+      .filter((m) => m.last_read_message_id)
+      .map((m) => m.last_read_message_id!)
+
+    const lastReadMessages =
+      lastReadMessageIds.length > 0
+        ? await db.chat_messages.findMany({
+            where: { id: { in: lastReadMessageIds } },
+            select: { id: true, created_at: true },
           })
+        : []
 
-          if (lastReadMessage) {
-            unreadCount = await db.chat_messages.count({
-              where: {
-                chat_group_id: membership.chat_group_id,
-                created_at: { gt: lastReadMessage.created_at },
-                deleted_at: null,
-              },
-            })
-          }
-        } else {
-          // User hasn't read any messages, count all
-          unreadCount = membership.chat_group._count.messages
-        }
-
-        // Get last message
-        const lastMessage = await db.chat_messages.findFirst({
-          where: {
-            chat_group_id: membership.chat_group_id,
-            deleted_at: null,
-          },
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-          orderBy: { created_at: "desc" },
-        })
-
-        return {
-          id: membership.chat_group.id,
-          name: membership.chat_group.name,
-          type: membership.chat_group.type,
-          memberCount: membership.chat_group._count.members,
-          unreadCount,
-          lastMessageAt: membership.chat_group.last_message_at,
-          lastMessage: lastMessage
-            ? {
-                id: lastMessage.id,
-                content:
-                  lastMessage.type === "text"
-                    ? lastMessage.content.substring(0, 100)
-                    : `[${lastMessage.type}]`,
-                createdAt: lastMessage.created_at,
-                user: lastMessage.user,
-              }
-            : null,
-          event: {
-            id: membership.chat_group.event.id,
-            slug: membership.chat_group.event.slug,
-            title: membership.chat_group.event.title,
-            coverImageUrl: membership.chat_group.event.cover_image_url,
-            startTime: membership.chat_group.event.start_time,
-            endTime: membership.chat_group.event.end_time,
-            status: membership.chat_group.event.status,
-          },
-          membership: {
-            role: membership.role,
-            joinedAt: membership.joined_at,
-          },
-        }
-      })
+    const lastReadMessageMap = new Map(
+      lastReadMessages.map((m) => [m.id, m.created_at])
     )
+
+    // 2. Batch fetch last message per group using raw SQL (single query)
+    const lastMessagesRaw = await db.$queryRaw<
+      Array<{
+        id: string
+        chat_group_id: string
+        content: string
+        type: string
+        created_at: Date
+        user_id: string
+        user_name: string | null
+      }>
+    >`
+      SELECT DISTINCT ON (cm.chat_group_id)
+        cm.id, cm.chat_group_id, cm.content, cm.type, cm.created_at, cm.user_id,
+        u.name as user_name
+      FROM chat_messages cm
+      LEFT JOIN "User" u ON cm.user_id = u.id
+      WHERE cm.chat_group_id = ANY(${chatGroupIds}::uuid[])
+        AND cm.deleted_at IS NULL
+      ORDER BY cm.chat_group_id, cm.created_at DESC
+    `
+
+    const lastMessageMap = new Map(
+      lastMessagesRaw.map((m) => [m.chat_group_id, m])
+    )
+
+    // 3. Batch calculate unread counts (single query)
+    // Build membership data for unread calculation
+    const membershipData = memberships.map((m) => ({
+      chatGroupId: m.chat_group_id,
+      lastReadAt: m.last_read_message_id
+        ? lastReadMessageMap.get(m.last_read_message_id)
+        : null,
+      totalMessages: m.chat_group._count.messages,
+    }))
+
+    // For groups with last_read_message_id, count messages after that timestamp
+    const groupsWithLastRead = membershipData.filter((m) => m.lastReadAt)
+
+    const unreadCountMap = new Map<string, number>()
+
+    if (groupsWithLastRead.length > 0) {
+      // Use a single query to count unread messages for all groups
+      const unreadCountsRaw = await db.$queryRaw<
+        Array<{ chat_group_id: string; unread_count: bigint }>
+      >`
+        SELECT chat_group_id, COUNT(*) as unread_count
+        FROM chat_messages
+        WHERE deleted_at IS NULL
+          AND (
+            ${groupsWithLastRead
+              .map(
+                (m) =>
+                  `(chat_group_id = '${m.chatGroupId}'::uuid AND created_at > '${m.lastReadAt!.toISOString()}'::timestamptz)`
+              )
+              .join(" OR ")}
+          )
+        GROUP BY chat_group_id
+      `
+
+      unreadCountsRaw.forEach((row) => {
+        unreadCountMap.set(row.chat_group_id, Number(row.unread_count))
+      })
+    }
+
+    // Build final response
+    const groupsWithUnread = memberships.map((membership) => {
+      const lastReadAt = membership.last_read_message_id
+        ? lastReadMessageMap.get(membership.last_read_message_id)
+        : null
+
+      // Calculate unread count
+      let unreadCount: number
+      if (lastReadAt) {
+        unreadCount = unreadCountMap.get(membership.chat_group_id) || 0
+      } else {
+        // User hasn't read any messages, count all
+        unreadCount = membership.chat_group._count.messages
+      }
+
+      const lastMessage = lastMessageMap.get(membership.chat_group_id)
+
+      return {
+        id: membership.chat_group.id,
+        name: membership.chat_group.name,
+        type: membership.chat_group.type,
+        memberCount: membership.chat_group._count.members,
+        unreadCount,
+        lastMessageAt: membership.chat_group.last_message_at,
+        lastMessage: lastMessage
+          ? {
+              id: lastMessage.id,
+              content:
+                lastMessage.type === "text"
+                  ? lastMessage.content.substring(0, 100)
+                  : `[${lastMessage.type}]`,
+              createdAt: lastMessage.created_at,
+              user: {
+                id: lastMessage.user_id,
+                name: lastMessage.user_name,
+              },
+            }
+          : null,
+        event: {
+          id: membership.chat_group.event.id,
+          slug: membership.chat_group.event.slug,
+          title: membership.chat_group.event.title,
+          coverImageUrl: membership.chat_group.event.cover_image_url,
+          startTime: membership.chat_group.event.start_time,
+          endTime: membership.chat_group.event.end_time,
+          status: membership.chat_group.event.status,
+        },
+        membership: {
+          role: membership.role,
+          joinedAt: membership.joined_at,
+        },
+      }
+    })
 
     return successResponse({
       groups: groupsWithUnread,
