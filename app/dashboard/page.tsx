@@ -3,6 +3,9 @@ import { EventsTable } from "./events-table"
 import { SectionCards } from "./section-cards"
 import { getEventsOverTime, getRecentEvents } from "./actions"
 
+// Force dynamic rendering - requires database at runtime
+export const dynamic = 'force-dynamic'
+
 export default async function Page() {
   const [eventsOverTime, recentEvents] = await Promise.all([
     getEventsOverTime(90),
