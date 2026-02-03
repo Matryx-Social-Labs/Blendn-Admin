@@ -1,0 +1,15 @@
+# Nixpacks configuration for Railway deployment
+# Explicitly define build and start to use custom server with Socket.io
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-9_x"]
+
+[phases.build]
+cmds = [
+  "npm ci",
+  "npx prisma generate",
+  "npm run build"
+]
+
+[start]
+cmd = "npm run start"
