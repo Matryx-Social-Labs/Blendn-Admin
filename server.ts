@@ -7,47 +7,59 @@ const dev = process.env.NODE_ENV !== "production"
 const hostname = process.env.HOSTNAME || "0.0.0.0"
 const port = parseInt(process.env.PORT || "3000", 10)
 
+console.log(`[${new Date().toISOString()}] > Server startup initiated`)
+console.log(`[${new Date().toISOString()}] > NODE_ENV: ${process.env.NODE_ENV}`)
+console.log(`[${new Date().toISOString()}] > PORT: ${port}`)
+console.log(`[${new Date().toISOString()}] > HOSTNAME: ${hostname}`)
+
 // Validate critical environment variables in production
 if (!dev) {
   const required = ["DATABASE_URL", "NEXTAUTH_SECRET", "MOBILE_JWT_SECRET"]
   const missing = required.filter((key) => !process.env[key])
   if (missing.length > 0) {
-    console.error(`❌ Missing required environment variables: ${missing.join(", ")}`)
+    console.error(`[${new Date().toISOString()}] ❌ Missing required environment variables: ${missing.join(", ")}`)
     process.exit(1)
   }
+  console.log(`[${new Date().toISOString()}] > All required environment variables present`)
 }
 
 // Create Next.js app
+console.log(`[${new Date().toISOString()}] > Creating Next.js app instance...`)
 const app = next({ dev, hostname, port })
 const handle = app.getRequestHandler()
 
-console.log(`> Starting server in ${dev ? 'development' : 'production'} mode...`)
-console.log(`> Preparing Next.js app...`)
+console.log(`[${new Date().toISOString()}] > Starting server in ${dev ? 'development' : 'production'} mode...`)
+console.log(`[${new Date().toISOString()}] > Preparing Next.js app...`)
 
 app.prepare().then(() => {
-  console.log(`> Next.js app ready`)
+  console.log(`[${new Date().toISOString()}] > Next.js app prepared successfully`)
+
   // Create HTTP server
+  console.log(`[${new Date().toISOString()}] > Creating HTTP server...`)
   const httpServer = createServer((req, res) => {
     handle(req, res)
   })
+  console.log(`[${new Date().toISOString()}] > HTTP server created`)
 
   // Initialize Socket.io
+  console.log(`[${new Date().toISOString()}] > Initializing Socket.io...`)
   const io = initSocketServer(httpServer)
+  console.log(`[${new Date().toISOString()}] > Socket.io initialized`)
 
   // Graceful shutdown
   const shutdown = () => {
-    console.log("\n> Shutting down gracefully...")
+    console.log(`\n[${new Date().toISOString()}] > Shutting down gracefully...`)
     io?.close(() => {
-      console.log("> Socket.io closed")
+      console.log(`[${new Date().toISOString()}] > Socket.io closed`)
     })
     httpServer.close(() => {
-      console.log("> HTTP server closed")
+      console.log(`[${new Date().toISOString()}] > HTTP server closed`)
       process.exit(0)
     })
 
     // Force exit after 10 seconds
     setTimeout(() => {
-      console.error("> Forced shutdown after timeout")
+      console.error(`[${new Date().toISOString()}] > Forced shutdown after timeout`)
       process.exit(1)
     }, 10000)
   }
@@ -56,7 +68,9 @@ app.prepare().then(() => {
   process.on("SIGINT", shutdown)
 
   // Start server
+  console.log(`[${new Date().toISOString()}] > Starting HTTP server on ${hostname}:${port}...`)
   httpServer.listen(port, hostname, () => {
+    console.log(`[${new Date().toISOString()}] > HTTP server listening`)
     console.log(`
 ╔═══════════════════════════════════════════════════╗
 ║           Blendn Admin Server Started             ║
@@ -67,7 +81,12 @@ app.prepare().then(() => {
 ╚═══════════════════════════════════════════════════╝
     `)
   })
+
+  httpServer.on('error', (err) => {
+    console.error(`[${new Date().toISOString()}] > HTTP server error:`, err)
+    process.exit(1)
+  })
 }).catch((err) => {
-  console.error('> Failed to start server:', err)
+  console.error(`[${new Date().toISOString()}] > Failed to prepare Next.js app:`, err)
   process.exit(1)
 })

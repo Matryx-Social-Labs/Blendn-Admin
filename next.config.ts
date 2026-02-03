@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Standalone output for custom server deployment
+  output: "standalone",
 
   // Image optimization
   images: {
