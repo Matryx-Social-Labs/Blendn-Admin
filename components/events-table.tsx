@@ -30,15 +30,20 @@ interface Event {
   id: string
   title: string
   description: string
-  start_time: Date
-  end_time: Date
+  start_time: string | Date
+  end_time: string | Date
   venue_name?: string
   status: "draft" | "published" | "cancelled" | "completed"
   current_capacity: number
   max_capacity?: number
 }
 
-const columns: ColumnDef<Event>[] = [
+const getColumns = (
+  actions?: {
+    onEdit?: (event: Event) => void
+    onDelete?: (event: Event) => void
+  }
+): ColumnDef<Event>[] => [
   {
     accessorKey: "title",
     header: ({ column }) => {
@@ -85,13 +90,53 @@ const columns: ColumnDef<Event>[] = [
         : row.getValue("current_capacity")
     },
   },
+  {
+    id: "actions",
+    header: "Actions",
+    cell: ({ row }) => {
+      if (!actions?.onEdit && !actions?.onDelete) return null
+      const event = row.original
+      return (
+        <div className="flex items-center gap-2">
+          {actions.onEdit && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => actions.onEdit?.(event)}
+            >
+              Edit
+            </Button>
+          )}
+          {actions.onDelete && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => actions.onDelete?.(event)}
+            >
+              Delete
+            </Button>
+          )}
+        </div>
+      )
+    },
+  },
 ]
 
-export function EventsTable({ events }: { events: Event[] }) {
+interface EventsTableProps {
+  events: Event[]
+  onEdit?: (event: Event) => void
+  onDelete?: (event: Event) => void
+}
+
+export function EventsTable({ events, onEdit, onDelete }: EventsTableProps) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = React.useState({})
+  const columns = React.useMemo(
+    () => getColumns({ onEdit, onDelete }),
+    [onEdit, onDelete]
+  )
 
   const table = useReactTable({
     data: events,

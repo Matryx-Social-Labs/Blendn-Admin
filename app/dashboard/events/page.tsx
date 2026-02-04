@@ -3,9 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { EventForm } from "@/components/event-form"
 import { EventsTable } from "@/components/events-table"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PlusIcon } from "@radix-ui/react-icons"
 import { toast } from "sonner"
 
@@ -13,12 +11,20 @@ interface Event {
   id: string
   title: string
   description: string
-  start_time: Date
-  end_time: Date
-  venue_name?: string
+  short_description?: string | null
+  start_time: string | Date
+  end_time: string | Date
+  venue_name?: string | null
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  country?: string | null
+  postal_code?: string | null
+  timezone: string
   status: "draft" | "published" | "cancelled" | "completed"
   current_capacity: number
-  max_capacity?: number
+  max_capacity?: number | null
+  external_link?: string | null
 }
 
 export default function EventsPage() {
@@ -46,27 +52,27 @@ export default function EventsPage() {
     }
   }
 
-  const handleCreateEvent = async (data: Record<string, unknown>) => {
+  const handleDeleteEvent = async (event: Event) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${event.title}"? This cannot be undone.`
+    )
+    if (!confirmed) return
+
     try {
-      const response = await fetch("/api/events", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
+      const response = await fetch(`/api/events/${event.id}`, {
+        method: "DELETE",
       })
 
       if (!response.ok) {
-        throw new Error("Failed to create event")
+        throw new Error("Failed to delete event")
       }
 
-      const newEvent = await response.json()
-      setEvents((prev) => [...prev, newEvent])
-      toast.success("Event created successfully")
+      setEvents((prev) => prev.filter((item) => item.id !== event.id))
+      toast.success("Event deleted successfully")
       router.refresh()
     } catch (error) {
-      console.error("Error creating event:", error)
-      toast.error("Failed to create event")
+      console.error("Error deleting event:", error)
+      toast.error("Failed to delete event")
     }
   }
 
@@ -87,24 +93,16 @@ export default function EventsPage() {
     <div className="container mx-auto py-10">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Events</h1>
-        <Sheet>
-          <SheetTrigger asChild>
-            <Button>
-              <PlusIcon className="h-4 w-4 mr-2" />
-              Create Event
-            </Button>
-          </SheetTrigger>
-          <SheetContent className="w-[400px] sm:w-[540px]">
-            <SheetHeader>
-              <SheetTitle>Create New Event</SheetTitle>
-            </SheetHeader>
-            <div className="py-4">
-              <EventForm onSubmit={handleCreateEvent} />
-            </div>
-          </SheetContent>
-        </Sheet>
+        <Button onClick={() => router.push("/dashboard/events/new")}>
+          <PlusIcon className="h-4 w-4 mr-2" />
+          Create Event
+        </Button>
       </div>
-      <EventsTable events={events} />
+      <EventsTable
+        events={events}
+        onEdit={(event) => router.push(`/dashboard/events/${event.id}`)}
+        onDelete={handleDeleteEvent}
+      />
     </div>
   )
 }
