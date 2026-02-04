@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { haversineDistance } from "@/lib/geo"
@@ -96,32 +97,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // Get user's relationship with this event
-    const [userFavorite, userRating, userCheckIn, interestedUsers] =
-      await Promise.all([
-      db.event_favorites.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
-      }),
-      db.event_ratings.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
-      }),
-      db.event_check_ins.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
-      }),
+    type InterestedUserFavorite = Prisma.event_favoritesGetPayload<{
+      include: {
+        user: { select: { id: true; name: true; image: true } }
+      }
+    }>
+
+    const interestedUsersPromise: Promise<InterestedUserFavorite[]> =
       includeSet.has("interestedUsers")
         ? db.event_favorites.findMany({
             where: { event_id: eventId },
@@ -137,8 +119,36 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             orderBy: { created_at: "desc" },
             take: interestedLimit,
           })
-        : Promise.resolve([]),
-    ])
+        : Promise.resolve([])
+
+    const [userFavorite, userRating, userCheckIn, interestedUsers] =
+      await Promise.all([
+        db.event_favorites.findUnique({
+          where: {
+            event_id_user_id: {
+              event_id: eventId,
+              user_id: authUser.userId,
+            },
+          },
+        }),
+        db.event_ratings.findUnique({
+          where: {
+            event_id_user_id: {
+              event_id: eventId,
+              user_id: authUser.userId,
+            },
+          },
+        }),
+        db.event_check_ins.findUnique({
+          where: {
+            event_id_user_id: {
+              event_id: eventId,
+              user_id: authUser.userId,
+            },
+          },
+        }),
+        interestedUsersPromise,
+      ])
 
     // Calculate average rating
     const avgRating = await db.event_ratings.aggregate({
@@ -227,7 +237,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       distance,
       ...(includeSet.has("interestedUsers") && {
-        interestedUsers: (interestedUsers as any[]).map((f) => ({
+        interestedUsers: interestedUsers.map((f) => ({
           id: f.user.id,
           name: f.user.name,
           avatar: f.user.image,

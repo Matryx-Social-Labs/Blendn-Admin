@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
@@ -11,9 +12,70 @@ import {
 import { eventQuerySchema } from "@/lib/validations/event"
 
 const EVENTS_CACHE_TTL_MS = 30 * 1000
+const eventSelect = {
+  id: true,
+  slug: true,
+  title: true,
+  short_description: true,
+  cover_image_url: true,
+  start_time: true,
+  end_time: true,
+  timezone: true,
+  venue_name: true,
+  address: true,
+  city: true,
+  state: true,
+  country: true,
+  latitude: true,
+  longitude: true,
+  status: true,
+  is_featured: true,
+  organizer: {
+    select: {
+      id: true,
+      name: true,
+      image: true,
+    },
+  },
+  categories: {
+    select: {
+      category: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          icon: true,
+        },
+      },
+    },
+  },
+  media: {
+    select: {
+      id: true,
+      url: true,
+      thumbnail_url: true,
+      type: true,
+      order: true,
+    },
+    orderBy: { order: "asc" },
+    take: 5,
+  },
+  _count: {
+    select: {
+      check_ins: {
+        where: { status: "checked_in" },
+      },
+      favorites: true,
+      ratings: true,
+    },
+  },
+} satisfies Prisma.eventsSelect
+
+type EventListItem = Prisma.eventsGetPayload<{ select: typeof eventSelect }>
+
 const eventsCache = new Map<
   string,
-  { expiresAt: number; events: any[]; totalCount: number }
+  { expiresAt: number; events: EventListItem[]; totalCount: number }
 >()
 
 function buildEventsCacheKey(input: {
@@ -242,7 +304,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      let interestedPreviewMap: Record<string, string[]> = {}
+      const interestedPreviewMap: Record<string, string[]> = {}
       if (includeSet.has("interestedPreview")) {
         const favorites = await db.event_favorites.findMany({
           where: {
@@ -290,7 +352,7 @@ export async function GET(request: NextRequest) {
         status: event.status,
         isFeatured: event.is_featured,
         organizer: event.organizer,
-        categories: event.categories.map((c: any) => c.category),
+        categories: event.categories.map((c) => c.category),
         media: event.media,
         checkInCount: event._count.check_ins,
         favoriteCount: event._count.favorites,
@@ -357,64 +419,7 @@ export async function GET(request: NextRequest) {
     // Fetch events
     let events = await db.events.findMany({
       where,
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        short_description: true,
-        cover_image_url: true,
-        start_time: true,
-        end_time: true,
-        timezone: true,
-        venue_name: true,
-        address: true,
-        city: true,
-        state: true,
-        country: true,
-        latitude: true,
-        longitude: true,
-        status: true,
-        is_featured: true,
-        organizer: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-          },
-        },
-        categories: {
-          select: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                slug: true,
-                icon: true,
-              },
-            },
-          },
-        },
-        media: {
-          select: {
-            id: true,
-            url: true,
-            thumbnail_url: true,
-            type: true,
-            order: true,
-          },
-          orderBy: { order: "asc" },
-          take: 5,
-        },
-        _count: {
-          select: {
-            check_ins: {
-              where: { status: "checked_in" },
-            },
-            favorites: true,
-            ratings: true,
-          },
-        },
-      },
+      select: eventSelect,
       orderBy,
       ...(shouldSortByDistance
         ? {}
@@ -545,7 +550,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    let interestedPreviewMap: Record<string, string[]> = {}
+    const interestedPreviewMap: Record<string, string[]> = {}
     if (includeSet.has("interestedPreview")) {
       const favorites = await db.event_favorites.findMany({
         where: {

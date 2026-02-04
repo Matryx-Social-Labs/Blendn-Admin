@@ -23,6 +23,10 @@ exports.eventQuerySchema = zod_1.z.object({
     // Sort
     sortBy: zod_1.z.enum(["start_time", "created_at", "distance"]).default("start_time"),
     sortOrder: zod_1.z.enum(["asc", "desc"]).default("asc"),
+    // Optional includes (comma-separated list)
+    include: zod_1.z.string().optional(),
+    // Interested preview limit (used when include contains interestedPreview)
+    interestedPreviewLimit: zod_1.z.coerce.number().int().min(1).max(6).optional(),
 });
 exports.checkinSchema = zod_1.z.object({
     latitude: zod_1.z.number().min(-90).max(90),
