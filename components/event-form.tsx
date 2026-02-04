@@ -109,8 +109,8 @@ export function EventForm({
   const resolvedDefaultValues = useMemo(
     () => ({
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      status: "draft",
-      visibility: "public",
+      status: "draft" as const,
+      visibility: "public" as const,
       is_featured: false,
       is_recurring: false,
       check_in_radius: 30,
@@ -821,7 +821,7 @@ export function EventForm({
                                 size="sm"
                                 disabled={index === 0}
                                 onClick={() => {
-                                  const next = [...field.value]
+                                  const next = [...(field.value ?? [])]
                                   const [removed] = next.splice(index, 1)
                                   next.splice(index - 1, 0, removed)
                                   field.onChange(next)
@@ -833,9 +833,9 @@ export function EventForm({
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                disabled={index === field.value.length - 1}
+                                disabled={index === (field.value?.length ?? 0) - 1}
                                 onClick={() => {
-                                  const next = [...field.value]
+                                  const next = [...(field.value ?? [])]
                                   const [removed] = next.splice(index, 1)
                                   next.splice(index + 1, 0, removed)
                                   field.onChange(next)

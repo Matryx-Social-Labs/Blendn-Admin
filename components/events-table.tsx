@@ -30,12 +30,20 @@ interface Event {
   id: string
   title: string
   description: string
+  short_description?: string | null
   start_time: string | Date
   end_time: string | Date
-  venue_name?: string
+  venue_name?: string | null
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  country?: string | null
+  postal_code?: string | null
+  timezone: string
   status: "draft" | "published" | "cancelled" | "completed"
   current_capacity: number
-  max_capacity?: number
+  max_capacity?: number | null
+  external_link?: string | null
 }
 
 const getColumns = (
