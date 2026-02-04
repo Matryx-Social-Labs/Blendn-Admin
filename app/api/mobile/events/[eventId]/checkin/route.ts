@@ -149,7 +149,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     if (existingMembership) {
-      if (existingMembership.status !== "active") {
+      if (existingMembership.status !== "active" || existingMembership.last_allowed_at) {
         await db.chat_group_members.update({
           where: {
             chat_group_id_user_id: {
@@ -159,6 +159,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           },
           data: {
             status: "active",
+            last_allowed_at: null,
             updated_at: now,
           },
         })
@@ -170,6 +171,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           user_id: authUser.userId,
           role: "member",
           status: "active",
+          last_allowed_at: null,
         },
       })
 

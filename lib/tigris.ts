@@ -1,4 +1,11 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  CreateBucketCommand,
+  HeadBucketCommand,
+  PutBucketCorsCommand,
+} from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 // Tigris Configuration (S3-compatible on Railway)
@@ -170,4 +177,76 @@ export function getMaxFileSize(folder: UploadFolder): number {
  */
 export function isConfigured(): boolean {
   return validateConfig()
+}
+
+/**
+ * Ensure the bucket exists, create it if not
+ */
+export async function ensureBucketExists(): Promise<boolean> {
+  if (!validateConfig()) {
+    console.warn("Tigris not configured, skipping bucket check")
+    return false
+  }
+
+  const client = getS3Client()
+
+  try {
+    // Check if bucket exists
+    await client.send(new HeadBucketCommand({ Bucket: TIGRIS_BUCKET }))
+    console.log(`✅ Bucket "${TIGRIS_BUCKET}" exists`)
+    return true
+  } catch (error: any) {
+    if (error.name === "NotFound" || error.$metadata?.httpStatusCode === 404) {
+      // Bucket doesn't exist, create it
+      console.log(`Creating bucket "${TIGRIS_BUCKET}"...`)
+      try {
+        await client.send(new CreateBucketCommand({ Bucket: TIGRIS_BUCKET }))
+        console.log(`✅ Bucket "${TIGRIS_BUCKET}" created`)
+
+        // Set up CORS for the bucket
+        await client.send(
+          new PutBucketCorsCommand({
+            Bucket: TIGRIS_BUCKET,
+            CORSConfiguration: {
+              CORSRules: [
+                {
+                  AllowedHeaders: ["*"],
+                  AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
+                  AllowedOrigins: ["*"],
+                  ExposeHeaders: ["ETag"],
+                  MaxAgeSeconds: 3600,
+                },
+              ],
+            },
+          })
+        )
+        console.log(`✅ CORS configured for bucket "${TIGRIS_BUCKET}"`)
+        return true
+      } catch (createError) {
+        console.error(`❌ Failed to create bucket:`, createError)
+        return false
+      }
+    }
+    console.error(`❌ Error checking bucket:`, error)
+    return false
+  }
+}
+
+/**
+ * Test the Tigris connection
+ */
+export async function testConnection(): Promise<{ success: boolean; message: string }> {
+  if (!validateConfig()) {
+    return { success: false, message: "Tigris not configured" }
+  }
+
+  try {
+    const bucketExists = await ensureBucketExists()
+    if (bucketExists) {
+      return { success: true, message: `Connected to Tigris. Bucket: ${TIGRIS_BUCKET}` }
+    }
+    return { success: false, message: "Failed to verify/create bucket" }
+  } catch (error: any) {
+    return { success: false, message: error.message || "Connection failed" }
+  }
 }

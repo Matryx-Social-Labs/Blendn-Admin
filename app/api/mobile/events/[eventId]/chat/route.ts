@@ -35,13 +35,40 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { page, limit, before, after } = parsed.data
 
-    // Get chat group for event
-    const chatGroup = await db.chat_groups.findUnique({
+    // Get chat group for event (create on demand if user is checked in)
+    let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
     })
 
     if (!chatGroup) {
-      return notFoundResponse("Chat not available for this event")
+      const checkIn = await db.event_check_ins.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+        select: { status: true },
+      })
+
+      if (checkIn?.status !== "checked_in") {
+        return notFoundResponse("Chat not available for this event")
+      }
+
+      const event = await db.events.findUnique({
+        where: { id: eventId, deleted_at: null },
+        select: { title: true },
+      })
+
+      chatGroup = await db.chat_groups.create({
+        data: {
+          event_id: eventId,
+          name: `${event?.title || "Event"} Chat`,
+          description: `Chat for ${event?.title || "Event"}`,
+          status: "active",
+          member_count: 0,
+        },
+      })
     }
 
     // Check if user is a member of the chat group
@@ -55,17 +82,70 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!membership || membership.status !== "active") {
-      return forbiddenResponse("You must check in to the event to access chat")
+      const checkIn = await db.event_check_ins.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+        select: { status: true },
+      })
+
+      if (checkIn?.status !== "checked_in") {
+        return forbiddenResponse("You must check in to the event to access chat")
+      }
+
+      await db.chat_group_members.upsert({
+        where: {
+          chat_group_id_user_id: {
+            chat_group_id: chatGroup.id,
+            user_id: authUser.userId,
+          },
+        },
+        create: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+          role: "member",
+          status: "active",
+          last_allowed_at: null,
+        },
+        update: {
+          status: "active",
+          last_allowed_at: null,
+          updated_at: new Date(),
+        },
+      })
+
+      await db.chat_groups.update({
+        where: { id: chatGroup.id },
+        data: { member_count: { increment: 1 } },
+      })
     }
 
-    // Build where clause for messages
+    const membershipFresh = membership
+      ? membership
+      : await db.chat_group_members.findUnique({
+          where: {
+            chat_group_id_user_id: {
+              chat_group_id: chatGroup.id,
+              user_id: authUser.userId,
+            },
+          },
+        })
+
+    // Build where clause for messages (lock to last checkout time if not checked in)
     const where: Record<string, unknown> = {
       chat_group_id: chatGroup.id,
       deleted_at: null,
     }
 
+    if (membershipFresh?.last_allowed_at) {
+      where.created_at = { lte: membershipFresh.last_allowed_at }
+    }
+
     if (before) {
-      where.created_at = { lt: new Date(before) }
+      where.created_at = { ...(where.created_at || {}), lt: new Date(before) }
     }
     if (after) {
       where.created_at = { ...(where.created_at || {}), gt: new Date(after) }
@@ -178,13 +258,40 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { content, type, parentId, metadata } = parsed.data
 
-    // Get chat group for event
-    const chatGroup = await db.chat_groups.findUnique({
+    // Get chat group for event (create on demand if user is checked in)
+    let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
     })
 
     if (!chatGroup) {
-      return notFoundResponse("Chat not available for this event")
+      const checkIn = await db.event_check_ins.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+        select: { status: true },
+      })
+
+      if (checkIn?.status !== "checked_in") {
+        return notFoundResponse("Chat not available for this event")
+      }
+
+      const event = await db.events.findUnique({
+        where: { id: eventId, deleted_at: null },
+        select: { title: true },
+      })
+
+      chatGroup = await db.chat_groups.create({
+        data: {
+          event_id: eventId,
+          name: `${event?.title || "Event"} Chat`,
+          description: `Chat for ${event?.title || "Event"}`,
+          status: "active",
+          member_count: 0,
+        },
+      })
     }
 
     // Check if chat group is active
@@ -203,7 +310,60 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!membership || membership.status !== "active") {
-      return forbiddenResponse("You must check in to the event to send messages")
+      const checkIn = await db.event_check_ins.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+        select: { status: true },
+      })
+
+      if (checkIn?.status !== "checked_in") {
+        return forbiddenResponse("You must check in to the event to send messages")
+      }
+
+      await db.chat_group_members.upsert({
+        where: {
+          chat_group_id_user_id: {
+            chat_group_id: chatGroup.id,
+            user_id: authUser.userId,
+          },
+        },
+        create: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+          role: "member",
+          status: "active",
+          last_allowed_at: null,
+        },
+        update: {
+          status: "active",
+          last_allowed_at: null,
+          updated_at: new Date(),
+        },
+      })
+
+      await db.chat_groups.update({
+        where: { id: chatGroup.id },
+        data: { member_count: { increment: 1 } },
+      })
+    }
+
+    const membershipFresh = membership
+      ? membership
+      : await db.chat_group_members.findUnique({
+          where: {
+            chat_group_id_user_id: {
+              chat_group_id: chatGroup.id,
+              user_id: authUser.userId,
+            },
+          },
+        })
+
+    if (membershipFresh?.last_allowed_at) {
+      return forbiddenResponse("You must check in to send messages")
     }
 
     // If replying, verify parent message exists

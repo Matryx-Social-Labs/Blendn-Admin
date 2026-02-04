@@ -87,6 +87,25 @@ export async function POST(
     // Emit real-time event
     emitEventCheckOut(eventId, user.userId)
 
+    // Mark chat access cutoff for this user
+    const chatGroup = await db.chat_groups.findUnique({
+      where: { event_id: eventId },
+      select: { id: true },
+    })
+
+    if (chatGroup) {
+      await db.chat_group_members.updateMany({
+        where: {
+          chat_group_id: chatGroup.id,
+          user_id: user.userId,
+        },
+        data: {
+          last_allowed_at: now,
+          updated_at: now,
+        },
+      })
+    }
+
     return successResponse({
       message: "Successfully checked out",
       checkIn: updatedCheckIn,
