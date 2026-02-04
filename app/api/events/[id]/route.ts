@@ -86,6 +86,9 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       media_items,
     } = body
 
+    // Debug: Log cover_image_url being updated
+    console.log("Updating event - cover_image_url:", cover_image_url)
+
     const event = await db.events.findFirst({
       where: {
         id: resolvedParams.id,

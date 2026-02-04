@@ -76,6 +76,9 @@ export async function POST(req: Request) {
       media_items,
     } = body
 
+    // Debug: Log cover_image_url
+    console.log("Creating event - cover_image_url:", cover_image_url)
+
     if (!title || !description || !start_time || !end_time || !timezone) {
       return new NextResponse("Missing required fields", { status: 400 })
     }

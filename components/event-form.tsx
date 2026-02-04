@@ -535,51 +535,88 @@ export function EventForm({
           )}
         />
 
-        <FormField
-          control={form.control}
-          name="cover_image_url"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Cover Image URL</FormLabel>
-              <div className="flex flex-col gap-2">
-                <FormControl>
-                  <Input placeholder="https://..." {...field} />
-                </FormControl>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  disabled={isUploadingCover}
-                  onChange={async (event) => {
-                    const file = event.target.files?.[0]
-                    if (!file) return
-                    try {
-                      setIsUploadingCover(true)
-                      const publicUrl = await uploadFile(file)
-                      form.setValue("cover_image_url", publicUrl, {
-                        shouldValidate: true,
-                      })
-                      toast.success("Cover image uploaded")
-                    } catch (error) {
-                      console.error("Cover upload error:", error)
-                      toast.error("Failed to upload cover image")
-                    } finally {
-                      setIsUploadingCover(false)
-                      event.target.value = ""
-                    }
-                  }}
-                />
-                {coverPreviewUrl && (
-                  <img
-                    src={coverPreviewUrl}
-                    alt="Cover preview"
-                    className="max-h-48 w-full rounded-md border object-cover"
-                  />
-                )}
-              </div>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        {/* Cover Image Section */}
+        <div className="rounded-lg border bg-muted/30 p-4">
+          <h3 className="mb-4 text-lg font-semibold">Cover Image</h3>
+          <p className="mb-4 text-sm text-muted-foreground">
+            This is the main image displayed on the event card. Recommended size: 1200x630px
+          </p>
+          <FormField
+            control={form.control}
+            name="cover_image_url"
+            render={({ field }) => (
+              <FormItem>
+                <div className="flex flex-col gap-4">
+                  {/* Image Preview */}
+                  {coverPreviewUrl ? (
+                    <div className="relative">
+                      <img
+                        src={coverPreviewUrl}
+                        alt="Cover preview"
+                        className="h-48 w-full rounded-lg border object-cover"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="absolute right-2 top-2"
+                        onClick={() => {
+                          form.setValue("cover_image_url", "", { shouldValidate: true })
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex h-48 w-full items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/50">
+                      <span className="text-muted-foreground">No cover image</span>
+                    </div>
+                  )}
+
+                  {/* Upload Button */}
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={isUploadingCover}
+                      className="cursor-pointer"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0]
+                        if (!file) return
+                        try {
+                          setIsUploadingCover(true)
+                          console.log("Uploading cover image:", file.name)
+                          const publicUrl = await uploadFile(file)
+                          console.log("Cover image uploaded, URL:", publicUrl)
+                          form.setValue("cover_image_url", publicUrl, {
+                            shouldValidate: true,
+                          })
+                          toast.success("Cover image uploaded successfully")
+                        } catch (error) {
+                          console.error("Cover upload error:", error)
+                          toast.error("Failed to upload cover image")
+                        } finally {
+                          setIsUploadingCover(false)
+                          event.target.value = ""
+                        }
+                      }}
+                    />
+                    {isUploadingCover && <span className="text-sm text-muted-foreground">Uploading...</span>}
+                  </div>
+
+                  {/* Manual URL Input */}
+                  <div className="flex flex-col gap-1">
+                    <FormLabel className="text-xs text-muted-foreground">Or enter URL manually</FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://..." {...field} value={field.value || ""} />
+                    </FormControl>
+                  </div>
+                </div>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
 
         <FormField
           control={form.control}
@@ -859,9 +896,15 @@ export function EventForm({
           )}
         />
 
-        <div className="space-y-4">
+        {/* Gallery Section */}
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <FormLabel>Media Items</FormLabel>
+            <div>
+              <h3 className="text-lg font-semibold">Gallery Images</h3>
+              <p className="text-sm text-muted-foreground">
+                Additional images and media for the event detail page (optional)
+              </p>
+            </div>
             <Button
               type="button"
               variant="outline"
@@ -877,12 +920,12 @@ export function EventForm({
                 })
               }
             >
-              Add Media
+              Add Gallery Image
             </Button>
           </div>
           {mediaFieldArray.fields.length === 0 && (
-            <p className="text-muted-foreground text-sm">
-              No media items added yet.
+            <p className="text-muted-foreground text-sm py-4 text-center">
+              No gallery images added yet. Click &quot;Add Gallery Image&quot; to add photos.
             </p>
           )}
           {mediaFieldArray.fields.map((fieldItem, index) => (
