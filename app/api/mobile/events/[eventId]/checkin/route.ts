@@ -122,32 +122,57 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Add user to chat group if exists
-    const chatGroup = await db.chat_groups.findUnique({
+    // Ensure chat group exists and add user
+    let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
     })
 
-    if (chatGroup) {
-      await db.chat_group_members.upsert({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroup.id,
-            user_id: authUser.userId,
-          },
+    if (!chatGroup) {
+      chatGroup = await db.chat_groups.create({
+        data: {
+          event_id: eventId,
+          name: `${event.title} Chat`,
+          description: `Chat for ${event.title}`,
+          status: "active",
+          member_count: 0,
         },
-        create: {
+      })
+    }
+
+    const existingMembership = await db.chat_group_members.findUnique({
+      where: {
+        chat_group_id_user_id: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+        },
+      },
+    })
+
+    if (existingMembership) {
+      if (existingMembership.status !== "active") {
+        await db.chat_group_members.update({
+          where: {
+            chat_group_id_user_id: {
+              chat_group_id: chatGroup.id,
+              user_id: authUser.userId,
+            },
+          },
+          data: {
+            status: "active",
+            updated_at: now,
+          },
+        })
+      }
+    } else {
+      await db.chat_group_members.create({
+        data: {
           chat_group_id: chatGroup.id,
           user_id: authUser.userId,
           role: "member",
           status: "active",
         },
-        update: {
-          status: "active",
-          updated_at: now,
-        },
       })
 
-      // Update member count
       await db.chat_groups.update({
         where: { id: chatGroup.id },
         data: {

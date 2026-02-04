@@ -10,6 +10,44 @@ import {
 } from "@/lib/api-response"
 import { eventQuerySchema } from "@/lib/validations/event"
 
+const EVENTS_CACHE_TTL_MS = 30 * 1000
+const eventsCache = new Map<
+  string,
+  { expiresAt: number; events: any[]; totalCount: number }
+>()
+
+function buildEventsCacheKey(input: {
+  page: number
+  limit: number
+  search?: string
+  lat?: number
+  lon?: number
+  radius?: number
+  categoryId?: string
+  categorySlug?: string
+  startDate?: string
+  endDate?: string
+  status?: string
+  sortBy: string
+  sortOrder: string
+}) {
+  return JSON.stringify({
+    page: input.page,
+    limit: input.limit,
+    search: input.search || null,
+    lat: input.lat ?? null,
+    lon: input.lon ?? null,
+    radius: input.radius ?? null,
+    categoryId: input.categoryId || null,
+    categorySlug: input.categorySlug || null,
+    startDate: input.startDate || null,
+    endDate: input.endDate || null,
+    status: input.status || null,
+    sortBy: input.sortBy,
+    sortOrder: input.sortOrder,
+  })
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Get authenticated user
@@ -39,7 +77,17 @@ export async function GET(request: NextRequest) {
       status,
       sortBy,
       sortOrder,
+      include,
+      interestedPreviewLimit,
     } = parsed.data
+
+    const includeSet = new Set(
+      (include || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+    const previewLimit = interestedPreviewLimit ?? 3
 
     // Build where clause
     const where: Record<string, unknown> = {
@@ -82,12 +130,224 @@ export async function GET(request: NextRequest) {
       where.end_time = { lte: new Date(endDate) }
     }
 
-    // Get total count
-    const totalCount = await db.events.count({ where })
+    const shouldSortByDistance =
+      sortBy === "distance" && lat !== undefined && lon !== undefined
+
+    const cacheKey = buildEventsCacheKey({
+      page,
+      limit,
+      search,
+      lat,
+      lon,
+      radius,
+      categoryId,
+      categorySlug,
+      startDate,
+      endDate,
+      status,
+      sortBy,
+      sortOrder,
+    })
+
+    const cached = eventsCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) {
+      const events = cached.events
+      const totalCount = cached.totalCount
+
+      const eventIds = events.map((e) => e.id)
+
+      // Get user's favorites for these events
+      const userFavoritesPromise = db.event_favorites.findMany({
+        where: {
+          user_id: authUser.userId,
+          event_id: { in: eventIds },
+        },
+        select: { event_id: true },
+      })
+
+      const userCheckinsPromise = includeSet.has("checkins")
+        ? db.event_check_ins.findMany({
+            where: {
+              user_id: authUser.userId,
+              event_id: { in: eventIds },
+            },
+            select: {
+              event_id: true,
+              id: true,
+              status: true,
+              check_in_time: true,
+            },
+          })
+        : Promise.resolve([])
+
+      const activeCheckinsPromise = includeSet.has("activeCheckins")
+        ? db.event_check_ins.findMany({
+            where: {
+              user_id: authUser.userId,
+              status: "checked_in",
+            },
+            include: {
+              event: {
+                select: {
+                  id: true,
+                  title: true,
+                  slug: true,
+                  cover_image_url: true,
+                  start_time: true,
+                  end_time: true,
+                  venue_name: true,
+                  address: true,
+                  city: true,
+                  status: true,
+                },
+              },
+            },
+            orderBy: { check_in_time: "desc" },
+          })
+        : Promise.resolve([])
+
+      const profilePromise = includeSet.has("profile")
+        ? db.user.findUnique({
+            where: { id: authUser.userId },
+            select: {
+              id: true,
+              name: true,
+              image: true,
+              profile: true,
+            },
+          })
+        : Promise.resolve(null)
+
+      const [userFavorites, userCheckins, activeCheckins, profile] =
+        await Promise.all([
+          userFavoritesPromise,
+          userCheckinsPromise,
+          activeCheckinsPromise,
+          profilePromise,
+        ])
+
+      const favoriteEventIds = new Set(userFavorites.map((f) => f.event_id))
+
+      const userCheckinMap: Record<
+        string,
+        { status: string; checkInId?: string; checkInTime?: Date | null }
+      > = {}
+      if (includeSet.has("checkins")) {
+        for (const checkIn of userCheckins) {
+          userCheckinMap[checkIn.event_id] = {
+            status: checkIn.status,
+            checkInId: checkIn.id,
+            checkInTime: checkIn.check_in_time,
+          }
+        }
+      }
+
+      let interestedPreviewMap: Record<string, string[]> = {}
+      if (includeSet.has("interestedPreview")) {
+        const favorites = await db.event_favorites.findMany({
+          where: {
+            event_id: { in: eventIds },
+          },
+          select: {
+            event_id: true,
+            user: {
+              select: { image: true },
+            },
+          },
+          orderBy: { created_at: "desc" },
+        })
+        const counts: Record<string, number> = {}
+        for (const fav of favorites) {
+          const img = fav.user?.image
+          if (!img) continue
+          if (!interestedPreviewMap[fav.event_id]) {
+            interestedPreviewMap[fav.event_id] = []
+          }
+          counts[fav.event_id] = counts[fav.event_id] || 0
+          if (counts[fav.event_id] < previewLimit) {
+            interestedPreviewMap[fav.event_id].push(img)
+            counts[fav.event_id] += 1
+          }
+        }
+      }
+
+      const transformedEvents = events.map((event) => ({
+        id: event.id,
+        slug: event.slug,
+        title: event.title,
+        shortDescription: event.short_description,
+        coverImageUrl: event.cover_image_url,
+        startTime: event.start_time,
+        endTime: event.end_time,
+        timezone: event.timezone,
+        venueName: event.venue_name,
+        address: event.address,
+        city: event.city,
+        state: event.state,
+        country: event.country,
+        latitude: event.latitude,
+        longitude: event.longitude,
+        status: event.status,
+        isFeatured: event.is_featured,
+        organizer: event.organizer,
+        categories: event.categories.map((c: any) => c.category),
+        media: event.media,
+        checkInCount: event._count.check_ins,
+        favoriteCount: event._count.favorites,
+        ratingCount: event._count.ratings,
+        isFavorited: favoriteEventIds.has(event.id),
+        userCheckin: includeSet.has("checkins")
+          ? userCheckinMap[event.id] || { status: "none" }
+          : undefined,
+        interestedPreview: includeSet.has("interestedPreview")
+          ? interestedPreviewMap[event.id] || []
+          : undefined,
+        distance:
+          lat !== undefined &&
+          lon !== undefined &&
+          event.latitude &&
+          event.longitude
+            ? haversineDistance(lat, lon, event.latitude, event.longitude)
+            : null,
+      }))
+
+      return successResponse({
+        events: transformedEvents,
+        pagination: {
+          page,
+          limit,
+          totalCount,
+          totalPages: Math.ceil(totalCount / limit),
+          hasMore: page * limit < totalCount,
+        },
+        ...(includeSet.has("activeCheckins") && {
+          activeCheckins: activeCheckins.map((c) => ({
+            id: c.id,
+            eventId: c.event_id,
+            checkInTime: c.check_in_time,
+            event: {
+              id: c.event.id,
+              title: c.event.title,
+              slug: c.event.slug,
+              coverImageUrl: c.event.cover_image_url,
+              startTime: c.event.start_time,
+              endTime: c.event.end_time,
+              venueName: c.event.venue_name,
+              address: c.event.address,
+              city: c.event.city,
+              status: c.event.status,
+            },
+          })),
+        }),
+        ...(includeSet.has("profile") && {
+          profile,
+        }),
+      })
+    }
 
     // Build orderBy
     let orderBy: Record<string, string> = {}
-    if (sortBy !== "distance") {
+    if (!shouldSortByDistance) {
       orderBy[sortBy] = sortOrder
     } else {
       // Default sort for distance sorting (we'll sort in memory)
@@ -156,13 +416,16 @@ export async function GET(request: NextRequest) {
         },
       },
       orderBy,
-      skip: (page - 1) * limit,
-      take: limit,
+      ...(shouldSortByDistance
+        ? {}
+        : { skip: (page - 1) * limit, take: limit }),
     })
 
+    let totalCount = await db.events.count({ where })
+
     // If sorting by distance and coordinates provided, calculate distances and sort
-    if (sortBy === "distance" && lat !== undefined && lon !== undefined) {
-      events = events
+    if (shouldSortByDistance) {
+      const withDistance = events
         .map((event) => ({
           ...event,
           distance:
@@ -180,18 +443,136 @@ export async function GET(request: NextRequest) {
             ? a.distance - b.distance
             : b.distance - a.distance
         }) as typeof events
+
+      totalCount = withDistance.length
+      const start = (page - 1) * limit
+      const end = start + limit
+      events = withDistance.slice(start, end) as typeof events
     }
 
-    // Get user's favorites for these events
+    eventsCache.set(cacheKey, {
+      expiresAt: Date.now() + EVENTS_CACHE_TTL_MS,
+      events,
+      totalCount,
+    })
+
     const eventIds = events.map((e) => e.id)
-    const userFavorites = await db.event_favorites.findMany({
+
+    // Get user's favorites for these events
+    const userFavoritesPromise = db.event_favorites.findMany({
       where: {
         user_id: authUser.userId,
         event_id: { in: eventIds },
       },
       select: { event_id: true },
     })
+
+    // Optional includes
+    const userCheckinsPromise = includeSet.has("checkins")
+      ? db.event_check_ins.findMany({
+          where: {
+            user_id: authUser.userId,
+            event_id: { in: eventIds },
+          },
+          select: {
+            event_id: true,
+            id: true,
+            status: true,
+            check_in_time: true,
+          },
+        })
+      : Promise.resolve([])
+
+    const activeCheckinsPromise = includeSet.has("activeCheckins")
+      ? db.event_check_ins.findMany({
+          where: {
+            user_id: authUser.userId,
+            status: "checked_in",
+          },
+          include: {
+            event: {
+              select: {
+                id: true,
+                title: true,
+                slug: true,
+                cover_image_url: true,
+                start_time: true,
+                end_time: true,
+                venue_name: true,
+                address: true,
+                city: true,
+                status: true,
+              },
+            },
+          },
+          orderBy: { check_in_time: "desc" },
+        })
+      : Promise.resolve([])
+
+    const profilePromise = includeSet.has("profile")
+      ? db.user.findUnique({
+          where: { id: authUser.userId },
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            profile: true,
+          },
+        })
+      : Promise.resolve(null)
+
+    const [userFavorites, userCheckins, activeCheckins, profile] =
+      await Promise.all([
+        userFavoritesPromise,
+        userCheckinsPromise,
+        activeCheckinsPromise,
+        profilePromise,
+      ])
+
     const favoriteEventIds = new Set(userFavorites.map((f) => f.event_id))
+
+    const userCheckinMap: Record<
+      string,
+      { status: string; checkInId?: string; checkInTime?: Date | null }
+    > = {}
+    if (includeSet.has("checkins")) {
+      for (const checkIn of userCheckins) {
+        userCheckinMap[checkIn.event_id] = {
+          status: checkIn.status,
+          checkInId: checkIn.id,
+          checkInTime: checkIn.check_in_time,
+        }
+      }
+    }
+
+    let interestedPreviewMap: Record<string, string[]> = {}
+    if (includeSet.has("interestedPreview")) {
+      const favorites = await db.event_favorites.findMany({
+        where: {
+          event_id: { in: eventIds },
+        },
+        select: {
+          event_id: true,
+          user: {
+            select: { image: true },
+          },
+        },
+        orderBy: { created_at: "desc" },
+      })
+      const counts: Record<string, number> = {}
+      for (const fav of favorites) {
+        const img = fav.user?.image
+        if (!img) continue
+        if (!interestedPreviewMap[fav.event_id]) {
+          interestedPreviewMap[fav.event_id] = []
+        }
+        counts[fav.event_id] = counts[fav.event_id] || 0
+        if (counts[fav.event_id] < previewLimit) {
+          interestedPreviewMap[fav.event_id].push(img)
+          counts[fav.event_id] += 1
+        }
+      }
+    }
 
     // Transform response
     const transformedEvents = events.map((event) => ({
@@ -219,6 +600,12 @@ export async function GET(request: NextRequest) {
       favoriteCount: event._count.favorites,
       ratingCount: event._count.ratings,
       isFavorited: favoriteEventIds.has(event.id),
+      userCheckin: includeSet.has("checkins")
+        ? userCheckinMap[event.id] || { status: "none" }
+        : undefined,
+      interestedPreview: includeSet.has("interestedPreview")
+        ? interestedPreviewMap[event.id] || []
+        : undefined,
       distance:
         lat !== undefined &&
         lon !== undefined &&
@@ -237,6 +624,28 @@ export async function GET(request: NextRequest) {
         totalPages: Math.ceil(totalCount / limit),
         hasMore: page * limit < totalCount,
       },
+      ...(includeSet.has("activeCheckins") && {
+        activeCheckins: activeCheckins.map((c) => ({
+          id: c.id,
+          eventId: c.event_id,
+          checkInTime: c.check_in_time,
+          event: {
+            id: c.event.id,
+            title: c.event.title,
+            slug: c.event.slug,
+            coverImageUrl: c.event.cover_image_url,
+            startTime: c.event.start_time,
+            endTime: c.event.end_time,
+            venueName: c.event.venue_name,
+            address: c.event.address,
+            city: c.event.city,
+            status: c.event.status,
+          },
+        })),
+      }),
+      ...(includeSet.has("profile") && {
+        profile,
+      }),
     })
   } catch (error) {
     console.error("List events error:", error)

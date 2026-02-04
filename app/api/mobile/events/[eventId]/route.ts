@@ -31,6 +31,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const userLon = searchParams.get("lon")
       ? parseFloat(searchParams.get("lon")!)
       : undefined
+    const includeSet = new Set(
+      (searchParams.get("include") || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+    const interestedLimit = Math.min(
+      Math.max(parseInt(searchParams.get("interestedLimit") || "6"), 1),
+      20
+    )
 
     // Fetch event with all related data
     const event = await db.events.findUnique({
@@ -86,7 +96,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // Get user's relationship with this event
-    const [userFavorite, userRating, userCheckIn] = await Promise.all([
+    const [userFavorite, userRating, userCheckIn, interestedUsers] =
+      await Promise.all([
       db.event_favorites.findUnique({
         where: {
           event_id_user_id: {
@@ -111,6 +122,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           },
         },
       }),
+      includeSet.has("interestedUsers")
+        ? db.event_favorites.findMany({
+            where: { event_id: eventId },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  image: true,
+                },
+              },
+            },
+            orderBy: { created_at: "desc" },
+            take: interestedLimit,
+          })
+        : Promise.resolve([]),
     ])
 
     // Calculate average rating
@@ -199,6 +226,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         userReview: userRating?.review || null,
       },
       distance,
+      ...(includeSet.has("interestedUsers") && {
+        interestedUsers: (interestedUsers as any[]).map((f) => ({
+          id: f.user.id,
+          name: f.user.name,
+          avatar: f.user.image,
+        })),
+      }),
     })
   } catch (error) {
     console.error("Get event error:", error)

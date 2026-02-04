@@ -27,6 +27,12 @@ export const eventQuerySchema = z.object({
   // Sort
   sortBy: z.enum(["start_time", "created_at", "distance"]).default("start_time"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
+
+  // Optional includes (comma-separated list)
+  include: z.string().optional(),
+
+  // Interested preview limit (used when include contains interestedPreview)
+  interestedPreviewLimit: z.coerce.number().int().min(1).max(6).optional(),
 })
 
 export const checkinSchema = z.object({
