@@ -195,8 +195,9 @@ export async function ensureBucketExists(): Promise<boolean> {
     await client.send(new HeadBucketCommand({ Bucket: TIGRIS_BUCKET }))
     console.log(`✅ Bucket "${TIGRIS_BUCKET}" exists`)
     return true
-  } catch (error: any) {
-    if (error.name === "NotFound" || error.$metadata?.httpStatusCode === 404) {
+  } catch (error: unknown) {
+    const s3Error = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+    if (s3Error.name === "NotFound" || s3Error.$metadata?.httpStatusCode === 404) {
       // Bucket doesn't exist, create it
       console.log(`Creating bucket "${TIGRIS_BUCKET}"...`)
       try {
@@ -246,7 +247,8 @@ export async function testConnection(): Promise<{ success: boolean; message: str
       return { success: true, message: `Connected to Tigris. Bucket: ${TIGRIS_BUCKET}` }
     }
     return { success: false, message: "Failed to verify/create bucket" }
-  } catch (error: any) {
-    return { success: false, message: error.message || "Connection failed" }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Connection failed"
+    return { success: false, message }
   }
 }
