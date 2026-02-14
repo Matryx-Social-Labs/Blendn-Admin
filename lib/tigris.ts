@@ -67,10 +67,8 @@ function generateKey(folder: UploadFolder, filename: string, userId: string): st
  * Get the public URL for a stored object
  */
 function getPublicUrl(key: string): string {
-  // Tigris provides public URLs via the endpoint
-  // Remove trailing slash from endpoint if present
-  const endpoint = TIGRIS_ENDPOINT.replace(/\/$/, "")
-  return `${endpoint}/${TIGRIS_BUCKET}/${key}`
+  // Tigris uses virtual-hosted style URLs for public access
+  return `https://${TIGRIS_BUCKET}.fly.storage.tigris.dev/${key}`
 }
 
 /**
@@ -131,6 +129,13 @@ export async function deleteFile(key: string): Promise<void> {
  * Extract the key from a public URL
  */
 export function extractKeyFromUrl(url: string): string | null {
+  // Handle virtual-hosted style: https://bucket.fly.storage.tigris.dev/key
+  const vhostPrefix = `${TIGRIS_BUCKET}.fly.storage.tigris.dev/`
+  const vhostIndex = url.indexOf(vhostPrefix)
+  if (vhostIndex !== -1) {
+    return url.substring(vhostIndex + vhostPrefix.length)
+  }
+  // Handle legacy path-style: https://t3.storage.dev/bucket/key
   const bucketPrefix = `/${TIGRIS_BUCKET}/`
   const index = url.indexOf(bucketPrefix)
   if (index === -1) return null
