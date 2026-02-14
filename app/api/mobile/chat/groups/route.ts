@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
@@ -97,26 +98,28 @@ export async function GET(request: NextRequest) {
     )
 
     // 2. Batch fetch last message per group using raw SQL (single query)
-    const lastMessagesRaw = await db.$queryRaw<
-      Array<{
-        id: string
-        chat_group_id: string
-        content: string
-        type: string
-        created_at: Date
-        user_id: string
-        user_name: string | null
-      }>
-    >`
-      SELECT DISTINCT ON (cm.chat_group_id)
-        cm.id, cm.chat_group_id, cm.content, cm.type, cm.created_at, cm.user_id,
-        u.name as user_name
-      FROM chat_messages cm
-      LEFT JOIN "User" u ON cm.user_id = u.id
-      WHERE cm.chat_group_id = ANY(${chatGroupIds}::uuid[])
-        AND cm.deleted_at IS NULL
-      ORDER BY cm.chat_group_id, cm.created_at DESC
-    `
+    type LastMessageRow = {
+      id: string
+      chat_group_id: string
+      content: string
+      type: string
+      created_at: Date
+      user_id: string
+      user_name: string | null
+    }
+
+    const lastMessagesRaw: LastMessageRow[] = chatGroupIds.length > 0
+      ? await db.$queryRaw<LastMessageRow[]>`
+          SELECT DISTINCT ON (cm.chat_group_id)
+            cm.id, cm.chat_group_id, cm.content, cm.type, cm.created_at, cm.user_id,
+            u.name as user_name
+          FROM chat_messages cm
+          LEFT JOIN "User" u ON cm.user_id = u.id
+          WHERE cm.chat_group_id = ANY(${chatGroupIds}::uuid[])
+            AND cm.deleted_at IS NULL
+          ORDER BY cm.chat_group_id, cm.created_at DESC
+        `
+      : []
 
     const lastMessageMap = new Map(
       lastMessagesRaw.map((m) => [m.chat_group_id, m])
@@ -138,21 +141,18 @@ export async function GET(request: NextRequest) {
     const unreadCountMap = new Map<string, number>()
 
     if (groupsWithLastRead.length > 0) {
-      // Use a single query to count unread messages for all groups
+      // Build parameterized SQL conditions for each group
+      const conditions = groupsWithLastRead.map((m) =>
+        Prisma.sql`(chat_group_id = ${m.chatGroupId}::uuid AND created_at > ${m.lastReadAt!}::timestamptz)`
+      )
+
       const unreadCountsRaw = await db.$queryRaw<
         Array<{ chat_group_id: string; unread_count: bigint }>
       >`
         SELECT chat_group_id, COUNT(*) as unread_count
         FROM chat_messages
         WHERE deleted_at IS NULL
-          AND (
-            ${groupsWithLastRead
-              .map(
-                (m) =>
-                  `(chat_group_id = '${m.chatGroupId}'::uuid AND created_at > '${m.lastReadAt!.toISOString()}'::timestamptz)`
-              )
-              .join(" OR ")}
-          )
+          AND (${Prisma.join(conditions, " OR ")})
         GROUP BY chat_group_id
       `
 
