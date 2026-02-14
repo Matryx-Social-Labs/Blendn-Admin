@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { ZodError } from "zod"
+import { resolveMediaFields } from "@/lib/media-response"
 
 export interface ApiResponse<T = unknown> {
   success: boolean
@@ -14,13 +15,15 @@ export interface ApiResponse<T = unknown> {
 export function successResponse<T>(
   data: T,
   status: number = 200
-): NextResponse<ApiResponse<T>> {
-  return NextResponse.json(
-    {
-      success: true,
-      data,
-    },
-    { status }
+): Promise<NextResponse<ApiResponse<T>>> {
+  return resolveMediaFields(data).then((resolvedData) =>
+    NextResponse.json(
+      {
+        success: true,
+        data: resolvedData,
+      },
+      { status }
+    )
   )
 }
 

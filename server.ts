@@ -1,6 +1,7 @@
 import { createServer } from "http"
 import next from "next"
 import { initSocketServer } from "./lib/socket-server"
+import { ensureBucketExists } from "./lib/tigris"
 
 // Environment configuration
 const dev = process.env.NODE_ENV !== "production"
@@ -34,6 +35,11 @@ console.log(`[${new Date().toISOString()}] > Preparing Next.js app...`)
 
 app.prepare().then(() => {
   console.log(`[${new Date().toISOString()}] > Next.js app prepared successfully`)
+
+  // Ensure Tigris bucket exists with public-read policy
+  ensureBucketExists().catch((err) => {
+    console.warn(`[${new Date().toISOString()}] > Tigris bucket setup warning:`, err)
+  })
 
   // Create HTTP server
   console.log(`[${new Date().toISOString()}] > Creating HTTP server...`)

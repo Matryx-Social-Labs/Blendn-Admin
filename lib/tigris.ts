@@ -1,10 +1,12 @@
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
   DeleteObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
   PutBucketCorsCommand,
+  PutBucketPolicyCommand,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
@@ -129,17 +131,64 @@ export async function deleteFile(key: string): Promise<void> {
  * Extract the key from a public URL
  */
 export function extractKeyFromUrl(url: string): string | null {
+  const cleanedUrl = url.split(/[?#]/)[0]
+
   // Handle virtual-hosted style: https://bucket.fly.storage.tigris.dev/key
   const vhostPrefix = `${TIGRIS_BUCKET}.fly.storage.tigris.dev/`
-  const vhostIndex = url.indexOf(vhostPrefix)
+  const vhostIndex = cleanedUrl.indexOf(vhostPrefix)
   if (vhostIndex !== -1) {
-    return url.substring(vhostIndex + vhostPrefix.length)
+    return cleanedUrl.substring(vhostIndex + vhostPrefix.length)
   }
+
+  // Handle virtual-hosted t3 style: https://bucket.t3.storage.dev/key
+  const t3VhostPrefix = `${TIGRIS_BUCKET}.t3.storage.dev/`
+  const t3VhostIndex = cleanedUrl.indexOf(t3VhostPrefix)
+  if (t3VhostIndex !== -1) {
+    return cleanedUrl.substring(t3VhostIndex + t3VhostPrefix.length)
+  }
+
   // Handle legacy path-style: https://t3.storage.dev/bucket/key
   const bucketPrefix = `/${TIGRIS_BUCKET}/`
-  const index = url.indexOf(bucketPrefix)
+  const index = cleanedUrl.indexOf(bucketPrefix)
   if (index === -1) return null
-  return url.substring(index + bucketPrefix.length)
+  return cleanedUrl.substring(index + bucketPrefix.length)
+}
+
+/**
+ * Generate a presigned download URL for a stored object
+ */
+export async function getPresignedDownloadUrl(
+  key: string,
+  expiresIn: number = 604800
+): Promise<string> {
+  const client = getS3Client()
+  const command = new GetObjectCommand({
+    Bucket: TIGRIS_BUCKET,
+    Key: key,
+  })
+
+  return getSignedUrl(client, command, { expiresIn })
+}
+
+/**
+ * Resolve a media URL/key to a publicly-accessible URL.
+ * The bucket has a public-read policy so no signing is needed.
+ * Non-Tigris URLs are returned unchanged.
+ */
+export function getAccessibleMediaUrl(urlOrKey: string): string {
+  if (!urlOrKey) return urlOrKey
+
+  const key =
+    extractKeyFromUrl(urlOrKey) ||
+    (!urlOrKey.startsWith("http://") && !urlOrKey.startsWith("https://")
+      ? urlOrKey.replace(/^\/+/, "")
+      : null)
+
+  if (!key) {
+    return urlOrKey
+  }
+
+  return getPublicUrl(key)
 }
 
 /**
@@ -185,6 +234,34 @@ export function isConfigured(): boolean {
 }
 
 /**
+ * Set bucket policy to allow public read access.
+ * This lets profile/event/chat images be served without presigned URLs.
+ */
+async function setBucketPublicRead(): Promise<void> {
+  const client = getS3Client()
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Sid: "PublicRead",
+        Effect: "Allow",
+        Principal: "*",
+        Action: ["s3:GetObject"],
+        Resource: [`arn:aws:s3:::${TIGRIS_BUCKET}/*`],
+      },
+    ],
+  })
+
+  await client.send(
+    new PutBucketPolicyCommand({
+      Bucket: TIGRIS_BUCKET,
+      Policy: policy,
+    })
+  )
+  console.log(`\u2705 Public-read policy set for bucket "${TIGRIS_BUCKET}"`)
+}
+
+/**
  * Ensure the bucket exists, create it if not
  */
 export async function ensureBucketExists(): Promise<boolean> {
@@ -199,6 +276,7 @@ export async function ensureBucketExists(): Promise<boolean> {
     // Check if bucket exists
     await client.send(new HeadBucketCommand({ Bucket: TIGRIS_BUCKET }))
     console.log(`✅ Bucket "${TIGRIS_BUCKET}" exists`)
+    await setBucketPublicRead()
     return true
   } catch (error: unknown) {
     const s3Error = error as { name?: string; $metadata?: { httpStatusCode?: number } }
@@ -227,6 +305,7 @@ export async function ensureBucketExists(): Promise<boolean> {
           })
         )
         console.log(`✅ CORS configured for bucket "${TIGRIS_BUCKET}"`)
+        await setBucketPublicRead()
         return true
       } catch (createError) {
         console.error(`❌ Failed to create bucket:`, createError)
