@@ -85,13 +85,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { name, phone, age, location, interests, onboarded } = parsed.data
+    const { name, phone, age, location, interests, photos, onboarded } = parsed.data
 
-    // Update user name if provided
-    if (name !== undefined) {
+    // Update user record (name and/or primary photo)
+    const userUpdate: Record<string, unknown> = {}
+    if (name !== undefined) userUpdate.name = name
+    if (photos !== undefined && photos.length > 0) userUpdate.image = photos[0]
+    if (Object.keys(userUpdate).length > 0) {
       await db.user.update({
         where: { id: userId },
-        data: { name },
+        data: userUpdate,
       })
     }
 
@@ -105,6 +108,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         age,
         location,
         interests: interests || [],
+        photos: photos || [],
         onboarded: onboarded ?? false,
       },
       update: {
@@ -113,6 +117,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(age !== undefined && { age }),
         ...(location !== undefined && { location }),
         ...(interests !== undefined && { interests }),
+        ...(photos !== undefined && { photos }),
         ...(onboarded !== undefined && { onboarded }),
         updated_at: new Date(),
       },

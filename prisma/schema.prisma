@@ -93,6 +93,7 @@ model profiles {
   age          Int?
   location     String?
   interests    String[]
+  photos       String[]
   onboarded    Boolean  @default(false)
   push_token   String?  // Expo push notification token
   push_platform String? // 'ios' or 'android'
