@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
+import { normalizeLocationToCity, resolveEventCity } from "@/lib/location"
 import {
   successResponse,
   validationErrorResponse,
@@ -333,45 +334,57 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const transformedEvents = events.map((event) => ({
-        id: event.id,
-        slug: event.slug,
-        title: event.title,
-        shortDescription: event.short_description,
-        coverImageUrl: event.cover_image_url,
-        startTime: event.start_time,
-        endTime: event.end_time,
-        timezone: event.timezone,
-        venueName: event.venue_name,
-        address: event.address,
-        city: event.city,
-        state: event.state,
-        country: event.country,
-        latitude: event.latitude,
-        longitude: event.longitude,
-        status: event.status,
-        isFeatured: event.is_featured,
-        organizer: event.organizer,
-        categories: event.categories.map((c) => c.category),
-        media: event.media,
-        checkInCount: event._count.check_ins,
-        favoriteCount: event._count.favorites,
-        ratingCount: event._count.ratings,
-        isFavorited: favoriteEventIds.has(event.id),
-        userCheckin: includeSet.has("checkins")
-          ? userCheckinMap[event.id] || { status: "none" }
-          : undefined,
-        interestedPreview: includeSet.has("interestedPreview")
-          ? interestedPreviewMap[event.id] || []
-          : undefined,
-        distance:
-          lat !== undefined &&
-          lon !== undefined &&
-          event.latitude &&
-          event.longitude
-            ? haversineDistance(lat, lon, event.latitude, event.longitude)
-            : null,
-      }))
+      const transformedEvents = await Promise.all(
+        events.map(async (event) => ({
+          id: event.id,
+          slug: event.slug,
+          title: event.title,
+          shortDescription: event.short_description,
+          coverImageUrl: event.cover_image_url,
+          startTime: event.start_time,
+          endTime: event.end_time,
+          timezone: event.timezone,
+          venueName: event.venue_name,
+          address: event.address,
+          city: await resolveEventCity(event.city, event.latitude, event.longitude),
+          state: event.state,
+          country: event.country,
+          latitude: event.latitude,
+          longitude: event.longitude,
+          status: event.status,
+          isFeatured: event.is_featured,
+          organizer: event.organizer,
+          categories: event.categories.map((c) => c.category),
+          media: event.media,
+          checkInCount: event._count.check_ins,
+          favoriteCount: event._count.favorites,
+          ratingCount: event._count.ratings,
+          isFavorited: favoriteEventIds.has(event.id),
+          userCheckin: includeSet.has("checkins")
+            ? userCheckinMap[event.id] || { status: "none" }
+            : undefined,
+          interestedPreview: includeSet.has("interestedPreview")
+            ? interestedPreviewMap[event.id] || []
+            : undefined,
+          distance:
+            lat !== undefined &&
+            lon !== undefined &&
+            event.latitude &&
+            event.longitude
+              ? haversineDistance(lat, lon, event.latitude, event.longitude)
+              : null,
+        }))
+      )
+
+      const normalizedProfile = profile?.profile
+        ? {
+            ...profile,
+            profile: {
+              ...profile.profile,
+              location: await normalizeLocationToCity(profile.profile.location),
+            },
+          }
+        : profile
 
       return successResponse({
         events: transformedEvents,
@@ -383,26 +396,32 @@ export async function GET(request: NextRequest) {
           hasMore: page * limit < totalCount,
         },
         ...(includeSet.has("activeCheckins") && {
-          activeCheckins: activeCheckins.map((c) => ({
-            id: c.id,
-            eventId: c.event_id,
-            checkInTime: c.check_in_time,
-            event: {
-              id: c.event.id,
-              title: c.event.title,
-              slug: c.event.slug,
-              coverImageUrl: c.event.cover_image_url,
-              startTime: c.event.start_time,
-              endTime: c.event.end_time,
-              venueName: c.event.venue_name,
-              address: c.event.address,
-              city: c.event.city,
-              status: c.event.status,
-            },
-          })),
+          activeCheckins: await Promise.all(
+            activeCheckins.map(async (c) => ({
+              id: c.id,
+              eventId: c.event_id,
+              checkInTime: c.check_in_time,
+              event: {
+                id: c.event.id,
+                title: c.event.title,
+                slug: c.event.slug,
+                coverImageUrl: c.event.cover_image_url,
+                startTime: c.event.start_time,
+                endTime: c.event.end_time,
+                venueName: c.event.venue_name,
+                address: c.event.address,
+                city: await resolveEventCity(
+                  c.event.city,
+                  null,
+                  null
+                ),
+                status: c.event.status,
+              },
+            }))
+          ),
         }),
         ...(includeSet.has("profile") && {
-          profile,
+          profile: normalizedProfile,
         }),
       })
     }
@@ -580,45 +599,57 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform response
-    const transformedEvents = events.map((event) => ({
-      id: event.id,
-      slug: event.slug,
-      title: event.title,
-      shortDescription: event.short_description,
-      coverImageUrl: event.cover_image_url,
-      startTime: event.start_time,
-      endTime: event.end_time,
-      timezone: event.timezone,
-      venueName: event.venue_name,
-      address: event.address,
-      city: event.city,
-      state: event.state,
-      country: event.country,
-      latitude: event.latitude,
-      longitude: event.longitude,
-      status: event.status,
-      isFeatured: event.is_featured,
-      organizer: event.organizer,
-      categories: event.categories.map((c) => c.category),
-      media: event.media,
-      checkInCount: event._count.check_ins,
-      favoriteCount: event._count.favorites,
-      ratingCount: event._count.ratings,
-      isFavorited: favoriteEventIds.has(event.id),
-      userCheckin: includeSet.has("checkins")
-        ? userCheckinMap[event.id] || { status: "none" }
-        : undefined,
-      interestedPreview: includeSet.has("interestedPreview")
-        ? interestedPreviewMap[event.id] || []
-        : undefined,
-      distance:
-        lat !== undefined &&
-        lon !== undefined &&
-        event.latitude &&
-        event.longitude
-          ? haversineDistance(lat, lon, event.latitude, event.longitude)
-          : null,
-    }))
+    const transformedEvents = await Promise.all(
+      events.map(async (event) => ({
+        id: event.id,
+        slug: event.slug,
+        title: event.title,
+        shortDescription: event.short_description,
+        coverImageUrl: event.cover_image_url,
+        startTime: event.start_time,
+        endTime: event.end_time,
+        timezone: event.timezone,
+        venueName: event.venue_name,
+        address: event.address,
+        city: await resolveEventCity(event.city, event.latitude, event.longitude),
+        state: event.state,
+        country: event.country,
+        latitude: event.latitude,
+        longitude: event.longitude,
+        status: event.status,
+        isFeatured: event.is_featured,
+        organizer: event.organizer,
+        categories: event.categories.map((c) => c.category),
+        media: event.media,
+        checkInCount: event._count.check_ins,
+        favoriteCount: event._count.favorites,
+        ratingCount: event._count.ratings,
+        isFavorited: favoriteEventIds.has(event.id),
+        userCheckin: includeSet.has("checkins")
+          ? userCheckinMap[event.id] || { status: "none" }
+          : undefined,
+        interestedPreview: includeSet.has("interestedPreview")
+          ? interestedPreviewMap[event.id] || []
+          : undefined,
+        distance:
+          lat !== undefined &&
+          lon !== undefined &&
+          event.latitude &&
+          event.longitude
+            ? haversineDistance(lat, lon, event.latitude, event.longitude)
+            : null,
+      }))
+    )
+
+    const normalizedProfile = profile?.profile
+      ? {
+          ...profile,
+          profile: {
+            ...profile.profile,
+            location: await normalizeLocationToCity(profile.profile.location),
+          },
+        }
+      : profile
 
     return successResponse({
       events: transformedEvents,
@@ -630,26 +661,28 @@ export async function GET(request: NextRequest) {
         hasMore: page * limit < totalCount,
       },
       ...(includeSet.has("activeCheckins") && {
-        activeCheckins: activeCheckins.map((c) => ({
-          id: c.id,
-          eventId: c.event_id,
-          checkInTime: c.check_in_time,
-          event: {
-            id: c.event.id,
-            title: c.event.title,
-            slug: c.event.slug,
-            coverImageUrl: c.event.cover_image_url,
-            startTime: c.event.start_time,
-            endTime: c.event.end_time,
-            venueName: c.event.venue_name,
-            address: c.event.address,
-            city: c.event.city,
-            status: c.event.status,
-          },
-        })),
+        activeCheckins: await Promise.all(
+          activeCheckins.map(async (c) => ({
+            id: c.id,
+            eventId: c.event_id,
+            checkInTime: c.check_in_time,
+            event: {
+              id: c.event.id,
+              title: c.event.title,
+              slug: c.event.slug,
+              coverImageUrl: c.event.cover_image_url,
+              startTime: c.event.start_time,
+              endTime: c.event.end_time,
+              venueName: c.event.venue_name,
+              address: c.event.address,
+              city: await resolveEventCity(c.event.city, null, null),
+              status: c.event.status,
+            },
+          }))
+        ),
       }),
       ...(includeSet.has("profile") && {
-        profile,
+        profile: normalizedProfile,
       }),
     })
   } catch (error) {

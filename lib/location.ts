@@ -89,5 +89,25 @@ export async function normalizeLocationToCity(
   if (!coordinates) return trimmed
 
   const city = await reverseGeocodeCity(coordinates.lat, coordinates.lon)
-  return city || trimmed
+  return city
+}
+
+export async function resolveEventCity(
+  city: string | null | undefined,
+  latitude: number | null | undefined,
+  longitude: number | null | undefined
+): Promise<string | null> {
+  const normalizedCity = await normalizeLocationToCity(city)
+  if (normalizedCity) return normalizedCity
+
+  if (
+    latitude === null ||
+    latitude === undefined ||
+    longitude === null ||
+    longitude === undefined
+  ) {
+    return null
+  }
+
+  return reverseGeocodeCity(latitude, longitude)
 }

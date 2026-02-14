@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { haversineDistance } from "@/lib/geo"
+import { resolveEventCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -172,6 +173,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    const resolvedCity = await resolveEventCity(
+      event.city,
+      event.latitude,
+      event.longitude
+    )
+
     return successResponse({
       id: event.id,
       slug: event.slug,
@@ -186,7 +193,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       visibility: event.visibility,
       venueName: event.venue_name,
       address: event.address,
-      city: event.city,
+      city: resolvedCity,
       state: event.state,
       country: event.country,
       postalCode: event.postal_code,

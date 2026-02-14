@@ -14,6 +14,7 @@ import {
 } from "@/lib/api-response"
 import { signinSchema } from "@/lib/validations/auth"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
+import { normalizeLocationToCity } from "@/lib/location"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
@@ -58,12 +59,19 @@ export async function POST(request: NextRequest) {
     // Store refresh token
     await storeRefreshToken(user.id, refreshToken, deviceInfo)
 
+    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+
     return successResponse({
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        profile: user.profile,
+        profile: user.profile
+          ? {
+              ...user.profile,
+              location: normalizedLocation,
+            }
+          : null,
       },
       accessToken,
       refreshToken,

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -29,6 +30,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Return user directly (not wrapped in { user: ... })
+    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+
     return successResponse({
       id: user.id,
       email: user.email,
@@ -36,7 +39,12 @@ export async function GET(request: NextRequest) {
       emailVerified: user.emailVerified,
       image: user.image,
       createdAt: user.createdAt,
-      profile: user.profile,
+      profile: user.profile
+        ? {
+            ...user.profile,
+            location: normalizedLocation,
+          }
+        : null,
     })
   } catch (error) {
     console.error("Session error:", error)

@@ -15,6 +15,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
+import { normalizeLocationToCity } from "@/lib/location"
 
 const googleAuthSchema = z.object({
   idToken: z.string().min(1, "ID token is required"),
@@ -84,9 +85,21 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    const normalizedLocation = await normalizeLocationToCity(user?.profile?.location)
+
     return successResponse(
       {
-        user,
+        user: user
+          ? {
+              ...user,
+              profile: user.profile
+                ? {
+                    ...user.profile,
+                    location: normalizedLocation,
+                  }
+                : null,
+            }
+          : null,
         accessToken,
         refreshToken,
         isNewUser,

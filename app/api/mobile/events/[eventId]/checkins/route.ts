@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -72,14 +73,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     return successResponse({
-      attendees: checkIns.map((c) => ({
-        userId: c.user.id,
-        name: c.user.name,
-        image: c.user.image,
-        age: c.user.profile?.age,
-        location: c.user.profile?.location,
-        checkInTime: c.check_in_time,
-      })),
+      attendees: await Promise.all(
+        checkIns.map(async (c) => ({
+          userId: c.user.id,
+          name: c.user.name,
+          image: c.user.image,
+          age: c.user.profile?.age,
+          location: await normalizeLocationToCity(c.user.profile?.location),
+          checkInTime: c.check_in_time,
+        }))
+      ),
       pagination: {
         page,
         limit,

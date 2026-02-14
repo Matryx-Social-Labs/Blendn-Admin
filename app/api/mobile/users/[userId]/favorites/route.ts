@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { haversineDistance } from "@/lib/geo"
+import { resolveEventCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     // Transform response
-    const events = favorites.map((f) => {
+    const events = await Promise.all(favorites.map(async (f) => {
       const event = f.event
       let distance: number | null = null
 
@@ -125,7 +126,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         status: event.status,
         venueName: event.venue_name,
         address: event.address,
-        city: event.city,
+        city: await resolveEventCity(event.city, event.latitude, event.longitude),
         state: event.state,
         country: event.country,
         latitude: event.latitude,
@@ -141,7 +142,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         isFavorited: true,
         distance,
       }
-    })
+    }))
 
     return successResponse({
       events,
