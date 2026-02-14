@@ -55,30 +55,17 @@ async function main() {
     console.log('Using existing event:', eventId)
   }
 
-  const avatarPool = [
-    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=facearea&w=300&h=300&q=70&sat=-20',
-    'https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1525134479668-1bee5c7c6845?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?auto=format&fit=facearea&w=300&h=300&q=70',
-    'https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=facearea&w=300&h=300&q=70&sat=10',
-  ]
-
+  // No placeholder avatars — test users will have no profile image
   const dummyUsers = await Promise.all(
     [...Array(10)].map(async (_, idx) => {
       const userEmail = `test-attendee+${now}-${idx}@blendn.local`
       const userName = `Test User ${idx + 1}`
-      const userImage = avatarPool[idx % avatarPool.length]
 
       const user = await prisma.user.create({
         data: {
           email: userEmail,
           name: userName,
-          image: userImage,
+          image: null,
         },
       })
 

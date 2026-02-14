@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
+import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -73,7 +74,7 @@ export async function GET(
       name: user.profile?.name || user.name,
       image: user.image,
       age: user.profile?.age,
-      location: user.profile?.location,
+      location: await normalizeLocationToCity(user.profile?.location),
       interests: user.user_interests.map((ui) => ui.category),
       memberSince: user.createdAt,
       stats: {

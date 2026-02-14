@@ -1,6 +1,7 @@
 "use server"
 
 import { db } from "@/lib/db"
+import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
 
 export interface UserWithProfile {
@@ -93,6 +94,14 @@ export async function getUsers(
       db.user.count({ where }),
     ])
 
+    await Promise.all(
+      users.map(async (user) => {
+        if (!user.profile?.location) return
+        const normalized = await normalizeLocationToCity(user.profile.location)
+        user.profile.location = normalized
+      })
+    )
+
     return { users, total }
   } catch (error) {
     console.error("Error fetching users:", error)
@@ -127,6 +136,10 @@ export async function getUserById(id: string): Promise<UserWithProfile | null> {
       },
     })
 
+    if (user?.profile?.location) {
+      user.profile.location = await normalizeLocationToCity(user.profile.location)
+    }
+
     return user
   } catch (error) {
     console.error("Error fetching user:", error)
@@ -149,6 +162,8 @@ export async function updateUser(
   }
 ) {
   try {
+    const normalizedLocation = await normalizeLocationToCity(data.profile?.location)
+
     const updateData: Record<string, unknown> = {}
     if (data.name !== undefined) updateData.name = data.name
     if (data.email !== undefined) updateData.email = data.email
@@ -159,14 +174,14 @@ export async function updateUser(
           create: {
             phone: data.profile.phone,
             age: data.profile.age,
-            location: data.profile.location,
+            location: normalizedLocation,
             interests: data.profile.interests || [],
             onboarded: data.profile.onboarded ?? false,
           },
           update: {
             phone: data.profile.phone,
             age: data.profile.age,
-            location: data.profile.location,
+            location: normalizedLocation,
             interests: data.profile.interests,
             onboarded: data.profile.onboarded,
           },

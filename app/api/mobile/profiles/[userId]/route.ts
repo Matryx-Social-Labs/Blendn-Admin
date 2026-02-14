@@ -10,6 +10,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { updateProfileSchema } from "@/lib/validations/profile"
+import { normalizeLocationToCity } from "@/lib/location"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -42,13 +43,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("User not found")
     }
 
+    const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+
     return successResponse({
       id: user.id,
       email: user.email,
       name: user.name,
       image: user.image,
       createdAt: user.createdAt,
-      profile: user.profile,
+      profile: user.profile
+        ? {
+            ...user.profile,
+            location: normalizedLocation,
+          }
+        : null,
       interests: user.user_interests.map((ui) => ({
         id: ui.category.id,
         name: ui.category.name,
@@ -86,6 +94,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const { name, phone, age, location, interests, photos, onboarded } = parsed.data
+    const normalizedLocation = await normalizeLocationToCity(location)
 
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
@@ -106,7 +115,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         name,
         phone,
         age,
-        location,
+        location: normalizedLocation,
         interests: interests || [],
         photos: photos || [],
         onboarded: onboarded ?? false,
@@ -115,7 +124,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(name !== undefined && { name }),
         ...(phone !== undefined && { phone }),
         ...(age !== undefined && { age }),
-        ...(location !== undefined && { location }),
+        ...(location !== undefined && { location: normalizedLocation }),
         ...(interests !== undefined && { interests }),
         ...(photos !== undefined && { photos }),
         ...(onboarded !== undefined && { onboarded }),

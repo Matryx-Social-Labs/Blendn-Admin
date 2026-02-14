@@ -15,18 +15,18 @@ async function main() {
       email: "contact@matrixsociallabs.com",
       name: "Admin",
       password: hashedPassword,
-      image: "https://i.pravatar.cc/150?u=admin",
+      image: null,
     },
   })
   console.log("✅ Created admin user:", adminUser.email)
 
   // Create test users
   const testUsers = [
-    { email: "john@test.com", name: "John Smith", image: "https://i.pravatar.cc/150?u=john" },
-    { email: "jane@test.com", name: "Jane Doe", image: "https://i.pravatar.cc/150?u=jane" },
-    { email: "mike@test.com", name: "Mike Johnson", image: "https://i.pravatar.cc/150?u=mike" },
-    { email: "sarah@test.com", name: "Sarah Williams", image: "https://i.pravatar.cc/150?u=sarah" },
-    { email: "alex@test.com", name: "Alex Brown", image: "https://i.pravatar.cc/150?u=alex" },
+    { email: "john@test.com", name: "John Smith", image: null },
+    { email: "jane@test.com", name: "Jane Doe", image: null },
+    { email: "mike@test.com", name: "Mike Johnson", image: null },
+    { email: "sarah@test.com", name: "Sarah Williams", image: null },
+    { email: "alex@test.com", name: "Alex Brown", image: null },
   ]
 
   const users = []
@@ -83,17 +83,9 @@ async function main() {
   }
   console.log("✅ Created", categories.length, "categories")
 
-  // Sample cover images (using Unsplash)
-  const coverImages = [
-    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800",
-    "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800",
-    "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800",
-    "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800",
-    "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=800",
-    "https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?w=800",
-    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800",
-    "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800",
-  ]
+  // Cover images should be uploaded to Tigris storage via the admin dashboard.
+  // Seed events will have no cover image until manually set.
+  const coverImages: (string | null)[] = [null]
 
   // Bangalore coordinates
   const baseLocations = [
