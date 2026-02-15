@@ -1,6 +1,7 @@
 import { Server as HttpServer } from "http"
 import { Server, Socket } from "socket.io"
 import { verifyAccessToken } from "./mobile-auth"
+import { db } from "./db"
 
 // Socket.io server instance
 let io: Server | null = null
@@ -200,21 +201,39 @@ export function initSocketServer(httpServer: HttpServer): Server {
       console.log(`User ${authSocket.data.userId} left ${room}`)
     })
 
-    // Typing indicators
-    authSocket.on("chat:startTyping", (chatGroupId) => {
+    // Typing indicators (use anonymous names)
+    authSocket.on("chat:startTyping", async (chatGroupId) => {
+      const membership = await db.chat_group_members.findUnique({
+        where: {
+          chat_group_id_user_id: {
+            chat_group_id: chatGroupId,
+            user_id: authSocket.data.userId,
+          },
+        },
+        select: { anonymous_name: true },
+      })
       authSocket.to(`chat:${chatGroupId}`).emit("chat:typing", {
         chatGroupId,
         userId: authSocket.data.userId,
-        userName: authSocket.data.email.split("@")[0], // Simplified, would get from DB in production
+        userName: membership?.anonymous_name || "Someone",
         isTyping: true,
       })
     })
 
-    authSocket.on("chat:stopTyping", (chatGroupId) => {
+    authSocket.on("chat:stopTyping", async (chatGroupId) => {
+      const membership = await db.chat_group_members.findUnique({
+        where: {
+          chat_group_id_user_id: {
+            chat_group_id: chatGroupId,
+            user_id: authSocket.data.userId,
+          },
+        },
+        select: { anonymous_name: true },
+      })
       authSocket.to(`chat:${chatGroupId}`).emit("chat:typing", {
         chatGroupId,
         userId: authSocket.data.userId,
-        userName: authSocket.data.email.split("@")[0],
+        userName: membership?.anonymous_name || "Someone",
         isTyping: false,
       })
     })

@@ -13,6 +13,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { checkinSchema } from "@/lib/validations/event"
+import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -149,7 +150,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     if (existingMembership) {
-      if (existingMembership.status !== "active" || existingMembership.last_allowed_at) {
+      if (existingMembership.status !== "active" || existingMembership.last_allowed_at || !existingMembership.anonymous_name) {
+        const anonName = existingMembership.anonymous_name || await generateUniqueAnonymousName(chatGroup.id)
         await db.chat_group_members.update({
           where: {
             chat_group_id_user_id: {
@@ -160,11 +162,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           data: {
             status: "active",
             last_allowed_at: null,
+            anonymous_name: anonName,
             updated_at: now,
           },
         })
       }
     } else {
+      const anonName = await generateUniqueAnonymousName(chatGroup.id)
       await db.chat_group_members.create({
         data: {
           chat_group_id: chatGroup.id,
@@ -172,6 +176,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           role: "member",
           status: "active",
           last_allowed_at: null,
+          anonymous_name: anonName,
         },
       })
 
@@ -185,18 +190,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     }
 
-    // Get user profile for socket emit
-    const userProfile = await db.user.findUnique({
-      where: { id: authUser.userId },
-      select: { name: true, image: true },
+    // Get the anonymous name for socket emit and push notification
+    const updatedMembership = await db.chat_group_members.findUnique({
+      where: {
+        chat_group_id_user_id: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+        },
+      },
+      select: { anonymous_name: true },
     })
+    const displayName = updatedMembership?.anonymous_name || "Someone"
 
-    // Emit real-time check-in event
+    // Emit real-time check-in event (anonymous)
     emitEventCheckIn(
       eventId,
       authUser.userId,
-      userProfile?.name || "Unknown",
-      userProfile?.image || undefined
+      displayName,
+      undefined
     )
 
     // Send push notifications to other checked-in users (async, don't await)
@@ -214,7 +225,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         if (userIds.length > 0) {
           return notifyEventCheckIn(
             userIds,
-            userProfile?.name || "Someone",
+            displayName,
             event.title,
             eventId,
             authUser.userId

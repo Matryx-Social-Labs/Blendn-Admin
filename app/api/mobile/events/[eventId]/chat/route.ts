@@ -11,6 +11,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
+import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -96,6 +97,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         return forbiddenResponse("You must check in to the event to access chat")
       }
 
+      const anonName = await generateUniqueAnonymousName(chatGroup.id)
       await db.chat_group_members.upsert({
         where: {
           chat_group_id_user_id: {
@@ -109,6 +111,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           role: "member",
           status: "active",
           last_allowed_at: null,
+          anonymous_name: anonName,
         },
         update: {
           status: "active",
@@ -133,6 +136,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         })
+
+    // Build anonymous name map from chat_group_members
+    const allMembers = await db.chat_group_members.findMany({
+      where: { chat_group_id: chatGroup.id },
+      select: { user_id: true, anonymous_name: true },
+    })
+    const anonMap = new Map(
+      allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
+    )
 
     // Build where clause for messages (lock to last checkout time if not checked in)
     const where: Record<string, unknown> = {
@@ -216,11 +228,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         editedAt: m.edited_at,
         parentId: m.parent_id,
         replyCount: m._count.replies,
-        user: m.user,
+        user: {
+          id: m.user.id,
+          name: anonMap.get(m.user.id) || "Attendee",
+          image: null,
+        },
         reactions: m.reactions.map((r) => ({
           emoji: r.emoji,
           userId: r.user_id,
-          userName: r.user.name,
+          userName: anonMap.get(r.user_id) || "Attendee",
         })),
         isOwn: m.user_id === authUser.userId,
       })),
@@ -324,6 +340,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return forbiddenResponse("You must check in to the event to send messages")
       }
 
+      const postAnonName = await generateUniqueAnonymousName(chatGroup.id)
       await db.chat_group_members.upsert({
         where: {
           chat_group_id_user_id: {
@@ -337,6 +354,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           role: "member",
           status: "active",
           last_allowed_at: null,
+          anonymous_name: postAnonName,
         },
         update: {
           status: "active",
@@ -388,14 +406,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Get user details for response
-    const user = await db.user.findUnique({
-      where: { id: authUser.userId },
-      select: {
-        id: true,
-        name: true,
-        image: true,
+    // Get anonymous name for response
+    const senderMembership = await db.chat_group_members.findUnique({
+      where: {
+        chat_group_id_user_id: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+        },
       },
+      select: { anonymous_name: true },
     })
 
     // Update chat group last_message_at
@@ -416,7 +435,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           metadata: message.metadata,
           createdAt: message.created_at,
           parentId: message.parent_id,
-          user,
+          user: {
+            id: authUser.userId,
+            name: senderMembership?.anonymous_name || "Attendee",
+            image: null,
+          },
           reactions: [],
           isOwn: true,
         },

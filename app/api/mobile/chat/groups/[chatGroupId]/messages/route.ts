@@ -64,6 +64,15 @@ export async function GET(
       return forbiddenResponse("You are not a member of this chat group")
     }
 
+    // Build anonymous name map
+    const allMembers = await db.chat_group_members.findMany({
+      where: { chat_group_id: chatGroupId },
+      select: { user_id: true, anonymous_name: true },
+    })
+    const anonMap = new Map(
+      allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
+    )
+
     // Build query for messages
     const whereClause: Record<string, unknown> = {
       chat_group_id: chatGroupId,
@@ -130,7 +139,23 @@ export async function GET(
     messagesToReturn.reverse()
 
     return successResponse({
-      messages: messagesToReturn,
+      messages: messagesToReturn.map((m) => ({
+        ...m,
+        user: {
+          id: m.user.id,
+          name: anonMap.get(m.user.id) || "Attendee",
+          image: null,
+        },
+        parent_message: m.parent_message
+          ? {
+              ...m.parent_message,
+              user: {
+                id: m.parent_message.user.id,
+                name: anonMap.get(m.parent_message.user.id) || "Attendee",
+              },
+            }
+          : null,
+      })),
       pagination: {
         hasMore,
         nextCursor: hasMore ? messagesToReturn[0]?.id : null,
@@ -257,14 +282,17 @@ export async function POST(
       data: { last_message_at: new Date() },
     })
 
-    // Emit real-time message
+    // Use anonymous name for socket emit and push
+    const senderAnonName = membership.anonymous_name || "Attendee"
+
+    // Emit real-time message (anonymous)
     emitChatMessage(chatGroupId, {
       id: message.id,
       content: message.content,
       type: message.type,
       userId: message.user_id,
-      userName: message.user.name || "Unknown",
-      userImage: message.user.image || undefined,
+      userName: senderAnonName,
+      userImage: undefined,
       createdAt: message.created_at.toISOString(),
       parentId: message.parent_id || undefined,
     })
@@ -277,15 +305,31 @@ export async function POST(
       })
       .then((members) => {
         const memberIds = members.map((m) => m.user_id)
-        const senderName = message.user.name || "Someone"
         const groupName = chatGroup.name || "Group Chat"
         const messagePreview = type === "text" ? content : type === "image" ? "📷 Photo" : "🎥 Video"
 
-        return notifyGroupMessage(memberIds, senderName, groupName, messagePreview, chatGroupId, user.userId)
+        return notifyGroupMessage(memberIds, senderAnonName, groupName, messagePreview, chatGroupId, user.userId)
       })
       .catch((err) => console.error("Push notification failed:", err))
 
-    return successResponse(message, 201)
+    // Return anonymized response
+    return successResponse({
+      ...message,
+      user: {
+        id: message.user.id,
+        name: senderAnonName,
+        image: null,
+      },
+      parent_message: message.parent_message
+        ? {
+            ...message.parent_message,
+            user: {
+              id: message.parent_message.user.id,
+              name: membership.anonymous_name || "Attendee",
+            },
+          }
+        : null,
+    }, 201)
   } catch (error) {
     console.error("Send message error:", error)
     return serverErrorResponse("Failed to send message")

@@ -112,9 +112,10 @@ export async function GET(request: NextRequest) {
       ? await db.$queryRaw<LastMessageRow[]>`
           SELECT DISTINCT ON (cm.chat_group_id)
             cm.id, cm.chat_group_id, cm.content, cm.type, cm.created_at, cm.user_id,
-            u.name as user_name
+            cgm.anonymous_name as user_name
           FROM chat_messages cm
-          LEFT JOIN "User" u ON cm.user_id = u.id
+          LEFT JOIN chat_group_members cgm
+            ON cm.user_id = cgm.user_id AND cm.chat_group_id = cgm.chat_group_id
           WHERE cm.chat_group_id = ANY(${chatGroupIds}::uuid[])
             AND cm.deleted_at IS NULL
           ORDER BY cm.chat_group_id, cm.created_at DESC

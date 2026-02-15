@@ -294,6 +294,7 @@ model chat_group_members {
   user_id                String
   role                   member_role           @default(member)
   status                 member_status         @default(active)
+  anonymous_name         String?
   last_read_message_id   String?              @db.Uuid
   last_allowed_at        DateTime?            @db.Timestamptz(6)
   notification_preferences Json                @default("{}")

@@ -89,8 +89,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       participants: members.map((m) => ({
         userId: m.user.id,
-        name: m.user.name,
-        avatar: m.user.image,
+        name: m.anonymous_name || "Anonymous",
+        avatar: null,
         role: m.role,
         status: m.status,
         joinedAt: m.joined_at,
