@@ -34,7 +34,11 @@ export async function GET(
             name: true,
             age: true,
             location: true,
+            bio: true,
+            occupation: true,
+            education: true,
             interests: true,
+            photos: true,
           },
         },
         user_interests: {
@@ -69,12 +73,23 @@ export async function GET(
     // This would be implemented in Phase 6
 
     // Format the response
+    // Build photos array: prefer profile gallery, fall back to single user image
+    const photos: string[] = (user.profile?.photos && user.profile.photos.length > 0)
+      ? user.profile.photos
+      : user.image
+        ? [user.image]
+        : []
+
     const publicProfile = {
       id: user.id,
       name: user.profile?.name || user.name,
       image: user.image,
+      photos,
       age: user.profile?.age,
       location: await normalizeLocationToCity(user.profile?.location),
+      bio: user.profile?.bio || null,
+      occupation: user.profile?.occupation || null,
+      education: user.profile?.education || null,
       interests: user.user_interests.map((ui) => ui.category),
       memberSince: user.createdAt,
       stats: {

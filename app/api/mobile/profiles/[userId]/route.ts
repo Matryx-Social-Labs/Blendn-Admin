@@ -93,7 +93,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { name, phone, age, location, interests, photos, onboarded } = parsed.data
+    const { name, phone, age, location, bio, occupation, education, interests, photos, onboarded } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
 
     // Update user record (name and/or primary photo)
@@ -116,6 +116,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         phone,
         age,
         location: normalizedLocation,
+        bio,
+        occupation,
+        education,
         interests: interests || [],
         photos: photos || [],
         onboarded: onboarded ?? false,
@@ -125,6 +128,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(phone !== undefined && { phone }),
         ...(age !== undefined && { age }),
         ...(location !== undefined && { location: normalizedLocation }),
+        ...(bio !== undefined && { bio }),
+        ...(occupation !== undefined && { occupation }),
+        ...(education !== undefined && { education }),
         ...(interests !== undefined && { interests }),
         ...(photos !== undefined && { photos }),
         ...(onboarded !== undefined && { onboarded }),

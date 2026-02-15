@@ -92,6 +92,9 @@ model profiles {
   name         String?
   age          Int?
   location     String?
+  bio          String?
+  occupation   String?
+  education    String?
   interests    String[]
   photos       String[]
   onboarded    Boolean  @default(false)
