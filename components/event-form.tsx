@@ -366,7 +366,7 @@ export function EventForm({
 }: EventFormProps) {
   const resolvedDefaultValues = useMemo(
     () => ({
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezone: "Asia/Kolkata",
       status: "draft" as const,
       visibility: "public" as const,
       is_featured: false,

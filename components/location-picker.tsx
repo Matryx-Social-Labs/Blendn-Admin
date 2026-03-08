@@ -108,8 +108,8 @@ export function LocationPicker({
       document.head.appendChild(link)
     }
 
-    const defaultLat = initialLat ?? 40.7128
-    const defaultLng = initialLng ?? -74.006
+    const defaultLat = initialLat ?? 20.5937
+    const defaultLng = initialLng ?? 78.9629
     const hasInitialLocation = Boolean(initialLat && initialLng)
 
     import("leaflet").then((L) => {
@@ -197,7 +197,7 @@ export function LocationPicker({
       setIsSearching(true)
       try {
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1`,
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1&countrycodes=in`,
           { headers: { "Accept-Language": "en" } }
         )
         const data: NominatimResult[] = await res.json()
