@@ -3,6 +3,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canManageEvent } from "@/lib/rbac"
 import { emitChatMessage } from "@/lib/socket-server"
+import { notifyAnnouncement } from "@/lib/push-notifications"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -105,6 +106,20 @@ export async function POST(req: Request, { params }: RouteContext) {
       userName: session.user.name ?? "Organiser",
       createdAt: chatMsg.created_at.toISOString(),
     })
+
+    // Fetch event title then send push notifications (fire and forget)
+    db.events.findUnique({ where: { id: eventId }, select: { title: true } })
+      .then((ev) => {
+        if (!ev) return
+        void notifyAnnouncement(
+          chatGroupId,
+          ev.title,
+          content.trim(),
+          eventId,
+          session.user.id
+        )
+      })
+      .catch((err) => console.error("Failed to send announcement push notifications:", err))
 
     return NextResponse.json(announcement, { status: 201 })
   } catch (err) {

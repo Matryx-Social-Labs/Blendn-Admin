@@ -36,6 +36,7 @@ interface SendBulkNotificationOptions {
   data?: NotificationData
   badge?: number
   sound?: "default" | null
+  channelId?: string
 }
 
 /**
@@ -160,7 +161,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
 export async function sendBulkPushNotifications(
   options: SendBulkNotificationOptions
 ): Promise<{ sent: number; failed: number }> {
-  const { userIds, title, body, data, badge, sound = "default" } = options
+  const { userIds, title, body, data, badge, sound = "default", channelId = "default" } = options
 
   const tokenMap = await getBulkUserPushTokens(userIds)
   const messages: ExpoPushMessage[] = []
@@ -176,6 +177,7 @@ export async function sendBulkPushNotifications(
           data: { ...data, userId } as Record<string, unknown>,
           badge,
           priority: "high",
+          channelId,
         })
       }
     }
@@ -312,6 +314,40 @@ export async function notifyEventCheckIn(
       type: "event_checkin",
       eventId,
     },
+  })
+}
+
+/**
+ * Send announcement notification to all active members of a chat group
+ */
+export async function notifyAnnouncement(
+  chatGroupId: string,
+  eventTitle: string,
+  announcementText: string,
+  eventId: string,
+  senderId: string
+): Promise<{ sent: number; failed: number }> {
+  const members = await db.chat_group_members.findMany({
+    where: { chat_group_id: chatGroupId, status: "active" },
+    select: { user_id: true },
+  })
+
+  const userIds = members
+    .map((m) => m.user_id)
+    .filter((id) => id !== senderId)
+
+  if (userIds.length === 0) return { sent: 0, failed: 0 }
+
+  const preview = announcementText.length > 100
+    ? announcementText.substring(0, 97) + "..."
+    : announcementText
+
+  return sendBulkPushNotifications({
+    userIds,
+    title: `📢 ${eventTitle}`,
+    body: preview,
+    data: { type: "event_update", chatGroupId, eventId },
+    channelId: "announcements",
   })
 }
 
