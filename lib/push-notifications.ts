@@ -11,7 +11,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -346,7 +346,7 @@ export async function notifyAnnouncement(
     userIds,
     title: `📢 ${eventTitle}`,
     body: preview,
-    data: { type: "event_update", chatGroupId, eventId },
+    data: { type: "announcement", chatGroupId, eventId },
     channelId: "announcements",
   })
 }
