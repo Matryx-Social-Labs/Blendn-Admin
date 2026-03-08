@@ -55,6 +55,9 @@ model User {
   // Message requests
   sent_message_requests     message_requests[] @relation("MessageRequestSender")
   received_message_requests message_requests[] @relation("MessageRequestRecipient")
+
+  // Announcements
+  sent_announcements        event_announcements[]
 }
 
 model Account {
@@ -145,16 +148,18 @@ model events {
   check_in_radius   Float          @default(30)
 
   // Relations
-  organizer         User           @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
-  details           event_details?
-  check_ins         event_check_ins[]
-  chat_group        chat_groups?
-  media             event_media[]
-  categories        event_categories[]
-  favorites         event_favorites[]
-  ratings           event_ratings[]
-  reports           event_reports[]
-  recurring_pattern recurring_events?
+  organizer            User           @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
+  details              event_details?
+  check_ins            event_check_ins[]
+  chat_group           chat_groups?
+  media                event_media[]
+  categories           event_categories[]
+  favorites            event_favorites[]
+  ratings              event_ratings[]
+  reports              event_reports[]
+  recurring_pattern    recurring_events?
+  sponsored_messages   event_sponsored_messages[]
+  announcements        event_announcements[]
 
   @@index([latitude, longitude])
   @@index([status, start_time])
@@ -528,6 +533,8 @@ enum message_type {
   image
   video
   system
+  sponsored
+  announcement
 }
 
 enum member_role {
@@ -553,6 +560,38 @@ enum message_request_status {
   accepted
   declined
   blocked
+}
+
+// Sponsored chat messages (periodic, auto-sent)
+model event_sponsored_messages {
+  id               String    @id @default(uuid()) @db.Uuid
+  event_id         String    @db.Uuid
+  content          String
+  interval_minutes Int       @default(30)
+  is_active        Boolean   @default(false)
+  last_sent_at     DateTime? @db.Timestamptz(6)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @db.Timestamptz(6)
+
+  event            events    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@index([is_active])
+}
+
+// Announcement messages (instant, sent by organiser)
+model event_announcements {
+  id         String   @id @default(uuid()) @db.Uuid
+  event_id   String   @db.Uuid
+  content    String
+  sent_by    String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  event      events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  sender     User     @relation(fields: [sent_by], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@index([created_at])
 }
 
 // Message Requests

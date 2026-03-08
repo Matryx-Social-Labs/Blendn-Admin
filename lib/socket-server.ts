@@ -126,6 +126,110 @@ export type AuthenticatedSocket = Socket<
   SocketData
 >
 
+// ── Sponsored Message Scheduler ───────────────────────────────────────────────
+
+interface SponsoredMessageRecord {
+  id: string
+  event_id: string
+  content: string
+  interval_minutes: number
+  organizer_id: string
+  chat_group_id: string
+}
+
+class SponsoredMessageScheduler {
+  private timers = new Map<string, ReturnType<typeof setInterval>>()
+
+  /** Send one sponsored message into the chatroom and update last_sent_at */
+  private async send(msg: SponsoredMessageRecord): Promise<void> {
+    try {
+      const created = await db.chat_messages.create({
+        data: {
+          chat_group_id: msg.chat_group_id,
+          user_id: msg.organizer_id,
+          type: "sponsored",
+          content: msg.content,
+          metadata: { sponsored_message_id: msg.id },
+        },
+      })
+
+      await db.chat_groups.update({
+        where: { id: msg.chat_group_id },
+        data: { last_message_at: created.created_at },
+      })
+
+      await db.event_sponsored_messages.update({
+        where: { id: msg.id },
+        data: { last_sent_at: created.created_at },
+      })
+
+      emitChatMessage(msg.chat_group_id, {
+        id: created.id,
+        content: created.content,
+        type: "sponsored",
+        userId: msg.organizer_id,
+        userName: "Sponsored",
+        createdAt: created.created_at.toISOString(),
+      })
+    } catch (err) {
+      console.error(`[Scheduler] Failed to send sponsored message ${msg.id}:`, err)
+    }
+  }
+
+  /** Start periodic sending for a message */
+  start(msg: SponsoredMessageRecord): void {
+    this.stop(msg.id) // clear any existing timer
+    const ms = msg.interval_minutes * 60 * 1000
+    const timer = setInterval(() => void this.send(msg), ms)
+    this.timers.set(msg.id, timer)
+    console.log(`[Scheduler] Started sponsored message ${msg.id} (every ${msg.interval_minutes} min)`)
+  }
+
+  /** Stop a specific timer */
+  stop(messageId: string): void {
+    const timer = this.timers.get(messageId)
+    if (timer) {
+      clearInterval(timer)
+      this.timers.delete(messageId)
+      console.log(`[Scheduler] Stopped sponsored message ${messageId}`)
+    }
+  }
+
+  /** Load all active sponsored messages from DB and start their timers */
+  async loadAll(): Promise<void> {
+    try {
+      const messages = await db.event_sponsored_messages.findMany({
+        where: { is_active: true },
+        include: {
+          event: {
+            select: {
+              organizer_id: true,
+              chat_group: { select: { id: true } },
+            },
+          },
+        },
+      })
+
+      for (const msg of messages) {
+        if (!msg.event.chat_group) continue
+        this.start({
+          id: msg.id,
+          event_id: msg.event_id,
+          content: msg.content,
+          interval_minutes: msg.interval_minutes,
+          organizer_id: msg.event.organizer_id,
+          chat_group_id: msg.event.chat_group.id,
+        })
+      }
+      console.log(`[Scheduler] Loaded ${messages.length} active sponsored messages`)
+    } catch (err) {
+      console.error("[Scheduler] Failed to load sponsored messages:", err)
+    }
+  }
+}
+
+export const sponsoredMessageScheduler = new SponsoredMessageScheduler()
+
 /**
  * Initialize Socket.io server
  */
@@ -293,6 +397,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
       console.error(`Socket error for ${authSocket.id}:`, error)
     })
   })
+
+  // Load and start all active sponsored message timers
+  void sponsoredMessageScheduler.loadAll()
 
   console.log("Socket.io server initialized")
   return io
