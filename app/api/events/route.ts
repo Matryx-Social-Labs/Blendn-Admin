@@ -39,6 +39,11 @@ export async function POST(req: Request) {
       return new NextResponse("Unauthorized", { status: 401 })
     }
 
+    const { role } = session.user
+    if (role !== "app_admin" && role !== "organizer") {
+      return new NextResponse("Forbidden", { status: 403 })
+    }
+
     const body = await req.json()
     const {
       title,

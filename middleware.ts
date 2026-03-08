@@ -32,10 +32,17 @@ export async function middleware(req: NextRequest) {
   // Handle dashboard auth
   const token = await getToken({ req })
 
-  if (!token && pathname.startsWith("/dashboard")) {
-    const redirectUrl = req.nextUrl.clone()
-    redirectUrl.pathname = "/login"
-    return NextResponse.redirect(redirectUrl)
+  if (pathname.startsWith("/dashboard")) {
+    if (!token) {
+      const redirectUrl = req.nextUrl.clone()
+      redirectUrl.pathname = "/login"
+      return NextResponse.redirect(redirectUrl)
+    }
+    if (token.role === "attendee") {
+      const redirectUrl = req.nextUrl.clone()
+      redirectUrl.pathname = "/login"
+      return NextResponse.redirect(redirectUrl)
+    }
   }
 
   return NextResponse.next()

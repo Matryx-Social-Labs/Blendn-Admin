@@ -8,6 +8,13 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum user_role {
+  app_admin
+  organizer
+  venue_owner
+  attendee
+}
+
 // NextAuth.js models
 model User {
   id            String    @id @default(cuid())
@@ -18,6 +25,7 @@ model User {
   image         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  role          user_role @default(attendee)
 
   accounts      Account[]
   sessions      Session[]

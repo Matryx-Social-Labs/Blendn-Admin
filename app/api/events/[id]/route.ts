@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { canManageEvent } from "@/lib/rbac"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -98,6 +99,10 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     if (!event) {
       return new NextResponse("Event not found", { status: 404 })
+    }
+
+    if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+      return new NextResponse("Forbidden", { status: 403 })
     }
 
     const updatedEvent = await db.events.update({
@@ -217,6 +222,10 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     if (!event) {
       return new NextResponse("Event not found", { status: 404 })
+    }
+
+    if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+      return new NextResponse("Forbidden", { status: 403 })
     }
 
     await db.events.update({

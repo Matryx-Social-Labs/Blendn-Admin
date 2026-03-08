@@ -3,6 +3,7 @@
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
+import { getAuth } from "@/lib/auth"
 
 export interface UserWithProfile {
   id: string
@@ -162,6 +163,11 @@ export async function updateUser(
   }
 ) {
   try {
+    const session = await getAuth()
+    if (!session?.user || session.user.role !== "app_admin") {
+      throw new Error("Forbidden")
+    }
+
     const normalizedLocation = await normalizeLocationToCity(data.profile?.location)
 
     const updateData: Record<string, unknown> = {}
@@ -207,6 +213,11 @@ export async function updateUser(
 
 export async function deleteUser(id: string) {
   try {
+    const session = await getAuth()
+    if (!session?.user || session.user.role !== "app_admin") {
+      throw new Error("Forbidden")
+    }
+
     await db.user.delete({
       where: { id },
     })
@@ -221,6 +232,11 @@ export async function deleteUser(id: string) {
 
 export async function toggleUserOnboarded(id: string, onboarded: boolean) {
   try {
+    const session = await getAuth()
+    if (!session?.user || session.user.role !== "app_admin") {
+      throw new Error("Forbidden")
+    }
+
     await db.profiles.updateMany({
       where: { id },
       data: { onboarded },
