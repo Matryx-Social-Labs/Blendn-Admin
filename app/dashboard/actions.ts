@@ -2,28 +2,25 @@
 
 import { db } from "@/lib/db"
 
-export async function getDashboardStats() {
+export async function getDashboardStats(userId?: string) {
   try {
-    const [
-      totalEvents,
-      totalUsers,
-      publishedEvents,
-      upcomingEvents,
-    ] = await Promise.all([
-      db.events.count(),
-      db.user.count(),
-      db.events.count({ where: { status: "published" } }),
+    const eventWhere = {
+      deleted_at: null,
+      ...(userId ? { organizer_id: userId } : {}),
+    }
+
+    const [totalEvents, publishedEvents, upcomingEvents] = await Promise.all([
+      db.events.count({ where: eventWhere }),
+      db.events.count({ where: { ...eventWhere, status: "published" } }),
       db.events.count({
         where: {
+          ...eventWhere,
           status: "published",
-          start_time: {
-            gte: new Date(),
-          },
+          start_time: { gte: new Date() },
         },
       }),
     ])
 
-    // Calculate growth percentages (comparing with last month)
     const lastMonth = new Date()
     lastMonth.setMonth(lastMonth.getMonth() - 1)
 
@@ -32,36 +29,12 @@ export async function getDashboardStats() {
 
     const [eventsLastMonth, eventsPreviousMonth] = await Promise.all([
       db.events.count({
-        where: {
-          created_at: {
-            gte: lastMonth,
-          },
-        },
+        where: { ...eventWhere, created_at: { gte: lastMonth } },
       }),
       db.events.count({
         where: {
-          created_at: {
-            gte: previousMonth,
-            lt: lastMonth,
-          },
-        },
-      }),
-    ])
-
-    const [usersLastMonth, usersPreviousMonth] = await Promise.all([
-      db.user.count({
-        where: {
-          createdAt: {
-            gte: lastMonth,
-          },
-        },
-      }),
-      db.user.count({
-        where: {
-          createdAt: {
-            gte: previousMonth,
-            lt: lastMonth,
-          },
+          ...eventWhere,
+          created_at: { gte: previousMonth, lt: lastMonth },
         },
       }),
     ])
@@ -73,6 +46,31 @@ export async function getDashboardStats() {
             ((eventsLastMonth - eventsPreviousMonth) / eventsPreviousMonth) * 100
           )
 
+    if (userId) {
+      // Scoped view: return check-ins count instead of total users
+      const totalCheckIns = await db.event_check_ins.count({
+        where: { event: { organizer_id: userId } },
+      })
+      return {
+        totalEvents,
+        publishedEvents,
+        upcomingEvents,
+        totalCheckIns,
+        totalUsers: null,
+        eventGrowth,
+        userGrowth: null,
+      }
+    }
+
+    // Admin view: return platform-wide user stats
+    const [totalUsers, usersLastMonth, usersPreviousMonth] = await Promise.all([
+      db.user.count(),
+      db.user.count({ where: { createdAt: { gte: lastMonth } } }),
+      db.user.count({
+        where: { createdAt: { gte: previousMonth, lt: lastMonth } },
+      }),
+    ])
+
     const userGrowth =
       usersPreviousMonth === 0
         ? 100
@@ -82,9 +80,10 @@ export async function getDashboardStats() {
 
     return {
       totalEvents,
-      totalUsers,
       publishedEvents,
       upcomingEvents,
+      totalCheckIns: null,
+      totalUsers,
       eventGrowth,
       userGrowth,
     }
@@ -94,26 +93,20 @@ export async function getDashboardStats() {
   }
 }
 
-export async function getEventsOverTime(days: number = 90) {
+export async function getEventsOverTime(days: number = 90, userId?: string) {
   try {
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - days)
 
     const events = await db.events.findMany({
       where: {
-        created_at: {
-          gte: startDate,
-        },
+        created_at: { gte: startDate },
+        ...(userId ? { organizer_id: userId } : {}),
       },
-      select: {
-        created_at: true,
-      },
-      orderBy: {
-        created_at: "asc",
-      },
+      select: { created_at: true },
+      orderBy: { created_at: "asc" },
     })
 
-    // Group events by date
     const groupedData: Record<string, { date: string; events: number }> = {}
 
     for (let i = 0; i < days; i++) {
@@ -139,30 +132,24 @@ export async function getEventsOverTime(days: number = 90) {
   }
 }
 
-export async function getRecentEvents(limit: number = 10) {
+export async function getRecentEvents(limit: number = 10, userId?: string) {
   try {
     const events = await db.events.findMany({
       take: limit,
-      orderBy: {
-        created_at: "desc",
+      where: {
+        deleted_at: null,
+        ...(userId ? { organizer_id: userId } : {}),
       },
+      orderBy: { created_at: "desc" },
       include: {
         organizer: {
-          select: {
-            name: true,
-            email: true,
-          },
+          select: { name: true, email: true },
         },
         categories: {
-          include: {
-            category: true,
-          },
+          include: { category: true },
         },
         _count: {
-          select: {
-            check_ins: true,
-            favorites: true,
-          },
+          select: { check_ins: true, favorites: true },
         },
       },
     })
@@ -194,17 +181,9 @@ export async function getTopCategories() {
   try {
     const categories = await db.categories.findMany({
       include: {
-        _count: {
-          select: {
-            events: true,
-          },
-        },
+        _count: { select: { events: true } },
       },
-      orderBy: {
-        events: {
-          _count: "desc",
-        },
-      },
+      orderBy: { events: { _count: "desc" } },
       take: 5,
     })
 

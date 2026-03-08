@@ -29,39 +29,43 @@ const navMain = [
     title: "Dashboard",
     url: "/dashboard",
     icon: IconDashboard,
+    allowedRoles: ["app_admin", "organizer", "venue_owner"],
   },
   {
     title: "Events",
     url: "/dashboard/events",
     icon: IconListDetails,
+    allowedRoles: ["app_admin", "organizer", "venue_owner"],
   },
   {
     title: "Users",
     url: "/dashboard/users",
     icon: IconUsers,
-    adminOnly: true,
+    allowedRoles: ["app_admin"],
   },
   {
     title: "Organisers",
     url: "/dashboard/organisers",
     icon: IconMicrophone2,
-    adminOnly: true,
+    allowedRoles: ["app_admin"],
   },
   {
     title: "Venue Owners",
     url: "/dashboard/venue-owners",
     icon: IconBuildingStore,
-    adminOnly: true,
+    allowedRoles: ["app_admin"],
   },
   {
     title: "Analytics",
     url: "/dashboard/analytics",
     icon: IconFolder,
+    allowedRoles: ["app_admin"],
   },
   {
     title: "Team",
     url: "/dashboard/team",
     icon: IconUsers,
+    allowedRoles: ["app_admin"],
   },
 ]
 
@@ -70,7 +74,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const role = session?.user?.role
 
   const filteredNav = navMain.filter(
-    (item) => !item.adminOnly || role === "app_admin"
+    (item) => role && item.allowedRoles.includes(role)
   )
 
   return (
