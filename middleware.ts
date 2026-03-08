@@ -32,6 +32,13 @@ export async function middleware(req: NextRequest) {
   // Handle dashboard auth
   const token = await getToken({ req })
 
+  // Redirect authenticated users away from login page
+  if (pathname === "/login") {
+    if (token && token.role !== "attendee") {
+      return NextResponse.redirect(new URL("/dashboard", req.url))
+    }
+  }
+
   if (pathname.startsWith("/dashboard")) {
     if (!token) {
       const redirectUrl = req.nextUrl.clone()
@@ -49,5 +56,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/api/mobile/:path*"],
+  matcher: ["/dashboard/:path*", "/api/mobile/:path*", "/login"],
 }
