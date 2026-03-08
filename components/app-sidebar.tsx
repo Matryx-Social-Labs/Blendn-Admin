@@ -8,6 +8,7 @@ import {
   IconListDetails,
   IconUsers,
 } from "@tabler/icons-react"
+import { useSession } from "next-auth/react"
 
 import { NavMain } from "@/components/nav-main"
 import { NavUser } from "@/components/nav-user"
@@ -21,42 +22,43 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 
-const data = {
-  user: {
-    name: "Blendn",
-    email: "admin@blendn.com",
-    avatar: "/avatars/shadcn.jpg",
+const navMain = [
+  {
+    title: "Dashboard",
+    url: "/dashboard",
+    icon: IconDashboard,
   },
-  navMain: [
-    {
-      title: "Dashboard",
-      url: "/dashboard",
-      icon: IconDashboard,
-    },
-    {
-      title: "Events",
-      url: "/dashboard/events",
-      icon: IconListDetails,
-    },
-    {
-      title: "Users",
-      url: "/dashboard/users",
-      icon: IconUsers,
-    },
-    {
-      title: "Analytics",
-      url: "/dashboard/analytics",
-      icon: IconFolder,
-    },
-    {
-      title: "Team",
-      url: "/dashboard/team",
-      icon: IconUsers,
-    },
-  ]
-}
+  {
+    title: "Events",
+    url: "/dashboard/events",
+    icon: IconListDetails,
+  },
+  {
+    title: "Users",
+    url: "/dashboard/users",
+    icon: IconUsers,
+    adminOnly: true,
+  },
+  {
+    title: "Analytics",
+    url: "/dashboard/analytics",
+    icon: IconFolder,
+  },
+  {
+    title: "Team",
+    url: "/dashboard/team",
+    icon: IconUsers,
+  },
+]
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { data: session } = useSession()
+  const role = session?.user?.role
+
+  const filteredNav = navMain.filter(
+    (item) => !item.adminOnly || role === "app_admin"
+  )
+
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
@@ -75,11 +77,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
-        
+        <NavMain items={filteredNav} />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <NavUser user={{
+          name: session?.user?.name ?? "Admin",
+          email: session?.user?.email ?? "",
+          avatar: session?.user?.image ?? "",
+          role: role,
+        }} />
       </SidebarFooter>
     </Sidebar>
   )

@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
 import { getAuth } from "@/lib/auth"
+import type { user_role } from "@prisma/client"
 
 export interface UserWithProfile {
   id: string
@@ -11,6 +12,7 @@ export interface UserWithProfile {
   email: string
   emailVerified: Date | null
   image: string | null
+  role: user_role
   createdAt: Date
   updatedAt: Date
   profile: {
@@ -103,7 +105,7 @@ export async function getUsers(
       })
     )
 
-    return { users, total }
+    return { users: users as unknown as UserWithProfile[], total }
   } catch (error) {
     console.error("Error fetching users:", error)
     throw new Error("Failed to fetch users")
@@ -141,7 +143,7 @@ export async function getUserById(id: string): Promise<UserWithProfile | null> {
       user.profile.location = await normalizeLocationToCity(user.profile.location)
     }
 
-    return user
+    return user as unknown as UserWithProfile | null
   } catch (error) {
     console.error("Error fetching user:", error)
     throw new Error("Failed to fetch user")
@@ -209,6 +211,16 @@ export async function updateUser(
     console.error("Error updating user:", error)
     throw new Error("Failed to update user")
   }
+}
+
+export async function updateUserRole(id: string, role: user_role) {
+  const session = await getAuth()
+  if (!session?.user || session.user.role !== "app_admin") {
+    throw new Error("Forbidden")
+  }
+  await db.user.update({ where: { id }, data: { role } })
+  revalidatePath("/dashboard/users")
+  return { success: true }
 }
 
 export async function deleteUser(id: string) {

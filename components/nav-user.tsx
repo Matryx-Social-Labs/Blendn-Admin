@@ -36,6 +36,7 @@ export function NavUser({
     name: string
     email: string
     avatar: string
+    role?: string
   }
 }) {
   const { isMobile } = useSidebar()
@@ -58,6 +59,11 @@ export function NavUser({
                 <span className="text-muted-foreground truncate text-xs">
                   {user.email}
                 </span>
+                {user.role && (
+                  <span className="truncate text-xs text-purple-600 capitalize">
+                    {user.role.replace(/_/g, " ")}
+                  </span>
+                )}
               </div>
               <IconDotsVertical className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -79,6 +85,11 @@ export function NavUser({
                   <span className="text-muted-foreground truncate text-xs">
                     {user.email}
                   </span>
+                  {user.role && (
+                    <span className="truncate text-xs text-purple-600 capitalize">
+                      {user.role.replace(/_/g, " ")}
+                    </span>
+                  )}
                 </div>
               </div>
             </DropdownMenuLabel>

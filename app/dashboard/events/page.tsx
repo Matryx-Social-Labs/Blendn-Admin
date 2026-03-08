@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { EventsTable } from "@/components/events-table"
 import { PlusIcon } from "@radix-ui/react-icons"
@@ -25,12 +26,17 @@ interface Event {
   current_capacity: number
   max_capacity?: number | null
   external_link?: string | null
+  organizer_id: string
 }
 
 export default function EventsPage() {
   const router = useRouter()
+  const { data: session } = useSession()
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
+
+  const currentUserId = session?.user?.id
+  const currentUserRole = session?.user?.role
 
   useEffect(() => {
     fetchEvents()
@@ -89,19 +95,25 @@ export default function EventsPage() {
     )
   }
 
+  const canCreate = currentUserRole === "app_admin" || currentUserRole === "organizer"
+
   return (
     <div className="container mx-auto py-10">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Events</h1>
-        <Button onClick={() => router.push("/dashboard/events/new")}>
-          <PlusIcon className="h-4 w-4 mr-2" />
-          Create Event
-        </Button>
+        {canCreate && (
+          <Button onClick={() => router.push("/dashboard/events/new")}>
+            <PlusIcon className="h-4 w-4 mr-2" />
+            Create Event
+          </Button>
+        )}
       </div>
       <EventsTable
         events={events}
         onEdit={(event) => router.push(`/dashboard/events/${event.id}`)}
         onDelete={handleDeleteEvent}
+        currentUserId={currentUserId}
+        currentUserRole={currentUserRole}
       />
     </div>
   )

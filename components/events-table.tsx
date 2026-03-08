@@ -44,13 +44,16 @@ interface Event {
   current_capacity: number
   max_capacity?: number | null
   external_link?: string | null
+  organizer_id: string
 }
 
 const getColumns = (
   actions?: {
     onEdit?: (event: Event) => void
     onDelete?: (event: Event) => void
-  }
+  },
+  currentUserId?: string,
+  currentUserRole?: string
 ): ColumnDef<Event>[] => [
   {
     accessorKey: "title",
@@ -104,6 +107,12 @@ const getColumns = (
     cell: ({ row }) => {
       if (!actions?.onEdit && !actions?.onDelete) return null
       const event = row.original
+      const canEdit =
+        currentUserRole === "app_admin" ||
+        (currentUserRole === "organizer" && event.organizer_id === currentUserId)
+
+      if (!canEdit) return null
+
       return (
         <div className="flex items-center gap-2">
           {actions.onEdit && (
@@ -134,16 +143,18 @@ interface EventsTableProps {
   events: Event[]
   onEdit?: (event: Event) => void
   onDelete?: (event: Event) => void
+  currentUserId?: string
+  currentUserRole?: string
 }
 
-export function EventsTable({ events, onEdit, onDelete }: EventsTableProps) {
+export function EventsTable({ events, onEdit, onDelete, currentUserId, currentUserRole }: EventsTableProps) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = React.useState({})
   const columns = React.useMemo(
-    () => getColumns({ onEdit, onDelete }),
-    [onEdit, onDelete]
+    () => getColumns({ onEdit, onDelete }, currentUserId, currentUserRole),
+    [onEdit, onDelete, currentUserId, currentUserRole]
   )
 
   const table = useReactTable({
@@ -247,4 +258,4 @@ export function EventsTable({ events, onEdit, onDelete }: EventsTableProps) {
       </div>
     </div>
   )
-} 
+}

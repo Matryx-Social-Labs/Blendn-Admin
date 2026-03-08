@@ -3,6 +3,7 @@ import { IconUsers, IconUserCheck, IconMail, IconTrendingUp } from "@tabler/icon
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getUsers, getUserStats } from "./actions"
 import { UsersTable } from "./users-table"
+import { getAuth } from "@/lib/auth"
 
 export default async function UsersPage({
   searchParams,
@@ -13,9 +14,10 @@ export default async function UsersPage({
   const search = typeof params.search === "string" ? params.search : undefined
   const status = typeof params.status === "string" ? params.status : undefined
 
-  const [{ users, total }, stats] = await Promise.all([
+  const [{ users, total }, stats, session] = await Promise.all([
     getUsers(search, status, 50),
     getUserStats(),
+    getAuth(),
   ])
 
   return (
@@ -87,7 +89,7 @@ export default async function UsersPage({
       </div>
 
       <div className="px-4 lg:px-6">
-        <UsersTable data={users} total={total} />
+        <UsersTable data={users} total={total} currentUserRole={session?.user?.role ?? "attendee"} />
       </div>
     </div>
   )

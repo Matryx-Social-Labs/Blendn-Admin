@@ -68,17 +68,44 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 
-import { UserWithProfile, deleteUser, updateUser } from "./actions"
+import { UserWithProfile, deleteUser, updateUser, updateUserRole } from "./actions"
+import type { user_role } from "@prisma/client"
 
 interface UsersTableProps {
   data: UserWithProfile[]
   total: number
+  currentUserRole: string
   onRefresh?: () => void
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  app_admin: "App Admin",
+  organizer: "Organizer",
+  venue_owner: "Venue Owner",
+  attendee: "Attendee",
+}
+
+const ROLE_COLORS: Record<string, React.CSSProperties> = {
+  app_admin: { backgroundColor: "#7c3aed", color: "#fff" },
+  organizer: { backgroundColor: "#2563eb", color: "#fff" },
+  venue_owner: { backgroundColor: "#16a34a", color: "#fff" },
+  attendee: { backgroundColor: "#e5e7eb", color: "#374151" },
+}
+
 // Actions cell component - extracted to comply with React hooks rules
-function ActionsCell({ row, table }: { row: { original: UserWithProfile }, table: { options: { meta?: { onRefresh?: () => void } } } }) {
+function ActionsCell({
+  row,
+  table,
+}: {
+  row: { original: UserWithProfile }
+  table: {
+    options: {
+      meta?: { onRefresh?: () => void; currentUserRole?: string }
+    }
+  }
+}) {
   const user = row.original
+  const currentUserRole = table.options.meta?.currentUserRole
   const [isEditOpen, setIsEditOpen] = React.useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(false)
@@ -131,6 +158,7 @@ function ActionsCell({ row, table }: { row: { original: UserWithProfile }, table
         open={isEditOpen}
         onOpenChange={setIsEditOpen}
         onSuccess={() => table.options.meta?.onRefresh?.()}
+        currentUserRole={currentUserRole}
       />
 
       <Sheet open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
@@ -238,6 +266,23 @@ const columns: ColumnDef<UserWithProfile>[] = [
     },
   },
   {
+    accessorKey: "role",
+    header: "Role",
+    cell: ({ row }) => {
+      const role = row.original.role as string
+      const style = ROLE_COLORS[role] ?? ROLE_COLORS.attendee
+      const label = ROLE_LABELS[role] ?? role
+      return (
+        <span
+          className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+          style={style}
+        >
+          {label}
+        </span>
+      )
+    },
+  },
+  {
     accessorKey: "profile",
     header: "Profile",
     cell: ({ row }) => {
@@ -322,9 +367,10 @@ interface EditUserDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
+  currentUserRole?: string
 }
 
-function EditUserDialog({ user, open, onOpenChange, onSuccess }: EditUserDialogProps) {
+function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }: EditUserDialogProps) {
   const [isLoading, setIsLoading] = React.useState(false)
   const [formData, setFormData] = React.useState({
     name: user.name || "",
@@ -334,6 +380,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess }: EditUserDialogP
     location: user.profile?.location || "",
     onboarded: user.profile?.onboarded || false,
   })
+  const [editRole, setEditRole] = React.useState<user_role>(user.role)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -349,6 +396,9 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess }: EditUserDialogP
           onboarded: formData.onboarded,
         },
       })
+      if (currentUserRole === "app_admin" && editRole !== user.role) {
+        await updateUserRole(user.id, editRole)
+      }
       toast.success("User updated successfully")
       onOpenChange(false)
       onSuccess()
@@ -425,6 +475,25 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess }: EditUserDialogP
             />
             <Label htmlFor="onboarded">Onboarded</Label>
           </div>
+          {currentUserRole === "app_admin" && (
+            <div className="space-y-2">
+              <Label htmlFor="role">Role</Label>
+              <Select
+                value={editRole}
+                onValueChange={(val) => setEditRole(val as user_role)}
+              >
+                <SelectTrigger id="role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="app_admin">App Admin</SelectItem>
+                  <SelectItem value="organizer">Organizer</SelectItem>
+                  <SelectItem value="venue_owner">Venue Owner</SelectItem>
+                  <SelectItem value="attendee">Attendee</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <SheetFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
@@ -439,7 +508,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess }: EditUserDialogP
   )
 }
 
-export function UsersTable({ data, onRefresh }: UsersTableProps) {
+export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps) {
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>({})
@@ -475,6 +544,7 @@ export function UsersTable({ data, onRefresh }: UsersTableProps) {
     getSortedRowModel: getSortedRowModel(),
     meta: {
       onRefresh,
+      currentUserRole,
     },
   })
 
