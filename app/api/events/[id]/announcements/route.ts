@@ -78,13 +78,15 @@ export async function POST(req: Request, { params }: RouteContext) {
       include: { sender: { select: { name: true, email: true } } },
     })
 
+    const chatContent = `📢 [Announcement]\n${content.trim()}`
+
     // Persist as a chat message
     const chatMsg = await db.chat_messages.create({
       data: {
         chat_group_id: chatGroupId,
         user_id: session.user.id,
-        type: "announcement",
-        content: content.trim(),
+        type: "text",
+        content: chatContent,
         metadata: { announcement_id: announcement.id },
       },
     })
@@ -98,7 +100,7 @@ export async function POST(req: Request, { params }: RouteContext) {
     emitChatMessage(chatGroupId, {
       id: chatMsg.id,
       content: chatMsg.content,
-      type: "announcement",
+      type: "text",
       userId: session.user.id,
       userName: session.user.name ?? "Organiser",
       createdAt: chatMsg.created_at.toISOString(),

@@ -143,12 +143,14 @@ class SponsoredMessageScheduler {
   /** Send one sponsored message into the chatroom and update last_sent_at */
   private async send(msg: SponsoredMessageRecord): Promise<void> {
     try {
+      const chatContent = `📣 [Sponsored]\n${msg.content}`
+
       const created = await db.chat_messages.create({
         data: {
           chat_group_id: msg.chat_group_id,
           user_id: msg.organizer_id,
-          type: "sponsored",
-          content: msg.content,
+          type: "text",
+          content: chatContent,
           metadata: { sponsored_message_id: msg.id },
         },
       })
@@ -166,7 +168,7 @@ class SponsoredMessageScheduler {
       emitChatMessage(msg.chat_group_id, {
         id: created.id,
         content: created.content,
-        type: "sponsored",
+        type: "text",
         userId: msg.organizer_id,
         userName: "Sponsored",
         createdAt: created.created_at.toISOString(),
