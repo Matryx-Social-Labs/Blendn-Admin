@@ -108,8 +108,8 @@ export function LocationPicker({
       document.head.appendChild(link)
     }
 
-    const defaultLat = initialLat ?? 20.5937
-    const defaultLng = initialLng ?? 78.9629
+    const defaultLat = initialLat ?? 12.9716
+    const defaultLng = initialLng ?? 77.5946
     const hasInitialLocation = Boolean(initialLat && initialLng)
 
     import("leaflet").then((L) => {
@@ -128,7 +128,7 @@ export function LocationPicker({
 
       const map = L.map(mapContainerRef.current!).setView(
         [defaultLat, defaultLng],
-        hasInitialLocation ? 14 : 2
+        hasInitialLocation ? 14 : 12
       )
       mapInstanceRef.current = map
 
