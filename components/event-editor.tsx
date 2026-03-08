@@ -138,7 +138,7 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
       additional_info: parseToKvArray(initialEvent.additional_info),
       accessibility_info: parseToKvArray(initialEvent.accessibility_info),
       media_items:
-        initialEvent.media_items?.map((item, index) => ({
+        initialEvent.media_items?.map((item) => ({
           id: crypto.randomUUID(),
           type: item.type,
           url: item.url,

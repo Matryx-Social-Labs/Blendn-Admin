@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import Image from "next/image"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useFieldArray, useForm } from "react-hook-form"
+import { useFieldArray, useForm, type UseFormReturn } from "react-hook-form"
 import * as z from "zod"
 import {
   DndContext,
@@ -12,7 +13,6 @@ import {
   useSensors,
 } from "@dnd-kit/core"
 import {
-  arrayMove,
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
@@ -110,7 +110,7 @@ export type EventFormValues = z.infer<typeof eventFormSchema>
 
 const ALL_TIMEZONES: string[] = (() => {
   try {
-    return (Intl as any).supportedValuesOf("timeZone") as string[]
+    return (Intl as typeof Intl & { supportedValuesOf: (k: string) => string[] }).supportedValuesOf("timeZone")
   } catch {
     return [
       "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
@@ -221,7 +221,7 @@ function SortableMediaItem({
 }: {
   fieldItem: { id: string }
   index: number
-  form: any
+  form: UseFormReturn<EventFormValues>
   onRemove: () => void
   isUploading: boolean
   onUpload: (file: File, index: number) => Promise<void>
@@ -300,9 +300,12 @@ function SortableMediaItem({
                 }}
               />
               {previewUrl && mediaType === "image" && (
-                <img
+                <Image
                   src={previewUrl}
                   alt={`Media ${index + 1}`}
+                  width={800}
+                  height={160}
+                  unoptimized
                   className="max-h-40 w-full rounded-md border object-cover"
                 />
               )}
@@ -916,9 +919,12 @@ export function EventForm({
                 <div className="flex flex-col gap-3">
                   {coverPreviewUrl ? (
                     <div className="relative">
-                      <img
+                      <Image
                         src={coverPreviewUrl}
                         alt="Cover preview"
+                        width={1200}
+                        height={192}
+                        unoptimized
                         className="h-48 w-full rounded-lg border object-cover"
                       />
                       <Button

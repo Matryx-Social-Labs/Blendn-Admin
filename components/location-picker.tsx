@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
+import type { Map as LeafletMap, Marker, Circle, LeafletMouseEvent } from "leaflet"
 import { Input } from "@/components/ui/input"
 import { IconMapPin, IconSearch } from "@tabler/icons-react"
 
@@ -47,9 +48,9 @@ export function LocationPicker({
   onLocationChange,
 }: LocationPickerProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null)
-  const mapInstanceRef = useRef<any>(null)
-  const markerRef = useRef<any>(null)
-  const circleRef = useRef<any>(null)
+  const mapInstanceRef = useRef<LeafletMap | null>(null)
+  const markerRef = useRef<Marker | null>(null)
+  const circleRef = useRef<Circle | null>(null)
   const checkInRadiusRef = useRef(checkInRadius)
 
   const [search, setSearch] = useState("")
@@ -115,7 +116,7 @@ export function LocationPicker({
       if (!mapContainerRef.current || mapInstanceRef.current) return
 
       // Fix default marker icons
-      delete (L.Icon.Default.prototype as any)._getIconUrl
+      delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
       L.Icon.Default.mergeOptions({
         iconRetinaUrl:
           "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -137,7 +138,7 @@ export function LocationPicker({
         maxZoom: 19,
       }).addTo(map)
 
-      const addMarkerAndCircle = (lat: number, lng: number, L: any) => {
+      const addMarkerAndCircle = (lat: number, lng: number) => {
         const latlng = L.latLng(lat, lng)
         if (markerRef.current) {
           markerRef.current.setLatLng(latlng)
@@ -165,12 +166,12 @@ export function LocationPicker({
       }
 
       if (hasInitialLocation) {
-        addMarkerAndCircle(defaultLat, defaultLng, L)
+        addMarkerAndCircle(defaultLat, defaultLng)
       }
 
-      map.on("click", async (e: any) => {
+      map.on("click", async (e: LeafletMouseEvent) => {
         const { lat, lng } = e.latlng
-        addMarkerAndCircle(lat, lng, L)
+        addMarkerAndCircle(lat, lng)
         await reverseGeocode(lat, lng)
       })
     })
