@@ -15,13 +15,17 @@ const parseJsonField = (value: unknown) => {
 
 export async function GET() {
   try {
+    const session = await getAuth()
+    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+
+    const where: Record<string, unknown> = { deleted_at: null }
+    if (session.user.role !== "app_admin") {
+      where.organizer_id = session.user.id
+    }
+
     const events = await db.events.findMany({
-      where: {
-        deleted_at: null,
-      },
-      orderBy: {
-        created_at: "desc",
-      },
+      where,
+      orderBy: { created_at: "desc" },
     })
 
     return NextResponse.json(events)
