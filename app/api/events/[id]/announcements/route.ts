@@ -79,7 +79,8 @@ export async function POST(req: Request, { params }: RouteContext) {
       include: { sender: { select: { name: true, email: true } } },
     })
 
-    const chatContent = `📢 [Announcement]\n${content.trim()}`
+    const senderName = session.user.name ?? session.user.email ?? "Organiser"
+    const chatContent = `📢 [Announcement from ${senderName}]\n${content.trim()}`
 
     // Persist as a chat message
     const chatMsg = await db.chat_messages.create({
