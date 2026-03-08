@@ -2,10 +2,12 @@
 
 import * as React from "react"
 import {
+  IconBuildingStore,
   IconDashboard,
   IconFolder,
   IconInnerShadowTop,
   IconListDetails,
+  IconMicrophone2,
   IconUsers,
 } from "@tabler/icons-react"
 import { useSession } from "next-auth/react"
@@ -37,6 +39,18 @@ const navMain = [
     title: "Users",
     url: "/dashboard/users",
     icon: IconUsers,
+    adminOnly: true,
+  },
+  {
+    title: "Organisers",
+    url: "/dashboard/organisers",
+    icon: IconMicrophone2,
+    adminOnly: true,
+  },
+  {
+    title: "Venue Owners",
+    url: "/dashboard/venue-owners",
+    icon: IconBuildingStore,
     adminOnly: true,
   },
   {
