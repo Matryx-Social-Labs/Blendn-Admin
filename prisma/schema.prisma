@@ -289,6 +289,7 @@ model chat_messages {
   created_at      DateTime         @default(now()) @db.Timestamptz(6)
   updated_at      DateTime         @default(now()) @db.Timestamptz(6)
   deleted_at      DateTime?        @db.Timestamptz(6)
+  deleted_by      String?
 
   // Relations
   chat_group      chat_groups      @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
@@ -314,6 +315,8 @@ model chat_group_members {
   joined_at              DateTime              @default(now()) @db.Timestamptz(6)
   created_at             DateTime              @default(now()) @db.Timestamptz(6)
   updated_at             DateTime              @default(now()) @db.Timestamptz(6)
+  banned_at              DateTime?            @db.Timestamptz(6)
+  banned_by              String?
 
   // Relations
   chat_group             chat_groups           @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)

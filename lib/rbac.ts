@@ -14,6 +14,16 @@ export function canManageEvent(
   return false
 }
 
+export function canModerateChat(
+  role: user_role,
+  userId: string,
+  organizerId: string
+): boolean {
+  if (role === "app_admin") return true
+  if (role === "organizer" || role === "venue_owner") return userId === organizerId
+  return false
+}
+
 export function canSendSystemMessages(role: user_role): boolean {
   return role === "app_admin"
 }

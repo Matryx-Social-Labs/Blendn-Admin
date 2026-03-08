@@ -86,6 +86,10 @@ export interface ServerToClientEvents {
     readBy: string
   }) => void
 
+  // Moderation events
+  "chat:messageDeleted": (data: { chatGroupId: string; messageId: string }) => void
+  "chat:memberBanned": (data: { chatGroupId: string; userId: string; banned: boolean }) => void
+
   // System events
   error: (data: { message: string; code?: string }) => void
   connected: (data: { userId: string }) => void
@@ -509,6 +513,22 @@ export function emitChatReaction(
     emoji,
     action,
   })
+}
+
+/**
+ * Emit a message deletion to the chat room
+ */
+export function emitChatMessageDeleted(chatGroupId: string, messageId: string): void {
+  if (!io) return
+  io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", { chatGroupId, messageId })
+}
+
+/**
+ * Emit a member ban/unban to the chat room
+ */
+export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean): void {
+  if (!io) return
+  io.to(`chat:${chatGroupId}`).emit("chat:memberBanned", { chatGroupId, userId, banned })
 }
 
 /**
