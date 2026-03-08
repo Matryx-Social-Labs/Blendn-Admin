@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import { format } from "date-fns"
+import { toZonedTime, fromZonedTime } from "date-fns-tz"
 import { EventForm, type EventFormValues } from "@/components/event-form"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -59,9 +60,10 @@ interface EventEditorProps {
   initialEvent?: EventEditorData
 }
 
-const formatDateTimeInput = (value?: string) => {
+const formatDateTimeInput = (value?: string, timezone = "Asia/Kolkata") => {
   if (!value) return ""
-  return format(new Date(value), "yyyy-MM-dd'T'HH:mm")
+  // Convert the UTC timestamp from the DB into the event's timezone for display
+  return format(toZonedTime(new Date(value), timezone), "yyyy-MM-dd'T'HH:mm")
 }
 
 const parseToKvArray = (value: unknown): Array<{ key: string; value: string }> => {
@@ -118,8 +120,8 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
       state: initialEvent.state ?? undefined,
       country: initialEvent.country ?? undefined,
       postal_code: initialEvent.postal_code ?? undefined,
-      start_time: formatDateTimeInput(initialEvent.start_time),
-      end_time: formatDateTimeInput(initialEvent.end_time),
+      start_time: formatDateTimeInput(initialEvent.start_time, initialEvent.timezone),
+      end_time: formatDateTimeInput(initialEvent.end_time, initialEvent.timezone),
       timezone: initialEvent.timezone,
       status: initialEvent.status,
       visibility: initialEvent.visibility,
@@ -153,9 +155,16 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
     try {
       setIsSaving(true)
 
+      // Convert datetimes from event timezone → UTC before sending to API
+      const tz = data.timezone || "Asia/Kolkata"
+      const toUtcIso = (localStr: string) =>
+        localStr ? fromZonedTime(localStr, tz).toISOString() : localStr
+
       // Transform structured arrays back to JSON for the API
       const payload = {
         ...data,
+        start_time: toUtcIso(data.start_time),
+        end_time: toUtcIso(data.end_time),
         faq:
           data.faq && data.faq.length > 0 ? JSON.stringify(data.faq) : undefined,
         additional_info:
