@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken"
-import { createHash } from "crypto"
+import { randomUUID } from "crypto"
+import bcrypt from "bcryptjs"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
 
@@ -29,12 +30,15 @@ export interface TokenPayload {
   userId: string
   email: string
   type: "access" | "refresh"
+  jti?: string
 }
 
 export interface DecodedToken extends TokenPayload {
   iat: number
   exp: number
 }
+
+const BCRYPT_ROUNDS = 12
 
 /**
  * Sign an access token (15 min expiry)
@@ -49,13 +53,15 @@ export function signAccessToken(userId: string, email: string): string {
 }
 
 /**
- * Sign a refresh token (30 day expiry)
+ * Sign a refresh token (30 day expiry) with a jti for DB lookup
  */
 export function signRefreshToken(userId: string, email: string): string {
+  const tokenId = randomUUID()
   const payload: TokenPayload = {
     userId,
     email,
     type: "refresh",
+    jti: tokenId,
   }
   return jwt.sign(payload, getJwtSecret(), { expiresIn: REFRESH_TOKEN_EXPIRY })
 }
@@ -76,25 +82,22 @@ export function verifyAccessToken(token: string): DecodedToken | null {
 }
 
 /**
- * Hash a token for secure storage
- */
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex")
-}
-
-/**
- * Store a hashed refresh token in the database
+ * Store a bcrypt-hashed refresh token in the database
+ * Uses the JWT's jti claim as the record ID for lookups
  */
 export async function storeRefreshToken(
   userId: string,
   token: string,
   deviceInfo?: Prisma.InputJsonValue
 ): Promise<void> {
-  const tokenHash = hashToken(token)
+  // Decode without verification to extract jti (we just signed it)
+  const decoded = jwt.decode(token) as DecodedToken
+  const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS)
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS)
 
   await db.mobile_refresh_tokens.create({
     data: {
+      id: decoded.jti!,
       user_id: userId,
       token_hash: tokenHash,
       device_info: deviceInfo,
@@ -113,14 +116,13 @@ export async function verifyRefreshToken(
   try {
     // First verify the JWT signature and expiry
     const decoded = jwt.verify(token, getJwtSecret()) as DecodedToken
-    if (decoded.type !== "refresh") {
+    if (decoded.type !== "refresh" || !decoded.jti) {
       return null
     }
 
-    // Check if token exists in DB and is not revoked
-    const tokenHash = hashToken(token)
+    // Look up the token record by jti (stored as the record id)
     const storedToken = await db.mobile_refresh_tokens.findUnique({
-      where: { token_hash: tokenHash },
+      where: { id: decoded.jti },
     })
 
     if (!storedToken) {
@@ -134,6 +136,12 @@ export async function verifyRefreshToken(
 
     // Check if token is expired in DB
     if (storedToken.expires_at < new Date()) {
+      return null
+    }
+
+    // Verify the token against the stored bcrypt hash
+    const isValid = await bcrypt.compare(token, storedToken.token_hash)
+    if (!isValid) {
       return null
     }
 
@@ -162,16 +170,22 @@ export async function revokeUserRefreshTokens(userId: string): Promise<void> {
  * Revoke a specific refresh token
  */
 export async function revokeRefreshToken(token: string): Promise<void> {
-  const tokenHash = hashToken(token)
-  await db.mobile_refresh_tokens.updateMany({
-    where: {
-      token_hash: tokenHash,
-      revoked_at: null,
-    },
-    data: {
-      revoked_at: new Date(),
-    },
-  })
+  try {
+    const decoded = jwt.decode(token) as DecodedToken | null
+    if (!decoded?.jti) return
+
+    await db.mobile_refresh_tokens.updateMany({
+      where: {
+        id: decoded.jti,
+        revoked_at: null,
+      },
+      data: {
+        revoked_at: new Date(),
+      },
+    })
+  } catch {
+    // Token may be malformed, nothing to revoke
+  }
 }
 
 /**
