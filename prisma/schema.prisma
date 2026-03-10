@@ -164,6 +164,10 @@ model events {
   @@index([latitude, longitude])
   @@index([status, start_time])
   @@index([organizer_id])
+  @@index([deleted_at])
+  @@index([city])
+  @@index([is_featured])
+  @@index([start_time])
 }
 
 model event_details {
@@ -198,6 +202,8 @@ model categories {
   children    categories[]        @relation("CategoryHierarchy")
   events      event_categories[]
   user_interests user_interests[]
+
+  @@index([parent_id])
 }
 
 model event_categories {
@@ -211,6 +217,7 @@ model event_categories {
   category    categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
 
   @@id([event_id, category_id])
+  @@index([category_id])
 }
 
 model event_media {
@@ -251,6 +258,7 @@ model event_check_ins {
   @@unique([event_id, user_id])
   @@index([event_id, status])
   @@index([user_id])
+  @@index([user_id, status])
 }
 
 model chat_groups {
@@ -299,6 +307,7 @@ model chat_messages {
   reactions       message_reactions[]
 
   @@index([chat_group_id, created_at])
+  @@index([chat_group_id, deleted_at])
   @@index([user_id])
 }
 
@@ -324,6 +333,7 @@ model chat_group_members {
 
   @@unique([chat_group_id, user_id])
   @@index([user_id])
+  @@index([user_id, status])
 }
 
 model message_reactions {
@@ -351,6 +361,8 @@ model event_favorites {
   user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([event_id, user_id])
+  @@index([user_id])
+  @@index([event_id])
 }
 
 model event_ratings {
@@ -367,6 +379,7 @@ model event_ratings {
   user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([event_id, user_id])
+  @@index([event_id])
 }
 
 model event_reports {
@@ -383,6 +396,7 @@ model event_reports {
   event       events        @relation(fields: [event_id], references: [id], onDelete: Cascade)
   user        User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  @@index([event_id])
   @@index([status])
 }
 
