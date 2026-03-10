@@ -468,10 +468,6 @@ async function buildAdminReport(): Promise<DashboardReport> {
 
   const topCity = topValue(publishedCities.map((event) => event.city))
   const averageRating = normalizeAverage(ratingsAggregate._avg.rating)
-  const verifiedUsers = await db.user.count({
-    where: { emailVerified: { not: null } },
-  })
-
   const metrics: DashboardMetric[] = [
     toMetric(
       "Total users",
@@ -647,7 +643,6 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
     currentChatMessages,
     previousChatMessages,
     currentCheckIns,
-    previousCheckIns,
     ratedAggregate,
     repeatAttendanceRows,
     eventsWithCapacity,
@@ -722,12 +717,6 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
       where: {
         ...attendedScope(userId),
         check_in_time: { gte: currentStart },
-      },
-    }),
-    db.event_check_ins.count({
-      where: {
-        ...attendedScope(userId),
-        check_in_time: { gte: previousStart, lt: currentStart },
       },
     }),
     db.event_ratings.aggregate({

@@ -22,7 +22,7 @@ export function auditLog(entry: AuditLogEntry): void {
         action: entry.action,
         resource: entry.resource,
         resource_id: entry.resourceId ?? null,
-        details: entry.details ?? null,
+        details: entry.details ?? undefined,
         ip_address: entry.ipAddress ?? null,
       },
     })

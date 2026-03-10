@@ -82,7 +82,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Atomic check-in: capacity check + check-in creation in a single transaction
-    const { checkIn, isNewCheckIn } = await db.$transaction(async (tx) => {
+    const { checkIn } = await db.$transaction(async (tx) => {
       // Check for existing check-in first
       const existing = await tx.event_check_ins.findUnique({
         where: {
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         })
       }
 
-      return { checkIn: result, isNewCheckIn: !alreadyCheckedIn }
+      return { checkIn: result }
     })
 
     // If capacity was full, the transaction threw — catch it below
