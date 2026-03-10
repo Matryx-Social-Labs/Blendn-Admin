@@ -8,6 +8,7 @@ import {
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -31,8 +32,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
-    const limit = Math.min(parseInt(searchParams.get("limit") || "10"), 50)
-    const offset = parseInt(searchParams.get("offset") || "0")
+    const { page, limit } = parsePagination(
+      searchParams.get("page") ?? undefined,
+      searchParams.get("limit") ?? undefined
+    )
 
     // Check if event exists
     const event = await db.events.findUnique({
@@ -62,7 +65,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
       },
       orderBy: { created_at: "desc" },
-      skip: offset,
+      skip: paginationSkip(page, limit),
       take: limit,
     })
 
@@ -72,7 +75,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         name: f.user.name,
         avatar: f.user.image,
       })),
-      totalCount,
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     console.error("Get interested users error:", error)

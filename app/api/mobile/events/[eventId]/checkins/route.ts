@@ -8,6 +8,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -25,8 +26,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
-    const page = parseInt(searchParams.get("page") || "1")
-    const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100)
+    const { page, limit } = parsePagination(
+      searchParams.get("page") ?? undefined,
+      searchParams.get("limit") ?? undefined
+    )
 
     // Check if event exists
     const event = await db.events.findUnique({
@@ -80,7 +83,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
       },
       orderBy: { check_in_time: "desc" },
-      skip: (page - 1) * limit,
+      skip: paginationSkip(page, limit),
       take: limit,
     })
 
@@ -95,13 +98,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           checkInTime: c.check_in_time,
         }))
       ),
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     console.error("Get check-ins error:", error)
