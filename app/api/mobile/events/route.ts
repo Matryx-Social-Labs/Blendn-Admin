@@ -13,6 +13,8 @@ import {
 import { eventQuerySchema } from "@/lib/validations/event"
 
 const EVENTS_CACHE_TTL_MS = 30 * 1000
+const EVENTS_CACHE_MAX_SIZE = 100
+
 const eventSelect = {
   id: true,
   slug: true,
@@ -74,10 +76,27 @@ const eventSelect = {
 
 type EventListItem = Prisma.eventsGetPayload<{ select: typeof eventSelect }>
 
+// Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<
   string,
   { expiresAt: number; events: EventListItem[]; totalCount: number }
 >()
+
+function setCache(key: string, value: { expiresAt: number; events: EventListItem[]; totalCount: number }) {
+  // Evict expired entries if cache is at capacity
+  if (eventsCache.size >= EVENTS_CACHE_MAX_SIZE) {
+    const now = Date.now()
+    for (const [k, v] of eventsCache) {
+      if (v.expiresAt <= now) eventsCache.delete(k)
+    }
+    // If still at capacity, delete oldest entry
+    if (eventsCache.size >= EVENTS_CACHE_MAX_SIZE) {
+      const firstKey = eventsCache.keys().next().value
+      if (firstKey) eventsCache.delete(firstKey)
+    }
+  }
+  eventsCache.set(key, value)
+}
 
 function buildEventsCacheKey(input: {
   page: number
@@ -478,7 +497,7 @@ export async function GET(request: NextRequest) {
       events = withDistance.slice(start, end) as typeof events
     }
 
-    eventsCache.set(cacheKey, {
+    setCache(cacheKey, {
       expiresAt: Date.now() + EVENTS_CACHE_TTL_MS,
       events,
       totalCount,
