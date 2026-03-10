@@ -17,6 +17,10 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Events",
     description: "Manage event supply, publishing status, and operational detail.",
   },
+  "/dashboard/chatrooms": {
+    title: "Chatrooms",
+    description: "Choose a live event and open its chatroom workspace.",
+  },
   "/dashboard/users": {
     title: "Users",
     description: "Track onboarding, verification, and user activity quality.",
@@ -45,10 +49,17 @@ export function SiteHeader() {
     const exact = routeContent[pathname]
     if (exact) return exact
 
+    if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/messaging")) {
+      return {
+        title: "Chatroom Management",
+        description: "Moderate the live feed, send announcements, and manage sponsored messages.",
+      }
+    }
+
     if (pathname.startsWith("/dashboard/events/")) {
       return {
         title: "Event Workspace",
-        description: "Inspect event setup, messaging, and performance detail.",
+        description: "Inspect event setup and performance detail.",
       }
     }
 
@@ -86,7 +97,7 @@ export function SiteHeader() {
           <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/62">
             {today}
           </div>
-          <BrandLogo compact className="hidden xl:flex" />
+          <BrandLogo size="header" className="hidden xl:flex shrink-0" />
         </div>
       </div>
     </header>

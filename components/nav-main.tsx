@@ -22,6 +22,7 @@ export function NavMain({
     description: string
     url: string
     icon?: Icon
+    isActive?: (pathname: string) => boolean
   }[]
 }) {
   const pathname = usePathname()
@@ -34,9 +35,10 @@ export function NavMain({
       <SidebarGroupContent>
         <SidebarMenu className="gap-2">
           {items.map((item) => {
-            const isActive =
-              pathname === item.url ||
-              (item.url !== "/dashboard" && pathname.startsWith(item.url))
+            const isActive = item.isActive
+              ? item.isActive(pathname)
+              : pathname === item.url ||
+                (item.url !== "/dashboard" && pathname.startsWith(item.url))
 
             return (
               <SidebarMenuItem key={item.title}>

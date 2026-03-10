@@ -21,8 +21,8 @@ import { Input } from "@/components/ui/input"
 const valueProps = [
   {
     icon: IconChartHistogram,
-    title: "Traction metrics",
-    description: "User activation, event supply, attendance, and engagement in one operating layer.",
+    title: "Performance reporting",
+    description: "User activity, event supply, attendance, and engagement in one operating layer.",
   },
   {
     icon: IconSparkles,
@@ -32,7 +32,7 @@ const valueProps = [
   {
     icon: IconDownload,
     title: "Exportable reporting",
-    description: "Investor snapshots and operator exports are ready directly from the dashboard.",
+    description: "Download platform, organiser, and venue reports directly from the dashboard.",
   },
 ]
 
@@ -95,20 +95,20 @@ export default function LoginPage() {
             <div className="flex items-start justify-between gap-4">
               <BrandLogo showTagline />
               <Badge className="brand-chip rounded-full px-3 py-1 font-medium">
-                Private admin access
+                Workspace access
               </Badge>
             </div>
 
             <div className="space-y-4">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">
-                Blend&apos;n dashboard
+                Blend&apos;n workspace
               </p>
               <h1 className="max-w-xl text-4xl font-semibold leading-tight text-white sm:text-5xl">
-                Operate the product like a marketplace, not a spreadsheet.
+                Manage events, venues, and reporting from one place.
               </h1>
               <p className="max-w-xl text-base leading-7 text-white/68">
-                Sign in to review investor-ready health metrics, host performance, venue demand,
-                and the event-level signals that matter while Blend&apos;n is still in MVP.
+                Sign in to manage events, review performance, and monitor venue and audience
+                activity across Blend&apos;n.
               </p>
             </div>
           </div>
@@ -142,7 +142,7 @@ export default function LoginPage() {
                 </p>
                 <h2 className="text-3xl font-semibold text-white">Sign in</h2>
                 <p className="text-sm leading-6 text-white/62">
-                  Use your admin, organiser, or venue owner credentials.
+                  Use your app admin, organiser, or venue owner credentials.
                 </p>
               </div>
 

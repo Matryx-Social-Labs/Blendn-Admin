@@ -6,6 +6,7 @@ import {
   IconChartHistogram,
   IconDashboard,
   IconListDetails,
+  IconMessage2,
   IconMicrophone2,
   IconUsers,
 } from "@tabler/icons-react"
@@ -27,17 +28,30 @@ import {
 const navMain = [
   {
     title: "Overview",
-    description: "Investor, organiser, or venue performance cockpit.",
+    description: "Role-based reporting across platform, organisers, and venues.",
     url: "/dashboard",
     icon: IconDashboard,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
   },
   {
     title: "Events",
-    description: "Create, manage, and inspect event-level performance.",
+    description: "Manage event setup, publishing status, and operational detail.",
     url: "/dashboard/events",
     icon: IconListDetails,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
+    isActive: (pathname: string) =>
+      pathname === "/dashboard/events" ||
+      pathname === "/dashboard/events/new" ||
+      (pathname.startsWith("/dashboard/events/") && !pathname.endsWith("/messaging")),
+  },
+  {
+    title: "Chatrooms",
+    description: "Select a live event and manage chatroom messaging.",
+    url: "/dashboard/chatrooms",
+    icon: IconMessage2,
+    allowedRoles: ["app_admin", "organizer"],
+    isActive: (pathname: string) =>
+      pathname === "/dashboard/chatrooms" || pathname.endsWith("/messaging"),
   },
   {
     title: "Users",
@@ -65,11 +79,11 @@ const navMain = [
 const roleContent: Record<string, { label: string; description: string }> = {
   app_admin: {
     label: "Platform view",
-    description: "Growth, activation, and host marketplace health.",
+    description: "Growth, attendance, and operator reporting across the platform.",
   },
   organizer: {
     label: "Organiser view",
-    description: "Attendance, demand, and event engagement signals.",
+    description: "Attendance, demand, chat activity, and event engagement signals.",
   },
   venue_owner: {
     label: "Venue view",
@@ -92,7 +106,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <div className="rounded-[1.6rem] border border-white/10 bg-white/[0.04] p-4">
-              <BrandLogo compact showTagline />
+              <BrandLogo size="sidebar" showTagline />
               {roleMeta ? (
                 <div className="mt-4 rounded-[1.2rem] border border-white/8 bg-black/20 p-3">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-white/42">

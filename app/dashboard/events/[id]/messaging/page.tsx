@@ -24,7 +24,7 @@ export default async function EventMessagingPage({ params }: Props) {
 
   if (!event) notFound()
   if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
-    redirect("/dashboard/events")
+    redirect("/dashboard/chatrooms")
   }
 
   return (
@@ -33,14 +33,14 @@ export default async function EventMessagingPage({ params }: Props) {
       <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
         <div>
           <p className="text-sm text-muted-foreground">{event.title}</p>
-          <h1 className="text-xl font-bold">Chatroom Management</h1>
+          <h1 className="text-xl font-bold">Chatroom Messaging</h1>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" asChild size="sm">
-            <Link href={`/dashboard/events/${eventId}`}>Edit Event</Link>
+            <Link href="/dashboard/chatrooms">Back to Chatrooms</Link>
           </Button>
           <Button variant="outline" asChild size="sm">
-            <Link href="/dashboard/events">All Events</Link>
+            <Link href={`/dashboard/events/${eventId}`}>Edit Event</Link>
           </Button>
         </div>
       </div>

@@ -15,9 +15,9 @@ import { Card, CardContent } from "@/components/ui/card"
 const highlightCards = [
   {
     icon: IconChartHistogram,
-    title: "Investor Reporting",
+    title: "Platform Reporting",
     description:
-      "Track activation, retention proxies, host velocity, attendance, and demand signals in one view.",
+      "Track user activity, event supply, attendance, and demand signals in one reporting layer.",
   },
   {
     icon: IconMicrophone2,
@@ -29,13 +29,13 @@ const highlightCards = [
     icon: IconBuildingStore,
     title: "Venue Performance",
     description:
-      "Surface venue-level attendance, fill rate, demand, and event mix so owners understand what is working.",
+      "Surface venue attendance, fill rate, demand, and event mix so owners can see what is working.",
   },
 ]
 
 const pilotMetrics = [
-  { label: "Platform Pulse", value: "Live demand, activity, and host momentum" },
-  { label: "Export Ready", value: "Investor snapshots and operator CSV downloads" },
+  { label: "Platform Pulse", value: "Live demand, attendance, and operator activity" },
+  { label: "Export Ready", value: "CSV downloads for platform, organiser, and venue reporting" },
   { label: "Role Based", value: "Separate views for admin, organisers, and venue owners" },
 ]
 
@@ -49,7 +49,7 @@ export default function Home() {
           <BrandLogo showTagline />
           <div className="flex flex-wrap items-center gap-3">
             <Badge className="brand-chip rounded-full px-3 py-1 font-medium">
-              MVP investor narrative
+              Role-based reporting
             </Badge>
             <Button
               asChild
@@ -69,12 +69,12 @@ export default function Home() {
               </Badge>
               <div className="space-y-4">
                 <h1 className="max-w-3xl text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl">
-                  A sharper control room for growth, attendance, and host performance.
+                  A sharper control room for events, venues, and audience activity.
                 </h1>
                 <p className="max-w-2xl text-base leading-7 text-white/68 sm:text-lg">
-                  The admin surface now frames Blend&apos;n as a live marketplace: investor-level
-                  traction signals for the platform, operational analytics for organisers, and
-                  venue intelligence that turns events into measurable performance.
+                  Blend&apos;n brings platform reporting, organiser operations, and venue
+                  performance into one workspace so every team can manage what is live and review
+                  what is working.
                 </p>
               </div>
             </div>
@@ -126,7 +126,7 @@ export default function Home() {
                       What changes here
                     </p>
                     <h2 className="mt-2 text-2xl font-semibold brand-gradient-text">
-                      A dashboard built for proof, not placeholders.
+                      A dashboard built for live operations and clear reporting.
                     </h2>
                   </div>
                   <div className="rounded-full border border-white/12 bg-white/6 p-3">

@@ -1,7 +1,5 @@
-import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 import { EventEditor } from "@/components/event-editor"
-import { Button } from "@/components/ui/button"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { canManageEvent } from "@/lib/rbac"
@@ -70,19 +68,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
   const primaryCategory = event.categories.find((entry) => entry.primary)?.category?.id
 
   return (
-    <div>
-      {/* Messaging shortcut banner */}
-      <div className="border-b bg-muted/40 px-6 py-2 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Send announcements or set up sponsored messages for the chatroom
-        </p>
-        <Button size="sm" variant="outline" asChild>
-          <Link href={`/dashboard/events/${resolvedParams.id}/messaging`}>
-            Chatroom Messaging
-          </Link>
-        </Button>
-      </div>
-      <EventEditor
+    <EventEditor
       categories={categories}
       initialEvent={{
         id: event.id,
@@ -125,6 +111,5 @@ export default async function EditEventPage({ params }: EventPageProps) {
         })),
       }}
     />
-    </div>
   )
 }
