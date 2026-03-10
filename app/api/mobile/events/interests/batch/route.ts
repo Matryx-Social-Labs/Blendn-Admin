@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, createBatchRateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
@@ -14,6 +15,9 @@ const batchInterestsSchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
+  const rateLimitResult = rateLimit(request, createBatchRateLimit())
+  if (rateLimitResult) return rateLimitResult
+
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {

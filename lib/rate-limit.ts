@@ -71,6 +71,16 @@ export function rateLimit(
 }
 
 /**
+ * Create a rate limit configuration for batch endpoints
+ */
+export function createBatchRateLimit(): RateLimitConfig {
+  return {
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 30,
+  }
+}
+
+/**
  * Create a rate limit configuration for auth endpoints
  */
 export function createAuthRateLimit(
