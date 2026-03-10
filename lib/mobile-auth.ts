@@ -4,16 +4,11 @@ import bcrypt from "bcryptjs"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
 
-let cachedJwtSecret: string | null = null
 function getJwtSecret(): string {
-  if (cachedJwtSecret) {
-    return cachedJwtSecret
-  }
   const secret = process.env.MOBILE_JWT_SECRET
   if (!secret) {
     throw new Error("MOBILE_JWT_SECRET environment variable is not set")
   }
-  cachedJwtSecret = secret
   return secret
 }
 const GOOGLE_CLIENT_IDS = [
