@@ -435,17 +435,21 @@ export async function GET(request: NextRequest) {
       orderBy = { start_time: "asc" }
     }
 
-    // Fetch events
-    let events = await db.events.findMany({
-      where,
-      select: eventSelect,
-      orderBy,
-      ...(shouldSortByDistance
-        ? {}
-        : { skip: (page - 1) * limit, take: limit }),
-    })
+    // Fetch events and count in parallel
+    const [eventsResult, totalCountResult] = await Promise.all([
+      db.events.findMany({
+        where,
+        select: eventSelect,
+        orderBy,
+        ...(shouldSortByDistance
+          ? {}
+          : { skip: (page - 1) * limit, take: limit }),
+      }),
+      db.events.count({ where }),
+    ])
 
-    let totalCount = await db.events.count({ where })
+    let events = eventsResult
+    let totalCount = totalCountResult
 
     // If sorting by distance and coordinates provided, calculate distances and sort
     if (shouldSortByDistance) {
@@ -545,12 +549,28 @@ export async function GET(request: NextRequest) {
         })
       : Promise.resolve(null)
 
-    const [userFavorites, userCheckins, activeCheckins, profile] =
+    const interestedPreviewPromise = includeSet.has("interestedPreview")
+      ? db.event_favorites.findMany({
+          where: {
+            event_id: { in: eventIds },
+          },
+          select: {
+            event_id: true,
+            user: {
+              select: { image: true },
+            },
+          },
+          orderBy: { created_at: "desc" },
+        })
+      : Promise.resolve([])
+
+    const [userFavorites, userCheckins, activeCheckins, profile, interestedFavorites] =
       await Promise.all([
         userFavoritesPromise,
         userCheckinsPromise,
         activeCheckinsPromise,
         profilePromise,
+        interestedPreviewPromise,
       ])
 
     const favoriteEventIds = new Set(userFavorites.map((f) => f.event_id))
@@ -571,20 +591,8 @@ export async function GET(request: NextRequest) {
 
     const interestedPreviewMap: Record<string, string[]> = {}
     if (includeSet.has("interestedPreview")) {
-      const favorites = await db.event_favorites.findMany({
-        where: {
-          event_id: { in: eventIds },
-        },
-        select: {
-          event_id: true,
-          user: {
-            select: { image: true },
-          },
-        },
-        orderBy: { created_at: "desc" },
-      })
       const counts: Record<string, number> = {}
-      for (const fav of favorites) {
+      for (const fav of interestedFavorites) {
         const img = fav.user?.image
         if (!img) continue
         if (!interestedPreviewMap[fav.event_id]) {
