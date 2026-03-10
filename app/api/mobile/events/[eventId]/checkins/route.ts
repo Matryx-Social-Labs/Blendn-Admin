@@ -38,19 +38,31 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("Event not found")
     }
 
-    // Get total count
+    // Get total count — same completeness filter as the list query below
+    const profileCompletedFilter = {
+      user: {
+        profile: {
+          onboarded: true,
+          name: { not: null },
+          photos: { isEmpty: false },
+        },
+      },
+    }
+
     const totalCount = await db.event_check_ins.count({
       where: {
         event_id: eventId,
         status: "checked_in",
+        ...profileCompletedFilter,
       },
     })
 
-    // Fetch check-ins with user info
+    // Fetch check-ins with user info — Fix #34: only include users with completed profiles
     const checkIns = await db.event_check_ins.findMany({
       where: {
         event_id: eventId,
         status: "checked_in",
+        ...profileCompletedFilter,
       },
       include: {
         user: {

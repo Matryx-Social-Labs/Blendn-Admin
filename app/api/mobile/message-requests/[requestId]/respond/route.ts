@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { sendPushNotification } from "@/lib/push-notifications"
 import {
   successResponse,
   unauthorizedResponse,
@@ -105,6 +106,30 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         },
       })
       conversationId = conversation.id
+    }
+
+    // Notify the original sender of the response (async, don't await)
+    if (action === "accept" || action === "decline") {
+      // We need the responder's name — fetch it
+      const responder = await db.user.findUnique({
+        where: { id: authUser.userId },
+        select: { name: true },
+      })
+      const responderName = responder?.name || "Someone"
+
+      sendPushNotification({
+        userId: messageRequest.sender_id,
+        title: action === "accept" ? "Message request accepted 🎉" : "Message request declined",
+        body: action === "accept"
+          ? `${responderName} accepted your message request`
+          : `${responderName} declined your message request`,
+        data: {
+          type: "message_request_response",
+          requestId,
+          conversationId: conversationId ?? undefined,
+        },
+        channelId: "messages",
+      }).catch(() => {})
     }
 
     return successResponse({

@@ -92,6 +92,19 @@ export async function POST(req: Request) {
       return new NextResponse("Missing required fields", { status: 400 })
     }
 
+    // Fix #31: Validate capacity fields
+    if (max_capacity !== undefined && max_capacity !== null) {
+      if (!Number.isInteger(max_capacity) || max_capacity < 1) {
+        return new NextResponse("max_capacity must be a positive integer", { status: 400 })
+      }
+      if (max_capacity > 100_000) {
+        return new NextResponse("max_capacity cannot exceed 100,000", { status: 400 })
+      }
+    }
+    if (current_capacity !== undefined && current_capacity < 0) {
+      return new NextResponse("current_capacity cannot be negative", { status: 400 })
+    }
+
     const resolvedFullDescription = full_description || description
     if (!resolvedFullDescription) {
       return new NextResponse("Missing full description", { status: 400 })

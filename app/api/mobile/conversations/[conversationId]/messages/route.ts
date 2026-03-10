@@ -152,6 +152,25 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Not authorized to send messages to this conversation")
     }
 
+    // Check if the recipient has blocked the sender
+    const recipientId =
+      conversation.user1_id === authUser.userId
+        ? conversation.user2_id
+        : conversation.user1_id
+
+    const isBlocked = await db.blocked_users.findFirst({
+      where: {
+        blocker_id: recipientId,
+        blocked_id: authUser.userId,
+      },
+      select: { id: true },
+    })
+
+    if (isBlocked) {
+      // Return forbidden without leaking which direction the block is in
+      return forbiddenResponse("You cannot send messages to this user")
+    }
+
     // Create the message
     const message = await db.private_messages.create({
       data: {
@@ -177,12 +196,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       where: { id: conversationId },
       data: { last_message_at: new Date(), updated_at: new Date() },
     })
-
-    // Determine recipient
-    const recipientId =
-      conversation.user1_id === authUser.userId
-        ? conversation.user2_id
-        : conversation.user1_id
 
     // Emit via Socket.io
     const messageData = {

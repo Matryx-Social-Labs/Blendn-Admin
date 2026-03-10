@@ -56,8 +56,15 @@ model User {
   sent_message_requests     message_requests[] @relation("MessageRequestSender")
   received_message_requests message_requests[] @relation("MessageRequestRecipient")
 
+  // Blocking
+  blocked_users   blocked_users[] @relation("BlockedByUser")
+  blocked_by      blocked_users[] @relation("BlockedUser")
+
   // Announcements
   sent_announcements        event_announcements[]
+
+  // RSVPs
+  event_rsvps               event_rsvps[]
 }
 
 model Account {
@@ -100,6 +107,7 @@ model VerificationToken {
 model profiles {
   id           String   @id
   phone        String?
+  // Canonical display name — always read from here, not from User.name
   name         String?
   age          Int?
   location     String?
@@ -109,8 +117,7 @@ model profiles {
   interests    String[]
   photos       String[]
   onboarded    Boolean  @default(false)
-  push_token   String?  // Expo push notification token
-  push_platform String? // 'ios' or 'android'
+  // push_token and push_platform removed — use push_tokens table instead
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   updated_at   DateTime @default(now()) @db.Timestamptz(6)
   user         User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -160,6 +167,7 @@ model events {
   recurring_pattern    recurring_events?
   sponsored_messages   event_sponsored_messages[]
   announcements        event_announcements[]
+  rsvps                event_rsvps[]
 
   @@index([latitude, longitude])
   @@index([status, start_time])
@@ -332,6 +340,7 @@ model chat_group_members {
   user                   User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([chat_group_id, user_id])
+  @@unique([chat_group_id, anonymous_name])
   @@index([user_id])
   @@index([user_id, status])
 }
@@ -506,7 +515,29 @@ model private_messages {
   @@index([created_at])
 }
 
+model event_rsvps {
+  id         String      @id @default(uuid()) @db.Uuid
+  event_id   String      @db.Uuid
+  user_id    String
+  status     rsvp_status @default(going)
+  created_at DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at DateTime    @default(now()) @db.Timestamptz(6)
+
+  event      events      @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([event_id])
+  @@index([user_id])
+}
+
 // Enums
+enum rsvp_status {
+  going
+  maybe
+  not_going
+}
+
 enum event_status {
   draft
   published
@@ -613,19 +644,34 @@ model event_announcements {
 
 // Audit Logs
 model audit_logs {
-  id         String   @id @default(uuid()) @db.Uuid
-  user_id    String?
-  action     String
-  resource   String
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String?
+  action      String
+  resource    String
   resource_id String?
-  details    Json?
-  ip_address String?
-  created_at DateTime @default(now()) @db.Timestamptz(6)
+  details     Json?
+  ip_address  String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([user_id])
   @@index([action])
   @@index([resource])
   @@index([created_at])
+}
+
+// Blocked Users
+model blocked_users {
+  id         String   @id @default(uuid()) @db.Uuid
+  blocker_id String
+  blocked_id String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  blocker    User     @relation("BlockedByUser", fields: [blocker_id], references: [id], onDelete: Cascade)
+  blocked    User     @relation("BlockedUser", fields: [blocked_id], references: [id], onDelete: Cascade)
+
+  @@unique([blocker_id, blocked_id])
+  @@index([blocker_id])
+  @@index([blocked_id])
 }
 
 // Message Requests

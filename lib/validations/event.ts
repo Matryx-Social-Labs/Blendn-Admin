@@ -43,9 +43,13 @@ export const checkinSchema = z.object({
       platform: z.string().optional(),
       device: z.string().optional(),
       appVersion: z.string().optional(),
+      gpsAccuracy: z.number().optional(), // accuracy radius in metres
     })
     .optional(),
 })
+
+// Maximum acceptable GPS accuracy (metres). Submissions worse than this are rejected.
+export const MAX_GPS_ACCURACY_METERS = 150
 
 export const ratingSchema = z.object({
   rating: z.number().int().min(1).max(5),

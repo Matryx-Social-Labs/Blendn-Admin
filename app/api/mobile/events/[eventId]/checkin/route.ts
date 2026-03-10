@@ -4,6 +4,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
+import { rateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   validationErrorResponse,
@@ -12,7 +13,7 @@ import {
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { checkinSchema } from "@/lib/validations/event"
+import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 
 interface RouteParams {
@@ -20,6 +21,17 @@ interface RouteParams {
 }
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
+  // Rate limit: max 10 check-in attempts per user per 10 minutes
+  const rateLimited = rateLimit(request, {
+    windowMs: 10 * 60 * 1000,
+    maxRequests: 10,
+    keyGenerator: (req) => {
+      const auth = req.headers.get("authorization") || "anon"
+      return `checkin:${auth.slice(-16)}`
+    },
+  })
+  if (rateLimited) return rateLimited
+
   try {
     const { eventId } = await params
 
@@ -38,6 +50,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const { latitude, longitude, deviceInfo } = parsed.data
+
+    // Reject submissions with poor GPS accuracy to prevent spoofing
+    const gpsAccuracy = deviceInfo?.gpsAccuracy
+    if (gpsAccuracy !== undefined && gpsAccuracy > MAX_GPS_ACCURACY_METERS) {
+      return errorResponse(
+        `GPS signal is too weak (accuracy: ${Math.round(gpsAccuracy)}m). Move to an area with better signal and try again.`
+      )
+    }
 
     // Fetch event
     const event = await db.events.findUnique({
@@ -81,77 +101,97 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Atomic check-in: capacity check + check-in creation in a single transaction
-    const { checkIn } = await db.$transaction(async (tx) => {
-      // Check for existing check-in first
-      const existing = await tx.event_check_ins.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
-      })
-
-      const alreadyCheckedIn = existing?.status === "checked_in"
-
-      // Re-fetch event inside transaction for accurate capacity
-      const freshEvent = await tx.events.findUnique({
-        where: { id: eventId },
-        select: { max_capacity: true, current_capacity: true },
-      })
-
-      if (
-        !alreadyCheckedIn &&
-        freshEvent?.max_capacity &&
-        freshEvent.current_capacity >= freshEvent.max_capacity
-      ) {
-        throw new Error("CAPACITY_FULL")
-      }
-
-      // Create or update check-in
-      const result = await tx.event_check_ins.upsert({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
-        create: {
-          event_id: eventId,
-          user_id: authUser.userId,
-          status: "checked_in",
-          check_in_time: now,
-          latitude,
-          longitude,
-          device_info: deviceInfo,
-        },
-        update: {
-          status: "checked_in",
-          check_in_time: now,
-          latitude,
-          longitude,
-          device_info: deviceInfo,
-          updated_at: now,
-        },
-      })
-
-      // Only increment capacity for new check-ins or re-check-ins (not already checked in)
-      if (!alreadyCheckedIn) {
-        await tx.events.update({
-          where: { id: eventId },
-          data: {
-            current_capacity: {
-              increment: 1,
-            },
-          },
-        })
-      }
-
-      return { checkIn: result }
+    // Fix #25: Prevent checking in to multiple events simultaneously.
+    // If the user is already checked in elsewhere, check them out first.
+    const otherActiveCheckIn = await db.event_check_ins.findFirst({
+      where: {
+        user_id: authUser.userId,
+        status: "checked_in",
+        event_id: { not: eventId },
+      },
+      select: { id: true, event_id: true },
     })
 
-    // If capacity was full, the transaction threw — catch it below
+    if (otherActiveCheckIn) {
+      // Auto-checkout from the other event
+      await db.event_check_ins.update({
+        where: { id: otherActiveCheckIn.id },
+        data: { status: "checked_out", check_out_time: now, updated_at: now },
+      })
+      await db.$executeRaw`
+        UPDATE events
+        SET current_capacity = GREATEST(0, current_capacity - 1)
+        WHERE id = ${otherActiveCheckIn.event_id}
+      `
+      // Close chat access for the other event
+      const otherChatGroup = await db.chat_groups.findUnique({
+        where: { event_id: otherActiveCheckIn.event_id },
+        select: { id: true },
+      })
+      if (otherChatGroup) {
+        await db.chat_group_members.updateMany({
+          where: { chat_group_id: otherChatGroup.id, user_id: authUser.userId },
+          data: { last_allowed_at: now, updated_at: now },
+        })
+      }
+    }
+
+    // Find existing check-in record to determine if this is a new, returning, or duplicate check-in
+    const existingCheckIn = await db.event_check_ins.findUnique({
+      where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
+      select: { id: true, status: true },
+    })
+
+    const isAlreadyCheckedIn = existingCheckIn?.status === "checked_in"
+    const needsCapacityIncrement = !isAlreadyCheckedIn // new or returning attendee
+
+    // Atomically check capacity and increment in one SQL statement to prevent overbooking.
+    // Only runs for new or returning (checked_out) attendees — already-checked-in users don't count twice.
+    if (needsCapacityIncrement && event.max_capacity) {
+      const updated = await db.$executeRaw`
+        UPDATE events
+        SET current_capacity = current_capacity + 1
+        WHERE id = ${eventId}
+          AND current_capacity < max_capacity
+      `
+      if (updated === 0) {
+        return errorResponse("Event is at full capacity")
+      }
+    } else if (needsCapacityIncrement) {
+      // No max_capacity — increment freely
+      await db.events.update({
+        where: { id: eventId },
+        data: { current_capacity: { increment: 1 } },
+      })
+    }
+
+    // Create or update check-in record
+    const checkIn = await db.event_check_ins.upsert({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: authUser.userId,
+        },
+      },
+      create: {
+        event_id: eventId,
+        user_id: authUser.userId,
+        status: "checked_in",
+        check_in_time: now,
+        latitude,
+        longitude,
+        device_info: deviceInfo,
+      },
+      update: {
+        status: "checked_in",
+        check_in_time: now,
+        latitude,
+        longitude,
+        device_info: deviceInfo,
+        updated_at: now,
+      },
+    })
+
 
     // Ensure chat group exists and add user
     let chatGroup = await db.chat_groups.findUnique({

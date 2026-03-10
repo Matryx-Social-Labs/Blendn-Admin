@@ -446,55 +446,61 @@ export async function GET(request: NextRequest) {
     }
 
     // Build orderBy
-    let orderBy: Record<string, string> = {}
-    if (!shouldSortByDistance) {
-      orderBy[sortBy] = sortOrder
-    } else {
-      // Default sort for distance sorting (we'll sort in memory)
-      orderBy = { start_time: "asc" }
-    }
+    const orderBy: Record<string, string> = shouldSortByDistance
+      ? { start_time: "asc" }
+      : { [sortBy]: sortOrder }
 
-    // Fetch events and count in parallel
-    const [eventsResult, totalCountResult] = await Promise.all([
-      db.events.findMany({
-        where,
-        select: eventSelect,
-        orderBy,
-        ...(shouldSortByDistance
-          ? {}
-          : { skip: (page - 1) * limit, take: limit }),
-      }),
-      db.events.count({ where }),
-    ])
+    let events: EventListItem[]
+    let totalCount: number
 
-    let events = eventsResult
-    let totalCount = totalCountResult
 
-    // If sorting by distance and coordinates provided, calculate distances and sort
     if (shouldSortByDistance) {
-      const withDistance = events
-        .map((event) => ({
-          ...event,
+      // Fetch only id + coordinates to sort by distance in-memory, avoiding loading
+      // full relations for all rows. Only the page's worth of events get the full select.
+      const lightweight = await db.events.findMany({
+        where,
+        select: { id: true, latitude: true, longitude: true },
+      })
+
+      const withDistance = lightweight
+        .map((e) => ({
+          id: e.id,
           distance:
-            event.latitude && event.longitude
-              ? haversineDistance(lat, lon, event.latitude, event.longitude)
+            e.latitude && e.longitude
+              ? haversineDistance(lat, lon, e.latitude, e.longitude)
               : null,
         }))
-        .filter(
-          (event) => event.distance === null || event.distance <= radius
-        )
+        .filter((e) => e.distance === null || e.distance <= radius)
         .sort((a, b) => {
           if (a.distance === null) return 1
           if (b.distance === null) return -1
           return sortOrder === "asc"
             ? a.distance - b.distance
             : b.distance - a.distance
-        }) as typeof events
+        })
 
       totalCount = withDistance.length
-      const start = (page - 1) * limit
-      const end = start + limit
-      events = withDistance.slice(start, end) as typeof events
+      const pageIds = withDistance
+        .slice((page - 1) * limit, page * limit)
+        .map((e) => e.id)
+
+      // Fetch full data only for the current page's events
+      const pageEvents = await db.events.findMany({
+        where: { id: { in: pageIds } },
+        select: eventSelect,
+      })
+      // Restore distance order (findMany with `in` doesn't preserve order)
+      const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
+      events = pageIds.map((id) => eventMap.get(id)!).filter(Boolean)
+    } else {
+      events = await db.events.findMany({
+        where,
+        select: eventSelect,
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+      })
+      totalCount = await db.events.count({ where })
     }
 
     setCache(cacheKey, {

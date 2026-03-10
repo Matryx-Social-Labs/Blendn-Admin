@@ -27,6 +27,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const searchParams = request.nextUrl.searchParams
     const page = parseInt(searchParams.get("page") || "1")
     const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100)
+    // Fix #20: 'upcoming' (default) shows only future events; 'past' shows completed ones
+    const timeFilter = searchParams.get("timeFilter") || "upcoming"
     const userLat = searchParams.get("lat")
       ? parseFloat(searchParams.get("lat")!)
       : undefined
@@ -34,13 +36,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ? parseFloat(searchParams.get("lon")!)
       : undefined
 
+    const now = new Date()
+    const eventTimeFilter =
+      timeFilter === "past"
+        ? { end_time: { lt: now } }
+        : { end_time: { gte: now } }
+
+    const eventWhereClause = {
+      deleted_at: null,
+      ...eventTimeFilter,
+    }
+
     // Get total count
     const totalCount = await db.event_favorites.count({
       where: {
         user_id: userId,
-        event: {
-          deleted_at: null,
-        },
+        event: eventWhereClause,
       },
     })
 
@@ -48,9 +59,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const favorites = await db.event_favorites.findMany({
       where: {
         user_id: userId,
-        event: {
-          deleted_at: null,
-        },
+        event: eventWhereClause,
       },
       include: {
         event: {
@@ -146,6 +155,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return successResponse({
       events,
+      timeFilter,
       pagination: {
         page,
         limit,

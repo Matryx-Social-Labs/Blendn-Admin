@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
 import { emitEventCheckOut } from "@/lib/socket-server"
+import { rateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   errorResponse,
@@ -14,6 +15,17 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ eventId: string }> }
 ) {
+  // Rate limit: max 10 checkouts per user per 10 minutes
+  const rateLimited = rateLimit(request, {
+    windowMs: 10 * 60 * 1000,
+    maxRequests: 10,
+    keyGenerator: (req) => {
+      const auth = req.headers.get("authorization") || "anon"
+      return `checkout:${auth.slice(-16)}`
+    },
+  })
+  if (rateLimited) return rateLimited
+
   try {
     const user = await getAuthenticatedUser(request)
     if (!user) {
@@ -83,6 +95,13 @@ export async function POST(
         },
       },
     })
+
+    // Decrement event capacity (never below 0)
+    await db.$executeRaw`
+      UPDATE events
+      SET current_capacity = GREATEST(0, current_capacity - 1)
+      WHERE id = ${eventId}
+    `
 
     // Emit real-time event
     emitEventCheckOut(eventId, user.userId)

@@ -4,6 +4,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyGroupMessage } from "@/lib/push-notifications"
+import { rateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   errorResponse,
@@ -171,6 +172,18 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ chatGroupId: string }> }
 ) {
+  // Rate limit: max 30 messages per user per minute per group
+  const rateLimited = rateLimit(request, {
+    windowMs: 60 * 1000,
+    maxRequests: 30,
+    keyGenerator: (req) => {
+      const auth = req.headers.get("authorization") || "anon"
+      const url = req.nextUrl.pathname
+      return `groupmsg:${auth.slice(-16)}:${url}`
+    },
+  })
+  if (rateLimited) return rateLimited
+
   try {
     const user = await getAuthenticatedUser(request)
     if (!user) {
@@ -221,6 +234,11 @@ export async function POST(
     }
     if (membership.status === "banned") {
       return forbiddenResponse("You are banned from this chat group")
+    }
+
+    // Enforce chat access cutoff — users lose write access when they check out
+    if (membership.last_allowed_at && membership.last_allowed_at < new Date()) {
+      return forbiddenResponse("You must be checked in to send messages in this event chat")
     }
 
     // Check if chat group is locked

@@ -1,12 +1,14 @@
 import { NextRequest } from "next/server"
-import { Prisma } from "@prisma/client"
+import { Prisma, event_status } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import {
   successResponse,
+  errorResponse,
   unauthorizedResponse,
+  forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -88,6 +90,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
             favorites: true,
             ratings: true,
+            rsvps: {
+              where: { status: "going" },
+            },
           },
         },
       },
@@ -122,7 +127,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           })
         : Promise.resolve([])
 
-    const [userFavorite, userRating, userCheckIn, interestedUsers] =
+    const [userFavorite, userRating, userCheckIn, userRsvp, interestedUsers] =
       await Promise.all([
         db.event_favorites.findUnique({
           where: {
@@ -141,6 +146,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           },
         }),
         db.event_check_ins.findUnique({
+          where: {
+            event_id_user_id: {
+              event_id: eventId,
+              user_id: authUser.userId,
+            },
+          },
+        }),
+        db.event_rsvps.findUnique({
           where: {
             event_id_user_id: {
               event_id: eventId,
@@ -234,6 +247,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         favoriteCount: event._count.favorites,
         ratingCount: event._count.ratings,
         averageRating: avgRating._avg.rating,
+        rsvpCount: event._count.rsvps,
       },
       userStatus: {
         isFavorited: !!userFavorite,
@@ -241,6 +255,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         checkInStatus: userCheckIn?.status || null,
         userRating: userRating?.rating || null,
         userReview: userRating?.review || null,
+        rsvpStatus: userRsvp?.status || null,
       },
       distance,
       ...(includeSet.has("interestedUsers") && {
@@ -254,5 +269,112 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     console.error("Get event error:", error)
     return serverErrorResponse("Failed to get event")
+  }
+}
+
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { eventId } = await params
+
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) {
+      return unauthorizedResponse("Authentication required")
+    }
+
+    // Validate eventId is a valid UUID
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(eventId)) {
+      return errorResponse("Invalid event ID format", 400)
+    }
+
+    // Fetch event to verify ownership
+    const event = await db.events.findUnique({
+      where: { id: eventId, deleted_at: null },
+      select: { id: true, organizer_id: true },
+    })
+
+    if (!event) {
+      return notFoundResponse("Event not found")
+    }
+
+    if (event.organizer_id !== authUser.userId) {
+      return forbiddenResponse("You are not the organizer of this event")
+    }
+
+    const body = await request.json()
+    const { title, description, shortDescription, status } = body as {
+      title?: string
+      description?: string
+      shortDescription?: string
+      status?: string
+    }
+
+    const updated = await db.events.update({
+      where: { id: eventId },
+      data: {
+        ...(title !== undefined && { title }),
+        ...(description !== undefined && { description }),
+        ...(shortDescription !== undefined && {
+          short_description: shortDescription,
+        }),
+        ...(status !== undefined && { status: status as event_status }),
+        updated_at: new Date(),
+      },
+    })
+
+    return successResponse({
+      id: updated.id,
+      title: updated.title,
+      description: updated.description,
+      shortDescription: updated.short_description,
+      status: updated.status,
+    })
+  } catch (error) {
+    console.error("Update event error:", error)
+    return serverErrorResponse("Failed to update event")
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { eventId } = await params
+
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) {
+      return unauthorizedResponse("Authentication required")
+    }
+
+    // Validate eventId is a valid UUID
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(eventId)) {
+      return errorResponse("Invalid event ID format", 400)
+    }
+
+    // Fetch event to verify ownership
+    const event = await db.events.findUnique({
+      where: { id: eventId, deleted_at: null },
+      select: { id: true, organizer_id: true },
+    })
+
+    if (!event) {
+      return notFoundResponse("Event not found")
+    }
+
+    if (event.organizer_id !== authUser.userId) {
+      return forbiddenResponse("You are not the organizer of this event")
+    }
+
+    // Soft delete
+    await db.events.update({
+      where: { id: eventId },
+      data: { deleted_at: new Date() },
+    })
+
+    return successResponse({ success: true })
+  } catch (error) {
+    console.error("Delete event error:", error)
+    return serverErrorResponse("Failed to delete event")
   }
 }

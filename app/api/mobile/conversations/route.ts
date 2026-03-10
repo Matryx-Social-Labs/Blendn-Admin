@@ -56,6 +56,16 @@ export async function GET(request: NextRequest) {
             is_read: true,
           },
         },
+        _count: {
+          select: {
+            messages: {
+              where: {
+                is_read: false,
+                sender_id: { not: authUser.userId },
+              },
+            },
+          },
+        },
       },
       orderBy: {
         last_message_at: "desc",
@@ -66,9 +76,6 @@ export async function GET(request: NextRequest) {
     const formattedConversations = conversations.map((conv) => {
       const otherUser = conv.user1_id === authUser.userId ? conv.user2 : conv.user1
       const lastMessage = conv.messages[0] || null
-      const unreadCount = conv.messages.filter(
-        (m) => !m.is_read && m.sender_id !== authUser.userId
-      ).length
 
       return {
         id: conv.id,
@@ -86,7 +93,7 @@ export async function GET(request: NextRequest) {
               isRead: lastMessage.is_read,
             }
           : null,
-        unreadCount,
+        unreadCount: conv._count.messages,
         updatedAt: conv.last_message_at || conv.created_at,
       }
     })

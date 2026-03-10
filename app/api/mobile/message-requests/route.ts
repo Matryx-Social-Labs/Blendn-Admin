@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { sendPushNotification } from "@/lib/push-notifications"
 import {
   successResponse,
   unauthorizedResponse,
@@ -48,6 +49,22 @@ export async function POST(request: NextRequest) {
       return notFoundResponse("User not found")
     }
 
+    // Check if either user has blocked the other
+    const blockExists = await db.blocked_users.findFirst({
+      where: {
+        OR: [
+          { blocker_id: authUser.userId, blocked_id: recipientId },
+          { blocker_id: recipientId, blocked_id: authUser.userId },
+        ],
+      },
+      select: { blocker_id: true },
+    })
+
+    if (blockExists) {
+      // Return generic not-found to avoid leaking block status to the sender
+      return notFoundResponse("User not found")
+    }
+
     // Check if a request already exists between these users (in either direction)
     const existingRequest = await db.message_requests.findFirst({
       where: {
@@ -82,6 +99,13 @@ export async function POST(request: NextRequest) {
       return conflictResponse("You already have a conversation with this user")
     }
 
+    // Fetch sender name for push notification (authUser doesn't carry name)
+    const sender = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { name: true },
+    })
+    const senderName = sender?.name || "Someone"
+
     // Create the message request
     const messageRequest = await db.message_requests.create({
       data: {
@@ -100,6 +124,17 @@ export async function POST(request: NextRequest) {
         },
       },
     })
+
+    // Notify recipient of new message request (async, don't await)
+    sendPushNotification({
+      userId: recipientId,
+      title: "New message request",
+      body: message
+        ? `${senderName}: ${message.slice(0, 80)}`
+        : `${senderName} wants to connect`,
+      data: { type: "message_request", requestId: messageRequest.id },
+      channelId: "messages",
+    }).catch(() => {})
 
     return successResponse(
       {

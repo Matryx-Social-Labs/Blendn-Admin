@@ -16,6 +16,19 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
+    // Fix #21: Archive chat groups whose event ended more than 24 hours ago.
+    // Runs in the background — doesn't block the response.
+    const archiveCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    db.chat_groups.updateMany({
+      where: {
+        status: "active",
+        event: {
+          end_time: { lt: archiveCutoff },
+        },
+      },
+      data: { status: "archived" },
+    }).catch((err: unknown) => console.error("Auto-archive chat groups failed:", err))
+
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
     const page = parseInt(searchParams.get("page") || "1")

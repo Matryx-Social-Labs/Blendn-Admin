@@ -106,6 +106,22 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
+    // Fix #31: Validate capacity fields on update
+    if (max_capacity !== undefined && max_capacity !== null) {
+      if (!Number.isInteger(max_capacity) || max_capacity < 1) {
+        return new NextResponse("max_capacity must be a positive integer", { status: 400 })
+      }
+      if (max_capacity > 100_000) {
+        return new NextResponse("max_capacity cannot exceed 100,000", { status: 400 })
+      }
+    }
+    if (current_capacity !== undefined && current_capacity < 0) {
+      return new NextResponse("current_capacity cannot be negative", { status: 400 })
+    }
+
+    // Fix #35: When cancelling an event, cascade to active check-ins
+    const isCancelling = status === "cancelled" && event.status !== "cancelled"
+
     const updatedEvent = await db.events.update({
       where: { id: resolvedParams.id },
       data: {
@@ -197,6 +213,17 @@ export async function PATCH(req: Request, { params }: RouteContext) {
           : undefined,
       },
     })
+
+    // Fix #35: Cancel all pending/checked_in check-ins when event is cancelled
+    if (isCancelling) {
+      await db.event_check_ins.updateMany({
+        where: {
+          event_id: resolvedParams.id,
+          status: { in: ["pending", "checked_in"] },
+        },
+        data: { status: "cancelled", updated_at: new Date() },
+      })
+    }
 
     return NextResponse.json(updatedEvent)
   } catch (error) {
