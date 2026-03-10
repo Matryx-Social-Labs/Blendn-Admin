@@ -23,6 +23,20 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
   const origin = req.headers.get("origin")
 
+  // API versioning: rewrite /api/mobile/v1/* to /api/mobile/*
+  if (pathname.startsWith("/api/mobile/v1/") || pathname === "/api/mobile/v1") {
+    const rewritten = pathname.replace("/api/mobile/v1", "/api/mobile")
+    const url = req.nextUrl.clone()
+    url.pathname = rewritten
+    const response = NextResponse.rewrite(url)
+    response.headers.set("X-API-Version", "v1")
+    const corsHeaders = getCorsHeaders(origin)
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value)
+    })
+    return response
+  }
+
   // Handle CORS for mobile API routes
   if (pathname.startsWith("/api/mobile")) {
     const corsHeaders = getCorsHeaders(origin)
@@ -71,4 +85,5 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: ["/", "/dashboard/:path*", "/api/mobile/:path*", "/login"],
+  // Note: /api/mobile/v1/* is matched by /api/mobile/:path*
 }
