@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { db } from "@/lib/db"
 import {
   getPresignedUploadUrl,
   validateContentType,
@@ -43,6 +44,17 @@ export async function POST(request: NextRequest) {
     }
 
     const { filename, contentType, folder } = validation.data
+
+    // Restrict event uploads to organizers and admins
+    if (folder === "events") {
+      const dbUser = await db.user.findUnique({
+        where: { id: user.userId },
+        select: { role: true },
+      })
+      if (!dbUser || !["app_admin", "organizer", "venue_owner"].includes(dbUser.role)) {
+        return errorResponse("You do not have permission to upload event files", 403)
+      }
+    }
 
     // Validate content type for the folder
     if (!validateContentType(contentType, folder as UploadFolder)) {
