@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server"
-import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
@@ -11,70 +10,12 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { eventQuerySchema } from "@/lib/validations/event"
-
-const EVENTS_CACHE_TTL_MS = 30 * 1000
-const EVENTS_CACHE_MAX_SIZE = 100
-
-const eventSelect = {
-  id: true,
-  slug: true,
-  title: true,
-  short_description: true,
-  cover_image_url: true,
-  start_time: true,
-  end_time: true,
-  timezone: true,
-  venue_name: true,
-  address: true,
-  city: true,
-  state: true,
-  country: true,
-  latitude: true,
-  longitude: true,
-  status: true,
-  is_featured: true,
-  organizer: {
-    select: {
-      id: true,
-      name: true,
-      image: true,
-    },
-  },
-  categories: {
-    select: {
-      category: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          icon: true,
-        },
-      },
-    },
-  },
-  media: {
-    select: {
-      id: true,
-      url: true,
-      thumbnail_url: true,
-      type: true,
-      order: true,
-    },
-    orderBy: { order: "asc" },
-    take: 5,
-  },
-  _count: {
-    select: {
-      check_ins: {
-        where: { status: "checked_in" },
-      },
-      favorites: true,
-      ratings: true,
-    },
-  },
-} satisfies Prisma.eventsSelect
-
-type EventListItem = Prisma.eventsGetPayload<{ select: typeof eventSelect }>
+import {
+  eventListSelect,
+  type EventListItem,
+  transformEvents,
+} from "@/lib/services/events.service"
+import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
 
 // Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<
@@ -353,47 +294,15 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const transformedEvents = await Promise.all(
-        events.map(async (event) => ({
-          id: event.id,
-          slug: event.slug,
-          title: event.title,
-          shortDescription: event.short_description,
-          coverImageUrl: event.cover_image_url,
-          startTime: event.start_time,
-          endTime: event.end_time,
-          timezone: event.timezone,
-          venueName: event.venue_name,
-          address: event.address,
-          city: await resolveEventCity(event.city, event.latitude, event.longitude),
-          state: event.state,
-          country: event.country,
-          latitude: event.latitude,
-          longitude: event.longitude,
-          status: event.status,
-          isFeatured: event.is_featured,
-          organizer: event.organizer,
-          categories: event.categories.map((c) => c.category),
-          media: event.media,
-          checkInCount: event._count.check_ins,
-          favoriteCount: event._count.favorites,
-          ratingCount: event._count.ratings,
-          isFavorited: favoriteEventIds.has(event.id),
-          userCheckin: includeSet.has("checkins")
-            ? userCheckinMap[event.id] || { status: "none" }
-            : undefined,
-          interestedPreview: includeSet.has("interestedPreview")
-            ? interestedPreviewMap[event.id] || []
-            : undefined,
-          distance:
-            lat !== undefined &&
-            lon !== undefined &&
-            event.latitude &&
-            event.longitude
-              ? haversineDistance(lat, lon, event.latitude, event.longitude)
-              : null,
-        }))
-      )
+      const transformedEvents = await transformEvents(events, {
+        favoriteEventIds,
+        userCheckinMap,
+        interestedPreviewMap,
+        userLat: lat,
+        userLon: lon,
+        includeCheckins: includeSet.has("checkins"),
+        includeInterestedPreview: includeSet.has("interestedPreview"),
+      })
 
       const normalizedProfile = profile?.profile
         ? {
@@ -487,7 +396,7 @@ export async function GET(request: NextRequest) {
       // Fetch full data only for the current page's events
       const pageEvents = await db.events.findMany({
         where: { id: { in: pageIds } },
-        select: eventSelect,
+        select: eventListSelect,
       })
       // Restore distance order (findMany with `in` doesn't preserve order)
       const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
@@ -495,7 +404,7 @@ export async function GET(request: NextRequest) {
     } else {
       events = await db.events.findMany({
         where,
-        select: eventSelect,
+        select: eventListSelect,
         orderBy,
         skip: (page - 1) * limit,
         take: limit,
@@ -632,47 +541,15 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform response
-    const transformedEvents = await Promise.all(
-      events.map(async (event) => ({
-        id: event.id,
-        slug: event.slug,
-        title: event.title,
-        shortDescription: event.short_description,
-        coverImageUrl: event.cover_image_url,
-        startTime: event.start_time,
-        endTime: event.end_time,
-        timezone: event.timezone,
-        venueName: event.venue_name,
-        address: event.address,
-        city: await resolveEventCity(event.city, event.latitude, event.longitude),
-        state: event.state,
-        country: event.country,
-        latitude: event.latitude,
-        longitude: event.longitude,
-        status: event.status,
-        isFeatured: event.is_featured,
-        organizer: event.organizer,
-        categories: event.categories.map((c) => c.category),
-        media: event.media,
-        checkInCount: event._count.check_ins,
-        favoriteCount: event._count.favorites,
-        ratingCount: event._count.ratings,
-        isFavorited: favoriteEventIds.has(event.id),
-        userCheckin: includeSet.has("checkins")
-          ? userCheckinMap[event.id] || { status: "none" }
-          : undefined,
-        interestedPreview: includeSet.has("interestedPreview")
-          ? interestedPreviewMap[event.id] || []
-          : undefined,
-        distance:
-          lat !== undefined &&
-          lon !== undefined &&
-          event.latitude &&
-          event.longitude
-            ? haversineDistance(lat, lon, event.latitude, event.longitude)
-            : null,
-      }))
-    )
+    const transformedEvents = await transformEvents(events, {
+      favoriteEventIds,
+      userCheckinMap,
+      interestedPreviewMap,
+      userLat: lat,
+      userLon: lon,
+      includeCheckins: includeSet.has("checkins"),
+      includeInterestedPreview: includeSet.has("interestedPreview"),
+    })
 
     const normalizedProfile = profile?.profile
       ? {

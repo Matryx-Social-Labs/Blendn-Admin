@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
+import {
+  RATE_LIMIT_MAX_ENTRIES,
+  RATE_LIMIT_WINDOW,
+  RATE_LIMIT_MAX_REQUESTS,
+} from "@/lib/constants"
 
 interface RateLimitEntry {
   count: number
@@ -8,7 +13,6 @@ interface RateLimitEntry {
 // In-memory store with bounded size.
 // NOTE: This is per-process only. In a multi-worker deployment,
 // replace with Redis (e.g. ioredis) for shared state across workers.
-const RATE_LIMIT_MAX_ENTRIES = 10_000
 const rateLimitStore = new Map<string, RateLimitEntry>()
 
 interface RateLimitConfig {
@@ -89,8 +93,8 @@ export function rateLimit(
  */
 export function createBatchRateLimit(): RateLimitConfig {
   return {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 30,
+    windowMs: RATE_LIMIT_WINDOW.BATCH,
+    maxRequests: RATE_LIMIT_MAX_REQUESTS.BATCH,
   }
 }
 
@@ -102,8 +106,8 @@ export function createAuthRateLimit(
 ): RateLimitConfig {
   const configs: Record<string, RateLimitConfig> = {
     signin: {
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      maxRequests: 5,
+      windowMs: RATE_LIMIT_WINDOW.SIGNIN,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.SIGNIN,
       keyGenerator: (req) => {
         const ip = req.headers.get("x-forwarded-for") ||
                    req.headers.get("x-real-ip") ||
@@ -113,8 +117,8 @@ export function createAuthRateLimit(
       },
     },
     signup: {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      maxRequests: 3,
+      windowMs: RATE_LIMIT_WINDOW.SIGNUP,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.SIGNUP,
       keyGenerator: (req) => {
         const ip = req.headers.get("x-forwarded-for") ||
                    req.headers.get("x-real-ip") ||
@@ -123,8 +127,8 @@ export function createAuthRateLimit(
       },
     },
     google: {
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      maxRequests: 10,
+      windowMs: RATE_LIMIT_WINDOW.GOOGLE_AUTH,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.GOOGLE_AUTH,
       keyGenerator: (req) => {
         const ip = req.headers.get("x-forwarded-for") ||
                    req.headers.get("x-real-ip") ||
@@ -133,8 +137,8 @@ export function createAuthRateLimit(
       },
     },
     refresh: {
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      maxRequests: 20,
+      windowMs: RATE_LIMIT_WINDOW.REFRESH,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.REFRESH,
       keyGenerator: (req) => {
         const ip = req.headers.get("x-forwarded-for") ||
                    req.headers.get("x-real-ip") ||
