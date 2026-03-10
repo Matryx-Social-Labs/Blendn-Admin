@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -72,4 +73,8 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Only upload source maps when SENTRY_AUTH_TOKEN is available
+  silent: !process.env.SENTRY_AUTH_TOKEN,
+  disableLogger: true,
+});
