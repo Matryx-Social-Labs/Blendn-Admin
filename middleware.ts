@@ -2,17 +2,31 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+const ALLOWED_ORIGINS = [
+  "https://api.blendn.app",
+  "https://blendn.app",
+  process.env.NEXTAUTH_URL,
+].filter(Boolean) as string[]
+
+function getCorsHeaders(origin: string | null) {
+  const allowedOrigin =
+    origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Credentials": "true",
+  }
 }
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
+  const origin = req.headers.get("origin")
 
   // Handle CORS for mobile API routes
   if (pathname.startsWith("/api/mobile")) {
+    const corsHeaders = getCorsHeaders(origin)
+
     // Handle preflight OPTIONS request
     if (req.method === "OPTIONS") {
       return new NextResponse(null, {
