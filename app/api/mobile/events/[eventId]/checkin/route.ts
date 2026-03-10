@@ -81,47 +81,77 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Check capacity
-    if (event.max_capacity && event.current_capacity >= event.max_capacity) {
-      return errorResponse("Event is at full capacity")
-    }
+    // Atomic check-in: capacity check + check-in creation in a single transaction
+    const { checkIn, isNewCheckIn } = await db.$transaction(async (tx) => {
+      // Check for existing check-in first
+      const existing = await tx.event_check_ins.findUnique({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+      })
 
-    // Create or update check-in
-    const checkIn = await db.event_check_ins.upsert({
-      where: {
-        event_id_user_id: {
+      const alreadyCheckedIn = existing?.status === "checked_in"
+
+      // Re-fetch event inside transaction for accurate capacity
+      const freshEvent = await tx.events.findUnique({
+        where: { id: eventId },
+        select: { max_capacity: true, current_capacity: true },
+      })
+
+      if (
+        !alreadyCheckedIn &&
+        freshEvent?.max_capacity &&
+        freshEvent.current_capacity >= freshEvent.max_capacity
+      ) {
+        throw new Error("CAPACITY_FULL")
+      }
+
+      // Create or update check-in
+      const result = await tx.event_check_ins.upsert({
+        where: {
+          event_id_user_id: {
+            event_id: eventId,
+            user_id: authUser.userId,
+          },
+        },
+        create: {
           event_id: eventId,
           user_id: authUser.userId,
+          status: "checked_in",
+          check_in_time: now,
+          latitude,
+          longitude,
+          device_info: deviceInfo,
         },
-      },
-      create: {
-        event_id: eventId,
-        user_id: authUser.userId,
-        status: "checked_in",
-        check_in_time: now,
-        latitude,
-        longitude,
-        device_info: deviceInfo,
-      },
-      update: {
-        status: "checked_in",
-        check_in_time: now,
-        latitude,
-        longitude,
-        device_info: deviceInfo,
-        updated_at: now,
-      },
+        update: {
+          status: "checked_in",
+          check_in_time: now,
+          latitude,
+          longitude,
+          device_info: deviceInfo,
+          updated_at: now,
+        },
+      })
+
+      // Only increment capacity for new check-ins or re-check-ins (not already checked in)
+      if (!alreadyCheckedIn) {
+        await tx.events.update({
+          where: { id: eventId },
+          data: {
+            current_capacity: {
+              increment: 1,
+            },
+          },
+        })
+      }
+
+      return { checkIn: result, isNewCheckIn: !alreadyCheckedIn }
     })
 
-    // Update event capacity
-    await db.events.update({
-      where: { id: eventId },
-      data: {
-        current_capacity: {
-          increment: 1,
-        },
-      },
-    })
+    // If capacity was full, the transaction threw — catch it below
 
     // Ensure chat group exists and add user
     let chatGroup = await db.chat_groups.findUnique({
@@ -244,6 +274,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       message: "Successfully checked in",
     })
   } catch (error) {
+    if (error instanceof Error && error.message === "CAPACITY_FULL") {
+      return errorResponse("Event is at full capacity")
+    }
     console.error("Check-in error:", error)
     return serverErrorResponse("Failed to check in")
   }
