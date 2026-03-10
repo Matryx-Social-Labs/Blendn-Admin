@@ -28,9 +28,9 @@ export default async function DashboardLayout({
       }
     >
       <AppSidebar variant="inset" />
-      <SidebarInset>
+      <SidebarInset className="overflow-hidden border border-white/10 bg-[#090909]/80">
         <SiteHeader />
-        <div className="flex flex-1 flex-col">
+        <div className="flex flex-1 flex-col bg-transparent">
           <div className="@container/main flex flex-1 flex-col gap-2">
             {children}
           </div>

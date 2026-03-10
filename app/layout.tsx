@@ -1,22 +1,28 @@
-import type { Metadata } from "next";
-import "./globals.css";
-import { Providers } from "@/components/providers";
+import type { Metadata } from "next"
+
+import { Providers } from "@/components/providers"
+
+import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Blendn",
-  description: "A Social Media App to meet new people around you.",
-};
+  title: {
+    default: "Blend'n Admin",
+    template: "%s | Blend'n Admin",
+  },
+  description:
+    "Blend'n control center for investor reporting, organiser performance, and venue insights.",
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="">
+    <html lang="en" className="dark">
+      <body className="antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>
-  );
+  )
 }

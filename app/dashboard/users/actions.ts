@@ -39,6 +39,11 @@ export async function getUsers(
   offset: number = 0
 ): Promise<{ users: UserWithProfile[]; total: number }> {
   try {
+    const session = await getAuth()
+    if (!session?.user || session.user.role !== "app_admin") {
+      throw new Error("Forbidden")
+    }
+
     const where: Record<string, unknown> = {}
 
     if (search) {
@@ -264,6 +269,11 @@ export async function toggleUserOnboarded(id: string, onboarded: boolean) {
 
 export async function getUserStats() {
   try {
+    const session = await getAuth()
+    if (!session?.user || session.user.role !== "app_admin") {
+      throw new Error("Forbidden")
+    }
+
     const [
       totalUsers,
       onboardedUsers,

@@ -1,98 +1,159 @@
 import Link from "next/link"
 import {
-  IconInnerShadowTop,
-  IconListDetails,
+  IconArrowRight,
+  IconBuildingStore,
+  IconChartHistogram,
+  IconMicrophone2,
   IconUsers,
-  IconChartBar,
 } from "@tabler/icons-react"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
 
-const features = [
+import { BrandLogo } from "@/components/brand-logo"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+
+const highlightCards = [
   {
-    icon: IconListDetails,
-    title: "Event Management",
+    icon: IconChartHistogram,
+    title: "Investor Reporting",
     description:
-      "Create, edit, and oversee events. Manage group chats, check-ins, and push notifications all from one place.",
+      "Track activation, retention proxies, host velocity, attendance, and demand signals in one view.",
   },
   {
-    icon: IconUsers,
-    title: "User Moderation",
+    icon: IconMicrophone2,
+    title: "Organiser Insights",
     description:
-      "View user accounts, manage roles, and enforce community guidelines to keep the platform safe.",
+      "Measure portfolio health across events, chat activity, interest conversion, ratings, and repeat attendance.",
   },
   {
-    icon: IconChartBar,
-    title: "Analytics",
+    icon: IconBuildingStore,
+    title: "Venue Performance",
     description:
-      "Track engagement metrics, event attendance, and platform growth with interactive dashboards.",
+      "Surface venue-level attendance, fill rate, demand, and event mix so owners understand what is working.",
   },
+]
+
+const pilotMetrics = [
+  { label: "Platform Pulse", value: "Live demand, activity, and host momentum" },
+  { label: "Export Ready", value: "Investor snapshots and operator CSV downloads" },
+  { label: "Role Based", value: "Separate views for admin, organisers, and venue owners" },
 ]
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 md:px-10">
-        <div className="flex items-center gap-2">
-          <IconInnerShadowTop className="size-6" />
-          <span className="text-lg font-semibold">Blendn Admin</span>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href="/login">Sign in</Link>
-        </Button>
-      </header>
+    <main className="relative min-h-screen overflow-hidden px-6 py-6 md:px-10">
+      <div className="brand-mesh pointer-events-none absolute inset-0 opacity-80" />
 
-      <Separator />
+      <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] max-w-7xl flex-col rounded-[2rem] border border-white/10 brand-surface">
+        <header className="flex flex-col gap-5 border-b border-white/10 px-6 py-6 md:flex-row md:items-center md:justify-between md:px-8">
+          <BrandLogo showTagline />
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge className="brand-chip rounded-full px-3 py-1 font-medium">
+              MVP investor narrative
+            </Badge>
+            <Button
+              asChild
+              variant="outline"
+              className="rounded-full border-white/15 bg-white/5 px-5 text-white hover:bg-white/10"
+            >
+              <Link href="/login">Sign in</Link>
+            </Button>
+          </div>
+        </header>
 
-      {/* Hero */}
-      <section className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-20 text-center">
-        <Badge variant="secondary">Admin Portal</Badge>
-        <h1 className="max-w-2xl text-4xl font-bold tracking-tight sm:text-5xl">
-          Blendn Admin Dashboard
-        </h1>
-        <p className="max-w-xl text-lg text-muted-foreground">
-          Manage events, moderate users, and monitor analytics for the Blendn
-          social platform — all in one place.
-        </p>
-        <div className="flex gap-3">
-          <Button asChild size="lg">
-            <Link href="/login">Get Started</Link>
-          </Button>
-          <Button asChild variant="outline" size="lg">
-            <Link href="/dashboard">Go to Dashboard</Link>
-          </Button>
-        </div>
-      </section>
+        <section className="grid flex-1 gap-10 px-6 py-10 md:px-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
+          <div className="space-y-8">
+            <div className="space-y-5">
+              <Badge className="brand-chip rounded-full px-3 py-1 font-medium">
+                Blend&apos;n operator cockpit
+              </Badge>
+              <div className="space-y-4">
+                <h1 className="max-w-3xl text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl">
+                  A sharper control room for growth, attendance, and host performance.
+                </h1>
+                <p className="max-w-2xl text-base leading-7 text-white/68 sm:text-lg">
+                  The admin surface now frames Blend&apos;n as a live marketplace: investor-level
+                  traction signals for the platform, operational analytics for organisers, and
+                  venue intelligence that turns events into measurable performance.
+                </p>
+              </div>
+            </div>
 
-      {/* Feature Cards */}
-      <section className="mx-auto w-full max-w-5xl px-6 pb-20">
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-          {features.map((feature) => (
-            <Card key={feature.title}>
-              <CardHeader>
-                <feature.icon className="mb-2 size-8 text-muted-foreground" />
-                <CardTitle>{feature.title}</CardTitle>
-                <CardDescription>{feature.description}</CardDescription>
-              </CardHeader>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                asChild
+                size="lg"
+                className="rounded-full bg-[#F05423] px-6 text-white hover:bg-[#d84a1d]"
+              >
+                <Link href="/login">
+                  Enter Dashboard
+                  <IconArrowRight className="size-4" />
+                </Link>
+              </Button>
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="rounded-full border-white/15 bg-transparent px-6 text-white hover:bg-white/8"
+              >
+                <Link href="/dashboard">Preview Shell</Link>
+              </Button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {pilotMetrics.map((metric) => (
+                <Card
+                  key={metric.label}
+                  className="rounded-[1.4rem] border-white/10 bg-white/[0.04] text-white shadow-none"
+                >
+                  <CardContent className="space-y-2 px-5 py-5">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/48">
+                      {metric.label}
+                    </p>
+                    <p className="text-sm leading-6 text-white/78">{metric.value}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            <Card className="rounded-[1.8rem] border-white/10 bg-black/30 text-white shadow-none">
+              <CardContent className="space-y-6 px-6 py-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/48">
+                      What changes here
+                    </p>
+                    <h2 className="mt-2 text-2xl font-semibold brand-gradient-text">
+                      A dashboard built for proof, not placeholders.
+                    </h2>
+                  </div>
+                  <div className="rounded-full border border-white/12 bg-white/6 p-3">
+                    <IconUsers className="size-6 text-[#F05423]" />
+                  </div>
+                </div>
+                <div className="grid gap-3">
+                  {highlightCards.map((item) => (
+                    <div
+                      key={item.title}
+                      className="flex gap-4 rounded-[1.4rem] border border-white/8 bg-white/[0.04] p-4"
+                    >
+                      <div className="mt-1 rounded-full bg-white/8 p-2">
+                        <item.icon className="size-5 text-[#F05423]" />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-base font-semibold text-white">{item.title}</h3>
+                        <p className="text-sm leading-6 text-white/68">{item.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
             </Card>
-          ))}
-        </div>
-      </section>
-
-      <Separator />
-
-      {/* Footer */}
-      <footer className="py-6 text-center text-sm text-muted-foreground">
-        Blendn &mdash; Matryx Social Labs
-      </footer>
-    </div>
+          </div>
+        </section>
+      </div>
+    </main>
   )
 }

@@ -43,36 +43,39 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath }: RoleU
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2 flex-1">
-          <IconSearch className="text-muted-foreground size-4" />
+        <div className="relative flex flex-1 items-center">
+          <IconSearch className="pointer-events-none absolute left-4 size-4 text-white/34" />
           <Input
             placeholder={`Search ${roleLabel.toLowerCase()}s...`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="max-w-sm"
+            className="h-11 max-w-sm rounded-2xl border-white/10 bg-white/6 pl-11 text-white placeholder:text-white/34"
           />
         </div>
-        <Button onClick={() => setModalOpen(true)}>
-          <IconUserPlus className="mr-2 size-4" />
+        <Button
+          onClick={() => setModalOpen(true)}
+          className="rounded-full bg-[#F05423] text-white hover:bg-[#d84a1d]"
+        >
+          <IconUserPlus className="size-4" />
           Generate Credentials
         </Button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border">
+      <div className="overflow-hidden rounded-[1.4rem] border border-white/10 bg-black/20">
         <Table>
-          <TableHeader className="bg-muted sticky top-0 z-10">
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Events</TableHead>
-              <TableHead>Joined</TableHead>
-              <TableHead className="w-24">Actions</TableHead>
+          <TableHeader className="sticky top-0 z-10 bg-white/[0.03]">
+            <TableRow className="border-white/10 hover:bg-transparent">
+              <TableHead className="px-3 text-white/48">Name</TableHead>
+              <TableHead className="px-3 text-white/48">Email</TableHead>
+              <TableHead className="px-3 text-white/48">Events</TableHead>
+              <TableHead className="px-3 text-white/48">Joined</TableHead>
+              <TableHead className="w-24 px-3 text-white/48">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="h-24 text-center text-white/54">
                   No {roleLabel.toLowerCase()}s found.
                 </TableCell>
               </TableRow>
@@ -83,25 +86,32 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath }: RoleU
                   : user.email[0].toUpperCase()
 
                 return (
-                  <TableRow key={user.id}>
-                    <TableCell>
+                  <TableRow key={user.id} className="border-white/8 hover:bg-white/[0.03]">
+                    <TableCell className="px-3 py-4">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-8 w-8">
                           <AvatarImage src={user.image ?? ""} alt={user.name ?? user.email} />
-                          <AvatarFallback>{initials}</AvatarFallback>
+                          <AvatarFallback className="bg-gradient-to-br from-[#F05423] to-[#865693] text-white">
+                            {initials}
+                          </AvatarFallback>
                         </Avatar>
-                        <span className="font-medium">{user.name ?? "Unnamed"}</span>
+                        <span className="font-medium text-white">{user.name ?? "Unnamed"}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
-                    <TableCell>
-                      <span className="text-sm">{user._count.organized_events}</span>
+                    <TableCell className="px-3 text-sm text-white/62">{user.email}</TableCell>
+                    <TableCell className="px-3">
+                      <span className="text-sm text-white">{user._count.organized_events}</span>
                     </TableCell>
-                    <TableCell className="text-sm">
+                    <TableCell className="px-3 text-sm text-white/62">
                       {format(new Date(user.createdAt), "MMM d, yyyy")}
                     </TableCell>
-                    <TableCell>
-                      <Button asChild variant="outline" size="sm">
+                    <TableCell className="px-3">
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full border-white/12 bg-white/5 text-white hover:bg-white/10"
+                      >
                         <Link href={`${detailBasePath}/${user.id}`}>View</Link>
                       </Button>
                     </TableCell>

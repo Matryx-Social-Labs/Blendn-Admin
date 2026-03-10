@@ -1,8 +1,10 @@
 import Link from "next/link"
-import { notFound } from "next/navigation"
+import { notFound, redirect } from "next/navigation"
 import { EventEditor } from "@/components/event-editor"
 import { Button } from "@/components/ui/button"
 import { db } from "@/lib/db"
+import { getAuth } from "@/lib/auth"
+import { canManageEvent } from "@/lib/rbac"
 
 interface EventPageProps {
   params: Promise<{
@@ -11,6 +13,11 @@ interface EventPageProps {
 }
 
 export default async function EditEventPage({ params }: EventPageProps) {
+  const session = await getAuth()
+  if (!session?.user) {
+    redirect("/login")
+  }
+
   const resolvedParams = await params
   const [event, categories] = await Promise.all([
     db.events.findFirst({
@@ -53,6 +60,10 @@ export default async function EditEventPage({ params }: EventPageProps) {
 
   if (!event) {
     notFound()
+  }
+
+  if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+    redirect("/dashboard/events")
   }
 
   const categoryIds = event.categories.map((entry) => entry.category.id)

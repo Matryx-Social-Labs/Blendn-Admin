@@ -18,26 +18,28 @@ export default async function OrganisersPage() {
   return (
     <div className="flex flex-col gap-6 py-6">
       <div className="px-4 lg:px-6">
-        <h1 className="text-2xl font-semibold">Organisers</h1>
-        <p className="text-muted-foreground">
-          Manage organiser accounts and generate onboarding credentials.
-        </p>
+        <div className="rounded-[1.8rem] border border-white/10 brand-surface px-6 py-6">
+          <h1 className="text-3xl font-semibold text-white">Organisers</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-white/62">
+            Manage organiser accounts, review event supply, and support host onboarding.
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 px-4 lg:px-6 sm:grid-cols-2">
-        <Card>
+        <Card className="rounded-[1.6rem] border-white/10 bg-white/[0.04] text-white shadow-none">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Organisers</CardTitle>
-            <IconUsers className="text-muted-foreground size-4" />
+            <IconUsers className="size-4 text-white/46" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{users.length}</div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="rounded-[1.6rem] border-white/10 bg-white/[0.04] text-white shadow-none">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Events</CardTitle>
-            <IconCalendarEvent className="text-muted-foreground size-4" />
+            <IconCalendarEvent className="size-4 text-white/46" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalEvents}</div>
@@ -46,12 +48,14 @@ export default async function OrganisersPage() {
       </div>
 
       <div className="px-4 lg:px-6">
-        <RoleUsersTable
-          users={users}
-          role="organizer"
-          roleLabel="Organiser"
-          detailBasePath="/dashboard/organisers"
-        />
+        <div className="rounded-[1.8rem] border border-white/10 bg-white/[0.04] p-5">
+          <RoleUsersTable
+            users={users}
+            role="organizer"
+            roleLabel="Organiser"
+            detailBasePath="/dashboard/organisers"
+          />
+        </div>
       </div>
     </div>
   )
