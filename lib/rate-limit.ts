@@ -5,7 +5,10 @@ interface RateLimitEntry {
   resetTime: number
 }
 
-// In-memory store - in production, use Redis
+// In-memory store with bounded size.
+// NOTE: This is per-process only. In a multi-worker deployment,
+// replace with Redis (e.g. ioredis) for shared state across workers.
+const RATE_LIMIT_MAX_ENTRIES = 10_000
 const rateLimitStore = new Map<string, RateLimitEntry>()
 
 interface RateLimitConfig {
@@ -36,6 +39,17 @@ export function rateLimit(
   const entry = rateLimitStore.get(key)
 
   if (!entry || now > entry.resetTime) {
+    // Evict expired entries if store is at capacity
+    if (rateLimitStore.size >= RATE_LIMIT_MAX_ENTRIES) {
+      for (const [k, v] of rateLimitStore) {
+        if (now > v.resetTime) rateLimitStore.delete(k)
+      }
+      // If still full, drop oldest
+      if (rateLimitStore.size >= RATE_LIMIT_MAX_ENTRIES) {
+        const firstKey = rateLimitStore.keys().next().value
+        if (firstKey) rateLimitStore.delete(firstKey)
+      }
+    }
     // First request or window expired - create new entry
     rateLimitStore.set(key, {
       count: 1,
