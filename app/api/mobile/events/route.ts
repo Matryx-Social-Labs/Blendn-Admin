@@ -16,6 +16,7 @@ import {
   transformEvents,
 } from "@/lib/services/events.service"
 import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
+import { logger } from "@/lib/logger"
 
 // Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<
@@ -596,7 +597,7 @@ export async function GET(request: NextRequest) {
       }),
     })
   } catch (error) {
-    console.error("List events error:", error)
+    logger.error("List events error", { error: String(error) })
     return serverErrorResponse("Failed to list events")
   }
 }

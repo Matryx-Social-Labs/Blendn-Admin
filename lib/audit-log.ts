@@ -1,5 +1,6 @@
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
+import { logger } from "./logger"
 
 interface AuditLogEntry {
   userId?: string
@@ -27,7 +28,7 @@ export function auditLog(entry: AuditLogEntry): void {
       },
     })
     .catch((err) => {
-      console.error("Audit log write failed:", err)
+      logger.error("Audit log write failed", { error: String(err) })
     })
 }
 
