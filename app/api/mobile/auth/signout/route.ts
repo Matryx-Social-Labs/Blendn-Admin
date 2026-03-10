@@ -4,6 +4,7 @@ import {
   revokeUserRefreshTokens,
   revokeRefreshToken,
 } from "@/lib/mobile-auth"
+import { auditLog, getRequestIp } from "@/lib/audit-log"
 import {
   successResponse,
   unauthorizedResponse,
@@ -34,6 +35,13 @@ export async function POST(request: NextRequest) {
       await revokeUserRefreshTokens(authUser.userId)
       revokedAll = true
     }
+
+    auditLog({
+      userId: authUser.userId,
+      action: revokedAll ? "signout_all" : "signout",
+      resource: "auth",
+      ipAddress: getRequestIp(request),
+    })
 
     return successResponse({
       message: revokedAll

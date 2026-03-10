@@ -3,6 +3,7 @@ import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canManageEvent } from "@/lib/rbac"
+import { auditLog } from "@/lib/audit-log"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -233,6 +234,14 @@ export async function DELETE(_: Request, { params }: RouteContext) {
       data: {
         deleted_at: new Date(),
       },
+    })
+
+    auditLog({
+      userId: session.user.id,
+      action: "delete",
+      resource: "event",
+      resourceId: resolvedParams.id,
+      details: { title: event.title },
     })
 
     return new NextResponse(null, { status: 204 })

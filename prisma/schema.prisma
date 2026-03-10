@@ -597,6 +597,23 @@ model event_announcements {
   @@index([created_at])
 }
 
+// Audit Logs
+model audit_logs {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String?
+  action     String
+  resource   String
+  resource_id String?
+  details    Json?
+  ip_address String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([user_id])
+  @@index([action])
+  @@index([resource])
+  @@index([created_at])
+}
+
 // Message Requests
 model message_requests {
   id            String                 @id @default(uuid()) @db.Uuid
