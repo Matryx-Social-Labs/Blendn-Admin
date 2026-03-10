@@ -6,8 +6,25 @@ export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
+  errorCode?: string
   errors?: Array<{ field: string; message: string }>
 }
+
+export const ErrorCode = {
+  VALIDATION_FAILED: "VALIDATION_FAILED",
+  UNAUTHORIZED: "UNAUTHORIZED",
+  FORBIDDEN: "FORBIDDEN",
+  NOT_FOUND: "NOT_FOUND",
+  CONFLICT: "CONFLICT",
+  RATE_LIMITED: "RATE_LIMITED",
+  SERVER_ERROR: "SERVER_ERROR",
+  EVENT_FULL: "EVENT_FULL",
+  EVENT_NOT_STARTED: "EVENT_NOT_STARTED",
+  EVENT_ENDED: "EVENT_ENDED",
+  OUT_OF_RANGE: "OUT_OF_RANGE",
+  ALREADY_CHECKED_IN: "ALREADY_CHECKED_IN",
+  STORAGE_UNAVAILABLE: "STORAGE_UNAVAILABLE",
+} as const
 
 /**
  * Create a success response
@@ -32,12 +49,14 @@ export function successResponse<T>(
  */
 export function errorResponse(
   message: string,
-  status: number = 400
+  status: number = 400,
+  errorCode?: string
 ): NextResponse<ApiResponse> {
   return NextResponse.json(
     {
       success: false,
       error: message,
+      ...(errorCode && { errorCode }),
     },
     { status }
   )
@@ -58,6 +77,7 @@ export function validationErrorResponse(
     {
       success: false,
       error: "Validation failed",
+      errorCode: ErrorCode.VALIDATION_FAILED,
       errors,
     },
     { status: 400 }
@@ -74,6 +94,7 @@ export function unauthorizedResponse(
     {
       success: false,
       error: message,
+      errorCode: ErrorCode.UNAUTHORIZED,
     },
     { status: 401 }
   )
@@ -89,6 +110,7 @@ export function forbiddenResponse(
     {
       success: false,
       error: message,
+      errorCode: ErrorCode.FORBIDDEN,
     },
     { status: 403 }
   )
@@ -104,6 +126,7 @@ export function notFoundResponse(
     {
       success: false,
       error: message,
+      errorCode: ErrorCode.NOT_FOUND,
     },
     { status: 404 }
   )
@@ -119,6 +142,7 @@ export function serverErrorResponse(
     {
       success: false,
       error: message,
+      errorCode: ErrorCode.SERVER_ERROR,
     },
     { status: 500 }
   )
@@ -134,6 +158,7 @@ export function conflictResponse(
     {
       success: false,
       error: message,
+      errorCode: ErrorCode.CONFLICT,
     },
     { status: 409 }
   )
