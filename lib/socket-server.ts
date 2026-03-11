@@ -88,6 +88,7 @@ export interface ServerToClientEvents {
 
   // Moderation events
   "chat:messageDeleted": (data: { chatGroupId: string; messageId: string }) => void
+  "chat:messageHidden": (data: { chatGroupId: string; messageId: string; reason: string }) => void
   "chat:memberBanned": (data: { chatGroupId: string; userId: string; banned: boolean }) => void
 
   // System events
@@ -521,6 +522,14 @@ export function emitChatReaction(
 export function emitChatMessageDeleted(chatGroupId: string, messageId: string): void {
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", { chatGroupId, messageId })
+}
+
+/**
+ * Emit a message hidden event (moderation auto-hide)
+ */
+export function emitChatMessageHidden(chatGroupId: string, messageId: string, reason: string): void {
+  if (!io) return
+  io.to(`chat:${chatGroupId}`).emit("chat:messageHidden", { chatGroupId, messageId, reason })
 }
 
 /**

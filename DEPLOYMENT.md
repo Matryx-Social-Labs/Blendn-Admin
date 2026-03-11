@@ -4,7 +4,7 @@
 
 1. Railway account (https://railway.app)
 2. GitHub repository connected to Railway
-3. Domain configured (e.g., admin.blendn.app)
+3. Domain configured (e.g., api.blendn.app)
 
 ## Quick Deploy
 
@@ -27,7 +27,7 @@ In Railway dashboard, add these environment variables:
 **Required:**
 ```
 DATABASE_URL=<your-railway-postgres-url>
-NEXTAUTH_URL=https://admin.blendn.app
+NEXTAUTH_URL=https://api.blendn.app
 NEXTAUTH_SECRET=<generate: openssl rand -base64 32>
 MOBILE_JWT_SECRET=<generate: openssl rand -base64 32>
 ```
@@ -64,7 +64,7 @@ railway up
 ### 5. Configure Domain
 
 1. In Railway dashboard, go to Settings > Domains
-2. Add custom domain: `admin.blendn.app`
+2. Add custom domain: `api.blendn.app`
 3. Configure DNS:
    - Add CNAME record pointing to Railway's domain
    - Or use Railway's provided nameservers
@@ -82,8 +82,7 @@ railway run npx prisma migrate deploy
 
 | Subdomain | Service | Purpose |
 |-----------|---------|---------|
-| `admin.blendn.app` | This deployment | Admin dashboard + API |
-| `api.blendn.app` | CNAME to admin | Mobile API (optional alias) |
+| `api.blendn.app` | This deployment | Admin dashboard + API |
 | `blendn.app` | Landing page | Marketing site (optional) |
 
 ### DNS Configuration
@@ -92,10 +91,7 @@ railway run npx prisma migrate deploy
 # In your domain registrar (e.g., Cloudflare, Namecheap)
 
 # Admin/API
-admin.blendn.app    CNAME    <your-railway-app>.up.railway.app
-
-# Optional: API alias
-api.blendn.app      CNAME    admin.blendn.app
+api.blendn.app    CNAME    <your-railway-app>.up.railway.app
 
 # Optional: Root domain redirect
 blendn.app          A        <landing-page-ip>

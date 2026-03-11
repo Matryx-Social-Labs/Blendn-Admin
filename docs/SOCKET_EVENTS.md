@@ -44,7 +44,8 @@ Users are auto-joined to rooms based on their state:
 | `chat:message` | `{ id, chatGroupId, userId, userName, userImage, content, type, parentId, createdAt }` | New message in chat |
 | `chat:typing` | `{ chatGroupId, userId, userName }` | User is typing |
 | `chat:reaction` | `{ chatGroupId, messageId, userId, emoji, action }` | Reaction added/removed |
-| `chat:messageDeleted` | `{ chatGroupId, messageId }` | Message was deleted |
+| `chat:messageDeleted` | `{ chatGroupId, messageId }` | Message was deleted by admin |
+| `chat:messageHidden` | `{ chatGroupId, messageId, reason }` | Message hidden by moderation system (reason: `keyword`, `openai_text`, `openai_image`, `spam`) |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Member ban status changed |
 
 ### Event Events (room: `event:{eventId}`)

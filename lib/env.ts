@@ -22,6 +22,9 @@ const envSchema = z.object({
   AWS_REGION: z.string().default("us-east-1"),
   AWS_S3_BUCKET: z.string().optional(),
 
+  // OpenAI (optional — moderation degrades to keyword-only if absent)
+  OPENAI_API_KEY: z.string().optional(),
+
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.string().default("3000"),

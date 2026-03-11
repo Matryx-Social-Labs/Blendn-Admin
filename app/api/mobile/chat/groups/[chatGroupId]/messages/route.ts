@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyGroupMessage } from "@/lib/push-notifications"
 import { rateLimit } from "@/lib/rate-limit"
+import { moderateMessage, checkSpam } from "@/lib/moderation"
 import {
   successResponse,
   errorResponse,
@@ -261,6 +262,12 @@ export async function POST(
       }
     }
 
+    // Spam check (sync — block before saving)
+    const spamResult = checkSpam(user.userId, chatGroupId, content)
+    if (spamResult && spamResult.action === "hide") {
+      return errorResponse(spamResult.reason || "Message blocked as spam", 429)
+    }
+
     // Create the message
     const message = await db.chat_messages.create({
       data: {
@@ -314,6 +321,16 @@ export async function POST(
       createdAt: message.created_at.toISOString(),
       parentId: message.parent_id || undefined,
     })
+
+    // Fire-and-forget: async content moderation
+    void moderateMessage(
+      message.id,
+      content,
+      type,
+      user.userId,
+      chatGroupId,
+      (metadata as Record<string, string> | undefined)?.mediaUrl
+    )
 
     // Send push notifications to group members (async, don't await)
     db.chat_group_members

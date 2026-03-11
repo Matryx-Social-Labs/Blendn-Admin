@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-response"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
+import { moderateMessage, checkSpam } from "@/lib/moderation"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -394,6 +395,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // Spam check (sync — block before saving)
+    const spamResult = checkSpam(authUser.userId, chatGroup.id, content)
+    if (spamResult && spamResult.action === "hide") {
+      return forbiddenResponse(spamResult.reason || "Message blocked as spam")
+    }
+
     // Create message
     const message = await db.chat_messages.create({
       data: {
@@ -416,6 +423,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
       select: { anonymous_name: true },
     })
+
+    // Fire-and-forget: async content moderation
+    void moderateMessage(
+      message.id,
+      content,
+      type,
+      authUser.userId,
+      chatGroup.id,
+      (metadata as Record<string, string> | undefined)?.mediaUrl
+    )
 
     // Update chat group last_message_at
     await db.chat_groups.update({

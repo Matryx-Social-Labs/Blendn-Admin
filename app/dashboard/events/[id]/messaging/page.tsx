@@ -5,7 +5,9 @@ import { db } from "@/lib/db"
 import { canManageEvent } from "@/lib/rbac"
 import { EventMessaging } from "@/components/event-messaging"
 import { ChatFeed } from "@/components/chat-feed"
+import { ModerationQueue } from "@/components/moderation-queue"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface Props {
   params: Promise<{ id: string }>
@@ -54,7 +56,18 @@ export default async function EventMessagingPage({ params }: Props) {
 
         {/* Right: Live chat feed + moderation */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          <ChatFeed eventId={event.id} />
+          <Tabs defaultValue="chat" className="flex flex-col h-full">
+            <TabsList className="mx-4 mt-2 w-fit">
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="moderation">Moderation</TabsTrigger>
+            </TabsList>
+            <TabsContent value="chat" className="flex-1 min-h-0">
+              <ChatFeed eventId={event.id} />
+            </TabsContent>
+            <TabsContent value="moderation" className="flex-1 min-h-0">
+              <ModerationQueue eventId={event.id} />
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>

@@ -65,6 +65,9 @@ model User {
 
   // RSVPs
   event_rsvps               event_rsvps[]
+
+  // Moderation
+  moderation_flags          moderation_flags[]
 }
 
 model Account {
@@ -304,8 +307,9 @@ model chat_messages {
   is_pinned       Boolean          @default(false)
   created_at      DateTime         @default(now()) @db.Timestamptz(6)
   updated_at      DateTime         @default(now()) @db.Timestamptz(6)
-  deleted_at      DateTime?        @db.Timestamptz(6)
-  deleted_by      String?
+  deleted_at         DateTime?        @db.Timestamptz(6)
+  deleted_by         String?
+  moderation_status  String?          // "clean" | "flagged" | "hidden"
 
   // Relations
   chat_group      chat_groups      @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
@@ -313,6 +317,7 @@ model chat_messages {
   parent_message  chat_messages?   @relation("MessageReplies", fields: [parent_id], references: [id])
   replies         chat_messages[]  @relation("MessageReplies")
   reactions       message_reactions[]
+  moderation_flags moderation_flags[]
 
   @@index([chat_group_id, created_at])
   @@index([chat_group_id, deleted_at])
@@ -690,4 +695,45 @@ model message_requests {
 
   @@unique([sender_id, recipient_id])
   @@index([recipient_id, status])
+}
+
+// ── Content Moderation ────────────────────────────────
+
+enum moderation_status_type {
+  pending
+  approved
+  rejected
+}
+
+enum moderation_source {
+  auto_text
+  auto_image
+  auto_spam
+  auto_keyword
+  user_report
+  manual
+}
+
+model moderation_flags {
+  id            String                 @id @default(uuid()) @db.Uuid
+  message_id    String                 @db.Uuid
+  chat_group_id String                 @db.Uuid
+  user_id       String
+  source        moderation_source
+  status        moderation_status_type @default(pending)
+  categories    Json                   // e.g. {"hate": 0.92, "sexual": 0.1}
+  confidence    Float
+  auto_action   String?                // "hidden" | "none" | "muted_user"
+  reviewed_by   String?
+  reviewed_at   DateTime?              @db.Timestamptz(6)
+  review_notes  String?
+  created_at    DateTime               @default(now()) @db.Timestamptz(6)
+
+  message       chat_messages          @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  user          User                   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([status, created_at])
+  @@index([chat_group_id])
+  @@index([user_id])
+  @@index([message_id])
 }
