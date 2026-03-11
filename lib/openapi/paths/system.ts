@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
+import { standardErrors } from "@/lib/openapi/schemas/common"
 
 registry.registerPath({
   method: "get",
@@ -36,5 +37,30 @@ registry.registerPath({
         },
       },
     },
+  },
+})
+
+// GET /api/cron/event-reminders
+registry.registerPath({
+  method: "get",
+  path: "/api/cron/event-reminders",
+  tags: ["Cron"],
+  summary: "Trigger event reminder notifications",
+  description: "Sends push notifications for events starting within 1 hour. Authenticated via CRON_SECRET Bearer token.",
+  security: [{ BearerAuth: [] }],
+  responses: {
+    200: {
+      description: "Reminders sent",
+      content: {
+        "application/json": {
+          schema: z.object({
+            success: z.literal(true),
+            notified: z.number(),
+            timestamp: z.string().datetime(),
+          }),
+        },
+      },
+    },
+    ...standardErrors,
   },
 })
