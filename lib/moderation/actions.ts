@@ -146,6 +146,65 @@ export async function markClean(messageId: string): Promise<void> {
   }
 }
 
+/**
+ * Check if a muted user's mute should have expired.
+ * Auto-mutes last for AUTO_MUTE_WINDOW_MS (1 hour). If the user's most recent
+ * hidden message is older than that window, unmute them automatically.
+ *
+ * Returns true if the user was auto-unmuted (caller should proceed normally),
+ * false if they should remain muted.
+ */
+export async function checkAndAutoUnmute(
+  userId: string,
+  chatGroupId: string
+): Promise<boolean> {
+  try {
+    const windowStart = new Date(Date.now() - AUTO_MUTE_WINDOW_MS)
+
+    // Count recent violations in the mute window
+    const recentHiddenCount = await db.moderation_flags.count({
+      where: {
+        user_id: userId,
+        chat_group_id: chatGroupId,
+        auto_action: "hidden",
+        created_at: { gte: windowStart },
+      },
+    })
+
+    // If no recent violations, the mute window has passed — unmute
+    if (recentHiddenCount < AUTO_MUTE_HIDDEN_COUNT) {
+      await db.chat_group_members.updateMany({
+        where: {
+          chat_group_id: chatGroupId,
+          user_id: userId,
+          status: "muted",
+        },
+        data: {
+          status: "active",
+        },
+      })
+
+      emitChatMemberMuted(chatGroupId, userId, false, "Auto-mute expired")
+
+      logger.info("User auto-unmuted after mute window expired", {
+        userId,
+        chatGroupId,
+      })
+
+      return true
+    }
+
+    return false
+  } catch (error) {
+    logger.error("Failed to check auto-unmute", {
+      userId,
+      chatGroupId,
+      error: String(error),
+    })
+    return false
+  }
+}
+
 /** Map internal source names to Prisma enum values */
 function mapSource(
   source: ModerationResult["source"]

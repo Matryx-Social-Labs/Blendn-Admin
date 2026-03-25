@@ -15,6 +15,7 @@ import {
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
+import { checkAndAutoUnmute } from "@/lib/moderation/actions"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -338,11 +339,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Check muted/banned BEFORE auto-join logic — do not re-activate restricted users
     if (membership?.status === "muted") {
-      return errorResponse(
-        "You are muted in this chat. Your messages have been flagged for policy violations.",
-        403,
-        ErrorCode.USER_MUTED
-      )
+      // Check if the auto-mute window has expired (1 hour)
+      const wasUnmuted = await checkAndAutoUnmute(authUser.userId, chatGroup.id)
+      if (!wasUnmuted) {
+        return errorResponse(
+          "You are muted in this chat. Your messages have been flagged for policy violations.",
+          403,
+          ErrorCode.USER_MUTED
+        )
+      }
+      // User was auto-unmuted, proceed with sending
     }
     if (membership?.status === "banned") {
       return errorResponse(

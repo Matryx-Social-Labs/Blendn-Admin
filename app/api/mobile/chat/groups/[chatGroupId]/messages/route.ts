@@ -6,6 +6,7 @@ import { emitChatMessage } from "@/lib/socket-server"
 import { notifyGroupMessage } from "@/lib/push-notifications"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
+import { checkAndAutoUnmute } from "@/lib/moderation/actions"
 import {
   successResponse,
   errorResponse,
@@ -242,11 +243,16 @@ export async function POST(
 
     // Check if user is muted or banned
     if (membership.status === "muted") {
-      return errorResponse(
-        "You are muted in this chat group. Your messages have been flagged for policy violations.",
-        403,
-        ErrorCode.USER_MUTED
-      )
+      // Check if the auto-mute window has expired (1 hour)
+      const wasUnmuted = await checkAndAutoUnmute(user.userId, chatGroupId)
+      if (!wasUnmuted) {
+        return errorResponse(
+          "You are muted in this chat group. Your messages have been flagged for policy violations.",
+          403,
+          ErrorCode.USER_MUTED
+        )
+      }
+      // User was auto-unmuted, proceed with sending
     }
     if (membership.status === "banned") {
       return errorResponse(

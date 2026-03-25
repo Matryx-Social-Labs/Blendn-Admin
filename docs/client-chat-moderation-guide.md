@@ -26,7 +26,7 @@ When a message send fails (`POST /api/mobile/chat/groups/{chatGroupId}/messages`
 
 | errorCode | HTTP Status | Meaning | Suggested UX |
 |-----------|-------------|---------|--------------|
-| `USER_MUTED` | 403 | User was auto-muted (3+ violations in 1 hour) | Show a persistent banner: "You've been muted for policy violations. You can still read messages." Disable the message input. |
+| `USER_MUTED` | 403 | User is still muted (auto-mute has NOT expired yet). Auto-mutes last 1 hour — if the mute window has passed, the backend auto-unmutes and the send succeeds (you won't see this error). | Show a persistent banner: "You've been muted for policy violations. You can still read messages." Disable the message input. |
 | `USER_BANNED` | 403 | User was banned by admin or auto-system | Show a full-screen overlay or modal: "You've been removed from this chat." Hide the input, optionally navigate back. |
 | `CHAT_LOCKED` | 403 | Organiser locked the chat | Show a banner: "Chat has been locked by the organiser." Disable input. |
 | `NOT_CHECKED_IN` | 403 | User checked out or never checked in | Show: "Check in to the event to send messages." |
@@ -424,7 +424,27 @@ User sends "offensive word"
   → If 3+ hidden messages in 1 hour → auto-mute
   → Socket emits "chat:memberMuted" → client disables input for that user
   → Next send attempt returns errorCode: "USER_MUTED"
+  → After 1 hour with no new violations → next send attempt auto-unmutes
+  → Socket emits "chat:memberMuted" { muted: false } → client re-enables input
 ```
+
+### Auto-unmute (mute expiry):
+```
+Muted user tries to send a message after 1+ hour
+  → Backend checks: are there 3+ hidden messages in the last hour?
+  → NO → auto-unmute: DB status set to "active"
+  → Socket emits "chat:memberMuted" { muted: false, reason: "Auto-mute expired" }
+  → Message send proceeds normally
+  → Client should: re-enable input, hide mute banner
+
+  → YES → user still has recent violations, stays muted
+  → Returns errorCode: "USER_MUTED"
+```
+
+**Important for client:** When the user is muted and tries to send, if the send
+succeeds (200), it means they were auto-unmuted by the backend. The client
+should clear the muted state and re-enable the input. The `chat:memberMuted`
+socket event with `muted: false` will also fire to confirm this.
 
 ### Admin ban from dashboard:
 ```
@@ -467,7 +487,7 @@ export const ErrorCode = {
 |-------|---------|------|---------------|
 | `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message auto-hidden by moderation (`moderation: true`) or admin-deleted (`moderation` absent) | If `moderation && userId === self`: replace with placeholder. Otherwise: remove from UI. |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Admin bans/unbans user | If self: show banned overlay / restore access |
-| `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Auto-mute or admin mute/unmute | If self: disable/enable input, show mute banner |
+| `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Auto-mute, auto-unmute (after 1hr), or admin mute/unmute. `reason` may be "Auto-mute expired" for auto-unmute. | If self and `muted: true`: disable input, show mute banner. If self and `muted: false`: re-enable input, hide mute banner, optionally show "You have been unmuted" toast. |
 
 ---
 
@@ -489,7 +509,8 @@ export const ErrorCode = {
 - [ ] Verify other users do NOT see the moderated message at all
 - [ ] Close and reopen the chat — the "message removed" placeholder should still appear for the sender (persisted via API)
 - [ ] Send 3+ slur messages within 1 hour — user should get muted, input disabled, mute banner shown
-- [ ] Try sending a message while muted — should show "You are muted" error with explanation, not generic "Failed to send"
+- [ ] Try sending a message while muted (within 1 hour) — should show "You are muted" error with explanation, not generic "Failed to send"
+- [ ] Wait 1+ hour after last violation, then try sending — should auto-unmute and send successfully. Socket emits `chat:memberMuted { muted: false }`. Client should re-enable input.
 - [ ] Have admin ban a user from dashboard — user should see banned overlay in real-time via socket
 - [ ] Have admin mute a user from dashboard — user should see muted banner in real-time via socket
 - [ ] Have admin unmute a user — input should re-enable
