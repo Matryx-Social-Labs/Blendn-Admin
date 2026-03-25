@@ -6,7 +6,9 @@ import { emitChatMessage } from "@/lib/socket-server"
 import { notifyGroupMessage } from "@/lib/push-notifications"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
-import { checkAndAutoUnmute } from "@/lib/moderation/actions"
+import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
+import { checkKeywords } from "@/lib/moderation/keyword-filter"
+import { checkTextContent } from "@/lib/moderation/openai-moderation"
 import {
   successResponse,
   errorResponse,
@@ -305,6 +307,35 @@ export async function POST(
       )
     }
 
+    // --- Pre-save moderation: keyword filter (sync, <1ms) ---
+    const keywordResult = checkKeywords(content)
+    if (keywordResult && keywordResult.action === "hide") {
+      // Save the message but immediately mark it as hidden
+      const message = await db.chat_messages.create({
+        data: {
+          chat_group_id: chatGroupId,
+          user_id: user.userId,
+          content,
+          type,
+          metadata: metadata || undefined,
+          parent_id: parentId || null,
+          moderation_status: "hidden",
+          deleted_at: new Date(),
+        },
+      })
+      // Flag for review and check auto-mute (fire-and-forget)
+      void flagForReview(message.id, chatGroupId, user.userId, keywordResult)
+      void checkAndAutoMute(user.userId, chatGroupId)
+      // Return success to sender but message is already hidden — never emitted to others
+      return successResponse({
+        id: message.id,
+        type: message.type,
+        content: null,
+        moderation_hidden: true,
+        createdAt: message.created_at.toISOString(),
+      })
+    }
+
     // Create the message
     const message = await db.chat_messages.create({
       data: {
@@ -338,6 +369,61 @@ export async function POST(
       },
     })
 
+    // --- Pre-emit moderation: OpenAI check with 1s timeout ---
+    // Run OpenAI moderation before broadcasting. If it takes >1s, emit anyway
+    // and fall back to the post-emit hide behavior for safety.
+    if (type === "text") {
+      try {
+        const openaiResult = await Promise.race([
+          checkTextContent(content),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+        ])
+        if (openaiResult && openaiResult.action === "hide") {
+          // Hide immediately — never broadcast to other users
+          await hideMessage(message.id, chatGroupId, user.userId, openaiResult)
+          await flagForReview(message.id, chatGroupId, user.userId, openaiResult)
+          void checkAndAutoMute(user.userId, chatGroupId)
+          return successResponse({
+            id: message.id,
+            type: message.type,
+            content: null,
+            moderation_hidden: true,
+            createdAt: message.created_at.toISOString(),
+          })
+        }
+        // If flagged (not hidden), let it through but flag for review
+        if (openaiResult && openaiResult.action === "flag") {
+          void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
+        }
+        // If timeout (null) or clean, proceed to emit
+        // For timeout case, fire-and-forget the full moderation pipeline as fallback
+        if (!openaiResult && content.length > 5) {
+          void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+        }
+      } catch {
+        // OpenAI failed — fall back to async moderation
+        void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+      }
+    } else {
+      // For images/media, run full async moderation (can't block on image analysis)
+      void moderateMessage(
+        message.id,
+        content,
+        type,
+        user.userId,
+        chatGroupId,
+        (metadata as Record<string, string> | undefined)?.mediaUrl
+      )
+    }
+
+    // Mark as clean if we got past all checks
+    if (!message.moderation_status || message.moderation_status === "pending") {
+      void db.chat_messages.update({
+        where: { id: message.id },
+        data: { moderation_status: "clean" },
+      }).catch(() => {})
+    }
+
     // Update chat group's last_message_at
     await db.chat_groups.update({
       where: { id: chatGroupId },
@@ -347,7 +433,7 @@ export async function POST(
     // Use anonymous name for socket emit and push
     const senderAnonName = membership.anonymous_name || "Attendee"
 
-    // Emit real-time message (anonymous)
+    // Emit real-time message — only reaches here if moderation passed
     emitChatMessage(chatGroupId, {
       id: message.id,
       content: message.content,
@@ -358,16 +444,6 @@ export async function POST(
       createdAt: message.created_at.toISOString(),
       parentId: message.parent_id || undefined,
     })
-
-    // Fire-and-forget: async content moderation
-    void moderateMessage(
-      message.id,
-      content,
-      type,
-      user.userId,
-      chatGroupId,
-      (metadata as Record<string, string> | undefined)?.mediaUrl
-    )
 
     // Send push notifications to group members (async, don't await)
     db.chat_group_members

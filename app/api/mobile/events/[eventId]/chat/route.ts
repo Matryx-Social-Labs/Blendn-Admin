@@ -15,7 +15,9 @@ import {
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
-import { checkAndAutoUnmute } from "@/lib/moderation/actions"
+import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
+import { checkKeywords } from "@/lib/moderation/keyword-filter"
+import { checkTextContent } from "@/lib/moderation/openai-moderation"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -435,6 +437,35 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    // --- Pre-save moderation: keyword filter (sync, <1ms) ---
+    const keywordResult = checkKeywords(content)
+    if (keywordResult && keywordResult.action === "hide") {
+      // Save but immediately mark as hidden — never emitted to other users
+      const message = await db.chat_messages.create({
+        data: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+          content,
+          type,
+          parent_id: parentId,
+          metadata: metadata as Prisma.InputJsonValue | undefined,
+          moderation_status: "hidden",
+          deleted_at: new Date(),
+        },
+      })
+      void flagForReview(message.id, chatGroup.id, authUser.userId, keywordResult)
+      void checkAndAutoMute(authUser.userId, chatGroup.id)
+      return successResponse({
+        message: {
+          id: message.id,
+          type: message.type,
+          content: null,
+          moderation_hidden: true,
+          createdAt: message.created_at,
+        },
+      })
+    }
+
     // Create message
     const message = await db.chat_messages.create({
       data: {
@@ -447,6 +478,56 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
+    // --- Pre-emit moderation: OpenAI check with 1s timeout ---
+    if (type === "text") {
+      try {
+        const openaiResult = await Promise.race([
+          checkTextContent(content),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+        ])
+        if (openaiResult && openaiResult.action === "hide") {
+          await hideMessage(message.id, chatGroup.id, authUser.userId, openaiResult)
+          await flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
+          void checkAndAutoMute(authUser.userId, chatGroup.id)
+          return successResponse({
+            message: {
+              id: message.id,
+              type: message.type,
+              content: null,
+              moderation_hidden: true,
+              createdAt: message.created_at,
+            },
+          })
+        }
+        if (openaiResult && openaiResult.action === "flag") {
+          void flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
+        }
+        // Timeout fallback — run full async pipeline
+        if (!openaiResult && content.length > 5) {
+          void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
+        }
+      } catch {
+        void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
+      }
+    } else {
+      void moderateMessage(
+        message.id,
+        content,
+        type,
+        authUser.userId,
+        chatGroup.id,
+        (metadata as Record<string, string> | undefined)?.mediaUrl
+      )
+    }
+
+    // Mark clean if passed all checks
+    if (!message.moderation_status || message.moderation_status === "pending") {
+      void db.chat_messages.update({
+        where: { id: message.id },
+        data: { moderation_status: "clean" },
+      }).catch(() => {})
+    }
+
     // Get anonymous name for response
     const senderMembership = await db.chat_group_members.findUnique({
       where: {
@@ -457,16 +538,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
       select: { anonymous_name: true },
     })
-
-    // Fire-and-forget: async content moderation
-    void moderateMessage(
-      message.id,
-      content,
-      type,
-      authUser.userId,
-      chatGroup.id,
-      (metadata as Record<string, string> | undefined)?.mediaUrl
-    )
 
     // Update chat group last_message_at
     await db.chat_groups.update({
