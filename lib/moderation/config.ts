@@ -1,6 +1,6 @@
 // Confidence thresholds for moderation actions
-export const AUTO_HIDE_THRESHOLD = 0.85
-export const FLAG_THRESHOLD = 0.5
+export const AUTO_HIDE_THRESHOLD = 0.7
+export const FLAG_THRESHOLD = 0.4
 
 // Spam detection
 export const SPAM_BURST_LIMIT = 5

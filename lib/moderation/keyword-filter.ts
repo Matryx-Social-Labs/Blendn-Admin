@@ -122,7 +122,9 @@ export function checkKeywords(content: string): ModerationResult | null {
 
   if (matched.length === 0) return null
 
-  const confidence = Math.min(1, 0.7 + matched.length * 0.1)
+  // Keyword matches are high-precision (exact match), so base confidence is high.
+  // A single slur should be enough to auto-hide.
+  const confidence = Math.min(1, 0.85 + matched.length * 0.05)
 
   return {
     action: confidence >= AUTO_HIDE_THRESHOLD ? "hide" : "flag",

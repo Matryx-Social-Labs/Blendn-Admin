@@ -529,7 +529,8 @@ export function emitChatMessageDeleted(chatGroupId: string, messageId: string): 
  */
 export function emitChatMessageHidden(chatGroupId: string, messageId: string, reason: string): void {
   if (!io) return
-  io.to(`chat:${chatGroupId}`).emit("chat:messageHidden", { chatGroupId, messageId, reason })
+  // Emit as "chat:messageDeleted" to match the client's expected event name
+  io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", { chatGroupId, messageId, reason })
 }
 
 /**
