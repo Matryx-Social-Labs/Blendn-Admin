@@ -43,7 +43,8 @@ export const ChatMessageSchema = z
   .object({
     id: z.string().uuid(),
     type: z.string(),
-    content: z.string(),
+    content: z.string().nullable().openapi({ description: "Message text. Null when moderation_hidden is true." }),
+    moderation_hidden: z.boolean().optional().openapi({ description: "True if this message was hidden by moderation. Content will be null. Only returned to the message sender." }),
     metadata: z.unknown().nullable(),
     isEdited: z.boolean(),
     isPinned: z.boolean(),

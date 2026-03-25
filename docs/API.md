@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`
+Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`
 
 ---
 
@@ -120,10 +120,18 @@ Body: `{ "eventIds": ["uuid", ...] }` (max 50)
 ```json
 { "content": "string", "type": "text|image|video", "metadata": {}, "parentId": "uuid?" }
 ```
-**Moderation:** Messages are spam-checked before saving (burst rate, duplicate, link density). After saving, async moderation runs (keyword filter + OpenAI Moderation API) — flagged messages are hidden retroactively via socket event.
+**Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
+1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
+2. **Keyword filter** (sync, <1ms) — slurs/profanity in 9 languages → saves as hidden, returns `moderation_hidden: true`
+3. **OpenAI Moderation** (pre-emit, 1s timeout) — AI content analysis → hides before broadcast
+
+If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
+If OpenAI times out (>1s), message is broadcast and moderation falls back to async (socket delete event).
+
+**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429)
 
 ### Event Chat: POST /events/:eventId/chat
-Same moderation pipeline applies to event chat messages.
+Same moderation pipeline and error codes apply.
 
 ---
 
@@ -205,13 +213,13 @@ Returns: `{ flags: [...], stats: { pending, autoHidden, total }, pagination }`
 
 ### Moderation Pipeline
 
-Messages go through this async pipeline after being saved:
+Messages go through a **pre-emit** pipeline — moderation runs before the message is broadcast to other users:
 1. **Spam check** (sync, blocks before save) — burst rate (5 msgs/10s), duplicate detection, link density (max 2)
-2. **Keyword filter** (sync, <1ms) — Exact-match wordlists for English + 8 Indian languages (Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati) in both native script and transliterated Latin
-3. **OpenAI Moderation API** (async, 50-200ms) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm
+2. **Keyword filter** (sync, before save, <1ms) — Exact-match wordlists for English + 8 Indian languages. If matched, message saved as hidden and never broadcast.
+3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
-Thresholds: `>=0.85` confidence → auto-hide, `>=0.5` → flag for review. Auto-mute after 3 hidden messages in 1 hour.
+Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden messages in 1 hour. Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
 Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent.
 

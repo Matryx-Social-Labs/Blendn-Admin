@@ -44,9 +44,9 @@ Users are auto-joined to rooms based on their state:
 | `chat:message` | `{ id, chatGroupId, userId, userName, userImage, content, type, parentId, createdAt }` | New message in chat |
 | `chat:typing` | `{ chatGroupId, userId, userName }` | User is typing |
 | `chat:reaction` | `{ chatGroupId, messageId, userId, emoji, action }` | Reaction added/removed |
-| `chat:messageDeleted` | `{ chatGroupId, messageId }` | Message was deleted by admin |
-| `chat:messageHidden` | `{ chatGroupId, messageId, reason }` | Message hidden by moderation system (reason: `keyword`, `openai_text`, `openai_image`, `spam`) |
+| `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message deleted. When `moderation: true`, it was auto-hidden by moderation — `userId` identifies the sender so the client can show a placeholder to them instead of removing. |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Member ban status changed |
+| `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Member mute status changed. `muted: true` = auto-muted (3+ violations in 1hr) or admin-muted. `muted: false` = auto-unmute expired or admin-unmuted. |
 
 ### Event Events (room: `event:{eventId}`)
 

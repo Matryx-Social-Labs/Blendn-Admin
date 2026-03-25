@@ -38,7 +38,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/messages",
   tags: ["Mobile Chat"],
   summary: "Get group messages",
-  description: "Cursor-based pagination. Pass `before` (message UUID) to load older messages.",
+  description: "Cursor-based pagination. Pass `before` (message UUID) to load older messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),
@@ -59,13 +59,25 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/messages",
   tags: ["Mobile Chat"],
   summary: "Send group message",
+  description: [
+    "Send a message to a chat group. Messages go through a moderation pipeline **before** being broadcast:",
+    "",
+    "1. **Spam check** — blocks if burst rate exceeded (5 msgs/10s) or 3+ links",
+    "2. **Keyword filter** — instant block for slurs/profanity in 9 languages",
+    "3. **OpenAI Moderation** — AI content analysis with 1s timeout (falls back to async if slow)",
+    "",
+    "If moderation catches the message, the response has `moderation_hidden: true` and `content: null`.",
+    "The message is never broadcast to other users via socket.",
+    "",
+    "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429)",
+  ].join("\n"),
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),
     body: { content: { "application/json": { schema: SendMessageRequestSchema } } },
   },
   responses: {
-    201: { description: "Message sent", content: { "application/json": { schema: wrap(ChatMessageSchema) } } },
+    201: { description: "Message sent (check `moderation_hidden` — if true, content was blocked)", content: { "application/json": { schema: wrap(ChatMessageSchema) } } },
     ...standardErrors,
   },
 })

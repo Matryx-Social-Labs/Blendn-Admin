@@ -403,29 +403,82 @@ const mapMessage = (m: ApiMessage): Message => ({
 
 | Scenario | Sender sees | Other users see |
 |----------|-------------|-----------------|
-| Message auto-hidden by moderation | "This message was removed for violating chat guidelines" (grey placeholder) | Nothing — message not visible |
+| Keyword filter catches message (pre-emit) | API response has `moderation_hidden: true` — show placeholder immediately, no socket event | Nothing — message never broadcast |
+| OpenAI catches within 1s (pre-emit) | API response has `moderation_hidden: true` — show placeholder immediately | Nothing — message never broadcast |
+| OpenAI catches after emit (post-emit fallback) | Socket `chat:messageDeleted` with `moderation: true` — replace with placeholder | Socket `chat:messageDeleted` — message disappears |
 | Message deleted by admin | Message disappears | Message disappears |
-| Page reload after moderation hide | Placeholder persists (API returns it) | Nothing |
+| Page reload after moderation hide | Placeholder persists (GET API returns it with `moderation_hidden: true`) | Nothing |
+
+### 5e. Handle `moderation_hidden` in POST response (NEW — most important)
+
+When the send API returns successfully but with `moderation_hidden: true`, the message was caught **before broadcast**. The client should show a placeholder immediately without waiting for a socket event:
+
+```typescript
+const result = await apiClient.sendChatMessage(chatRoomId, messageText, 'text')
+
+if (result.success && result.data) {
+  if (result.data.moderation_hidden) {
+    // Message was caught by moderation — show placeholder
+    const placeholderMsg: Message = {
+      message_id: result.data.id,
+      sender_id: currentUser.id,
+      sender_name: currentUser.name,
+      message_text: null,
+      message_type: result.data.type,
+      moderation_hidden: true,
+      created_at: result.data.createdAt,
+    }
+    setMessages(prev => [...prev, placeholderMsg])
+    showTray(
+      'Message Removed',
+      'Your message was removed for violating chat guidelines. Repeated violations may result in being muted.',
+      [{ label: 'OK', variant: 'primary', onPress: closeTray }]
+    )
+  } else {
+    // Normal message — add optimistically (or wait for socket)
+    // ...existing logic
+  }
+}
+```
 
 ---
 
 ## 6. Complete Event Flow Summary
 
 ### Auto-moderation (keyword/AI detection):
+
+**Pre-emit moderation (most common — keyword filter or OpenAI catches it fast):**
 ```
 User sends "offensive word"
-  → Message saved to DB & shown via socket (optimistic)
-  → Backend runs async moderation (~50-200ms)
-  → Keyword filter matches → confidence 0.9 → auto-hide
-  → DB: message.moderation_status = "hidden", message.deleted_at = now()
-  → Socket emits "chat:messageDeleted" with { moderation: true, userId }
-  → OTHER users: message removed from UI (they never see the content)
-  → SENDER: message replaced with "This message was removed" placeholder + toast
+  → Backend runs keyword filter BEFORE saving (~1ms)
+  → Keyword matches → message saved with moderation_status="hidden"
+  → Message is NEVER emitted via Socket.io — other users never see it
+  → API response to sender: { moderation_hidden: true, content: null }
+  → Client should: show placeholder bubble, show warning toast
   → If 3+ hidden messages in 1 hour → auto-mute
-  → Socket emits "chat:memberMuted" → client disables input for that user
-  → Next send attempt returns errorCode: "USER_MUTED"
-  → After 1 hour with no new violations → next send attempt auto-unmutes
-  → Socket emits "chat:memberMuted" { muted: false } → client re-enables input
+  → Socket emits "chat:memberMuted" → client disables input
+  → After 1 hour with no violations → next send auto-unmutes
+```
+
+**Pre-emit OpenAI catch (within 1s):**
+```
+User sends "I want to harm people" (no keyword match, but OpenAI catches it)
+  → Keyword filter passes → message saved to DB
+  → OpenAI moderation runs with 1s timeout
+  → OpenAI returns hide action within 1s
+  → Message hidden BEFORE socket emit → never broadcast
+  → API response: { moderation_hidden: true, content: null }
+```
+
+**Post-emit fallback (OpenAI slow — rare):**
+```
+User sends problematic content
+  → Keyword filter passes → message saved
+  → OpenAI times out (>1s) → message emitted via Socket.io
+  → Async moderation catches it later
+  → Socket emits "chat:messageDeleted" with { moderation: true, userId }
+  → OTHER users: message removed from UI
+  → SENDER: message replaced with placeholder + toast
 ```
 
 ### Auto-unmute (mute expiry):

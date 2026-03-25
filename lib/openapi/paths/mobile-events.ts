@@ -384,6 +384,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/chat",
   tags: ["Mobile Events"],
   summary: "Get event chat messages (must be checked in)",
+  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -406,13 +407,22 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/chat",
   tags: ["Mobile Events"],
   summary: "Send event chat message (must be checked in)",
+  description: [
+    "Send a message to an event chat. Same moderation pipeline as group chat:",
+    "",
+    "1. **Spam check** → 2. **Keyword filter** (instant) → 3. **OpenAI Moderation** (1s timeout)",
+    "",
+    "If caught, response has `moderation_hidden: true`, `content: null`. Message is never broadcast.",
+    "",
+    "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429)",
+  ].join("\n"),
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
     body: { content: { "application/json": { schema: SendMessageRequestSchema } } },
   },
   responses: {
-    201: { description: "Message sent", content: { "application/json": { schema: wrap(z.object({ message: ChatMessageSchema })) } } },
+    201: { description: "Message sent (check `moderation_hidden` — if true, content was blocked)", content: { "application/json": { schema: wrap(z.object({ message: ChatMessageSchema })) } } },
     ...standardErrors,
   },
 })

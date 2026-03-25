@@ -2,23 +2,32 @@
 
 ## Overview
 
-Every message sent in event group chat goes through a multi-layer moderation pipeline. The system is designed to **never block the user experience** — messages are saved and delivered instantly via Socket.io, and moderation runs asynchronously in the background (fire-and-forget). The only exception is spam detection, which runs synchronously before the message is saved.
+Every message sent in event group chat goes through a multi-layer **pre-emit** moderation pipeline. Moderation runs **before** the message is broadcast to other users via Socket.io, so blocked content is never visible to anyone except the sender (who sees a placeholder).
 
 **Pipeline order:**
 
 ```
 User sends message
   │
-  ├─ [SYNC] Spam check → blocks message if spam detected
+  ├─ [SYNC] Spam check → blocks message if spam detected (429 response)
   │
-  ├─ Message saved to DB + emitted via Socket.io
+  ├─ [SYNC] Keyword filter (~1ms) → if match:
+  │     Save with moderation_status="hidden", return moderation_hidden=true
+  │     Message is NEVER emitted via Socket.io
   │
-  └─ [ASYNC - fire and forget]
-       ├─ 1. Keyword filter (~1ms)
-       ├─ 2. OpenAI text moderation (50-200ms)
-       └─ 3. OpenAI image moderation (500-1500ms, images/gifs only)
+  ├─ Message saved to DB
+  │
+  ├─ [PRE-EMIT] OpenAI text moderation (1s timeout via Promise.race)
+  │     If flagged → hide before emit, return moderation_hidden=true
+  │     If timeout → emit anyway, fall back to async pipeline
+  │
+  ├─ Socket.io emit (only if moderation passed)
+  │
+  └─ [ASYNC fallback - only if OpenAI timed out]
+       ├─ OpenAI text moderation (retry)
+       └─ OpenAI image moderation (500-1500ms, images/gifs only)
             │
-            └─ Action: hide / flag / mark clean
+            └─ Action: hide (via socket delete event) / flag / mark clean
 ```
 
 If any layer returns `hide`, the pipeline **stops early** — no further checks run.
@@ -63,7 +72,7 @@ This is the only layer that can **prevent a message from being created at all**.
 
 ## Layer 2: Keyword Filter
 
-**When:** Asynchronous, first check after message is saved.
+**When:** Synchronous, runs BEFORE the message is saved to the database. If it matches, the message is saved with `moderation_status: "hidden"` and never broadcast.
 **Source file:** `lib/moderation/keyword-filter.ts`
 
 Exact-match against curated wordlists covering **9 languages** with leetspeak normalization.
@@ -102,34 +111,36 @@ Before matching, the message is normalized:
 ### Confidence scoring
 
 ```
-confidence = 0.7 + (number_of_matched_keywords × 0.1)
+confidence = 0.85 + (number_of_matched_keywords × 0.1)
 ```
 
 | Matches | Confidence | Action |
 |---|---|---|
-| 1 keyword | 0.8 | **Flag** for review (message stays visible) |
-| 2 keywords | 0.9 | **Auto-hide** + flag (confidence >= 0.85) |
-| 3+ keywords | 1.0 | **Auto-hide** + flag |
+| 1 keyword | 0.9 | **Auto-hide** + flag (confidence >= 0.7 threshold) |
+| 2 keywords | 1.0 (capped) | **Auto-hide** + flag |
+| 3+ keywords | 1.0 (capped) | **Auto-hide** + flag |
+
+> **Note:** With the current thresholds (`AUTO_HIDE_THRESHOLD = 0.7`, base confidence = 0.85), even a **single keyword match** triggers auto-hide. This is intentional — slurs should never be visible.
 
 ### Test examples
 
 | Message | Matched keywords | Confidence | Result |
 |---|---|---|---|
-| "you're such a chutiya retard" | chutiya, retard | 0.9 | **Hidden** + flagged |
-| "this event is bc terrible" | bc | 0.8 | **Flagged** (visible) |
-| "madarchod bhosadike" | madarchod, bhosadike | 0.9 | **Hidden** + flagged |
-| "what a fag event" | fag | 0.8 | **Flagged** (visible) |
-| "n!gg3r go home" | nigger (via leetspeak) | 0.8 | **Flagged** (visible) |
-| "bsdk kya kar rahe ho" | bsdk | 0.8 | **Flagged** (visible) |
+| "you're such a chutiya retard" | chutiya, retard | 1.0 | **Hidden** (never broadcast) |
+| "this event is bc terrible" | bc | 0.9 | **Hidden** (never broadcast) |
+| "madarchod bhosadike" | madarchod, bhosadike | 1.0 | **Hidden** (never broadcast) |
+| "what a fag event" | fag | 0.9 | **Hidden** (never broadcast) |
+| "n!gg3r go home" | nigger (via leetspeak) | 0.9 | **Hidden** (never broadcast) |
+| "bsdk kya kar rahe ho" | bsdk | 0.9 | **Hidden** (never broadcast) |
 | "this event sucks" | none | — | **Passes** (no keywords matched) |
 | "the food is terrible" | none | — | **Passes** |
-| "mc bc chutiya" | mc, bc, chutiya | 1.0 | **Hidden** + flagged |
+| "mc bc chutiya" | mc, bc, chutiya | 1.0 | **Hidden** (never broadcast) |
 
 ---
 
 ## Layer 3: OpenAI Text Moderation
 
-**When:** Asynchronous, runs after keyword filter (if keyword filter didn't already hide).
+**When:** Pre-emit — runs AFTER saving but BEFORE socket broadcast, with a **1-second timeout** via `Promise.race`. If the API takes longer, the message is emitted and moderation falls back to async (post-emit hide via socket event).
 **Source file:** `lib/moderation/openai-moderation.ts`
 **Model:** `omni-moderation-latest`
 **Fails open:** If the API is down or key is missing, the message is treated as clean.
@@ -156,9 +167,9 @@ OpenAI returns a confidence score (0.0 to 1.0) for each category:
 
 | Highest category score | Action | Config constant |
 |---|---|---|
-| >= 0.85 | **Auto-hide** + flag | `AUTO_HIDE_THRESHOLD` |
-| 0.50 - 0.84 | **Flag** for review (message stays visible) | `FLAG_THRESHOLD` |
-| < 0.50 | **Clean** | — |
+| >= 0.70 | **Auto-hide** + flag | `AUTO_HIDE_THRESHOLD` |
+| 0.40 - 0.69 | **Flag** for review (message stays visible) | `FLAG_THRESHOLD` |
+| < 0.40 | **Clean** | — |
 
 ### Test examples
 
@@ -200,17 +211,24 @@ Same categories and thresholds as text moderation, applied to the image content.
 
 ## Actions Taken
 
-### Auto-hide (confidence >= 0.85)
+### Auto-hide (confidence >= 0.70)
 
-1. Message `moderation_status` set to `"hidden"`
-2. Message soft-deleted (`deleted_at` set to current time)
-3. Socket.io emits `chat:messageHidden` to all clients in the chat room — message disappears from everyone's screen
+**Pre-emit (keyword or OpenAI catches before broadcast):**
+1. Message saved with `moderation_status: "hidden"` and `deleted_at` set
+2. **Never emitted** via Socket.io — other users never see it
+3. API response to sender has `moderation_hidden: true`, `content: null`
 4. A `moderation_flags` record is created for admin review
 5. Auto-mute check runs (see below)
 
+**Post-emit fallback (OpenAI timed out, async catch):**
+1. Message `moderation_status` set to `"hidden"`, `deleted_at` set
+2. Socket.io emits `chat:messageDeleted` with `{ moderation: true, userId }` — other users remove the message, sender sees a "message removed" placeholder
+3. A `moderation_flags` record is created for admin review
+4. Auto-mute check runs
+
 **Source:** `lib/moderation/actions.ts` → `hideMessage()`
 
-### Flag for review (confidence 0.50 - 0.84)
+### Flag for review (confidence 0.40 - 0.69)
 
 1. Message `moderation_status` set to `"flagged"`
 2. A `moderation_flags` record is created with categories and confidence scores
@@ -231,12 +249,21 @@ Same categories and thresholds as text moderation, applied to the image content.
 If a user accumulates **3 or more hidden messages within 1 hour** in the same chat group, they are automatically muted:
 
 1. `chat_group_members.status` set to `"muted"`
-2. User can no longer send messages in that chat group
-3. Muted users receive a 403 error when attempting to send
+2. Socket.io emits `chat:memberMuted` with `{ muted: true }` — client disables input
+3. Muted users receive a 403 error with `errorCode: "USER_MUTED"` when attempting to send
 
 **Config:** `AUTO_MUTE_HIDDEN_COUNT = 3`, `AUTO_MUTE_WINDOW_MS = 60 minutes`
 
 **Source:** `lib/moderation/actions.ts` → `checkAndAutoMute()`
+
+### Auto-unmute (mute expiry)
+
+When a muted user tries to send a message, the backend checks if they still have 3+ hidden messages in the last hour:
+
+1. If **no** (mute window has passed) → auto-unmute: status set to `"active"`, Socket.io emits `chat:memberMuted` with `{ muted: false, reason: "Auto-mute expired" }`, message send proceeds normally
+2. If **yes** (recent violations still in window) → user stays muted, 403 returned
+
+**Source:** `lib/moderation/actions.ts` → `checkAndAutoUnmute()`
 
 ---
 
@@ -283,8 +310,8 @@ All thresholds are in `lib/moderation/config.ts`:
 
 ```typescript
 // Confidence thresholds
-AUTO_HIDE_THRESHOLD = 0.85     // Auto-hide if confidence >= this
-FLAG_THRESHOLD = 0.5           // Flag for review if confidence >= this
+AUTO_HIDE_THRESHOLD = 0.7      // Auto-hide if confidence >= this
+FLAG_THRESHOLD = 0.4           // Flag for review if confidence >= this
 
 // Spam detection
 SPAM_BURST_LIMIT = 5           // Max messages in burst window
@@ -447,49 +474,49 @@ For crowd mood tracking and issue detection, see the planned [Sentiment Analysis
               │               │
           [spam]          [clean]
               │               │
-          Block msg      Save message to DB
-          Return 429     Emit via Socket.io
+          Block msg           ▼
+          Return 429  ┌────────────────┐
+                      │  Keyword Filter │ ◄── SYNC (before save)
+                      │  (~1ms)         │
+                      └───────┬────────┘
                               │
-                              ▼
-                    ┌──────────────────┐
-                    │  ASYNC PIPELINE   │ ◄── fire-and-forget
-                    │  (never throws)  │
-                    └────────┬─────────┘
-                             │
-                    ┌────────┴────────┐
-                    │  Keyword Filter  │
-                    │  (~1ms, sync)    │
-                    └────────┬────────┘
-                             │
-                    ┌────────┴────────┐
-                    │                 │
-                [match]          [no match]
-                    │                 │
-                    ▼                 ▼
-             hide or flag    ┌────────────────┐
-             (early exit)    │  OpenAI Text    │
-                             │  (50-200ms)     │
-                             └────────┬────────┘
-                                      │
-                             ┌────────┴────────┐
-                             │                 │
-                          [match]          [no match]
-                             │                 │
-                             ▼                 ▼
-                      hide or flag    ┌────────────────┐
-                      (early exit)    │  OpenAI Image   │
-                                      │  (if applicable)│
-                                      │  (500-1500ms)   │
-                                      └────────┬────────┘
-                                               │
-                                      ┌────────┴────────┐
-                                      │                 │
-                                   [match]          [no match]
-                                      │                 │
-                                      ▼                 ▼
-                               hide or flag       markClean()
-                                      │
-                                      ▼
+                      ┌───────┴───────┐
+                      │               │
+                  [match]         [no match]
+                      │               │
+                  Save as         Save message
+                  hidden          to DB
+                  Return              │
+                  moderation_         ▼
+                  hidden=true   ┌────────────────┐
+                                │  OpenAI Text    │ ◄── PRE-EMIT (1s timeout)
+                                │  (50-200ms)     │
+                                └───────┬────────┘
+                                        │
+                              ┌─────────┼─────────┐
+                              │         │         │
+                          [hide]    [timeout]   [clean/flag]
+                              │         │         │
+                          Hide msg   Emit msg   Emit msg
+                          Return     via Socket  via Socket
+                          hidden=    ┌─────┐     Mark clean
+                          true       │ASYNC│
+                                     │fall-│
+                                     │back │
+                                     └──┬──┘
+                                        │
+                              ┌─────────┴─────────┐
+                              │  OpenAI retry +    │
+                              │  Image moderation  │
+                              └─────────┬─────────┘
+                                        │
+                                   [if hidden]
+                                        │
+                                  Socket emits
+                                  chat:messageDeleted
+                                  {moderation:true}
+                                        │
+                                        ▼
                             ┌──────────────────┐
                             │ checkAndAutoMute  │
                             │ (if message was   │
