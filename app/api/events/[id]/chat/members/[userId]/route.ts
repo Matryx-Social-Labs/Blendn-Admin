@@ -14,10 +14,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
 
     const { id: eventId, userId: targetUserId } = await params
-    const { action } = await request.json() as { action: "ban" | "unban" }
+    const { action } = await request.json() as { action: "ban" | "unban" | "mute" | "unmute" }
 
-    if (action !== "ban" && action !== "unban") {
-      return new NextResponse("Invalid action", { status: 400 })
+    if (!["ban", "unban", "mute", "unmute"].includes(action)) {
+      return new NextResponse("Invalid action. Must be ban, unban, mute, or unmute.", { status: 400 })
     }
 
     const event = await db.events.findUnique({
@@ -30,7 +30,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }
     if (!event.chat_group) return new NextResponse("No chat group", { status: 404 })
 
-    const banned = action === "ban"
+    const statusMap = {
+      ban: "banned" as const,
+      unban: "active" as const,
+      mute: "muted" as const,
+      unmute: "active" as const,
+    }
 
     await db.chat_group_members.update({
       where: {
@@ -40,15 +45,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         },
       },
       data: {
-        status: banned ? "banned" : "active",
-        banned_at: banned ? new Date() : null,
-        banned_by: banned ? session.user.id : null,
+        status: statusMap[action],
+        banned_at: action === "ban" ? new Date() : action === "unban" ? null : undefined,
+        banned_by: action === "ban" ? session.user.id : action === "unban" ? null : undefined,
       },
     })
 
-    emitChatMemberBanned(event.chat_group.id, targetUserId, banned)
+    if (action === "ban" || action === "unban") {
+      emitChatMemberBanned(event.chat_group.id, targetUserId, action === "ban")
+    }
 
-    return NextResponse.json({ success: true, banned })
+    return NextResponse.json({ success: true, action, status: statusMap[action] })
   } catch (err) {
     console.error("Ban member error:", err)
     return new NextResponse("Internal Server Error", { status: 500 })
