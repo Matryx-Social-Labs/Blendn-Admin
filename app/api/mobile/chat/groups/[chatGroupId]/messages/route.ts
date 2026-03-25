@@ -14,6 +14,7 @@ import {
   notFoundResponse,
   validationErrorResponse,
   serverErrorResponse,
+  ErrorCode,
 } from "@/lib/api-response"
 
 const sendMessageSchema = z.object({
@@ -231,20 +232,36 @@ export async function POST(
 
     // Check if user is muted or banned
     if (membership.status === "muted") {
-      return forbiddenResponse("You are muted in this chat group")
+      return errorResponse(
+        "You are muted in this chat group. Your messages have been flagged for policy violations.",
+        403,
+        ErrorCode.USER_MUTED
+      )
     }
     if (membership.status === "banned") {
-      return forbiddenResponse("You are banned from this chat group")
+      return errorResponse(
+        "You have been banned from this chat group due to repeated policy violations.",
+        403,
+        ErrorCode.USER_BANNED
+      )
     }
 
     // Enforce chat access cutoff — users lose write access when they check out
     if (membership.last_allowed_at && membership.last_allowed_at < new Date()) {
-      return forbiddenResponse("You must be checked in to send messages in this event chat")
+      return errorResponse(
+        "You must be checked in to send messages in this event chat",
+        403,
+        ErrorCode.NOT_CHECKED_IN
+      )
     }
 
     // Check if chat group is locked
     if (chatGroup.status === "locked") {
-      return forbiddenResponse("This chat group is locked")
+      return errorResponse(
+        "This chat group is currently locked by the organiser",
+        403,
+        ErrorCode.CHAT_LOCKED
+      )
     }
 
     // If replying, verify parent message exists in this group
@@ -265,7 +282,11 @@ export async function POST(
     // Spam check (sync — block before saving)
     const spamResult = checkSpam(user.userId, chatGroupId, content)
     if (spamResult && spamResult.action === "hide") {
-      return errorResponse(spamResult.reason || "Message blocked as spam", 429)
+      return errorResponse(
+        spamResult.reason || "Message blocked as spam. Please slow down.",
+        429,
+        ErrorCode.SPAM_BLOCKED
+      )
     }
 
     // Create the message

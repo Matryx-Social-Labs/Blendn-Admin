@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
-import { emitChatMessageHidden } from "@/lib/socket-server"
+import { emitChatMessageHidden, emitChatMemberMuted } from "@/lib/socket-server"
 import { AUTO_MUTE_HIDDEN_COUNT, AUTO_MUTE_WINDOW_MS } from "./config"
 import type { ModerationResult } from "./types"
 
@@ -105,6 +105,13 @@ export async function checkAndAutoMute(
           status: "muted",
         },
       })
+
+      emitChatMemberMuted(
+        chatGroupId,
+        userId,
+        true,
+        "Auto-muted due to repeated policy violations"
+      )
 
       logger.warn("User auto-muted due to repeated violations", {
         userId,

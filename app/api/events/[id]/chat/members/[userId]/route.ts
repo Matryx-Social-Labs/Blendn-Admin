@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canModerateChat } from "@/lib/rbac"
-import { emitChatMemberBanned } from "@/lib/socket-server"
+import { emitChatMemberBanned, emitChatMemberMuted } from "@/lib/socket-server"
 
 interface RouteContext {
   params: Promise<{ id: string; userId: string }>
@@ -53,6 +53,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     if (action === "ban" || action === "unban") {
       emitChatMemberBanned(event.chat_group.id, targetUserId, action === "ban")
+    }
+    if (action === "mute" || action === "unmute") {
+      emitChatMemberMuted(event.chat_group.id, targetUserId, action === "mute", "Muted by admin")
     }
 
     return NextResponse.json({ success: true, action, status: statusMap[action] })

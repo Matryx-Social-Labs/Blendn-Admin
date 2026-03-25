@@ -4,11 +4,13 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
   successResponse,
+  errorResponse,
   validationErrorResponse,
   unauthorizedResponse,
   notFoundResponse,
   forbiddenResponse,
   serverErrorResponse,
+  ErrorCode,
 } from "@/lib/api-response"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
@@ -326,7 +328,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    if (!membership || membership.status !== "active") {
+    // Check muted/banned BEFORE auto-join logic — do not re-activate restricted users
+    if (membership?.status === "muted") {
+      return errorResponse(
+        "You are muted in this chat. Your messages have been flagged for policy violations.",
+        403,
+        ErrorCode.USER_MUTED
+      )
+    }
+    if (membership?.status === "banned") {
+      return errorResponse(
+        "You have been banned from this chat due to repeated policy violations.",
+        403,
+        ErrorCode.USER_BANNED
+      )
+    }
+
+    // Auto-join: if not a member yet, check if user is checked in
+    if (!membership) {
       const checkIn = await db.event_check_ins.findUnique({
         where: {
           event_id_user_id: {
@@ -338,29 +357,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
 
       if (checkIn?.status !== "checked_in") {
-        return forbiddenResponse("You must check in to the event to send messages")
+        return errorResponse(
+          "You must check in to the event to send messages",
+          403,
+          ErrorCode.NOT_CHECKED_IN
+        )
       }
 
       const postAnonName = await generateUniqueAnonymousName(chatGroup.id)
-      await db.chat_group_members.upsert({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroup.id,
-            user_id: authUser.userId,
-          },
-        },
-        create: {
+      await db.chat_group_members.create({
+        data: {
           chat_group_id: chatGroup.id,
           user_id: authUser.userId,
           role: "member",
           status: "active",
           last_allowed_at: null,
           anonymous_name: postAnonName,
-        },
-        update: {
-          status: "active",
-          last_allowed_at: null,
-          updated_at: new Date(),
         },
       })
 
@@ -382,7 +394,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         })
 
     if (membershipFresh?.last_allowed_at) {
-      return forbiddenResponse("You must check in to send messages")
+      return errorResponse(
+        "You must be checked in to send messages",
+        403,
+        ErrorCode.NOT_CHECKED_IN
+      )
     }
 
     // If replying, verify parent message exists
@@ -398,7 +414,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Spam check (sync — block before saving)
     const spamResult = checkSpam(authUser.userId, chatGroup.id, content)
     if (spamResult && spamResult.action === "hide") {
-      return forbiddenResponse(spamResult.reason || "Message blocked as spam")
+      return errorResponse(
+        spamResult.reason || "Message blocked as spam. Please slow down.",
+        429,
+        ErrorCode.SPAM_BLOCKED
+      )
     }
 
     // Create message

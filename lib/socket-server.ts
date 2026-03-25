@@ -90,6 +90,7 @@ export interface ServerToClientEvents {
   "chat:messageDeleted": (data: { chatGroupId: string; messageId: string }) => void
   "chat:messageHidden": (data: { chatGroupId: string; messageId: string; reason: string }) => void
   "chat:memberBanned": (data: { chatGroupId: string; userId: string; banned: boolean }) => void
+  "chat:memberMuted": (data: { chatGroupId: string; userId: string; muted: boolean; reason?: string }) => void
 
   // System events
   error: (data: { message: string; code?: string }) => void
@@ -539,6 +540,14 @@ export function emitChatMessageHidden(chatGroupId: string, messageId: string, re
 export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean): void {
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:memberBanned", { chatGroupId, userId, banned })
+}
+
+/**
+ * Emit a member mute/unmute to the chat room
+ */
+export function emitChatMemberMuted(chatGroupId: string, userId: string, muted: boolean, reason?: string): void {
+  if (!io) return
+  io.to(`chat:${chatGroupId}`).emit("chat:memberMuted", { chatGroupId, userId, muted, reason })
 }
 
 /**
