@@ -5,11 +5,14 @@ import { AUTO_MUTE_HIDDEN_COUNT, AUTO_MUTE_WINDOW_MS } from "./config"
 import type { ModerationResult } from "./types"
 
 /**
- * Hide a message: set moderation_status, soft-delete, and notify via socket
+ * Hide a message: set moderation_status, soft-delete, and notify via socket.
+ * The socket event includes userId so the client can show a "message removed"
+ * placeholder to the sender instead of silently deleting it.
  */
 export async function hideMessage(
   messageId: string,
   chatGroupId: string,
+  userId: string,
   result: ModerationResult
 ): Promise<void> {
   try {
@@ -21,11 +24,12 @@ export async function hideMessage(
       },
     })
 
-    emitChatMessageHidden(chatGroupId, messageId, result.source)
+    emitChatMessageHidden(chatGroupId, messageId, userId)
 
     logger.info("Message auto-hidden", {
       messageId,
       chatGroupId,
+      userId,
       source: result.source,
       confidence: result.confidence,
     })

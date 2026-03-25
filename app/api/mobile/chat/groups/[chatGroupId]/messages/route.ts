@@ -76,10 +76,14 @@ export async function GET(
       allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
     )
 
-    // Build query for messages
+    // Build query for messages — include moderation-hidden messages
+    // so the sender can see "This message was removed" placeholders
     const whereClause: Record<string, unknown> = {
       chat_group_id: chatGroupId,
-      deleted_at: null,
+      OR: [
+        { deleted_at: null },
+        { moderation_status: "hidden", user_id: user.userId },
+      ],
     }
 
     // If cursor provided, get messages before that message
@@ -142,23 +146,29 @@ export async function GET(
     messagesToReturn.reverse()
 
     return successResponse({
-      messages: messagesToReturn.map((m) => ({
-        ...m,
-        user: {
-          id: m.user.id,
-          name: anonMap.get(m.user.id) || "Attendee",
-          image: null,
-        },
-        parent_message: m.parent_message
-          ? {
-              ...m.parent_message,
-              user: {
-                id: m.parent_message.user.id,
-                name: anonMap.get(m.parent_message.user.id) || "Attendee",
-              },
-            }
-          : null,
-      })),
+      messages: messagesToReturn.map((m) => {
+        const isHidden = m.moderation_status === "hidden"
+        return {
+          ...m,
+          // Redact content for moderation-hidden messages; show placeholder
+          content: isHidden ? null : m.content,
+          moderation_hidden: isHidden,
+          user: {
+            id: m.user.id,
+            name: anonMap.get(m.user.id) || "Attendee",
+            image: null,
+          },
+          parent_message: m.parent_message
+            ? {
+                ...m.parent_message,
+                user: {
+                  id: m.parent_message.user.id,
+                  name: anonMap.get(m.parent_message.user.id) || "Attendee",
+                },
+              }
+            : null,
+        }
+      }),
       pagination: {
         hasMore,
         nextCursor: hasMore ? messagesToReturn[0]?.id : null,

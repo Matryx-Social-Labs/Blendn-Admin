@@ -27,7 +27,7 @@ export async function moderateMessage(
     // 1. Keyword filter (sync)
     const keywordResult = checkKeywords(content)
     if (keywordResult && keywordResult.action === "hide") {
-      await hideMessage(messageId, chatGroupId, keywordResult)
+      await hideMessage(messageId, chatGroupId, userId, keywordResult)
       await flagForReview(messageId, chatGroupId, userId, keywordResult)
       await checkAndAutoMute(userId, chatGroupId)
       return
@@ -36,7 +36,7 @@ export async function moderateMessage(
     // 2. OpenAI text moderation (async)
     const textResult = await checkTextContent(content)
     if (textResult && textResult.action === "hide") {
-      await hideMessage(messageId, chatGroupId, textResult)
+      await hideMessage(messageId, chatGroupId, userId, textResult)
       await flagForReview(messageId, chatGroupId, userId, textResult)
       await checkAndAutoMute(userId, chatGroupId)
       return
@@ -46,7 +46,7 @@ export async function moderateMessage(
     if ((type === "image" || type === "gif") && mediaUrl) {
       const imageResult = await checkImageContent(mediaUrl)
       if (imageResult && imageResult.action === "hide") {
-        await hideMessage(messageId, chatGroupId, imageResult)
+        await hideMessage(messageId, chatGroupId, userId, imageResult)
         await flagForReview(messageId, chatGroupId, userId, imageResult)
         await checkAndAutoMute(userId, chatGroupId)
         return

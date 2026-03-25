@@ -87,8 +87,7 @@ export interface ServerToClientEvents {
   }) => void
 
   // Moderation events
-  "chat:messageDeleted": (data: { chatGroupId: string; messageId: string }) => void
-  "chat:messageHidden": (data: { chatGroupId: string; messageId: string; reason: string }) => void
+  "chat:messageDeleted": (data: { chatGroupId: string; messageId: string; moderation?: boolean; userId?: string }) => void
   "chat:memberBanned": (data: { chatGroupId: string; userId: string; banned: boolean }) => void
   "chat:memberMuted": (data: { chatGroupId: string; userId: string; muted: boolean; reason?: string }) => void
 
@@ -526,12 +525,18 @@ export function emitChatMessageDeleted(chatGroupId: string, messageId: string): 
 }
 
 /**
- * Emit a message hidden event (moderation auto-hide)
+ * Emit a message hidden event (moderation auto-hide).
+ * Includes userId and moderation flag so the client can show a
+ * "message removed" placeholder to the sender instead of just deleting it.
  */
-export function emitChatMessageHidden(chatGroupId: string, messageId: string, reason: string): void {
+export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string): void {
   if (!io) return
-  // Emit as "chat:messageDeleted" to match the client's expected event name
-  io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", { chatGroupId, messageId, reason })
+  io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", {
+    chatGroupId,
+    messageId,
+    moderation: true,
+    userId,
+  })
 }
 
 /**

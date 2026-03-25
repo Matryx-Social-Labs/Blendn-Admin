@@ -283,28 +283,129 @@ Since muted users CAN still read messages but not send, the GET endpoint lets th
 
 ---
 
-## 5. Message Hidden in Real-Time — Visual Feedback
+## 5. "This message was removed" — Placeholder for Moderated Messages
 
-When `chat:messageDeleted` fires for a message the current user just sent, it means their message was auto-hidden by moderation. Instead of silently removing it, show brief feedback:
+When moderation hides a message, the sender should see a **placeholder** ("This message was removed") instead of the message just vanishing. Other users should not see it at all.
+
+### How it works (backend changes already done):
+
+1. **Socket event `chat:messageDeleted`** now includes two new fields:
+   - `moderation: true` — distinguishes moderation-hidden from admin-deleted
+   - `userId` — the sender's ID, so the client knows whose message it was
+
+2. **GET messages endpoints** now return moderation-hidden messages **only to the sender** with:
+   - `content: null` (redacted)
+   - `moderation_hidden: true` flag
+
+This means on page reload, the sender still sees their removed messages as placeholders.
+
+### 5a. Handle `chat:messageDeleted` — show placeholder instead of removing
+
+Update the `handleDeleted` callback in `app/chat/[id].tsx`:
 
 ```typescript
-const handleDeleted: ChatMessageDeletedCallback = (data) => {
-  const wasOwnMessage = messages.find(
-    m => m.message_id === data.messageId && m.sender_id === currentUser?.id
-  )
+// Update the event type to include new fields
+type ChatMessageDeletedData = {
+  chatGroupId: string
+  messageId: string
+  moderation?: boolean  // true when auto-hidden by moderation
+  userId?: string       // sender of the hidden message
+}
 
-  setMessages(prev => prev.filter(m => m.message_id !== data.messageId))
-
-  if (wasOwnMessage) {
-    // Their message was removed by moderation
+const handleDeleted = (data: ChatMessageDeletedData) => {
+  if (data.moderation && data.userId === currentUser?.id) {
+    // OWN message was moderation-hidden → show placeholder, don't remove
+    setMessages(prev => prev.map(m =>
+      m.message_id === data.messageId
+        ? { ...m, message_text: null, moderation_hidden: true }
+        : m
+    ))
     showTray(
       'Message Removed',
       'Your message was removed for violating chat guidelines. Repeated violations may result in being muted.',
       [{ label: 'OK', variant: 'primary', onPress: closeTray }]
     )
+  } else {
+    // Someone else's message or admin deletion → remove entirely
+    setMessages(prev => prev.filter(m => m.message_id !== data.messageId))
   }
 }
 ```
+
+### 5b. Render the placeholder in the message list
+
+In the message bubble component:
+
+```tsx
+// In the message rendering logic:
+{msg.moderation_hidden ? (
+  <View style={styles.moderatedMessage}>
+    <IconAlertCircle size={14} color={APP_COLORS.textTertiary} />
+    <Text style={styles.moderatedText}>
+      This message was removed for violating chat guidelines
+    </Text>
+  </View>
+) : (
+  <Text style={styles.messageText}>{msg.message_text}</Text>
+)}
+```
+
+Styles:
+```typescript
+moderatedMessage: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 6,
+  paddingVertical: 6,
+  paddingHorizontal: 10,
+  backgroundColor: 'rgba(255,59,48,0.06)',
+  borderRadius: 8,
+  borderWidth: 1,
+  borderColor: 'rgba(255,59,48,0.1)',
+},
+moderatedText: {
+  color: APP_COLORS.textTertiary,
+  fontSize: 13,
+  fontStyle: 'italic',
+  flex: 1,
+},
+```
+
+### 5c. Handle `moderation_hidden` from GET response on page load
+
+When fetching messages via API, the response now includes `moderation_hidden: true` for the sender's hidden messages. Map this into your Message type:
+
+```typescript
+// In the message mapping from API response:
+interface Message {
+  message_id: string
+  sender_id: string
+  sender_name: string
+  message_text: string | null  // null when moderation_hidden
+  message_type: string
+  moderation_hidden?: boolean  // ADD THIS
+  // ... other fields
+}
+
+// When mapping API response to Message objects:
+const mapMessage = (m: ApiMessage): Message => ({
+  message_id: m.id,
+  sender_id: m.user.id,
+  sender_name: m.user.name,
+  message_text: m.content,          // will be null if moderation_hidden
+  message_type: m.type,
+  moderation_hidden: m.moderation_hidden ?? false,
+  // ...
+})
+```
+
+### 5d. What each user sees
+
+| Scenario | Sender sees | Other users see |
+|----------|-------------|-----------------|
+| Message auto-hidden by moderation | "This message was removed for violating chat guidelines" (grey placeholder) | Nothing — message not visible |
+| Message deleted by admin | Message disappears | Message disappears |
+| Page reload after moderation hide | Placeholder persists (API returns it) | Nothing |
 
 ---
 
@@ -317,7 +418,9 @@ User sends "offensive word"
   → Backend runs async moderation (~50-200ms)
   → Keyword filter matches → confidence 0.9 → auto-hide
   → DB: message.moderation_status = "hidden", message.deleted_at = now()
-  → Socket emits "chat:messageDeleted" → client removes message from all users
+  → Socket emits "chat:messageDeleted" with { moderation: true, userId }
+  → OTHER users: message removed from UI (they never see the content)
+  → SENDER: message replaced with "This message was removed" placeholder + toast
   → If 3+ hidden messages in 1 hour → auto-mute
   → Socket emits "chat:memberMuted" → client disables input for that user
   → Next send attempt returns errorCode: "USER_MUTED"
@@ -362,7 +465,7 @@ export const ErrorCode = {
 
 | Event | Payload | When | Client Action |
 |-------|---------|------|---------------|
-| `chat:messageDeleted` | `{ chatGroupId, messageId }` | Message auto-hidden or admin-deleted | Remove from UI. If own message, show warning toast. |
+| `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message auto-hidden by moderation (`moderation: true`) or admin-deleted (`moderation` absent) | If `moderation && userId === self`: replace with placeholder. Otherwise: remove from UI. |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Admin bans/unbans user | If self: show banned overlay / restore access |
 | `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Auto-mute or admin mute/unmute | If self: disable/enable input, show mute banner |
 
@@ -373,19 +476,23 @@ export const ErrorCode = {
 | File | Change |
 |------|--------|
 | `lib/apiClient.ts` | Add `errorCode` to `ApiResponse` type |
-| `lib/socketClient.ts` | Add `chat:memberMuted` event type, callback type, and listener |
-| `app/chat/[id].tsx` | Handle error codes in sendMessage, add muted/banned/locked states, subscribe to `chat:memberMuted`, show warnings for own hidden messages |
-| `app/chat/[id].tsx` styles | Add `restrictedBanner`, `restrictedText` styles |
+| `lib/socketClient.ts` | Add `chat:memberMuted` event type, callback type, and listener. Update `chat:messageDeleted` type to include `moderation?` and `userId?` fields. |
+| `app/chat/[id].tsx` | Handle error codes in sendMessage, add muted/banned/locked states, subscribe to `chat:memberMuted`. Update `handleDeleted` to show placeholder for own moderation-hidden messages. Add `moderation_hidden` to Message interface. |
+| `app/chat/[id].tsx` styles | Add `restrictedBanner`, `restrictedText`, `moderatedMessage`, `moderatedText` styles |
+| Message bubble component | Render "This message was removed" placeholder when `moderation_hidden` is true |
 
 ---
 
 ## 10. Testing Checklist
 
-- [ ] Send a message with a slur (e.g. "test nigga test") — message should appear then disappear within ~200ms, toast shows "Message Removed"
-- [ ] Send 3+ slur messages within 1 hour — user should get muted, input disabled, banner shown
-- [ ] Try sending a message while muted — should show "You are muted" error, not "Failed to send"
+- [ ] Send a message with a slur (e.g. "test nigga test") — sender should see the message replaced with "This message was removed for violating chat guidelines" placeholder + toast warning
+- [ ] Verify other users do NOT see the moderated message at all
+- [ ] Close and reopen the chat — the "message removed" placeholder should still appear for the sender (persisted via API)
+- [ ] Send 3+ slur messages within 1 hour — user should get muted, input disabled, mute banner shown
+- [ ] Try sending a message while muted — should show "You are muted" error with explanation, not generic "Failed to send"
 - [ ] Have admin ban a user from dashboard — user should see banned overlay in real-time via socket
 - [ ] Have admin mute a user from dashboard — user should see muted banner in real-time via socket
 - [ ] Have admin unmute a user — input should re-enable
 - [ ] Send 5+ messages in 10 seconds — should show "Slow down" toast
 - [ ] Check out of event then try to send — should show "Check in to send messages"
+- [ ] Admin deletes a message (not moderation) — message should disappear entirely for everyone, no placeholder

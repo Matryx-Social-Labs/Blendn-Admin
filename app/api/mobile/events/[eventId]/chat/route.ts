@@ -149,10 +149,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
     )
 
-    // Build where clause for messages (lock to last checkout time if not checked in)
+    // Build where clause for messages — include moderation-hidden messages
+    // for the sender so they see "This message was removed" placeholders
     const where: Record<string, unknown> = {
       chat_group_id: chatGroup.id,
-      deleted_at: null,
+      OR: [
+        { deleted_at: null },
+        { moderation_status: "hidden", user_id: authUser.userId },
+      ],
     }
 
     if (membershipFresh?.last_allowed_at) {
@@ -220,29 +224,33 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       chatGroupId: chatGroup.id,
       chatGroupName: chatGroup.name,
-      messages: messages.reverse().map((m) => ({
-        id: m.id,
-        type: m.type,
-        content: m.content,
-        metadata: m.metadata,
-        isEdited: m.is_edited,
-        isPinned: m.is_pinned,
-        createdAt: m.created_at,
-        editedAt: m.edited_at,
-        parentId: m.parent_id,
-        replyCount: m._count.replies,
-        user: {
-          id: m.user.id,
-          name: anonMap.get(m.user.id) || "Attendee",
-          image: null,
-        },
-        reactions: m.reactions.map((r) => ({
-          emoji: r.emoji,
-          userId: r.user_id,
-          userName: anonMap.get(r.user_id) || "Attendee",
-        })),
-        isOwn: m.user_id === authUser.userId,
-      })),
+      messages: messages.reverse().map((m) => {
+        const isHidden = m.moderation_status === "hidden"
+        return {
+          id: m.id,
+          type: m.type,
+          content: isHidden ? null : m.content,
+          moderation_hidden: isHidden,
+          metadata: isHidden ? null : m.metadata,
+          isEdited: m.is_edited,
+          isPinned: m.is_pinned,
+          createdAt: m.created_at,
+          editedAt: m.edited_at,
+          parentId: m.parent_id,
+          replyCount: m._count.replies,
+          user: {
+            id: m.user.id,
+            name: anonMap.get(m.user.id) || "Attendee",
+            image: null,
+          },
+          reactions: isHidden ? [] : m.reactions.map((r) => ({
+            emoji: r.emoji,
+            userId: r.user_id,
+            userName: anonMap.get(r.user_id) || "Attendee",
+          })),
+          isOwn: m.user_id === authUser.userId,
+        }
+      }),
       pagination: {
         page,
         limit,
