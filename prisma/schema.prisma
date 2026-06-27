@@ -125,6 +125,8 @@ model profiles {
   education    String?
   interests    String[]
   photos       String[]
+  goals        String[]
+  looking_for  String[]
   onboarded    Boolean  @default(false)
   // push_token and push_platform removed — use push_tokens table instead
   created_at   DateTime @default(now()) @db.Timestamptz(6)

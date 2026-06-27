@@ -10,6 +10,8 @@ export const updateProfileSchema = z.object({
   education: z.string().max(100).optional().nullable(),
   interests: z.array(z.string()).optional(),
   photos: z.array(z.string().url()).max(6).optional(),
+  goals: z.array(z.string()).optional(),
+  looking_for: z.array(z.string()).optional(),
   onboarded: z.boolean().optional(),
 })
 
