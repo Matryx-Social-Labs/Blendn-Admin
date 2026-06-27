@@ -25,6 +25,7 @@ model User {
   image         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime? // set when the user deletes their account; PII is scrubbed, row is kept for FK integrity
   role          user_role @default(attendee)
 
   accounts      Account[]
@@ -68,6 +69,11 @@ model User {
 
   // Moderation
   moderation_flags          moderation_flags[]
+
+  // Reporting (users/messages)
+  user_reports_filed     user_reports[]    @relation("UserReportReporter")
+  user_reports_received  user_reports[]    @relation("UserReportReported")
+  message_reports        message_reports[]
 }
 
 model Account {
@@ -411,6 +417,40 @@ model event_reports {
   user        User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([event_id])
+  @@index([status])
+}
+
+model user_reports {
+  id          String        @id @default(uuid()) @db.Uuid
+  reporter_id String
+  reported_id String
+  reason      String
+  description String?
+  status      report_status @default(pending)
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime      @default(now()) @db.Timestamptz(6)
+
+  reporter    User @relation("UserReportReporter", fields: [reporter_id], references: [id], onDelete: Cascade)
+  reported    User @relation("UserReportReported", fields: [reported_id], references: [id], onDelete: Cascade)
+
+  @@index([reported_id])
+  @@index([status])
+}
+
+model message_reports {
+  id           String        @id @default(uuid()) @db.Uuid
+  reporter_id  String
+  message_id   String        @db.Uuid
+  message_type String        // 'group' | 'private'
+  reason       String
+  description  String?
+  status       report_status @default(pending)
+  created_at   DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime      @default(now()) @db.Timestamptz(6)
+
+  reporter     User @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
+
+  @@index([message_id])
   @@index([status])
 }
 

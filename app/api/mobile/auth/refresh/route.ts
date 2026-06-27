@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       where: { id: decoded.userId },
     })
 
-    if (!user) {
+    if (!user || user.deletedAt) {
       return unauthorizedResponse("User not found")
     }
 

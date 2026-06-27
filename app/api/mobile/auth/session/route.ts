@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    if (!user) {
+    if (!user || user.deletedAt) {
       return notFoundResponse("User not found")
     }
 
