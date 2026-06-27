@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken"
 import { randomUUID } from "crypto"
 import bcrypt from "bcryptjs"
+import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
 
@@ -16,6 +17,10 @@ const GOOGLE_CLIENT_IDS = [
   process.env.GOOGLE_IOS_CLIENT_ID,
   process.env.GOOGLE_ANDROID_CLIENT_ID,
 ].filter(Boolean) as string[]
+
+// Apple identity tokens issued to the native app have this as the audience
+const APPLE_AUDIENCE = process.env.APPLE_BUNDLE_ID || "com.matryxsociallabs.blendn"
+const appleJwks = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"))
 
 const ACCESS_TOKEN_EXPIRY = "15m"
 const REFRESH_TOKEN_EXPIRY = "30d"
@@ -370,6 +375,129 @@ export async function findOrCreateGoogleUser(
           provider: "google",
           provider_id: googlePayload.sub,
           email: googlePayload.email,
+        },
+      },
+    },
+  })
+
+  return {
+    userId: newUser.id,
+    email: newUser.email,
+    isNewUser: true,
+  }
+}
+
+export interface AppleTokenPayload {
+  sub: string // Apple user ID
+  email?: string
+  email_verified?: boolean | string
+  aud: string
+  iss: string
+  exp: number
+  iat: number
+}
+
+/**
+ * Verify an Apple Sign in identity token (JWT signed by Apple, verified
+ * against Apple's published JWKS).
+ */
+export async function verifyAppleIdToken(
+  identityToken: string
+): Promise<AppleTokenPayload | null> {
+  try {
+    const { payload } = await jwtVerify(identityToken, appleJwks, {
+      issuer: "https://appleid.apple.com",
+      audience: APPLE_AUDIENCE,
+    })
+
+    if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
+      console.error("Apple token expired")
+      return null
+    }
+
+    return payload as unknown as AppleTokenPayload
+  } catch (error) {
+    console.error("Error verifying Apple identity token:", error)
+    return null
+  }
+}
+
+/**
+ * Find or create a user from Sign in with Apple.
+ * `fullName` is only ever sent by Apple on the user's first authorization,
+ * so it must be passed through from the client on that first call.
+ */
+export async function findOrCreateAppleUser(
+  applePayload: AppleTokenPayload,
+  fullName?: { givenName?: string | null; familyName?: string | null }
+): Promise<{ userId: string; email: string; isNewUser: boolean }> {
+  const existingOAuth = await db.user_oauth_accounts.findUnique({
+    where: {
+      provider_provider_id: {
+        provider: "apple",
+        provider_id: applePayload.sub,
+      },
+    },
+    include: { user: true },
+  })
+
+  if (existingOAuth) {
+    return {
+      userId: existingOAuth.user_id,
+      email: existingOAuth.user.email,
+      isNewUser: false,
+    }
+  }
+
+  const displayName = [fullName?.givenName, fullName?.familyName].filter(Boolean).join(" ") || null
+
+  // Apple may omit email on tokens after the first authorization; in that
+  // case Apple guarantees `sub` is stable so the OAuth-account lookup above
+  // is the source of truth. A missing email at this point only happens on
+  // a genuinely new user, which Apple does not allow without an email scope.
+  const email = applePayload.email
+
+  if (email) {
+    const existingUser = await db.user.findUnique({ where: { email } })
+
+    if (existingUser) {
+      await db.user_oauth_accounts.create({
+        data: {
+          user_id: existingUser.id,
+          provider: "apple",
+          provider_id: applePayload.sub,
+          email,
+        },
+      })
+
+      return {
+        userId: existingUser.id,
+        email: existingUser.email,
+        isNewUser: false,
+      }
+    }
+  }
+
+  if (!email) {
+    throw new Error("Apple sign in did not provide an email for a new user")
+  }
+
+  const newUser = await db.user.create({
+    data: {
+      email,
+      name: displayName,
+      emailVerified: new Date(),
+      profile: {
+        create: {
+          name: displayName,
+          onboarded: false,
+        },
+      },
+      oauth_accounts: {
+        create: {
+          provider: "apple",
+          provider_id: applePayload.sub,
+          email,
         },
       },
     },
