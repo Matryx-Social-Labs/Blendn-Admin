@@ -1,0 +1,59 @@
+import * as z from "zod"
+
+// ── Schema ────────────────────────────────────────────────────────────────────
+
+export const faqItemSchema = z.object({
+  question: z.string().min(1, "Question required"),
+  answer: z.string().min(1, "Answer required"),
+})
+
+export const kvItemSchema = z.object({
+  key: z.string().min(1, "Key required"),
+  value: z.string().min(1, "Value required"),
+})
+
+export const eventFormSchema = z.object({
+  title: z.string().min(3, { message: "Title must be at least 3 characters." }),
+  description: z.string().min(10, { message: "Description must be at least 10 characters." }),
+  full_description: z.string().min(10, { message: "Full description must be at least 10 characters." }),
+  short_description: z.string().optional(),
+  venue_name: z.string().optional(),
+  address: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  country: z.string().optional(),
+  postal_code: z.string().optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  check_in_radius: z.number().min(10).max(5000).optional(),
+  start_time: z.string().min(1, { message: "Start time is required." }),
+  end_time: z.string().min(1, { message: "End time is required." }),
+  timezone: z.string().min(1, { message: "Timezone is required." }),
+  status: z.enum(["draft", "published", "cancelled", "completed"]),
+  visibility: z.enum(["public", "private", "unlisted"]),
+  max_capacity: z.number().optional(),
+  cover_image_url: z.string().url().optional().or(z.literal("")),
+  external_link: z.string().url().optional().or(z.literal("")),
+  is_featured: z.boolean().optional(),
+  house_rules: z.string().optional(),
+  cancellation_policy: z.string().optional(),
+  faq: z.array(faqItemSchema).optional(),
+  additional_info: z.array(kvItemSchema).optional(),
+  accessibility_info: z.array(kvItemSchema).optional(),
+  category_ids: z.array(z.string()).optional(),
+  primary_category_id: z.string().optional(),
+  media_items: z
+    .array(
+      z.object({
+        id: z.string(),
+        type: z.enum(["image", "video", "document"]),
+        url: z.string().url(),
+        thumbnail_url: z.string().url().optional().or(z.literal("")),
+        title: z.string().optional(),
+        description: z.string().optional(),
+      })
+    )
+    .optional(),
+})
+
+export type EventFormValues = z.infer<typeof eventFormSchema>

@@ -86,16 +86,16 @@ export default function EventsPage() {
     return (
       <div className="flex flex-col gap-6 py-6">
         <div className="px-4 lg:px-6">
-          <div className="rounded-[1.8rem] border border-white/10 brand-surface px-6 py-6">
-            <h1 className="text-3xl font-semibold text-white">Events</h1>
-            <p className="mt-2 text-sm leading-6 text-white/62">
+          <div className="rounded-xl border bg-card px-6 py-6">
+            <h1 className="text-3xl font-semibold text-foreground">Events</h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Manage event inventory, publishing status, and operational detail.
             </p>
           </div>
         </div>
         <div className="px-4 lg:px-6">
-          <div className="flex h-64 items-center justify-center rounded-[1.8rem] border border-white/10 bg-white/[0.04]">
-            <div className="text-white/56">Loading events...</div>
+          <div className="flex h-64 items-center justify-center rounded-xl border bg-muted/50">
+            <div className="text-muted-foreground">Loading events...</div>
           </div>
         </div>
       </div>
@@ -107,17 +107,17 @@ export default function EventsPage() {
   return (
     <div className="flex flex-col gap-6 py-6">
       <div className="px-4 lg:px-6">
-        <div className="flex flex-col gap-4 rounded-[1.8rem] border border-white/10 brand-surface px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-4 rounded-xl border bg-card px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold text-white">Events</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/62">
+            <h1 className="text-3xl font-semibold text-foreground">Events</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
               View event inventory, update publishing state, and keep operator workflows moving.
             </p>
           </div>
           {canCreate && (
             <Button
               onClick={() => router.push("/dashboard/events/new")}
-              className="rounded-full bg-[#F05423] text-white hover:bg-[#d84a1d]"
+              className="rounded-full"
             >
               <PlusIcon className="h-4 w-4" />
               Create Event
@@ -126,7 +126,7 @@ export default function EventsPage() {
         </div>
       </div>
       <div className="px-4 lg:px-6">
-        <div className="rounded-[1.8rem] border border-white/10 bg-white/[0.04] p-5">
+        <div className="rounded-xl border bg-card p-5">
           <EventsTable
             events={events}
             onEdit={(event) => router.push(`/dashboard/events/${event.id}`)}

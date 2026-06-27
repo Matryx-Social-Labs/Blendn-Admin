@@ -53,7 +53,7 @@ export function BrandLogo({
     <div className={cn("flex items-center", config.gap, className)}>
       <div
         className={cn(
-          "brand-wordmark relative flex items-center rounded-full bg-white/92 shadow-[0_14px_40px_rgba(0,0,0,0.28)]",
+          "relative flex items-center rounded-full bg-card shadow-sm",
           config.containerPadding
         )}
       >
@@ -68,11 +68,11 @@ export function BrandLogo({
       </div>
       {showTagline ? (
         <div className="min-w-0">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-white/65">
+          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
             Blend&apos;n Workspace
           </p>
           {resolvedSize === "hero" ? (
-            <p className="text-sm text-white/72">
+            <p className="text-sm text-muted-foreground">
               Workspace for events, venues, and operations.
             </p>
           ) : null}

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   IconBell,
   IconBrandSpeedtest,
@@ -245,6 +246,7 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
                 <Button
                   size="sm"
                   variant="ghost"
+                  aria-label="Edit message"
                   onClick={() => openEdit(msg)}
                 >
                   <IconPencil className="size-4" />
@@ -253,6 +255,7 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
                   size="sm"
                   variant="ghost"
                   className="text-destructive hover:text-destructive"
+                  aria-label="Delete message"
                   onClick={() => remove(msg.id)}
                 >
                   <IconTrash className="size-4" />
@@ -324,14 +327,16 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
       {/* Quick templates */}
       <div className="flex flex-wrap gap-1.5">
         {QUICK_TEMPLATES.map((t) => (
-          <button
+          <Button
             key={t}
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => setContent(t)}
-            className="rounded-full border px-2.5 py-1 text-xs hover:bg-muted transition-colors text-left"
+            className="rounded-full text-left text-xs"
           >
             {t.length > 50 ? t.slice(0, 50) + "…" : t}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -397,39 +402,21 @@ export function EventMessaging({ eventId, eventTitle }: EventMessagingProps) {
         </p>
       </div>
 
-      {/* Tab switcher */}
-      <div className="flex rounded-lg border p-1 gap-1 w-fit">
-        <button
-          type="button"
-          onClick={() => setTab("announcements")}
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            tab === "announcements"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Announcements
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("sponsored")}
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            tab === "sponsored"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Sponsored
-        </button>
-      </div>
-
-      <div>
-        {tab === "announcements" ? (
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setTab(value as "announcements" | "sponsored")}
+      >
+        <TabsList className="w-fit">
+          <TabsTrigger value="announcements">Announcements</TabsTrigger>
+          <TabsTrigger value="sponsored">Sponsored</TabsTrigger>
+        </TabsList>
+        <TabsContent value="announcements">
           <AnnouncementsPanel eventId={eventId} />
-        ) : (
+        </TabsContent>
+        <TabsContent value="sponsored">
           <SponsoredMessagesPanel eventId={eventId} />
-        )}
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
