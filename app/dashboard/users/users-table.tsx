@@ -85,11 +85,15 @@ const ROLE_LABELS: Record<string, string> = {
   attendee: "Attendee",
 }
 
+/**
+ * Brand chart hues rather than raw hexes, so these follow the theme instead of
+ * staying violet/blue/green while the rest of the app is orange and purple.
+ */
 const ROLE_COLORS: Record<string, React.CSSProperties> = {
-  app_admin: { backgroundColor: "#7c3aed", color: "#fff" },
-  organizer: { backgroundColor: "#2563eb", color: "#fff" },
-  venue_owner: { backgroundColor: "#16a34a", color: "#fff" },
-  attendee: { backgroundColor: "#e5e7eb", color: "#374151" },
+  app_admin: { backgroundColor: "var(--chart-3)", color: "var(--background)" },
+  organizer: { backgroundColor: "var(--chart-1)", color: "var(--background)" },
+  venue_owner: { backgroundColor: "var(--chart-2)", color: "var(--background)" },
+  attendee: { backgroundColor: "var(--muted)", color: "var(--muted-foreground)" },
 }
 
 // Actions cell component - extracted to comply with React hooks rules

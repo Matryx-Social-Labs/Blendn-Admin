@@ -91,6 +91,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Session {
@@ -100,6 +101,8 @@ model Session {
   expires      DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model VerificationToken {
@@ -328,6 +331,10 @@ model chat_messages {
   @@index([chat_group_id, created_at])
   @@index([chat_group_id, deleted_at])
   @@index([user_id])
+  // Self-referencing FK for threaded replies. Unindexed, deleting a chat group
+  // made Postgres scan the whole chat_messages table once per cascaded message;
+  // at 500k rows that is ~2.5e10 comparisons and the delete never returns.
+  @@index([parent_id])
 }
 
 model chat_group_members {
@@ -368,6 +375,9 @@ model message_reactions {
   user    User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([message_id, user_id, emoji])
+  // The unique index above serves message_id lookups but not user_id, which is
+  // what a user deletion cascades on.
+  @@index([user_id])
 }
 
 model event_favorites {
@@ -400,6 +410,7 @@ model event_ratings {
 
   @@unique([event_id, user_id])
   @@index([event_id])
+  @@index([user_id])
 }
 
 model event_reports {
@@ -418,6 +429,7 @@ model event_reports {
 
   @@index([event_id])
   @@index([status])
+  @@index([user_id])
 }
 
 model user_reports {
@@ -435,6 +447,7 @@ model user_reports {
 
   @@index([reported_id])
   @@index([status])
+  @@index([reporter_id])
 }
 
 model message_reports {
@@ -452,6 +465,7 @@ model message_reports {
 
   @@index([message_id])
   @@index([status])
+  @@index([reporter_id])
 }
 
 model recurring_events {
@@ -492,6 +506,7 @@ model user_interests {
   category categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, category_id])
+  @@index([category_id])
 }
 
 model user_oauth_accounts {
@@ -685,6 +700,7 @@ model event_announcements {
 
   @@index([event_id])
   @@index([created_at])
+  @@index([sent_by])
 }
 
 // Audit Logs

@@ -5,6 +5,53 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-05
+
+### Added
+
+- Brand design system. Colour, type, and layout now follow the Blend'n Brand
+  Guideline instead of shadcn's defaults; documented in `docs/DESIGN_SYSTEM.md`.
+  Every theme token was previously `oklch(L 0 0)` — zero chroma, pure greyscale —
+  so the only brand element on screen was the logo image.
+- Satoshi as the interface typeface, self-hosted (`app/fonts/`) so the first
+  render does not block on Fontshare's CDN.
+- `--success` token for positive deltas. The metric arrows used `--chart-1`,
+  which in the dark theme rendered a positive change in blue against a red
+  negative.
+- Indexes on ten foreign keys that had none, and an integration test asserting
+  the class of bug is gone rather than the ten instances.
+
+### Fixed
+
+- Two of the four spotlight cards rendered twice on the overview — once in the
+  hero rail and again in the section below. The hero now carries the export
+  action, which belongs at page level anyway.
+- The page header rendered the description sentence as the `h1` and the page
+  name as a 0.68rem eyebrow, putting the wrong string in the document's only
+  landmark heading. There were also two `h1`s on the overview.
+- Funnel stages with a value of zero drew a bar a tenth as wide as the largest
+  stage, so a funnel that dropped to nothing still looked like it converted.
+- Venue owners could not reach Chatrooms. `canModerateChat` and the messaging
+  page's `canManageEvent` gate had always allowed it; the nav list and the
+  chatrooms index were the only things saying no.
+- The "top performers" table drew from the 24 most *recent* events and then
+  ranked them by traction, so a host with more than 24 events got a recency
+  window presented as a whole-portfolio leaderboard. It now ranks from the
+  most-attended events.
+- The KPI grid and the spotlight grid used container queries and viewport
+  breakpoints respectively, so collapsing the sidebar reflowed them at different
+  widths.
+- Role badges in the users table hardcoded violet/blue/green hexes.
+
+### Performance
+
+- `chat_messages.parent_id` is a self-referencing foreign key and had no index,
+  so deleting a chat group made Postgres scan the whole table once per cascaded
+  message. At 500,000 rows that is roughly 2.5e10 comparisons and the delete
+  never returns — three attempts to remove the load-test dataset from staging
+  failed on this before the cause was found. The same path runs on event
+  deletion and on account deletion.
+
 ## [0.5.2] - 2026-08-05
 
 ### Added

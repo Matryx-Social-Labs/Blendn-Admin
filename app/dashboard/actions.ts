@@ -279,11 +279,31 @@ async function getMonthlyTrend(role: DashboardRole, userId?: string): Promise<Da
   )
 }
 
+/**
+ * Candidate pool for the "top performers" table.
+ *
+ * This used to take the 24 most RECENT events and then re-rank them by a
+ * traction score, so a host with thirty events got a leaderboard drawn from a
+ * recency window and presented as if it covered the whole portfolio — an event
+ * from four months ago that outdrew everything since could not appear.
+ *
+ * Ordering by check-in count instead makes the pool the most-attended events,
+ * which is the dominant term of the score below (attendees is weighted 2x), so
+ * the final ranking is the real one. The pool stays bounded because app_admin
+ * runs this across every event on the platform.
+ *
+ * The orderBy counts all check-ins rather than only attended statuses —
+ * relation-count ordering takes no filter in Prisma. That only affects which
+ * events are considered, never how they are scored; the exact attended count
+ * is computed in the `_count` select below.
+ */
+const PERFORMANCE_POOL = 50
+
 async function getPerformanceRows(userId?: string): Promise<DashboardPerformanceRow[]> {
   const events = await db.events.findMany({
     where: eventScope(userId),
-    take: 24,
-    orderBy: { start_time: "desc" },
+    take: PERFORMANCE_POOL,
+    orderBy: { check_ins: { _count: "desc" } },
     include: {
       categories: {
         include: {
