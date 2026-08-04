@@ -5,7 +5,17 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.6] - 2026-08-04
+## [0.1.7] - 2026-08-04
+
+### Changed
+
+- List endpoints that previously fetched every matching row now return a bounded
+  page. Fine at today's volumes, but the event list in particular grew with the
+  whole table. Response shapes are unchanged.
+- Page-size limits come from the shared configuration instead of being written
+  into each route.
+
+
 
 ### Fixed
 
