@@ -81,13 +81,18 @@ export function SiteHeader() {
           className="data-[orientation=vertical]:h-5"
         />
 
+        {/*
+          The title and the description used to be the other way round: the
+          page name rendered as a 0.68rem uppercase eyebrow and the description
+          sentence was the <h1>. That put the wrong string in the document's
+          only landmark heading and buried the one word telling you where you
+          are.
+        */}
         <div className="min-w-0 flex-1">
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-            {content.title}
+          <h1 className="truncate text-lg font-semibold text-foreground">{content.title}</h1>
+          <p className="truncate text-xs leading-5 text-muted-foreground">
+            {content.description}
           </p>
-          <div className="flex items-center gap-3">
-            <h1 className="truncate text-lg font-semibold text-foreground">{content.description}</h1>
-          </div>
         </div>
 
         <div className="hidden items-center gap-3 md:flex">

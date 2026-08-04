@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { canAccessDashboard } from "@/lib/rbac"
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -43,18 +44,23 @@ export default async function ChatroomsPage() {
     redirect("/login")
   }
 
-  if (session.user.role !== "app_admin" && session.user.role !== "organizer") {
+  if (!canAccessDashboard(session.user.role)) {
     redirect("/dashboard")
   }
 
   const now = new Date()
+  // Scope to owned events for everyone except app_admin. venue_owner used to be
+  // bounced off this page entirely, which contradicted `canModerateChat` and
+  // the messaging page's own `canManageEvent` gate — both already allow a venue
+  // owner to moderate their own events.
+  const isPlatformAdmin = session.user.role === "app_admin"
   const liveEvents = await db.events.findMany({
     where: {
       deleted_at: null,
       status: "published",
       start_time: { lte: now },
       end_time: { gte: now },
-      ...(session.user.role === "organizer" ? { organizer_id: session.user.id } : {}),
+      ...(isPlatformAdmin ? {} : { organizer_id: session.user.id }),
     },
     select: {
       id: true,

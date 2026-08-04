@@ -38,6 +38,7 @@ import type {
   DashboardReport,
   DashboardTrendKey,
 } from "@/lib/dashboard-types"
+import { funnelBarWidth } from "@/lib/dashboard-view"
 import { cn } from "@/lib/utils"
 
 const trendKeyStyles: Record<DashboardTrendKey, { color: string }> = {
@@ -62,7 +63,10 @@ function trendLabel(key: DashboardTrendKey, role: DashboardReport["role"]) {
 
 function metricIcon(trend: DashboardMetric["trend"]) {
   if (trend === "up") {
-    return <IconArrowUpRight className="size-4 text-chart-1" />
+    // `text-chart-1` used to be here, which in the dark theme rendered a
+    // positive delta in blue while a negative one was red — two colours with
+    // no shared axis. `--success` exists for exactly this.
+    return <IconArrowUpRight className="size-4 text-success" />
   }
 
   if (trend === "down") {
@@ -127,7 +131,15 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
       <section className="px-4 lg:px-6">
         <Card className="rounded-xl">
           <CardContent className="px-6 py-7 lg:px-8">
-            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            {/*
+              The right-hand rail used to render `spotlights.slice(0, 2)`,
+              which the spotlight section further down then rendered again —
+              two of the four cards appeared twice on one screen. The rail now
+              carries the export action instead, which belongs at page level
+              anyway: the bundles cover metrics, trend and table, not just the
+              table it was previously nested inside.
+            */}
+            <div className="flex flex-col gap-6 @3xl/main:flex-row @3xl/main:items-start @3xl/main:justify-between">
               <div className="max-w-3xl space-y-4">
                 <Badge variant="secondary" className="rounded-full px-3 py-1 font-medium">
                   {report.role === "app_admin"
@@ -137,33 +149,30 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                       : "Venue reporting"}
                 </Badge>
                 <div className="space-y-3">
-                  <h1 className="text-3xl font-semibold sm:text-4xl">
+                  {/* h2, not h1 — SiteHeader owns the page's single h1. */}
+                  <h2 className="text-3xl font-semibold sm:text-4xl">
                     {report.headline}
-                  </h1>
+                  </h2>
                   <p className="max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
                     {report.summary}
                   </p>
                 </div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:w-[430px]">
-                {report.spotlights.slice(0, 2).map((card) => (
-                  <Card key={card.title} className="rounded-lg bg-muted">
-                    <CardContent className="p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        {card.title}
-                      </p>
-                      <p className="mt-3 text-2xl font-semibold">{card.value}</p>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">{card.description}</p>
-                    </CardContent>
-                  </Card>
-                ))}
+              <div className="shrink-0">
+                <ExportMenu bundles={report.exports} />
               </div>
             </div>
           </CardContent>
         </Card>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+      {/*
+        Every grid on this page is keyed to @container/main, not the viewport.
+        The spotlight grid below used md:/xl: while this one used @xl/@5xl, so
+        collapsing the sidebar reflowed the two rows at different widths and
+        they visibly fell out of step.
+      */}
+      <section className="grid grid-cols-1 gap-4 px-4 lg:px-6 @sm/main:grid-cols-2 @5xl/main:grid-cols-4">
         {report.metrics.map((metric) => (
           <Card key={metric.label} className="rounded-xl shadow-none">
             <CardContent className="space-y-4 px-5 py-5">
@@ -185,7 +194,11 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
         ))}
       </section>
 
-      <section className="grid gap-6 px-4 lg:px-6 xl:grid-cols-[1.45fr_0.55fr]">
+      {/*
+        Was 1.45/0.55, which left the funnel ~370px for four stacked stage
+        cards while the chart column had slack it did not need.
+      */}
+      <section className="grid gap-6 px-4 lg:px-6 @4xl/main:grid-cols-[1.4fr_0.85fr]">
         <Card className="rounded-xl shadow-none">
           <CardHeader className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-2">
@@ -318,10 +331,11 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                     {formatNumericValue(stage.value)}
                   </p>
                 </div>
+                {/* chart-1 -> 2 -> 3 is now the brand gradient: orange, rose, purple. */}
                 <div className="h-2 rounded-full bg-border">
                   <div
                     className="h-2 rounded-full bg-gradient-to-r from-chart-1 via-chart-2 to-chart-3"
-                    style={{ width: `${Math.max(10, (stage.value / funnelMax) * 100)}%` }}
+                    style={{ width: `${funnelBarWidth(stage.value, funnelMax)}%` }}
                   />
                 </div>
                 <p className="text-sm leading-6 text-muted-foreground">{stage.detail}</p>
@@ -331,7 +345,7 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
         </Card>
       </section>
 
-      <section className="grid gap-4 px-4 lg:px-6 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 px-4 lg:px-6 @sm/main:grid-cols-2 @5xl/main:grid-cols-4">
         {report.spotlights.map((card) => (
           <Card key={card.title} className="rounded-xl shadow-none">
             <CardContent className="space-y-3 px-5 py-5">
@@ -347,14 +361,13 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
 
       <section className="px-4 lg:px-6">
         <Card className="rounded-xl shadow-none">
-          <CardHeader className="gap-4 border-b pb-5 lg:flex-row lg:items-start lg:justify-between">
+          <CardHeader className="gap-4 border-b pb-5">
             <div className="space-y-2">
               <CardTitle className="text-xl">{report.performance.title}</CardTitle>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
                 {report.performance.description}
               </p>
             </div>
-            <ExportMenu bundles={report.exports} />
           </CardHeader>
           <CardContent className="space-y-5 px-5 py-5">
             <div className="relative max-w-sm">

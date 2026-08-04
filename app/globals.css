@@ -3,7 +3,33 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Brand tokens — Blend'n Brand Guideline, page 6.
+ *
+ * The hexes below were sampled from the guideline's own swatches rather than
+ * copied from the labels, because the labels and the swatches disagree: the
+ * purple is printed as #925D46 (a brown) next to a swatch that renders
+ * #8F49AA and a CMYK spec of 47/74/0/0. The swatch and the CMYK agree with
+ * each other, so the printed hex is treated as a typo. Confirm with the
+ * designer; it is one value to change if they say otherwise.
+ *
+ *   orange  #F05423   primary
+ *   purple  #8F49AA   primary (gradient end)
+ *   rose    #BE5C71   secondary
+ *   ink     #0D0C0C   secondary
+ *   white   #FFFFFF   secondary
+ *
+ * Charts 1-3 walk the primary gradient orange -> rose -> purple, so a series
+ * drawn in any of them is on-brand; 4 and 5 are supporting hues for the rare
+ * case where three is not enough separation.
+ */
 @theme inline {
+  --color-brand-orange: oklch(0.652 0.2 36.7);
+  --color-brand-purple: oklch(0.532 0.16 315.6);
+  --color-brand-rose: oklch(0.599 0.127 8.2);
+  --color-brand-ink: oklch(0.156 0.002 17.3);
+  --color-success: var(--success);
+  --font-sans: var(--font-satoshi);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -41,73 +67,98 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/*
+ * `--primary-foreground` is brand ink, not white. White on #F05423 is 3.4:1,
+ * which fails WCAG AA for body text; ink is 6.2:1. It also matches the
+ * guideline's own monogram-on-orange tile (page 5), which is dark-on-orange.
+ *
+ * `--destructive` is pushed cooler and darker than the brand orange on
+ * purpose. A stock red sits ~14 degrees of hue from #F05423 and reads as "the
+ * same colour, slightly off" when a down-trend badge lands next to a primary
+ * button.
+ *
+ * `--success` is deliberately outside the brand palette. The guideline defines
+ * no status colours, and the alternatives both fail: brand orange for "up" is
+ * indistinguishable from destructive, and rose is already a chart series.
+ */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.995 0.002 60);
+  --foreground: oklch(0.156 0.002 17.3);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.156 0.002 17.3);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.156 0.002 17.3);
+  --primary: oklch(0.652 0.2 36.7);
+  --primary-foreground: oklch(0.156 0.002 17.3);
+  --secondary: oklch(0.968 0.006 40);
+  --secondary-foreground: oklch(0.24 0.01 330);
+  --muted: oklch(0.968 0.006 40);
+  --muted-foreground: oklch(0.5 0.012 330);
+  --accent: oklch(0.958 0.012 40);
+  --accent-foreground: oklch(0.24 0.01 330);
+  --destructive: oklch(0.55 0.215 15);
+  --success: oklch(0.62 0.145 157);
+  --border: oklch(0.905 0.006 40);
+  --input: oklch(0.905 0.006 40);
+  --ring: oklch(0.652 0.2 36.7);
+  --chart-1: oklch(0.652 0.2 36.7);
+  --chart-2: oklch(0.599 0.127 8.2);
+  --chart-3: oklch(0.532 0.16 315.6);
+  --chart-4: oklch(0.7 0.145 66);
+  --chart-5: oklch(0.6 0.105 184);
+  --sidebar: oklch(0.985 0.004 40);
+  --sidebar-foreground: oklch(0.156 0.002 17.3);
+  --sidebar-primary: oklch(0.652 0.2 36.7);
+  --sidebar-primary-foreground: oklch(0.156 0.002 17.3);
+  --sidebar-accent: oklch(0.958 0.012 40);
+  --sidebar-accent-foreground: oklch(0.24 0.01 330);
+  --sidebar-border: oklch(0.905 0.006 40);
+  --sidebar-ring: oklch(0.652 0.2 36.7);
 }
 
+/*
+ * The shipped theme — app/layout.tsx pins `.dark`. The guideline is dark-first
+ * (every page of it is #0D0C0C), so `--background` is the brand ink exactly,
+ * and surfaces above it lift with a trace of the brand purple rather than
+ * neutral grey so the greys read warm instead of dead.
+ *
+ * Chart hues are lifted relative to the light theme: the brand purple at its
+ * true lightness (0.532) does not carry enough contrast against ink.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.156 0.002 17.3);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.205 0.008 320);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.205 0.008 320);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --primary: oklch(0.652 0.2 36.7);
+  --primary-foreground: oklch(0.156 0.002 17.3);
+  --secondary: oklch(0.269 0.01 320);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --muted: oklch(0.245 0.008 320);
+  --muted-foreground: oklch(0.72 0.012 320);
+  --accent: oklch(0.285 0.018 320);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+  --destructive: oklch(0.635 0.215 12.5);
+  --success: oklch(0.719 0.146 157.3);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
+  --ring: oklch(0.652 0.2 36.7);
+  --chart-1: oklch(0.68 0.195 38);
+  --chart-2: oklch(0.63 0.155 8);
+  --chart-3: oklch(0.62 0.16 316);
+  --chart-4: oklch(0.78 0.145 68);
+  --chart-5: oklch(0.7 0.108 183);
+  --sidebar: oklch(0.185 0.006 320);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-primary: oklch(0.652 0.2 36.7);
+  --sidebar-primary-foreground: oklch(0.156 0.002 17.3);
+  --sidebar-accent: oklch(0.285 0.018 320);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.652 0.2 36.7);
 }
 
 @layer base {
