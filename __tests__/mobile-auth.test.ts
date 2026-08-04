@@ -7,26 +7,32 @@ jest.mock("jose", () => ({
   createRemoteJWKSet: jest.fn(),
 }))
 
-jest.mock("@/lib/db", () => ({
-  db: {
-    mobile_refresh_tokens: {
-      create: jest.fn(),
-      findUnique: jest.fn(),
-      updateMany: jest.fn(),
-    },
+const mockDb = {
+  mobile_refresh_tokens: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+    updateMany: jest.fn(),
   },
-}))
+}
+
+jest.mock("@/lib/db", () => ({ db: mockDb }))
 
 import jwt from "jsonwebtoken"
 import {
   signAccessToken,
   signRefreshToken,
   verifyAccessToken,
+  verifyRefreshToken,
+  storeRefreshToken,
   extractBearerToken,
 } from "@/lib/mobile-auth"
 
 const USER = "user_abc"
 const EMAIL = "user@example.com"
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
 
 describe("signAccessToken / verifyAccessToken", () => {
   it("round-trips the user identity", () => {
@@ -113,5 +119,84 @@ describe("extractBearerToken", () => {
 
   it("is case-sensitive on the scheme", () => {
     expect(extractBearerToken("bearer abc")).toBeNull()
+  })
+})
+
+describe("storeRefreshToken", () => {
+  it("refuses to store a token with no jti instead of writing undefined as the row id", async () => {
+    const noJti = jwt.sign(
+      { userId: USER, email: EMAIL, type: "refresh" },
+      process.env.MOBILE_JWT_SECRET!
+    )
+    await expect(storeRefreshToken(USER, noJti)).rejects.toThrow(/jti/)
+    expect(mockDb.mobile_refresh_tokens.create).not.toHaveBeenCalled()
+  })
+
+  it("keys the row on the token's jti so rotation can find it", async () => {
+    const token = signRefreshToken(USER, EMAIL)
+    const { jti } = jwt.decode(token) as { jti: string }
+
+    await storeRefreshToken(USER, token)
+
+    expect(mockDb.mobile_refresh_tokens.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ id: jti, user_id: USER }),
+      })
+    )
+  })
+})
+
+describe("verifyRefreshToken — reuse handling", () => {
+  const withStoredToken = (overrides: Record<string, unknown>) => {
+    const token = signRefreshToken(USER, EMAIL)
+    const { jti } = jwt.decode(token) as { jti: string }
+    mockDb.mobile_refresh_tokens.findUnique.mockResolvedValue({
+      id: jti,
+      user_id: USER,
+      token_hash: "$2a$04$notarealhash",
+      expires_at: new Date(Date.now() + 60_000),
+      revoked_at: null,
+      ...overrides,
+    })
+    return token
+  }
+
+  it("rejects an unknown token", async () => {
+    mockDb.mobile_refresh_tokens.findUnique.mockResolvedValue(null)
+    await expect(verifyRefreshToken(signRefreshToken(USER, EMAIL))).resolves.toBeNull()
+  })
+
+  it("rejects a token replayed seconds after rotation WITHOUT nuking every session", async () => {
+    // The refresh route revokes the old token before the client has stored the
+    // new one. An app killed mid-refresh replays the old token on next launch —
+    // that is recovery, not theft. Revoking the family here would sign the user
+    // out on every device they own.
+    const token = withStoredToken({ revoked_at: new Date(Date.now() - 5_000) })
+
+    await expect(verifyRefreshToken(token)).resolves.toBeNull()
+    expect(mockDb.mobile_refresh_tokens.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("revokes the whole family when a token is replayed long after rotation", async () => {
+    const token = withStoredToken({ revoked_at: new Date(Date.now() - 10 * 60_000) })
+
+    await expect(verifyRefreshToken(token)).resolves.toBeNull()
+    expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { user_id: USER, revoked_at: null },
+        data: { revoked_at: expect.any(Date) },
+      })
+    )
+  })
+
+  it("rejects a DB-expired token", async () => {
+    const token = withStoredToken({ expires_at: new Date(Date.now() - 1_000) })
+    await expect(verifyRefreshToken(token)).resolves.toBeNull()
+    expect(mockDb.mobile_refresh_tokens.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("rejects an access token presented as a refresh token", async () => {
+    await expect(verifyRefreshToken(signAccessToken(USER, EMAIL))).resolves.toBeNull()
+    expect(mockDb.mobile_refresh_tokens.findUnique).not.toHaveBeenCalled()
   })
 })
