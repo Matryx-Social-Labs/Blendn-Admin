@@ -5,6 +5,14 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-04
+
+### Changed
+
+- Updated 34 dependencies to their latest compatible releases, mostly UI
+  components and React. No package changed its major version, so behaviour is
+  unchanged.
+
 ## [0.2.0] - 2026-08-04
 
 ### Security
