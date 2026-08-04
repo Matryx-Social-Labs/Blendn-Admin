@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -178,7 +179,7 @@ export async function GET(
       },
     })
   } catch (error) {
-    console.error("Get chat messages error:", error)
+    logger.error("Get chat messages error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get messages")
   }
 }
@@ -458,7 +459,7 @@ export async function POST(
 
         return notifyGroupMessage(memberIds, senderAnonName, groupName, messagePreview, chatGroupId, user.userId)
       })
-      .catch((err) => console.error("Push notification failed:", err))
+      .catch((err) => logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) }))
 
     // Return anonymized response
     return successResponse({
@@ -479,7 +480,7 @@ export async function POST(
         : null,
     }, 201)
   } catch (error) {
-    console.error("Send message error:", error)
+    logger.error("Send message error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to send message")
   }
 }

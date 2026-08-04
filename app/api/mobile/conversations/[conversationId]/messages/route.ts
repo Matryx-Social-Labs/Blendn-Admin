@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { media_type } from "@prisma/client"
@@ -109,7 +110,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       nextCursor: messages.length > 0 ? messages[messages.length - 1].created_at.toISOString() : null,
     })
   } catch (error) {
-    console.error("Get messages error:", error)
+    logger.error("Get messages error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get messages")
   }
 }
@@ -222,12 +223,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const senderName = message.sender.name || "Someone"
     const messagePreview = text || (mediaType === "image" ? "📷 Photo" : "🎥 Video")
     notifyPrivateMessage(recipientId, senderName, messagePreview, conversationId).catch((err) =>
-      console.error("Push notification failed:", err)
+      logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) })
     )
 
     return successResponse(messageData)
   } catch (error) {
-    console.error("Send message error:", error)
+    logger.error("Send message error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to send message")
   }
 }

@@ -1,7 +1,7 @@
+import { logger } from "@/lib/logger"
 import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent } from "./openai-moderation"
 import { hideMessage, flagForReview, checkAndAutoMute, markClean } from "./actions"
-import { logger } from "@/lib/logger"
 
 /**
  * Main moderation orchestrator.

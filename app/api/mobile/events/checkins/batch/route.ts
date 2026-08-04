@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     return successResponse({ statuses })
   } catch (error) {
-    console.error("Batch check-in status error:", error)
+    logger.error("Batch check-in status error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get check-in statuses")
   }
 }

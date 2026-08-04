@@ -1,10 +1,10 @@
+import { logger } from "./logger"
 import jwt from "jsonwebtoken"
 import { randomUUID } from "crypto"
 import bcrypt from "bcryptjs"
 import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
-import { logger } from "./logger"
 
 function getJwtSecret(): string {
   const secret = process.env.MOBILE_JWT_SECRET

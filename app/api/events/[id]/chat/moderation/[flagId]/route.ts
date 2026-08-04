@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -97,7 +98,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       data: { flagId, action, reviewedBy: session.user.id },
     })
   } catch (error) {
-    console.error("Review moderation flag error:", error)
+    logger.error("Review moderation flag error", { error: error instanceof Error ? error.message : String(error) })
     return NextResponse.json(
       { error: "Failed to review flag" },
       { status: 500 }

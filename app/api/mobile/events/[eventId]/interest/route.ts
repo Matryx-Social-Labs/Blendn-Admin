@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
@@ -82,7 +83,7 @@ export async function POST(
       interestCount,
     })
   } catch (error) {
-    console.error("Toggle interest error:", error)
+    logger.error("Toggle interest error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to toggle interest")
   }
 }
@@ -125,7 +126,7 @@ export async function GET(
       interestCount,
     })
   } catch (error) {
-    console.error("Get interest error:", error)
+    logger.error("Get interest error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get interest status")
   }
 }

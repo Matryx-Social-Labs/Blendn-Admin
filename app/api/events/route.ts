@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -30,7 +31,7 @@ export async function GET() {
 
     return NextResponse.json(events)
   } catch (error) {
-    console.error("Error fetching events:", error)
+    logger.error("Error fetching events", { error: error instanceof Error ? error.message : String(error) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
     } = body
 
     // Debug: Log cover_image_url
-    console.log("Creating event - cover_image_url:", cover_image_url)
+    logger.info("Creating event - cover_image_url", { error: cover_image_url instanceof Error ? cover_image_url.message : String(cover_image_url) })
 
     if (!title || !description || !start_time || !end_time || !timezone) {
       return new NextResponse("Missing required fields", { status: 400 })
@@ -179,7 +180,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(event)
   } catch (error) {
-    console.error("Error creating event:", error)
+    logger.error("Error creating event", { error: error instanceof Error ? error.message : String(error) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }

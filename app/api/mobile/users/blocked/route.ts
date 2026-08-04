@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse({ users })
   } catch (error) {
-    console.error("Get blocked users error:", error)
+    logger.error("Get blocked users error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to fetch blocked users")
   }
 }

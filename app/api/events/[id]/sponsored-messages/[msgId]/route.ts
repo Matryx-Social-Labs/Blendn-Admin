@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -67,7 +68,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     return NextResponse.json(updated)
   } catch (err) {
-    console.error("Error updating sponsored message:", err)
+    logger.error("Error updating sponsored message", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }
@@ -98,7 +99,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     return new NextResponse(null, { status: 204 })
   } catch (err) {
-    console.error("Error deleting sponsored message:", err)
+    logger.error("Error deleting sponsored message", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }

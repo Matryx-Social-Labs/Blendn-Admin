@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
   } catch (error) {
-    console.error("Respond to message request error:", error)
+    logger.error("Respond to message request error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to respond to message request")
   }
 }

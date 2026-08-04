@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import {
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
       isNewUser ? 201 : 200
     )
   } catch (error) {
-    console.error("Apple auth error:", error)
+    logger.error("Apple auth error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to authenticate with Apple")
   }
 }

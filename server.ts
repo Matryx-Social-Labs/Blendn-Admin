@@ -1,6 +1,6 @@
 import { createServer } from "http"
 import next from "next"
-import { initSocketServer } from "./lib/socket-server"
+import { initSocketServer, sponsoredMessageScheduler } from "./lib/socket-server"
 import { ensureBucketExists } from "./lib/tigris"
 import { validateEnv } from "./lib/env"
 
@@ -58,6 +58,9 @@ app.prepare().then(() => {
   // Graceful shutdown
   const shutdown = () => {
     console.log(`\n[${new Date().toISOString()}] > Shutting down gracefully...`)
+    // Clear the sponsored-message setInterval handles; without this they keep
+    // the event loop alive and the process waits for the forced-exit timeout.
+    sponsoredMessageScheduler.stopAll()
     io?.close(() => {
       console.log(`[${new Date().toISOString()}] > Socket.io closed`)
     })

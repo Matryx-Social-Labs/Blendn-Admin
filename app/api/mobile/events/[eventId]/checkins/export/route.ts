@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -78,7 +79,7 @@ export async function GET(
       },
     })
   } catch (error) {
-    console.error("Export attendees error:", error)
+    logger.error("Export attendees error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to export attendees")
   }
 }

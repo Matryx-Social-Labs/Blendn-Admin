@@ -1,5 +1,6 @@
 "use client"
 
+import { logger } from "@/lib/logger"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -68,7 +69,7 @@ export default function LoginPage() {
       router.push("/dashboard")
       router.refresh()
     } catch (error) {
-      console.error("Error logging in:", error)
+      logger.error("Error logging in", { error: error instanceof Error ? error.message : String(error) })
       toast.error("Invalid email or password")
     } finally {
       setLoading(false)

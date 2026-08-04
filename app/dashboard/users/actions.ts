@@ -1,5 +1,6 @@
 "use server"
 
+import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
@@ -112,7 +113,7 @@ export async function getUsers(
 
     return { users: users as unknown as UserWithProfile[], total }
   } catch (error) {
-    console.error("Error fetching users:", error)
+    logger.error("Error fetching users", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch users")
   }
 }
@@ -150,7 +151,7 @@ export async function getUserById(id: string): Promise<UserWithProfile | null> {
 
     return user as unknown as UserWithProfile | null
   } catch (error) {
-    console.error("Error fetching user:", error)
+    logger.error("Error fetching user", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch user")
   }
 }
@@ -213,7 +214,7 @@ export async function updateUser(
     revalidatePath("/dashboard/users")
     return { success: true, user }
   } catch (error) {
-    console.error("Error updating user:", error)
+    logger.error("Error updating user", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to update user")
   }
 }
@@ -242,7 +243,7 @@ export async function deleteUser(id: string) {
     revalidatePath("/dashboard/users")
     return { success: true }
   } catch (error) {
-    console.error("Error deleting user:", error)
+    logger.error("Error deleting user", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to delete user")
   }
 }
@@ -262,7 +263,7 @@ export async function toggleUserOnboarded(id: string, onboarded: boolean) {
     revalidatePath("/dashboard/users")
     return { success: true }
   } catch (error) {
-    console.error("Error updating user onboarding status:", error)
+    logger.error("Error updating user onboarding status", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to update user onboarding status")
   }
 }
@@ -311,7 +312,7 @@ export async function getUserStats() {
       verificationRate: totalUsers > 0 ? Math.round((verifiedUsers / totalUsers) * 100) : 0,
     }
   } catch (error) {
-    console.error("Error fetching user stats:", error)
+    logger.error("Error fetching user stats", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch user stats")
   }
 }

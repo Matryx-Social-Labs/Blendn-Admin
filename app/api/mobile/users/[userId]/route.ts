@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
@@ -102,7 +103,7 @@ export async function GET(
 
     return successResponse(publicProfile)
   } catch (error) {
-    console.error("Get public profile error:", error)
+    logger.error("Get public profile error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get user profile")
   }
 }

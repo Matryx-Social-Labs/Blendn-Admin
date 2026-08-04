@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
@@ -50,7 +51,7 @@ export async function POST(
 
     return successResponse({ rsvpStatus: rsvp.status, rsvpCount })
   } catch (error) {
-    console.error("RSVP error:", error)
+    logger.error("RSVP error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to update RSVP")
   }
 }
@@ -76,7 +77,7 @@ export async function DELETE(
 
     return successResponse({ rsvpStatus: null, rsvpCount })
   } catch (error) {
-    console.error("RSVP cancel error:", error)
+    logger.error("RSVP cancel error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to cancel RSVP")
   }
 }

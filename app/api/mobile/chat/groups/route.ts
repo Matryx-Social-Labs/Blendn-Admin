@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
         },
       },
       data: { status: "archived" },
-    }).catch((err: unknown) => console.error("Auto-archive chat groups failed:", err))
+    }).catch((err: unknown) => logger.error("Auto-archive chat groups failed", { error: err instanceof Error ? err.message : String(err) }))
 
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
@@ -240,7 +241,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error("Get chat groups error:", error)
+    logger.error("Get chat groups error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get chat groups")
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from "./logger"
 import { z } from "zod"
 
 /**
@@ -40,8 +41,9 @@ export function validateEnv(): Env {
   const parsed = envSchema.safeParse(process.env)
 
   if (!parsed.success) {
-    console.error("❌ Invalid environment variables:")
-    console.error(parsed.error.flatten().fieldErrors)
+    logger.error("Invalid environment variables", {
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    })
     throw new Error("Invalid environment variables")
   }
 

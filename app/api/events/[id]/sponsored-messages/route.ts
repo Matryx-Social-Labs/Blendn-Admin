@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -27,7 +28,7 @@ export async function GET(_: Request, { params }: RouteContext) {
 
     return NextResponse.json(messages)
   } catch (err) {
-    console.error("Error fetching sponsored messages:", err)
+    logger.error("Error fetching sponsored messages", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }
@@ -70,7 +71,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     return NextResponse.json(message, { status: 201 })
   } catch (err) {
-    console.error("Error creating sponsored message:", err)
+    logger.error("Error creating sponsored message", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }

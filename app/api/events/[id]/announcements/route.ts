@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -35,7 +36,7 @@ export async function GET(_: Request, { params }: RouteContext) {
 
     return NextResponse.json(announcements)
   } catch (err) {
-    console.error("Error fetching announcements:", err)
+    logger.error("Error fetching announcements", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }
@@ -131,11 +132,11 @@ export async function POST(req: Request, { params }: RouteContext) {
           session.user.id
         )
       })
-      .catch((err) => console.error("Failed to send announcement push notifications:", err))
+      .catch((err) => logger.error("Failed to send announcement push notifications", { error: err instanceof Error ? err.message : String(err) }))
 
     return NextResponse.json(announcement, { status: 201 })
   } catch (err) {
-    console.error("Error sending announcement:", err)
+    logger.error("Error sending announcement", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }

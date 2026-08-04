@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse(formattedConversations)
   } catch (error) {
-    console.error("List conversations error:", error)
+    logger.error("List conversations error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to list conversations")
   }
 }
@@ -179,7 +180,7 @@ export async function POST(request: NextRequest) {
       isNew: !conversation.last_message_at,
     })
   } catch (error) {
-    console.error("Create conversation error:", error)
+    logger.error("Create conversation error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to create conversation")
   }
 }

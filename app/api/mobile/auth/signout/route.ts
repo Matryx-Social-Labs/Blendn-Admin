@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import {
   getAuthenticatedUser,
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
         : "Signed out successfully",
     })
   } catch (error) {
-    console.error("Signout error:", error)
+    logger.error("Signout error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to sign out")
   }
 }

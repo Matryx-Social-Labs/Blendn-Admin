@@ -1,5 +1,6 @@
 "use client"
 
+import { logger } from "@/lib/logger"
 import { useState } from "react"
 import { IconDownload } from "@tabler/icons-react"
 import { toast } from "sonner"
@@ -55,7 +56,7 @@ export function ExportMenu({ bundles }: { bundles: DashboardExportBundle[] }) {
       URL.revokeObjectURL(url)
       toast.success(`${bundle.name} exported`)
     } catch (error) {
-      console.error("Export failed:", error)
+      logger.error("Export failed", { error: error instanceof Error ? error.message : String(error) })
       toast.error("Export failed")
     } finally {
       window.setTimeout(() => setActiveFile(null), 300)

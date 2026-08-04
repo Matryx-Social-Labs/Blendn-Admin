@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
@@ -130,7 +131,7 @@ export async function POST(
       checkIn: updatedCheckIn,
     })
   } catch (error) {
-    console.error("Checkout error:", error)
+    logger.error("Checkout error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to checkout from event")
   }
 }

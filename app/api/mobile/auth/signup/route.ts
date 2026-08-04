@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
       201
     )
   } catch (error) {
-    console.error("Signup error:", error)
+    logger.error("Signup error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to create account")
   }
 }
