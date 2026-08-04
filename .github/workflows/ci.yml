@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, dev]
+    branches: [dev, stage, prod]
   push:
-    branches: [main, dev]
+    branches: [dev, stage, prod]
 
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blendn_test

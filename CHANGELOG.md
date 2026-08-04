@@ -5,6 +5,29 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-04
+
+### Fixed
+
+- Getting signed out on every device after a normal app interruption. If the app
+  was backgrounded or killed while refreshing its login, the next launch looked
+  like a stolen-token replay and logged you out everywhere. A replay within a
+  minute of rotation is now treated as the retry it almost always is; a replay
+  long after still revokes every session.
+- Sign-in with Google or Apple wrote raw error objects and account details to the
+  server log. Failures are now recorded through the structured logger without the
+  payload.
+
+### Changed
+
+- CI now runs on the `dev`, `stage`, and `prod` branches. It previously listed
+  `main`, which does not exist in this repository, so pushes to `stage` and
+  `prod` ran no checks at all.
+
+### Added
+
+- Tests for refresh-token rotation, reuse handling, and storage — 7 new tests.
+
 ## [0.1.1] - 2026-08-04
 
 ### Fixed

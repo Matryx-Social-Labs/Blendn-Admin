@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs"
 import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
+import { logger } from "./logger"
 
 function getJwtSecret(): string {
   const secret = process.env.MOBILE_JWT_SECRET
@@ -25,6 +26,22 @@ const appleJwks = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/key
 const ACCESS_TOKEN_EXPIRY = "15m"
 const REFRESH_TOKEN_EXPIRY = "30d"
 const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000 // 30 days in ms
+
+/**
+ * How long after rotation a replayed refresh token is treated as a client
+ * retry rather than as theft.
+ *
+ * The refresh route revokes the old token *before* the client has stored the
+ * new one, so a lost response (app backgrounded or killed mid-refresh, flaky
+ * network) leaves the client holding a token the server already revoked.
+ * Replaying it is the normal recovery path, not an attack — and because
+ * `mobile_refresh_tokens` has no family/chain column, the theft response can
+ * only revoke *every* session for the user. Without this window an interrupted
+ * refresh on one phone signs the user out on all their devices.
+ *
+ * A replay long after rotation is still treated as theft.
+ */
+const REFRESH_REUSE_GRACE_MS = 60 * 1000 // 60 seconds
 
 export interface TokenPayload {
   userId: string
@@ -91,13 +108,19 @@ export async function storeRefreshToken(
   deviceInfo?: Prisma.InputJsonValue
 ): Promise<void> {
   // Decode without verification to extract jti (we just signed it)
-  const decoded = jwt.decode(token) as DecodedToken
+  const decoded = jwt.decode(token) as DecodedToken | null
+  if (!decoded?.jti) {
+    // signRefreshToken always sets a jti; if it is missing the token is not one
+    // of ours and there would be nothing to key rotation or revocation on.
+    throw new Error("Cannot store a refresh token without a jti")
+  }
+
   const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS)
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS)
 
   await db.mobile_refresh_tokens.create({
     data: {
-      id: decoded.jti!,
+      id: decoded.jti,
       user_id: userId,
       token_hash: tokenHash,
       device_info: deviceInfo,
@@ -129,16 +152,29 @@ export async function verifyRefreshToken(
       return null
     }
 
-    // A revoked token being presented again means it was already rotated
-    // out (or explicitly revoked) and is now being replayed - the classic
-    // signal that this refresh token was stolen. Kill the whole token
-    // family so both the attacker and the legitimate holder of the current
-    // token are forced to re-authenticate, rather than just rejecting this
-    // one request.
+    // A revoked token presented again was already rotated out and is being
+    // replayed — usually the classic signal that it was stolen. Kill the whole
+    // token family so both the attacker and the legitimate holder are forced to
+    // re-authenticate.
+    //
+    // Exception: a replay within REFRESH_REUSE_GRACE_MS of rotation is almost
+    // certainly the client retrying after it never received the new token.
+    // Reject the request, but don't sign the user out everywhere over it.
     if (storedToken.revoked_at) {
-      console.error(
-        `Refresh token reuse detected for user ${storedToken.user_id} (token ${storedToken.id}); revoking all refresh tokens`
-      )
+      const sinceRevokedMs = Date.now() - storedToken.revoked_at.getTime()
+
+      if (sinceRevokedMs <= REFRESH_REUSE_GRACE_MS) {
+        logger.info("Refresh token replayed just after rotation, treating as client retry", {
+          userId: storedToken.user_id,
+          sinceRevokedMs,
+        })
+        return null
+      }
+
+      logger.error("Refresh token reuse detected, revoking all refresh tokens", {
+        userId: storedToken.user_id,
+        sinceRevokedMs,
+      })
       await revokeUserRefreshTokens(storedToken.user_id)
       return null
     }
@@ -280,7 +316,7 @@ export async function verifyGoogleIdToken(
     )
 
     if (!response.ok) {
-      console.error("Google token verification failed:", response.status)
+      logger.warn("Google token verification failed", { status: response.status })
       return null
     }
 
@@ -288,31 +324,31 @@ export async function verifyGoogleIdToken(
 
     // Verify the audience matches one of our client IDs
     if (GOOGLE_CLIENT_IDS.length > 0 && !GOOGLE_CLIENT_IDS.includes(payload.aud)) {
-      console.error("Google token audience mismatch:", payload.aud)
+      logger.warn("Google token audience mismatch")
       return null
     }
 
     // Verify the issuer
     if (!["accounts.google.com", "https://accounts.google.com"].includes(payload.iss)) {
-      console.error("Google token issuer mismatch:", payload.iss)
+      logger.warn("Google token issuer mismatch")
       return null
     }
 
     // Verify the token is not expired
     if (payload.exp * 1000 < Date.now()) {
-      console.error("Google token expired")
+      logger.warn("Google token expired")
       return null
     }
 
     // Verify email is verified
     if (!payload.email_verified) {
-      console.error("Google email not verified")
+      logger.warn("Google email not verified")
       return null
     }
 
     return payload
   } catch (error) {
-    console.error("Error verifying Google ID token:", error)
+    logger.error("Error verifying Google ID token", { error: error instanceof Error ? error.message : String(error) })
     return null
   }
 }
@@ -420,13 +456,13 @@ export async function verifyAppleIdToken(
     })
 
     if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
-      console.error("Apple token expired")
+      logger.warn("Apple token expired")
       return null
     }
 
     return payload as unknown as AppleTokenPayload
   } catch (error) {
-    console.error("Error verifying Apple identity token:", error)
+    logger.error("Error verifying Apple identity token", { error: error instanceof Error ? error.message : String(error) })
     return null
   }
 }
