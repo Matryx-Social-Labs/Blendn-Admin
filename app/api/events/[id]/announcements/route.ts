@@ -7,6 +7,7 @@ import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { announcementSchema } from "@/lib/validations/event"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyAnnouncement } from "@/lib/push-notifications"
+import { PAGINATION } from "@/lib/constants"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -28,7 +29,7 @@ export async function GET(_: Request, { params }: RouteContext) {
     const announcements = await db.event_announcements.findMany({
       where: { event_id: eventId },
       orderBy: { created_at: "desc" },
-      take: 50,
+      take: PAGINATION.DEFAULT_CHAT_LIMIT,
       include: {
         sender: { select: { name: true, email: true } },
       },

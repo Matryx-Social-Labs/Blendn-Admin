@@ -1,8 +1,9 @@
 import { logger } from "@/lib/logger"
-import { NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import slugify from "slugify"
+import { PAGINATION } from "@/lib/constants"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -14,7 +15,7 @@ const parseJsonField = (value: unknown) => {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getAuth()
     if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
@@ -24,9 +25,18 @@ export async function GET() {
       where.organizer_id = session.user.id
     }
 
+    // Bounded so the payload can't grow without limit as events accumulate.
+    // Response stays a plain array — callers can raise the window with ?limit.
+    const limit = Math.min(
+      parseInt(req.nextUrl.searchParams.get("limit") || String(PAGINATION.MAX_LIMIT), 10) ||
+        PAGINATION.MAX_LIMIT,
+      PAGINATION.MAX_LIMIT
+    )
+
     const events = await db.events.findMany({
       where,
       orderBy: { created_at: "desc" },
+      take: limit,
     })
 
     return NextResponse.json(events)

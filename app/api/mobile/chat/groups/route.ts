@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { PAGINATION } from "@/lib/constants"
 import {
   successResponse,
   unauthorizedResponse,
@@ -33,7 +34,11 @@ export async function GET(request: NextRequest) {
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
     const page = parseInt(searchParams.get("page") || "1")
-    const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100)
+    const limit = Math.min(
+      parseInt(searchParams.get("limit") || String(PAGINATION.DEFAULT_LIMIT), 10) ||
+        PAGINATION.DEFAULT_LIMIT,
+      PAGINATION.MAX_LIMIT
+    )
 
     // Get total count of user's chat groups
     const totalCount = await db.chat_group_members.count({
