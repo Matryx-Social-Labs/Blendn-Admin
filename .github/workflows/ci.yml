@@ -2,9 +2,20 @@ name: CI
 
 on:
   pull_request:
-    branches: [dev, stage, prod]
+    branches: [dev, staging, prod]
+    paths-ignore: ["**.md", "docs/**", ".benchmarks/**"]
+  # `push` only on dev. staging and prod are only ever reached through a
+  # promotion PR, which already ran this workflow on the identical content —
+  # re-running on the post-merge push was ~11 of the 60 runs measured in a day.
   push:
-    branches: [dev, stage, prod]
+    branches: [dev]
+    paths-ignore: ["**.md", "docs/**", ".benchmarks/**"]
+
+# Pushing twice in quick succession used to leave the first run grinding to
+# completion against code nobody was waiting on.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blendn_test
@@ -13,9 +24,66 @@ env:
   MOBILE_JWT_SECRET: ci-test-jwt-secret-please-change-32-chars
 
 jobs:
-  lint-test-build:
+  # One install, cached and shared. `cache: "npm"` on setup-node only caches the
+  # downloaded tarballs, not the resulting node_modules, which is why install
+  # was still taking 36s on every run.
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Cache node_modules
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Deliberately NOT --legacy-peer-deps. Railway builds with a strict
+      # install, so the flag made CI pass while the deploy failed on an
+      # unresolvable peer range — exactly what happened on the zod 4 upgrade.
+      # CI has to reproduce the deploy's install or it is not a gate.
+      - name: Install dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+  # ── Three lanes below run in parallel. Wall clock is the slowest lane, ──
+  # ── not the sum. Only `test` needs a database.                         ──
+
+  lint-and-types:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # tsc needs the generated client for @prisma/client types.
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.json
+
+  test:
+    needs: install
     runs-on: ubuntu-latest
 
+    # Postgres lives only in this job. It cost 25s of startup on every run,
+    # including the two lanes that never touch a database.
     services:
       postgres:
         image: postgres:16
@@ -32,21 +100,15 @@ jobs:
           --health-retries 5
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
-
-      # Deliberately NOT --legacy-peer-deps. Railway builds with a strict
-      # install, so the flag made CI pass while the deploy failed on an
-      # unresolvable peer range — which is exactly what happened on the zod 4
-      # upgrade. CI has to reproduce the deploy's install or it is not a gate.
-      - name: Install dependencies
-        run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Generate Prisma client
         run: npm run db:generate
@@ -54,20 +116,43 @@ jobs:
       - name: Push database schema
         run: npm run db:push
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Type check
-        run: npx tsc --noEmit -p tsconfig.json
-
       - name: Test
         run: npm test -- --ci
 
-      # Runs against the postgres service above, which already has the schema
-      # pushed. The unit suite mocks @/lib/db everywhere, so without this a
-      # Prisma upgrade could break every query and CI would stay green.
+      # The unit suite mocks @/lib/db everywhere, so without this a Prisma
+      # upgrade could break every query in the app and CI would stay green.
+      # Runs in ~2s here because Postgres is on the runner; locally it is ~20s
+      # over Railway's public proxy. Check the test COUNT, not the duration.
       - name: Integration tests
         run: npm run test:integration -- --ci
+
+  build:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Next's build cache. Keyed on the lockfile AND the source tree: keyed on
+      # the lockfile alone it would serve a stale cache across source changes
+      # and could mask a real build failure.
+      - name: Cache Next build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'components/**', 'lib/**') }}
+          restore-keys: |
+            next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+
+      - name: Generate Prisma client
+        run: npm run db:generate
 
       - name: Build
         run: npm run build
