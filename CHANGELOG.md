@@ -5,6 +5,38 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-04
+
+### Security
+
+- **No known vulnerabilities remain.** The last three needed this framework
+  upgrade; the count is now zero, down from 47 at the start of the day.
+
+### Changed
+
+- Upgraded to Next.js 16. The dashboard now ships 11% less JavaScript
+  (3754 KB → 3329 KB), so it loads faster.
+- Linting moved to the standard ESLint command, since the framework removed its
+  own wrapper. It now covers the whole project rather than part of it.
+
+### Known
+
+- The new linter surfaced 10 pre-existing warnings in dashboard components
+  (state updates inside effects that cause extra renders). They do not affect
+  correctness and are tracked for follow-up.
+
+## [0.2.5] - 2026-08-04
+
+### Added
+
+- A smoke test that runs against a deployed environment and checks the things
+  that actually break: the database is really reachable, bad input is rejected
+  properly, the scheduled-jobs endpoint stays locked, the API spec is intact,
+  and the realtime connection refuses a bad token. It exits with an error, so it
+  can gate a release rather than just report.
+- A performance baseline, so the framework upgrades coming next can be checked
+  for slowdowns instead of assumed fine.
+
 ## [0.2.4] - 2026-08-04
 
 ### Fixed
