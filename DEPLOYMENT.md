@@ -34,10 +34,11 @@ MOBILE_JWT_SECRET=<generate: openssl rand -base64 32>
 
 **Optional:**
 ```
-AWS_ACCESS_KEY_ID=<your-aws-key>
-AWS_SECRET_ACCESS_KEY=<your-aws-secret>
-AWS_REGION=us-east-1
-AWS_S3_BUCKET=blendn-uploads
+TIGRIS_ENDPOINT=https://fly.storage.tigris.dev
+TIGRIS_ACCESS_KEY=<your-tigris-key>
+TIGRIS_SECRET_KEY=<your-tigris-secret>
+TIGRIS_BUCKET=blendn-media
+TIGRIS_REGION=auto
 ```
 
 ### 3. Connect Database
@@ -105,10 +106,15 @@ blendn.app          A        <landing-page-ip>
 | `NEXTAUTH_URL` | Yes | Full URL of admin dashboard |
 | `NEXTAUTH_SECRET` | Yes | Secret for NextAuth (min 32 chars) |
 | `MOBILE_JWT_SECRET` | Yes | Secret for mobile API JWT (min 32 chars) |
-| `AWS_ACCESS_KEY_ID` | No | AWS credentials for S3 |
-| `AWS_SECRET_ACCESS_KEY` | No | AWS credentials for S3 |
-| `AWS_REGION` | No | AWS region (default: us-east-1) |
-| `AWS_S3_BUCKET` | No | S3 bucket for uploads |
+| `TIGRIS_ENDPOINT` | No | Tigris S3-compatible endpoint. Uploads are disabled if unset |
+| `TIGRIS_ACCESS_KEY` | No | Tigris credentials |
+| `TIGRIS_SECRET_KEY` | No | Tigris credentials |
+| `TIGRIS_BUCKET` | No | Bucket for uploads (default: blendn-media) |
+| `TIGRIS_REGION` | No | Bucket region (default: auto) |
+| `OPENAI_API_KEY` | No | AI moderation. Without it, moderation falls back to keyword matching only |
+| `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
+| `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
+| `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |
 | `PORT` | No | Server port (Railway sets this) |
 | `NODE_ENV` | No | Set to "production" by Railway |
 

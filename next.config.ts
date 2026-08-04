@@ -59,6 +59,16 @@ const nextConfig: NextConfig = {
   },
 };
 
+// A production build without SENTRY_AUTH_TOKEN still succeeds, it just ships
+// without source maps — which is only discovered later, when a production stack
+// trace turns out to be unreadable. Say so at build time.
+if (process.env.NODE_ENV === "production" && !process.env.SENTRY_AUTH_TOKEN) {
+  console.warn(
+    "[build] SENTRY_AUTH_TOKEN is not set — building without source map upload. " +
+      "Production stack traces will stay minified."
+  );
+}
+
 export default withSentryConfig(nextConfig, {
   // Only upload source maps when SENTRY_AUTH_TOKEN is available
   silent: !process.env.SENTRY_AUTH_TOKEN,
