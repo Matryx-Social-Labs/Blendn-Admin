@@ -1,4 +1,6 @@
 import { PrismaClient } from "@prisma/client"
+import { PrismaPg } from "@prisma/adapter-pg"
+import { Pool } from "pg"
 
 /**
  * Shared setup for integration tests.
@@ -7,7 +9,20 @@ import { PrismaClient } from "@prisma/client"
  * the repo would notice a Prisma upgrade changing query semantics — that is the
  * entire reason this directory exists.
  */
-export const db = new PrismaClient()
+/**
+ * The pool is created explicitly rather than letting the adapter own it,
+ * because `prisma.$disconnect()` does NOT close a pool the adapter created —
+ * jest then hangs after the run with open handles, which in CI is a job that
+ * never finishes rather than a test that fails. `closeDb()` ends both.
+ */
+const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+
+export const db = new PrismaClient({ adapter: new PrismaPg(pool) })
+
+export async function closeDb() {
+  await db.$disconnect()
+  await pool.end()
+}
 
 /** Namespace every fixture so a failed run can never collide with the next. */
 export const testId = (label: string) =>
