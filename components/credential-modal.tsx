@@ -63,11 +63,19 @@ export function CredentialModal({ open, onOpenChange, role, roleLabel }: Credent
     }
   }
 
-  const copyAll = () => {
+  const copyAll = async () => {
     if (!credentials) return
     const text = `Name: ${credentials.name}\nEmail: ${credentials.email}\nPassword: ${credentials.password}`
-    navigator.clipboard.writeText(text)
-    toast.success("Credentials copied to clipboard")
+    try {
+      // Unavailable on insecure origins and rejects when permission is denied.
+      // These are one-time credentials, so a success toast on a failed copy
+      // loses them.
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable")
+      await navigator.clipboard.writeText(text)
+      toast.success("Credentials copied to clipboard")
+    } catch {
+      toast.error("Couldn't copy automatically — select the details and copy them manually")
+    }
   }
 
   return (
