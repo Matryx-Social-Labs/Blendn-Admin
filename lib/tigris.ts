@@ -238,6 +238,28 @@ export function isConfigured(): boolean {
  * Set bucket policy to allow public read access.
  * This lets profile/event/chat images be served without presigned URLs.
  */
+/**
+ * Applying the public-read policy is best-effort and must never decide whether
+ * storage is usable.
+ *
+ * Tigris does not implement S3 bucket policies the way AWS does — PutBucketPolicy
+ * comes back with "A header you provided implies functionality that is not
+ * implemented". Previously that rejection propagated to the caller's catch, which
+ * logged the misleading "Error checking bucket" and returned false for a bucket
+ * that exists and works. Public read access on Tigris is a bucket setting, not
+ * something to reassert on every boot.
+ */
+async function trySetBucketPublicRead(): Promise<void> {
+  try {
+    await setBucketPublicRead()
+  } catch (error) {
+    logger.warn("Could not apply public-read bucket policy (set it on the bucket itself)", {
+      bucket: TIGRIS_BUCKET,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 async function setBucketPublicRead(): Promise<void> {
   const client = getS3Client()
   const policy = JSON.stringify({
@@ -277,7 +299,7 @@ export async function ensureBucketExists(): Promise<boolean> {
     // Check if bucket exists
     await client.send(new HeadBucketCommand({ Bucket: TIGRIS_BUCKET }))
     logger.info("Bucket exists", { bucket: TIGRIS_BUCKET })
-    await setBucketPublicRead()
+    await trySetBucketPublicRead()
     return true
   } catch (error: unknown) {
     const s3Error = error as { name?: string; $metadata?: { httpStatusCode?: number } }
@@ -306,7 +328,7 @@ export async function ensureBucketExists(): Promise<boolean> {
           })
         )
         logger.info("CORS configured for bucket", { bucket: TIGRIS_BUCKET })
-        await setBucketPublicRead()
+        await trySetBucketPublicRead()
         return true
       } catch (createError) {
         logger.error("Failed to create bucket", { bucket: TIGRIS_BUCKET, error: createError instanceof Error ? createError.message : String(createError) })
