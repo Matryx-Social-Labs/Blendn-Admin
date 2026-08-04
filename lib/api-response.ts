@@ -73,7 +73,11 @@ export function errorResponse(
 export function validationErrorResponse(
   error: ZodError
 ): NextResponse<ApiResponse> {
-  const errors = error.errors.map((e) => ({
+  // `.issues` not `.errors`: ZodError.errors is removed in zod 4, and both
+  // exist on the zod 3 we're on today. Every mobile route funnels validation
+  // failures through here, so on `.errors` a zod upgrade turns all 26 of them
+  // from a 400 into a 500 raised inside the error handler itself.
+  const errors = error.issues.map((e) => ({
     field: e.path.join("."),
     message: e.message,
   }))
