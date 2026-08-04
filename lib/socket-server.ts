@@ -2,6 +2,8 @@ import { Server as HttpServer } from "http"
 import { Server, Socket } from "socket.io"
 import { verifyAccessToken } from "./mobile-auth"
 import { db } from "./db"
+import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
+import { logger } from "./logger"
 
 // Socket.io server instance
 let io: Server | null = null
@@ -245,6 +247,143 @@ class SponsoredMessageScheduler {
 export const sponsoredMessageScheduler = new SponsoredMessageScheduler()
 
 /**
+ * Join `room` only if `check` authorizes it, otherwise tell the client.
+ *
+ * Fails closed: a throwing check (malformed UUID from a hostile client, DB
+ * blip) denies the join rather than leaking the room.
+ */
+export async function guardJoin(
+  socket: AuthenticatedSocket,
+  room: string,
+  denyMessage: string,
+  check: () => Promise<boolean>
+): Promise<void> {
+  try {
+    if (await check()) {
+      socket.join(room)
+      logger.debug("Socket joined room", { room, userId: socket.data.userId })
+      return
+    }
+  } catch (error) {
+    // Room IDs are `@db.Uuid`, so a malformed one from a hostile client makes
+    // Prisma throw. Socket.io does not await listeners, so an escaping rejection
+    // would take down the process — deny instead.
+    logger.warn("Socket join authorization check failed", {
+      room,
+      userId: socket.data.userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+}
+
+/**
+ * Broadcast a typing indicator to a chat room, under the sender's anonymous name.
+ *
+ * No-ops for muted or banned members. The join guard can't cover this on its
+ * own: a member banned *after* joining stays in the room until they disconnect.
+ */
+export async function emitChatTyping(
+  socket: AuthenticatedSocket,
+  chatGroupId: string,
+  isTyping: boolean
+): Promise<void> {
+  try {
+    const membership = await db.chat_group_members.findUnique({
+      where: {
+        chat_group_id_user_id: {
+          chat_group_id: chatGroupId,
+          user_id: socket.data.userId,
+        },
+      },
+      select: { anonymous_name: true, status: true },
+    })
+
+    if (!membership || membership.status !== "active") return
+
+    socket.to(`chat:${chatGroupId}`).emit("chat:typing", {
+      chatGroupId,
+      userId: socket.data.userId,
+      userName: membership.anonymous_name || "Someone",
+      isTyping,
+    })
+  } catch (error) {
+    // Same fail-safe as guardJoin: chat_group_id is `@db.Uuid`, and an
+    // escaping rejection from this listener would take down the process.
+    logger.warn("Typing indicator lookup failed", {
+      chatGroupId,
+      userId: socket.data.userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
+ * Broadcast a typing indicator into a private conversation.
+ *
+ * `socket.to(room)` broadcasts to a room the sender does not have to be in, so
+ * joining is not enough of a gate here — without this participant check any
+ * authenticated user who guessed a conversation id could spoof typing state
+ * into someone else's DM.
+ */
+export async function emitPrivateTyping(
+  socket: AuthenticatedSocket,
+  conversationId: string,
+  isTyping: boolean
+): Promise<void> {
+  try {
+    if (!(await canJoinConversation(socket.data.userId, conversationId))) return
+
+    const profile = await db.profiles.findUnique({
+      where: { id: socket.data.userId },
+      select: { name: true },
+    })
+
+    socket.to(`conversation:${conversationId}`).emit("private:typing", {
+      conversationId,
+      userId: socket.data.userId,
+      // Read the display name, never the email local part.
+      userName: profile?.name || "Someone",
+      isTyping,
+    })
+  } catch (error) {
+    logger.warn("Private typing indicator failed", {
+      conversationId,
+      userId: socket.data.userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
+ * Relay a read receipt into a private conversation. Same participant gate as
+ * `emitPrivateTyping` — read receipts are only meaningful between the two
+ * participants, and must not be forgeable by a third party.
+ */
+export async function emitPrivateRead(
+  socket: AuthenticatedSocket,
+  conversationId: string,
+  messageIds: string[]
+): Promise<void> {
+  try {
+    if (!(await canJoinConversation(socket.data.userId, conversationId))) return
+
+    socket.to(`conversation:${conversationId}`).emit("private:read", {
+      conversationId,
+      messageIds,
+      readBy: socket.data.userId,
+    })
+  } catch (error) {
+    logger.warn("Private read receipt failed", {
+      conversationId,
+      userId: socket.data.userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
  * Initialize Socket.io server
  */
 export function initSocketServer(httpServer: HttpServer): Server {
@@ -305,29 +444,12 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     // Event room handlers
     authSocket.on("join:event", async (eventId) => {
-      const event = await db.events.findUnique({
-        where: { id: eventId },
-        select: { visibility: true, organizer_id: true },
-      })
-
-      if (!event) {
-        authSocket.emit("error", { message: "Event not found", code: "NOT_FOUND" })
-        return
-      }
-
-      if (event.visibility === "private" && event.organizer_id !== authSocket.data.userId) {
-        const hasAccess = await db.event_rsvps.findUnique({
-          where: { event_id_user_id: { event_id: eventId, user_id: authSocket.data.userId } },
-        })
-        if (!hasAccess) {
-          authSocket.emit("error", { message: "Not authorized to join this event", code: "FORBIDDEN" })
-          return
-        }
-      }
-
-      const room = `event:${eventId}`
-      authSocket.join(room)
-      console.log(`User ${authSocket.data.userId} joined ${room}`)
+      await guardJoin(
+        authSocket,
+        `event:${eventId}`,
+        "Not authorized to join this event",
+        () => canJoinEvent(authSocket.data.userId, eventId)
+      )
     })
 
     authSocket.on("leave:event", (eventId) => {
@@ -338,24 +460,12 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     // Chat room handlers
     authSocket.on("join:chat", async (chatGroupId) => {
-      const membership = await db.chat_group_members.findUnique({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroupId,
-            user_id: authSocket.data.userId,
-          },
-        },
-        select: { status: true },
-      })
-
-      if (!membership || membership.status === "banned") {
-        authSocket.emit("error", { message: "Not authorized to join this chat", code: "FORBIDDEN" })
-        return
-      }
-
-      const room = `chat:${chatGroupId}`
-      authSocket.join(room)
-      console.log(`User ${authSocket.data.userId} joined ${room}`)
+      await guardJoin(
+        authSocket,
+        `chat:${chatGroupId}`,
+        "Not authorized to join this chat",
+        () => canJoinChat(authSocket.data.userId, chatGroupId)
+      )
     })
 
     authSocket.on("leave:chat", (chatGroupId) => {
@@ -365,60 +475,21 @@ export function initSocketServer(httpServer: HttpServer): Server {
     })
 
     // Typing indicators (use anonymous names)
-    authSocket.on("chat:startTyping", async (chatGroupId) => {
-      const membership = await db.chat_group_members.findUnique({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroupId,
-            user_id: authSocket.data.userId,
-          },
-        },
-        select: { anonymous_name: true },
-      })
-      authSocket.to(`chat:${chatGroupId}`).emit("chat:typing", {
-        chatGroupId,
-        userId: authSocket.data.userId,
-        userName: membership?.anonymous_name || "Someone",
-        isTyping: true,
-      })
-    })
-
-    authSocket.on("chat:stopTyping", async (chatGroupId) => {
-      const membership = await db.chat_group_members.findUnique({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroupId,
-            user_id: authSocket.data.userId,
-          },
-        },
-        select: { anonymous_name: true },
-      })
-      authSocket.to(`chat:${chatGroupId}`).emit("chat:typing", {
-        chatGroupId,
-        userId: authSocket.data.userId,
-        userName: membership?.anonymous_name || "Someone",
-        isTyping: false,
-      })
-    })
+    authSocket.on("chat:startTyping", (chatGroupId) =>
+      void emitChatTyping(authSocket, chatGroupId, true)
+    )
+    authSocket.on("chat:stopTyping", (chatGroupId) =>
+      void emitChatTyping(authSocket, chatGroupId, false)
+    )
 
     // Private conversation room handlers
     authSocket.on("join:conversation", async (conversationId) => {
-      const conversation = await db.private_conversations.findUnique({
-        where: { id: conversationId },
-        select: { user1_id: true, user2_id: true },
-      })
-
-      if (
-        !conversation ||
-        (conversation.user1_id !== authSocket.data.userId && conversation.user2_id !== authSocket.data.userId)
-      ) {
-        authSocket.emit("error", { message: "Not authorized to join this conversation", code: "FORBIDDEN" })
-        return
-      }
-
-      const room = `conversation:${conversationId}`
-      authSocket.join(room)
-      console.log(`User ${authSocket.data.userId} joined ${room}`)
+      await guardJoin(
+        authSocket,
+        `conversation:${conversationId}`,
+        "Not authorized to join this conversation",
+        () => canJoinConversation(authSocket.data.userId, conversationId)
+      )
     })
 
     authSocket.on("leave:conversation", (conversationId) => {
@@ -428,31 +499,17 @@ export function initSocketServer(httpServer: HttpServer): Server {
     })
 
     // Private messaging typing indicators
-    authSocket.on("private:startTyping", (conversationId) => {
-      authSocket.to(`conversation:${conversationId}`).emit("private:typing", {
-        conversationId,
-        userId: authSocket.data.userId,
-        userName: authSocket.data.email.split("@")[0],
-        isTyping: true,
-      })
-    })
+    authSocket.on("private:startTyping", (conversationId) =>
+      void emitPrivateTyping(authSocket, conversationId, true)
+    )
 
-    authSocket.on("private:stopTyping", (conversationId) => {
-      authSocket.to(`conversation:${conversationId}`).emit("private:typing", {
-        conversationId,
-        userId: authSocket.data.userId,
-        userName: authSocket.data.email.split("@")[0],
-        isTyping: false,
-      })
-    })
+    authSocket.on("private:stopTyping", (conversationId) =>
+      void emitPrivateTyping(authSocket, conversationId, false)
+    )
 
-    authSocket.on("private:markRead", (conversationId, messageIds) => {
-      authSocket.to(`conversation:${conversationId}`).emit("private:read", {
-        conversationId,
-        messageIds,
-        readBy: authSocket.data.userId,
-      })
-    })
+    authSocket.on("private:markRead", (conversationId, messageIds) =>
+      void emitPrivateRead(authSocket, conversationId, messageIds)
+    )
 
     // Ping handler for connection health
     authSocket.on("ping", () => {
