@@ -5,6 +5,17 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-08-04
+
+### Fixed
+
+- Startup reported "Error checking bucket" and treated object storage as
+  unavailable when the bucket was actually fine. Applying the public-read policy
+  is best-effort — Tigris does not implement S3 bucket policies — and no longer
+  decides whether storage works.
+- Restored the version headings for 0.1.2 through 0.1.6, which were lost while
+  the entries were being written.
+
 ## [0.1.7] - 2026-08-04
 
 ### Changed
@@ -15,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Page-size limits come from the shared configuration instead of being written
   into each route.
 
-
+## [0.1.6] - 2026-08-04
 
 ### Fixed
 
@@ -36,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The organiser and venue owner tables now distinguish "no results for your
   search" from "none created yet".
 
-
+## [0.1.5] - 2026-08-04
 
 ### Fixed
 
@@ -58,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build, which otherwise succeeds and ships unreadable stack traces.
 - A real README, replacing the create-next-app boilerplate.
 
-
+## [0.1.4] - 2026-08-04
 
 ### Changed
 
@@ -74,7 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waited for the forced-exit timeout instead of exiting cleanly.
 - A leftover debug line printed the cover image URL on every event creation.
 
-
+## [0.1.3] - 2026-08-04
 
 ### Fixed
 
@@ -96,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spread its load across addresses.
 - 23 tests covering the new validation and rate-limit behaviour.
 
-
+## [0.1.2] - 2026-08-04
 
 ### Fixed
 
