@@ -5,6 +5,18 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-08-04
+
+### Added
+
+- A smoke test that runs against a deployed environment and checks the things
+  that actually break: the database is really reachable, bad input is rejected
+  properly, the scheduled-jobs endpoint stays locked, the API spec is intact,
+  and the realtime connection refuses a bad token. It exits with an error, so it
+  can gate a release rather than just report.
+- A performance baseline, so the framework upgrades coming next can be checked
+  for slowdowns instead of assumed fine.
+
 ## [0.2.4] - 2026-08-04
 
 ### Fixed
