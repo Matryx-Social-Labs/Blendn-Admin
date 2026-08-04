@@ -1,5 +1,5 @@
 import { canJoinChat, canJoinConversation, canJoinEvent } from "@/lib/socket-auth"
-import { db, cleanup, makeUser, makeEvent, testId } from "./helpers"
+import { db, cleanup, closeDb, makeUser, makeEvent, testId } from "./helpers"
 
 /**
  * The unit version of these tests mocks `@/lib/db` and asserts on the mock's
@@ -16,7 +16,7 @@ const events: string[] = []
 
 afterAll(async () => {
   await cleanup(users, events)
-  await db.$disconnect()
+  await closeDb()
 })
 
 describe("canJoinChat against a real database", () => {

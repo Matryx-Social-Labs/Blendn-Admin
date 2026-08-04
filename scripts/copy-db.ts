@@ -16,6 +16,7 @@
  * unrecoverable.
  */
 import { PrismaClient } from "@prisma/client"
+import { PrismaPg } from "@prisma/adapter-pg"
 
 const SOURCE = process.env.SOURCE_DATABASE_URL
 const TARGET = process.env.TARGET_DATABASE_URL
@@ -29,8 +30,10 @@ if (SOURCE === TARGET) {
   process.exit(1)
 }
 
-const src = new PrismaClient({ datasources: { db: { url: SOURCE } } })
-const dst = new PrismaClient({ datasources: { db: { url: TARGET } } })
+// Prisma 7 removed the `datasources` constructor override; per-connection
+// URLs now come through a driver adapter.
+const src = new PrismaClient({ adapter: new PrismaPg({ connectionString: SOURCE }) })
+const dst = new PrismaClient({ adapter: new PrismaPg({ connectionString: TARGET }) })
 
 /**
  * Parents before children. A row whose foreign key has not been inserted yet
