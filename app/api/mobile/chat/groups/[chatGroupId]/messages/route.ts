@@ -422,7 +422,14 @@ export async function POST(
       void db.chat_messages.update({
         where: { id: message.id },
         data: { moderation_status: "clean" },
-      }).catch(() => {})
+      }).catch((err: unknown) =>
+      // Push is best-effort and must not fail the request, but swallowing the
+      // error entirely means a broken push pipeline is invisible.
+      logger.warn("Push notification failed", {
+        context: "group chat message",
+        error: err instanceof Error ? err.message : String(err),
+      })
+    )
     }
 
     // Update chat group's last_message_at
