@@ -51,7 +51,7 @@ describe("validationErrorResponse", () => {
       {
         code: ZodIssueCode.invalid_type,
         expected: "string",
-        received: "undefined",
+        // zod 4 dropped `received` from the issue shape.
         path: ["email"],
         message: "Required",
       },
