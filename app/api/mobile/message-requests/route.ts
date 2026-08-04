@@ -14,8 +14,9 @@ import {
 } from "@/lib/api-response"
 
 const createRequestSchema = z.object({
+  // User ids are cuid, not uuid — do not tighten this to z.string().uuid().
   recipientId: z.string().min(1),
-  message: z.string().max(500).optional(),
+  message: z.string().trim().min(1).max(500).optional(),
 })
 
 // POST: Create a message request
@@ -129,9 +130,9 @@ export async function POST(request: NextRequest) {
     sendPushNotification({
       userId: recipientId,
       title: "New message request",
-      body: message
-        ? `${senderName}: ${message.slice(0, 80)}`
-        : `${senderName} wants to connect`,
+      // Deliberately generic: push bodies render on a locked screen, so the
+      // request text stays in the app rather than on the lock screen.
+      body: `${senderName} wants to connect`,
       data: { type: "message_request", requestId: messageRequest.id },
       channelId: "messages",
     }).catch(() => {})

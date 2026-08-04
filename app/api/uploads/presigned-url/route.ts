@@ -33,6 +33,13 @@ export async function POST(request: NextRequest) {
       return unauthorizedResponse("Authentication required")
     }
 
+    // A dashboard session alone is not enough: attendees never upload through
+    // the dashboard. Same role gate /api/events POST applies.
+    const { role } = session.user
+    if (role !== "app_admin" && role !== "organizer" && role !== "venue_owner") {
+      return errorResponse("Not authorized to upload", 403)
+    }
+
     const body = await request.json()
     const validation = presignedUrlSchema.safeParse(body)
     if (!validation.success) {

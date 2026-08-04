@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canManageEvent } from "@/lib/rbac"
+import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
+import { announcementSchema } from "@/lib/validations/event"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyAnnouncement } from "@/lib/push-notifications"
 
@@ -45,10 +47,19 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     const { id: eventId } = await params
 
-    const { content } = await req.json()
-    if (!content?.trim()) {
-      return new NextResponse("content is required", { status: 400 })
+    // An announcement pushes to every attendee of the event. Bound how fast a
+    // single organiser account can fire them.
+    const limited = rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
+    if (limited) return limited
+
+    const parsed = announcementSchema.safeParse(await req.json())
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      )
     }
+    const { content } = parsed.data
 
     // Find the event's chat group (also used for access check)
     const event = await db.events.findUnique({
@@ -73,14 +84,14 @@ export async function POST(req: Request, { params }: RouteContext) {
     const announcement = await db.event_announcements.create({
       data: {
         event_id: eventId,
-        content: content.trim(),
+        content,
         sent_by: session.user.id,
       },
       include: { sender: { select: { name: true, email: true } } },
     })
 
     const senderName = session.user.name ?? session.user.email ?? "Organiser"
-    const chatContent = `📢 [Announcement from ${senderName}]\n${content.trim()}`
+    const chatContent = `📢 [Announcement from ${senderName}]\n${content}`
 
     // Persist as a chat message
     const chatMsg = await db.chat_messages.create({
@@ -115,7 +126,7 @@ export async function POST(req: Request, { params }: RouteContext) {
         void notifyAnnouncement(
           chatGroupId,
           ev.title,
-          content.trim(),
+          content,
           eventId,
           session.user.id
         )

@@ -99,6 +99,35 @@ export function createBatchRateLimit(): RateLimitConfig {
 }
 
 /**
+ * Rate limit keyed on the authenticated user rather than the client IP.
+ *
+ * Use this for endpoints where the caller is already authenticated and the
+ * abuse case is a single compromised or misbehaving account, not an anonymous
+ * flood — IP keying is useless there because everyone behind one NAT shares a
+ * bucket while the attacker just rotates addresses.
+ */
+export function createUserRateLimit(
+  scope: "organiser-broadcast" | "private-message",
+  userId: string
+): RateLimitConfig {
+  const settings = {
+    "organiser-broadcast": {
+      windowMs: RATE_LIMIT_WINDOW.ORGANISER_BROADCAST,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.ORGANISER_BROADCAST,
+    },
+    "private-message": {
+      windowMs: RATE_LIMIT_WINDOW.PRIVATE_MESSAGE,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.PRIVATE_MESSAGE,
+    },
+  }[scope]
+
+  return {
+    ...settings,
+    keyGenerator: () => `${scope}:${userId}`,
+  }
+}
+
+/**
  * Create a rate limit configuration for auth endpoints
  */
 export function createAuthRateLimit(

@@ -5,7 +5,29 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2] - 2026-08-04
+## [0.1.3] - 2026-08-04
+
+### Fixed
+
+- Editing a sponsored message with a malformed value returned a server error
+  instead of a validation message. All organiser broadcast content is now
+  validated and length-capped before it is saved.
+- Message requests could be sent with an empty message body.
+- Anyone with a dashboard login could request an upload URL, including attendee
+  accounts that have no reason to upload. Now limited to admins, organisers, and
+  venue owners.
+- Message-request push notifications previewed the sender's text on the lock
+  screen. They now say only who wants to connect; the message stays in the app.
+
+### Added
+
+- Rate limits on the endpoints that fan out to many people: announcements and
+  sponsored messages (10/min per organiser) and direct messages (30/min per
+  sender). These are keyed per account rather than per IP, so one account cannot
+  spread its load across addresses.
+- 23 tests covering the new validation and rate-limit behaviour.
+
+
 
 ### Fixed
 
