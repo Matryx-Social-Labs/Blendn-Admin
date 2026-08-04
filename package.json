@@ -1,6 +1,6 @@
 {
   "name": "blendn-admin",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "scripts": {
     "dev": "ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
@@ -17,7 +17,9 @@
     "postinstall": "prisma generate",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:integration": "jest --config jest.integration.config.ts"
+    "test:integration": "jest --config jest.integration.config.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "bench": "tsx scripts/bench.ts"
   },
   "prisma": {
     "seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
@@ -93,6 +95,7 @@
     "eslint-config-next": "15.3.1",
     "jest": "^30.3.0",
     "prisma": "^6.6.0",
+    "socket.io-client": "^4.8.3",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
