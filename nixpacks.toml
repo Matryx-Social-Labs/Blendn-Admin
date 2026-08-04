@@ -1,19 +1,19 @@
-# Nixpacks configuration for Railway deployment
-# Explicitly define build and start to use custom server with Socket.io
+# NOTE: Railway builds this service with railpack, not nixpacks — verified in
+# the build logs. This file is retained only so a future switch back to the
+# nixpacks builder does not silently lose the custom start command, which must
+# run server.ts (Socket.io) rather than `next start`.
+#
+# If you change build behaviour, change it in railway.json. Editing this file
+# alone will have no effect.
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-9_x"]
+nixPkgs = ["nodejs_22"]
 
 [phases.install]
-cmds = ["npm install --legacy-peer-deps"]
-cacheDirectories = []
+cmds = ["npm ci"]
 
 [phases.build]
-cmds = [
-  "npx prisma generate",
-  "npm run build"
-]
-cacheDirectories = [".next/cache"]
+cmds = ["npm run build"]
 
 [start]
 cmd = "npm run start"
