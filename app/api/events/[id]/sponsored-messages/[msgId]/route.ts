@@ -3,6 +3,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canManageEvent } from "@/lib/rbac"
 import { sponsoredMessageScheduler } from "@/lib/socket-server"
+import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
 
 interface RouteContext {
   params: Promise<{ id: string; msgId: string }>
@@ -24,8 +25,14 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
-    const body = await req.json()
-    const { content, interval_minutes, is_active } = body
+    const parsed = sponsoredMessageUpdateSchema.safeParse(await req.json())
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      )
+    }
+    const { content, interval_minutes, is_active } = parsed.data
 
     const existing = await db.event_sponsored_messages.findFirst({
       where: { id: msgId, event_id: eventId },
@@ -35,7 +42,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const updated = await db.event_sponsored_messages.update({
       where: { id: msgId },
       data: {
-        ...(content !== undefined && { content: content.trim() }),
+        ...(content !== undefined && { content }),
         ...(interval_minutes !== undefined && { interval_minutes }),
         ...(is_active !== undefined && { is_active }),
         updated_at: new Date(),
