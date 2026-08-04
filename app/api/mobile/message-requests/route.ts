@@ -136,7 +136,14 @@ export async function POST(request: NextRequest) {
       body: `${senderName} wants to connect`,
       data: { type: "message_request", requestId: messageRequest.id },
       channelId: "messages",
-    }).catch(() => {})
+    }).catch((err: unknown) =>
+      // Push is best-effort and must not fail the request, but swallowing the
+      // error entirely means a broken push pipeline is invisible.
+      logger.warn("Push notification failed", {
+        context: "message request",
+        error: err instanceof Error ? err.message : String(err),
+      })
+    )
 
     return successResponse(
       {
