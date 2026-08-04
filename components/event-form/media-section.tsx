@@ -79,6 +79,7 @@ function SortableMediaItem({
             variant="ghost"
             size="icon"
             className="size-auto cursor-grab touch-none p-1 text-muted-foreground hover:text-foreground"
+            aria-label={`Reorder media item ${index + 1}`}
             {...attributes}
             {...listeners}
           >
@@ -86,7 +87,13 @@ function SortableMediaItem({
           </Button>
           <span className="text-sm font-medium">Media #{index + 1}</span>
         </div>
-        <Button type="button" variant="destructive" size="sm" onClick={onRemove}>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          onClick={onRemove}
+          aria-label={`Remove media item ${index + 1}`}
+        >
           <IconTrash className="size-4" />
         </Button>
       </div>

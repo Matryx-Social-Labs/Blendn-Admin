@@ -5,7 +5,28 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.5] - 2026-08-04
+## [0.1.6] - 2026-08-04
+
+### Fixed
+
+- Switching filters quickly in the moderation queue could leave an older result
+  on screen, showing a reviewer the wrong set of flagged messages. Requests are
+  now cancelled when superseded.
+- Copying generated credentials reported success even when the copy silently
+  failed, which loses one-time credentials. Failures now say so and tell you to
+  copy manually.
+
+### Added
+
+- Loading placeholders on the dashboard overview, events, chatrooms, organisers,
+  and venue owners pages. They previously showed nothing at all while their data
+  loaded.
+- Accessible names on the remaining icon-only buttons, so screen readers
+  announce them.
+- The organiser and venue owner tables now distinguish "no results for your
+  search" from "none created yet".
+
+
 
 ### Fixed
 
