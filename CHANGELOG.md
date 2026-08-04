@@ -5,6 +5,21 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-08-05
+
+### Added
+
+- Tooling to measure API performance against realistic data volume, and a
+  recorded baseline. The previous benchmark only measured endpoints that reject
+  the request, so it never exercised a single database query.
+
+### Verified
+
+- With 1000x the current data (10,000 accounts, 2,000 events, 500,000 chat
+  messages) the real endpoints respond in 207-238ms, against a 200ms floor that
+  is network round-trip. The heaviest one adds about 38ms of actual work. No
+  slow queries, and no missing indexes.
+
 ## [0.5.1] - 2026-08-05
 
 ### Fixed

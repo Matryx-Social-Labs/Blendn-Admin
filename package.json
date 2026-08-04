@@ -1,6 +1,6 @@
 {
   "name": "blendn-admin",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "scripts": {
     "dev": "ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
@@ -19,7 +19,8 @@
     "test:watch": "jest --watch",
     "test:integration": "jest --config jest.integration.config.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "bench": "tsx scripts/bench.ts"
+    "bench": "tsx scripts/bench.ts",
+    "seed:volume": "tsx scripts/seed-volume.ts"
   },
   "prisma": {
     "seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
