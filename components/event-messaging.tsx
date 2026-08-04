@@ -201,7 +201,7 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
               <Button size="sm" onClick={save} disabled={saving}>
                 {saving ? "Saving…" : "Save"}
               </Button>
-              <Button size="sm" variant="ghost" onClick={cancelForm}>
+              <Button size="sm" variant="ghost" onClick={cancelForm} aria-label="Cancel">
                 <IconX className="size-4" />
               </Button>
             </div>

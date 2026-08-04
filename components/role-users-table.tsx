@@ -73,7 +73,9 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath }: RoleU
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                  No {roleLabel.toLowerCase()}s found.
+                  {search
+                    ? `No ${roleLabel.toLowerCase()}s match "${search}".`
+                    : `No ${roleLabel.toLowerCase()}s yet. Use Generate Credentials to add one.`}
                 </TableCell>
               </TableRow>
             ) : (

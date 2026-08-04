@@ -311,6 +311,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                         onClick={() => void deleteMessage(msg.id)}
                         disabled={actionLoading === msg.id}
                         title="Delete message"
+                        aria-label="Delete message"
                       >
                         <IconTrash className="size-3.5" />
                       </Button>
