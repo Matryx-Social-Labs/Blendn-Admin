@@ -63,6 +63,39 @@ describe("validationErrorResponse", () => {
     expect(body.errors).toHaveLength(1)
     expect(body.errors[0].field).toBe("email")
   })
+
+  it("reads .issues, so it survives the zod 4 upgrade", async () => {
+    // zod 4 removes ZodError.errors and keeps only .issues. On the zod 3 we run
+    // today BOTH exist, so the test above passes either way and would not catch
+    // a revert to .errors. This one hands over an object that has ONLY .issues —
+    // the zod 4 shape — and fails loudly if the helper reaches for .errors.
+    const zod4Shaped = {
+      issues: [
+        {
+          code: "invalid_type",
+          expected: "string",
+          received: "undefined",
+          path: ["profile", "name"],
+          message: "Required",
+        },
+      ],
+    } as unknown as ZodError
+
+    const res = validationErrorResponse(zod4Shaped)
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.errors).toHaveLength(1)
+    // path is joined with "." so nested fields stay addressable by the client
+    expect(body.errors[0].field).toBe("profile.name")
+    expect(body.errors[0].message).toBe("Required")
+  })
+
+  it("handles a validation failure with no issues without crashing", async () => {
+    const res = validationErrorResponse({ issues: [] } as unknown as ZodError)
+    expect(res.status).toBe(400)
+    expect((await res.json()).errors).toEqual([])
+  })
 })
 
 describe("status code responses", () => {
