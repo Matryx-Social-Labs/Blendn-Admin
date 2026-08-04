@@ -5,6 +5,15 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-08-04
+
+### Removed
+
+- `DIRECT_URL`. Prisma's `directUrl` exists for deployments where the app talks
+  to a connection pooler and migrations have to bypass it. This one connects to
+  Postgres directly, so it was a second copy of `DATABASE_URL` that had to be
+  kept in sync — and forgetting it in CI is what kept every CI run red.
+
 ## [0.1.8] - 2026-08-04
 
 ### Fixed

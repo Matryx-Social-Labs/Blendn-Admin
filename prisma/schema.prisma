@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum user_role {
@@ -21,26 +20,26 @@ model User {
   name          String?
   email         String    @unique
   emailVerified DateTime?
-  password      String?   // hashed password for credentials
+  password      String? // hashed password for credentials
   image         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime? // set when the user deletes their account; PII is scrubbed, row is kept for FK integrity
   role          user_role @default(attendee)
 
-  accounts      Account[]
-  sessions      Session[]
-  profile       profiles?
+  accounts Account[]
+  sessions Session[]
+  profile  profiles?
 
   // Event relations
   organized_events       events[]
-  event_check_ins       event_check_ins[]
-  chat_messages         chat_messages[]
+  event_check_ins        event_check_ins[]
+  chat_messages          chat_messages[]
   chat_group_memberships chat_group_members[]
-  message_reactions     message_reactions[]
-  event_favorites       event_favorites[]
-  event_ratings         event_ratings[]
-  event_reports         event_reports[]
+  message_reactions      message_reactions[]
+  event_favorites        event_favorites[]
+  event_ratings          event_ratings[]
+  event_reports          event_reports[]
 
   // Mobile API relations
   mobile_refresh_tokens mobile_refresh_tokens[]
@@ -51,29 +50,29 @@ model User {
   // Private messaging
   conversations_as_user1 private_conversations[] @relation("ConversationUser1")
   conversations_as_user2 private_conversations[] @relation("ConversationUser2")
-  sent_private_messages  private_messages[] @relation("PrivateMessageSender")
+  sent_private_messages  private_messages[]      @relation("PrivateMessageSender")
 
   // Message requests
   sent_message_requests     message_requests[] @relation("MessageRequestSender")
   received_message_requests message_requests[] @relation("MessageRequestRecipient")
 
   // Blocking
-  blocked_users   blocked_users[] @relation("BlockedByUser")
-  blocked_by      blocked_users[] @relation("BlockedUser")
+  blocked_users blocked_users[] @relation("BlockedByUser")
+  blocked_by    blocked_users[] @relation("BlockedUser")
 
   // Announcements
-  sent_announcements        event_announcements[]
+  sent_announcements event_announcements[]
 
   // RSVPs
-  event_rsvps               event_rsvps[]
+  event_rsvps event_rsvps[]
 
   // Moderation
-  moderation_flags          moderation_flags[]
+  moderation_flags moderation_flags[]
 
   // Reporting (users/messages)
-  user_reports_filed     user_reports[]    @relation("UserReportReporter")
-  user_reports_received  user_reports[]    @relation("UserReportReported")
-  message_reports        message_reports[]
+  user_reports_filed    user_reports[]    @relation("UserReportReporter")
+  user_reports_received user_reports[]    @relation("UserReportReported")
+  message_reports       message_reports[]
 }
 
 model Account {
@@ -114,29 +113,29 @@ model VerificationToken {
 
 // Application models
 model profiles {
-  id           String   @id
-  phone        String?
+  id          String   @id
+  phone       String?
   // Canonical display name — always read from here, not from User.name
-  name         String?
-  age          Int?
-  location     String?
-  bio          String?
-  occupation   String?
-  education    String?
-  interests    String[]
-  photos       String[]
-  goals        String[]
-  looking_for  String[]
-  onboarded    Boolean  @default(false)
+  name        String?
+  age         Int?
+  location    String?
+  bio         String?
+  occupation  String?
+  education   String?
+  interests   String[]
+  photos      String[]
+  goals       String[]
+  looking_for String[]
+  onboarded   Boolean  @default(false)
   // push_token and push_platform removed — use push_tokens table instead
-  created_at   DateTime @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime @default(now()) @db.Timestamptz(6)
-  user         User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  user        User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
 model events {
-  id                String         @id @default(uuid()) @db.Uuid
-  slug              String         @unique
+  id                String          @id @default(uuid()) @db.Uuid
+  slug              String          @unique
   title             String
   description       String
   short_description String?
@@ -148,37 +147,37 @@ model events {
   state             String?
   country           String?
   postal_code       String?
-  start_time        DateTime       @db.Timestamptz(6)
-  end_time          DateTime       @db.Timestamptz(6)
+  start_time        DateTime        @db.Timestamptz(6)
+  end_time          DateTime        @db.Timestamptz(6)
   timezone          String
-  status            event_status   @default(draft)
+  status            event_status    @default(draft)
   visibility        visibility_type @default(public)
   max_capacity      Int?
-  current_capacity  Int            @default(0)
-  created_at        DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime       @default(now()) @db.Timestamptz(6)
-  deleted_at        DateTime?      @db.Timestamptz(6)
+  current_capacity  Int             @default(0)
+  created_at        DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime        @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime?       @db.Timestamptz(6)
   organizer_id      String
   cover_image_url   String?
   external_link     String?
-  is_featured       Boolean        @default(false)
-  is_recurring      Boolean        @default(false)
-  check_in_radius   Float          @default(30)
+  is_featured       Boolean         @default(false)
+  is_recurring      Boolean         @default(false)
+  check_in_radius   Float           @default(30)
 
   // Relations
-  organizer            User           @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
-  details              event_details?
-  check_ins            event_check_ins[]
-  chat_group           chat_groups?
-  media                event_media[]
-  categories           event_categories[]
-  favorites            event_favorites[]
-  ratings              event_ratings[]
-  reports              event_reports[]
-  recurring_pattern    recurring_events?
-  sponsored_messages   event_sponsored_messages[]
-  announcements        event_announcements[]
-  rsvps                event_rsvps[]
+  organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
+  details            event_details?
+  check_ins          event_check_ins[]
+  chat_group         chat_groups?
+  media              event_media[]
+  categories         event_categories[]
+  favorites          event_favorites[]
+  ratings            event_ratings[]
+  reports            event_reports[]
+  recurring_pattern  recurring_events?
+  sponsored_messages event_sponsored_messages[]
+  announcements      event_announcements[]
+  rsvps              event_rsvps[]
 
   @@index([latitude, longitude])
   @@index([status, start_time])
@@ -203,7 +202,7 @@ model event_details {
   updated_at          DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event              events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
 }
 
 model categories {
@@ -217,9 +216,9 @@ model categories {
   updated_at  DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  parent      categories?         @relation("CategoryHierarchy", fields: [parent_id], references: [id])
-  children    categories[]        @relation("CategoryHierarchy")
-  events      event_categories[]
+  parent         categories?        @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children       categories[]       @relation("CategoryHierarchy")
+  events         event_categories[]
   user_interests user_interests[]
 
   @@index([parent_id])
@@ -232,47 +231,47 @@ model event_categories {
   created_at  DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event       events     @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  category    categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
+  event    events     @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  category categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
 
   @@id([event_id, category_id])
   @@index([category_id])
 }
 
 model event_media {
-  id            String      @id @default(uuid()) @db.Uuid
-  event_id      String      @db.Uuid
+  id            String     @id @default(uuid()) @db.Uuid
+  event_id      String     @db.Uuid
   type          media_type
   url           String
   thumbnail_url String?
   title         String?
   description   String?
-  order         Int         @default(0)
-  created_at    DateTime    @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime    @default(now()) @db.Timestamptz(6)
+  order         Int        @default(0)
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime   @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event         events      @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
 
   @@index([event_id, order])
 }
 
 model event_check_ins {
-  id              String          @id @default(uuid()) @db.Uuid
-  event_id        String          @db.Uuid
-  user_id         String
-  status          check_in_status @default(pending)
-  check_in_time   DateTime?       @db.Timestamptz(6)
-  check_out_time  DateTime?       @db.Timestamptz(6)
-  latitude        Float?
-  longitude       Float?
-  device_info     Json?
-  created_at      DateTime        @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime        @default(now()) @db.Timestamptz(6)
+  id             String          @id @default(uuid()) @db.Uuid
+  event_id       String          @db.Uuid
+  user_id        String
+  status         check_in_status @default(pending)
+  check_in_time  DateTime?       @db.Timestamptz(6)
+  check_out_time DateTime?       @db.Timestamptz(6)
+  latitude       Float?
+  longitude      Float?
+  device_info    Json?
+  created_at     DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime        @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event           events          @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user            User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([event_id, user_id])
   @@index([event_id, status])
@@ -295,36 +294,36 @@ model chat_groups {
   deleted_at      DateTime?         @db.Timestamptz(6)
 
   // Relations
-  event           events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  messages        chat_messages[]
-  members         chat_group_members[]
+  event    events               @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  messages chat_messages[]
+  members  chat_group_members[]
 
   @@index([status])
 }
 
 model chat_messages {
-  id              String           @id @default(uuid()) @db.Uuid
-  chat_group_id   String           @db.Uuid
-  user_id         String
-  parent_id       String?          @db.Uuid
-  type            message_type     @default(text)
-  content         String
-  metadata        Json?
-  is_edited       Boolean          @default(false)
-  edited_at       DateTime?        @db.Timestamptz(6)
-  is_pinned       Boolean          @default(false)
-  created_at      DateTime         @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime         @default(now()) @db.Timestamptz(6)
-  deleted_at         DateTime?        @db.Timestamptz(6)
-  deleted_by         String?
-  moderation_status  String?          // "clean" | "flagged" | "hidden"
+  id                String       @id @default(uuid()) @db.Uuid
+  chat_group_id     String       @db.Uuid
+  user_id           String
+  parent_id         String?      @db.Uuid
+  type              message_type @default(text)
+  content           String
+  metadata          Json?
+  is_edited         Boolean      @default(false)
+  edited_at         DateTime?    @db.Timestamptz(6)
+  is_pinned         Boolean      @default(false)
+  created_at        DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime     @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime?    @db.Timestamptz(6)
+  deleted_by        String?
+  moderation_status String? // "clean" | "flagged" | "hidden"
 
   // Relations
-  chat_group      chat_groups      @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
-  user            User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  parent_message  chat_messages?   @relation("MessageReplies", fields: [parent_id], references: [id])
-  replies         chat_messages[]  @relation("MessageReplies")
-  reactions       message_reactions[]
+  chat_group       chat_groups         @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
+  user             User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  parent_message   chat_messages?      @relation("MessageReplies", fields: [parent_id], references: [id])
+  replies          chat_messages[]     @relation("MessageReplies")
+  reactions        message_reactions[]
   moderation_flags moderation_flags[]
 
   @@index([chat_group_id, created_at])
@@ -333,24 +332,24 @@ model chat_messages {
 }
 
 model chat_group_members {
-  id                      String                @id @default(uuid()) @db.Uuid
-  chat_group_id          String                @db.Uuid
-  user_id                String
-  role                   member_role           @default(member)
-  status                 member_status         @default(active)
-  anonymous_name         String?
-  last_read_message_id   String?              @db.Uuid
-  last_allowed_at        DateTime?            @db.Timestamptz(6)
-  notification_preferences Json                @default("{}")
-  joined_at              DateTime              @default(now()) @db.Timestamptz(6)
-  created_at             DateTime              @default(now()) @db.Timestamptz(6)
-  updated_at             DateTime              @default(now()) @db.Timestamptz(6)
-  banned_at              DateTime?            @db.Timestamptz(6)
-  banned_by              String?
+  id                       String        @id @default(uuid()) @db.Uuid
+  chat_group_id            String        @db.Uuid
+  user_id                  String
+  role                     member_role   @default(member)
+  status                   member_status @default(active)
+  anonymous_name           String?
+  last_read_message_id     String?       @db.Uuid
+  last_allowed_at          DateTime?     @db.Timestamptz(6)
+  notification_preferences Json          @default("{}")
+  joined_at                DateTime      @default(now()) @db.Timestamptz(6)
+  created_at               DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime      @default(now()) @db.Timestamptz(6)
+  banned_at                DateTime?     @db.Timestamptz(6)
+  banned_by                String?
 
   // Relations
-  chat_group             chat_groups           @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
-  user                   User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  chat_group chat_groups @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([chat_group_id, user_id])
   @@unique([chat_group_id, anonymous_name])
@@ -359,15 +358,15 @@ model chat_group_members {
 }
 
 model message_reactions {
-  id          String   @id @default(uuid()) @db.Uuid
-  message_id  String   @db.Uuid
-  user_id     String
-  emoji       String
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  id         String   @id @default(uuid()) @db.Uuid
+  message_id String   @db.Uuid
+  user_id    String
+  emoji      String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  message     chat_messages @relation(fields: [message_id], references: [id], onDelete: Cascade)
-  user        User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  message chat_messages @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([message_id, user_id, emoji])
 }
@@ -379,8 +378,8 @@ model event_favorites {
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event      events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([event_id, user_id])
   @@index([user_id])
@@ -397,8 +396,8 @@ model event_ratings {
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event      events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([event_id, user_id])
   @@index([event_id])
@@ -415,8 +414,8 @@ model event_reports {
   updated_at  DateTime      @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event       events        @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user        User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([event_id])
   @@index([status])
@@ -432,8 +431,8 @@ model user_reports {
   created_at  DateTime      @default(now()) @db.Timestamptz(6)
   updated_at  DateTime      @default(now()) @db.Timestamptz(6)
 
-  reporter    User @relation("UserReportReporter", fields: [reporter_id], references: [id], onDelete: Cascade)
-  reported    User @relation("UserReportReported", fields: [reported_id], references: [id], onDelete: Cascade)
+  reporter User @relation("UserReportReporter", fields: [reporter_id], references: [id], onDelete: Cascade)
+  reported User @relation("UserReportReported", fields: [reported_id], references: [id], onDelete: Cascade)
 
   @@index([reported_id])
   @@index([status])
@@ -443,30 +442,30 @@ model message_reports {
   id           String        @id @default(uuid()) @db.Uuid
   reporter_id  String
   message_id   String        @db.Uuid
-  message_type String        // 'group' | 'private'
+  message_type String // 'group' | 'private'
   reason       String
   description  String?
   status       report_status @default(pending)
   created_at   DateTime      @default(now()) @db.Timestamptz(6)
   updated_at   DateTime      @default(now()) @db.Timestamptz(6)
 
-  reporter     User @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
+  reporter User @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
 
   @@index([message_id])
   @@index([status])
 }
 
 model recurring_events {
-  id                String   @id @default(uuid()) @db.Uuid
-  parent_event_id   String   @unique @db.Uuid
+  id                 String   @id @default(uuid()) @db.Uuid
+  parent_event_id    String   @unique @db.Uuid
   recurrence_pattern Json
-  start_date        DateTime @db.Date
-  end_date          DateTime @db.Date
-  created_at        DateTime @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime @default(now()) @db.Timestamptz(6)
+  start_date         DateTime @db.Date
+  end_date           DateTime @db.Date
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  parent_event      events   @relation(fields: [parent_event_id], references: [id], onDelete: Cascade)
+  parent_event events @relation(fields: [parent_event_id], references: [id], onDelete: Cascade)
 }
 
 model mobile_refresh_tokens {
@@ -478,20 +477,20 @@ model mobile_refresh_tokens {
   created_at  DateTime  @default(now()) @db.Timestamptz(6)
   revoked_at  DateTime? @db.Timestamptz(6)
 
-  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
   @@index([expires_at])
 }
 
 model user_interests {
-  id          String     @id @default(uuid()) @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
   user_id     String
-  category_id String     @db.Uuid
-  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  category_id String   @db.Uuid
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
 
-  user        User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  category    categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  category categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, category_id])
 }
@@ -499,26 +498,26 @@ model user_interests {
 model user_oauth_accounts {
   id          String   @id @default(uuid()) @db.Uuid
   user_id     String
-  provider    String   // 'google', 'apple'
+  provider    String // 'google', 'apple'
   provider_id String
   email       String?
   created_at  DateTime @default(now()) @db.Timestamptz(6)
 
-  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([provider, provider_id])
   @@index([user_id])
 }
 
 model push_tokens {
-  id          String   @id @default(uuid()) @db.Uuid
-  user_id     String
-  token       String
-  platform    String   // 'ios', 'android'
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String
+  token      String
+  platform   String // 'ios', 'android'
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
 
-  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, token])
   @@index([user_id])
@@ -526,16 +525,16 @@ model push_tokens {
 
 // Private Messaging
 model private_conversations {
-  id           String   @id @default(uuid()) @db.Uuid
-  user1_id     String
-  user2_id     String
-  created_at   DateTime @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+  id              String    @id @default(uuid()) @db.Uuid
+  user1_id        String
+  user2_id        String
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @db.Timestamptz(6)
   last_message_at DateTime? @db.Timestamptz(6)
 
-  user1        User     @relation("ConversationUser1", fields: [user1_id], references: [id], onDelete: Cascade)
-  user2        User     @relation("ConversationUser2", fields: [user2_id], references: [id], onDelete: Cascade)
-  messages     private_messages[]
+  user1    User               @relation("ConversationUser1", fields: [user1_id], references: [id], onDelete: Cascade)
+  user2    User               @relation("ConversationUser2", fields: [user2_id], references: [id], onDelete: Cascade)
+  messages private_messages[]
 
   @@unique([user1_id, user2_id])
   @@index([user1_id])
@@ -544,18 +543,18 @@ model private_conversations {
 }
 
 model private_messages {
-  id              String   @id @default(uuid()) @db.Uuid
-  conversation_id String   @db.Uuid
+  id              String      @id @default(uuid()) @db.Uuid
+  conversation_id String      @db.Uuid
   sender_id       String
   message_text    String?
   media_url       String?
   media_type      media_type?
-  is_read         Boolean  @default(false)
-  created_at      DateTime @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+  is_read         Boolean     @default(false)
+  created_at      DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime    @default(now()) @db.Timestamptz(6)
 
-  conversation    private_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-  sender          User     @relation("PrivateMessageSender", fields: [sender_id], references: [id], onDelete: Cascade)
+  conversation private_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender       User                  @relation("PrivateMessageSender", fields: [sender_id], references: [id], onDelete: Cascade)
 
   @@index([conversation_id])
   @@index([sender_id])
@@ -570,8 +569,8 @@ model event_rsvps {
   created_at DateTime    @default(now()) @db.Timestamptz(6)
   updated_at DateTime    @default(now()) @db.Timestamptz(6)
 
-  event      events      @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user       User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([event_id, user_id])
   @@index([event_id])
@@ -668,7 +667,7 @@ model event_sponsored_messages {
   created_at       DateTime  @default(now()) @db.Timestamptz(6)
   updated_at       DateTime  @default(now()) @db.Timestamptz(6)
 
-  event            events    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
 
   @@index([event_id])
   @@index([is_active])
@@ -682,8 +681,8 @@ model event_announcements {
   sent_by    String
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
-  event      events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  sender     User     @relation(fields: [sent_by], references: [id], onDelete: Cascade)
+  event  events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  sender User   @relation(fields: [sent_by], references: [id], onDelete: Cascade)
 
   @@index([event_id])
   @@index([created_at])
@@ -713,8 +712,8 @@ model blocked_users {
   blocked_id String
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
-  blocker    User     @relation("BlockedByUser", fields: [blocker_id], references: [id], onDelete: Cascade)
-  blocked    User     @relation("BlockedUser", fields: [blocked_id], references: [id], onDelete: Cascade)
+  blocker User @relation("BlockedByUser", fields: [blocker_id], references: [id], onDelete: Cascade)
+  blocked User @relation("BlockedUser", fields: [blocked_id], references: [id], onDelete: Cascade)
 
   @@unique([blocker_id, blocked_id])
   @@index([blocker_id])
@@ -723,14 +722,14 @@ model blocked_users {
 
 // Message Requests
 model message_requests {
-  id            String                 @id @default(uuid()) @db.Uuid
-  sender_id     String
-  recipient_id  String
-  status        message_request_status @default(pending)
-  message       String?
-  created_at    DateTime               @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime               @default(now()) @db.Timestamptz(6)
-  responded_at  DateTime?              @db.Timestamptz(6)
+  id           String                 @id @default(uuid()) @db.Uuid
+  sender_id    String
+  recipient_id String
+  status       message_request_status @default(pending)
+  message      String?
+  created_at   DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime               @default(now()) @db.Timestamptz(6)
+  responded_at DateTime?              @db.Timestamptz(6)
 
   sender    User @relation("MessageRequestSender", fields: [sender_id], references: [id], onDelete: Cascade)
   recipient User @relation("MessageRequestRecipient", fields: [recipient_id], references: [id], onDelete: Cascade)
@@ -763,16 +762,16 @@ model moderation_flags {
   user_id       String
   source        moderation_source
   status        moderation_status_type @default(pending)
-  categories    Json                   // e.g. {"hate": 0.92, "sexual": 0.1}
+  categories    Json // e.g. {"hate": 0.92, "sexual": 0.1}
   confidence    Float
-  auto_action   String?                // "hidden" | "none" | "muted_user"
+  auto_action   String? // "hidden" | "none" | "muted_user"
   reviewed_by   String?
   reviewed_at   DateTime?              @db.Timestamptz(6)
   review_notes  String?
   created_at    DateTime               @default(now()) @db.Timestamptz(6)
 
-  message       chat_messages          @relation(fields: [message_id], references: [id], onDelete: Cascade)
-  user          User                   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  message chat_messages @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([status, created_at])
   @@index([chat_group_id])
