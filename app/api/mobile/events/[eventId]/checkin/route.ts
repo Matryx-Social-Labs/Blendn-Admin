@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -302,7 +303,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           )
         }
       })
-      .catch((err) => console.error("Push notification failed:", err))
+      .catch((err) => logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) }))
 
     return successResponse({
       checkIn: {
@@ -317,7 +318,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (error instanceof Error && error.message === "CAPACITY_FULL") {
       return errorResponse("Event is at full capacity")
     }
-    console.error("Check-in error:", error)
+    logger.error("Check-in error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to check in")
   }
 }

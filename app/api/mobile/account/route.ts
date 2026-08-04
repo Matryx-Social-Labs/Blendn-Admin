@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -57,7 +58,7 @@ export async function DELETE(request: NextRequest) {
 
     return successResponse({ deleted: true })
   } catch (error) {
-    console.error("Account deletion error:", error)
+    logger.error("Account deletion error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to delete account")
   }
 }

@@ -1,5 +1,6 @@
 "use client"
 
+import { logger } from "@/lib/logger"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
@@ -51,7 +52,7 @@ export default function EventsPage() {
       const data = await response.json()
       setEvents(data)
     } catch (error) {
-      console.error("Error fetching events:", error)
+      logger.error("Error fetching events", { error: error instanceof Error ? error.message : String(error) })
       toast.error("Failed to load events")
     } finally {
       setLoading(false)
@@ -77,7 +78,7 @@ export default function EventsPage() {
       toast.success("Event deleted successfully")
       router.refresh()
     } catch (error) {
-      console.error("Error deleting event:", error)
+      logger.error("Error deleting event", { error: error instanceof Error ? error.message : String(error) })
       toast.error("Failed to delete event")
     }
   }

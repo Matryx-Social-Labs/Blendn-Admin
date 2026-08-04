@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })),
     })
   } catch (error) {
-    console.error("Get profile error:", error)
+    logger.error("Get profile error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get profile")
   }
 }
@@ -174,7 +175,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       })),
     })
   } catch (error) {
-    console.error("Update profile error:", error)
+    logger.error("Update profile error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to update profile")
   }
 }

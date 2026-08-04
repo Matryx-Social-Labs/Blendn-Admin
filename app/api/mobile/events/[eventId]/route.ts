@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma, event_status } from "@prisma/client"
 import { db } from "@/lib/db"
@@ -267,7 +268,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }),
     })
   } catch (error) {
-    console.error("Get event error:", error)
+    logger.error("Get event error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get event")
   }
 }
@@ -331,7 +332,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       status: updated.status,
     })
   } catch (error) {
-    console.error("Update event error:", error)
+    logger.error("Update event error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to update event")
   }
 }
@@ -374,7 +375,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     return successResponse({ success: true })
   } catch (error) {
-    console.error("Delete event error:", error)
+    logger.error("Delete event error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to delete event")
   }
 }

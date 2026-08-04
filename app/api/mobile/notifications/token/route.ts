@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
       message: "Push token registered successfully",
     })
   } catch (error) {
-    console.error("Register push token error:", error)
+    logger.error("Register push token error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to register push token")
   }
 }
@@ -115,7 +116,7 @@ export async function DELETE(request: NextRequest) {
       message: "Push token removed successfully",
     })
   } catch (error) {
-    console.error("Remove push token error:", error)
+    logger.error("Remove push token error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to remove push token")
   }
 }

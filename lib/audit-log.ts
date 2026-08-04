@@ -1,6 +1,6 @@
+import { logger } from "./logger"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
-import { logger } from "./logger"
 
 interface AuditLogEntry {
   userId?: string

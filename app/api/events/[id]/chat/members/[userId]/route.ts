@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -60,7 +61,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     return NextResponse.json({ success: true, action, status: statusMap[action] })
   } catch (err) {
-    console.error("Ban member error:", err)
+    logger.error("Ban member error", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal Server Error", { status: 500 })
   }
 }

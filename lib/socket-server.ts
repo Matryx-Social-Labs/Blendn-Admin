@@ -1,9 +1,9 @@
+import { logger } from "./logger"
 import { Server as HttpServer } from "http"
 import { Server, Socket } from "socket.io"
 import { verifyAccessToken } from "./mobile-auth"
 import { db } from "./db"
 import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
-import { logger } from "./logger"
 
 // Socket.io server instance
 let io: Server | null = null
@@ -188,7 +188,7 @@ class SponsoredMessageScheduler {
         createdAt: created.created_at.toISOString(),
       })
     } catch (err) {
-      console.error(`[Scheduler] Failed to send sponsored message ${msg.id}:`, err)
+      logger.error("Failed to send sponsored message", { messageId: msg.id, error: err instanceof Error ? err.message : String(err) })
     }
   }
 
@@ -198,7 +198,7 @@ class SponsoredMessageScheduler {
     const ms = msg.interval_minutes * 60 * 1000
     const timer = setInterval(() => void this.send(msg), ms)
     this.timers.set(msg.id, timer)
-    console.log(`[Scheduler] Started sponsored message ${msg.id} (every ${msg.interval_minutes} min)`)
+    logger.info("Started sponsored message schedule", { messageId: msg.id, intervalMinutes: msg.interval_minutes })
   }
 
   /** Stop a specific timer */
@@ -207,7 +207,19 @@ class SponsoredMessageScheduler {
     if (timer) {
       clearInterval(timer)
       this.timers.delete(messageId)
-      console.log(`[Scheduler] Stopped sponsored message ${messageId}`)
+      logger.info("Stopped sponsored message schedule", { messageId })
+    }
+  }
+
+  /** Clear every timer. Called from the server's shutdown handler. */
+  stopAll(): void {
+    const count = this.timers.size
+    for (const timer of this.timers.values()) {
+      clearInterval(timer)
+    }
+    this.timers.clear()
+    if (count > 0) {
+      logger.info("Stopped all sponsored message schedules", { count })
     }
   }
 
@@ -237,9 +249,9 @@ class SponsoredMessageScheduler {
           chat_group_id: msg.event.chat_group.id,
         })
       }
-      console.log(`[Scheduler] Loaded ${messages.length} active sponsored messages`)
+      logger.info("Loaded active sponsored messages", { count: messages.length })
     } catch (err) {
-      console.error("[Scheduler] Failed to load sponsored messages:", err)
+      logger.error("[Scheduler] Failed to load sponsored messages", { error: err instanceof Error ? err.message : String(err) })
     }
   }
 }
@@ -426,7 +438,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
       next()
     } catch (error) {
-      console.error("Socket auth error:", error)
+      logger.error("Socket auth error", { error: error instanceof Error ? error.message : String(error) })
       next(new Error("Authentication failed"))
     }
   })
@@ -434,7 +446,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
   // Connection handler
   io.on("connection", (socket) => {
     const authSocket = socket as AuthenticatedSocket
-    console.log(`Socket connected: ${authSocket.id} (user: ${authSocket.data.userId})`)
+    logger.debug("Socket connected", { socketId: authSocket.id, userId: authSocket.data.userId })
 
     // Send connection confirmation
     authSocket.emit("connected", { userId: authSocket.data.userId })
@@ -455,7 +467,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
     authSocket.on("leave:event", (eventId) => {
       const room = `event:${eventId}`
       authSocket.leave(room)
-      console.log(`User ${authSocket.data.userId} left ${room}`)
+      logger.debug("Socket left room", { room, userId: authSocket.data.userId })
     })
 
     // Chat room handlers
@@ -471,7 +483,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
     authSocket.on("leave:chat", (chatGroupId) => {
       const room = `chat:${chatGroupId}`
       authSocket.leave(room)
-      console.log(`User ${authSocket.data.userId} left ${room}`)
+      logger.debug("Socket left room", { room, userId: authSocket.data.userId })
     })
 
     // Typing indicators (use anonymous names)
@@ -495,7 +507,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
     authSocket.on("leave:conversation", (conversationId) => {
       const room = `conversation:${conversationId}`
       authSocket.leave(room)
-      console.log(`User ${authSocket.data.userId} left ${room}`)
+      logger.debug("Socket left room", { room, userId: authSocket.data.userId })
     })
 
     // Private messaging typing indicators
@@ -518,19 +530,19 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     // Disconnect handler
     authSocket.on("disconnect", (reason) => {
-      console.log(`Socket disconnected: ${authSocket.id} (user: ${authSocket.data.userId}), reason: ${reason}`)
+      logger.debug("Socket disconnected", { socketId: authSocket.id, userId: authSocket.data.userId, reason })
     })
 
     // Error handler
     authSocket.on("error", (error) => {
-      console.error(`Socket error for ${authSocket.id}:`, error)
+      logger.error("Socket error", { socketId: authSocket.id, error: error instanceof Error ? error.message : String(error) })
     })
   })
 
   // Load and start all active sponsored message timers
   void sponsoredMessageScheduler.loadAll()
 
-  console.log("Socket.io server initialized")
+  logger.info("Socket.io server initialized")
   return io
 }
 

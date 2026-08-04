@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     return successResponse({ reported: true }, 201)
   } catch (error) {
-    console.error("Report user error:", error)
+    logger.error("Report user error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to submit report")
   }
 }

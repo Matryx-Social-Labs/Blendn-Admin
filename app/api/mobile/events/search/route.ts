@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -113,7 +114,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error("Event search error:", error)
+    logger.error("Event search error", { error: error instanceof Error ? error.message : String(error) })
     // Fallback to ILIKE if full-text search fails (e.g., tsvector not available)
     return serverErrorResponse("Search failed")
   }

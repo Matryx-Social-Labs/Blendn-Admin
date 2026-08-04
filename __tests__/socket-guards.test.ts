@@ -13,6 +13,7 @@ import {
   emitChatTyping,
   emitPrivateTyping,
   emitPrivateRead,
+  sponsoredMessageScheduler,
 } from "@/lib/socket-server"
 import type { AuthenticatedSocket } from "@/lib/socket-server"
 
@@ -282,5 +283,31 @@ describe("emitPrivateTyping / emitPrivateRead", () => {
     await expect(emitPrivateRead(b.socket, "not-a-uuid", ["m1"])).resolves.toBeUndefined()
     expect(a.roomEmit).not.toHaveBeenCalled()
     expect(b.roomEmit).not.toHaveBeenCalled()
+  })
+})
+
+describe("sponsoredMessageScheduler.stopAll", () => {
+  it("clears every timer so shutdown isn't held open by the event loop", () => {
+    jest.useFakeTimers()
+    const scheduler = sponsoredMessageScheduler
+    const msg = (id: string) => ({
+      id,
+      event_id: "e1",
+      content: "hi",
+      interval_minutes: 10,
+      organizer_id: "u1",
+      chat_group_id: "c1",
+    })
+
+    scheduler.start(msg("m1"))
+    scheduler.start(msg("m2"))
+    expect(jest.getTimerCount()).toBe(2)
+
+    scheduler.stopAll()
+    expect(jest.getTimerCount()).toBe(0)
+
+    // Idempotent — the shutdown handler may run more than once.
+    expect(() => scheduler.stopAll()).not.toThrow()
+    jest.useRealTimers()
   })
 })

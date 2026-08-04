@@ -1,6 +1,6 @@
+import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { notifyEventUpdate } from "@/lib/push-notifications"
-import { logger } from "@/lib/logger"
 
 /**
  * Send notifications to all interested users when event details change

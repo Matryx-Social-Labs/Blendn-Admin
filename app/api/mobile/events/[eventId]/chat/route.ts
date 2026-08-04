@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
@@ -263,7 +264,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
   } catch (error) {
-    console.error("Get chat messages error:", error)
+    logger.error("Get chat messages error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get messages")
   }
 }
@@ -569,7 +570,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       201
     )
   } catch (error) {
-    console.error("Send message error:", error)
+    logger.error("Send message error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to send message")
   }
 }

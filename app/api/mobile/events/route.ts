@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -16,7 +17,6 @@ import {
   transformEvents,
 } from "@/lib/services/events.service"
 import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
-import { logger } from "@/lib/logger"
 
 // Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<

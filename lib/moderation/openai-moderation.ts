@@ -1,6 +1,6 @@
+import { logger } from "@/lib/logger"
 import type { ModerationResult, OpenAIModerationCategory } from "./types"
 import { AUTO_HIDE_THRESHOLD, FLAG_THRESHOLD } from "./config"
-import { logger } from "@/lib/logger"
 
 const OPENAI_MODERATION_URL = "https://api.openai.com/v1/moderations"
 

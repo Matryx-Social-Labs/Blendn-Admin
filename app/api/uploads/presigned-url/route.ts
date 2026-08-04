@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuth } from "@/lib/auth"
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
       expiresIn: 900,
     })
   } catch (error) {
-    console.error("Generate presigned URL error:", error)
+    logger.error("Generate presigned URL error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to generate upload URL")
   }
 }

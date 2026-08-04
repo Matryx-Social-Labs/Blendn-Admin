@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -155,7 +156,7 @@ export async function POST(request: NextRequest) {
       201
     )
   } catch (error) {
-    console.error("Create message request error:", error)
+    logger.error("Create message request error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to create message request")
   }
 }
@@ -223,7 +224,7 @@ export async function GET(request: NextRequest) {
       totalCount,
     })
   } catch (error) {
-    console.error("Get message requests error:", error)
+    logger.error("Get message requests error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get message requests")
   }
 }

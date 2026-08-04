@@ -1,3 +1,4 @@
+import { logger } from "./logger"
 /**
  * Push Notification Service using Expo Push Notifications
  * https://docs.expo.dev/push-notifications/sending-notifications/
@@ -89,7 +90,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
     const pushTokens = await getUserPushTokens(userId)
 
     if (pushTokens.length === 0) {
-      console.log(`No push tokens for user ${userId}`)
+      logger.debug("No push tokens for user", { userId })
       return false
     }
 
@@ -98,7 +99,10 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
     for (const pushToken of pushTokens) {
       // Check if it's a valid Expo push token
       if (!Expo.isExpoPushToken(pushToken)) {
-        console.error(`Invalid Expo push token: ${pushToken}`)
+        // isExpoPushToken is a type guard, so pushToken narrows to never here.
+        logger.warn("Invalid Expo push token", {
+          tokenPrefix: String(pushToken).slice(0, 12),
+        })
         continue
       }
 
@@ -133,7 +137,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
     for (let i = 0; i < tickets.length; i++) {
       const ticket = tickets[i]
       if (ticket.status === "error") {
-        console.error(`Push notification error: ${ticket.message}`)
+        logger.warn("Push notification rejected", { reason: ticket.message })
         if (ticket.details?.error === "DeviceNotRegistered") {
           // Remove invalid token from database
           const invalidToken = messages[i]?.to as string
@@ -147,11 +151,11 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
     }
 
     if (hasSuccess) {
-      console.log(`Push notification sent to user ${userId}`)
+      logger.debug("Push notification sent", { userId })
     }
     return hasSuccess
   } catch (error) {
-    console.error("Failed to send push notification:", error)
+    logger.error("Failed to send push notification", { error: error instanceof Error ? error.message : String(error) })
     return false
   }
 }
@@ -202,7 +206,7 @@ export async function sendBulkPushNotifications(
           sent++
         } else {
           failed++
-          console.error(`Push notification error: ${ticket.message}`)
+          logger.warn("Push notification rejected", { reason: ticket.message })
           if (ticket.details?.error === "DeviceNotRegistered") {
             const invalidToken = chunk[i]?.to as string
             if (invalidToken) {
@@ -212,12 +216,12 @@ export async function sendBulkPushNotifications(
         }
       }
     } catch (error) {
-      console.error("Failed to send push notification chunk:", error)
+      logger.error("Failed to send push notification chunk", { error: error instanceof Error ? error.message : String(error) })
       failed += chunk.length
     }
   }
 
-  console.log(`Bulk push notifications: ${sent} sent, ${failed} failed`)
+  logger.info("Bulk push notifications complete", { sent, failed })
   return { sent, failed }
 }
 
@@ -229,9 +233,9 @@ async function removeInvalidPushToken(token: string): Promise<void> {
     await db.push_tokens.deleteMany({
       where: { token },
     })
-    console.log(`Removed invalid push token: ${token.substring(0, 20)}...`)
+    logger.debug("Removed invalid push token", { tokenPrefix: token.slice(0, 12) })
   } catch (error) {
-    console.error("Failed to remove invalid push token:", error)
+    logger.error("Failed to remove invalid push token", { error: error instanceof Error ? error.message : String(error) })
   }
 }
 

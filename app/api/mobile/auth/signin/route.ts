@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
       refreshToken,
     })
   } catch (error) {
-    console.error("Signin error:", error)
+    logger.error("Signin error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to sign in")
   }
 }

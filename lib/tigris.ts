@@ -1,3 +1,4 @@
+import { logger } from "./logger"
 import {
   S3Client,
   PutObjectCommand,
@@ -20,7 +21,7 @@ const TIGRIS_REGION = process.env.TIGRIS_REGION || "auto"
 // Validate configuration
 function validateConfig(): boolean {
   if (!TIGRIS_ENDPOINT || !TIGRIS_ACCESS_KEY || !TIGRIS_SECRET_KEY) {
-    console.warn("Tigris configuration incomplete. Storage features will be disabled.")
+    logger.warn("Tigris configuration incomplete. Storage features will be disabled.")
     return false
   }
   return true
@@ -258,7 +259,7 @@ async function setBucketPublicRead(): Promise<void> {
       Policy: policy,
     })
   )
-  console.log(`\u2705 Public-read policy set for bucket "${TIGRIS_BUCKET}"`)
+  logger.info("Public-read policy set for bucket", { bucket: TIGRIS_BUCKET })
 }
 
 /**
@@ -266,7 +267,7 @@ async function setBucketPublicRead(): Promise<void> {
  */
 export async function ensureBucketExists(): Promise<boolean> {
   if (!validateConfig()) {
-    console.warn("Tigris not configured, skipping bucket check")
+    logger.warn("Tigris not configured, skipping bucket check")
     return false
   }
 
@@ -275,17 +276,17 @@ export async function ensureBucketExists(): Promise<boolean> {
   try {
     // Check if bucket exists
     await client.send(new HeadBucketCommand({ Bucket: TIGRIS_BUCKET }))
-    console.log(`✅ Bucket "${TIGRIS_BUCKET}" exists`)
+    logger.info("Bucket exists", { bucket: TIGRIS_BUCKET })
     await setBucketPublicRead()
     return true
   } catch (error: unknown) {
     const s3Error = error as { name?: string; $metadata?: { httpStatusCode?: number } }
     if (s3Error.name === "NotFound" || s3Error.$metadata?.httpStatusCode === 404) {
       // Bucket doesn't exist, create it
-      console.log(`Creating bucket "${TIGRIS_BUCKET}"...`)
+      logger.info("Creating bucket", { bucket: TIGRIS_BUCKET })
       try {
         await client.send(new CreateBucketCommand({ Bucket: TIGRIS_BUCKET }))
-        console.log(`✅ Bucket "${TIGRIS_BUCKET}" created`)
+        logger.info("Bucket created", { bucket: TIGRIS_BUCKET })
 
         // Set up CORS for the bucket
         await client.send(
@@ -304,15 +305,15 @@ export async function ensureBucketExists(): Promise<boolean> {
             },
           })
         )
-        console.log(`✅ CORS configured for bucket "${TIGRIS_BUCKET}"`)
+        logger.info("CORS configured for bucket", { bucket: TIGRIS_BUCKET })
         await setBucketPublicRead()
         return true
       } catch (createError) {
-        console.error(`❌ Failed to create bucket:`, createError)
+        logger.error("Failed to create bucket", { bucket: TIGRIS_BUCKET, error: createError instanceof Error ? createError.message : String(createError) })
         return false
       }
     }
-    console.error(`❌ Error checking bucket:`, error)
+    logger.error("Error checking bucket", { bucket: TIGRIS_BUCKET, error: error instanceof Error ? error.message : String(error) })
     return false
   }
 }

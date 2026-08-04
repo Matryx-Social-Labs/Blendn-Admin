@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })),
     })
   } catch (error) {
-    console.error("Get interests error:", error)
+    logger.error("Get interests error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get interests")
   }
 }
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })),
     })
   } catch (error) {
-    console.error("Add interests error:", error)
+    logger.error("Add interests error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to add interests")
   }
 }
@@ -166,7 +167,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       })),
     })
   } catch (error) {
-    console.error("Remove interests error:", error)
+    logger.error("Remove interests error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to remove interests")
   }
 }
