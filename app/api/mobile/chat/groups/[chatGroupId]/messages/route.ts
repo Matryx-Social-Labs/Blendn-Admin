@@ -24,7 +24,7 @@ import {
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
   type: z.enum(["text", "image", "video"]).default("text"),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
   parentId: z.string().uuid().optional(),
 })
 

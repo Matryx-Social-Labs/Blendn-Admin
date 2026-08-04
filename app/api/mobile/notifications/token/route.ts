@@ -13,8 +13,9 @@ import {
 
 const pushTokenSchema = z.object({
   token: z.string().min(1, "Token is required"),
+  // zod 4 replaced the `errorMap` param with `error`.
   platform: z.enum(["ios", "android"], {
-    errorMap: () => ({ message: "Platform must be 'ios' or 'android'" }),
+    error: "Platform must be 'ios' or 'android'",
   }),
 })
 
