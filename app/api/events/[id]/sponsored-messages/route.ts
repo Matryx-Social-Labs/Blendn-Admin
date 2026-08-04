@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { canManageEvent } from "@/lib/rbac"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { sponsoredMessageCreateSchema } from "@/lib/validations/event"
+import { PAGINATION } from "@/lib/constants"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -24,6 +25,7 @@ export async function GET(_: Request, { params }: RouteContext) {
     const messages = await db.event_sponsored_messages.findMany({
       where: { event_id: eventId },
       orderBy: { created_at: "asc" },
+      take: PAGINATION.MAX_LIMIT,
     })
 
     return NextResponse.json(messages)

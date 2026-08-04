@@ -11,6 +11,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { addInterestsSchema, removeInterestsSchema } from "@/lib/validations/profile"
+import { PAGINATION } from "@/lib/constants"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       include: {
         category: true,
       },
+      take: PAGINATION.MAX_LIMIT,
     })
 
     return successResponse({
