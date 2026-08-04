@@ -5,6 +5,14 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-08-04
+
+### Fixed
+
+- Push notification failures were discarded without a trace in four places. If
+  push stopped working, nothing anywhere would have said so. Failures are now
+  recorded; sending still never blocks the request that triggered it.
+
 ## [0.2.3] - 2026-08-04
 
 ### Fixed
