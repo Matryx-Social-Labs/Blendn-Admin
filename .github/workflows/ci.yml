@@ -23,22 +23,28 @@ env:
   NEXTAUTH_SECRET: ci-test-secret-please-change-32-characters
   MOBILE_JWT_SECRET: ci-test-jwt-secret-please-change-32-chars
 
+# Three lanes, no shared setup job. A separate `install` job was measured at 61s
+# on the critical path and bought nothing: each lane restores node_modules from
+# cache in 12-18s regardless, so the install job's only effect was to delay
+# every lane behind it. Wall clock is now the slowest lane, not install + lane.
+#
+# Actions are on their current majors (checkout@v7, setup-node@v7, cache@v6)
+# because the @v4 runtimes target Node 20, which GitHub deprecated — every run
+# was force-executing them on Node 24 and warning about it. Note this is the
+# Node the ACTIONS run on; `node-version: 22` below is the Node our code runs
+# on, and the two are unrelated.
+
 jobs:
-  # One install, cached and shared. `cache: "npm"` on setup-node only caches the
-  # downloaded tarballs, not the resulting node_modules, which is why install
-  # was still taking 36s on every run.
-  install:
+  lint-and-types:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
-
-      - name: Cache node_modules
-        id: cache
-        uses: actions/cache@v4
+      - uses: actions/cache@v6
+        id: modules
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -48,25 +54,8 @@ jobs:
       # unresolvable peer range — exactly what happened on the zod 4 upgrade.
       # CI has to reproduce the deploy's install or it is not a gate.
       - name: Install dependencies
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.modules.outputs.cache-hit != 'true'
         run: npm ci
-
-  # ── Three lanes below run in parallel. Wall clock is the slowest lane, ──
-  # ── not the sum. Only `test` needs a database.                         ──
-
-  lint-and-types:
-    needs: install
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-      - uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       # tsc needs the generated client for @prisma/client types.
       - name: Generate Prisma client
@@ -79,10 +68,9 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json
 
   test:
-    needs: install
     runs-on: ubuntu-latest
 
-    # Postgres lives only in this job. It cost 25s of startup on every run,
+    # Postgres lives only in this lane. It cost 24s of startup on every run,
     # including the two lanes that never touch a database.
     services:
       postgres:
@@ -100,15 +88,20 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
+        id: modules
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
 
       - name: Generate Prisma client
         run: npm run db:generate
@@ -127,24 +120,29 @@ jobs:
         run: npm run test:integration -- --ci
 
   build:
-    needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
+        id: modules
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
-      # Next's build cache. Keyed on the lockfile AND the source tree: keyed on
-      # the lockfile alone it would serve a stale cache across source changes
-      # and could mask a real build failure.
+      - name: Install dependencies
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      # Next's build cache — the largest single cost at 73s. Keyed on the
+      # lockfile AND the source tree: keyed on the lockfile alone it would serve
+      # a stale cache across source changes and could mask a real build failure.
+      # restore-keys lets an unrelated source change still reuse most of it.
       - name: Cache Next build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .next/cache
           key: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'components/**', 'lib/**') }}
