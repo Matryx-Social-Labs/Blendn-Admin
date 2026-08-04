@@ -1,0 +1,70 @@
+{
+  "capturedAt": "2026-08-04T22:57:35.157Z",
+  "base": "https://staging-api.blendn.app",
+  "bundleKb": 3360,
+  "endpoints": [
+    {
+      "name": "health",
+      "medianMs": 202,
+      "minMs": 189,
+      "maxMs": 231,
+      "status": 200
+    },
+    {
+      "name": "openapi-spec",
+      "medianMs": 301,
+      "minMs": 282,
+      "maxMs": 359,
+      "status": 200
+    },
+    {
+      "name": "login-page",
+      "medianMs": 205,
+      "minMs": 187,
+      "maxMs": 210,
+      "status": 200
+    },
+    {
+      "name": "mobile-events-unauth",
+      "medianMs": 196,
+      "minMs": 186,
+      "maxMs": 206,
+      "status": 401
+    },
+    {
+      "name": "events (authed)",
+      "medianMs": 238,
+      "minMs": 200,
+      "maxMs": 437,
+      "status": 200
+    },
+    {
+      "name": "events + interested",
+      "medianMs": 228,
+      "minMs": 204,
+      "maxMs": 280,
+      "status": 200
+    },
+    {
+      "name": "chat groups + unread",
+      "medianMs": 211,
+      "minMs": 202,
+      "maxMs": 238,
+      "status": 200
+    },
+    {
+      "name": "active checkins",
+      "medianMs": 208,
+      "minMs": 201,
+      "maxMs": 242,
+      "status": 200
+    },
+    {
+      "name": "categories",
+      "medianMs": 207,
+      "minMs": 194,
+      "maxMs": 232,
+      "status": 200
+    }
+  ]
+}

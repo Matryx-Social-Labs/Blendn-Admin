@@ -20,11 +20,31 @@ const WARMUP = 2
 /** Below this, differences are noise on a shared host, not a regression. */
 const REGRESSION_FACTOR = 1.5
 
+/**
+ * Unauthenticated paths. These measure the latency floor — HTTP round trip,
+ * Node, and a 401 — NOT application work. Kept for the floor, but on their own
+ * they are not a performance test: the original four endpoints never executed a
+ * single application query.
+ */
 const ENDPOINTS = [
   { name: "health", path: "/api/health" },
   { name: "openapi-spec", path: "/api/docs" },
   { name: "login-page", path: "/login" },
   { name: "mobile-events-unauth", path: "/api/mobile/events" },
+]
+
+/**
+ * The paths that actually do work. `events` alone issues 5 DB calls with 17
+ * include/selects; the messages route issues 9. These only run when
+ * BENCH_EMAIL / BENCH_PASSWORD are set, and are reported as SKIPPED otherwise
+ * rather than quietly shortening the run.
+ */
+const AUTHED_ENDPOINTS = [
+  { name: "events (authed)", path: "/api/mobile/events?limit=20" },
+  { name: "events + interested", path: "/api/mobile/events?limit=20&include=interestedPreview" },
+  { name: "chat groups + unread", path: "/api/mobile/chat/groups" },
+  { name: "active checkins", path: "/api/mobile/checkins/active" },
+  { name: "categories", path: "/api/mobile/categories" },
 ]
 
 type Sample = { name: string; medianMs: number; minMs: number; maxMs: number; status: number }
@@ -52,12 +72,13 @@ function bundleSizeKb(): number | null {
   return Math.round(total / 1024)
 }
 
-async function timeEndpoint(path: string): Promise<{ ms: number[]; status: number }> {
+async function timeEndpoint(path: string, token?: string): Promise<{ ms: number[]; status: number }> {
   const ms: number[] = []
   let status = 0
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined
   for (let i = 0; i < SAMPLES + WARMUP; i++) {
     const t0 = performance.now()
-    const res = await fetch(`${BASE}${path}`, { signal: AbortSignal.timeout(30_000) })
+    const res = await fetch(`${BASE}${path}`, { headers, signal: AbortSignal.timeout(30_000) })
     await res.arrayBuffer()
     const dt = performance.now() - t0
     status = res.status
@@ -82,6 +103,39 @@ async function capture(): Promise<Report> {
     const last = endpoints[endpoints.length - 1]
     console.log(`  ${e.name.padEnd(22)} ${String(last.medianMs).padStart(5)}ms median  (${last.minMs}-${last.maxMs}ms)  HTTP ${status}`)
   }
+  // Authenticated lanes. A 401 here would silently look "fast", so the status
+  // is recorded alongside the timing and anything non-200 is called out.
+  const email = process.env.BENCH_EMAIL
+  const password = process.env.BENCH_PASSWORD
+  if (email && password) {
+    const res = await fetch(`${BASE}/api/mobile/auth/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    })
+    const body = (await res.json()) as { data?: { accessToken?: string } }
+    const token = body?.data?.accessToken
+    if (!token) {
+      console.log("  authenticated lanes SKIPPED — sign-in failed")
+    } else {
+      for (const e of AUTHED_ENDPOINTS) {
+        const { ms, status } = await timeEndpoint(e.path, token)
+        const s: Sample = {
+          name: e.name,
+          medianMs: Math.round(median(ms)),
+          minMs: Math.round(Math.min(...ms)),
+          maxMs: Math.round(Math.max(...ms)),
+          status,
+        }
+        endpoints.push(s)
+        const warn = status !== 200 ? `  <-- HTTP ${status}, not measuring real work` : ""
+        console.log(`  ${e.name.padEnd(22)} ${String(s.medianMs).padStart(5)}ms median  (${s.minMs}-${s.maxMs}ms)  HTTP ${status}${warn}`)
+      }
+    }
+  } else {
+    console.log("  authenticated lanes SKIPPED — set BENCH_EMAIL and BENCH_PASSWORD")
+  }
+
   const bundleKb = bundleSizeKb()
   console.log(`  ${"client bundle".padEnd(22)} ${bundleKb === null ? "n/a (no .next build)" : bundleKb + " KB"}`)
   return { capturedAt: new Date().toISOString(), base: BASE, bundleKb, endpoints }
