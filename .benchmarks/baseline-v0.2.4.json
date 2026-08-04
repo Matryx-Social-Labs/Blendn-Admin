@@ -1,0 +1,35 @@
+{
+  "capturedAt": "2026-08-04T20:34:27.242Z",
+  "base": "https://staging-api.blendn.app",
+  "bundleKb": 3754,
+  "endpoints": [
+    {
+      "name": "health",
+      "medianMs": 196,
+      "minMs": 186,
+      "maxMs": 215,
+      "status": 200
+    },
+    {
+      "name": "openapi-spec",
+      "medianMs": 258,
+      "minMs": 242,
+      "maxMs": 325,
+      "status": 200
+    },
+    {
+      "name": "login-page",
+      "medianMs": 193,
+      "minMs": 188,
+      "maxMs": 212,
+      "status": 200
+    },
+    {
+      "name": "mobile-events-unauth",
+      "medianMs": 201,
+      "minMs": 189,
+      "maxMs": 357,
+      "status": 401
+    }
+  ]
+}
