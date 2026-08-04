@@ -5,12 +5,6 @@
 
 const API_BASE = "http://localhost:3000"
 
-interface ApiResponse<T = any> {
-  success: boolean
-  data?: T
-  error?: string
-}
-
 async function testPrivateMessaging() {
   console.log("=== Private Messaging API Tests ===\n")
 
