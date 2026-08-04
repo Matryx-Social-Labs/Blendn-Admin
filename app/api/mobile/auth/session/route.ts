@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    if (!user) {
+    if (!user || user.deletedAt) {
       return notFoundResponse("User not found")
     }
 
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest) {
         : null,
     })
   } catch (error) {
-    console.error("Session error:", error)
+    logger.error("Session error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get session")
   }
 }

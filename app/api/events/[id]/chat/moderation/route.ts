@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -133,7 +134,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
   } catch (error) {
-    console.error("Get moderation flags error:", error)
+    logger.error("Get moderation flags error", { error: error instanceof Error ? error.message : String(error) })
     return NextResponse.json(
       { error: "Failed to get moderation flags" },
       { status: 500 }

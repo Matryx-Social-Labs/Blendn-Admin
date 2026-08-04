@@ -1,6 +1,8 @@
+import { logger } from "./logger"
 import jwt from "jsonwebtoken"
 import { randomUUID } from "crypto"
 import bcrypt from "bcryptjs"
+import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
 
@@ -17,9 +19,29 @@ const GOOGLE_CLIENT_IDS = [
   process.env.GOOGLE_ANDROID_CLIENT_ID,
 ].filter(Boolean) as string[]
 
+// Apple identity tokens issued to the native app have this as the audience
+const APPLE_AUDIENCE = process.env.APPLE_BUNDLE_ID || "com.matryxsociallabs.blendn"
+const appleJwks = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"))
+
 const ACCESS_TOKEN_EXPIRY = "15m"
 const REFRESH_TOKEN_EXPIRY = "30d"
 const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000 // 30 days in ms
+
+/**
+ * How long after rotation a replayed refresh token is treated as a client
+ * retry rather than as theft.
+ *
+ * The refresh route revokes the old token *before* the client has stored the
+ * new one, so a lost response (app backgrounded or killed mid-refresh, flaky
+ * network) leaves the client holding a token the server already revoked.
+ * Replaying it is the normal recovery path, not an attack — and because
+ * `mobile_refresh_tokens` has no family/chain column, the theft response can
+ * only revoke *every* session for the user. Without this window an interrupted
+ * refresh on one phone signs the user out on all their devices.
+ *
+ * A replay long after rotation is still treated as theft.
+ */
+const REFRESH_REUSE_GRACE_MS = 60 * 1000 // 60 seconds
 
 export interface TokenPayload {
   userId: string
@@ -86,13 +108,19 @@ export async function storeRefreshToken(
   deviceInfo?: Prisma.InputJsonValue
 ): Promise<void> {
   // Decode without verification to extract jti (we just signed it)
-  const decoded = jwt.decode(token) as DecodedToken
+  const decoded = jwt.decode(token) as DecodedToken | null
+  if (!decoded?.jti) {
+    // signRefreshToken always sets a jti; if it is missing the token is not one
+    // of ours and there would be nothing to key rotation or revocation on.
+    throw new Error("Cannot store a refresh token without a jti")
+  }
+
   const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS)
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS)
 
   await db.mobile_refresh_tokens.create({
     data: {
-      id: decoded.jti!,
+      id: decoded.jti,
       user_id: userId,
       token_hash: tokenHash,
       device_info: deviceInfo,
@@ -124,8 +152,30 @@ export async function verifyRefreshToken(
       return null
     }
 
-    // Check if token is revoked
+    // A revoked token presented again was already rotated out and is being
+    // replayed — usually the classic signal that it was stolen. Kill the whole
+    // token family so both the attacker and the legitimate holder are forced to
+    // re-authenticate.
+    //
+    // Exception: a replay within REFRESH_REUSE_GRACE_MS of rotation is almost
+    // certainly the client retrying after it never received the new token.
+    // Reject the request, but don't sign the user out everywhere over it.
     if (storedToken.revoked_at) {
+      const sinceRevokedMs = Date.now() - storedToken.revoked_at.getTime()
+
+      if (sinceRevokedMs <= REFRESH_REUSE_GRACE_MS) {
+        logger.info("Refresh token replayed just after rotation, treating as client retry", {
+          userId: storedToken.user_id,
+          sinceRevokedMs,
+        })
+        return null
+      }
+
+      logger.error("Refresh token reuse detected, revoking all refresh tokens", {
+        userId: storedToken.user_id,
+        sinceRevokedMs,
+      })
+      await revokeUserRefreshTokens(storedToken.user_id)
       return null
     }
 
@@ -266,7 +316,7 @@ export async function verifyGoogleIdToken(
     )
 
     if (!response.ok) {
-      console.error("Google token verification failed:", response.status)
+      logger.warn("Google token verification failed", { status: response.status })
       return null
     }
 
@@ -274,31 +324,31 @@ export async function verifyGoogleIdToken(
 
     // Verify the audience matches one of our client IDs
     if (GOOGLE_CLIENT_IDS.length > 0 && !GOOGLE_CLIENT_IDS.includes(payload.aud)) {
-      console.error("Google token audience mismatch:", payload.aud)
+      logger.warn("Google token audience mismatch")
       return null
     }
 
     // Verify the issuer
     if (!["accounts.google.com", "https://accounts.google.com"].includes(payload.iss)) {
-      console.error("Google token issuer mismatch:", payload.iss)
+      logger.warn("Google token issuer mismatch")
       return null
     }
 
     // Verify the token is not expired
     if (payload.exp * 1000 < Date.now()) {
-      console.error("Google token expired")
+      logger.warn("Google token expired")
       return null
     }
 
     // Verify email is verified
     if (!payload.email_verified) {
-      console.error("Google email not verified")
+      logger.warn("Google email not verified")
       return null
     }
 
     return payload
   } catch (error) {
-    console.error("Error verifying Google ID token:", error)
+    logger.error("Error verifying Google ID token", { error: error instanceof Error ? error.message : String(error) })
     return null
   }
 }
@@ -370,6 +420,129 @@ export async function findOrCreateGoogleUser(
           provider: "google",
           provider_id: googlePayload.sub,
           email: googlePayload.email,
+        },
+      },
+    },
+  })
+
+  return {
+    userId: newUser.id,
+    email: newUser.email,
+    isNewUser: true,
+  }
+}
+
+export interface AppleTokenPayload {
+  sub: string // Apple user ID
+  email?: string
+  email_verified?: boolean | string
+  aud: string
+  iss: string
+  exp: number
+  iat: number
+}
+
+/**
+ * Verify an Apple Sign in identity token (JWT signed by Apple, verified
+ * against Apple's published JWKS).
+ */
+export async function verifyAppleIdToken(
+  identityToken: string
+): Promise<AppleTokenPayload | null> {
+  try {
+    const { payload } = await jwtVerify(identityToken, appleJwks, {
+      issuer: "https://appleid.apple.com",
+      audience: APPLE_AUDIENCE,
+    })
+
+    if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
+      logger.warn("Apple token expired")
+      return null
+    }
+
+    return payload as unknown as AppleTokenPayload
+  } catch (error) {
+    logger.error("Error verifying Apple identity token", { error: error instanceof Error ? error.message : String(error) })
+    return null
+  }
+}
+
+/**
+ * Find or create a user from Sign in with Apple.
+ * `fullName` is only ever sent by Apple on the user's first authorization,
+ * so it must be passed through from the client on that first call.
+ */
+export async function findOrCreateAppleUser(
+  applePayload: AppleTokenPayload,
+  fullName?: { givenName?: string | null; familyName?: string | null }
+): Promise<{ userId: string; email: string; isNewUser: boolean }> {
+  const existingOAuth = await db.user_oauth_accounts.findUnique({
+    where: {
+      provider_provider_id: {
+        provider: "apple",
+        provider_id: applePayload.sub,
+      },
+    },
+    include: { user: true },
+  })
+
+  if (existingOAuth) {
+    return {
+      userId: existingOAuth.user_id,
+      email: existingOAuth.user.email,
+      isNewUser: false,
+    }
+  }
+
+  const displayName = [fullName?.givenName, fullName?.familyName].filter(Boolean).join(" ") || null
+
+  // Apple may omit email on tokens after the first authorization; in that
+  // case Apple guarantees `sub` is stable so the OAuth-account lookup above
+  // is the source of truth. A missing email at this point only happens on
+  // a genuinely new user, which Apple does not allow without an email scope.
+  const email = applePayload.email
+
+  if (email) {
+    const existingUser = await db.user.findUnique({ where: { email } })
+
+    if (existingUser) {
+      await db.user_oauth_accounts.create({
+        data: {
+          user_id: existingUser.id,
+          provider: "apple",
+          provider_id: applePayload.sub,
+          email,
+        },
+      })
+
+      return {
+        userId: existingUser.id,
+        email: existingUser.email,
+        isNewUser: false,
+      }
+    }
+  }
+
+  if (!email) {
+    throw new Error("Apple sign in did not provide an email for a new user")
+  }
+
+  const newUser = await db.user.create({
+    data: {
+      email,
+      name: displayName,
+      emailVerified: new Date(),
+      profile: {
+        create: {
+          name: displayName,
+          onboarded: false,
+        },
+      },
+      oauth_accounts: {
+        create: {
+          provider: "apple",
+          provider_id: applePayload.sub,
+          email,
         },
       },
     },

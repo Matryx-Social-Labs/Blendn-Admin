@@ -63,7 +63,7 @@ const getColumns = (
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="rounded-full px-0 text-white hover:bg-transparent hover:text-white"
+          className="rounded-full px-0 hover:bg-transparent"
         >
           Title
           <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -122,7 +122,7 @@ const getColumns = (
               variant="outline"
               size="sm"
               onClick={() => actions.onEdit?.(event)}
-              className="rounded-full border-white/12 bg-white/5 text-white hover:bg-white/10"
+              className="rounded-full"
             >
               Edit
             </Button>
@@ -183,24 +183,24 @@ export function EventsTable({ events, onEdit, onDelete, currentUserId, currentUs
   return (
     <div className="w-full space-y-4">
       <div className="relative flex items-center">
-        <IconSearch className="pointer-events-none absolute left-4 size-4 text-white/34" />
+        <IconSearch className="pointer-events-none absolute left-4 size-4 text-muted-foreground" />
         <Input
           placeholder="Filter events..."
           value={(table.getColumn("title")?.getFilterValue() as string) ?? ""}
           onChange={(event) =>
             table.getColumn("title")?.setFilterValue(event.target.value)
           }
-          className="h-11 max-w-sm rounded-2xl border-white/10 bg-white/6 pl-11 text-white placeholder:text-white/34"
+          className="h-11 max-w-sm rounded-xl pl-11"
         />
       </div>
-      <div className="overflow-hidden rounded-[1.4rem] border border-white/10 bg-black/20">
+      <div className="overflow-hidden rounded-xl border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id} className="border-white/10 hover:bg-transparent">
+              <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => {
                   return (
-                    <TableHead key={header.id} className="h-11 px-3 text-white/48">
+                    <TableHead key={header.id} className="h-11 px-3 text-muted-foreground">
                       {header.isPlaceholder
                         ? null
                         : flexRender(
@@ -219,10 +219,9 @@ export function EventsTable({ events, onEdit, onDelete, currentUserId, currentUs
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  className="border-white/8 hover:bg-white/[0.03]"
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="px-3 py-4 text-white/76">
+                    <TableCell key={cell.id} className="px-3 py-4">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
@@ -232,7 +231,7 @@ export function EventsTable({ events, onEdit, onDelete, currentUserId, currentUs
               <TableRow>
                 <TableCell
                   colSpan={columns.length}
-                  className="h-24 text-center text-white/54"
+                  className="h-24 text-center text-muted-foreground"
                 >
                   No events found.
                 </TableCell>
@@ -241,10 +240,10 @@ export function EventsTable({ events, onEdit, onDelete, currentUserId, currentUs
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-end gap-2 py-2">
-        <div className="flex-1 text-sm text-white/46">
-          {table.getFilteredSelectedRowModel().rows.length} of{" "}
-          {table.getFilteredRowModel().rows.length} row(s) selected.
+      <div className="flex items-center justify-between gap-2 py-2">
+        <div className="text-sm text-muted-foreground">
+          Page {table.getState().pagination.pageIndex + 1} of{" "}
+          {Math.max(table.getPageCount(), 1)}
         </div>
         <div className="flex gap-2">
           <Button
@@ -252,7 +251,7 @@ export function EventsTable({ events, onEdit, onDelete, currentUserId, currentUs
             size="sm"
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
-            className="rounded-full border-white/12 bg-white/5 text-white hover:bg-white/10"
+            className="rounded-full"
           >
             Previous
           </Button>
@@ -261,7 +260,7 @@ export function EventsTable({ events, onEdit, onDelete, currentUserId, currentUs
             size="sm"
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
-            className="rounded-full border-white/12 bg-white/5 text-white hover:bg-white/10"
+            className="rounded-full"
           >
             Next
           </Button>

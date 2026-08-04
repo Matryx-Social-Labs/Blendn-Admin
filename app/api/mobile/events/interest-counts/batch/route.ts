@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
 
     return successResponse({ counts })
   } catch (error) {
-    console.error("Batch interest count error:", error)
+    logger.error("Batch interest count error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get interest counts")
   }
 }

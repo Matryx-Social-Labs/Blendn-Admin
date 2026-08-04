@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
+import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
+import { canAccessDashboard } from "@/lib/rbac"
+import type { user_role } from "@prisma/client"
 
 const ALLOWED_ORIGINS = [
   "https://api.blendn.app",
@@ -8,13 +11,29 @@ const ALLOWED_ORIGINS = [
   process.env.NEXTAUTH_URL,
 ].filter(Boolean) as string[]
 
-function getCorsHeaders(origin: string | null) {
-  const allowedOrigin =
-    origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
-  return {
-    "Access-Control-Allow-Origin": allowedOrigin,
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const baseHeaders = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  }
+
+  // Native mobile clients (Expo/React Native fetch) don't send an Origin
+  // header at all, so there's no browser CORS enforcement to satisfy -
+  // let the request through without an ACAO header.
+  if (!origin) {
+    return baseHeaders
+  }
+
+  // Browser request from a disallowed origin: omit Access-Control-Allow-Origin
+  // entirely (fail closed) rather than echoing back an unrelated allowed
+  // origin, which the browser would reject anyway but is misleading to log/debug.
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return baseHeaders
+  }
+
+  return {
+    ...baseHeaders,
+    "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Credentials": "true",
   }
 }
@@ -35,6 +54,15 @@ export async function middleware(req: NextRequest) {
       response.headers.set(key, value)
     })
     return response
+  }
+
+  // Rate limit the dashboard credentials sign-in (NextAuth has no built-in
+  // rate limiting; this mirrors the limits already applied to mobile auth)
+  if (pathname === "/api/auth/callback/credentials" && req.method === "POST") {
+    const rateLimited = rateLimit(req, createAuthRateLimit("dashboard-signin"))
+    if (rateLimited) {
+      return rateLimited
+    }
   }
 
   // Handle CORS for mobile API routes
@@ -62,7 +90,7 @@ export async function middleware(req: NextRequest) {
 
   // Redirect authenticated users away from landing and login pages
   if (pathname === "/" || pathname === "/login") {
-    if (token && token.role !== "attendee") {
+    if (token && canAccessDashboard(token.role as user_role)) {
       return NextResponse.redirect(new URL("/dashboard", req.url))
     }
   }
@@ -73,7 +101,7 @@ export async function middleware(req: NextRequest) {
       redirectUrl.pathname = "/login"
       return NextResponse.redirect(redirectUrl)
     }
-    if (token.role === "attendee") {
+    if (!canAccessDashboard(token.role as user_role)) {
       const redirectUrl = req.nextUrl.clone()
       redirectUrl.pathname = "/login"
       return NextResponse.redirect(redirectUrl)
@@ -84,6 +112,12 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/dashboard/:path*", "/api/mobile/:path*", "/login"],
+  matcher: [
+    "/",
+    "/dashboard/:path*",
+    "/api/mobile/:path*",
+    "/login",
+    "/api/auth/callback/credentials",
+  ],
   // Note: /api/mobile/v1/* is matched by /api/mobile/:path*
 }

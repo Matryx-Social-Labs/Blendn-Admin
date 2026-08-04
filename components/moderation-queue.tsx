@@ -48,27 +48,38 @@ export function ModerationQueue({ eventId }: ModerationQueueProps) {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
 
-  const fetchFlags = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(
-        `/api/events/${eventId}/chat/moderation?status=${filter}&page=${page}&limit=20`
-      )
-      const json = await res.json()
-      if (json.success) {
-        setFlags(json.data.flags)
-        setStats(json.data.stats)
-        setTotalPages(json.data.pagination.totalPages)
+  const fetchFlags = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true)
+      try {
+        const res = await fetch(
+          `/api/events/${eventId}/chat/moderation?status=${filter}&page=${page}&limit=20`,
+          { signal }
+        )
+        const json = await res.json()
+        if (signal?.aborted) return
+        if (json.success) {
+          setFlags(json.data.flags)
+          setStats(json.data.stats)
+          setTotalPages(json.data.pagination.totalPages)
+        }
+      } catch (err) {
+        // An abort is this effect superseding itself, not a failure.
+        if ((err as Error)?.name === "AbortError") return
+        toast.error("Failed to load moderation queue")
+      } finally {
+        if (!signal?.aborted) setLoading(false)
       }
-    } catch {
-      toast.error("Failed to load moderation queue")
-    } finally {
-      setLoading(false)
-    }
-  }, [eventId, filter, page])
+    },
+    [eventId, filter, page]
+  )
 
   useEffect(() => {
-    fetchFlags()
+    // Without this, flipping filters quickly lets an older response land after
+    // a newer one and show an admin the wrong moderation queue.
+    const controller = new AbortController()
+    void fetchFlags(controller.signal)
+    return () => controller.abort()
   }, [fetchFlags])
 
   const handleReview = async (flagId: string, action: "approve" | "reject") => {

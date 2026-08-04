@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -14,8 +15,9 @@ import {
 } from "@/lib/api-response"
 
 const createRequestSchema = z.object({
+  // User ids are cuid, not uuid — do not tighten this to z.string().uuid().
   recipientId: z.string().min(1),
-  message: z.string().max(500).optional(),
+  message: z.string().trim().min(1).max(500).optional(),
 })
 
 // POST: Create a message request
@@ -129,9 +131,9 @@ export async function POST(request: NextRequest) {
     sendPushNotification({
       userId: recipientId,
       title: "New message request",
-      body: message
-        ? `${senderName}: ${message.slice(0, 80)}`
-        : `${senderName} wants to connect`,
+      // Deliberately generic: push bodies render on a locked screen, so the
+      // request text stays in the app rather than on the lock screen.
+      body: `${senderName} wants to connect`,
       data: { type: "message_request", requestId: messageRequest.id },
       channelId: "messages",
     }).catch(() => {})
@@ -154,7 +156,7 @@ export async function POST(request: NextRequest) {
       201
     )
   } catch (error) {
-    console.error("Create message request error:", error)
+    logger.error("Create message request error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to create message request")
   }
 }
@@ -222,7 +224,7 @@ export async function GET(request: NextRequest) {
       totalCount,
     })
   } catch (error) {
-    console.error("Get message requests error:", error)
+    logger.error("Get message requests error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get message requests")
   }
 }

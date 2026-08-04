@@ -1,5 +1,6 @@
 "use server"
 
+import { logger } from "@/lib/logger"
 import type { check_in_status } from "@prisma/client"
 
 import { db } from "@/lib/db"
@@ -1039,7 +1040,7 @@ export async function getDashboardStats(userId?: string) {
       userGrowth,
     }
   } catch (error) {
-    console.error("Error fetching dashboard stats:", error)
+    logger.error("Error fetching dashboard stats", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch dashboard stats")
   }
 }
@@ -1078,7 +1079,7 @@ export async function getEventsOverTime(days: number = 90, userId?: string) {
       (left, right) => new Date(left.date).getTime() - new Date(right.date).getTime()
     )
   } catch (error) {
-    console.error("Error fetching events over time:", error)
+    logger.error("Error fetching events over time", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch events over time")
   }
 }
@@ -1123,7 +1124,7 @@ export async function getRecentEvents(limit: number = 10, userId?: string) {
       created_at: event.created_at,
     }))
   } catch (error) {
-    console.error("Error fetching recent events:", error)
+    logger.error("Error fetching recent events", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch recent events")
   }
 }
@@ -1144,7 +1145,7 @@ export async function getTopCategories() {
       eventCount: category._count.events,
     }))
   } catch (error) {
-    console.error("Error fetching top categories:", error)
+    logger.error("Error fetching top categories", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch top categories")
   }
 }

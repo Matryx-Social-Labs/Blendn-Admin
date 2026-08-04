@@ -1,5 +1,6 @@
 "use client"
 
+import { logger } from "@/lib/logger"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
@@ -219,7 +220,7 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
         router.refresh()
       }
     } catch (error) {
-      console.error("Error saving event:", error)
+      logger.error("Error saving event", { error: error instanceof Error ? error.message : String(error) })
       toast.error("Failed to save event")
     } finally {
       setIsSaving(false)

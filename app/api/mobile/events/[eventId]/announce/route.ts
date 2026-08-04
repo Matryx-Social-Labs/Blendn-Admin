@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -91,7 +92,7 @@ export async function POST(
 
     return successResponse({ id: announcement.id })
   } catch (error) {
-    console.error("Send announcement error:", error)
+    logger.error("Send announcement error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to send announcement")
   }
 }

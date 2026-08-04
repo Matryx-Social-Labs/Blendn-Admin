@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import {
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       where: { id: decoded.userId },
     })
 
-    if (!user) {
+    if (!user || user.deletedAt) {
       return unauthorizedResponse("User not found")
     }
 
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
       refreshToken,
     })
   } catch (error) {
-    console.error("Token refresh error:", error)
+    logger.error("Token refresh error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to refresh token")
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 
@@ -23,7 +24,7 @@ export async function GET() {
   } catch (error) {
     health.status = "degraded"
     health.database = "disconnected"
-    console.error("Health check - Database error:", error)
+    logger.error("Health check - Database error", { error: error instanceof Error ? error.message : String(error) })
   }
 
   const statusCode = health.status === "ok" ? 200 : 503

@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import type { Map as LeafletMap, Marker, Circle, LeafletMouseEvent } from "leaflet"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { IconMapPin, IconSearch } from "@tabler/icons-react"
 
 export interface LocationData {
@@ -259,39 +265,45 @@ export function LocationPicker({
 
   return (
     <div className="space-y-2">
-      <div className="relative">
-        <div className="relative">
-          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
-          <Input
-            value={search}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search for a location..."
-            className="pl-9 pr-20"
-            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-          />
-          {isSearching && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-              Searching…
-            </span>
-          )}
-        </div>
-        {showSuggestions && suggestions.length > 0 && (
-          <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border bg-background shadow-md max-h-60 overflow-y-auto">
+      <Popover open={showSuggestions} onOpenChange={setShowSuggestions}>
+        <PopoverTrigger asChild>
+          <div className="relative">
+            <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <Input
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Search for a location..."
+              className="pl-9 pr-20"
+              onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+            />
+            {isSearching && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                Searching…
+              </span>
+            )}
+          </div>
+        </PopoverTrigger>
+        {suggestions.length > 0 && (
+          <PopoverContent
+            align="start"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            className="w-[var(--radix-popover-trigger-width)] p-0 max-h-60 overflow-y-auto"
+          >
             {suggestions.map((result) => (
-              <button
+              <Button
                 key={result.place_id}
                 type="button"
-                className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-start gap-2"
-                onMouseDown={() => selectSuggestion(result)}
+                variant="ghost"
+                className="w-full justify-start text-left px-3 py-2 h-auto text-sm hover:bg-muted flex items-start gap-2 font-normal"
+                onClick={() => selectSuggestion(result)}
               >
                 <IconMapPin className="size-4 mt-0.5 shrink-0 text-muted-foreground" />
                 <span className="line-clamp-2">{result.display_name}</span>
-              </button>
+              </Button>
             ))}
-          </div>
+          </PopoverContent>
         )}
-      </div>
+      </Popover>
       <div
         ref={mapContainerRef}
         className="h-72 w-full rounded-md border overflow-hidden"

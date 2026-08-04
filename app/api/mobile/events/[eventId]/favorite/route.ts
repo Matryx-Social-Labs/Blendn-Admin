@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       message: "Event added to favorites",
     })
   } catch (error) {
-    console.error("Add favorite error:", error)
+    logger.error("Add favorite error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to add favorite")
   }
 }
@@ -102,7 +103,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       message: "Event removed from favorites",
     })
   } catch (error) {
-    console.error("Remove favorite error:", error)
+    logger.error("Remove favorite error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to remove favorite")
   }
 }

@@ -1,7 +1,11 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canManageEvent } from "@/lib/rbac"
+import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
+import { sponsoredMessageCreateSchema } from "@/lib/validations/event"
+import { PAGINATION } from "@/lib/constants"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -21,11 +25,12 @@ export async function GET(_: Request, { params }: RouteContext) {
     const messages = await db.event_sponsored_messages.findMany({
       where: { event_id: eventId },
       orderBy: { created_at: "asc" },
+      take: PAGINATION.MAX_LIMIT,
     })
 
     return NextResponse.json(messages)
   } catch (err) {
-    console.error("Error fetching sponsored messages:", err)
+    logger.error("Error fetching sponsored messages", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }
@@ -43,21 +48,24 @@ export async function POST(req: Request, { params }: RouteContext) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
-    const { content, interval_minutes } = await req.json()
+    // Every sponsored message fans out to the whole event chat, so bound how
+    // fast one organiser account can create them.
+    const limited = rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
+    if (limited) return limited
 
-    if (!content?.trim()) {
-      return new NextResponse("content is required", { status: 400 })
+    const parsed = sponsoredMessageCreateSchema.safeParse(await req.json())
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      )
     }
-
-    const intervals = [10, 15, 30, 60]
-    if (!intervals.includes(interval_minutes)) {
-      return new NextResponse("interval_minutes must be 10, 15, 30 or 60", { status: 400 })
-    }
+    const { content, interval_minutes } = parsed.data
 
     const message = await db.event_sponsored_messages.create({
       data: {
         event_id: eventId,
-        content: content.trim(),
+        content,
         interval_minutes,
         is_active: false,
       },
@@ -65,7 +73,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     return NextResponse.json(message, { status: 201 })
   } catch (err) {
-    console.error("Error creating sponsored message:", err)
+    logger.error("Error creating sponsored message", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }

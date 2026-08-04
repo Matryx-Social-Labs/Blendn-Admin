@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -137,7 +138,7 @@ export async function GET(_: Request, { params }: RouteContext) {
       })),
     })
   } catch (err) {
-    console.error("Chat messages fetch error:", err)
+    logger.error("Chat messages fetch error", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal Server Error", { status: 500 })
   }
 }

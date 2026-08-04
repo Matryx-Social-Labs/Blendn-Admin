@@ -99,10 +99,39 @@ export function createBatchRateLimit(): RateLimitConfig {
 }
 
 /**
+ * Rate limit keyed on the authenticated user rather than the client IP.
+ *
+ * Use this for endpoints where the caller is already authenticated and the
+ * abuse case is a single compromised or misbehaving account, not an anonymous
+ * flood — IP keying is useless there because everyone behind one NAT shares a
+ * bucket while the attacker just rotates addresses.
+ */
+export function createUserRateLimit(
+  scope: "organiser-broadcast" | "private-message",
+  userId: string
+): RateLimitConfig {
+  const settings = {
+    "organiser-broadcast": {
+      windowMs: RATE_LIMIT_WINDOW.ORGANISER_BROADCAST,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.ORGANISER_BROADCAST,
+    },
+    "private-message": {
+      windowMs: RATE_LIMIT_WINDOW.PRIVATE_MESSAGE,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.PRIVATE_MESSAGE,
+    },
+  }[scope]
+
+  return {
+    ...settings,
+    keyGenerator: () => `${scope}:${userId}`,
+  }
+}
+
+/**
  * Create a rate limit configuration for auth endpoints
  */
 export function createAuthRateLimit(
-  type: "signin" | "signup" | "google" | "refresh"
+  type: "signin" | "signup" | "google" | "apple" | "refresh" | "dashboard-signin"
 ): RateLimitConfig {
   const configs: Record<string, RateLimitConfig> = {
     signin: {
@@ -136,6 +165,16 @@ export function createAuthRateLimit(
         return `auth:google:${ip}`
       },
     },
+    apple: {
+      windowMs: RATE_LIMIT_WINDOW.GOOGLE_AUTH,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.GOOGLE_AUTH,
+      keyGenerator: (req) => {
+        const ip = req.headers.get("x-forwarded-for") ||
+                   req.headers.get("x-real-ip") ||
+                   "unknown"
+        return `auth:apple:${ip}`
+      },
+    },
     refresh: {
       windowMs: RATE_LIMIT_WINDOW.REFRESH,
       maxRequests: RATE_LIMIT_MAX_REQUESTS.REFRESH,
@@ -144,6 +183,16 @@ export function createAuthRateLimit(
                    req.headers.get("x-real-ip") ||
                    "unknown"
         return `auth:refresh:${ip}`
+      },
+    },
+    "dashboard-signin": {
+      windowMs: RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN,
+      keyGenerator: (req) => {
+        const ip = req.headers.get("x-forwarded-for") ||
+                   req.headers.get("x-real-ip") ||
+                   "unknown"
+        return `auth:dashboard-signin:${ip}`
       },
     },
   }

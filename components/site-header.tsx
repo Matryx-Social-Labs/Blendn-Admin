@@ -73,28 +73,28 @@ export function SiteHeader() {
   }).format(new Date())
 
   return (
-    <header className="sticky top-0 z-20 border-b border-white/10 bg-[#090909]/70 backdrop-blur-xl transition-[width,height] ease-linear">
+    <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-xl transition-[width,height] ease-linear">
       <div className="flex h-(--header-height) w-full items-center gap-3 px-4 lg:px-6">
-        <SidebarTrigger className="-ml-1 rounded-full border border-white/10 bg-white/5 text-white hover:bg-white/10" />
+        <SidebarTrigger className="-ml-1 rounded-full" />
         <Separator
           orientation="vertical"
-          className="data-[orientation=vertical]:h-5 data-[orientation=vertical]:bg-white/10"
+          className="data-[orientation=vertical]:h-5"
         />
 
         <div className="min-w-0 flex-1">
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-white/42">
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
             {content.title}
           </p>
           <div className="flex items-center gap-3">
-            <h1 className="truncate text-lg font-semibold text-white">{content.description}</h1>
+            <h1 className="truncate text-lg font-semibold text-foreground">{content.description}</h1>
           </div>
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
-          <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-white/60">
+          <div className="rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             {session?.user?.role ? roleLabels[session.user.role] ?? session.user.role : "Workspace"}
           </div>
-          <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/62">
+          <div className="rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
             {today}
           </div>
           <BrandLogo size="header" className="hidden xl:flex shrink-0" />

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -44,16 +45,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+    const isSelf = authUser.userId === userId
+
+    // Email and phone are only for the profile owner -- everyone else gets
+    // the same public-safe shape as /api/mobile/users/[userId].
+    const { phone: _phone, ...publicProfileFields } = user.profile ?? {}
 
     return successResponse({
       id: user.id,
-      email: user.email,
+      email: isSelf ? user.email : undefined,
       name: user.name,
       image: user.image,
       createdAt: user.createdAt,
       profile: user.profile
         ? {
-            ...user.profile,
+            ...(isSelf ? user.profile : publicProfileFields),
             location: normalizedLocation,
           }
         : null,
@@ -65,7 +71,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })),
     })
   } catch (error) {
-    console.error("Get profile error:", error)
+    logger.error("Get profile error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get profile")
   }
 }
@@ -93,7 +99,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { name, phone, age, location, bio, occupation, education, interests, photos, onboarded } = parsed.data
+    const { name, phone, age, location, bio, occupation, education, interests, photos, goals, looking_for, onboarded } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
 
     // Update user record (name and/or primary photo)
@@ -121,6 +127,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         education,
         interests: interests || [],
         photos: photos || [],
+        goals: goals || [],
+        looking_for: looking_for || [],
         onboarded: onboarded ?? false,
       },
       update: {
@@ -133,6 +141,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(education !== undefined && { education }),
         ...(interests !== undefined && { interests }),
         ...(photos !== undefined && { photos }),
+        ...(goals !== undefined && { goals }),
+        ...(looking_for !== undefined && { looking_for }),
         ...(onboarded !== undefined && { onboarded }),
         updated_at: new Date(),
       },
@@ -165,7 +175,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       })),
     })
   } catch (error) {
-    console.error("Update profile error:", error)
+    logger.error("Update profile error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to update profile")
   }
 }

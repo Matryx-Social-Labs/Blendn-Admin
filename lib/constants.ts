@@ -8,6 +8,9 @@ export const RATE_LIMIT_WINDOW = {
   REFRESH: 15 * 60 * 1000, // 15 minutes
   BATCH: 60 * 1000, // 1 minute
   CHECKIN: 10 * 60 * 1000, // 10 minutes
+  DASHBOARD_SIGNIN: 15 * 60 * 1000, // 15 minutes
+  ORGANISER_BROADCAST: 60 * 1000, // 1 minute
+  PRIVATE_MESSAGE: 60 * 1000, // 1 minute
 } as const
 
 export const RATE_LIMIT_MAX_REQUESTS = {
@@ -17,6 +20,10 @@ export const RATE_LIMIT_MAX_REQUESTS = {
   REFRESH: 20,
   BATCH: 30,
   CHECKIN: 10,
+  DASHBOARD_SIGNIN: 5,
+  // Announcements and sponsored messages broadcast to every attendee.
+  ORGANISER_BROADCAST: 10,
+  PRIVATE_MESSAGE: 30,
 } as const
 
 // ── Caching ───────────────────────────────────────────

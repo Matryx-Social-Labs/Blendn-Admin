@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     return successResponse({ blocked: true })
   } catch (error) {
-    console.error("Block user error:", error)
+    logger.error("Block user error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to block user")
   }
 }
@@ -88,7 +89,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     return successResponse({ blocked: false })
   } catch (error) {
-    console.error("Unblock user error:", error)
+    logger.error("Unblock user error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to unblock user")
   }
 }

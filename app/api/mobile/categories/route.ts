@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse(categories)
   } catch (error) {
-    console.error("Get categories error:", error)
+    logger.error("Get categories error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get categories")
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
@@ -37,7 +38,7 @@ export async function GET(_: Request, { params }: RouteContext) {
 
     return NextResponse.json(event)
   } catch (error) {
-    console.error("Error fetching event:", error)
+    logger.error("Error fetching event", { error: error instanceof Error ? error.message : String(error) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }
@@ -89,7 +90,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     } = body
 
     // Debug: Log cover_image_url being updated
-    console.log("Updating event - cover_image_url:", cover_image_url)
+    logger.info("Updating event - cover_image_url", { error: cover_image_url instanceof Error ? cover_image_url.message : String(cover_image_url) })
 
     const event = await db.events.findFirst({
       where: {
@@ -227,7 +228,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     return NextResponse.json(updatedEvent)
   } catch (error) {
-    console.error("Error updating event:", error)
+    logger.error("Error updating event", { error: error instanceof Error ? error.message : String(error) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }
@@ -273,7 +274,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     return new NextResponse(null, { status: 204 })
   } catch (error) {
-    console.error("Error deleting event:", error)
+    logger.error("Error deleting event", { error: error instanceof Error ? error.message : String(error) })
     return new NextResponse("Internal error", { status: 500 })
   }
 }

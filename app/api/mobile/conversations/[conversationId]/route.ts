@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       lastMessageAt: conversation.last_message_at,
     })
   } catch (error) {
-    console.error("Get conversation error:", error)
+    logger.error("Get conversation error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get conversation")
   }
 }
@@ -93,7 +94,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     return successResponse({ deleted: true })
   } catch (error) {
-    console.error("Delete conversation error:", error)
+    logger.error("Delete conversation error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to delete conversation")
   }
 }

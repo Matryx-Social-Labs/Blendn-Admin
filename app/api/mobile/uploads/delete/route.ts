@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -52,7 +53,7 @@ export async function DELETE(request: NextRequest) {
 
     return successResponse({ deleted: true })
   } catch (error) {
-    console.error("Delete file error:", error)
+    logger.error("Delete file error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to delete file")
   }
 }

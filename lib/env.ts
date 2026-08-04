@@ -1,3 +1,4 @@
+import { logger } from "./logger"
 import { z } from "zod"
 
 /**
@@ -16,11 +17,15 @@ const envSchema = z.object({
   // Mobile API
   MOBILE_JWT_SECRET: z.string().min(32, "MOBILE_JWT_SECRET must be at least 32 characters"),
 
-  // AWS S3 (optional)
-  AWS_ACCESS_KEY_ID: z.string().optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().optional(),
-  AWS_REGION: z.string().default("us-east-1"),
-  AWS_S3_BUCKET: z.string().optional(),
+  // Tigris object storage (optional — uploads are disabled without it).
+  // These names must match what lib/tigris.ts actually reads; they were
+  // previously documented as AWS_* here and in DEPLOYMENT.md, which meant a
+  // deployment configured from the docs got uploads silently switched off.
+  TIGRIS_ENDPOINT: z.string().optional(),
+  TIGRIS_ACCESS_KEY: z.string().optional(),
+  TIGRIS_SECRET_KEY: z.string().optional(),
+  TIGRIS_BUCKET: z.string().default("blendn-media"),
+  TIGRIS_REGION: z.string().default("auto"),
 
   // OpenAI (optional — moderation degrades to keyword-only if absent)
   OPENAI_API_KEY: z.string().optional(),
@@ -40,8 +45,9 @@ export function validateEnv(): Env {
   const parsed = envSchema.safeParse(process.env)
 
   if (!parsed.success) {
-    console.error("❌ Invalid environment variables:")
-    console.error(parsed.error.flatten().fieldErrors)
+    logger.error("Invalid environment variables", {
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    })
     throw new Error("Invalid environment variables")
   }
 

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuth } from "@/lib/auth"
@@ -33,6 +34,13 @@ export async function POST(request: NextRequest) {
       return unauthorizedResponse("Authentication required")
     }
 
+    // A dashboard session alone is not enough: attendees never upload through
+    // the dashboard. Same role gate /api/events POST applies.
+    const { role } = session.user
+    if (role !== "app_admin" && role !== "organizer" && role !== "venue_owner") {
+      return errorResponse("Not authorized to upload", 403)
+    }
+
     const body = await request.json()
     const validation = presignedUrlSchema.safeParse(body)
     if (!validation.success) {
@@ -62,7 +70,7 @@ export async function POST(request: NextRequest) {
       expiresIn: 900,
     })
   } catch (error) {
-    console.error("Generate presigned URL error:", error)
+    logger.error("Generate presigned URL error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to generate upload URL")
   }
 }

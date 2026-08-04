@@ -1,5 +1,5 @@
-import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
+import { db } from "@/lib/db"
 import { emitChatMessageHidden, emitChatMemberMuted } from "@/lib/socket-server"
 import { AUTO_MUTE_HIDDEN_COUNT, AUTO_MUTE_WINDOW_MS } from "./config"
 import type { ModerationResult } from "./types"

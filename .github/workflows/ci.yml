@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, stage, prod]
+  push:
+    branches: [dev, stage, prod]
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blendn_test
+  # prisma/schema.prisma declares `directUrl = env("DIRECT_URL")`, and the
+  # Prisma CLI fails validation (P1012) when it is unset — this broke every CI
+  # run. In production DIRECT_URL bypasses the connection pooler; CI talks to a
+  # local postgres directly, so the two are the same URL here.
+  DIRECT_URL: postgresql://postgres:postgres@localhost:5432/blendn_test
+  NEXTAUTH_URL: http://localhost:3000
+  NEXTAUTH_SECRET: ci-test-secret-please-change-32-characters
+  MOBILE_JWT_SECRET: ci-test-jwt-secret-please-change-32-chars
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: blendn_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Push database schema
+        run: npm run db:push
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Test
+        run: npm test -- --ci
+
+      - name: Build
+        run: npm run build

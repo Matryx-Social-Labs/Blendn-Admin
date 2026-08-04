@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -39,7 +40,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     return NextResponse.json({ success: true })
   } catch (err) {
-    console.error("Delete message error:", err)
+    logger.error("Delete message error", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal Server Error", { status: 500 })
   }
 }

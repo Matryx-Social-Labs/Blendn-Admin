@@ -43,24 +43,10 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      {
-        // CORS headers for mobile API
-        source: "/api/mobile/:path*",
-        headers: [
-          {
-            key: "Access-Control-Allow-Origin",
-            value: "*",
-          },
-          {
-            key: "Access-Control-Allow-Methods",
-            value: "GET, POST, PUT, DELETE, OPTIONS",
-          },
-          {
-            key: "Access-Control-Allow-Headers",
-            value: "Content-Type, Authorization",
-          },
-        ],
-      },
+      // CORS for /api/mobile/* is handled per-request in middleware.ts
+      // (origin allow-list). Do not add a static wildcard CORS block here -
+      // it would apply to every request regardless of origin and override
+      // the allow-list logic.
     ];
   },
 
@@ -72,6 +58,21 @@ const nextConfig: NextConfig = {
     },
   },
 };
+
+// A production build without SENTRY_AUTH_TOKEN still succeeds, it just ships
+// without source maps — which is only discovered later, when a production stack
+// trace turns out to be unreadable. Say so at build time.
+// NEXT_PHASE is set only during a real build; `next lint` also runs with
+// NODE_ENV=production and would otherwise trip this warning.
+if (
+  process.env.NEXT_PHASE === "phase-production-build" &&
+  !process.env.SENTRY_AUTH_TOKEN
+) {
+  console.warn(
+    "[build] SENTRY_AUTH_TOKEN is not set — building without source map upload. " +
+      "Production stack traces will stay minified."
+  );
+}
 
 export default withSentryConfig(nextConfig, {
   // Only upload source maps when SENTRY_AUTH_TOKEN is available

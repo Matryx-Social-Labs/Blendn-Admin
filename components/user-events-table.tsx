@@ -117,6 +117,7 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
                         size="icon"
                         className="size-8"
                         disabled={loadingId === event.id}
+                        aria-label={`Actions for ${event.title}`}
                       >
                         <IconDotsVertical className="size-4" />
                       </Button>

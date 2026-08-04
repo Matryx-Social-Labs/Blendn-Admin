@@ -41,10 +41,10 @@ import type {
 import { cn } from "@/lib/utils"
 
 const trendKeyStyles: Record<DashboardTrendKey, { color: string }> = {
-  users: { color: "#F05423" },
-  events: { color: "#865693" },
-  attendees: { color: "#BE5C71" },
-  engagement: { color: "#ffffff" },
+  users: { color: "var(--chart-1)" },
+  events: { color: "var(--chart-2)" },
+  attendees: { color: "var(--chart-3)" },
+  engagement: { color: "var(--chart-4)" },
 }
 
 function trendLabel(key: DashboardTrendKey, role: DashboardReport["role"]) {
@@ -62,14 +62,14 @@ function trendLabel(key: DashboardTrendKey, role: DashboardReport["role"]) {
 
 function metricIcon(trend: DashboardMetric["trend"]) {
   if (trend === "up") {
-    return <IconArrowUpRight className="size-4 text-[#f7a888]" />
+    return <IconArrowUpRight className="size-4 text-chart-1" />
   }
 
   if (trend === "down") {
-    return <IconArrowDownRight className="size-4 text-[#be5c71]" />
+    return <IconArrowDownRight className="size-4 text-destructive" />
   }
 
-  return <IconMinus className="size-4 text-white/55" />
+  return <IconMinus className="size-4 text-muted-foreground" />
 }
 
 function formatStatus(status: string) {
@@ -125,11 +125,11 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
   return (
     <div className="flex flex-col gap-6 py-6">
       <section className="px-4 lg:px-6">
-        <div className="overflow-hidden rounded-[2rem] border border-white/10 brand-surface">
-          <div className="brand-mesh px-6 py-7 lg:px-8">
+        <Card className="rounded-xl">
+          <CardContent className="px-6 py-7 lg:px-8">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
               <div className="max-w-3xl space-y-4">
-                <Badge className="brand-chip rounded-full px-3 py-1 font-medium">
+                <Badge variant="secondary" className="rounded-full px-3 py-1 font-medium">
                   {report.role === "app_admin"
                     ? "Platform reporting"
                     : report.role === "organizer"
@@ -137,52 +137,48 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                       : "Venue reporting"}
                 </Badge>
                 <div className="space-y-3">
-                  <h1 className="text-3xl font-semibold text-white sm:text-4xl">
+                  <h1 className="text-3xl font-semibold sm:text-4xl">
                     {report.headline}
                   </h1>
-                  <p className="max-w-2xl text-sm leading-7 text-white/68 sm:text-base">
+                  <p className="max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
                     {report.summary}
                   </p>
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:w-[430px]">
                 {report.spotlights.slice(0, 2).map((card) => (
-                  <div
-                    key={card.title}
-                    className="rounded-[1.4rem] border border-white/10 bg-black/24 p-4"
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/44">
-                      {card.title}
-                    </p>
-                    <p className="mt-3 text-2xl font-semibold text-white">{card.value}</p>
-                    <p className="mt-2 text-sm leading-6 text-white/62">{card.description}</p>
-                  </div>
+                  <Card key={card.title} className="rounded-lg bg-muted">
+                    <CardContent className="p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                        {card.title}
+                      </p>
+                      <p className="mt-3 text-2xl font-semibold">{card.value}</p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">{card.description}</p>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
         {report.metrics.map((metric) => (
-          <Card
-            key={metric.label}
-            className="rounded-[1.6rem] border-white/10 bg-white/[0.04] text-white shadow-none"
-          >
+          <Card key={metric.label} className="rounded-xl shadow-none">
             <CardContent className="space-y-4 px-5 py-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-white/68">{metric.label}</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">{metric.value}</p>
+                  <p className="text-sm font-medium text-muted-foreground">{metric.label}</p>
+                  <p className="mt-3 text-3xl font-semibold">{metric.value}</p>
                 </div>
-                <div className="rounded-full border border-white/10 bg-white/6 p-2">
+                <div className="rounded-full border border-border bg-accent p-2">
                   {metricIcon(metric.trend)}
                 </div>
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-medium text-white/72">{metric.delta}</p>
-                <p className="text-sm leading-6 text-white/52">{metric.detail}</p>
+                <p className="text-sm font-medium">{metric.delta}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{metric.detail}</p>
               </div>
             </CardContent>
           </Card>
@@ -190,11 +186,11 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
       </section>
 
       <section className="grid gap-6 px-4 lg:px-6 xl:grid-cols-[1.45fr_0.55fr]">
-        <Card className="rounded-[1.8rem] border-white/10 bg-white/[0.04] text-white shadow-none">
-          <CardHeader className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <Card className="rounded-xl shadow-none">
+          <CardHeader className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-2">
-              <CardTitle className="text-xl text-white">{report.trend.title}</CardTitle>
-              <p className="text-sm leading-6 text-white/58">{report.trend.description}</p>
+              <CardTitle className="text-xl">{report.trend.title}</CardTitle>
+              <p className="text-sm leading-6 text-muted-foreground">{report.trend.description}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {(["users", "events", "attendees", "engagement"] as DashboardTrendKey[]).map((key) => (
@@ -205,8 +201,8 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                   variant="ghost"
                   onClick={() => setActiveTrend(key)}
                   className={cn(
-                    "rounded-full border border-white/10 px-3 text-white/68 hover:bg-white/8 hover:text-white",
-                    activeTrend === key && "bg-white/10 text-white"
+                    "rounded-full border border-border px-3 text-muted-foreground hover:bg-accent hover:text-foreground",
+                    activeTrend === key && "bg-accent text-foreground"
                   )}
                 >
                   {trendLabel(key, report.role)}
@@ -221,8 +217,8 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                     variant="ghost"
                     onClick={() => setWindowSize(value)}
                     className={cn(
-                      "rounded-full border border-white/10 px-3 text-white/58 hover:bg-white/8 hover:text-white",
-                      windowSize === value && "border-white/14 bg-white/10 text-white"
+                      "rounded-full border border-border px-3 text-muted-foreground hover:bg-accent hover:text-foreground",
+                      windowSize === value && "bg-accent text-foreground"
                     )}
                   >
                     {value.toUpperCase()}
@@ -256,27 +252,27 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                     />
                   </linearGradient>
                 </defs>
-                <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
+                <CartesianGrid vertical={false} stroke="var(--border)" />
                 <XAxis
                   dataKey="label"
                   tickLine={false}
                   axisLine={false}
                   tickMargin={10}
-                  tick={{ fill: "rgba(255,255,255,0.56)" }}
+                  tick={{ fill: "var(--muted-foreground)" }}
                 />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
                   tickMargin={10}
-                  tick={{ fill: "rgba(255,255,255,0.56)" }}
+                  tick={{ fill: "var(--muted-foreground)" }}
                 />
                 <ChartTooltip
-                  cursor={{ stroke: "rgba(255,255,255,0.1)" }}
+                  cursor={{ stroke: "var(--border)" }}
                   content={
                     <ChartTooltipContent
-                      className="rounded-2xl border-white/10 bg-[#0d0d10]/96 text-white"
+                      className="rounded-xl border-border bg-card text-foreground"
                       formatter={(value) => (
-                        <span className="font-medium text-white">{formatNumericValue(Number(value))}</span>
+                        <span className="font-medium">{formatNumericValue(Number(value))}</span>
                       )}
                     />
                   }
@@ -295,7 +291,7 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                   activeDot={{
                     r: 5,
                     fill: trendKeyStyles[activeTrend].color,
-                    stroke: "#090909",
+                    stroke: "var(--background)",
                   }}
                 />
               </AreaChart>
@@ -303,32 +299,32 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
           </CardContent>
         </Card>
 
-        <Card className="rounded-[1.8rem] border-white/10 bg-white/[0.04] text-white shadow-none">
-          <CardHeader className="border-b border-white/10 pb-5">
-            <CardTitle className="text-xl text-white">{report.funnel.title}</CardTitle>
-            <p className="text-sm leading-6 text-white/58">{report.funnel.description}</p>
+        <Card className="rounded-xl shadow-none">
+          <CardHeader className="border-b pb-5">
+            <CardTitle className="text-xl">{report.funnel.title}</CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">{report.funnel.description}</p>
           </CardHeader>
           <CardContent className="space-y-4 px-5 py-5">
             {report.funnel.stages.map((stage, index) => (
-              <div key={stage.label} className="space-y-2 rounded-[1.2rem] border border-white/8 bg-black/18 p-4">
+              <div key={stage.label} className="space-y-2 rounded-lg border border-border bg-muted p-4">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/44">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                       Stage {index + 1}
                     </p>
-                    <h3 className="mt-1 text-base font-semibold text-white">{stage.label}</h3>
+                    <h3 className="mt-1 text-base font-semibold">{stage.label}</h3>
                   </div>
-                  <p className="text-2xl font-semibold text-white">
+                  <p className="text-2xl font-semibold">
                     {formatNumericValue(stage.value)}
                   </p>
                 </div>
-                <div className="h-2 rounded-full bg-white/8">
+                <div className="h-2 rounded-full bg-border">
                   <div
-                    className="h-2 rounded-full bg-gradient-to-r from-[#F05423] via-[#BE5C71] to-[#865693]"
+                    className="h-2 rounded-full bg-gradient-to-r from-chart-1 via-chart-2 to-chart-3"
                     style={{ width: `${Math.max(10, (stage.value / funnelMax) * 100)}%` }}
                   />
                 </div>
-                <p className="text-sm leading-6 text-white/56">{stage.detail}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{stage.detail}</p>
               </div>
             ))}
           </CardContent>
@@ -337,27 +333,24 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
 
       <section className="grid gap-4 px-4 lg:px-6 md:grid-cols-2 xl:grid-cols-4">
         {report.spotlights.map((card) => (
-          <Card
-            key={card.title}
-            className="rounded-[1.6rem] border-white/10 bg-black/24 text-white shadow-none"
-          >
+          <Card key={card.title} className="rounded-xl shadow-none">
             <CardContent className="space-y-3 px-5 py-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/42">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                 {card.title}
               </p>
-              <p className="text-3xl font-semibold text-white">{card.value}</p>
-              <p className="text-sm leading-6 text-white/60">{card.description}</p>
+              <p className="text-3xl font-semibold">{card.value}</p>
+              <p className="text-sm leading-6 text-muted-foreground">{card.description}</p>
             </CardContent>
           </Card>
         ))}
       </section>
 
       <section className="px-4 lg:px-6">
-        <Card className="rounded-[1.8rem] border-white/10 bg-white/[0.04] text-white shadow-none">
-          <CardHeader className="gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-start lg:justify-between">
+        <Card className="rounded-xl shadow-none">
+          <CardHeader className="gap-4 border-b pb-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-2">
-              <CardTitle className="text-xl text-white">{report.performance.title}</CardTitle>
-              <p className="max-w-3xl text-sm leading-6 text-white/58">
+              <CardTitle className="text-xl">{report.performance.title}</CardTitle>
+              <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
                 {report.performance.description}
               </p>
             </div>
@@ -365,57 +358,57 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
           </CardHeader>
           <CardContent className="space-y-5 px-5 py-5">
             <div className="relative max-w-sm">
-              <IconSearch className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-white/34" />
+              <IconSearch className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search events, cities, categories, or status"
-                className="h-12 rounded-2xl border-white/10 bg-white/6 pl-11 text-white placeholder:text-white/34"
+                className="h-12 rounded-xl pl-11"
               />
             </div>
 
             <Table className="min-w-[940px]">
               <TableHeader>
-                <TableRow className="border-white/10 hover:bg-transparent">
-                  <TableHead className="h-11 px-3 text-white/48">Event</TableHead>
-                  <TableHead className="h-11 px-3 text-white/48">Segment</TableHead>
-                  <TableHead className="h-11 px-3 text-white/48">Status</TableHead>
-                  <TableHead className="h-11 px-3 text-white/48">City / Venue</TableHead>
-                  <TableHead className="h-11 px-3 text-white/48">Start</TableHead>
-                  <TableHead className="h-11 px-3 text-right text-white/48">Attendees</TableHead>
-                  <TableHead className="h-11 px-3 text-right text-white/48">Demand</TableHead>
-                  <TableHead className="h-11 px-3 text-right text-white/48">Engagement</TableHead>
-                  <TableHead className="h-11 px-3 text-right text-white/48">Rating</TableHead>
-                  <TableHead className="h-11 px-3 text-right text-white/48">Capacity</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="h-11 px-3 text-muted-foreground">Event</TableHead>
+                  <TableHead className="h-11 px-3 text-muted-foreground">Segment</TableHead>
+                  <TableHead className="h-11 px-3 text-muted-foreground">Status</TableHead>
+                  <TableHead className="h-11 px-3 text-muted-foreground">City / Venue</TableHead>
+                  <TableHead className="h-11 px-3 text-muted-foreground">Start</TableHead>
+                  <TableHead className="h-11 px-3 text-right text-muted-foreground">Attendees</TableHead>
+                  <TableHead className="h-11 px-3 text-right text-muted-foreground">Demand</TableHead>
+                  <TableHead className="h-11 px-3 text-right text-muted-foreground">Engagement</TableHead>
+                  <TableHead className="h-11 px-3 text-right text-muted-foreground">Rating</TableHead>
+                  <TableHead className="h-11 px-3 text-right text-muted-foreground">Capacity</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {performanceRows.map((row) => (
-                  <TableRow key={row.id} className="border-white/8 hover:bg-white/[0.03]">
+                  <TableRow key={row.id}>
                     <TableCell className="px-3 py-4">
                       <div className="space-y-1">
-                        <p className="font-medium text-white">{row.name}</p>
-                        <p className="text-xs text-white/46">ID {row.id.slice(0, 8)}</p>
+                        <p className="font-medium">{row.name}</p>
+                        <p className="text-xs text-muted-foreground">ID {row.id.slice(0, 8)}</p>
                       </div>
                     </TableCell>
-                    <TableCell className="px-3 text-white/70">{row.segment}</TableCell>
+                    <TableCell className="px-3 text-muted-foreground">{row.segment}</TableCell>
                     <TableCell className="px-3">
-                      <Badge className="rounded-full border border-white/10 bg-white/6 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-white/78">
+                      <Badge variant="secondary" className="rounded-full px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em]">
                         {formatStatus(row.status)}
                       </Badge>
                     </TableCell>
-                    <TableCell className="px-3 text-white/70">{row.city}</TableCell>
-                    <TableCell className="px-3 text-white/60">{formatDate(row.startAt)}</TableCell>
-                    <TableCell className="px-3 text-right text-white">{formatNumericValue(row.attendees)}</TableCell>
-                    <TableCell className="px-3 text-right text-white">{formatNumericValue(row.demand)}</TableCell>
-                    <TableCell className="px-3 text-right text-white">{formatNumericValue(row.engagement)}</TableCell>
-                    <TableCell className="px-3 text-right text-white">{formatNumericValue(row.rating)}</TableCell>
-                    <TableCell className="px-3 text-right text-white">{formatNumericValue(row.capacity)}</TableCell>
+                    <TableCell className="px-3 text-muted-foreground">{row.city}</TableCell>
+                    <TableCell className="px-3 text-muted-foreground">{formatDate(row.startAt)}</TableCell>
+                    <TableCell className="px-3 text-right">{formatNumericValue(row.attendees)}</TableCell>
+                    <TableCell className="px-3 text-right">{formatNumericValue(row.demand)}</TableCell>
+                    <TableCell className="px-3 text-right">{formatNumericValue(row.engagement)}</TableCell>
+                    <TableCell className="px-3 text-right">{formatNumericValue(row.rating)}</TableCell>
+                    <TableCell className="px-3 text-right">{formatNumericValue(row.capacity)}</TableCell>
                   </TableRow>
                 ))}
                 {performanceRows.length === 0 ? (
-                  <TableRow className="border-white/8 hover:bg-transparent">
-                    <TableCell colSpan={10} className="px-3 py-10 text-center text-sm text-white/54">
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={10} className="px-3 py-10 text-center text-sm text-muted-foreground">
                       No events matched this filter.
                     </TableCell>
                   </TableRow>

@@ -1,7 +1,9 @@
+import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { PAGINATION } from "@/lib/constants"
 import {
   successResponse,
   unauthorizedResponse,
@@ -27,12 +29,16 @@ export async function GET(request: NextRequest) {
         },
       },
       data: { status: "archived" },
-    }).catch((err: unknown) => console.error("Auto-archive chat groups failed:", err))
+    }).catch((err: unknown) => logger.error("Auto-archive chat groups failed", { error: err instanceof Error ? err.message : String(err) }))
 
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
     const page = parseInt(searchParams.get("page") || "1")
-    const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100)
+    const limit = Math.min(
+      parseInt(searchParams.get("limit") || String(PAGINATION.DEFAULT_LIMIT), 10) ||
+        PAGINATION.DEFAULT_LIMIT,
+      PAGINATION.MAX_LIMIT
+    )
 
     // Get total count of user's chat groups
     const totalCount = await db.chat_group_members.count({
@@ -240,7 +246,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error("Get chat groups error:", error)
+    logger.error("Get chat groups error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get chat groups")
   }
 }

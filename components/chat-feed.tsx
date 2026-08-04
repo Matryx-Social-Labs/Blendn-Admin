@@ -211,6 +211,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
           onClick={() => void fetchData()}
           disabled={loading}
           title="Refresh"
+          aria-label="Refresh"
         >
           <IconRefresh className={`size-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
@@ -218,21 +219,23 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
 
       {/* Tab switcher */}
       <div className="flex border-b shrink-0">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setActiveTab("messages")}
-          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+          className={`flex-1 py-2 h-auto rounded-none text-xs font-medium transition-colors ${
             activeTab === "messages"
               ? "border-b-2 border-primary text-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
           Messages
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setActiveTab("members")}
-          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+          className={`flex-1 py-2 h-auto rounded-none text-xs font-medium transition-colors ${
             activeTab === "members"
               ? "border-b-2 border-primary text-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -244,7 +247,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
               {restrictedCount}
             </span>
           )}
-        </button>
+        </Button>
       </div>
 
       {/* Content */}
@@ -308,6 +311,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                         onClick={() => void deleteMessage(msg.id)}
                         disabled={actionLoading === msg.id}
                         title="Delete message"
+                        aria-label="Delete message"
                       >
                         <IconTrash className="size-3.5" />
                       </Button>
@@ -477,10 +481,12 @@ function RestrictedMemberCard({
   return (
     <div className={`rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}>
       {/* Header row */}
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={onToggleExpand}
-        className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-muted/20 transition-colors"
+        aria-label={isExpanded ? "Collapse member details" : "Expand member details"}
+        className="w-full h-auto justify-between px-3 py-2.5 text-left font-normal hover:bg-muted/20 transition-colors"
       >
         <div className="flex items-center gap-2 min-w-0">
           {isExpanded ? (
@@ -544,7 +550,7 @@ function RestrictedMemberCard({
             </>
           )}
         </div>
-      </button>
+      </Button>
 
       {/* Expanded: violation history */}
       {isExpanded && member.recentViolations.length > 0 && (

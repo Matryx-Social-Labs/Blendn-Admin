@@ -10,6 +10,8 @@ jest.mock("@/lib/constants", () => ({
     REFRESH: 900_000,
     BATCH: 60_000,
     CHECKIN: 600_000,
+    ORGANISER_BROADCAST: 60_000,
+    PRIVATE_MESSAGE: 60_000,
   },
   RATE_LIMIT_MAX_REQUESTS: {
     SIGNIN: 5,
@@ -18,10 +20,17 @@ jest.mock("@/lib/constants", () => ({
     REFRESH: 20,
     BATCH: 30,
     CHECKIN: 10,
+    ORGANISER_BROADCAST: 3,
+    PRIVATE_MESSAGE: 5,
   },
 }))
 
-import { rateLimit, createBatchRateLimit, createAuthRateLimit } from "@/lib/rate-limit"
+import {
+  rateLimit,
+  createBatchRateLimit,
+  createAuthRateLimit,
+  createUserRateLimit,
+} from "@/lib/rate-limit"
 
 function makeRequest(path = "/api/test", ip = "127.0.0.1"): NextRequest {
   const req = new NextRequest(`http://localhost${path}`, {
@@ -105,5 +114,45 @@ describe("createAuthRateLimit", () => {
       expect(config.maxRequests).toBeGreaterThan(0)
       expect(config.keyGenerator).toBeDefined()
     }
+  })
+})
+
+describe("createUserRateLimit", () => {
+  it("keys on the user, not the IP, so one account cannot flood from many IPs", () => {
+    const config = createUserRateLimit("organiser-broadcast", "user_abc")
+    const fromOneIp = makeRequest("/api/events/1/announcements", "1.1.1.1")
+    const fromAnother = makeRequest("/api/events/1/announcements", "2.2.2.2")
+
+    expect(config.keyGenerator!(fromOneIp)).toBe(config.keyGenerator!(fromAnother))
+    expect(config.keyGenerator!(fromOneIp)).toBe("organiser-broadcast:user_abc")
+  })
+
+  it("gives different users separate buckets", () => {
+    const a = createUserRateLimit("private-message", "user_a")
+    const b = createUserRateLimit("private-message", "user_b")
+    const req = makeRequest("/api/mobile/conversations/1/messages")
+
+    expect(a.keyGenerator!(req)).not.toBe(b.keyGenerator!(req))
+  })
+
+  it("keeps broadcast and DM scopes in separate buckets for the same user", () => {
+    const broadcast = createUserRateLimit("organiser-broadcast", "user_abc")
+    const dm = createUserRateLimit("private-message", "user_abc")
+    const req = makeRequest("/api/x")
+
+    expect(broadcast.keyGenerator!(req)).not.toBe(dm.keyGenerator!(req))
+  })
+
+  it("actually blocks once the per-user budget is spent", () => {
+    const config = createUserRateLimit("organiser-broadcast", "user_spammer")
+    const req = makeRequest("/api/events/1/announcements")
+
+    let blocked = null
+    for (let i = 0; i < config.maxRequests + 1; i++) {
+      blocked = rateLimit(req, config)
+    }
+
+    expect(blocked).not.toBeNull()
+    expect(blocked!.status).toBe(429)
   })
 })
