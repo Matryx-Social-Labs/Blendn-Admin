@@ -1,6 +1,6 @@
 {
   "name": "blendn-admin",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "scripts": {
     "dev": "ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
@@ -81,7 +81,7 @@
     "swagger-ui-react": "^5.32.0",
     "tailwind-merge": "^3.2.0",
     "vaul": "^1.1.2",
-    "zod": "^3.24.3"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

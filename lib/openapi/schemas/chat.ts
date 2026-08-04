@@ -8,7 +8,7 @@ export const SendMessageRequestSchema = z
     content: z.string().min(1).max(4000),
     type: z.enum(["text", "image", "video"]).default("text"),
     parentId: z.string().uuid().optional(),
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .openapi("SendMessageRequest")
 
