@@ -5,6 +5,27 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-04
+
+### Security
+
+- Known vulnerabilities went from **47 to 3** (was 6 critical, 21 high, 19
+  moderate, 1 low). The three that remain all need a Next.js major upgrade and
+  are being handled separately.
+- Removed the Clerk authentication SDK. It was installed but never used — this
+  app signs in with NextAuth — and it carried four of the advisories on its own.
+
+### Changed
+
+- Validation errors are read through the API that survives the next major
+  version of the validation library. Behaviour is identical today; without it,
+  that upgrade would have turned every rejected request across 26 endpoints into
+  a server error instead of a validation message.
+
+### Added
+
+- Tests that pin the above, including one that fails if the old API comes back.
+
 ## [0.1.9] - 2026-08-04
 
 ### Removed
