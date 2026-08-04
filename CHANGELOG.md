@@ -5,6 +5,36 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-08-04
+
+### Fixed
+
+- Push notification failures were discarded without a trace in four places. If
+  push stopped working, nothing anywhere would have said so. Failures are now
+  recorded; sending still never blocks the request that triggered it.
+
+## [0.2.3] - 2026-08-04
+
+### Fixed
+
+- Errors thrown while the app's root layout renders were never reported. That is
+  the case where someone sees a blank page, so it was the one failure we had no
+  visibility into. They now report, and the page shows a reference code to quote
+  when reporting the problem.
+
+### Changed
+
+- Builds are now warning-free. Cleared a deprecated Sentry option, moved browser
+  error tracking to the filename the next major version of the framework
+  requires (it silently stops working otherwise), and moved CI onto a supported
+  Node version.
+
+### Added
+
+- A script to copy one database into another, used to give the staging
+  environment realistic data so upgrades can be tested against something other
+  than an empty schema.
+
 ## [0.2.2] - 2026-08-04
 
 ### Added

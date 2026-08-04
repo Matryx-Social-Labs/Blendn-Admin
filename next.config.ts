@@ -77,5 +77,7 @@ if (
 export default withSentryConfig(nextConfig, {
   // Only upload source maps when SENTRY_AUTH_TOKEN is available
   silent: !process.env.SENTRY_AUTH_TOKEN,
-  disableLogger: true,
+  // Replaces the deprecated `disableLogger: true`, which warned on every build.
+  // Strips Sentry's debug logging from the production bundle.
+  webpack: { treeshake: { removeDebugLogging: true } },
 });
