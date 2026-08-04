@@ -8,11 +8,6 @@ on:
 
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/blendn_test
-  # prisma/schema.prisma declares `directUrl = env("DIRECT_URL")`, and the
-  # Prisma CLI fails validation (P1012) when it is unset — this broke every CI
-  # run. In production DIRECT_URL bypasses the connection pooler; CI talks to a
-  # local postgres directly, so the two are the same URL here.
-  DIRECT_URL: postgresql://postgres:postgres@localhost:5432/blendn_test
   NEXTAUTH_URL: http://localhost:3000
   NEXTAUTH_SECRET: ci-test-secret-please-change-32-characters
   MOBILE_JWT_SECRET: ci-test-jwt-secret-please-change-32-chars
