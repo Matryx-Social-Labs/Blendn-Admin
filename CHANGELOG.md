@@ -5,6 +5,18 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-05
+
+### Fixed
+
+- The v0.5.0 deploy failed to build. An API-documentation package still required
+  the previous major version of the validation library, so installing the two
+  together was impossible. Upgraded it; nothing was ever served from the broken
+  build, and both environments stayed up on the previous release throughout.
+- Continuous integration now installs dependencies the same way the deploy does.
+  It had been using a flag that ignores exactly this class of conflict, which is
+  why it reported success while the deploy could not build.
+
 ## [0.5.0] - 2026-08-04
 
 ### Changed

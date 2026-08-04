@@ -41,8 +41,12 @@ jobs:
           node-version: "22"
           cache: "npm"
 
+      # Deliberately NOT --legacy-peer-deps. Railway builds with a strict
+      # install, so the flag made CI pass while the deploy failed on an
+      # unresolvable peer range — which is exactly what happened on the zod 4
+      # upgrade. CI has to reproduce the deploy's install or it is not a gate.
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci
 
       - name: Generate Prisma client
         run: npm run db:generate
