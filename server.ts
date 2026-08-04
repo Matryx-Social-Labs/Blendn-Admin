@@ -2,6 +2,7 @@ import { createServer } from "http"
 import next from "next"
 import { initSocketServer } from "./lib/socket-server"
 import { ensureBucketExists } from "./lib/tigris"
+import { validateEnv } from "./lib/env"
 
 // Environment configuration
 const dev = process.env.NODE_ENV !== "production"
@@ -14,15 +15,16 @@ console.log(`[${new Date().toISOString()}] > NODE_ENV: ${process.env.NODE_ENV}`)
 console.log(`[${new Date().toISOString()}] > PORT: ${port}`)
 console.log(`[${new Date().toISOString()}] > HOSTNAME: ${hostname}`)
 
-// Validate critical environment variables in production
+// Validate critical environment variables in production (presence AND shape,
+// e.g. secrets must meet their minimum length - not just "is set")
 if (!dev) {
-  const required = ["DATABASE_URL", "NEXTAUTH_SECRET", "MOBILE_JWT_SECRET"]
-  const missing = required.filter((key) => !process.env[key])
-  if (missing.length > 0) {
-    console.error(`[${new Date().toISOString()}] ❌ Missing required environment variables: ${missing.join(", ")}`)
+  try {
+    validateEnv()
+    console.log(`[${new Date().toISOString()}] > All required environment variables present and valid`)
+  } catch {
+    console.error(`[${new Date().toISOString()}] ❌ Environment validation failed, see errors above`)
     process.exit(1)
   }
-  console.log(`[${new Date().toISOString()}] > All required environment variables present`)
 }
 
 // Create Next.js app

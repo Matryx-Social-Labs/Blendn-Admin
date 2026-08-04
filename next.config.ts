@@ -43,24 +43,10 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      {
-        // CORS headers for mobile API
-        source: "/api/mobile/:path*",
-        headers: [
-          {
-            key: "Access-Control-Allow-Origin",
-            value: "*",
-          },
-          {
-            key: "Access-Control-Allow-Methods",
-            value: "GET, POST, PUT, DELETE, OPTIONS",
-          },
-          {
-            key: "Access-Control-Allow-Headers",
-            value: "Content-Type, Authorization",
-          },
-        ],
-      },
+      // CORS for /api/mobile/* is handled per-request in middleware.ts
+      // (origin allow-list). Do not add a static wildcard CORS block here -
+      // it would apply to every request regardless of origin and override
+      // the allow-list logic.
     ];
   },
 

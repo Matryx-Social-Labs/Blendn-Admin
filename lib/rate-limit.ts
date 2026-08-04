@@ -102,7 +102,7 @@ export function createBatchRateLimit(): RateLimitConfig {
  * Create a rate limit configuration for auth endpoints
  */
 export function createAuthRateLimit(
-  type: "signin" | "signup" | "google" | "apple" | "refresh"
+  type: "signin" | "signup" | "google" | "apple" | "refresh" | "dashboard-signin"
 ): RateLimitConfig {
   const configs: Record<string, RateLimitConfig> = {
     signin: {
@@ -154,6 +154,16 @@ export function createAuthRateLimit(
                    req.headers.get("x-real-ip") ||
                    "unknown"
         return `auth:refresh:${ip}`
+      },
+    },
+    "dashboard-signin": {
+      windowMs: RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN,
+      keyGenerator: (req) => {
+        const ip = req.headers.get("x-forwarded-for") ||
+                   req.headers.get("x-real-ip") ||
+                   "unknown"
+        return `auth:dashboard-signin:${ip}`
       },
     },
   }

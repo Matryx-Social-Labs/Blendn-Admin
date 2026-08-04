@@ -129,8 +129,17 @@ export async function verifyRefreshToken(
       return null
     }
 
-    // Check if token is revoked
+    // A revoked token being presented again means it was already rotated
+    // out (or explicitly revoked) and is now being replayed - the classic
+    // signal that this refresh token was stolen. Kill the whole token
+    // family so both the attacker and the legitimate holder of the current
+    // token are forced to re-authenticate, rather than just rejecting this
+    // one request.
     if (storedToken.revoked_at) {
+      console.error(
+        `Refresh token reuse detected for user ${storedToken.user_id} (token ${storedToken.id}); revoking all refresh tokens`
+      )
+      await revokeUserRefreshTokens(storedToken.user_id)
       return null
     }
 

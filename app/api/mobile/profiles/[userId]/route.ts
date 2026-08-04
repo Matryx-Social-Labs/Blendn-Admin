@@ -44,16 +44,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
+    const isSelf = authUser.userId === userId
+
+    // Email and phone are only for the profile owner -- everyone else gets
+    // the same public-safe shape as /api/mobile/users/[userId].
+    const { phone: _phone, ...publicProfileFields } = user.profile ?? {}
 
     return successResponse({
       id: user.id,
-      email: user.email,
+      email: isSelf ? user.email : undefined,
       name: user.name,
       image: user.image,
       createdAt: user.createdAt,
       profile: user.profile
         ? {
-            ...user.profile,
+            ...(isSelf ? user.profile : publicProfileFields),
             location: normalizedLocation,
           }
         : null,

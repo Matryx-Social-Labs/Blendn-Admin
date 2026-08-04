@@ -6,6 +6,13 @@ import { db } from "./db"
 // Socket.io server instance
 let io: Server | null = null
 
+// Kept in sync with ALLOWED_ORIGINS in middleware.ts
+const ALLOWED_ORIGINS = [
+  "https://api.blendn.app",
+  "https://blendn.app",
+  process.env.NEXTAUTH_URL,
+].filter(Boolean) as string[]
+
 // Room types for organizing subscriptions
 export type RoomType = "event" | "chat" | "user"
 
@@ -243,7 +250,17 @@ export const sponsoredMessageScheduler = new SponsoredMessageScheduler()
 export function initSocketServer(httpServer: HttpServer): Server {
   io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {
-      origin: "*", // In production, restrict this to your mobile app domain
+      // Native mobile clients (Expo/React Native WebSocket) don't send an Origin
+      // header, so `origin` is undefined for them and always allowed. Browser
+      // clients (e.g. the admin dashboard) are restricted to the same allow-list
+      // middleware.ts uses for HTTP CORS.
+      origin: (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          callback(null, true)
+        } else {
+          callback(new Error("Not allowed by CORS"))
+        }
+      },
       methods: ["GET", "POST"],
     },
     pingTimeout: 60000,
@@ -287,7 +304,27 @@ export function initSocketServer(httpServer: HttpServer): Server {
     authSocket.join(`user:${authSocket.data.userId}`)
 
     // Event room handlers
-    authSocket.on("join:event", (eventId) => {
+    authSocket.on("join:event", async (eventId) => {
+      const event = await db.events.findUnique({
+        where: { id: eventId },
+        select: { visibility: true, organizer_id: true },
+      })
+
+      if (!event) {
+        authSocket.emit("error", { message: "Event not found", code: "NOT_FOUND" })
+        return
+      }
+
+      if (event.visibility === "private" && event.organizer_id !== authSocket.data.userId) {
+        const hasAccess = await db.event_rsvps.findUnique({
+          where: { event_id_user_id: { event_id: eventId, user_id: authSocket.data.userId } },
+        })
+        if (!hasAccess) {
+          authSocket.emit("error", { message: "Not authorized to join this event", code: "FORBIDDEN" })
+          return
+        }
+      }
+
       const room = `event:${eventId}`
       authSocket.join(room)
       console.log(`User ${authSocket.data.userId} joined ${room}`)
@@ -300,7 +337,22 @@ export function initSocketServer(httpServer: HttpServer): Server {
     })
 
     // Chat room handlers
-    authSocket.on("join:chat", (chatGroupId) => {
+    authSocket.on("join:chat", async (chatGroupId) => {
+      const membership = await db.chat_group_members.findUnique({
+        where: {
+          chat_group_id_user_id: {
+            chat_group_id: chatGroupId,
+            user_id: authSocket.data.userId,
+          },
+        },
+        select: { status: true },
+      })
+
+      if (!membership || membership.status === "banned") {
+        authSocket.emit("error", { message: "Not authorized to join this chat", code: "FORBIDDEN" })
+        return
+      }
+
       const room = `chat:${chatGroupId}`
       authSocket.join(room)
       console.log(`User ${authSocket.data.userId} joined ${room}`)
@@ -350,7 +402,20 @@ export function initSocketServer(httpServer: HttpServer): Server {
     })
 
     // Private conversation room handlers
-    authSocket.on("join:conversation", (conversationId) => {
+    authSocket.on("join:conversation", async (conversationId) => {
+      const conversation = await db.private_conversations.findUnique({
+        where: { id: conversationId },
+        select: { user1_id: true, user2_id: true },
+      })
+
+      if (
+        !conversation ||
+        (conversation.user1_id !== authSocket.data.userId && conversation.user2_id !== authSocket.data.userId)
+      ) {
+        authSocket.emit("error", { message: "Not authorized to join this conversation", code: "FORBIDDEN" })
+        return
+      }
+
       const room = `conversation:${conversationId}`
       authSocket.join(room)
       console.log(`User ${authSocket.data.userId} joined ${room}`)

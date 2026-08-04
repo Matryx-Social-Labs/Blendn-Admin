@@ -8,6 +8,7 @@ export const RATE_LIMIT_WINDOW = {
   REFRESH: 15 * 60 * 1000, // 15 minutes
   BATCH: 60 * 1000, // 1 minute
   CHECKIN: 10 * 60 * 1000, // 10 minutes
+  DASHBOARD_SIGNIN: 15 * 60 * 1000, // 15 minutes
 } as const
 
 export const RATE_LIMIT_MAX_REQUESTS = {
@@ -17,6 +18,7 @@ export const RATE_LIMIT_MAX_REQUESTS = {
   REFRESH: 20,
   BATCH: 30,
   CHECKIN: 10,
+  DASHBOARD_SIGNIN: 5,
 } as const
 
 // ── Caching ───────────────────────────────────────────
