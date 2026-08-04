@@ -59,5 +59,11 @@ jobs:
       - name: Test
         run: npm test -- --ci
 
+      # Runs against the postgres service above, which already has the schema
+      # pushed. The unit suite mocks @/lib/db everywhere, so without this a
+      # Prisma upgrade could break every query and CI would stay green.
+      - name: Integration tests
+        run: npm run test:integration -- --ci
+
       - name: Build
         run: npm run build
