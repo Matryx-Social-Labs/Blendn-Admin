@@ -5,7 +5,29 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.4] - 2026-08-04
+## [0.1.5] - 2026-08-04
+
+### Fixed
+
+- Setting up a new environment from the deployment docs silently disabled file
+  uploads. The docs and the validation schema both named the storage variables
+  `AWS_*`, but the code reads `TIGRIS_*`, so uploads returned 503 with nothing
+  explaining why. All three now agree.
+
+### Added
+
+- `.env.example` documenting every variable the code reads, including the two
+  that fail quietly: without `OPENAI_API_KEY` moderation drops to keyword
+  matching, and without `TIGRIS_*` uploads are off.
+- Error reports are scrubbed before leaving the server. Emails, tokens, upload
+  signatures, cookies, and request bodies are removed, and the reporting user is
+  reduced to an id. Expected errors — navigation aborts, offline requests,
+  expired sessions — no longer report at all.
+- A build-time warning when `SENTRY_AUTH_TOKEN` is missing in a production
+  build, which otherwise succeeds and ships unreadable stack traces.
+- A real README, replacing the create-next-app boilerplate.
+
+
 
 ### Changed
 
