@@ -1,4 +1,9 @@
-import { db } from "@/lib/db"
+// Relative, not "@/lib/db". `build:server` compiles this with plain tsc,
+// which resolves the @/ alias for typechecking and then emits it verbatim into
+// the require() — so the build goes green and the container dies on boot with
+// MODULE_NOT_FOUND. Everything reachable from server.ts must use relative
+// paths.
+import { db } from "./db"
 
 import type { LiveSnapshot } from "./live-metrics"
 

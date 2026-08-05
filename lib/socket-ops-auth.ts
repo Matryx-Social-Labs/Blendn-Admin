@@ -1,9 +1,14 @@
 import { decode } from "next-auth/jwt"
 import type { user_role } from "@prisma/client"
 
-import { db } from "@/lib/db"
-import { logger } from "@/lib/logger"
-import { eventPermissions } from "@/lib/rbac"
+// Relative, not "@/lib/db". `build:server` compiles this with plain tsc,
+// which resolves the @/ alias for typechecking and then emits it verbatim into
+// the require() — so the build goes green and the container dies on boot with
+// MODULE_NOT_FOUND. Everything reachable from server.ts must use relative
+// paths.
+import { db } from "./db"
+import { logger } from "./logger"
+import { eventPermissions } from "./rbac"
 
 /**
  * Dashboard authentication for Socket.io.
