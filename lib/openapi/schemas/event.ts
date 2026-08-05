@@ -15,6 +15,13 @@ export const EventQuerySchema = z
     categorySlug: z.string().optional(),
     startDate: z.string().datetime().optional(),
     endDate: z.string().datetime().optional(),
+    includePast: z
+      .boolean()
+      .default(false)
+      .openapi({
+        description:
+          "Include events that have already ended. Off by default — discovery only returns events you can still go to. Set true for history screens.",
+      }),
     status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
     sortBy: z.enum(["start_time", "created_at", "distance"]).default("start_time"),
     sortOrder: z.enum(["asc", "desc"]).default("asc"),
@@ -71,7 +78,8 @@ const OrganizerSchema = z.object({
   id: z.string(),
   name: z.string(),
   image: z.string().nullable(),
-  email: z.string().optional(),
+  // No email. A host's public identity is their name and picture; the address
+  // was returned by the detail endpoint only, and is no longer sent.
 })
 
 const EventCategorySchema = z.object({

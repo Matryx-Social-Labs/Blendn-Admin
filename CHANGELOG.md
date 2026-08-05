@@ -5,6 +5,38 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-05
+
+### Changed
+
+- **Chatrooms close themselves.** The archive job needed an external cron nobody
+  had scheduled. It now runs inside the server process — once on boot, then
+  every 15 minutes — beside the existing sponsored-message scheduler.
+
+  Deliberately a periodic sweep rather than a timer per event. The write gate
+  already refuses posts to an expired room on the strength of the event's own
+  `end_time`, so this job never was what stops anyone typing; it tidies state.
+  Lateness is therefore unobservable, and per-event timers would buy that
+  invisible precision at the cost of four kinds of bookkeeping — reschedule on
+  edit, cancel on delete, rehydrate on boot, dedupe across replicas.
+
+  `/api/cron/archive-chats` remains as a manual trigger and calls the same
+  function, so there is one implementation rather than two that can drift.
+
+### Added
+
+- `includePast` documented on the events list, and the organiser schema no
+  longer advertises an email — both drifted when the behaviour changed in
+  v0.13.0.
+- Spec entries for five previously **undocumented** mobile endpoints: Apple
+  sign-in, report a message, report a user, list blocked users, and delete your
+  own account. Three of those are the safety surface, which is the last thing a
+  client developer should have to reverse-engineer from source.
+- `__tests__/openapi-coverage.test.ts` asserts spec ↔ route agreement in both
+  directions. It found those five. It cannot prove response *shapes* match —
+  that needs contract tests against real handlers — so a green run means the
+  spec and the routes describe the same set of endpoints, nothing stronger.
+
 ## [0.13.0] - 2026-08-05
 
 ### Fixed
