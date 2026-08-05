@@ -3,14 +3,21 @@ import { EventEditor } from "@/components/event-editor"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { eventPermissions } from "@/lib/rbac"
+import { LiveTab } from "@/components/dashboard/live-tab"
+import { EventTabs, eventTabsFor, type EventTabKey } from "./event-tabs"
+
+/** Hours the chatroom stays open after an event for feedback. Matches the
+ *  auto-archive window in the mobile chat list. */
+const FEEDBACK_WINDOW_HOURS = 24
 
 interface EventPageProps {
   params: Promise<{
     id: string
   }>
+  searchParams: Promise<{ tab?: string }>
 }
 
-export default async function EditEventPage({ params }: EventPageProps) {
+export default async function EventDetailPage({ params, searchParams }: EventPageProps) {
   const session = await getAuth()
   if (!session?.user) {
     redirect("/login")
@@ -63,8 +70,83 @@ export default async function EditEventPage({ params }: EventPageProps) {
     notFound()
   }
 
-  if (!eventPermissions(session.user, event).canEdit) {
+  /*
+   * Gated on operational access, not editorial. A venue owner must be able to
+   * open an event held in their building — its live view, guest list and
+   * chatroom — while the editor stays with whoever runs it. Gating the whole
+   * page on canEdit locked them out of the event entirely.
+   */
+  const permissions = eventPermissions(session.user, event)
+  if (!permissions.canOperate) {
     redirect("/dashboard/events")
+  }
+
+  const { tab: requestedTab } = await searchParams
+  const feedbackWindowOpen =
+    Date.now() < event.end_time.getTime() + FEEDBACK_WINDOW_HOURS * 60 * 60 * 1000
+  const tabs = eventTabsFor(event.start_time.toISOString(), event.end_time.toISOString(), {
+    canOperate: permissions.canOperate,
+    feedbackWindowOpen,
+  })
+  // An unknown or now-closed tab falls back rather than 404ing — the Live tab
+  // legitimately disappears mid-session when an event ends.
+  const activeTab = (tabs.find((t) => t.key === requestedTab)?.key ?? "overview") as EventTabKey
+
+  const header = (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[length:var(--text-h2)] font-bold">{event.title}</h2>
+          <p className="text-[0.8125rem] text-muted-foreground">
+            {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(event.start_time)}
+            {event.venue_name ? ` · ${event.venue_name}` : ""}
+            {event.city ? `, ${event.city}` : ""}
+          </p>
+        </div>
+        {!permissions.canEdit ? (
+          <p className="max-w-sm rounded-lg border border-border bg-card px-3.5 py-2.5 text-[0.78rem] leading-relaxed text-muted-foreground">
+            <b className="font-medium text-foreground">Operational access.</b> You operate this
+            venue, so you get the live view, attendees and the chatroom. Editing, publishing and
+            cancelling belong to whoever runs the event.
+          </p>
+        ) : null}
+      </div>
+      <EventTabs eventId={event.id} active={activeTab} tabs={tabs} />
+    </div>
+  )
+
+  if (activeTab === "live") {
+    return (
+      <div className="flex flex-col gap-5">
+        {header}
+        <LiveTab
+          eventId={event.id}
+          startAt={event.start_time.toISOString()}
+          endAt={event.end_time.toISOString()}
+        />
+      </div>
+    )
+  }
+
+  if (activeTab === "chat" || activeTab === "attendees" || activeTab === "feedback") {
+    // These live on their own routes today. Kept as links rather than
+    // duplicated here so there is one implementation of each, not two.
+    redirect(
+      activeTab === "chat"
+        ? `/dashboard/events/${event.id}/messaging`
+        : `/dashboard/events/${event.id}/messaging?view=${activeTab}`
+    )
+  }
+
+  if (!permissions.canEdit) {
+    return (
+      <div className="flex flex-col gap-5">
+        {header}
+        <p className="text-sm text-muted-foreground">
+          This event is run by someone else. Open Live or Chat to operate the room.
+        </p>
+      </div>
+    )
   }
 
   const categoryIds = event.categories.map((entry) => entry.category.id)

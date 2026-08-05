@@ -5,7 +5,8 @@ import { verifyAccessToken } from "./mobile-auth"
 import { db } from "./db"
 import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
-import { buildLiveSnapshot, type LiveSnapshot } from "./live-metrics"
+import { buildLiveSnapshot } from "./live-snapshot"
+import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
 // Socket.io server instance

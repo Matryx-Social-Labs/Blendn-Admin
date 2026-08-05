@@ -5,6 +5,42 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-05
+
+### Added
+
+- **Live tab on event detail.** The dashboard was blind to an event while it was
+  happening — everything was either forward-looking pacing or a next-day
+  digest. Shows who is inside against capacity, arrival rate against this
+  event's own median, check-outs, chat pace, active chatters, open flags, the
+  rolling mood split, and complaints by category. Updates over the socket
+  channel; pre-event, live and post-event states are all designed.
+- Alerts rendered from the same aggregates, with an explicit resting state
+  saying that alerts combine chat and check-in signal rather than leaving a
+  blank panel.
+- `ArrivalCurve` and `CategoryBars` charts.
+
+### Changed
+
+- **Event detail is a tab host, gated on operational access rather than
+  editing.** A venue owner can now open an event held in their building — its
+  live view, guest list and chatroom — with the editor reserved for whoever
+  runs it, and a note saying so rather than a silently missing button.
+- Tabs are lifecycle-aware: Live only while the event runs, Feedback only after
+  it ends and while the chat window is open. A tab that is permanently empty
+  teaches people to stop clicking tabs.
+- **Chatrooms is a triage list.** It listed live events only, so a room full of
+  post-event feedback — the entire point of the feedback window — was
+  unreachable unless you already knew the event. It now covers any room whose
+  chat is open, live or in its feedback window.
+
+### Fixed
+
+- The Live tab was offered to users without operational access. Live data is
+  attendance and chat, not a public summary, and the socket room behind it
+  gates on exactly that permission — a tab list offering something the server
+  will deny is its own bug. Caught by a test before it shipped.
+
 ## [0.11.0] - 2026-08-05
 
 ### Added
