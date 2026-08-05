@@ -44,7 +44,7 @@ export default function Home() {
     <main className="relative min-h-screen overflow-hidden px-6 py-6 md:px-10">
       <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] max-w-7xl flex-col rounded-xl border border-border bg-card">
         <header className="flex flex-col gap-5 border-b border-border px-6 py-6 md:flex-row md:items-center md:justify-between md:px-8">
-          <BrandLogo showTagline />
+          <BrandLogo size="hero" />
           <div className="flex flex-wrap items-center gap-3">
             <Badge variant="secondary" className="rounded-full px-3 py-1 font-medium">
               Role-based reporting

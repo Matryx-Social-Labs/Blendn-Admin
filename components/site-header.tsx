@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { usePathname } from "next/navigation"
 import { useSession } from "next-auth/react"
 
-import { BrandLogo } from "@/components/brand-logo"
+import { NavUser } from "@/components/nav-user"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 
@@ -102,8 +102,19 @@ export function SiteHeader() {
           <div className="rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
             {today}
           </div>
-          <BrandLogo size="header" className="hidden xl:flex shrink-0" />
         </div>
+
+        {/* Account and sign-out live top-right, as the design places them. The
+            sidebar footer previously carried this, which put the way *out* of
+            the product at the far end of the way *around* it. */}
+        <NavUser
+          user={{
+            name: session?.user?.name ?? "Blend'n",
+            email: session?.user?.email ?? "",
+            avatar: session?.user?.image ?? "",
+            role: session?.user?.role,
+          }}
+        />
       </div>
     </header>
   )
