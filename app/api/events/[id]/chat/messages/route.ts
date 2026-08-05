@@ -25,6 +25,23 @@ export async function GET(_: Request, { params }: RouteContext) {
     }
     if (!event.chat_group) return NextResponse.json({ messages: [] })
 
+    /*
+     * Attendees are pseudonymous in event chat: they get an `anonymous_name` on
+     * check-in and every mobile surface shows that instead of who they are. The
+     * point is honest feedback — an attendee who knows the organiser can see
+     * their name does not say the venue was filthy.
+     *
+     * The dashboard UI already rendered only the pseudonym, but this route was
+     * shipping `name` and `email` in the JSON regardless, so any host could read
+     * the real identity of every "anonymous" attendee out of the network tab.
+     * The anonymity was cosmetic.
+     *
+     * Real identity is now admin-only. Hosts get the user id (needed to ban or
+     * mute through /chat/members/[userId]) and nothing that names a person.
+     */
+    // Shaping pinned by __tests__/chat-identity.test.ts — keep them in step.
+    const isPlatformAdmin = session.user.role === "app_admin"
+
     const messages = await db.chat_messages.findMany({
       where: { chat_group_id: event.chat_group.id, deleted_at: null },
       orderBy: { created_at: "desc" },
@@ -113,10 +130,12 @@ export async function GET(_: Request, { params }: RouteContext) {
         createdAt: m.created_at.toISOString(),
         user: {
           id: m.user.id,
-          name: m.user.name,
-          email: m.user.email,
-          image: m.user.image,
           anonymousName: memberMap.get(m.user.id)?.anonymous_name ?? null,
+          // Admin-only. Absent, not null, for hosts — so a client that reads
+          // `user.name` gets undefined rather than a convincing blank.
+          ...(isPlatformAdmin
+            ? { name: m.user.name, email: m.user.email, image: m.user.image }
+            : {}),
         },
       })),
       members: members.map((m) => ({

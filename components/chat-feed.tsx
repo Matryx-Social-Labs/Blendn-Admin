@@ -26,10 +26,17 @@ interface ChatMessage {
   createdAt: string
   user: {
     id: string
-    name: string | null
-    email: string
-    image: string | null
     anonymousName: string | null
+    /*
+     * Present only for app_admin — the API omits real identity for organisers
+     * and venue owners so event chat stays genuinely pseudonymous. Optional
+     * here rather than `string | null` so that rendering `user.name` without
+     * checking the role fails to typecheck instead of silently showing a blank
+     * to hosts and the real name to admins.
+     */
+    name?: string | null
+    email?: string
+    image?: string | null
   }
 }
 
