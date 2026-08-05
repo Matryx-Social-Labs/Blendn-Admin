@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 import { sponsoredMessageScheduler } from "@/lib/socket-server"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
 
@@ -19,10 +20,10 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId },
-      select: { organizer_id: true, venue: { select: { owner_id: true } }, chat_group: { select: { id: true } } },
+      select: { organizer_id: true, organizer_org_id: true, venue: { select: { owner_org_id: true } }, chat_group: { select: { id: true } } },
     })
     if (!event) return new NextResponse("Not found", { status: 404 })
-    if (!eventPermissions(session.user, event).canEdit) {
+    if (!eventPermissions(await actorFor(session.user), event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
@@ -82,10 +83,10 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId },
-      select: { organizer_id: true, venue: { select: { owner_id: true } } },
+      select: { organizer_id: true, organizer_org_id: true, venue: { select: { owner_org_id: true } } },
     })
     if (!event) return new NextResponse("Not found", { status: 404 })
-    if (!eventPermissions(session.user, event).canEdit) {
+    if (!eventPermissions(await actorFor(session.user), event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 

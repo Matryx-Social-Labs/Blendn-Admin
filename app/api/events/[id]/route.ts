@@ -4,6 +4,7 @@ import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
 
 const parseJsonField = (value: unknown) => {
@@ -99,14 +100,14 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       },
       // eventPermissions needs the venue owner: an event at a claimed venue
       // grants that owner operational access even though they cannot edit it.
-      include: { venue: { select: { owner_id: true } } },
+      include: { venue: { select: { owner_org_id: true } } },
     })
 
     if (!event) {
       return new NextResponse("Event not found", { status: 404 })
     }
 
-    if (!eventPermissions(session.user, event).canEdit) {
+    if (!eventPermissions(await actorFor(session.user), event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
@@ -252,14 +253,14 @@ export async function DELETE(_: Request, { params }: RouteContext) {
       },
       // eventPermissions needs the venue owner: an event at a claimed venue
       // grants that owner operational access even though they cannot edit it.
-      include: { venue: { select: { owner_id: true } } },
+      include: { venue: { select: { owner_org_id: true } } },
     })
 
     if (!event) {
       return new NextResponse("Event not found", { status: 404 })
     }
 
-    if (!eventPermissions(session.user, event).canEdit) {
+    if (!eventPermissions(await actorFor(session.user), event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 

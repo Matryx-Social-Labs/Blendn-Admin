@@ -19,16 +19,19 @@ export function canSendPushNotifications(role: user_role): boolean {
 export interface PermissionActor {
   id: string
   role: user_role
+  /** Organisations this actor is a member of. Empty denies everything. */
+  orgIds?: string[]
 }
 
 /**
- * The two axes that decide access. `venue` is null when the event has no linked
- * venue, which is the common case — most events happen at places that are not
- * on the platform and carry only a free-text location.
+ * The two axes that decide access, now expressed as organisations.
+ *
+ * `venue` is null when the event has no linked venue, which remains the common
+ * case — most events are at places not on the platform.
  */
 export interface PermissionEvent {
-  organizer_id: string
-  venue: { owner_id: string | null } | null
+  organizer_org_id: string | null
+  venue: { owner_org_id: string | null } | null
 }
 
 export interface EventPermissions {
@@ -37,10 +40,8 @@ export interface EventPermissions {
   /**
    * Chat, moderation, the attendee list. What happens in your building.
    *
-   * Deliberately one flag rather than three. The model defines the operational
-   * bucket as a single thing — "the chatroom, moderation, who is walking in" —
-   * and three fields that are always equal are noise, not flexibility. Split it
-   * when a policy actually distinguishes them.
+   * One flag, not three: the model defines the operational bucket as a single
+   * thing, and three fields that are always equal are noise.
    */
   canOperate: boolean
 }
@@ -50,27 +51,20 @@ const DENIED: EventPermissions = { canEdit: false, canOperate: false }
 /**
  * Resolve what an actor may do with one event.
  *
- * Authorization used to be role-shaped and self-contradictory: `canManageEvent`
- * denied `venue_owner` unconditionally — so a venue owner could not manage even
- * their own event — while `canModerateChat` allowed them. A venue owner could
- * open the Chatrooms list and get bounced out of every room in it.
+ * Authorization is organisation-shaped. Two axes:
  *
- * It is now relationship-shaped. Two axes:
+ *     event.organizer_org_id     which company RUNS it
+ *     event.venue.owner_org_id   whose building it is IN
  *
- *     event.organizer_id     who RUNS it
- *     event.venue.owner_id   whose building it is IN
+ *     | actor       | condition                          | edit | operate |
+ *     | app_admin   | always                             | yes  | yes     |
+ *     | host        | member of the organising org       | yes  | yes     |
+ *     | venue owner | member of the venue's owning org   | no   | yes     |
  *
- * and two buckets:
- *
- *     | actor       | condition                 | edit | operate |
- *     | app_admin   | always                    | yes  | yes     |
- *     | organiser   | event.organizer_id = me   | yes  | yes     |
- *     | venue owner | event.venue.owner_id = me | no   | yes     |
- *     | venue owner | event.organizer_id = me   | yes  | yes     |
- *
- * The venue-owner row is the point: you control what happens in your room —
- * chat, moderation, the guest list — but the event is not yours to change.
- * Host it yourself and you are the organiser, so you get both.
+ * Membership rather than identity is the point: a colleague who did not create
+ * the event gets the same access, and the venue survives one person leaving.
+ * `events.organizer_id` still records *who created it*, which is a different
+ * question and stays useful for audit.
  *
  * Pinned by __tests__/event-permissions.test.ts, which asserts every row.
  */
@@ -78,32 +72,36 @@ export function eventPermissions(
   actor: PermissionActor,
   event: PermissionEvent
 ): EventPermissions {
-  // Fails closed on a half-built actor. Without this an empty id could match an
-  // unclaimed venue's null owner in the comparison further down.
+  // Fails closed on a half-built actor.
   if (!actor?.id) return DENIED
 
   if (actor.role === "app_admin") return { canEdit: true, canOperate: true }
-
   if (actor.role !== "organizer" && actor.role !== "venue_owner") return DENIED
 
-  // Whoever runs it gets both, whichever host role they hold.
-  if (event.organizer_id === actor.id) return { canEdit: true, canOperate: true }
+  // Empty ids are filtered so a blank membership cannot match a null owner —
+  // the null-equals-null hole, in its organisation form.
+  const orgs = new Set((actor.orgIds ?? []).filter(Boolean))
+  if (orgs.size === 0) return DENIED
 
-  // Operational only, and only for a venue that is actually claimed by them.
+  // Whichever org runs it gets both, whatever host role its members hold.
+  if (event.organizer_org_id && orgs.has(event.organizer_org_id)) {
+    return { canEdit: true, canOperate: true }
+  }
+
   const ownsVenue =
     actor.role === "venue_owner" &&
-    event.venue?.owner_id != null &&
-    event.venue.owner_id === actor.id
+    event.venue?.owner_org_id != null &&
+    orgs.has(event.venue.owner_org_id)
 
   return ownsVenue ? { canEdit: false, canOperate: true } : DENIED
 }
 
 /**
- * `select` fragment for loading an event with everything `eventPermissions`
- * needs. Exported so the ~17 call sites cannot drift into fetching a shape the
- * resolver silently reads as "no linked venue".
+ * `select` fragment for loading an event with everything the resolver needs.
+ * Exported so call sites cannot drift into fetching a shape it silently reads
+ * as "no organiser, no venue".
  */
 export const eventPermissionSelect = {
-  organizer_id: true,
-  venue: { select: { owner_id: true } },
+  organizer_org_id: true,
+  venue: { select: { owner_org_id: true } },
 } as const
