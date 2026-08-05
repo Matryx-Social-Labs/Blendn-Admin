@@ -1,4 +1,11 @@
 import { logger } from "./logger"
+import {
+  approvedHtml,
+  declinedHtml,
+  domainVerifyHtml,
+  inviteHtml,
+  onboardingVerifyHtml,
+} from "./email-html"
 
 /**
  * Transactional email.
@@ -90,13 +97,20 @@ export async function sendEmail(opts: {
 /* -------------------------------------------------------------------------- */
 
 /*
- * Plain text, deliberately. These are short operational mails carrying one
- * link; an HTML template would be more to maintain and more to render wrong in
- * Outlook, for no gain.
+ * Each returns `subject`, `text` and `html`.
+ *
+ * Both parts are sent, not one or the other: Resend delivers them as multipart
+ * and the client picks. The plain text is not a formality — it is what a
+ * text-only client, a screen reader in plain mode, and a spam filter comparing
+ * parts all read, and an HTML-only email scores worse for deliverability.
+ *
+ * The HTML lives in ./email-html.ts, which is table-layout and inline CSS
+ * because Outlook renders with Word.
  */
 
-export function onboardingVerifyEmail(name: string, link: string) {
+export function onboardingVerifyEmail(name: string, link: string, orgName = "your organisation") {
   return {
+    html: onboardingVerifyHtml(name, orgName, link),
     subject: "Confirm your email — Blend'n host application",
     text: [
       `Hi ${name},`,
@@ -111,8 +125,14 @@ export function onboardingVerifyEmail(name: string, link: string) {
   }
 }
 
-export function inviteEmail(orgName: string, inviterName: string, link: string) {
+export function inviteEmail(
+  orgName: string,
+  inviterName: string,
+  link: string,
+  roleLabel = "a member"
+) {
   return {
+    html: inviteHtml(orgName, inviterName, link, roleLabel),
     subject: `${inviterName} invited you to ${orgName} on Blend'n`,
     text: [
       `${inviterName} has invited you to join ${orgName} on Blend'n.`,
@@ -128,6 +148,7 @@ export function inviteEmail(orgName: string, inviterName: string, link: string) 
 
 export function approvedEmail(name: string, orgName: string, email: string, password: string) {
   return {
+    html: approvedHtml(name, orgName, email, password),
     subject: "Your Blend'n host account is ready",
     text: [
       `Hi ${name},`,
@@ -145,6 +166,7 @@ export function approvedEmail(name: string, orgName: string, email: string, pass
 
 export function declinedEmail(name: string, reason: string) {
   return {
+    html: declinedHtml(name, reason),
     subject: "About your Blend'n host application",
     text: [
       `Hi ${name},`,
@@ -160,6 +182,7 @@ export function declinedEmail(name: string, reason: string) {
 
 export function domainVerifyEmail(domain: string, link: string) {
   return {
+    html: domainVerifyHtml(domain, link),
     subject: `Verify ${domain} for Blend'n`,
     text: [
       `Someone has asked to verify ${domain} for an organisation on Blend'n.`,

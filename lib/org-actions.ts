@@ -207,6 +207,13 @@ export async function getOrgMembers(orgId: string): Promise<{
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+/** What the invitee is told they are being invited as. */
+const ROLE_LABELS: Record<org_role, string> = {
+  owner: "an owner",
+  admin: "an admin",
+  staff: "staff",
+}
+
 export interface InviteResult {
   ok: boolean
   /** Set when the address is outside a verified domain and no reason was given. */
@@ -297,7 +304,7 @@ export async function inviteMember(
   if (emailConfigured()) {
     const result = await sendEmail({
       to: target,
-      ...inviteEmail(org.display_name, user.name ?? "A colleague", link),
+      ...inviteEmail(org.display_name, user.name ?? "A colleague", link, ROLE_LABELS[role]),
     })
     sent = result.sent
     if (!result.sent) logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })

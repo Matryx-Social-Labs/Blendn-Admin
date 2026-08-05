@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
         // as unconfirmed. Better than parking it in a state nothing can leave.
         status: emailConfigured() ? "email_pending" : "pending",
       },
-      select: { id: true, contact_name: true },
+      select: { id: true, contact_name: true, display_name: true },
     })
 
     let emailSent = false
@@ -156,7 +156,7 @@ export async function POST(req: NextRequest) {
       const link = `${appUrl()}/apply/verify?token=${encodeURIComponent(token)}`
       const result = await sendEmail({
         to: input.contact_email,
-        ...onboardingVerifyEmail(request.contact_name, link),
+        ...onboardingVerifyEmail(request.contact_name, link, request.display_name),
       })
       emailSent = result.sent
       if (!result.sent) {
