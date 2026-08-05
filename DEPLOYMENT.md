@@ -113,7 +113,7 @@ blendn.app          A        <landing-page-ip>
 | `TIGRIS_REGION` | No | Bucket region (default: auto) |
 | `OPENAI_API_KEY` | No | AI moderation. Without it, moderation falls back to keyword matching only |
 | `RESEND_API_KEY` | No | Transactional email. Without it onboarding and invites still work, but nothing is sent — the dashboard shows the link/password to pass on by hand |
-| `EMAIL_FROM` | No | Sender address, e.g. `Blendn <hello@blendn.app>`. Required alongside `RESEND_API_KEY`; email is off unless both are set |
+| `EMAIL_FROM` | No | Sender, `"Blend'n" <hello@blendn.app>`. Quote the display name — the apostrophe is legal unquoted per RFC 5322 but quoting is free. Required alongside `RESEND_API_KEY`; email is off unless both are set |
 | `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |
