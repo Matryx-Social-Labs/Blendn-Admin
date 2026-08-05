@@ -92,7 +92,7 @@ export default function LoginPage() {
         <section className="flex flex-col justify-between border-b border-border px-6 py-8 lg:border-b-0 lg:border-r lg:px-10 lg:py-10">
           <div className="space-y-8">
             <div className="flex items-start justify-between gap-4">
-              <BrandLogo showTagline />
+              <BrandLogo size="hero" />
               <Badge variant="secondary" className="rounded-full px-3 py-1 font-medium">
                 Workspace access
               </Badge>

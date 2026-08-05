@@ -76,7 +76,7 @@ describe("visibleNavFor", () => {
       "Chatrooms",
       "Users",
       "Organisers",
-      "Venue owners",
+      "Venues",
     ])
   })
 
@@ -91,14 +91,15 @@ describe("visibleNavFor", () => {
     for (const role of ["organizer", "venue_owner"]) {
       expect(titles(role)).not.toContain("Users")
       expect(titles(role)).not.toContain("Organisers")
-      expect(titles(role)).not.toContain("Venue owners")
+      expect(titles(role)).not.toContain("Venues")
       expect(titles(role)).not.toContain("Moderation")
     }
   })
 
   it("shows Chatrooms to venue owners", () => {
-    // lib/rbac.ts `canModerateChat` grants venue_owner moderation over its own
-    // events and the messaging page gates on `canManageEvent`, which agrees.
+    // `eventPermissions` grants venue owners the operational bucket for events
+    // at a venue they own, and every screen behind this item gates on that same
+    // resolver — so the nav and the pages cannot disagree.
     expect(titles("venue_owner")).toContain("Chatrooms")
   })
 

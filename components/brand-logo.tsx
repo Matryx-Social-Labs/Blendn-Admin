@@ -2,82 +2,60 @@ import Image from "next/image"
 
 import { cn } from "@/lib/utils"
 
-type BrandLogoSize = "hero" | "sidebar" | "header"
-
-interface BrandLogoProps {
-  compact?: boolean
-  size?: BrandLogoSize
-  showTagline?: boolean
-  className?: string
-}
-
-const sizeConfig: Record<
-  BrandLogoSize,
-  {
-    imageWidth: number
-    imageHeight: number
-    containerPadding: string
-    gap: string
-  }
-> = {
-  hero: {
-    imageWidth: 156,
-    imageHeight: 44,
-    containerPadding: "px-4 py-2",
-    gap: "gap-3",
-  },
-  sidebar: {
-    imageWidth: 112,
-    imageHeight: 32,
-    containerPadding: "px-3.5 py-2",
-    gap: "gap-3",
-  },
-  header: {
-    imageWidth: 88,
-    imageHeight: 25,
-    containerPadding: "px-3 py-1.5",
-    gap: "gap-2.5",
-  },
-}
+/**
+ * The brand mark, placed as the design places it.
+ *
+ * The design uses the monogram at a fixed square size next to the word
+ * "Blend'n" set in the UI font at 700 — not an image of the full lockup inside
+ * a rounded white plate, which is what this component used to render. That
+ * plate existed to stop a non-transparent PNG showing a white box on a dark
+ * background; the assets are transparent now, so the plate is not needed and
+ * its rounded pill was reading as a button.
+ *
+ * Setting the wordmark as text rather than shipping it as an image also means
+ * it inherits Satoshi, sits on the same baseline grid as everything else, and
+ * stays crisp at any zoom.
+ *
+ * The guideline's 35px minimum height applies to the *logo lockup* as an
+ * artwork; the monogram alone in UI chrome is a different case, and the design
+ * uses 30px in the sidebar and 26px in the mobile header.
+ */
+const SIZES = {
+  /** Sidebar header. */
+  sidebar: { mark: 30, text: "text-base" },
+  /** Compact chrome — mobile header. */
+  header: { mark: 26, text: "text-[0.9375rem]" },
+  /** Login and other full-page contexts. */
+  hero: { mark: 44, text: "text-2xl" },
+} as const
 
 export function BrandLogo({
-  compact = false,
-  size,
-  showTagline = false,
+  size = "sidebar",
+  /** Monogram only — for the collapsed sidebar. */
+  markOnly = false,
   className,
-}: BrandLogoProps) {
-  const resolvedSize = size ?? (compact ? "sidebar" : "hero")
-  const config = sizeConfig[resolvedSize]
+}: {
+  size?: keyof typeof SIZES
+  markOnly?: boolean
+  className?: string
+}) {
+  const { mark, text } = SIZES[size]
 
   return (
-    <div className={cn("flex items-center", config.gap, className)}>
-      <div
-        className={cn(
-          "relative flex items-center rounded-full bg-card shadow-sm",
-          config.containerPadding
-        )}
-      >
-        <Image
-          src="/brand/blend-logo.png"
-          alt="Blend'n"
-          width={config.imageWidth}
-          height={config.imageHeight}
-          className="h-auto w-auto"
-          priority
-        />
-      </div>
-      {showTagline ? (
-        <div className="min-w-0">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-            Blend&apos;n Workspace
-          </p>
-          {resolvedSize === "hero" ? (
-            <p className="text-sm text-muted-foreground">
-              Workspace for events, venues, and operations.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+    <span className={cn("flex items-center gap-2.5", className)}>
+      <Image
+        src="/brand/monogram-gradient.png"
+        alt={markOnly ? "Blend'n" : ""}
+        width={mark}
+        height={mark}
+        // The mark is the brand's first paint on every page; letting it arrive
+        // late is the one image worth prioritising.
+        priority
+        style={{ width: mark, height: mark }}
+      />
+      {markOnly ? null : (
+        <span className={cn("font-bold leading-none", text)}>Blend&apos;n</span>
+      )}
+    </span>
   )
 }
