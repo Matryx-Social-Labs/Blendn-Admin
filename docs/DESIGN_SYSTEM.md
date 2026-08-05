@@ -112,6 +112,37 @@ as if it had a tenth of the best stage's traffic. A non-zero value still gets a
 2% floor so a single check-in out of fifty thousand stays visible — that is a
 rounding courtesy for values already above zero, not an invented one.
 
+## What each role sees
+
+Every figure on the overview used to be trailing 30-day reporting, which answers
+"how did we do" and never "what needs attention now". `upcoming` and `breakdown`
+sit directly under the KPI cards for that reason.
+
+| Section | app_admin | organizer | venue_owner |
+|---|---|---|---|
+| Metrics (4) | users, active audience, supply, check-ins | portfolio, audience, demand, chat | same as organizer |
+| Spotlights (5) | repeat, host activation, push reach, rating, **moderation backlog** | repeat, fill, rating, top city, **turn-up rate** | …top venue, **turn-up rate** |
+| `upcoming` | next events platform-wide | own next events | own next events |
+| `breakdown` | **moderation queue** by review state | **rating spread** 1–5 | **events by venue** |
+| Trend | acquisition / supply / attendance / engagement | audience-scoped equivalent | same |
+| Funnel | signups → onboarded → active → checked in | events → published → audience → ratings | same |
+
+Three of these close gaps the audit found:
+
+- **Moderation was invisible.** `moderation_flags` is a core table and its
+  pending count is the most time-sensitive number an admin has, but the only way
+  to see it was to open one event's messaging page at a time.
+- **Turn-up rate** is the gap between committed RSVPs and actual check-ins — the
+  no-show rate, which decides catering and whether to overbook. It is capped at
+  100% because walk-ins check in without ever RSVPing, and "112% turned up"
+  reads as a bug rather than a good night.
+- **Events by venue.** A venue owner with three venues previously saw one
+  blended number, which is the opposite of what the role exists to answer.
+
+`fillPct` is `null`, not `0`, when an event states no capacity. There is no
+target to fall short of, so `fillTone` renders it neutral — zero would paint it
+in the alarm colour.
+
 ## Navigation and roles
 
 `lib/dashboard-nav.ts` holds the nav config and `visibleNavFor(role)`, outside

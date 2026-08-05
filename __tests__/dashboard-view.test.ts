@@ -1,4 +1,4 @@
-import { funnelBarWidth } from "@/lib/dashboard-view"
+import { fillTone, formatCountdown, funnelBarWidth } from "@/lib/dashboard-view"
 import { visibleNavFor } from "@/lib/dashboard-nav"
 
 describe("funnelBarWidth", () => {
@@ -25,6 +25,35 @@ describe("funnelBarWidth", () => {
   it("returns zero rather than dividing by zero on an empty funnel", () => {
     expect(funnelBarWidth(0, 0)).toBe(0)
     expect(funnelBarWidth(5, 0)).toBe(0)
+  })
+})
+
+describe("formatCountdown", () => {
+  it("names today and tomorrow instead of counting them", () => {
+    expect(formatCountdown(0)).toBe("Today")
+    expect(formatCountdown(1)).toBe("Tomorrow")
+    expect(formatCountdown(9)).toBe("In 9 days")
+  })
+
+  it("treats an event already under way as today, not as negative days", () => {
+    expect(formatCountdown(-3)).toBe("Today")
+  })
+})
+
+describe("fillTone", () => {
+  it("keeps an event with no stated capacity neutral", () => {
+    // No capacity is not the same as empty: there is no target to fall short
+    // of, so it must not render as the alarm colour.
+    expect(fillTone(null)).toBe("bg-muted-foreground/40")
+  })
+
+  it("escalates as an event fails to fill", () => {
+    expect(fillTone(95)).toBe("bg-success")
+    expect(fillTone(80)).toBe("bg-success")
+    expect(fillTone(60)).toBe("bg-chart-1")
+    expect(fillTone(25)).toBe("bg-chart-1")
+    expect(fillTone(24)).toBe("bg-destructive")
+    expect(fillTone(0)).toBe("bg-destructive")
   })
 })
 

@@ -5,6 +5,29 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-05
+
+### Added
+
+- Forward-looking reporting on the dashboard overview. Every figure on it was
+  trailing 30-day, so a host could see how last month went but nothing about the
+  event running on Thursday. `Upcoming events` shows committed RSVPs against
+  capacity for each published event that has not started, coloured by how far
+  short it is.
+- A second chart per role, chosen for what that role actually decides on:
+  moderation queue by review state for `app_admin`, rating spread for
+  `organizer`, events by venue for `venue_owner`.
+- Moderation backlog for `app_admin` — pending flag count, affected chatrooms,
+  and flags per 1,000 messages. `moderation_flags` is a core table and the only
+  way to see any of it was to open one event's messaging page at a time.
+- Turn-up rate for hosts: committed RSVPs against actual check-ins on past
+  events. The remainder is the no-show rate, which is what decides catering and
+  whether to overbook.
+- `scripts/create-dashboard-user.ts` to create or reset a dashboard login. The
+  password is generated rather than taken as an argument, so it never lands in
+  shell history or the process list.
+- Both new sections are included in the CSV export bundles.
+
 ## [0.6.0] - 2026-08-05
 
 ### Added

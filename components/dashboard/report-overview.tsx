@@ -4,6 +4,8 @@ import { useMemo, useState } from "react"
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   XAxis,
   YAxis,
@@ -11,6 +13,7 @@ import {
 import {
   IconArrowDownRight,
   IconArrowUpRight,
+  IconCalendarEvent,
   IconMinus,
   IconSearch,
 } from "@tabler/icons-react"
@@ -38,7 +41,7 @@ import type {
   DashboardReport,
   DashboardTrendKey,
 } from "@/lib/dashboard-types"
-import { funnelBarWidth } from "@/lib/dashboard-view"
+import { fillTone, formatCountdown, funnelBarWidth } from "@/lib/dashboard-view"
 import { cn } from "@/lib/utils"
 
 const trendKeyStyles: Record<DashboardTrendKey, { color: string }> = {
@@ -195,6 +198,123 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
       </section>
 
       {/*
+        Forward-looking pair, placed directly under the KPIs because everything
+        below them is trailing 30-day reporting. The dashboard could previously
+        tell you how last month went and nothing at all about the event running
+        on Thursday.
+      */}
+      <section className="grid gap-6 px-4 lg:px-6 @4xl/main:grid-cols-[1.15fr_0.85fr]">
+        <Card className="rounded-xl shadow-none">
+          <CardHeader className="border-b pb-5">
+            <CardTitle className="text-xl">{report.upcoming.title}</CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {report.upcoming.description}
+            </p>
+          </CardHeader>
+          <CardContent className="px-5 py-5">
+            {report.upcoming.rows.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+                <IconCalendarEvent className="size-8 text-muted-foreground" />
+                <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+                  {report.upcoming.emptyMessage}
+                </p>
+              </div>
+            ) : (
+              <ul className="space-y-4">
+                {report.upcoming.rows.map((row) => (
+                  <li key={row.id} className="space-y-2 rounded-lg border border-border bg-muted p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{row.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDate(row.startAt)} · {row.city}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold">
+                          {formatNumericValue(row.committed)}
+                          {row.capacity ? ` / ${formatNumericValue(row.capacity)}` : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatCountdown(row.daysOut)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="h-2 rounded-full bg-border">
+                      <div
+                        className={cn("h-2 rounded-full transition-[width]", fillTone(row.fillPct))}
+                        style={{ width: `${funnelBarWidth(row.fillPct ?? 0, 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {row.fillPct === null
+                        ? "No capacity set — commitment shown without a target."
+                        : `${formatNumericValue(Math.round(row.fillPct))}% of capacity committed`}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl shadow-none">
+          <CardHeader className="border-b pb-5">
+            <CardTitle className="text-xl">{report.breakdown.title}</CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {report.breakdown.description}
+            </p>
+          </CardHeader>
+          <CardContent className="px-4 py-5 sm:px-6">
+            {report.breakdown.bars.every((bar) => bar.value === 0) ? (
+              <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+                <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+                  {report.breakdown.emptyMessage}
+                </p>
+              </div>
+            ) : (
+              <ChartContainer
+                config={{ value: { label: "Count", color: "var(--chart-1)" } }}
+                className="h-[280px] w-full"
+              >
+                {/* Horizontal: the labels are words ("5 stars", venue names), and
+                    words do not fit under a vertical axis without rotating. */}
+                <BarChart data={report.breakdown.bars} layout="vertical" margin={{ left: 8 }}>
+                  <CartesianGrid horizontal={false} stroke="var(--border)" />
+                  <XAxis type="number" tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)" }} />
+                  <YAxis
+                    type="category"
+                    dataKey="label"
+                    width={96}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: "var(--muted-foreground)" }}
+                  />
+                  <ChartTooltip
+                    cursor={{ fill: "var(--accent)" }}
+                    content={
+                      <ChartTooltipContent
+                        className="rounded-xl border-border bg-card text-foreground"
+                        formatter={(value, _name, item) => (
+                          <div className="space-y-1">
+                            <p className="font-medium">{formatNumericValue(Number(value))}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {(item?.payload as { detail?: string })?.detail}
+                            </p>
+                          </div>
+                        )}
+                      />
+                    }
+                  />
+                  <Bar dataKey="value" fill="var(--chart-1)" radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ChartContainer>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/*
         Was 1.45/0.55, which left the funnel ~370px for four stacked stage
         cards while the chart column had slack it did not need.
       */}
@@ -345,7 +465,8 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
         </Card>
       </section>
 
-      <section className="grid gap-4 px-4 lg:px-6 @sm/main:grid-cols-2 @5xl/main:grid-cols-4">
+      {/* Five spotlights for every role now, so one grid rule covers both. */}
+      <section className="grid gap-4 px-4 lg:px-6 @sm/main:grid-cols-2 @3xl/main:grid-cols-3 @5xl/main:grid-cols-5">
         {report.spotlights.map((card) => (
           <Card key={card.title} className="rounded-xl shadow-none">
             <CardContent className="space-y-3 px-5 py-5">
