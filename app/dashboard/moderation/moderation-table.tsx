@@ -50,6 +50,10 @@ export function ModerationTable({
     {
       key: "ageHours",
       label: "Age",
+      // Age is the SLA, so it sorts — and it sorts on the number, not on the
+      // rendered "<1h" / "3d" string, which would order 3d before 9h.
+      sortType: "number",
+      hideable: false,
       render: (row) => (
         <span
           className={cn(
@@ -92,25 +96,29 @@ export function ModerationTable({
     {
       key: "category",
       label: "Category",
+      sortType: "string",
       render: (row) => (
         <Badge variant={(row.confidence ?? 0) >= 0.9 ? "destructive" : "secondary"}>
           {row.category}
         </Badge>
       ),
     },
-    { key: "authorName", label: "Author", secondary: true },
-    { key: "source", label: "Source", secondary: true },
+    { key: "authorName", label: "Author", secondary: true, sortType: "string" },
+    { key: "source", label: "Source", secondary: true, sortType: "string" },
     {
       key: "confidence",
       label: "Confidence",
       align: "right",
       secondary: true,
+      sortType: "number",
       render: (row) => (row.confidence === null ? "—" : row.confidence.toFixed(2)),
     },
     {
       key: "actions",
       label: "",
       align: "right",
+      sortable: false,
+      hideable: false,
       render: (row) =>
         status === "pending" ? (
           <span className="inline-flex justify-end gap-1.5">
@@ -139,6 +147,24 @@ export function ModerationTable({
     <DataTable
       columns={columns}
       rows={rows}
+      sortable
+      // No defaultSort: the server already returns oldest-first, and age IS the
+      // SLA. Sorting here is for exploring; the third click returns to the
+      // queue order that matters.
+      search
+      searchPlaceholder="Search flags…"
+      pagination
+      columnMenu
+      filters={[
+        {
+          key: "category",
+          label: "Category",
+          options: [...new Set(rows.map((r) => r.category))].sort().map((c) => ({
+            value: c,
+            label: c,
+          })),
+        },
+      ]}
       emptyState={
         <EmptyState
           icon={<IconFlag />}
