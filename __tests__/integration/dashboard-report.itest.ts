@@ -1,15 +1,16 @@
-import { getDashboardReport } from "@/app/dashboard/actions"
+import { getDashboardOverview } from "@/app/dashboard/actions"
 import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
 
 /**
- * The report is nine parallel Prisma calls per role, several of them `groupBy`
- * with relation filters. TypeScript checks the shapes but not whether the
- * queries are valid SQL — a wrong relation name in a `groupBy` compiles and
- * throws at request time. These run the real thing.
+ * The three overviews are ~20 parallel Prisma calls between them, several of
+ * them `groupBy` with relation filters. TypeScript checks the shapes but not
+ * whether the query is valid SQL — a wrong relation name in a `groupBy`
+ * compiles and throws at request time, which is precisely the class of bug the
+ * unit suite cannot see because it mocks `@/lib/db`.
  *
  * They also pin the arithmetic that is easy to get subtly wrong: capacity
- * percentages when capacity is absent, and a turn-up rate when walk-ins mean
- * more people attended than ever RSVP'd.
+ * percentages when capacity is absent, turn-up when walk-ins outnumber RSVPs,
+ * and the pacing curve's days-out bucketing.
  */
 
 const users: string[] = []
@@ -19,7 +20,12 @@ const DAY = 24 * 60 * 60 * 1000
 
 async function makeScheduledEvent(
   organizerId: string,
-  opts: { startsInDays: number; capacity?: number | null }
+  opts: {
+    startsInDays: number
+    capacity?: number | null
+    venue?: string | null
+    status?: "published" | "draft"
+  }
 ) {
   const slug = testId("dash")
   const start = new Date(Date.now() + opts.startsInDays * DAY)
@@ -31,9 +37,10 @@ async function makeScheduledEvent(
       start_time: start,
       end_time: new Date(start.getTime() + 2 * 60 * 60 * 1000),
       timezone: "UTC",
-      status: "published",
+      status: opts.status ?? "published",
       organizer_id: organizerId,
       max_capacity: opts.capacity ?? null,
+      venue_name: opts.venue ?? null,
     },
   })
   events.push(event.id)
@@ -45,18 +52,18 @@ afterAll(async () => {
   await closeDb()
 })
 
-describe("organiser report", () => {
-  it("reports upcoming events with commitment against capacity", async () => {
-    const owner = await makeUser("dash_owner", "organizer")
+describe("organiser overview", () => {
+  it("leads with the next event and its commitment against capacity", async () => {
+    const owner = await makeUser("ovw_owner", "organizer")
     users.push(owner)
 
-    const soon = await makeScheduledEvent(owner, { startsInDays: 3, capacity: 10 })
-    const later = await makeScheduledEvent(owner, { startsInDays: 20, capacity: null })
+    const soon = await makeScheduledEvent(owner, { startsInDays: 4, capacity: 10 })
+    await makeScheduledEvent(owner, { startsInDays: 30, capacity: 20 })
 
     const attendees = await Promise.all([
-      makeUser("dash_a1"),
-      makeUser("dash_a2"),
-      makeUser("dash_a3"),
+      makeUser("ovw_a1"),
+      makeUser("ovw_a2"),
+      makeUser("ovw_a3"),
     ])
     users.push(...attendees)
 
@@ -64,43 +71,76 @@ describe("organiser report", () => {
       data: [
         { event_id: soon, user_id: attendees[0], status: "going" },
         { event_id: soon, user_id: attendees[1], status: "maybe" },
-        // A decline must not count as commitment.
+        // A decline is not commitment and must not reach the fill bar.
         { event_id: soon, user_id: attendees[2], status: "not_going" },
-        { event_id: later, user_id: attendees[0], status: "going" },
       ],
     })
 
-    const report = await getDashboardReport("organizer", owner)
-    const rows = report.upcoming.rows
+    const overview = await getDashboardOverview("organizer", owner)
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
 
-    // Soonest first, and the past events this owner has do not appear.
-    expect(rows.map((r) => r.id)).toEqual([soon, later])
-
-    const soonRow = rows[0]
-    expect(soonRow.committed).toBe(2)
-    expect(soonRow.capacity).toBe(10)
-    expect(soonRow.fillPct).toBe(20)
-    expect(soonRow.daysOut).toBeGreaterThan(0)
-
-    // No stated capacity means there is no target, so the percentage is absent
-    // rather than zero — zero would render as the alarm colour.
-    expect(rows[1].capacity).toBeNull()
-    expect(rows[1].fillPct).toBeNull()
+    expect(overview.nextEvent?.id).toBe(soon)
+    expect(overview.nextEvent?.going).toBe(1)
+    expect(overview.nextEvent?.maybe).toBe(1)
+    expect(overview.nextEvent?.capacity).toBe(10)
+    // 2 committed of 10, not 3 of 10.
+    expect(overview.nextEvent?.fillPct).toBe(20)
+    expect(overview.pacingCapacity).toBe(10)
   })
 
-  it("caps the turn-up rate when walk-ins outnumber RSVPs", async () => {
-    const owner = await makeUser("dash_walkin", "organizer")
+  it("leaves fill undefined rather than zero when no capacity is set", async () => {
+    const owner = await makeUser("ovw_nocap", "organizer")
     users.push(owner)
+    const event = await makeScheduledEvent(owner, { startsInDays: 6, capacity: null })
+    const attendee = await makeUser("ovw_nc1")
+    users.push(attendee)
+    await db.event_rsvps.create({
+      data: { event_id: event, user_id: attendee, status: "going" },
+    })
 
+    const overview = await getDashboardOverview("organizer", owner)
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+
+    // There is no target to fall short of, so a percentage would be invented.
+    expect(overview.nextEvent?.capacity).toBeNull()
+    expect(overview.nextEvent?.fillPct).toBeNull()
+  })
+
+  it("builds a cumulative pacing curve that never decreases", async () => {
+    const owner = await makeUser("ovw_pace", "organizer")
+    users.push(owner)
+    const event = await makeScheduledEvent(owner, { startsInDays: 10, capacity: 30 })
+
+    const attendees = await Promise.all([makeUser("ovw_p1"), makeUser("ovw_p2")])
+    users.push(...attendees)
+    await db.event_rsvps.createMany({
+      data: attendees.map((id) => ({ event_id: event, user_id: id, status: "going" as const })),
+    })
+
+    const overview = await getDashboardOverview("organizer", owner)
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+
+    expect(overview.pacing.length).toBeGreaterThan(0)
+    // Days-out counts down to the event, so cumulative must be non-decreasing.
+    const cumulative = overview.pacing.map((p) => p.cumulative)
+    for (let i = 1; i < cumulative.length; i++) {
+      expect(cumulative[i]).toBeGreaterThanOrEqual(cumulative[i - 1])
+    }
+    expect(cumulative[cumulative.length - 1]).toBe(2)
+  })
+
+  it("floors the no-show rate at zero when walk-ins outnumber RSVPs", async () => {
+    const owner = await makeUser("ovw_walkin", "organizer")
+    users.push(owner)
     const past = await makeScheduledEvent(owner, { startsInDays: -5, capacity: 50 })
+
     const attendees = await Promise.all([
-      makeUser("dash_w1"),
-      makeUser("dash_w2"),
-      makeUser("dash_w3"),
+      makeUser("ovw_w1"),
+      makeUser("ovw_w2"),
+      makeUser("ovw_w3"),
     ])
     users.push(...attendees)
 
-    // One RSVP, three people through the door.
     await db.event_rsvps.create({
       data: { event_id: past, user_id: attendees[0], status: "going" },
     })
@@ -113,19 +153,43 @@ describe("organiser report", () => {
       })),
     })
 
-    const report = await getDashboardReport("organizer", owner)
-    const turnUp = report.spotlights.find((card) => card.title === "Turn-up rate")
+    const overview = await getDashboardOverview("organizer", owner)
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
 
-    // Raw ratio is 300%. "300% turned up" reads as a bug, not a good night.
-    expect(turnUp?.value).toBe("100%")
+    // 3 attended against 1 RSVP is a 300% turn-up; a negative no-show rate
+    // would render as "−200% didn't show".
+    expect(overview.noShowRatePct).toBe(0)
+  })
+
+  it("counts repeat attendees, not repeat check-ins", async () => {
+    const owner = await makeUser("ovw_repeat", "organizer")
+    users.push(owner)
+    const first = await makeScheduledEvent(owner, { startsInDays: -20 })
+    const second = await makeScheduledEvent(owner, { startsInDays: -10 })
+
+    const loyal = await makeUser("ovw_loyal")
+    const once = await makeUser("ovw_once")
+    users.push(loyal, once)
+
+    await db.event_check_ins.createMany({
+      data: [
+        { event_id: first, user_id: loyal, status: "checked_in", check_in_time: new Date() },
+        { event_id: second, user_id: loyal, status: "checked_in", check_in_time: new Date() },
+        { event_id: first, user_id: once, status: "checked_in", check_in_time: new Date() },
+      ],
+    })
+
+    const overview = await getDashboardOverview("organizer", owner)
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+    expect(overview.repeatAttendees).toBe(1)
   })
 
   it("breaks ratings down rather than only averaging them", async () => {
-    const owner = await makeUser("dash_rating", "organizer")
+    const owner = await makeUser("ovw_rating", "organizer")
     users.push(owner)
     const event = await makeScheduledEvent(owner, { startsInDays: -2 })
 
-    const raters = await Promise.all([makeUser("dash_r1"), makeUser("dash_r2")])
+    const raters = await Promise.all([makeUser("ovw_r1"), makeUser("ovw_r2")])
     users.push(...raters)
     await db.event_ratings.createMany({
       data: [
@@ -134,65 +198,86 @@ describe("organiser report", () => {
       ],
     })
 
-    const report = await getDashboardReport("organizer", owner)
-    expect(report.breakdown.title).toBe("Rating spread")
+    const overview = await getDashboardOverview("organizer", owner)
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
 
-    const byLabel = Object.fromEntries(
-      report.breakdown.bars.map((bar) => [bar.label, bar.value])
-    )
-    // The average of these two is 3.0, which describes neither rater.
-    expect(byLabel["5 stars"]).toBe(1)
-    expect(byLabel["1 star"]).toBe(1)
-    expect(byLabel["3 stars"]).toBe(0)
+    // The mean is 3.0, which describes neither rater.
+    expect(overview.averageRating).toBe(3)
+    expect(overview.ratings[4]).toBe(1)
+    expect(overview.ratings[0]).toBe(1)
+    expect(overview.ratings[2]).toBe(0)
   })
 })
 
-describe("venue owner report", () => {
+describe("venue owner overview", () => {
   it("splits the portfolio by venue instead of blending it", async () => {
-    const owner = await makeUser("dash_venue", "organizer")
+    const owner = await makeUser("ovw_venue", "organizer")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
-    for (const [venue, count] of [
-      ["Rooftop", 2],
-      ["Basement", 1],
-    ] as const) {
-      for (let i = 0; i < count; i++) {
-        const id = await makeScheduledEvent(owner, { startsInDays: 5 + i })
-        await db.events.update({ where: { id }, data: { venue_name: venue } })
-      }
-    }
+    await makeScheduledEvent(owner, { startsInDays: -3, venue: "Rooftop" })
+    await makeScheduledEvent(owner, { startsInDays: -6, venue: "Rooftop" })
+    await makeScheduledEvent(owner, { startsInDays: -9, venue: "Basement" })
 
-    const report = await getDashboardReport("venue_owner", owner)
-    expect(report.breakdown.title).toBe("Events by venue")
+    const overview = await getDashboardOverview("venue_owner", owner)
+    if (overview.role !== "venue_owner") throw new Error("wrong overview role")
 
-    const byLabel = Object.fromEntries(
-      report.breakdown.bars.map((bar) => [bar.label, bar.value])
-    )
-    expect(byLabel["Rooftop"]).toBe(2)
-    expect(byLabel["Basement"]).toBe(1)
+    const byName = Object.fromEntries(overview.venues.map((v) => [v.name, v.eventsInWindow]))
+    expect(byName["Rooftop"]).toBe(2)
+    expect(byName["Basement"]).toBe(1)
+  })
+
+  it("fills the utilisation grid from event start times", async () => {
+    const owner = await makeUser("ovw_util", "organizer")
+    users.push(owner)
+    await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
+    await makeScheduledEvent(owner, { startsInDays: -4, venue: "Grid Room" })
+
+    const overview = await getDashboardOverview("venue_owner", owner)
+    if (overview.role !== "venue_owner") throw new Error("wrong overview role")
+
+    expect(overview.utilisation).toHaveLength(7)
+    expect(overview.utilisation[0]).toHaveLength(4)
+    const total = overview.utilisation.flat().reduce((a, b) => a + b, 0)
+    expect(total).toBe(1)
+    expect(overview.peakWindow).not.toBeNull()
   })
 })
 
-describe("admin report", () => {
-  it("builds without throwing and surfaces the moderation backlog", async () => {
-    // Nine parallel queries including two groupBys. The value here is that it
-    // executes at all — a bad relation name in groupBy typechecks fine.
-    const report = await getDashboardReport("app_admin")
+describe("admin overview", () => {
+  it("executes every query and reports the moderation queue", async () => {
+    const overview = await getDashboardOverview("app_admin")
+    if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
-    expect(report.role).toBe("app_admin")
-    expect(report.breakdown.title).toBe("Moderation queue")
-    expect(report.breakdown.bars.map((bar) => bar.label)).toEqual([
-      "Pending",
-      "Approved",
-      "Rejected",
+    expect(overview.growth).toHaveLength(8)
+    expect(overview.funnel.map((s) => s.label)).toEqual([
+      "signed up",
+      "onboarded",
+      "RSVP'd",
+      "checked in",
     ])
-    expect(report.spotlights.some((card) => card.title === "Moderation backlog")).toBe(true)
-    expect(report.metrics).toHaveLength(4)
-    expect(report.spotlights).toHaveLength(5)
+    expect(overview.attention.pending).toBeGreaterThanOrEqual(0)
+    expect(overview.publishingHosts.publishing).toBeLessThanOrEqual(
+      overview.publishingHosts.total + overview.publishingHosts.publishing
+    )
   })
 
+  it("keeps the funnel monotonically non-increasing", async () => {
+    const overview = await getDashboardOverview("app_admin")
+    if (overview.role !== "app_admin") throw new Error("wrong overview role")
+
+    // Each stage is a subset of the one above it. If this ever inverts, the
+    // stages are counting different populations and the funnel is a lie.
+    const values = overview.funnel.map((s) => s.value)
+    for (let i = 1; i < values.length; i++) {
+      expect(values[i]).toBeLessThanOrEqual(values[i - 1])
+    }
+  })
+})
+
+describe("role gating", () => {
   it("refuses a scoped role without a user id", async () => {
-    await expect(getDashboardReport("organizer")).rejects.toThrow(/User ID is required/)
+    await expect(getDashboardOverview("organizer")).rejects.toThrow(/User ID is required/)
+    await expect(getDashboardOverview("venue_owner")).rejects.toThrow(/User ID is required/)
   })
 })

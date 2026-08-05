@@ -1,1453 +1,669 @@
 "use server"
 
-import { logger } from "@/lib/logger"
 import type { check_in_status, rsvp_status } from "@prisma/client"
 
 import { db } from "@/lib/db"
+import { logger } from "@/lib/logger"
 import type {
-  DashboardBreakdownBar,
-  DashboardExportBundle,
-  DashboardMetric,
-  DashboardPerformanceRow,
-  DashboardReport,
+  AdminOverview,
+  CityRow,
   DashboardRole,
-  DashboardSpotlightCard,
-  DashboardTrendPoint,
-  DashboardUpcomingRow,
+  EventRow,
+  NextEvent,
+  OrganizerOverview,
+  OrganiserSupplyRow,
+  PacingPoint,
+  RatingCounts,
+  VenueOverview,
+  VenueRow,
 } from "@/lib/dashboard-types"
 
-const DAY_IN_MS = 24 * 60 * 60 * 1000
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-const ATTENDED_STATUSES: check_in_status[] = ["checked_in", "checked_out"]
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date)
-  next.setDate(next.getDate() + days)
-  return next
-}
-
-function addMonths(date: Date, months: number) {
-  const next = new Date(date)
-  next.setMonth(next.getMonth() + months)
-  return next
-}
-
-function startOfDay(date: Date) {
-  const next = new Date(date)
-  next.setHours(0, 0, 0, 0)
-  return next
-}
-
-function startOfMonth(date: Date) {
-  const next = new Date(date)
-  next.setDate(1)
-  next.setHours(0, 0, 0, 0)
-  return next
-}
-
-function monthLabel(date: Date) {
-  return `${MONTH_NAMES[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`
-}
-
-function compactNumber(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: value >= 1000 ? 1 : 0,
-  }).format(value)
-}
-
-function wholeNumber(value: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value)
-}
-
-function oneDecimal(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 1,
-  }).format(value)
-}
-
-function percentChange(current: number, previous: number) {
-  if (previous === 0) {
-    return current === 0 ? 0 : 100
-  }
-
-  return ((current - previous) / previous) * 100
-}
-
-function changeMeta(current: number, previous: number) {
-  const delta = percentChange(current, previous)
-  const trend: DashboardMetric["trend"] =
-    current === previous ? "flat" : current > previous ? "up" : "down"
-
-  if (trend === "flat") {
-    return { trend, delta: "Flat vs prior 30d" as const }
-  }
-
-  const prefix = delta > 0 ? "+" : ""
-  return {
-    trend,
-    delta: `${prefix}${oneDecimal(delta)}% vs prior 30d`,
-  }
-}
-
-function toMetric(label: string, value: string, current: number, previous: number, detail: string): DashboardMetric {
-  const meta = changeMeta(current, previous)
-  return {
-    label,
-    value,
-    delta: meta.delta,
-    trend: meta.trend,
-    detail,
-  }
-}
+const DAY_MS = 24 * 60 * 60 * 1000
+const ATTENDED: check_in_status[] = ["checked_in", "checked_out"]
+/** going and maybe are intent; not_going is a decline and never counts. */
+const COMMITTED: rsvp_status[] = ["going", "maybe"]
+/** Trailing window for venue utilisation and per-venue rates. */
+const WINDOW_WEEKS = 8
 
 function eventScope(userId?: string) {
-  return {
-    deleted_at: null,
-    ...(userId ? { organizer_id: userId } : {}),
+  return { deleted_at: null, ...(userId ? { organizer_id: userId } : {}) }
+}
+
+function pct(part: number, whole: number) {
+  return whole === 0 ? null : (part / whole) * 100
+}
+
+function round1(value: number | null) {
+  return value === null ? null : Math.round(value * 10) / 10
+}
+
+function emptyRatings(): RatingCounts {
+  return [0, 0, 0, 0, 0]
+}
+
+function toRatingCounts(rows: Array<{ rating: number; _count: { _all: number } }>): RatingCounts {
+  const counts = emptyRatings()
+  for (const row of rows) {
+    if (row.rating >= 1 && row.rating <= 5) counts[row.rating - 1] = row._count._all
   }
+  return counts
 }
 
-function attendedScope(userId?: string) {
-  return {
-    status: { in: ATTENDED_STATUSES },
-    event: eventScope(userId),
+/* -------------------------------------------------------------------------- */
+/* Organiser                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Cumulative RSVP curve for one event, bucketed by days before it starts.
+ *
+ * Uses `event_rsvps.created_at` against `events.start_time`, so the x axis is
+ * "days out" rather than a calendar date — which is the only way two events of
+ * different sizes and dates can be compared to each other.
+ */
+function buildPacing(
+  rsvps: Array<{ created_at: Date }>,
+  startTime: Date,
+  windowDays: number
+): PacingPoint[] {
+  const daysBefore = rsvps
+    .map((r) => Math.max(0, Math.ceil((startTime.getTime() - r.created_at.getTime()) / DAY_MS)))
+    .sort((a, b) => b - a)
+
+  const points: PacingPoint[] = []
+  for (let d = windowDays; d >= 0; d--) {
+    points.push({ daysOut: d, cumulative: daysBefore.filter((x) => x >= d).length })
   }
+  return points
 }
 
-function normalizeAverage(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return 0
-  }
+async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview> {
+  const now = new Date()
+  const windowStart = new Date(now.getTime() - 30 * DAY_MS)
+  const priorStart = new Date(now.getTime() - 60 * DAY_MS)
+  const todayStart = new Date(now)
+  todayStart.setHours(0, 0, 0, 0)
+  const pastEvents = { ...eventScope(userId), start_time: { lt: now } }
 
-  return Math.round(value * 10) / 10
-}
-
-function topValue(values: Array<string | null | undefined>) {
-  const counts = new Map<string, number>()
-
-  values
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .forEach((value) => {
-      counts.set(value, (counts.get(value) ?? 0) + 1)
-    })
-
-  let winner = "Unspecified"
-  let winnerCount = 0
-
-  counts.forEach((count, value) => {
-    if (count > winnerCount) {
-      winner = value
-      winnerCount = count
-    }
-  })
-
-  return { value: winner, count: winnerCount }
-}
-
-function repeatAttendanceRate(rows: Array<{ user_id: string }>) {
-  if (rows.length === 0) {
-    return 0
-  }
-
-  const counts = new Map<string, number>()
-  rows.forEach((row) => {
-    counts.set(row.user_id, (counts.get(row.user_id) ?? 0) + 1)
-  })
-
-  const repeated = Array.from(counts.values()).filter((count) => count > 1).length
-  return (repeated / counts.size) * 100
-}
-
-async function getDistinctUserIdsForPeriod(
-  start: Date,
-  end: Date,
-  userId?: string,
-  includeRefreshTokens?: boolean
-) {
-  const [checkIns, favorites, chats, refreshTokens] = await Promise.all([
-    db.event_check_ins.findMany({
-      where: {
-        ...attendedScope(userId),
-        check_in_time: { gte: start, lt: end },
+  const [next, previous, ratingSpread, ratingAggregate, chatToday, eventRows] = await Promise.all([
+    db.events.findFirst({
+      where: { ...eventScope(userId), status: "published", start_time: { gte: now } },
+      orderBy: { start_time: "asc" },
+      select: {
+        id: true,
+        title: true,
+        start_time: true,
+        city: true,
+        venue_name: true,
+        max_capacity: true,
+        rsvps: { select: { created_at: true, status: true } },
+        _count: { select: { favorites: true } },
       },
-      select: { user_id: true },
-      distinct: ["user_id"],
     }),
-    db.event_favorites.findMany({
-      where: {
-        event: eventScope(userId),
-        created_at: { gte: start, lt: end },
+    // The benchmark for the pacing note: the most recent event that has run.
+    db.events.findFirst({
+      where: { ...pastEvents, status: "published" },
+      orderBy: { start_time: "desc" },
+      select: {
+        start_time: true,
+        max_capacity: true,
+        rsvps: { where: { status: { in: COMMITTED } }, select: { created_at: true } },
       },
-      select: { user_id: true },
-      distinct: ["user_id"],
     }),
-    db.chat_messages.findMany({
+    db.event_ratings.groupBy({
+      by: ["rating"],
+      where: { event: eventScope(userId) },
+      _count: { _all: true },
+    }),
+    db.event_ratings.aggregate({
+      where: { event: eventScope(userId) },
+      _avg: { rating: true },
+      _count: { rating: true },
+    }),
+    db.chat_messages.count({
       where: {
         deleted_at: null,
-        created_at: { gte: start, lt: end },
-        chat_group: {
-          event: eventScope(userId),
+        created_at: { gte: todayStart },
+        chat_group: { event: eventScope(userId) },
+      },
+    }),
+    db.events.findMany({
+      where: eventScope(userId),
+      orderBy: { start_time: "desc" },
+      take: 25,
+      select: {
+        id: true,
+        title: true,
+        start_time: true,
+        city: true,
+        venue_name: true,
+        status: true,
+        max_capacity: true,
+        _count: {
+          select: {
+            rsvps: { where: { status: "going" } },
+            check_ins: { where: { status: { in: ATTENDED } } },
+          },
         },
       },
-      select: { user_id: true },
-      distinct: ["user_id"],
     }),
-    includeRefreshTokens
-      ? db.mobile_refresh_tokens.findMany({
-          where: {
-            revoked_at: null,
-            created_at: { gte: start, lt: end },
-          },
-          select: { user_id: true },
-          distinct: ["user_id"],
-        })
-      : Promise.resolve([] as Array<{ user_id: string }>),
   ])
 
-  const uniqueUsers = new Set<string>()
-  ;[checkIns, favorites, chats, refreshTokens].forEach((collection) => {
-    collection.forEach((entry) => uniqueUsers.add(entry.user_id))
-  })
+  // No-show rate over the last 30 days, and the 30 before it, so the delta says
+  // whether it is getting better rather than just what it is.
+  const [committedNow, attendedNow, committedPrior, attendedPrior, repeatRows] = await Promise.all([
+    db.event_rsvps.count({
+      where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
+    }),
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED }, event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
+    }),
+    db.event_rsvps.count({
+      where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
+    }),
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
+    }),
+    db.event_check_ins.groupBy({
+      by: ["user_id"],
+      where: { status: { in: ATTENDED }, event: eventScope(userId) },
+      _count: { _all: true },
+    }),
+  ])
 
-  return Array.from(uniqueUsers)
-}
+  // Turn-up capped at 100 (walk-ins check in without RSVPing), so no-show is
+  // floored at 0 rather than going negative.
+  const turnUpNow = pct(Math.min(attendedNow, committedNow), committedNow)
+  const turnUpPrior = pct(Math.min(attendedPrior, committedPrior), committedPrior)
+  const noShowNow = turnUpNow === null ? null : 100 - turnUpNow
+  const noShowPrior = turnUpPrior === null ? null : 100 - turnUpPrior
 
-async function getMonthlyTrend(role: DashboardRole, userId?: string): Promise<DashboardTrendPoint[]> {
-  const currentMonth = startOfMonth(new Date())
-  const monthStarts = Array.from({ length: 6 }, (_, index) =>
-    startOfMonth(addMonths(currentMonth, index - 5))
-  )
+  let nextEvent: NextEvent | null = null
+  let pacing: PacingPoint[] = []
+  let pacingCapacity: number | null = null
 
-  return Promise.all(
-    monthStarts.map(async (monthStart) => {
-      const monthEnd = startOfMonth(addMonths(monthStart, 1))
+  if (next) {
+    const going = next.rsvps.filter((r) => r.status === "going").length
+    const maybe = next.rsvps.filter((r) => r.status === "maybe").length
+    const committed = next.rsvps.filter((r) => COMMITTED.includes(r.status))
+    const daysOut = Math.max(0, Math.ceil((next.start_time.getTime() - now.getTime()) / DAY_MS))
+    const windowDays = Math.max(7, Math.min(60, daysOut + 14))
 
-      const [users, events, attendees, favorites, chats, privateMessages] = await Promise.all([
-        role === "app_admin"
-          ? db.user.count({
-              where: {
-                createdAt: { gte: monthStart, lt: monthEnd },
-              },
-            })
-          : getDistinctUserIdsForPeriod(monthStart, monthEnd, userId).then((rows) => rows.length),
-        db.events.count({
-          where: {
-            ...eventScope(userId),
-            status: "published",
-            start_time: { gte: monthStart, lt: monthEnd },
-          },
-        }),
-        db.event_check_ins.count({
-          where: {
-            ...attendedScope(userId),
-            check_in_time: { gte: monthStart, lt: monthEnd },
-          },
-        }),
-        db.event_favorites.count({
-          where: {
-            event: eventScope(userId),
-            created_at: { gte: monthStart, lt: monthEnd },
-          },
-        }),
-        db.chat_messages.count({
-          where: {
-            deleted_at: null,
-            created_at: { gte: monthStart, lt: monthEnd },
-            chat_group: {
-              event: eventScope(userId),
-            },
-          },
-        }),
-        role === "app_admin"
-          ? db.private_messages.count({
-              where: {
-                created_at: { gte: monthStart, lt: monthEnd },
-              },
-            })
-          : Promise.resolve(0),
-      ])
+    pacing = buildPacing(committed, next.start_time, windowDays)
+    pacingCapacity = next.max_capacity
 
-      return {
-        label: monthLabel(monthStart),
-        date: monthStart.toISOString(),
-        users,
-        events,
-        attendees,
-        engagement: favorites + chats + privateMessages,
+    let pacingNote: string | null = null
+    if (previous && previous.rsvps.length > 0) {
+      const benchmark = buildPacing(previous.rsvps, previous.start_time, windowDays).find(
+        (p) => p.daysOut === daysOut
+      )
+      if (benchmark && benchmark.cumulative > 0) {
+        const ratio = committed.length / benchmark.cumulative
+        pacingNote =
+          ratio >= 1.1
+            ? "Pacing ahead of your last event at this point."
+            : ratio <= 0.9
+              ? "Pacing behind your last event at this point."
+              : "Pacing in line with your last event at this point."
       }
-    })
-  )
+    }
+
+    nextEvent = {
+      id: next.id,
+      title: next.title,
+      startAt: next.start_time.toISOString(),
+      venue: next.venue_name ?? "Venue TBD",
+      city: next.city ?? "",
+      daysOut,
+      going,
+      maybe,
+      favourites: next._count.favorites,
+      capacity: next.max_capacity,
+      fillPct:
+        next.max_capacity && next.max_capacity > 0
+          ? Math.min(100, (committed.length / next.max_capacity) * 100)
+          : null,
+      pacingNote,
+    }
+  }
+
+  return {
+    role: "organizer",
+    nextEvent,
+    pacing,
+    pacingCapacity,
+    ratings: toRatingCounts(ratingSpread),
+    noShowRatePct: round1(noShowNow),
+    noShowDelta:
+      noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
+    repeatAttendees: repeatRows.filter((r) => r._count._all > 1).length,
+    averageRating: round1(ratingAggregate._avg.rating),
+    ratingCount: ratingAggregate._count.rating,
+    chatToday,
+    events: eventRows.map((event) => ({
+      id: event.id,
+      name: event.title,
+      startAt: event.start_time.toISOString(),
+      city: event.city ?? "",
+      venue: event.venue_name ?? "—",
+      status: event.status,
+      going: event._count.rsvps,
+      fillPct:
+        event.max_capacity && event.max_capacity > 0
+          ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
+          : null,
+      turnUpPct:
+        event.start_time >= now || event._count.rsvps === 0
+          ? null
+          : Math.min(100, (event._count.check_ins / event._count.rsvps) * 100),
+    })),
+  }
 }
 
-/**
- * Candidate pool for the "top performers" table.
- *
- * This used to take the 24 most RECENT events and then re-rank them by a
- * traction score, so a host with thirty events got a leaderboard drawn from a
- * recency window and presented as if it covered the whole portfolio — an event
- * from four months ago that outdrew everything since could not appear.
- *
- * Ordering by check-in count instead makes the pool the most-attended events,
- * which is the dominant term of the score below (attendees is weighted 2x), so
- * the final ranking is the real one. The pool stays bounded because app_admin
- * runs this across every event on the platform.
- *
- * The orderBy counts all check-ins rather than only attended statuses —
- * relation-count ordering takes no filter in Prisma. That only affects which
- * events are considered, never how they are scored; the exact attended count
- * is computed in the `_count` select below.
- */
-const PERFORMANCE_POOL = 50
+/* -------------------------------------------------------------------------- */
+/* Admin                                                                       */
+/* -------------------------------------------------------------------------- */
 
-async function getPerformanceRows(userId?: string): Promise<DashboardPerformanceRow[]> {
-  const events = await db.events.findMany({
-    where: eventScope(userId),
-    take: PERFORMANCE_POOL,
-    orderBy: { check_ins: { _count: "desc" } },
-    include: {
-      categories: {
-        include: {
-          category: {
-            select: { name: true },
-          },
-        },
-      },
-      ratings: {
-        select: { rating: true },
-      },
-      chat_group: {
-        select: {
-          _count: {
-            select: { messages: true },
-          },
-        },
-      },
-      _count: {
-        select: {
-          check_ins: {
-            where: {
-              status: { in: ATTENDED_STATUSES },
-            },
-          },
-          favorites: true,
-          ratings: true,
-        },
-      },
-    },
-  })
-
-  return events
-    .map((event) => {
-      const averageRating =
-        event.ratings.length > 0
-          ? event.ratings.reduce((sum, rating) => sum + rating.rating, 0) / event.ratings.length
-          : null
-
-      const row: DashboardPerformanceRow = {
-        id: event.id,
-        name: event.title,
-        segment: event.categories[0]?.category.name ?? "General",
-        status: event.status,
-        city: event.city ?? event.venue_name ?? "TBD",
-        startAt: event.start_time.toISOString(),
-        attendees: event._count.check_ins,
-        demand: event._count.favorites,
-        engagement: (event.chat_group?._count.messages ?? 0) + event._count.favorites,
-        rating: averageRating ? normalizeAverage(averageRating) : null,
-        capacity: event.max_capacity,
-      }
-
-      return row
-    })
-    .sort((left, right) => {
-      const leftScore = left.attendees * 2 + left.demand + left.engagement
-      const rightScore = right.attendees * 2 + right.demand + right.engagement
-      return rightScore - leftScore
-    })
-    .slice(0, 12)
-}
-
-/** RSVP states that count as intent to attend. `not_going` is a decline. */
-const COMMITTED_RSVPS: rsvp_status[] = ["going", "maybe"]
-
-/**
- * The next published events that have not started.
- *
- * Every other figure on this dashboard looks backwards over 30 days, which
- * answers "how did we do" and never "what needs attention now". A host with a
- * sold-out event tomorrow and an empty one next week could not tell those
- * apart from this screen.
- */
-async function getUpcomingRows(userId?: string): Promise<DashboardUpcomingRow[]> {
+async function buildAdminOverview(): Promise<AdminOverview> {
   const now = new Date()
+  const weekStart = new Date(now.getTime() - 7 * DAY_MS)
+
+  const [
+    pendingFlags,
+    oldestFlag,
+    highConfidence,
+    flagRooms,
+    users,
+    activeThisWeek,
+    publishedEvents,
+    checkIns,
+    hostAccounts,
+    publishingHosts,
+    onboarded,
+    rsvpUsers,
+    checkedInUsers,
+    signupBuckets,
+    activeBuckets,
+    supplyRows,
+    cityRows,
+  ] = await Promise.all([
+    db.moderation_flags.count({ where: { status: "pending" } }),
+    db.moderation_flags.findFirst({
+      where: { status: "pending" },
+      orderBy: { created_at: "asc" },
+      select: { created_at: true },
+    }),
+    // 0.9 is the pipeline's own "act without a human" threshold; above it a
+    // flag is very likely real, which is what makes it the queue's priority.
+    db.moderation_flags.count({ where: { status: "pending", confidence: { gte: 0.9 } } }),
+    db.moderation_flags.findMany({
+      where: { status: "pending" },
+      select: { chat_group_id: true },
+      distinct: ["chat_group_id"],
+    }),
+    db.user.count(),
+    db.mobile_refresh_tokens
+      .findMany({
+        where: { revoked_at: null, created_at: { gte: weekStart } },
+        select: { user_id: true },
+        distinct: ["user_id"],
+      })
+      .then((rows) => rows.length),
+    db.events.count({ where: { ...eventScope(), status: "published" } }),
+    db.event_check_ins.count({ where: { status: { in: ATTENDED }, event: eventScope() } }),
+    db.user.count({ where: { role: { in: ["organizer", "venue_owner"] } } }),
+    db.events
+      .findMany({
+        where: { ...eventScope(), status: "published" },
+        select: { organizer_id: true },
+        distinct: ["organizer_id"],
+      })
+      .then((rows) => rows.length),
+    /*
+     * Funnel stages must be nested subsets, or the shape lies.
+     *
+     * The first version counted four independent populations — every onboarded
+     * profile, every user with an RSVP, every user with a check-in — and drew
+     * them as a funnel. Staging had 7 onboarded and 10 RSVP'd, because a user
+     * can RSVP without ever completing onboarding, so stage 3 was wider than
+     * stage 2 and the chart showed a funnel widening downward.
+     *
+     * Each stage now filters on the one above it.
+     */
+    db.user.count({ where: { profile: { onboarded: true } } }),
+    db.user.count({
+      where: { profile: { onboarded: true }, event_rsvps: { some: {} } },
+    }),
+    db.user.count({
+      where: {
+        profile: { onboarded: true },
+        event_rsvps: { some: {} },
+        event_check_ins: { some: { status: { in: ATTENDED } } },
+      },
+    }),
+    db.user.findMany({ select: { createdAt: true }, orderBy: { createdAt: "asc" } }),
+    db.mobile_refresh_tokens.findMany({
+      where: { created_at: { gte: new Date(now.getTime() - 8 * 7 * DAY_MS) } },
+      select: { created_at: true, user_id: true },
+    }),
+    db.events.groupBy({
+      by: ["organizer_id", "status"],
+      where: eventScope(),
+      _count: { _all: true },
+    }),
+    db.events.findMany({
+      where: { ...eventScope(), status: "published", city: { not: null } },
+      select: {
+        city: true,
+        _count: { select: { rsvps: true, favorites: true } },
+      },
+    }),
+  ])
+
+  /* Weekly growth: cumulative signups against distinct users with a session
+     that week. Plotted together deliberately — the gap between the two lines
+     is the vanity, and a signups line alone hides it entirely. */
+  const growth: AdminOverview["growth"] = []
+  for (let week = 7; week >= 0; week--) {
+    const bucketEnd = new Date(now.getTime() - week * 7 * DAY_MS)
+    const bucketStart = new Date(bucketEnd.getTime() - 7 * DAY_MS)
+    growth.push({
+      label: week === 0 ? "now" : `−${week}w`,
+      signups: signupBuckets.filter((u) => u.createdAt <= bucketEnd).length,
+      active: new Set(
+        activeBuckets
+          .filter((t) => t.created_at > bucketStart && t.created_at <= bucketEnd)
+          .map((t) => t.user_id)
+      ).size,
+    })
+  }
+
+  const publishedByOrganiser = new Map<string, number>()
+  const draftsByOrganiser = new Map<string, number>()
+  for (const row of supplyRows) {
+    const target = row.status === "published" ? publishedByOrganiser : draftsByOrganiser
+    target.set(row.organizer_id, (target.get(row.organizer_id) ?? 0) + row._count._all)
+  }
+
+  const organiserIds = Array.from(
+    new Set([...publishedByOrganiser.keys(), ...draftsByOrganiser.keys()])
+  )
+  const [organisers, lastEvents] = await Promise.all([
+    db.user.findMany({
+      where: { id: { in: organiserIds } },
+      select: { id: true, name: true, email: true },
+    }),
+    db.events.groupBy({
+      by: ["organizer_id"],
+      where: { ...eventScope(), status: "published" },
+      _max: { start_time: true },
+    }),
+  ])
+
+  const totalPublished = Array.from(publishedByOrganiser.values()).reduce((a, b) => a + b, 0)
+  const supply: OrganiserSupplyRow[] = organisers
+    .map((organiser) => ({
+      id: organiser.id,
+      name: organiser.name ?? organiser.email,
+      published: publishedByOrganiser.get(organiser.id) ?? 0,
+      drafts: draftsByOrganiser.get(organiser.id) ?? 0,
+      sharePct:
+        totalPublished === 0
+          ? 0
+          : Math.round(((publishedByOrganiser.get(organiser.id) ?? 0) / totalPublished) * 100),
+      lastEventAt:
+        lastEvents.find((e) => e.organizer_id === organiser.id)?._max.start_time?.toISOString() ??
+        null,
+    }))
+    .sort((a, b) => b.published - a.published)
+
+  const cityMap = new Map<string, CityRow>()
+  for (const event of cityRows) {
+    const city = event.city as string
+    const existing = cityMap.get(city) ?? { city, events: 0, rsvps: 0, favourites: 0 }
+    existing.events += 1
+    existing.rsvps += event._count.rsvps
+    existing.favourites += event._count.favorites
+    cityMap.set(city, existing)
+  }
+
+  return {
+    role: "app_admin",
+    attention: {
+      pending: pendingFlags,
+      oldestHours: oldestFlag
+        ? Math.floor((now.getTime() - oldestFlag.created_at.getTime()) / (60 * 60 * 1000))
+        : null,
+      highConfidence,
+      affectedRooms: flagRooms.length,
+    },
+    users,
+    activeThisWeek,
+    publishedEvents,
+    checkIns,
+    publishingHosts: { publishing: publishingHosts, total: hostAccounts },
+    growth,
+    funnel: [
+      { label: "signed up", value: users },
+      { label: "onboarded", value: onboarded },
+      { label: "RSVP'd", value: rsvpUsers },
+      { label: "checked in", value: checkedInUsers },
+    ],
+    supply,
+    cities: Array.from(cityMap.values()).sort((a, b) => b.events - a.events),
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Venue owner                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Four slots per day, by start hour. */
+function slotFor(date: Date) {
+  const hour = date.getHours()
+  if (hour < 12) return 0
+  if (hour < 17) return 1
+  if (hour < 22) return 2
+  return 3
+}
+
+/** Monday-first, matching the heatmap's axis. */
+function dayIndex(date: Date) {
+  return (date.getDay() + 6) % 7
+}
+
+async function buildVenueOverview(userId: string): Promise<VenueOverview> {
+  const now = new Date()
+  const windowStart = new Date(now.getTime() - WINDOW_WEEKS * 7 * DAY_MS)
+
   const events = await db.events.findMany({
-    where: {
-      ...eventScope(userId),
-      status: "published",
-      start_time: { gte: now },
+    where: { ...eventScope(userId), venue_name: { not: null } },
+    select: {
+      id: true,
+      title: true,
+      start_time: true,
+      venue_name: true,
+      max_capacity: true,
+      status: true,
+      ratings: { select: { rating: true } },
+      _count: { select: { rsvps: { where: { status: { in: COMMITTED } } } } },
     },
     orderBy: { start_time: "asc" },
-    take: 8,
+  })
+
+  const [committed, attended, upcoming14d] = await Promise.all([
+    db.event_rsvps.count({
+      where: {
+        status: { in: COMMITTED },
+        event: { ...eventScope(userId), start_time: { lt: now } },
+      },
+    }),
+    db.event_check_ins.count({
+      where: {
+        status: { in: ATTENDED },
+        event: { ...eventScope(userId), start_time: { lt: now } },
+      },
+    }),
+    db.events.count({
+      where: {
+        ...eventScope(userId),
+        status: "published",
+        start_time: { gte: now, lte: new Date(now.getTime() + 14 * DAY_MS) },
+      },
+    }),
+  ])
+
+  /* Venues are grouped by venue_name because there is no venues table. Two
+     spellings of one room therefore read as two venues — flagged in the UI. */
+  const byVenue = new Map<string, typeof events>()
+  for (const event of events) {
+    const key = event.venue_name as string
+    byVenue.set(key, [...(byVenue.get(key) ?? []), event])
+  }
+
+  const venues: VenueRow[] = Array.from(byVenue.entries())
+    .map(([name, venueEvents]) => {
+      const inWindow = venueEvents.filter((e) => e.start_time >= windowStart && e.start_time < now)
+      const ratings = emptyRatings()
+      let ratingTotal = 0
+      let ratingCount = 0
+      for (const event of venueEvents) {
+        for (const { rating } of event.ratings) {
+          if (rating >= 1 && rating <= 5) ratings[rating - 1] += 1
+          ratingTotal += rating
+          ratingCount += 1
+        }
+      }
+      const averageRating = ratingCount === 0 ? null : ratingTotal / ratingCount
+      const next = venueEvents.find((e) => e.start_time >= now && e.status === "published")
+      const nightsPerWeek = inWindow.length / WINDOW_WEEKS
+
+      // Tone is about what needs attention, not a ranking: a low rating across
+      // several organisers' events is a facilities problem worth surfacing.
+      const tone: VenueRow["tone"] =
+        averageRating !== null && averageRating < 3.5
+          ? "destructive"
+          : nightsPerWeek >= 2
+            ? "success"
+            : nightsPerWeek < 0.5
+              ? "destructive"
+              : "neutral"
+
+      return {
+        name,
+        eventsInWindow: inWindow.length,
+        nightsPerWeek: Math.round(nightsPerWeek * 10) / 10,
+        averageRating: round1(averageRating),
+        ratings,
+        nextBooking: next
+          ? {
+              id: next.id,
+              name: next.title,
+              startAt: next.start_time.toISOString(),
+              going: next._count.rsvps,
+            }
+          : null,
+        capacityProxy: venueEvents.reduce<number | null>(
+          (max, e) => (e.max_capacity && (max === null || e.max_capacity > max) ? e.max_capacity : max),
+          null
+        ),
+        tone,
+        note:
+          averageRating !== null && averageRating < 3.5
+            ? "ratings low"
+            : nightsPerWeek >= 2
+              ? "performing"
+              : nightsPerWeek < 0.5
+                ? "underused"
+                : "steady",
+      }
+    })
+    .sort((a, b) => b.nightsPerWeek - a.nightsPerWeek)
+
+  const utilisation = Array.from({ length: 7 }, () => [0, 0, 0, 0])
+  for (const event of events) {
+    if (event.start_time < windowStart || event.start_time >= now) continue
+    utilisation[dayIndex(event.start_time)][slotFor(event.start_time)] += 1
+  }
+
+  let peakWindow: string | null = null
+  let peakCount = 0
+  const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+  const SLOT_NAMES = ["morning", "afternoon", "evening", "late"]
+  utilisation.forEach((slots, di) =>
+    slots.forEach((count, si) => {
+      if (count > peakCount) {
+        peakCount = count
+        peakWindow = `${DAY_NAMES[di]} ${SLOT_NAMES[si]}`
+      }
+    })
+  )
+
+  return {
+    role: "venue_owner",
+    venues,
+    utilisation,
+    peakWindow,
+    turnUpRatePct: round1(pct(Math.min(attended, committed), committed)),
+    eventsNext14d: upcoming14d,
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
+export async function getDashboardOverview(role: DashboardRole, userId?: string) {
+  try {
+    if (role === "app_admin") return await buildAdminOverview()
+    if (!userId) throw new Error("User ID is required for scoped dashboard reports")
+    if (role === "venue_owner") return await buildVenueOverview(userId)
+    return await buildOrganizerOverview(userId)
+  } catch (error) {
+    logger.error("Failed to build dashboard overview", {
+      role,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
+}
+
+/** Shared by the events screen for all three roles; scoped by the caller. */
+export async function getEventRows(userId?: string): Promise<EventRow[]> {
+  const now = new Date()
+  const events = await db.events.findMany({
+    where: eventScope(userId),
+    orderBy: { start_time: "desc" },
+    take: 100,
     select: {
       id: true,
       title: true,
       start_time: true,
       city: true,
       venue_name: true,
+      status: true,
       max_capacity: true,
       _count: {
-        select: { rsvps: { where: { status: { in: COMMITTED_RSVPS } } } },
+        select: {
+          rsvps: { where: { status: "going" } },
+          check_ins: { where: { status: { in: ATTENDED } } },
+        },
       },
     },
   })
 
-  return events.map((event) => {
-    const capacity = event.max_capacity
-    const committed = event._count.rsvps
-    return {
-      id: event.id,
-      name: event.title,
-      startAt: event.start_time.toISOString(),
-      daysOut: Math.max(
-        0,
-        Math.ceil((event.start_time.getTime() - now.getTime()) / DAY_IN_MS)
-      ),
-      committed,
-      capacity,
-      // No stated capacity means there is nothing to be full of; a percentage
-      // would be invented rather than unknown.
-      fillPct: capacity && capacity > 0 ? Math.min(100, (committed / capacity) * 100) : null,
-      city: event.city ?? event.venue_name ?? "TBD",
-    }
-  })
-}
-
-/**
- * Share of committed RSVPs on past events that actually checked in.
- *
- * The gap between the two is the no-show rate, which is what decides catering,
- * staffing, and whether to overbook. Nothing on this dashboard exposed it.
- */
-async function getShowUpRate(userId?: string) {
-  const pastEvents = { ...eventScope(userId), start_time: { lt: new Date() } }
-
-  const [committed, attended] = await Promise.all([
-    db.event_rsvps.count({
-      where: { status: { in: COMMITTED_RSVPS }, event: pastEvents },
-    }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED_STATUSES }, event: pastEvents },
-    }),
-  ])
-
-  return {
-    committed,
-    attended,
-    // Capped at 100: walk-ins check in without ever having RSVP'd, so the raw
-    // ratio can exceed 1 and "112% turned up" reads as a bug, not a good day.
-    rate: committed === 0 ? null : Math.min(100, (attended / committed) * 100),
-  }
-}
-
-async function buildAdminReport(): Promise<DashboardReport> {
-  const now = new Date()
-  const currentStart = startOfDay(new Date(now.getTime() - 29 * DAY_IN_MS))
-  const previousStart = startOfDay(new Date(now.getTime() - 59 * DAY_IN_MS))
-
-  const [totalUsers, totalPublishedEvents, currentSignups, previousSignups, currentCheckIns, previousCheckIns] =
-    await Promise.all([
-      db.user.count(),
-      db.events.count({
-        where: {
-          ...eventScope(),
-          status: "published",
-        },
-      }),
-      db.user.count({
-        where: { createdAt: { gte: currentStart } },
-      }),
-      db.user.count({
-        where: {
-          createdAt: { gte: previousStart, lt: currentStart },
-        },
-      }),
-      db.event_check_ins.count({
-        where: {
-          ...attendedScope(),
-          check_in_time: { gte: currentStart },
-        },
-      }),
-      db.event_check_ins.count({
-        where: {
-          ...attendedScope(),
-          check_in_time: { gte: previousStart, lt: currentStart },
-        },
-      }),
-    ])
-
-  const [
-    currentActiveAudienceIds,
-    previousActiveAudienceIds,
-    currentEventSupply,
-    previousEventSupply,
-    onboardedProfiles,
-    checkedInUsers,
-    activeHosts,
-    totalHosts,
-    pushReachUsers,
-    ratingsAggregate,
-    repeatAttendanceRows,
-    publishedCities,
-    performanceRows,
-    trendPoints,
-    upcomingRows,
-    moderationByStatus,
-    pendingFlagGroups,
-    totalMessages,
-  ] = await Promise.all([
-    getDistinctUserIdsForPeriod(currentStart, addDays(now, 1), undefined, true),
-    getDistinctUserIdsForPeriod(previousStart, currentStart, undefined, true),
-    db.events.count({
-      where: {
-        ...eventScope(),
-        status: "published",
-        created_at: { gte: currentStart },
-      },
-    }),
-    db.events.count({
-      where: {
-        ...eventScope(),
-        status: "published",
-        created_at: { gte: previousStart, lt: currentStart },
-      },
-    }),
-    db.profiles.count({
-      where: { onboarded: true },
-    }),
-    db.event_check_ins.findMany({
-      where: {
-        ...attendedScope(),
-        check_in_time: { gte: currentStart },
-      },
-      select: { user_id: true },
-      distinct: ["user_id"],
-    }),
-    db.events.findMany({
-      where: {
-        ...eventScope(),
-        status: "published",
-      },
-      select: { organizer_id: true },
-      distinct: ["organizer_id"],
-    }),
-    db.user.count({
-      where: {
-        role: { in: ["organizer", "venue_owner"] },
-      },
-    }),
-    db.push_tokens.findMany({
-      select: { user_id: true },
-      distinct: ["user_id"],
-    }),
-    db.event_ratings.aggregate({
-      _avg: { rating: true },
-      _count: { rating: true },
-    }),
-    db.event_check_ins.findMany({
-      where: attendedScope(),
-      select: { user_id: true },
-    }),
-    db.events.findMany({
-      where: {
-        ...eventScope(),
-        status: "published",
-        city: { not: null },
-      },
-      select: { city: true },
-    }),
-    getPerformanceRows(),
-    getMonthlyTrend("app_admin"),
-    getUpcomingRows(),
-    // Trust and safety was invisible on this dashboard: `moderation_flags` is a
-    // core table and the pending count is the most time-sensitive number an
-    // admin has, but the only way to see it was to open one event's messaging
-    // page at a time.
-    db.moderation_flags.groupBy({
-      by: ["status"],
-      _count: { _all: true },
-    }),
-    db.moderation_flags.findMany({
-      where: { status: "pending" },
-      select: { chat_group_id: true },
-      distinct: ["chat_group_id"],
-    }),
-    db.chat_messages.count(),
-  ])
-
-  const currentActiveAudience = currentActiveAudienceIds.length
-  const previousActiveAudience = previousActiveAudienceIds.length
-  const repeatedAttendance = repeatAttendanceRate(repeatAttendanceRows)
-
-  const topCity = topValue(publishedCities.map((event) => event.city))
-  const averageRating = normalizeAverage(ratingsAggregate._avg.rating)
-
-  const flagCount = (status: string) =>
-    moderationByStatus.find((row) => row.status === status)?._count._all ?? 0
-  const pendingFlags = flagCount("pending")
-  const totalFlags = moderationByStatus.reduce((sum, row) => sum + row._count._all, 0)
-  // Flags per thousand messages, so the number stays comparable as volume grows
-  // — a raw flag count only ever goes up and says nothing about whether chat is
-  // getting worse.
-  const flagRate = totalMessages === 0 ? 0 : (totalFlags / totalMessages) * 1000
-
-  const metrics: DashboardMetric[] = [
-    toMetric(
-      "Total users",
-      compactNumber(totalUsers),
-      currentSignups,
-      previousSignups,
-      `${wholeNumber(currentSignups)} new users in the last 30 days`
-    ),
-    toMetric(
-      "Active audience",
-      compactNumber(currentActiveAudience),
-      currentActiveAudience,
-      previousActiveAudience,
-      "Users who checked in, chatted, saved events, or refreshed a mobile session"
-    ),
-    toMetric(
-      "Published event supply",
-      compactNumber(totalPublishedEvents),
-      currentEventSupply,
-      previousEventSupply,
-      `${wholeNumber(currentEventSupply)} published in the last 30 days`
-    ),
-    toMetric(
-      "Check-ins",
-      compactNumber(currentCheckIns),
-      currentCheckIns,
-      previousCheckIns,
-      "Confirmed attendance across all live and completed events in the last 30 days"
-    ),
-  ]
-
-  const spotlights: DashboardSpotlightCard[] = [
-    {
-      title: "Repeat attendance",
-      value: `${oneDecimal(repeatedAttendance)}%`,
-      description: "Share of attendees who have checked into more than one event.",
-    },
-    {
-      title: "Host activation",
-      value: totalHosts === 0 ? "0%" : `${wholeNumber((activeHosts.length / totalHosts) * 100)}%`,
-      description: `${activeHosts.length} of ${totalHosts} organiser and venue accounts have published inventory.`,
-    },
-    {
-      title: "Push reachable audience",
-      value: totalUsers === 0 ? "0%" : `${wholeNumber((pushReachUsers.length / totalUsers) * 100)}%`,
-      description: `${pushReachUsers.length} users currently have at least one push token on file.`,
-    },
-    {
-      title: "Average event rating",
-      value: ratingsAggregate._count.rating > 0 ? `${oneDecimal(averageRating)}/5` : "No ratings",
-      description:
-        ratingsAggregate._count.rating > 0
-          ? `Based on ${wholeNumber(ratingsAggregate._count.rating)} submitted event ratings.`
-          : "Ratings will populate as event feedback comes in.",
-    },
-    {
-      title: "Moderation backlog",
-      value: wholeNumber(pendingFlags),
-      description:
-        pendingFlags > 0
-          ? `Flags awaiting review across ${wholeNumber(pendingFlagGroups.length)} chatroom${pendingFlagGroups.length === 1 ? "" : "s"}. ${oneDecimal(flagRate)} flags per 1,000 messages platform-wide.`
-          : `Nothing awaiting review. ${oneDecimal(flagRate)} flags per 1,000 messages platform-wide.`,
-    },
-  ]
-
-  const exports: DashboardExportBundle[] = [
-    {
-      name: "Investor summary",
-      filename: "blendn-investor-summary.csv",
-      columns: ["metric", "value", "detail"],
-      rows: [
-        ...metrics.map((metric) => ({
-          metric: metric.label,
-          value: metric.value,
-          detail: `${metric.delta}. ${metric.detail}`,
-        })),
-        ...spotlights.map((card) => ({
-          metric: card.title,
-          value: card.value,
-          detail: card.description,
-        })),
-      ],
-    },
-    {
-      name: "Upcoming events",
-      filename: "blendn-upcoming-events.csv",
-      columns: ["event", "start_at", "days_out", "committed_rsvps", "capacity", "fill_pct", "city"],
-      rows: upcomingRows.map((row) => ({
-        event: row.name,
-        start_at: row.startAt,
-        days_out: row.daysOut,
-        committed_rsvps: row.committed,
-        capacity: row.capacity,
-        fill_pct: row.fillPct === null ? null : Math.round(row.fillPct),
-        city: row.city,
-      })),
-    },
-    {
-      name: "Growth trend",
-      filename: "blendn-growth-trend.csv",
-      columns: ["month", "new_users", "published_events", "check_ins", "engagement_actions"],
-      rows: trendPoints.map((point) => ({
-        month: point.label,
-        new_users: point.users,
-        published_events: point.events,
-        check_ins: point.attendees,
-        engagement_actions: point.engagement,
-      })),
-    },
-    {
-      name: "Moderation queue",
-      filename: "blendn-moderation-queue.csv",
-      columns: ["state", "count", "detail"],
-      rows: [
-        { state: "Pending", count: pendingFlags, detail: `${pendingFlagGroups.length} chatrooms affected` },
-        { state: "Approved", count: flagCount("approved"), detail: "Reviewed and allowed to stand" },
-        { state: "Rejected", count: flagCount("rejected"), detail: "Reviewed and actioned" },
-        { state: "Flags per 1,000 messages", count: Math.round(flagRate * 10) / 10, detail: "Platform-wide rate" },
-      ],
-    },
-    {
-      name: "Event performance",
-      filename: "blendn-event-performance.csv",
-      columns: ["event", "segment", "status", "city", "start_at", "attendees", "demand", "engagement", "rating", "capacity"],
-      rows: performanceRows.map((row) => ({
-        event: row.name,
-        segment: row.segment,
-        status: row.status,
-        city: row.city,
-        start_at: row.startAt,
-        attendees: row.attendees,
-        demand: row.demand,
-        engagement: row.engagement,
-        rating: row.rating,
-        capacity: row.capacity,
-      })),
-    },
-  ]
-
-  return {
-    role: "app_admin",
-    headline: "Investor & Ops Overview",
-    summary:
-      "Blend'n is still in MVP, so the strongest story is not vanity traffic. This view surfaces adoption, activation, host liquidity, attendance, and engagement signals you can defend in an investor conversation.",
-    metrics,
-    trend: {
-      title: "Marketplace momentum",
-      description: "Six-month view of acquisition, supply, attendance, and engagement.",
-      points: trendPoints,
-      defaultKey: "users",
-    },
-    funnel: {
-      title: "Activation funnel",
-      description: "The clearest MVP path from account creation to real-world attendance.",
-      stages: [
-        {
-          label: "Total signups",
-          value: totalUsers,
-          detail: "All registered user accounts",
-        },
-        {
-          label: "Onboarded profiles",
-          value: onboardedProfiles,
-          detail: `${totalUsers === 0 ? 0 : wholeNumber((onboardedProfiles / totalUsers) * 100)}% profile completion`,
-        },
-        {
-          label: "Active audience 30d",
-          value: currentActiveAudience,
-          detail: "Checked in, chatted, saved an event, or refreshed a session",
-        },
-        {
-          label: "Checked-in users 30d",
-          value: checkedInUsers.length,
-          detail: "Users who attended at least one event in the last 30 days",
-        },
-      ],
-    },
-    spotlights,
-    upcoming: {
-      title: "Next events on the platform",
-      description:
-        "Published events that have not started, in the order they run. Commitment is RSVPs of going or maybe.",
-      rows: upcomingRows,
-      emptyMessage: "No published events are scheduled. Every event on the platform has already run.",
-    },
-    breakdown: {
-      title: "Moderation queue",
-      description:
-        "Flags raised by the moderation pipeline, by review state. Pending flags are content the filters caught that nobody has ruled on yet.",
-      bars: [
-        {
-          label: "Pending",
-          value: pendingFlags,
-          detail: `Awaiting review across ${wholeNumber(pendingFlagGroups.length)} chatroom${pendingFlagGroups.length === 1 ? "" : "s"}`,
-        },
-        {
-          label: "Approved",
-          value: flagCount("approved"),
-          detail: "Reviewed and allowed to stand",
-        },
-        {
-          label: "Rejected",
-          value: flagCount("rejected"),
-          detail: "Reviewed and actioned",
-        },
-      ],
-      emptyMessage:
-        "No content has been flagged yet. This fills in as the moderation pipeline runs against live chat.",
-    },
-    performance: {
-      title: "Top event performers",
-      description:
-        topCity.count > 0
-          ? `Current event mix is strongest in ${topCity.value}. Use this table to support city and category expansion decisions.`
-          : `Use this table to compare event traction, category fit, and attendance depth.`,
-      rows: performanceRows,
-    },
-    exports,
-  }
-}
-
-async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId: string): Promise<DashboardReport> {
-  const now = new Date()
-  const currentStart = startOfDay(new Date(now.getTime() - 29 * DAY_IN_MS))
-  const previousStart = startOfDay(new Date(now.getTime() - 59 * DAY_IN_MS))
-
-  const [
-    totalEvents,
-    publishedEvents,
-    upcomingEvents,
-    currentEventSupply,
-    previousEventSupply,
-    currentAudienceIds,
-    previousAudienceIds,
-    currentDemand,
-    previousDemand,
-    currentChatMessages,
-    previousChatMessages,
-    currentCheckIns,
-    ratedAggregate,
-    repeatAttendanceRows,
-    eventsWithCapacity,
-    eventsForMix,
-    ratings30d,
-    performanceRows,
-    trendPoints,
-    upcomingRows,
-    showUp,
-    ratingSpread,
-    venueSpread,
-  ] = await Promise.all([
-    db.events.count({
-      where: eventScope(userId),
-    }),
-    db.events.count({
-      where: {
-        ...eventScope(userId),
-        status: "published",
-      },
-    }),
-    db.events.count({
-      where: {
-        ...eventScope(userId),
-        status: "published",
-        start_time: { gte: now },
-      },
-    }),
-    db.events.count({
-      where: {
-        ...eventScope(userId),
-        status: "published",
-        created_at: { gte: currentStart },
-      },
-    }),
-    db.events.count({
-      where: {
-        ...eventScope(userId),
-        status: "published",
-        created_at: { gte: previousStart, lt: currentStart },
-      },
-    }),
-    getDistinctUserIdsForPeriod(currentStart, addDays(now, 1), userId),
-    getDistinctUserIdsForPeriod(previousStart, currentStart, userId),
-    db.event_favorites.count({
-      where: {
-        event: eventScope(userId),
-        created_at: { gte: currentStart },
-      },
-    }),
-    db.event_favorites.count({
-      where: {
-        event: eventScope(userId),
-        created_at: { gte: previousStart, lt: currentStart },
-      },
-    }),
-    db.chat_messages.count({
-      where: {
-        deleted_at: null,
-        created_at: { gte: currentStart },
-        chat_group: {
-          event: eventScope(userId),
-        },
-      },
-    }),
-    db.chat_messages.count({
-      where: {
-        deleted_at: null,
-        created_at: { gte: previousStart, lt: currentStart },
-        chat_group: {
-          event: eventScope(userId),
-        },
-      },
-    }),
-    db.event_check_ins.count({
-      where: {
-        ...attendedScope(userId),
-        check_in_time: { gte: currentStart },
-      },
-    }),
-    db.event_ratings.aggregate({
-      where: {
-        event: eventScope(userId),
-      },
-      _avg: { rating: true },
-      _count: { rating: true },
-    }),
-    db.event_check_ins.findMany({
-      where: attendedScope(userId),
-      select: { user_id: true },
-    }),
-    db.events.findMany({
-      where: {
-        ...eventScope(userId),
-        max_capacity: { not: null },
-      },
-      select: {
-        max_capacity: true,
-        _count: {
-          select: {
-            check_ins: {
-              where: {
-                status: { in: ATTENDED_STATUSES },
-              },
-            },
-          },
-        },
-      },
-    }),
-    db.events.findMany({
-      where: eventScope(userId),
-      select: {
-        city: true,
-        venue_name: true,
-      },
-    }),
-    db.event_ratings.count({
-      where: {
-        event: eventScope(userId),
-        created_at: { gte: currentStart },
-      },
-    }),
-    getPerformanceRows(userId),
-    getMonthlyTrend(role, userId),
-    getUpcomingRows(userId),
-    getShowUpRate(userId),
-    // The spread behind the average. A 4.2 mean hides a 5/1 split, and those
-    // are completely different events to run next time.
-    db.event_ratings.groupBy({
-      by: ["rating"],
-      where: { event: eventScope(userId) },
-      _count: { _all: true },
-    }),
-    // A venue owner with three venues saw one blended number for all of them,
-    // which is the opposite of what the role exists to answer.
-    db.events.groupBy({
-      by: ["venue_name"],
-      where: { ...eventScope(userId), venue_name: { not: null } },
-      _count: { _all: true },
-      orderBy: { _count: { venue_name: "desc" } },
-      take: 8,
-    }),
-  ])
-
-  const currentAudience = currentAudienceIds.length
-  const previousAudience = previousAudienceIds.length
-  const repeatedAttendance = repeatAttendanceRate(repeatAttendanceRows)
-
-  const averageFillRate =
-    eventsWithCapacity.length === 0
-      ? 0
-      : eventsWithCapacity.reduce((sum, event) => {
-          const capacity = event.max_capacity ?? 0
-          if (capacity <= 0) {
-            return sum
-          }
-
-          return sum + Math.min(100, (event._count.check_ins / capacity) * 100)
-        }, 0) / eventsWithCapacity.length
-
-  const topCity = topValue(eventsForMix.map((event) => event.city))
-  const topVenue = topValue(eventsForMix.map((event) => event.venue_name))
-  const averageRating = normalizeAverage(ratedAggregate._avg.rating)
-
-  /*
-   * The two roles want different second charts. A venue owner's question is
-   * "which of my venues is working" — that cannot be answered by an average
-   * across all of them, which is all this dashboard used to offer. An
-   * organiser's is "is the 4.2 average a consensus or a split", which the mean
-   * actively hides.
-   */
-  const ratingBars: DashboardBreakdownBar[] = [5, 4, 3, 2, 1].map((star) => {
-    const count = ratingSpread.find((row) => row.rating === star)?._count._all ?? 0
-    const share =
-      ratedAggregate._count.rating === 0 ? 0 : (count / ratedAggregate._count.rating) * 100
-    return {
-      label: `${star} star${star === 1 ? "" : "s"}`,
-      value: count,
-      detail: `${oneDecimal(share)}% of ratings`,
-    }
-  })
-
-  const venueBars: DashboardBreakdownBar[] = venueSpread.map((row) => ({
-    label: row.venue_name ?? "Unnamed venue",
-    value: row._count._all,
-    detail: `${wholeNumber(row._count._all)} event${row._count._all === 1 ? "" : "s"} in your portfolio`,
+  return events.map((event) => ({
+    id: event.id,
+    name: event.title,
+    startAt: event.start_time.toISOString(),
+    city: event.city ?? "",
+    venue: event.venue_name ?? "—",
+    status: event.status,
+    going: event._count.rsvps,
+    fillPct:
+      event.max_capacity && event.max_capacity > 0
+        ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
+        : null,
+    turnUpPct:
+      event.start_time >= now || event._count.rsvps === 0
+        ? null
+        : Math.min(100, (event._count.check_ins / event._count.rsvps) * 100),
   }))
-
-  const venueBreakdown =
-    role === "venue_owner"
-      ? {
-          title: "Events by venue",
-          description:
-            "How your portfolio is distributed across venues. A venue carrying most of the inventory is either your strongest room or your single point of failure.",
-          bars: venueBars,
-          emptyMessage:
-            "No events carry a venue name yet. Set one on an event and the split appears here.",
-        }
-      : {
-          title: "Rating spread",
-          description:
-            "The distribution behind the average. A mean of 4.2 can be broad agreement or a split between people who loved it and people who did not.",
-          bars: ratingBars,
-          emptyMessage: "No ratings submitted yet. This fills in as attendees leave feedback.",
-        }
-
-  const metrics: DashboardMetric[] = [
-    toMetric(
-      "Events in portfolio",
-      compactNumber(totalEvents),
-      currentEventSupply,
-      previousEventSupply,
-      `${wholeNumber(publishedEvents)} published and ${wholeNumber(upcomingEvents)} upcoming`
-    ),
-    toMetric(
-      "Unique audience 30d",
-      compactNumber(currentAudience),
-      currentAudience,
-      previousAudience,
-      "Distinct users who checked in, saved, or chatted in your event ecosystem"
-    ),
-    toMetric(
-      "Demand signals 30d",
-      compactNumber(currentDemand),
-      currentDemand,
-      previousDemand,
-      "Event saves and interest captured in the last 30 days"
-    ),
-    toMetric(
-      "Chat activity 30d",
-      compactNumber(currentChatMessages),
-      currentChatMessages,
-      previousChatMessages,
-      `${wholeNumber(currentCheckIns)} check-ins across your portfolio in the last 30 days`
-    ),
-  ]
-
-  const spotlights: DashboardSpotlightCard[] = [
-    {
-      title: "Repeat attendee rate",
-      value: `${oneDecimal(repeatedAttendance)}%`,
-      description: "Audience returning for more than one event in your portfolio.",
-    },
-    {
-      title: "Average fill rate",
-      value: `${oneDecimal(averageFillRate)}%`,
-      description: "Based on checked-in attendees versus stated max capacity.",
-    },
-    {
-      title: "Average event rating",
-      value: ratedAggregate._count.rating > 0 ? `${oneDecimal(averageRating)}/5` : "No ratings",
-      description:
-        ratedAggregate._count.rating > 0
-          ? `${wholeNumber(ratedAggregate._count.rating)} ratings submitted across your events.`
-          : "Ratings will appear once attendees leave event feedback.",
-    },
-    {
-      title: role === "venue_owner" ? "Top venue" : "Top city",
-      value: role === "venue_owner" ? topVenue.value : topCity.value,
-      description:
-        role === "venue_owner"
-          ? "Venue name appearing most often across your managed event inventory."
-          : "City showing the highest concentration of your current event portfolio.",
-    },
-    {
-      title: "Turn-up rate",
-      value: showUp.rate === null ? "No RSVPs yet" : `${oneDecimal(showUp.rate)}%`,
-      description:
-        showUp.rate === null
-          ? "Appears once past events have RSVPs to compare against check-ins."
-          : `${wholeNumber(showUp.attended)} of ${wholeNumber(showUp.committed)} committed RSVPs checked in. The remainder is your no-show rate.`,
-    },
-  ]
-
-  const exports: DashboardExportBundle[] = [
-    {
-      name: "Performance summary",
-      filename: `blendn-${role}-summary.csv`,
-      columns: ["metric", "value", "detail"],
-      rows: [
-        ...metrics.map((metric) => ({
-          metric: metric.label,
-          value: metric.value,
-          detail: `${metric.delta}. ${metric.detail}`,
-        })),
-        ...spotlights.map((card) => ({
-          metric: card.title,
-          value: card.value,
-          detail: card.description,
-        })),
-      ],
-    },
-    {
-      name: "Upcoming events",
-      filename: `blendn-${role}-upcoming.csv`,
-      columns: ["event", "start_at", "days_out", "committed_rsvps", "capacity", "fill_pct", "city"],
-      rows: upcomingRows.map((row) => ({
-        event: row.name,
-        start_at: row.startAt,
-        days_out: row.daysOut,
-        committed_rsvps: row.committed,
-        capacity: row.capacity,
-        fill_pct: row.fillPct === null ? null : Math.round(row.fillPct),
-        city: row.city,
-      })),
-    },
-    {
-      name: venueBreakdown.title,
-      filename: `blendn-${role}-${role === "venue_owner" ? "venues" : "rating-spread"}.csv`,
-      columns: ["label", "count", "detail"],
-      rows: venueBreakdown.bars.map((bar) => ({
-        label: bar.label,
-        count: bar.value,
-        detail: bar.detail,
-      })),
-    },
-    {
-      name: "Trend lines",
-      filename: `blendn-${role}-trend.csv`,
-      columns: ["month", "audience", "published_events", "check_ins", "engagement_actions"],
-      rows: trendPoints.map((point) => ({
-        month: point.label,
-        audience: point.users,
-        published_events: point.events,
-        check_ins: point.attendees,
-        engagement_actions: point.engagement,
-      })),
-    },
-    {
-      name: "Event performance",
-      filename: `blendn-${role}-events.csv`,
-      columns: ["event", "segment", "status", "city", "start_at", "attendees", "demand", "engagement", "rating", "capacity"],
-      rows: performanceRows.map((row) => ({
-        event: row.name,
-        segment: row.segment,
-        status: row.status,
-        city: row.city,
-        start_at: row.startAt,
-        attendees: row.attendees,
-        demand: row.demand,
-        engagement: row.engagement,
-        rating: row.rating,
-        capacity: row.capacity,
-      })),
-    },
-  ]
-
-  return {
-    role,
-    headline: role === "venue_owner" ? "Venue Performance Overview" : "Organiser Performance Overview",
-    summary:
-      role === "venue_owner"
-        ? "Use this view to show venue partners how inventory is performing: portfolio depth, audience pull, attendance conversion, and feedback quality."
-        : "This view concentrates on supply quality, audience pull, repeat attendance, and event-level traction so organisers can improve the next slate of events.",
-    metrics,
-    trend: {
-      title: "Portfolio momentum",
-      description: "Audience, event supply, attendance, and engagement over the last six months.",
-      points: trendPoints,
-      defaultKey: "attendees",
-    },
-    funnel: {
-      title: "Demand funnel",
-      description: "How your event pipeline converts interest into attendance and feedback.",
-      stages: [
-        {
-          label: "Total events",
-          value: totalEvents,
-          detail: "All events currently tied to your account",
-        },
-        {
-          label: "Published events",
-          value: publishedEvents,
-          detail: `${totalEvents === 0 ? 0 : wholeNumber((publishedEvents / totalEvents) * 100)}% of total portfolio`,
-        },
-        {
-          label: "Audience 30d",
-          value: currentAudience,
-          detail: "Distinct users who engaged with your event portfolio",
-        },
-        {
-          label: "Ratings 30d",
-          value: ratings30d,
-          detail: "Fresh feedback submitted during the current 30-day window",
-        },
-      ],
-    },
-    spotlights,
-    upcoming: {
-      title: "Your next events",
-      description:
-        "Published events that have not started, soonest first. Commitment is RSVPs of going or maybe, measured against stated capacity.",
-      rows: upcomingRows,
-      emptyMessage:
-        "Nothing scheduled. Publish an event and it will appear here with live commitment against capacity.",
-    },
-    breakdown: venueBreakdown,
-    performance: {
-      title: "Event leaderboard",
-      description:
-        role === "venue_owner"
-          ? "Compare which events are driving attendance, demand, and chat energy inside your venues."
-          : "Compare which events are creating the strongest mix of attendance, demand, and conversation.",
-      rows: performanceRows,
-    },
-    exports,
-  }
-}
-
-export async function getDashboardReport(role: DashboardRole, userId?: string) {
-  if (role === "app_admin") {
-    return buildAdminReport()
-  }
-
-  if (!userId) {
-    throw new Error("User ID is required for scoped dashboard reports")
-  }
-
-  return buildHostReport(role, userId)
-}
-
-export async function getDashboardStats(userId?: string) {
-  try {
-    const scopedEventWhere = {
-      deleted_at: null,
-      ...(userId ? { organizer_id: userId } : {}),
-    }
-
-    const [totalEvents, publishedEvents, upcomingEvents] = await Promise.all([
-      db.events.count({ where: scopedEventWhere }),
-      db.events.count({ where: { ...scopedEventWhere, status: "published" } }),
-      db.events.count({
-        where: {
-          ...scopedEventWhere,
-          status: "published",
-          start_time: { gte: new Date() },
-        },
-      }),
-    ])
-
-    const lastMonth = new Date()
-    lastMonth.setMonth(lastMonth.getMonth() - 1)
-
-    const previousMonth = new Date()
-    previousMonth.setMonth(previousMonth.getMonth() - 2)
-
-    const [eventsLastMonth, eventsPreviousMonth] = await Promise.all([
-      db.events.count({
-        where: { ...scopedEventWhere, created_at: { gte: lastMonth } },
-      }),
-      db.events.count({
-        where: {
-          ...scopedEventWhere,
-          created_at: { gte: previousMonth, lt: lastMonth },
-        },
-      }),
-    ])
-
-    const eventGrowth =
-      eventsPreviousMonth === 0
-        ? 100
-        : Math.round(((eventsLastMonth - eventsPreviousMonth) / eventsPreviousMonth) * 100)
-
-    if (userId) {
-      const totalCheckIns = await db.event_check_ins.count({
-        where: { event: { organizer_id: userId } },
-      })
-      return {
-        totalEvents,
-        publishedEvents,
-        upcomingEvents,
-        totalCheckIns,
-        totalUsers: null,
-        eventGrowth,
-        userGrowth: null,
-      }
-    }
-
-    const [totalUsers, usersLastMonth, usersPreviousMonth] = await Promise.all([
-      db.user.count(),
-      db.user.count({ where: { createdAt: { gte: lastMonth } } }),
-      db.user.count({
-        where: { createdAt: { gte: previousMonth, lt: lastMonth } },
-      }),
-    ])
-
-    const userGrowth =
-      usersPreviousMonth === 0
-        ? 100
-        : Math.round(((usersLastMonth - usersPreviousMonth) / usersPreviousMonth) * 100)
-
-    return {
-      totalEvents,
-      publishedEvents,
-      upcomingEvents,
-      totalCheckIns: null,
-      totalUsers,
-      eventGrowth,
-      userGrowth,
-    }
-  } catch (error) {
-    logger.error("Error fetching dashboard stats", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to fetch dashboard stats")
-  }
-}
-
-export async function getEventsOverTime(days: number = 90, userId?: string) {
-  try {
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - days)
-
-    const events = await db.events.findMany({
-      where: {
-        created_at: { gte: startDate },
-        ...(userId ? { organizer_id: userId } : {}),
-      },
-      select: { created_at: true },
-      orderBy: { created_at: "asc" },
-    })
-
-    const groupedData: Record<string, { date: string; events: number }> = {}
-
-    for (let index = 0; index < days; index++) {
-      const date = new Date()
-      date.setDate(date.getDate() - index)
-      const dateStr = date.toISOString().split("T")[0]
-      groupedData[dateStr] = { date: dateStr, events: 0 }
-    }
-
-    events.forEach((event) => {
-      const dateStr = event.created_at.toISOString().split("T")[0]
-      if (groupedData[dateStr]) {
-        groupedData[dateStr].events += 1
-      }
-    })
-
-    return Object.values(groupedData).sort(
-      (left, right) => new Date(left.date).getTime() - new Date(right.date).getTime()
-    )
-  } catch (error) {
-    logger.error("Error fetching events over time", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to fetch events over time")
-  }
-}
-
-export async function getRecentEvents(limit: number = 10, userId?: string) {
-  try {
-    const events = await db.events.findMany({
-      take: limit,
-      where: {
-        deleted_at: null,
-        ...(userId ? { organizer_id: userId } : {}),
-      },
-      orderBy: { created_at: "desc" },
-      include: {
-        organizer: {
-          select: { name: true, email: true },
-        },
-        categories: {
-          include: { category: true },
-        },
-        _count: {
-          select: { check_ins: true, favorites: true },
-        },
-      },
-    })
-
-    return events.map((event) => ({
-      id: event.id,
-      title: event.title,
-      slug: event.slug,
-      status: event.status,
-      visibility: event.visibility,
-      start_time: event.start_time,
-      end_time: event.end_time,
-      city: event.city,
-      max_capacity: event.max_capacity,
-      current_capacity: event.current_capacity,
-      organizer: event.organizer,
-      categories: event.categories.map((item) => item.category.name),
-      check_ins: event._count.check_ins,
-      favorites: event._count.favorites,
-      created_at: event.created_at,
-    }))
-  } catch (error) {
-    logger.error("Error fetching recent events", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to fetch recent events")
-  }
-}
-
-export async function getTopCategories() {
-  try {
-    const categories = await db.categories.findMany({
-      include: {
-        _count: { select: { events: true } },
-      },
-      orderBy: { events: { _count: "desc" } },
-      take: 5,
-    })
-
-    return categories.map((category) => ({
-      id: category.id,
-      name: category.name,
-      eventCount: category._count.events,
-    }))
-  } catch (error) {
-    logger.error("Error fetching top categories", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to fetch top categories")
-  }
 }

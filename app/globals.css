@@ -29,7 +29,32 @@
   --color-brand-rose: oklch(0.599 0.127 8.2);
   --color-brand-ink: oklch(0.156 0.002 17.3);
   --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-faint-foreground: var(--faint-foreground);
+  --color-border-strong: var(--border-strong);
+  --color-surface-raised: var(--surface-raised);
+  --color-chart-grid: var(--chart-grid);
   --font-sans: var(--font-satoshi);
+
+  /*
+   * Type scale. Satoshi ships 400/500/700 — there is no 600, so `font-semibold`
+   * resolves up to the 700 face. Treat 700 as the heading and number weight and
+   * 500 as emphasis; don't reach for semibold expecting something in between.
+   *
+   * `--text-metric-hero` is deliberately far above everything else: each screen
+   * gets exactly one number at that size, and that is what carries the
+   * hierarchy. The old dashboard had eleven cards at the same visual weight, so
+   * nothing was primary.
+   */
+  --text-metric-hero: 2.5rem;
+  --text-metric: 1.75rem;
+  --text-h1: 1.375rem;
+  --text-h2: 1.0625rem;
+  --text-body: 0.9375rem;
+  --text-small: 0.8125rem;
+  --text-caption: 0.75rem;
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -99,7 +124,14 @@
   --accent-foreground: oklch(0.24 0.01 330);
   --destructive: oklch(0.55 0.215 15);
   --success: oklch(0.62 0.145 157);
+  --warning: oklch(0.66 0.14 75);
+  --info: oklch(0.532 0.16 315.6);
+  --faint-foreground: oklch(0.62 0.012 330);
+  --surface-raised: oklch(0.968 0.006 40);
   --border: oklch(0.905 0.006 40);
+  --border-strong: oklch(0.85 0.008 40);
+  --chart-grid: oklch(0 0 0 / 8%);
+  --gradient-brand: linear-gradient(135deg, #f05423 0%, #8f49aa 100%);
   --input: oklch(0.905 0.006 40);
   --ring: oklch(0.652 0.2 36.7);
   --chart-1: oklch(0.652 0.2 36.7);
@@ -143,7 +175,16 @@
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.635 0.215 12.5);
   --success: oklch(0.719 0.146 157.3);
+  --warning: oklch(0.8 0.14 80);
+  /* Brand purple, lifted for contrast on ink. */
+  --info: oklch(0.62 0.16 316);
+  /* A third text level below muted, for hints that must not compete. */
+  --faint-foreground: oklch(0.55 0.012 320);
+  --surface-raised: oklch(0.245 0.008 320);
   --border: oklch(1 0 0 / 10%);
+  --border-strong: oklch(1 0 0 / 18%);
+  --chart-grid: oklch(1 0 0 / 8%);
+  --gradient-brand: linear-gradient(135deg, #f05423 0%, #8f49aa 100%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.652 0.2 36.7);
   --chart-1: oklch(0.68 0.195 38);
