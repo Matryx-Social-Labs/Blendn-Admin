@@ -23,7 +23,7 @@ interface RouteParams {
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   // Rate limit: max 10 check-in attempts per user per 10 minutes
-  const rateLimited = rateLimit(request, {
+  const rateLimited = await rateLimit(request, {
     windowMs: 10 * 60 * 1000,
     maxRequests: 10,
     keyGenerator: (req) => {

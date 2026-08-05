@@ -1,19 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
-  RATE_LIMIT_MAX_ENTRIES,
   RATE_LIMIT_WINDOW,
   RATE_LIMIT_MAX_REQUESTS,
 } from "@/lib/constants"
-
-interface RateLimitEntry {
-  count: number
-  resetTime: number
-}
-
-// In-memory store with bounded size.
-// NOTE: This is per-process only. In a multi-worker deployment,
-// replace with Redis (e.g. ioredis) for shared state across workers.
-const rateLimitStore = new Map<string, RateLimitEntry>()
+import { hit } from "@/lib/rate-limit-store"
 
 interface RateLimitConfig {
   windowMs: number
@@ -29,63 +19,35 @@ const DEFAULT_KEY_GENERATOR = (req: NextRequest): string => {
 }
 
 /**
- * Rate limiter middleware
- * Returns null if allowed, or a NextResponse if rate limited
+ * Rate limiter. Returns null if allowed, or a 429 if not.
+ *
+ * Async because the counter now lives in Redis when one is configured — the
+ * previous version kept it in a process-local Map, so every limit was
+ * per-replica and got weaker with each instance added.
  */
-export function rateLimit(
+export async function rateLimit(
   req: NextRequest,
   config: RateLimitConfig
-): NextResponse | null {
+): Promise<NextResponse | null> {
   const { windowMs, maxRequests, keyGenerator = DEFAULT_KEY_GENERATOR } = config
-  const key = keyGenerator(req)
-  const now = Date.now()
+  const key = `rl:${keyGenerator(req)}`
 
-  const entry = rateLimitStore.get(key)
+  const { count, resetAt } = await hit(key, windowMs)
+  if (count <= maxRequests) return null
 
-  if (!entry || now > entry.resetTime) {
-    // Evict expired entries if store is at capacity
-    if (rateLimitStore.size >= RATE_LIMIT_MAX_ENTRIES) {
-      for (const [k, v] of rateLimitStore) {
-        if (now > v.resetTime) rateLimitStore.delete(k)
-      }
-      // If still full, drop oldest
-      if (rateLimitStore.size >= RATE_LIMIT_MAX_ENTRIES) {
-        const firstKey = rateLimitStore.keys().next().value
-        if (firstKey) rateLimitStore.delete(firstKey)
-      }
-    }
-    // First request or window expired - create new entry
-    rateLimitStore.set(key, {
-      count: 1,
-      resetTime: now + windowMs,
-    })
-    return null
-  }
-
-  if (entry.count >= maxRequests) {
-    // Rate limit exceeded
-    const retryAfter = Math.ceil((entry.resetTime - now) / 1000)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Too many requests",
-        retryAfter,
+  const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
+  return NextResponse.json(
+    { success: false, error: "Too many requests", retryAfter },
+    {
+      status: 429,
+      headers: {
+        "X-RateLimit-Limit": maxRequests.toString(),
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": resetAt.toString(),
+        "Retry-After": retryAfter.toString(),
       },
-      {
-        status: 429,
-        headers: {
-          "X-RateLimit-Limit": maxRequests.toString(),
-          "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": entry.resetTime.toString(),
-          "Retry-After": retryAfter.toString(),
-        },
-      }
-    )
-  }
-
-  // Increment counter
-  entry.count++
-  return null
+    }
+  )
 }
 
 /**
@@ -201,18 +163,53 @@ export function createAuthRateLimit(
 }
 
 /**
- * Clean up expired entries periodically (call this in a cron job)
+ * Kept for the cron that used to call it. Redis expires its own keys and the
+ * in-process fallback evicts on write, so there is nothing left to sweep.
  */
 export function cleanupRateLimitStore(): number {
-  const now = Date.now()
-  let cleaned = 0
+  return 0
+}
 
-  for (const [key, entry] of rateLimitStore.entries()) {
-    if (now > entry.resetTime) {
-      rateLimitStore.delete(key)
-      cleaned++
-    }
+/**
+ * Per-user policies for authenticated mutations.
+ *
+ * Keyed on the user, not the IP: for an authenticated endpoint the abuse case
+ * is one account misbehaving, and IP keying is actively wrong there — everyone
+ * behind a single NAT shares a bucket while an attacker just rotates address.
+ *
+ * The numbers are chosen to be invisible to a person using the app normally and
+ * to bite a script. `report` and `block` are deliberately generous: rate
+ * limiting a safety action is a trade-off against someone in trouble, so the
+ * limit is set where only automation notices it.
+ */
+const USER_POLICIES = {
+  /** Sends a push to every attendee — the most expensive thing a host can do. */
+  broadcast: { windowMs: 60 * 1000, maxRequests: 3 },
+  /** Issues a signed upload URL; unbounded means unbounded storage. */
+  upload: { windowMs: 60 * 1000, maxRequests: 20 },
+  /** Safety actions. Loose on purpose — see above. */
+  safety: { windowMs: 60 * 1000, maxRequests: 20 },
+  /** Ordinary writes: RSVP, favourite, rating, interest, profile edits. */
+  write: { windowMs: 60 * 1000, maxRequests: 30 },
+  /** Creating or destroying whole objects. */
+  heavy: { windowMs: 60 * 1000, maxRequests: 10 },
+} as const
+
+export type UserRateLimitPolicy = keyof typeof USER_POLICIES
+
+/**
+ * Rate limit an authenticated route, keyed on the caller.
+ *
+ * `scope` should be stable per endpoint — it namespaces the bucket so a user
+ * hitting two different endpoints does not share one allowance.
+ */
+export function userLimit(
+  policy: UserRateLimitPolicy,
+  scope: string,
+  userId: string
+): RateLimitConfig {
+  return {
+    ...USER_POLICIES[policy],
+    keyGenerator: () => `${scope}:${userId}`,
   }
-
-  return cleaned
 }

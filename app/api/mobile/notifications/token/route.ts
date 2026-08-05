@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
 import {
   successResponse,
@@ -25,6 +26,9 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "push-token", user.userId))
+    if (limited) return limited
 
     const body = await request.json()
 
@@ -97,6 +101,9 @@ export async function DELETE(request: NextRequest) {
     if (!user) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "push-token", user.userId))
+    if (limited) return limited
 
     const { searchParams } = new URL(request.url)
     const token = searchParams.get("token")

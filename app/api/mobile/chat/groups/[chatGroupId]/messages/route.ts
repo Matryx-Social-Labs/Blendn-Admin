@@ -190,7 +190,7 @@ export async function POST(
   { params }: { params: Promise<{ chatGroupId: string }> }
 ) {
   // Rate limit: max 30 messages per user per minute per group
-  const rateLimited = rateLimit(request, {
+  const rateLimited = await rateLimit(request, {
     windowMs: 60 * 1000,
     maxRequests: 30,
     keyGenerator: (req) => {

@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
@@ -22,6 +23,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "favorite", authUser.userId))
+    if (limited) return limited
 
     // Check if event exists
     const event = await db.events.findUnique({
@@ -73,6 +77,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "favorite", authUser.userId))
+    if (limited) return limited
 
     // Check if event exists
     const event = await db.events.findUnique({

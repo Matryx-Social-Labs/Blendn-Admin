@@ -18,7 +18,7 @@ import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
-  const rateLimitResult = rateLimit(request, createAuthRateLimit("signup"))
+  const rateLimitResult = await rateLimit(request, createAuthRateLimit("signup"))
   if (rateLimitResult) {
     return rateLimitResult
   }

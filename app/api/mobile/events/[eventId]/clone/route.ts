@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
@@ -20,6 +21,9 @@ export async function POST(
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("heavy", "event-clone", authUser.userId))
+    if (limited) return limited
 
     const { eventId } = await params
 

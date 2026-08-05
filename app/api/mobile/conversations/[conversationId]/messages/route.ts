@@ -156,7 +156,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Group chat sends and check-ins are rate limited; DM sends were not, so a
     // single account could flood a conversation and its push notifications.
-    const limited = rateLimit(request, createUserRateLimit("private-message", authUser.userId))
+    const limited = await rateLimit(request, createUserRateLimit("private-message", authUser.userId))
     if (limited) return limited
 
     // Check if the recipient has blocked the sender

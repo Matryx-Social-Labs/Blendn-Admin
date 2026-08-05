@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deleteFile, extractKeyFromUrl } from "@/lib/tigris"
 import {
   successResponse,
@@ -21,6 +22,9 @@ export async function DELETE(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("upload", "upload-delete", authUser.userId))
+    if (limited) return limited
 
     const body = await request.json()
     const parsed = deleteSchema.safeParse(body)

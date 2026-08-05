@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   errorResponse,
@@ -279,6 +280,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "event-chat", authUser.userId))
+    if (limited) return limited
 
     const body = await request.json()
 
