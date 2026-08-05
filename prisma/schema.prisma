@@ -778,6 +778,9 @@ model organisation_join_requests {
 
   @@unique([org_id, user_id])
   @@index([org_id])
+  /// The composite unique above leads with org_id, so it cannot serve the FK
+  /// check that runs on every User delete.
+  @@index([user_id])
 }
 
 /// A company applying to host on Blendn, before any account exists.
@@ -821,6 +824,7 @@ model organiser_onboarding_requests {
 
   @@index([status])
   @@index([contact_email])
+  @@index([org_id])
 }
 
 /// The token for verifying an applicant's email, before they have an account.

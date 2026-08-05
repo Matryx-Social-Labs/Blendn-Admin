@@ -89,6 +89,9 @@ ALTER TABLE "organisation_join_requests" ADD CONSTRAINT "organisation_join_reque
 CREATE UNIQUE INDEX "organisation_join_requests_org_id_user_id_key"
     ON "organisation_join_requests"("org_id", "user_id");
 CREATE INDEX "organisation_join_requests_org_id_idx" ON "organisation_join_requests"("org_id");
+-- user_id needs its own index: the composite unique above leads with org_id, so
+-- it cannot serve the FK check that runs on every User delete.
+CREATE INDEX "organisation_join_requests_user_id_idx" ON "organisation_join_requests"("user_id");
 
 -- ---------------------------------------------------------------------------
 -- Onboarding applications
@@ -131,6 +134,9 @@ ALTER TABLE "organiser_onboarding_requests" ADD CONSTRAINT "organiser_onboarding
 CREATE INDEX "organiser_onboarding_requests_status_idx" ON "organiser_onboarding_requests"("status");
 CREATE INDEX "organiser_onboarding_requests_contact_email_idx"
     ON "organiser_onboarding_requests"("contact_email");
+-- The org_id FK is nullable and rarely queried, but SET NULL on organisation
+-- delete still checks it, and an unindexed FK is a seq scan per delete.
+CREATE INDEX "organiser_onboarding_requests_org_id_idx" ON "organiser_onboarding_requests"("org_id");
 
 CREATE TABLE "onboarding_email_tokens" (
     "token_hash" TEXT NOT NULL,
