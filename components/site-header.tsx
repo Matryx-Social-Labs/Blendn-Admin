@@ -1,18 +1,43 @@
 "use client"
 
-import { useMemo } from "react"
+import { Suspense, useMemo } from "react"
 import { usePathname } from "next/navigation"
 import { useSession } from "next-auth/react"
 
-import { NavUser } from "@/components/nav-user"
-import { Separator } from "@/components/ui/separator"
+import { AccountMenu } from "@/components/account-menu"
+import { DateRangeControl } from "@/components/date-range-control"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 
+/**
+ * The top bar.
+ *
+ * Left: the sidebar toggle, then the page's single `h1` and a one-line
+ * description. Right: the global date range, then a compact account menu.
+ *
+ * Three things were removed rather than restyled:
+ *
+ *   - a **role pill**, because the role already appears in the sidebar. Between
+ *     the sidebar, that pill, the account trigger and the account menu, the
+ *     role was on screen four times.
+ *   - a **date chip** showing today's date. It was not a control, not a filter,
+ *     and computed with `new Date()` during client render — a hydration
+ *     mismatch waiting to happen. A real date-range control occupies that space
+ *     now, and every chart and table on the page reads it.
+ *   - `NavUser`, a `SidebarMenu` component built for the 288px sidebar footer,
+ *     which rendered a three-line block inside a horizontal header.
+ */
+
+/** Pages whose content has no time dimension hide the range control. */
+const TIMELESS = new Set([
+  "/dashboard/settings",
+  "/dashboard/organisation",
+  "/dashboard/organisations",
+  "/dashboard/onboarding",
+  "/dashboard/categories",
+  "/dashboard/events/new",
+])
+
 const routeContent: Record<string, { title: string; description: string }> = {
-  "/dashboard": {
-    title: "Overview",
-    description: "Live reporting across growth, attendance, and event activity.",
-  },
   "/dashboard/moderation": {
     title: "Moderation",
     description: "Flags and reports across the platform, oldest first.",
@@ -20,6 +45,10 @@ const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard/events": {
     title: "Events",
     description: "Every event on the platform — search, filter, and drill in.",
+  },
+  "/dashboard/events/new": {
+    title: "New event",
+    description: "Publish an event. Save a draft at any point.",
   },
   "/dashboard/attendees": {
     title: "Attendees",
@@ -45,24 +74,33 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Venues",
     description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
   },
-}
-
-const roleLabels: Record<string, string> = {
-  app_admin: "App Admin",
-  organizer: "Organiser",
-  venue_owner: "Venue Owner",
+  "/dashboard/onboarding": {
+    title: "Applications",
+    description: "Host applications awaiting review. Every one is read by a person.",
+  },
+  "/dashboard/organisations": {
+    title: "Organisations",
+    description: "Every host on the platform — members, domains, and suspension.",
+  },
+  "/dashboard/organisation": {
+    title: "Your organisation",
+    description: "Colleagues, invites, and domain verification.",
+  },
+  "/dashboard/settings": {
+    title: "Settings",
+    description: "Your account, password, and what we email you about.",
+  },
 }
 
 export function SiteHeader() {
   const pathname = usePathname()
   const { data: session } = useSession()
-
   const role = session?.user?.role
 
   const content = useMemo(() => {
-    // The overview says something different per role, as the design does — the
-    // three dashboards answer different questions and a shared subtitle would
-    // describe none of them.
+    // The overview asks a different question per role, as the design does — the
+    // three dashboards are genuinely different screens and a shared subtitle
+    // would describe none of them.
     if (pathname === "/dashboard") {
       return {
         title: "Overview",
@@ -84,65 +122,49 @@ export function SiteHeader() {
         description: "Every room whose chat is open — live events and post-event feedback windows.",
       }
     }
-
+    if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/edit")) {
+      return { title: "Edit event", description: "Changes go live as soon as you save." }
+    }
     if (pathname.startsWith("/dashboard/events/")) {
-      return {
-        title: "Event Workspace",
-        description: "Inspect event setup and performance detail.",
-      }
+      return { title: "Event", description: "Setup, performance, and what happened on the night." }
     }
 
-    return routeContent["/dashboard"]
+    return {
+      title: "Overview",
+      description: "Live reporting across growth, attendance, and event activity.",
+    }
   }, [pathname, role])
 
-  const today = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date())
+  const showRange = !TIMELESS.has(pathname) && !pathname.endsWith("/edit")
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-xl transition-[width,height] ease-linear">
-      <div className="flex h-(--header-height) w-full items-center gap-3 px-4 lg:px-6">
-        <SidebarTrigger className="-ml-1 rounded-full" />
-        <Separator
-          orientation="vertical"
-          className="data-[orientation=vertical]:h-5"
-        />
+      <div className="flex min-h-14 w-full items-center gap-3.5 px-4 py-2 lg:px-6">
+        <SidebarTrigger className="-ml-1 size-[34px] shrink-0 rounded-lg border border-border" />
 
         {/*
-          The title and the description used to be the other way round: the
-          page name rendered as a 0.68rem uppercase eyebrow and the description
-          sentence was the <h1>. That put the wrong string in the document's
-          only landmark heading and buried the one word telling you where you
-          are.
+          The single `h1` on the page, holding the page *name*. It used to be
+          the description sentence, which put the wrong string in the document's
+          only landmark heading.
         */}
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold text-foreground">{content.title}</h1>
-          <p className="truncate text-xs leading-5 text-muted-foreground">
-            {content.description}
-          </p>
+        <div className="flex min-w-0 flex-1 flex-col gap-px">
+          <h1 className="truncate text-[1.25rem] font-bold leading-[1.25]">{content.title}</h1>
+          <p className="truncate text-[0.78125rem] text-muted-foreground">{content.description}</p>
         </div>
 
-        <div className="hidden items-center gap-3 md:flex">
-          <div className="rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            {session?.user?.role ? roleLabels[session.user.role] ?? session.user.role : "Workspace"}
-          </div>
-          <div className="rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            {today}
-          </div>
-        </div>
+        {showRange ? (
+          // useSearchParams needs a Suspense boundary or the whole route opts
+          // out of static rendering and the build warns.
+          <Suspense fallback={<div className="hidden h-9 w-[250px] @3xl/main:block" />}>
+            <DateRangeControl className="hidden @3xl/main:inline-flex" />
+          </Suspense>
+        ) : null}
 
-        {/* Account and sign-out live top-right, as the design places them. The
-            sidebar footer previously carried this, which put the way *out* of
-            the product at the far end of the way *around* it. */}
-        <NavUser
-          user={{
-            name: session?.user?.name ?? "Blend'n",
-            email: session?.user?.email ?? "",
-            avatar: session?.user?.image ?? "",
-            role: session?.user?.role,
-          }}
+        <AccountMenu
+          name={session?.user?.name ?? "Blend'n"}
+          email={session?.user?.email ?? ""}
+          image={session?.user?.image}
+          showOrganisation={role === "organizer" || role === "venue_owner"}
         />
       </div>
     </header>
