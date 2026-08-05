@@ -1,7 +1,9 @@
 import {
+  IconBuilding,
   IconBuildingStore,
   IconDashboard,
   IconFlag,
+  IconInbox,
   IconListDetails,
   IconMessage2,
   IconMicrophone2,
@@ -16,8 +18,8 @@ export interface DashboardNavItem {
   url: string
   icon: typeof IconDashboard
   allowedRoles: DashboardRole[]
-  /** Renders a count next to the item; only Moderation uses it today. */
-  badgeKey?: "pendingFlags"
+  /** Renders a count next to the item. */
+  badgeKey?: "pendingFlags" | "pendingApplications"
   isActive?: (pathname: string) => boolean
 }
 
@@ -110,6 +112,32 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/venue-owners",
     icon: IconBuildingStore,
     allowedRoles: ["app_admin"],
+  },
+  {
+    title: "Applications",
+    description: "Host applications awaiting review. Every one is read by a person.",
+    url: "/dashboard/onboarding",
+    icon: IconInbox,
+    allowedRoles: ["app_admin"],
+    badgeKey: "pendingApplications",
+  },
+  {
+    title: "Organisations",
+    description: "Every host organisation — members, domains, and suspension.",
+    url: "/dashboard/organisations",
+    icon: IconBuilding,
+    allowedRoles: ["app_admin"],
+  },
+  {
+    // The host's own copy of the above. Two screens rather than one with a
+    // branch: an admin managing the platform and an owner managing their own
+    // company want different things on screen, and the audit trail should say
+    // which of the two acted.
+    title: "My organisation",
+    description: "Your colleagues, invites, and domain verification.",
+    url: "/dashboard/organisation",
+    icon: IconBuilding,
+    allowedRoles: ["organizer", "venue_owner"],
   },
 ]
 
