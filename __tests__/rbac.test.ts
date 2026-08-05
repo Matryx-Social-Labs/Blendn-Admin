@@ -1,13 +1,18 @@
 import {
   canAccessDashboard,
-  canManageEvent,
-  canModerateChat,
   canSendSystemMessages,
   canSendPushNotifications,
 } from "@/lib/rbac"
 
-const OWNER = "user_owner"
-const STRANGER = "user_stranger"
+/**
+ * Role-only predicates — the ones that genuinely depend on nothing but the
+ * role. Per-event authorization moved to `eventPermissions` and is asserted as
+ * a full matrix in __tests__/event-permissions.test.ts.
+ *
+ * `canManageEvent` and `canModerateChat` used to live here and contradicted
+ * each other about venue owners; splitting role-only from relationship-shaped
+ * is what made that contradiction impossible to express.
+ */
 
 describe("canAccessDashboard", () => {
   it("admits staff roles", () => {
@@ -21,46 +26,11 @@ describe("canAccessDashboard", () => {
   })
 })
 
-describe("canManageEvent", () => {
-  it("lets app_admin manage any event", () => {
-    expect(canManageEvent("app_admin", STRANGER, OWNER)).toBe(true)
-  })
-
-  it("scopes organizers to events they own", () => {
-    expect(canManageEvent("organizer", OWNER, OWNER)).toBe(true)
-    expect(canManageEvent("organizer", STRANGER, OWNER)).toBe(false)
-  })
-
-  it("denies venue_owner and attendee outright", () => {
-    expect(canManageEvent("venue_owner", OWNER, OWNER)).toBe(false)
-    expect(canManageEvent("attendee", OWNER, OWNER)).toBe(false)
-  })
-})
-
-describe("canModerateChat", () => {
-  it("lets app_admin moderate any chat", () => {
-    expect(canModerateChat("app_admin", STRANGER, OWNER)).toBe(true)
-  })
-
-  it("scopes organizers and venue owners to their own events", () => {
-    expect(canModerateChat("organizer", OWNER, OWNER)).toBe(true)
-    expect(canModerateChat("organizer", STRANGER, OWNER)).toBe(false)
-    expect(canModerateChat("venue_owner", OWNER, OWNER)).toBe(true)
-    expect(canModerateChat("venue_owner", STRANGER, OWNER)).toBe(false)
-  })
-
-  it("denies attendees", () => {
-    expect(canModerateChat("attendee", OWNER, OWNER)).toBe(false)
-  })
-
-  it("differs from canManageEvent: venue_owner may moderate but not manage", () => {
-    expect(canModerateChat("venue_owner", OWNER, OWNER)).toBe(true)
-    expect(canManageEvent("venue_owner", OWNER, OWNER)).toBe(false)
-  })
-})
-
 describe("admin-only capabilities", () => {
   it("restricts system messages and push notifications to app_admin", () => {
+    // These are platform-voice actions: a system message appears as Blend'n
+    // itself, and a push lands on every attendee's phone. Neither scopes to
+    // ownership, so neither belongs in eventPermissions.
     for (const role of ["organizer", "venue_owner", "attendee"] as const) {
       expect(canSendSystemMessages(role)).toBe(false)
       expect(canSendPushNotifications(role)).toBe(false)

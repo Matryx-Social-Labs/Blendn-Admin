@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import { EventEditor } from "@/components/event-editor"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
-import { canManageEvent } from "@/lib/rbac"
+import { eventPermissions } from "@/lib/rbac"
 
 interface EventPageProps {
   params: Promise<{
@@ -43,6 +43,9 @@ export default async function EditEventPage({ params }: EventPageProps) {
             order: "asc",
           },
         },
+        // eventPermissions needs the venue owner: an event at a claimed venue
+        // grants that owner operational access even though they cannot edit it.
+        venue: { select: { owner_id: true } },
       },
     }),
     db.categories.findMany({
@@ -60,7 +63,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
     notFound()
   }
 
-  if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+  if (!eventPermissions(session.user, event).canEdit) {
     redirect("/dashboard/events")
   }
 

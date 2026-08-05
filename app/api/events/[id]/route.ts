@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { canManageEvent } from "@/lib/rbac"
+import { eventPermissions } from "@/lib/rbac"
 import { auditLog } from "@/lib/audit-log"
 
 const parseJsonField = (value: unknown) => {
@@ -97,13 +97,16 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         id: resolvedParams.id,
         deleted_at: null,
       },
+      // eventPermissions needs the venue owner: an event at a claimed venue
+      // grants that owner operational access even though they cannot edit it.
+      include: { venue: { select: { owner_id: true } } },
     })
 
     if (!event) {
       return new NextResponse("Event not found", { status: 404 })
     }
 
-    if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+    if (!eventPermissions(session.user, event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
@@ -247,13 +250,16 @@ export async function DELETE(_: Request, { params }: RouteContext) {
         id: resolvedParams.id,
         deleted_at: null,
       },
+      // eventPermissions needs the venue owner: an event at a claimed venue
+      // grants that owner operational access even though they cannot edit it.
+      include: { venue: { select: { owner_id: true } } },
     })
 
     if (!event) {
       return new NextResponse("Event not found", { status: 404 })
     }
 
-    if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+    if (!eventPermissions(session.user, event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 

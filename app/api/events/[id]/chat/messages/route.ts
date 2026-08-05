@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { canModerateChat } from "@/lib/rbac"
+import { eventPermissions } from "@/lib/rbac"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -17,10 +17,10 @@ export async function GET(_: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { organizer_id: true, chat_group: { select: { id: true } } },
+      select: { organizer_id: true, venue: { select: { owner_id: true } }, chat_group: { select: { id: true } } },
     })
     if (!event) return new NextResponse("Not found", { status: 404 })
-    if (!canModerateChat(session.user.role, session.user.id, event.organizer_id)) {
+    if (!eventPermissions(session.user, event).canOperate) {
       return new NextResponse("Forbidden", { status: 403 })
     }
     if (!event.chat_group) return NextResponse.json({ messages: [] })
