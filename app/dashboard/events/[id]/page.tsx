@@ -128,8 +128,10 @@ export default async function EventDetailPage({ params, searchParams }: EventPag
     )
   }
 
-  if (activeTab === "chat" || activeTab === "attendees" || activeTab === "feedback") {
-    // These live on their own routes today. Kept as links rather than
+  if (activeTab === "feedback") redirect(`/dashboard/events/${event.id}/feedback`)
+
+  if (activeTab === "chat" || activeTab === "attendees") {
+    // These live on the messaging route today. Kept as links rather than
     // duplicated here so there is one implementation of each, not two.
     redirect(
       activeTab === "chat"
