@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { canManageEvent } from "@/lib/rbac"
+import { eventPermissions } from "@/lib/rbac"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { sponsoredMessageCreateSchema } from "@/lib/validations/event"
 import { PAGINATION } from "@/lib/constants"
@@ -16,9 +16,9 @@ export async function GET(_: Request, { params }: RouteContext) {
     const { id: eventId } = await params
     const session = await getAuth()
     if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
-    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_id: true } })
+    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_id: true, venue: { select: { owner_id: true } } } })
     if (!event) return new NextResponse("Not found", { status: 404 })
-    if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+    if (!eventPermissions(session.user, event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
@@ -42,9 +42,9 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     const { id: eventId } = await params
 
-    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_id: true } })
+    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_id: true, venue: { select: { owner_id: true } } } })
     if (!event) return new NextResponse("Not found", { status: 404 })
-    if (!canManageEvent(session.user.role, session.user.id, event.organizer_id)) {
+    if (!eventPermissions(session.user, event).canEdit) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 

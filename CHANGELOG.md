@@ -5,6 +5,59 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-05
+
+### Added
+
+- **Venues are a real record.** Until now a venue was a nullable free-text
+  string on an event and a "venue owner" was a role whose events happened to
+  carry venue names, so Byg Brewski could not exist as a thing. `venues` has an
+  optional owner — null means unclaimed — and `events.venue_id` links to it.
+  `events.venue_name` is deliberately kept: most events are at places that are
+  not on the platform, so linkage is optional everywhere.
+- Account suspension columns on `User`. Suspension, not deletion, is how a host
+  is removed — deleting one cascades their events, every check-in and every chat
+  message, destroying other people's history to punish one person.
+
+### Changed
+
+- **Authorization is relationship-shaped, not role-shaped.** `canManageEvent`
+  and `canModerateChat` are replaced by a single `eventPermissions(actor, event)`
+  resolver returning `{ canEdit, canOperate }`, derived from two axes:
+  `organizer_id` (who runs it) and `venue.owner_id` (whose building it is in).
+
+  A venue owner now gets the operational bucket — chat, moderation, the guest
+  list — for events at their venue, and both buckets for events they run
+  themselves. The event stays un-editable by them, because it is not theirs to
+  change.
+
+### Fixed
+
+- **Venue owners were locked out of every chatroom.** `canManageEvent` denied
+  `venue_owner` unconditionally while `canModerateChat` allowed them; the nav
+  and the chatrooms list said yes and the messaging page said no, so opening any
+  room redirected straight back out. The two predicates cannot disagree now
+  because there is only one.
+- The chatrooms list scoped on `organizer_id` alone, so a venue owner saw
+  nothing there even for events in their own building.
+
+## [0.8.1] - 2026-08-05
+
+### Security
+
+- Event chat is pseudonymous — attendees get an `anonymous_name` on check-in so
+  they can give honest feedback without the organiser knowing who said it. The
+  dashboard UI honoured that, but `GET /api/events/[id]/chat/messages` shipped
+  every attendee's real **name and email** in the JSON to any organiser or venue
+  owner regardless, readable straight out of the browser's network tab. The
+  anonymity was cosmetic.
+
+  Real identity is now app_admin only. Hosts get the pseudonym and the user id,
+  which they need to ban or mute, and nothing that names a person. The fields
+  are *absent* rather than null so reading `user.name` yields undefined instead
+  of a convincing blank, and the client type marks them optional so rendering
+  one without checking the role fails to typecheck.
+
 ## [0.8.0] - 2026-08-05
 
 ### Changed
