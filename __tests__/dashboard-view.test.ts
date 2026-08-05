@@ -77,14 +77,39 @@ describe("visibleNavFor", () => {
       "Users",
       "Organisers",
       "Venues",
+      "Applications",
+      "Organisations",
     ])
   })
 
   it("gives each host role its own screens, not a shared list", () => {
     // The whole point of the redesign's IA: venue_owner used to get the
     // organiser's nav, which is why the role's actual questions had no home.
-    expect(titles("organizer")).toEqual(["Overview", "Events", "Attendees", "Chatrooms"])
-    expect(titles("venue_owner")).toEqual(["Overview", "Events", "My venues", "Chatrooms"])
+    expect(titles("organizer")).toEqual([
+      "Overview",
+      "Events",
+      "Attendees",
+      "Chatrooms",
+      "My organisation",
+    ])
+    expect(titles("venue_owner")).toEqual([
+      "Overview",
+      "Events",
+      "My venues",
+      "Chatrooms",
+      "My organisation",
+    ])
+  })
+
+  it("keeps the two organisation screens apart", () => {
+    // A host manages their own company; an admin manages every company. Giving
+    // an admin the host screen would record support actions as though the org's
+    // own owner took them.
+    expect(titles("app_admin")).not.toContain("My organisation")
+    for (const role of ["organizer", "venue_owner"]) {
+      expect(titles(role)).not.toContain("Organisations")
+      expect(titles(role)).not.toContain("Applications")
+    }
   })
 
   it("keeps platform administration away from hosts", () => {
@@ -109,10 +134,13 @@ describe("visibleNavFor", () => {
     expect(titles("not-a-role")).toEqual([])
   })
 
-  it("badges only the moderation queue", () => {
+  it("badges only the two admin queues", () => {
+    // A badge is a claim that something is waiting. Both of these are worked
+    // through by a person, so both count down to zero; anything else with a
+    // badge would be decoration that never clears.
     const badged = visibleNavFor("app_admin").filter((item) => item.badgeKey)
-    expect(badged.map((item) => item.title)).toEqual(["Moderation"])
-    expect(badged[0].badgeKey).toBe("pendingFlags")
+    expect(badged.map((item) => item.title)).toEqual(["Moderation", "Applications"])
+    expect(badged.map((item) => item.badgeKey)).toEqual(["pendingFlags", "pendingApplications"])
   })
 })
 

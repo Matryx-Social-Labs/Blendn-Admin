@@ -40,8 +40,9 @@ model User {
 
   // Event relations
   organized_events       events[]
-  owned_venues           venues[]            @relation("VenueOwner")
+  owned_venues           venues[]                     @relation("VenueOwner")
   org_memberships        organisation_members[]
+  org_join_requests      organisation_join_requests[]
   event_check_ins        event_check_ins[]
   chat_messages          chat_messages[]
   chat_group_memberships chat_group_members[]
@@ -146,8 +147,8 @@ model profiles {
 }
 
 model events {
-  id                String          @id @default(uuid()) @db.Uuid
-  slug              String          @unique
+  id                String             @id @default(uuid()) @db.Uuid
+  slug              String             @unique
   title             String
   description       String
   short_description String?
@@ -157,31 +158,31 @@ model events {
   // Free text, kept deliberately: most events are at places that are not on
   // the platform, so venue_id is null and this is all there is.
   venue_name        String?
-  venue_id          String?           @db.Uuid
+  venue_id          String?            @db.Uuid
   venue_link_status venue_link_status?
   city              String?
   state             String?
   country           String?
   postal_code       String?
-  start_time        DateTime        @db.Timestamptz(6)
-  end_time          DateTime        @db.Timestamptz(6)
+  start_time        DateTime           @db.Timestamptz(6)
+  end_time          DateTime           @db.Timestamptz(6)
   timezone          String
-  status            event_status    @default(draft)
-  visibility        visibility_type @default(public)
+  status            event_status       @default(draft)
+  visibility        visibility_type    @default(public)
   max_capacity      Int?
-  current_capacity  Int             @default(0)
-  created_at        DateTime        @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime        @default(now()) @db.Timestamptz(6)
-  deleted_at        DateTime?       @db.Timestamptz(6)
+  current_capacity  Int                @default(0)
+  created_at        DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime?          @db.Timestamptz(6)
   organizer_id      String
   /// Which company is accountable. `organizer_id` still records who created
   /// it — a different question, kept for audit and for "my events".
-  organizer_org_id  String?           @db.Uuid
+  organizer_org_id  String?            @db.Uuid
   cover_image_url   String?
   external_link     String?
-  is_featured       Boolean         @default(false)
-  is_recurring      Boolean         @default(false)
-  check_in_radius   Float           @default(30)
+  is_featured       Boolean            @default(false)
+  is_recurring      Boolean            @default(false)
+  check_in_radius   Float              @default(30)
 
   // Relations
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
@@ -198,8 +199,8 @@ model events {
   announcements      event_announcements[]
   rsvps              event_rsvps[]
   feedback           event_feedback[]
-  venue              venues?             @relation(fields: [venue_id], references: [id], onDelete: SetNull)
-  organizer_org      organisations?      @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
+  venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
+  organizer_org      organisations?             @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
 
   @@index([latitude, longitude])
   @@index([status, start_time])
@@ -622,27 +623,27 @@ model event_rsvps {
 /// `owner_id` null means unclaimed — the record exists (an admin created it, or
 /// it was seeded) but nobody operates it yet.
 model venues {
-  id         String       @id @default(uuid()) @db.Uuid
-  name       String
-  address    String?
-  city       String?
-  latitude   Float?
-  longitude  Float?
-  capacity   Int?
-  owner_id   String?
-  owner_org_id String?    @db.Uuid
-  claimed_at DateTime?    @db.Timestamptz(6)
-  status     venue_status @default(active)
-  created_by String?
-  created_at DateTime     @default(now()) @db.Timestamptz(6)
-  updated_at DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
-  deleted_at DateTime?    @db.Timestamptz(6)
+  id           String       @id @default(uuid()) @db.Uuid
+  name         String
+  address      String?
+  city         String?
+  latitude     Float?
+  longitude    Float?
+  capacity     Int?
+  owner_id     String?
+  owner_org_id String?      @db.Uuid
+  claimed_at   DateTime?    @db.Timestamptz(6)
+  status       venue_status @default(active)
+  created_by   String?
+  created_at   DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime?    @db.Timestamptz(6)
 
   // SetNull, not Cascade: removing an owner must orphan the venue, never delete
   // a real place and every event that happened in it.
   owner     User?          @relation("VenueOwner", fields: [owner_id], references: [id], onDelete: SetNull)
   owner_org organisations? @relation(fields: [owner_org_id], references: [id], onDelete: SetNull)
-  events events[]
+  events    events[]
 
   @@index([owner_id])
   @@index([owner_org_id])
@@ -672,9 +673,13 @@ model organisations {
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
   updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
 
-  members organisation_members[]
-  events  events[]
-  venues  venues[]
+  members       organisation_members[]
+  events        events[]
+  venues        venues[]
+  domains       organisation_domains[]
+  invites       organisation_invites[]
+  join_requests organisation_join_requests[]
+  onboarding    organiser_onboarding_requests[]
 
   @@index([status])
 }
@@ -683,12 +688,12 @@ model organisations {
 /// permission resolver reads — so a colleague gets the same access as whoever
 /// created a thing, and the venue survives one person leaving.
 model organisation_members {
-  id                 String       @id @default(uuid()) @db.Uuid
-  org_id             String       @db.Uuid
+  id                 String   @id @default(uuid()) @db.Uuid
+  org_id             String   @db.Uuid
   user_id            String
-  role               org_role     @default(staff)
-  is_primary_contact Boolean      @default(false)
-  created_at         DateTime     @default(now()) @db.Timestamptz(6)
+  role               org_role @default(staff)
+  is_primary_contact Boolean  @default(false)
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
 
   org  organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
   user User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -696,6 +701,165 @@ model organisation_members {
   @@unique([org_id, user_id])
   @@index([user_id])
   @@index([org_id])
+}
+
+/// A domain an organisation has proved it controls.
+///
+/// `@@unique([domain])` is the load-bearing line: without it two organisations
+/// could each verify `bygbrewski.com`, and each would then auto-accept the
+/// other's staff. First to verify wins; a second claim is refused and reviewed
+/// by hand.
+model organisation_domains {
+  id                 String               @id @default(uuid()) @db.Uuid
+  org_id             String               @db.Uuid
+  /// Stored lowercase, apex only — `mail.acme.com` and `ACME.com` must not be
+  /// two separate claims on the same company.
+  domain             String
+  method             domain_verify_method @default(dns_txt)
+  /// The value that must appear in the TXT record. Kept after verification so
+  /// a periodic re-check can confirm the record is still there.
+  verification_token String
+  verified_at        DateTime?            @db.Timestamptz(6)
+  verified_by        String?
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+
+  org organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@unique([domain])
+  @@index([org_id])
+}
+
+/// An outstanding invitation to join an organisation.
+///
+/// The token is the sensitive surface — it grants access to a company's
+/// dashboard — so only its SHA-256 hash is stored. A leaked database gives an
+/// attacker hashes, not usable invitations.
+model organisation_invites {
+  id                     String    @id @default(uuid()) @db.Uuid
+  org_id                 String    @db.Uuid
+  /// Lowercased. The invite is bound to this address: accepting while signed in
+  /// as anyone else is refused, so a forwarded link is not a way in.
+  email                  String
+  role                   org_role  @default(staff)
+  token_hash             String
+  expires_at             DateTime  @db.Timestamptz(6)
+  invited_by             String
+  accepted_at            DateTime? @db.Timestamptz(6)
+  revoked_at             DateTime? @db.Timestamptz(6)
+  /// Non-null when the invited address is outside the org's verified domain.
+  /// Required in that case, and copied into audit_logs — an org that invites
+  /// outsiders can do so, but not silently.
+  domain_override_reason String?
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+
+  org organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@unique([token_hash])
+  @@index([org_id])
+  @@index([email])
+}
+
+/// Someone on a verified domain asking to be let in.
+///
+/// The org's own admin decides, not the platform: a verified domain proves the
+/// company owns the domain, not that every address on it should reach the
+/// dashboard.
+model organisation_join_requests {
+  id         String              @id @default(uuid()) @db.Uuid
+  org_id     String              @db.Uuid
+  user_id    String
+  status     join_request_status @default(pending)
+  decided_by String?
+  decided_at DateTime?           @db.Timestamptz(6)
+  created_at DateTime            @default(now()) @db.Timestamptz(6)
+
+  org  organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([org_id, user_id])
+  @@index([org_id])
+  /// The composite unique above leads with org_id, so it cannot serve the FK
+  /// check that runs on every User delete.
+  @@index([user_id])
+}
+
+/// A company applying to host on Blendn, before any account exists.
+///
+/// Deliberately not a `User` yet — an application is not an account, and
+/// creating one on submit would let anyone mint dashboard logins. The row holds
+/// what was claimed; approval is what creates the org, the user, and the
+/// membership.
+model organiser_onboarding_requests {
+  id                String            @id @default(uuid()) @db.Uuid
+  kind              organisation_kind @default(company)
+  display_name      String
+  legal_name        String?
+  gstin             String?
+  website           String?
+  address           String?
+  city              String?
+  /// The person accountable. Every organisation has a human attached.
+  contact_name      String
+  contact_email     String
+  contact_phone     String?
+  /// Which dashboard role this application is for. A venue owner must be a
+  /// company; an individual organiser may be a sole trader.
+  requested_role    user_role         @default(organizer)
+  email_verified_at DateTime?         @db.Timestamptz(6)
+  /// Set at submit from the email domain. `domain` = company address, accepted
+  /// as-is. `needs_proof` = free provider, must also carry GSTIN or a website.
+  tier              onboarding_tier   @default(needs_proof)
+  status            onboarding_status @default(pending)
+  /// Shown to the reviewer, not enforced — the reviewer decides.
+  review_note       String?
+  reviewed_by       String?
+  reviewed_at       DateTime?         @db.Timestamptz(6)
+  decline_reason    String?
+  /// Set on approval, linking the application to what it produced.
+  org_id            String?           @db.Uuid
+  created_at        DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
+
+  org organisations? @relation(fields: [org_id], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([contact_email])
+  @@index([org_id])
+}
+
+/// The token for verifying an applicant's email, before they have an account.
+/// Separate from `organisation_invites` because there is no org yet.
+model onboarding_email_tokens {
+  token_hash String    @id
+  request_id String    @db.Uuid
+  expires_at DateTime  @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([request_id])
+}
+
+enum domain_verify_method {
+  dns_txt
+  email_role
+}
+
+enum join_request_status {
+  pending
+  approved
+  declined
+}
+
+enum onboarding_tier {
+  domain
+  needs_proof
+}
+
+enum onboarding_status {
+  pending
+  email_pending
+  approved
+  declined
 }
 
 enum organisation_kind {

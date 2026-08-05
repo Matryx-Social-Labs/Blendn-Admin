@@ -17,11 +17,16 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
-  // Only admins have a moderation nav item, so only they pay for the count.
-  const pendingFlags =
-    session.user.role === "app_admin"
-      ? await db.moderation_flags.count({ where: { status: "pending" } })
-      : 0
+  // Only admins have these nav items, so only they pay for the counts.
+  const isAdmin = session.user.role === "app_admin"
+  const [pendingFlags, pendingApplications] = isAdmin
+    ? await Promise.all([
+        db.moderation_flags.count({ where: { status: "pending" } }),
+        db.organiser_onboarding_requests.count({
+          where: { status: { in: ["pending", "email_pending"] } },
+        }),
+      ])
+    : [0, 0]
 
   return (
     <SidebarProvider
@@ -32,7 +37,7 @@ export default async function DashboardLayout({
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" badges={{ pendingFlags }} />
+      <AppSidebar variant="inset" badges={{ pendingFlags, pendingApplications }} />
       <SidebarInset className="overflow-hidden border border-border bg-background">
         <SiteHeader />
         {/*
