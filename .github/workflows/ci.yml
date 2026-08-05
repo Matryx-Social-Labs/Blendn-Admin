@@ -154,3 +154,15 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # `npm run build` compiles server.ts with plain tsc, which resolves the
+      # @/ path alias for typechecking and then emits it verbatim into the
+      # require(). A file using "@/lib/db" therefore builds green and dies on
+      # boot with MODULE_NOT_FOUND — which is how v0.12.0 failed its healthcheck
+      # on staging while CI was entirely happy.
+      #
+      # Loading the compiled graph catches it. Nothing connects: lib/db.ts
+      # builds its Prisma client lazily behind a Proxy, so this is a resolution
+      # check and needs no database.
+      - name: Compiled server resolves
+        run: node -e "require('./dist/lib/socket-server.js')"

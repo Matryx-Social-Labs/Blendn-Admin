@@ -5,6 +5,22 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-08-05
+
+### Fixed
+
+- **v0.12.0 failed its healthcheck on staging and never deployed.** `build:server`
+  compiles `server.ts` with plain `tsc`, which resolves the `@/` path alias for
+  typechecking and then emits it verbatim into the `require()`. Two new files in
+  the socket graph used `@/lib/db`, so the build went green and the container
+  died on boot with `MODULE_NOT_FOUND`. Everything reachable from `server.ts`
+  now uses relative imports, with a comment saying why so it does not get
+  "tidied" back.
+- CI now loads the compiled server graph after building. Nothing connects —
+  `lib/db.ts` builds its client lazily behind a Proxy — so it is a pure module
+  resolution check, and it is the one thing that would have caught this before
+  the deploy rather than after.
+
 ## [0.12.0] - 2026-08-05
 
 ### Added
