@@ -145,7 +145,14 @@ we do" and never "what needs attention now".
 | Leads with | moderation attention strip | next event's fill %, in 40px type | per-venue comparison table |
 | Primary chart | signups vs active (the gap is the vanity) | RSVP pacing vs capacity | utilisation heatmap, day x slot |
 | Secondary | activation funnel | rating distribution | rating distribution, busiest venue |
-| Own screens | Moderation, Users, Organisers, Venue owners | Attendees | My venues |
+| Own screens | Moderation, Users, Organisers, Venues, Applications, Organisations | Attendees, My organisation | My venues, My organisation |
+
+**Applications / Organisations vs My organisation.** Two screens, not one with a
+branch. A platform admin managing every host and an owner managing their own
+company want different things on screen, and the audit trail should record which
+of the two acted — an admin acting through the host screen would be logged as
+though the org's own owner did it. `app_admin` is redirected away from
+`/dashboard/organisation`, and hosts never see the platform pair.
 
 ### The moderation queue is new
 
@@ -159,10 +166,19 @@ The sidebar badge count is fetched in the server layout, not by a client
 effect — an alert that pops in after paint is one the operator has already
 scrolled past.
 
-### Venues are derived, not modelled
+### Venues are modelled now
 
-There is no `venues` table; a venue is a free-text string on an event. See
-`docs/DASHBOARD_DATA_GAPS.md` for what that costs and what the UI says about it.
+This section used to say venues were derived from a free-text string. That
+stopped being true in v0.18.0: there is a real `venues` table with an owning
+organisation, and `events.venue_id` links to it.
+
+`events.venue_name` is **kept** and still free text, because most events are at
+places that are not on the platform — `venue_id` is null for those, and the name
+is all there is. Any screen showing venues has to handle both.
+
+One thing has not caught up: `components/event-editor.tsx` never sets
+`venue_id`, so an event created through the dashboard does not link to a claimed
+venue and its owner never sees it. See `docs/CLAUDE_DESIGN_BRIEF.md` §2.4.
 
 ## Navigation and roles
 
