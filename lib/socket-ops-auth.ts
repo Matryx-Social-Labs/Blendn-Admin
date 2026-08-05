@@ -9,6 +9,7 @@ import type { user_role } from "@prisma/client"
 import { db } from "./db"
 import { logger } from "./logger"
 import { eventPermissions } from "./rbac"
+import { actorFor } from "./org-membership"
 
 /**
  * Dashboard authentication for Socket.io.
@@ -106,9 +107,12 @@ export async function canJoinEventOps(
 ): Promise<boolean> {
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
-    select: { organizer_id: true, venue: { select: { owner_id: true } } },
+    select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } },
   })
   if (!event) return false
 
-  return eventPermissions({ id: principal.userId, role: principal.role }, event).canOperate
+  // Memberships loaded through the shared helper so the socket cannot answer
+  // the authorization question differently from the page that opened it.
+  return eventPermissions(await actorFor({ id: principal.userId, role: principal.role }), event)
+    .canOperate
 }

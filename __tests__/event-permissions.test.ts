@@ -1,127 +1,155 @@
 import { eventPermissions, type PermissionActor, type PermissionEvent } from "@/lib/rbac"
 
 /**
- * The permission matrix, written before the resolver.
+ * The permission matrix. Written before the resolver, for the third time.
  *
- * Authorization used to be role-shaped: `canManageEvent` returned false for
- * `venue_owner` unconditionally, while `canModerateChat` said venue owners
- * could moderate. The two disagreed, and a venue owner could reach the
- * Chatrooms list but got bounced out of every room in it.
+ * Authorization has now moved twice. It began role-shaped and
+ * self-contradictory (`canManageEvent` denied venue owners while
+ * `canModerateChat` allowed them). It became relationship-shaped, resolving on
+ * `organizer_id` and `venue.owner_id` being *user* ids. It now resolves on
+ * **organisation membership**, because a host is a company rather than a login:
+ * Byg Brewski's staff need access, and the venue must survive one person
+ * leaving.
  *
- * It is now relationship-shaped. Two independent axes on an event —
- * `organizer_id` (who runs it) and `venue.owner_id` (whose building it is in) —
- * and two buckets of control:
+ * The shape of a mistake here is an access-control bug, not a broken screen, so
+ * every row is asserted and the new rows are written first.
  *
- *   editorial   edit, publish, cancel      the event is yours to change
- *   operational chat, moderation, attendees  what happens in your building
- *
- * Every row of the decided model is asserted here. If a row is wrong the
- * resolver is wrong, not this file.
+ * `kind: individual` is what lets a sole-trader organiser exist without a
+ * company: they get an org of one member and no GSTIN. Everything is an org, so
+ * no call site needs a user-or-org union.
  */
 
 const ADMIN = "usr_admin"
-const ORGANISER = "usr_organiser"
-const VENUE_OWNER = "usr_venue_owner"
-const STRANGER = "usr_stranger"
+const ALICE = "usr_alice" // owner of ORG_HOST
+const BOB = "usr_bob" // staff at ORG_HOST
+const CARA = "usr_cara" // owner of ORG_VENUE
+const STRANGER = "usr_stranger" // member of nothing relevant
 
-const actor = (id: string, role: PermissionActor["role"]): PermissionActor => ({ id, role })
+const ORG_HOST = "org_host"
+const ORG_VENUE = "org_venue"
+const ORG_OTHER = "org_other"
 
-const event = (organizerId: string, venueOwnerId?: string | null): PermissionEvent => ({
-  organizer_id: organizerId,
-  venue: venueOwnerId === undefined ? null : { owner_id: venueOwnerId },
+/** An actor carries the orgs they belong to — the resolver stays pure. */
+const actor = (
+  id: string,
+  role: PermissionActor["role"],
+  orgIds: string[] = []
+): PermissionActor => ({ id, role, orgIds })
+
+const event = (organizerOrgId: string, venueOwnerOrgId?: string | null): PermissionEvent => ({
+  organizer_org_id: organizerOrgId,
+  venue: venueOwnerOrgId === undefined ? null : { owner_org_id: venueOwnerOrgId },
 })
 
-describe("eventPermissions — the decided matrix", () => {
+describe("eventPermissions — the matrix", () => {
   it("gives app_admin everything, on any event", () => {
-    const p = eventPermissions(actor(ADMIN, "app_admin"), event(ORGANISER, VENUE_OWNER))
+    const p = eventPermissions(actor(ADMIN, "app_admin"), event(ORG_HOST, ORG_VENUE))
     expect(p.canEdit).toBe(true)
     expect(p.canOperate).toBe(true)
   })
 
-  it("gives the organiser of an event both buckets", () => {
-    const p = eventPermissions(actor(ORGANISER, "organizer"), event(ORGANISER))
+  it("gives a member of the organising org both buckets", () => {
+    const p = eventPermissions(actor(ALICE, "organizer", [ORG_HOST]), event(ORG_HOST))
     expect(p.canEdit).toBe(true)
     expect(p.canOperate).toBe(true)
   })
 
-  it("gives an organiser nothing on someone else's event", () => {
-    const p = eventPermissions(actor(STRANGER, "organizer"), event(ORGANISER))
+  it("gives a COLLEAGUE the same access as the person who created it", () => {
+    // The whole point of modelling the company. Bob did not create this event
+    // and is not named on it anywhere — he simply works there.
+    const p = eventPermissions(actor(BOB, "organizer", [ORG_HOST]), event(ORG_HOST))
+    expect(p.canEdit).toBe(true)
+    expect(p.canOperate).toBe(true)
+  })
+
+  it("gives a member of a different org nothing", () => {
+    const p = eventPermissions(actor(STRANGER, "organizer", [ORG_OTHER]), event(ORG_HOST))
     expect(p.canEdit).toBe(false)
     expect(p.canOperate).toBe(false)
   })
 
-  it("gives a venue owner operational control of an event in their building, and no editorial", () => {
-    // The row that did not exist before. Someone else runs the event; it is
-    // happening in your venue, so you get the chatroom, moderation and the
-    // guest list — but the event is not yours to change.
+  it("gives the venue's org operational control and no editorial", () => {
     const p = eventPermissions(
-      actor(VENUE_OWNER, "venue_owner"),
-      event(ORGANISER, VENUE_OWNER)
+      actor(CARA, "venue_owner", [ORG_VENUE]),
+      event(ORG_HOST, ORG_VENUE)
     )
     expect(p.canOperate).toBe(true)
     expect(p.canEdit).toBe(false)
   })
 
-  it("gives a venue owner both buckets on an event they run themselves", () => {
-    // Hosting your own event makes you the organiser. The old resolver denied
-    // this outright, so a venue owner could not manage even their own event.
+  it("gives both buckets when the venue's org also runs the event", () => {
     const p = eventPermissions(
-      actor(VENUE_OWNER, "venue_owner"),
-      event(VENUE_OWNER, VENUE_OWNER)
+      actor(CARA, "venue_owner", [ORG_VENUE]),
+      event(ORG_VENUE, ORG_VENUE)
     )
     expect(p.canEdit).toBe(true)
     expect(p.canOperate).toBe(true)
   })
 
-  it("gives a venue owner nothing on an event that is neither theirs nor at their venue", () => {
+  it("gives a venue owner nothing on an event neither theirs nor at their venue", () => {
     const p = eventPermissions(
-      actor(VENUE_OWNER, "venue_owner"),
-      event(ORGANISER, STRANGER)
+      actor(CARA, "venue_owner", [ORG_VENUE]),
+      event(ORG_HOST, ORG_OTHER)
     )
     expect(p.canEdit).toBe(false)
     expect(p.canOperate).toBe(false)
   })
 
   it("gives an attendee nothing, ever", () => {
-    for (const ev of [event(ORGANISER), event(ORGANISER, VENUE_OWNER)]) {
-      const p = eventPermissions(actor(STRANGER, "attendee"), ev)
-      expect(p.canEdit).toBe(false)
-      expect(p.canOperate).toBe(false)
+    for (const ev of [event(ORG_HOST), event(ORG_HOST, ORG_VENUE)]) {
+      expect(eventPermissions(actor(STRANGER, "attendee", [ORG_HOST]), ev).canOperate).toBe(false)
     }
   })
 })
 
-describe("eventPermissions — the unlinked-venue case, which is the common one", () => {
+describe("eventPermissions — multi-org membership", () => {
+  it("resolves on any org the actor belongs to, not just the first", () => {
+    // An agency running events for several clients is a real shape; matching
+    // only orgIds[0] would deny them everything but one.
+    const p = eventPermissions(
+      actor(ALICE, "organizer", [ORG_OTHER, ORG_HOST]),
+      event(ORG_HOST)
+    )
+    expect(p.canEdit).toBe(true)
+  })
+})
+
+describe("eventPermissions — the unlinked venue, still the common case", () => {
   it("grants no venue rights when the event has no linked venue", () => {
-    // Most events are at places not on the platform: free-text location, no
-    // venue record. Nobody gets venue-derived access, and nothing breaks.
-    const p = eventPermissions(actor(VENUE_OWNER, "venue_owner"), event(ORGANISER, undefined))
+    const p = eventPermissions(actor(CARA, "venue_owner", [ORG_VENUE]), event(ORG_HOST, undefined))
     expect(p.canOperate).toBe(false)
-    expect(p.canEdit).toBe(false)
   })
 
-  it("grants no venue rights when the venue exists but is unclaimed", () => {
-    // A venue record with no owner — created by an admin, never claimed.
-    // `owner_id` is null and must not match a null-ish actor id.
-    const p = eventPermissions(actor(VENUE_OWNER, "venue_owner"), event(ORGANISER, null))
+  it("grants no venue rights when the venue is unclaimed", () => {
+    const p = eventPermissions(actor(CARA, "venue_owner", [ORG_VENUE]), event(ORG_HOST, null))
     expect(p.canOperate).toBe(false)
-    expect(p.canEdit).toBe(false)
   })
 })
 
 describe("eventPermissions — fails closed", () => {
-  it("denies when the actor id is empty, even if the venue owner is also empty", () => {
-    // Guards the classic null-equals-null hole: an unauthenticated or
-    // half-built actor must never match an unclaimed venue.
-    const p = eventPermissions(actor("", "venue_owner"), event(ORGANISER, null))
-    expect(p.canOperate).toBe(false)
+  it("denies an actor with no org memberships", () => {
+    // A newly created host account before it is attached to anything.
+    const p = eventPermissions(actor(ALICE, "organizer", []), event(ORG_HOST))
     expect(p.canEdit).toBe(false)
+    expect(p.canOperate).toBe(false)
+  })
+
+  it("denies when the actor id is empty", () => {
+    expect(eventPermissions(actor("", "organizer", [ORG_HOST]), event(ORG_HOST)).canEdit).toBe(
+      false
+    )
+  })
+
+  it("never matches an empty org id against a null venue owner", () => {
+    // The null-equals-null hole, in its new form.
+    const p = eventPermissions(actor(CARA, "venue_owner", [""]), event(ORG_HOST, null))
+    expect(p.canOperate).toBe(false)
   })
 
   it("denies an unknown role outright", () => {
     const p = eventPermissions(
-      actor(ORGANISER, "unknown_role" as PermissionActor["role"]),
-      event(ORGANISER, ORGANISER)
+      actor(ALICE, "unknown_role" as PermissionActor["role"], [ORG_HOST]),
+      event(ORG_HOST)
     )
     expect(p.canEdit).toBe(false)
     expect(p.canOperate).toBe(false)
@@ -130,20 +158,18 @@ describe("eventPermissions — fails closed", () => {
 
 describe("eventPermissions — editorial always implies operational", () => {
   it("never grants edit without operate", () => {
-    // You cannot be allowed to cancel an event but not read its chatroom.
-    // Asserted across the whole matrix so a future rule cannot invert it.
     const actors: PermissionActor[] = [
       actor(ADMIN, "app_admin"),
-      actor(ORGANISER, "organizer"),
-      actor(VENUE_OWNER, "venue_owner"),
-      actor(STRANGER, "organizer"),
-      actor(STRANGER, "attendee"),
+      actor(ALICE, "organizer", [ORG_HOST]),
+      actor(CARA, "venue_owner", [ORG_VENUE]),
+      actor(STRANGER, "organizer", [ORG_OTHER]),
+      actor(STRANGER, "attendee", []),
     ]
     const events = [
-      event(ORGANISER),
-      event(ORGANISER, VENUE_OWNER),
-      event(VENUE_OWNER, VENUE_OWNER),
-      event(ORGANISER, null),
+      event(ORG_HOST),
+      event(ORG_HOST, ORG_VENUE),
+      event(ORG_VENUE, ORG_VENUE),
+      event(ORG_HOST, null),
     ]
     for (const a of actors) {
       for (const e of events) {

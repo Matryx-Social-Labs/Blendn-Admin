@@ -3,6 +3,7 @@ import Link from "next/link"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 import { EventMessaging } from "@/components/event-messaging"
 import { ChatFeed } from "@/components/chat-feed"
 import { ModerationQueue } from "@/components/moderation-queue"
@@ -21,11 +22,11 @@ export default async function EventMessagingPage({ params }: Props) {
 
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
-    select: { id: true, title: true, organizer_id: true, venue: { select: { owner_id: true } } },
+    select: { id: true, title: true, organizer_org_id: true, venue: { select: { owner_org_id: true } } },
   })
 
   if (!event) notFound()
-  if (!eventPermissions(session.user, event).canEdit) {
+  if (!eventPermissions(await actorFor(session.user), event).canEdit) {
     redirect("/dashboard/chatrooms")
   }
 

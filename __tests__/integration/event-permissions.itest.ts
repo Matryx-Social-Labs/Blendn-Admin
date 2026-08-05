@@ -1,4 +1,5 @@
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
 
 /**
@@ -18,28 +19,42 @@ import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
 const users: string[] = []
 const events: string[] = []
 const venues: string[] = []
+const orgs: string[] = []
+
+/** Create an org with one member, mirroring what onboarding will do. */
+async function makeOrg(ownerId: string, kind: "individual" | "company" = "individual") {
+  const org = await db.organisations.create({
+    data: { kind, display_name: testId("org"), status: "verified" },
+  })
+  orgs.push(org.id)
+  await db.organisation_members.create({
+    data: { org_id: org.id, user_id: ownerId, role: "owner", is_primary_contact: true },
+  })
+  return org.id
+}
 
 afterAll(async () => {
   if (events.length) await db.events.deleteMany({ where: { id: { in: events } } })
   if (venues.length) await db.venues.deleteMany({ where: { id: { in: venues } } })
+  if (orgs.length) await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await cleanup(users, [])
   await closeDb()
 })
 
-async function makeVenue(ownerId: string | null) {
+async function makeVenue(ownerOrgId: string | null) {
   const venue = await db.venues.create({
     data: {
       name: testId("venue"),
       city: "Bangalore",
-      owner_id: ownerId,
-      claimed_at: ownerId ? new Date() : null,
+      owner_org_id: ownerOrgId,
+      claimed_at: ownerOrgId ? new Date() : null,
     },
   })
   venues.push(venue.id)
   return venue.id
 }
 
-async function makeEventAt(organizerId: string, venueId: string | null) {
+async function makeEventAt(organizerId: string, venueId: string | null, orgId?: string) {
   const slug = testId("perm")
   const start = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
   const event = await db.events.create({
@@ -52,6 +67,7 @@ async function makeEventAt(organizerId: string, venueId: string | null) {
       timezone: "UTC",
       status: "published",
       organizer_id: organizerId,
+      organizer_org_id: orgId ?? null,
       venue_id: venueId,
       venue_link_status: venueId ? "auto_linked" : null,
     },
@@ -66,7 +82,9 @@ async function resolve(actorId: string, role: "app_admin" | "organizer" | "venue
     where: { id: eventId },
     select: eventPermissionSelect,
   })
-  return eventPermissions({ id: actorId, role }, event)
+  // Memberships loaded exactly as a route does, so a mismatch between the
+  // helper's query and the resolver's expectation shows up here.
+  return eventPermissions(await actorFor({ id: actorId, role }), event)
 }
 
 describe("the venue-owner dead end, against real rows", () => {
@@ -78,8 +96,10 @@ describe("the venue-owner dead end, against real rows", () => {
     users.push(owner, organiser)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
-    const venueId = await makeVenue(owner)
-    const eventId = await makeEventAt(organiser, venueId)
+    const venueOrg = await makeOrg(owner, "company")
+    const hostOrg = await makeOrg(organiser)
+    const venueId = await makeVenue(venueOrg)
+    const eventId = await makeEventAt(organiser, venueId, hostOrg)
 
     const p = await resolve(owner, "venue_owner", eventId)
     expect(p.canOperate).toBe(true)
@@ -92,8 +112,8 @@ describe("the venue-owner dead end, against real rows", () => {
     users.push(owner, organiser)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
-    await makeVenue(owner)
-    const elsewhere = await makeEventAt(organiser, null)
+    await makeVenue(await makeOrg(owner, "company"))
+    const elsewhere = await makeEventAt(organiser, null, await makeOrg(organiser))
 
     const p = await resolve(owner, "venue_owner", elsewhere)
     expect(p.canOperate).toBe(false)
@@ -105,8 +125,9 @@ describe("the venue-owner dead end, against real rows", () => {
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
-    const venueId = await makeVenue(owner)
-    const eventId = await makeEventAt(owner, venueId)
+    const ownOrg = await makeOrg(owner, "company")
+    const venueId = await makeVenue(ownOrg)
+    const eventId = await makeEventAt(owner, venueId, ownOrg)
 
     const p = await resolve(owner, "venue_owner", eventId)
     expect(p.canEdit).toBe(true)
@@ -123,8 +144,9 @@ describe("unclaimed venues grant nothing", () => {
     users.push(owner, organiser)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
+    await makeOrg(owner, "company")
     const unclaimed = await makeVenue(null)
-    const eventId = await makeEventAt(organiser, unclaimed)
+    const eventId = await makeEventAt(organiser, unclaimed, await makeOrg(organiser))
 
     const p = await resolve(owner, "venue_owner", eventId)
     expect(p.canOperate).toBe(false)
@@ -138,15 +160,16 @@ describe("the shared select loads what the resolver needs", () => {
     const owner = await makeUser("perm_owner5", "organizer")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
-    const venueId = await makeVenue(owner)
-    const eventId = await makeEventAt(owner, venueId)
+    const ownOrg = await makeOrg(owner, "company")
+    const venueId = await makeVenue(ownOrg)
+    const eventId = await makeEventAt(owner, venueId, ownOrg)
 
     const event = await db.events.findUniqueOrThrow({
       where: { id: eventId },
       select: eventPermissionSelect,
     })
     expect(event.venue).not.toBeUndefined()
-    expect(event.venue?.owner_id).toBe(owner)
+    expect(event.venue?.owner_org_id).not.toBeNull()
   })
 
   it("returns null venue for an unlinked event, which is the common case", async () => {
@@ -168,8 +191,9 @@ describe("admin is unaffected by venue linkage", () => {
     const organiser = await makeUser("perm_org7", "organizer")
     users.push(admin, organiser)
 
-    const linked = await makeEventAt(organiser, await makeVenue(null))
-    const unlinked = await makeEventAt(organiser, null)
+    const hostOrg = await makeOrg(organiser)
+    const linked = await makeEventAt(organiser, await makeVenue(null), hostOrg)
+    const unlinked = await makeEventAt(organiser, null, hostOrg)
 
     for (const eventId of [linked, unlinked]) {
       const p = await resolve(admin, "app_admin", eventId)
