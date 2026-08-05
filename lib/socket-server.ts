@@ -4,6 +4,9 @@ import { Server, Socket } from "socket.io"
 import { verifyAccessToken } from "./mobile-auth"
 import { db } from "./db"
 import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
+import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
+import { buildLiveSnapshot, type LiveSnapshot } from "./live-metrics"
+import type { user_role } from "@prisma/client"
 
 // Socket.io server instance
 let io: Server | null = null
@@ -103,12 +106,18 @@ export interface ServerToClientEvents {
   // System events
   error: (data: { message: string; code?: string }) => void
   connected: (data: { userId: string }) => void
+
+  /** Live operations aggregate. Dashboard-only; carries no attendee rows. */
+  "ops:snapshot": (data: LiveSnapshot) => void
 }
 
 export interface ClientToServerEvents {
   // Join/leave rooms
   "join:event": (eventId: string) => void
   "leave:event": (eventId: string) => void
+  /** Dashboard-only live operations room. */
+  "join:eventOps": (eventId: string) => void
+  "leave:eventOps": (eventId: string) => void
   "join:chat": (chatGroupId: string) => void
   "leave:chat": (chatGroupId: string) => void
   "join:conversation": (conversationId: string) => void
@@ -130,6 +139,14 @@ export interface ClientToServerEvents {
 interface SocketData {
   userId: string
   email: string
+  /**
+   * Which scheme authenticated this socket. Dashboard sockets are the only
+   * ones allowed into `:ops` rooms, and attendee sockets must never be —
+   * the two carry completely different payloads.
+   */
+  principal: "mobile" | "dashboard"
+  /** Present only for dashboard principals. */
+  role?: user_role
 }
 
 // Authenticated socket type
@@ -264,6 +281,58 @@ export const sponsoredMessageScheduler = new SponsoredMessageScheduler()
  * Fails closed: a throwing check (malformed UUID from a hostile client, DB
  * blip) denies the join rather than leaking the room.
  */
+/*
+ * Per-event snapshot broadcasting.
+ *
+ * A timer runs only while someone is watching that event, and stops itself
+ * when the last watcher leaves. The alternative — one global tick over every
+ * live event — burns queries for rooms nobody has open, which at 5-second
+ * granularity is most of them most of the time.
+ */
+const opsTimers = new Map<string, NodeJS.Timeout>()
+const OPS_INTERVAL_MS = 5000
+
+export function startOpsBroadcast(eventId: string): void {
+  if (!io || opsTimers.has(eventId)) return
+
+  const timer = setInterval(() => {
+    void (async () => {
+      const room = `event:${eventId}:ops`
+      const watchers = io ? await io.in(room).fetchSockets() : []
+      if (watchers.length === 0) {
+        stopOpsBroadcast(eventId)
+        return
+      }
+      try {
+        const snapshot = await buildLiveSnapshot(eventId)
+        if (snapshot) io?.to(room).emit("ops:snapshot", snapshot)
+      } catch (error) {
+        // A failed snapshot must not kill the timer or the process — the next
+        // tick may well succeed, and a dead timer is a silently frozen screen.
+        logger.warn("Live snapshot failed", {
+          eventId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })()
+  }, OPS_INTERVAL_MS)
+
+  opsTimers.set(eventId, timer)
+}
+
+export function stopOpsBroadcast(eventId: string): void {
+  const timer = opsTimers.get(eventId)
+  if (timer) {
+    clearInterval(timer)
+    opsTimers.delete(eventId)
+  }
+}
+
+/** Used by tests and by shutdown so a process can exit cleanly. */
+export function stopAllOpsBroadcasts(): void {
+  for (const eventId of Array.from(opsTimers.keys())) stopOpsBroadcast(eventId)
+}
+
 export async function guardJoin(
   socket: AuthenticatedSocket,
   room: string,
@@ -418,23 +487,77 @@ export function initSocketServer(httpServer: HttpServer): Server {
     pingInterval: 25000,
   })
 
-  // Authentication middleware
+  /*
+   * Cross-replica message delivery.
+   *
+   * Without an adapter every replica keeps its own room membership, so a
+   * message emitted on replica A never reaches a client connected to replica
+   * B — chat silently half-works rather than failing loudly. That has not
+   * bitten because railway.json sets no replica count and the app runs as one
+   * instance; dashboard sockets are long-lived and bring that ceiling closer.
+   *
+   * Opt-in on REDIS_URL. With no Redis provisioned this is a no-op and the
+   * default in-memory adapter stands, which is correct for one replica.
+   * **Do not raise the replica count until REDIS_URL is set** — that is the
+   * moment this stops being precautionary.
+   */
+  const redisUrl = process.env.REDIS_URL
+  if (redisUrl) {
+    void (async () => {
+      try {
+        const { createClient } = await import("redis")
+        const { createAdapter } = await import("@socket.io/redis-adapter")
+        const pubClient = createClient({ url: redisUrl })
+        const subClient = pubClient.duplicate()
+        await Promise.all([pubClient.connect(), subClient.connect()])
+        io?.adapter(createAdapter(pubClient, subClient))
+        logger.info("Socket.io Redis adapter attached")
+      } catch (error) {
+        // Falling back to in-memory is correct at one replica and wrong at
+        // several, so this is an error rather than a warning even though the
+        // process keeps serving.
+        logger.error("Socket.io Redis adapter failed to attach", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })()
+  }
+
+  /*
+   * Authentication middleware — two schemes, mobile first.
+   *
+   * The mobile path is byte-for-byte what it was: every phone in the field
+   * depends on this handshake, so a dashboard client must not be able to
+   * change how a mobile token is judged. Only when there is no mobile token,
+   * or it fails, does the dashboard cookie get a look.
+   */
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace("Bearer ", "")
 
-      if (!token) {
+      if (token) {
+        const decoded = verifyAccessToken(token)
+        if (!decoded) {
+          return next(new Error("Invalid or expired token"))
+        }
+
+        // Attach user data to socket
+        socket.data.userId = decoded.userId
+        socket.data.email = decoded.email
+        socket.data.principal = "mobile"
+
+        return next()
+      }
+
+      const dashboard = await authenticateDashboardSocket(socket.handshake.headers.cookie)
+      if (!dashboard) {
         return next(new Error("Authentication required"))
       }
 
-      const decoded = verifyAccessToken(token)
-      if (!decoded) {
-        return next(new Error("Invalid or expired token"))
-      }
-
-      // Attach user data to socket
-      socket.data.userId = decoded.userId
-      socket.data.email = decoded.email
+      socket.data.userId = dashboard.userId
+      socket.data.email = dashboard.email
+      socket.data.role = dashboard.role
+      socket.data.principal = "dashboard"
 
       next()
     } catch (error) {
@@ -468,6 +591,43 @@ export function initSocketServer(httpServer: HttpServer): Server {
       const room = `event:${eventId}`
       authSocket.leave(room)
       logger.debug("Socket left room", { room, userId: authSocket.data.userId })
+
+
+    /*
+     * Live operations room. Deliberately separate from `event:{id}` — that room
+     * carries attendee-facing traffic including check-in names, and a host must
+     * not receive it. This one carries aggregates only.
+     */
+    authSocket.on("join:eventOps", async (eventId) => {
+      if (authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
+        // An attendee token must never reach ops aggregates, even if the user
+        // behind it also happens to hold a dashboard role.
+        authSocket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
+        return
+      }
+      const principal = {
+        userId: authSocket.data.userId,
+        email: authSocket.data.email,
+        role: authSocket.data.role,
+      }
+      await guardJoin(
+        authSocket,
+        `event:${eventId}:ops`,
+        "Not authorized to watch this event",
+        () => canJoinEventOps(principal, eventId)
+      )
+      // Send one snapshot immediately so the screen is populated on open
+      // rather than blank until the first tick.
+      if (authSocket.rooms.has(`event:${eventId}:ops`)) {
+        const snapshot = await buildLiveSnapshot(eventId).catch(() => null)
+        if (snapshot) authSocket.emit("ops:snapshot", snapshot)
+        startOpsBroadcast(eventId)
+      }
+    })
+
+    authSocket.on("leave:eventOps", (eventId) => {
+      authSocket.leave(`event:${eventId}:ops`)
+    })
     })
 
     // Chat room handlers
