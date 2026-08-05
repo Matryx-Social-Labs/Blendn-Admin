@@ -1,6 +1,7 @@
 import { createServer } from "http"
 import next from "next"
 import { initSocketServer, sponsoredMessageScheduler } from "./lib/socket-server"
+import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
 import { ensureBucketExists } from "./lib/tigris"
 import { validateEnv } from "./lib/env"
 
@@ -61,6 +62,7 @@ app.prepare().then(() => {
     // Clear the sponsored-message setInterval handles; without this they keep
     // the event loop alive and the process waits for the forced-exit timeout.
     sponsoredMessageScheduler.stopAll()
+    stopChatLifecycleSweeper()
     io?.close(() => {
       console.log(`[${new Date().toISOString()}] > Socket.io closed`)
     })
