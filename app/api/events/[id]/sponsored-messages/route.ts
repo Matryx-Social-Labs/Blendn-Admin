@@ -50,7 +50,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     // Every sponsored message fans out to the whole event chat, so bound how
     // fast one organiser account can create them.
-    const limited = rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
+    const limited = await rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
     if (limited) return limited
 
     const parsed = sponsoredMessageCreateSchema.safeParse(await req.json())

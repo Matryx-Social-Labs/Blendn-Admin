@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   validationErrorResponse,
@@ -28,6 +29,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("safety", "report-message", authUser.userId))
+    if (limited) return limited
 
     const { messageId } = await params
 

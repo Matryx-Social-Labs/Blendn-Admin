@@ -51,7 +51,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     // An announcement pushes to every attendee of the event. Bound how fast a
     // single organiser account can fire them.
-    const limited = rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
+    const limited = await rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
     if (limited) return limited
 
     const parsed = announcementSchema.safeParse(await req.json())

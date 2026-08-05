@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { emitChatMessage } from "@/lib/socket-server"
 import {
   successResponse,
@@ -23,6 +24,9 @@ export async function POST(
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("broadcast", "announce", authUser.userId))
+    if (limited) return limited
 
     // Validate eventId is a valid UUID
     const uuidRegex =

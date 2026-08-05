@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   errorResponse,
@@ -21,6 +22,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("safety", "block-user", authUser.userId))
+    if (limited) return limited
 
     const { userId: targetId } = await params
 
@@ -77,6 +81,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("safety", "block-user", authUser.userId))
+    if (limited) return limited
 
     const { userId: targetId } = await params
 

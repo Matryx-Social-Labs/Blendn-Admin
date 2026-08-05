@@ -6,6 +6,7 @@ import { db } from "./db"
 import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
+import { startChatLifecycleSweeper } from "./chat-lifecycle"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -702,6 +703,11 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
   // Load and start all active sponsored message timers
   void sponsoredMessageScheduler.loadAll()
+
+  // Chat rooms close themselves. No external cron to configure — and the
+  // immediate pass on boot is the important one, since deploys restart this
+  // process often enough that boot is when any backlog gets cleared.
+  startChatLifecycleSweeper()
 
   logger.info("Socket.io server initialized")
   return io

@@ -19,7 +19,7 @@ import { normalizeLocationToCity } from "@/lib/location"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
-  const rateLimitResult = rateLimit(request, createAuthRateLimit("signin"))
+  const rateLimitResult = await rateLimit(request, createAuthRateLimit("signin"))
   if (rateLimitResult) {
     return rateLimitResult
   }

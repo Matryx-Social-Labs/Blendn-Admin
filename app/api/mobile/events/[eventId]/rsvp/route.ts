@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
 import {
   successResponse,
@@ -20,6 +21,9 @@ export async function POST(
   try {
     const user = await getAuthenticatedUser(request)
     if (!user) return unauthorizedResponse("Authentication required")
+
+    const limited = await rateLimit(request, userLimit("write", "rsvp", user.userId))
+    if (limited) return limited
 
     const { eventId } = await params
     if (!uuidRegex.test(eventId)) return errorResponse("Invalid event ID format", 400)
@@ -63,6 +67,9 @@ export async function DELETE(
   try {
     const user = await getAuthenticatedUser(request)
     if (!user) return unauthorizedResponse("Authentication required")
+
+    const limited = await rateLimit(request, userLimit("write", "rsvp", user.userId))
+    if (limited) return limited
 
     const { eventId } = await params
     if (!uuidRegex.test(eventId)) return errorResponse("Invalid event ID format", 400)

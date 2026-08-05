@@ -31,7 +31,7 @@ const googleAuthSchema = z.object({
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
-  const rateLimitResult = rateLimit(request, createAuthRateLimit("google"))
+  const rateLimitResult = await rateLimit(request, createAuthRateLimit("google"))
   if (rateLimitResult) {
     return rateLimitResult
   }

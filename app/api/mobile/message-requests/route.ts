@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { sendPushNotification } from "@/lib/push-notifications"
 import {
   successResponse,
@@ -27,6 +28,9 @@ export async function POST(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "message-request", authUser.userId))
+    if (limited) return limited
 
     const body = await request.json()
     const parsed = createRequestSchema.safeParse(body)

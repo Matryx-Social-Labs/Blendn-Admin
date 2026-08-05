@@ -5,6 +5,110 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-05
+
+### Security
+
+- **Rate limiting now covers the mutating API.** 22 mobile routes had none at
+  all, including `users/[id]/block`, both report endpoints,
+  `uploads/presigned-url`, and `events/[eventId]/announce` — which sends a push
+  notification to every attendee of an event. One is left deliberately
+  unlimited: `auth/signout`, where refusing the request leaves a session the
+  user asked to end.
+
+- **Counters live in Redis when `REDIS_URL` is set.** They were held in a
+  process-local `Map`, so every limit was per-replica: 30/min silently became
+  30/min *per instance*, and each replica added made every limit weaker.
+
+  With no Redis, or if Redis is unreachable, it degrades to the in-process
+  counter rather than failing open or failing closed. Failing open would let an
+  attacker disable every limit in the product by taking one dependency down;
+  failing closed would turn a Redis blip into an outage.
+
+### Changed
+
+- `rateLimit()` is now async, since the counter is remote. All call sites
+  updated.
+- Authenticated routes are keyed on the **user**, not the IP. For an
+  authenticated endpoint the abuse case is one account misbehaving, and IP
+  keying is actively wrong there — everyone behind one NAT shares a bucket
+  while an attacker rotates address.
+- Limits are named policies (`broadcast`, `upload`, `safety`, `write`,
+  `heavy`) rather than numbers scattered across routes. `safety` is
+  deliberately loose: rate limiting a report or a block is a trade-off against
+  someone in trouble, so it sits where only automation notices it.
+
+## [0.14.0] - 2026-08-05
+
+### Changed
+
+- **Chatrooms close themselves.** The archive job needed an external cron nobody
+  had scheduled. It now runs inside the server process — once on boot, then
+  every 15 minutes — beside the existing sponsored-message scheduler.
+
+  Deliberately a periodic sweep rather than a timer per event. The write gate
+  already refuses posts to an expired room on the strength of the event's own
+  `end_time`, so this job never was what stops anyone typing; it tidies state.
+  Lateness is therefore unobservable, and per-event timers would buy that
+  invisible precision at the cost of four kinds of bookkeeping — reschedule on
+  edit, cancel on delete, rehydrate on boot, dedupe across replicas.
+
+  `/api/cron/archive-chats` remains as a manual trigger and calls the same
+  function, so there is one implementation rather than two that can drift.
+
+### Added
+
+- `includePast` documented on the events list, and the organiser schema no
+  longer advertises an email — both drifted when the behaviour changed in
+  v0.13.0.
+- Spec entries for five previously **undocumented** mobile endpoints: Apple
+  sign-in, report a message, report a user, list blocked users, and delete your
+  own account. Three of those are the safety surface, which is the last thing a
+  client developer should have to reverse-engineer from source.
+- `__tests__/openapi-coverage.test.ts` asserts spec ↔ route agreement in both
+  directions. It found those five. It cannot prove response *shapes* match —
+  that needs contract tests against real handlers — so a green run means the
+  spec and the routes describe the same set of endpoints, nothing stronger.
+
+## [0.13.0] - 2026-08-05
+
+### Fixed
+
+- **Event chatrooms never closed.** A membership row was a permanent licence to
+  write: people were still posting into rooms for events that finished months
+  earlier. Two causes, both now removed.
+
+  There were two write paths with two different gates. `events/[id]/chat`
+  rejected anything not `active`; `chat/groups/[id]/messages` rejected only
+  `locked`, so an **archived room stayed writable**. Both now call one rule,
+  `chatWindowState` in `lib/chat-window.ts`, so they cannot fork again.
+
+  Archiving was also opportunistic — it piggybacked on a mobile chat-list
+  request, so a room nobody opened stayed `active` indefinitely. It is now a
+  cron (`/api/cron/archive-chats`) that runs whether or not anyone opens the
+  app, and marks members `left`.
+
+  The write gate deliberately does **not** depend on that job having run: it
+  compares against the event's own `end_time`, so a room the job has not
+  reached yet is still closed. Jobs are late, get stuck, or have never run for
+  a given row.
+
+- **The mobile events feed served only finished events.** There was no time
+  filter at all — on production that meant all ten events, every one already
+  over, presented as things to go to. Discovery now excludes ended events;
+  `includePast=true` still returns them for history screens.
+
+- **The organiser's email address** was returned by `GET /api/mobile/events/[id]`.
+  The list endpoint never included it; only the detail endpoint did.
+
+### Notes
+
+- Members are marked `left`, not deleted. `anonymous_name` lives on the
+  membership row and every historical message resolves its pseudonym through
+  it — deleting the rows would strip names off the whole transcript, which
+  anonymises nobody and breaks the feedback digest. Banned members keep that
+  status, since a ban is a moderation record that should outlive the room.
+
 ## [0.12.1] - 2026-08-05
 
 ### Fixed

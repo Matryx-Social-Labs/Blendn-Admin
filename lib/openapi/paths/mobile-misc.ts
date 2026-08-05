@@ -230,3 +230,158 @@ registry.registerPath({
     ...standardErrors,
   },
 })
+
+/*
+ * === Trust & safety, account, Apple sign-in ===
+ *
+ * These five endpoints shipped without spec entries — found by
+ * __tests__/openapi-coverage.test.ts rather than by anyone noticing. Three of
+ * them are the safety surface (report a message, report a user, list who you
+ * have blocked), which is precisely the part a client developer must not have
+ * to reverse-engineer from the source.
+ */
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/auth/apple",
+  tags: ["Mobile Auth"],
+  summary: "Sign in with Apple",
+  description:
+    "Exchanges an Apple identity token for Blend'n access and refresh tokens. `fullName` is only supplied by Apple on the very first authorisation, so persist it then — it is not sent again.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            identityToken: z.string().min(1),
+            fullName: z
+              .object({
+                givenName: z.string().nullable().optional(),
+                familyName: z.string().nullable().optional(),
+              })
+              .optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Authenticated",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              accessToken: z.string(),
+              refreshToken: z.string(),
+              user: z.object({
+                id: z.string(),
+                email: z.string(),
+                name: z.string().nullable(),
+              }),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/messages/{messageId}/report",
+  tags: ["Mobile Safety"],
+  summary: "Report a message",
+  description:
+    "Reports a group or private message. `messageType` is required because the two live in different tables and the id alone is ambiguous.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ messageId: z.string().uuid() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            messageType: z.enum(["group", "private"]),
+            reason: z.string().min(1),
+            description: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Report filed", content: { "application/json": { schema: wrap(MessageResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/users/{userId}/report",
+  tags: ["Mobile Safety"],
+  summary: "Report a user",
+  security: bearerAuth,
+  request: {
+    params: z.object({ userId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            reason: z.string().min(1),
+            description: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Report filed", content: { "application/json": { schema: wrap(MessageResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/users/blocked",
+  tags: ["Mobile Safety"],
+  summary: "List blocked users",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "Blocked users",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              users: z.array(
+                z.object({
+                  blocked_id: z.string(),
+                  blocked_user_name: z.string().nullable(),
+                  blocked_user_photo: z.string().nullable(),
+                  reason: z.string().nullable(),
+                  blocked_at: z.string().datetime(),
+                })
+              ),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/account",
+  tags: ["Mobile Profile"],
+  summary: "Delete your own account",
+  description:
+    "Anonymises the account rather than hard-deleting the row. Events, chat messages and check-ins cascade from User, so a real delete would destroy other people's event history and conversations along with yours.",
+  security: bearerAuth,
+  responses: {
+    200: { description: "Account deleted", content: { "application/json": { schema: wrap(MessageResponseSchema) } } },
+    ...standardErrors,
+  },
+})
