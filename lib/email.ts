@@ -97,11 +97,11 @@ export async function sendEmail(opts: {
 
 export function onboardingVerifyEmail(name: string, link: string) {
   return {
-    subject: "Confirm your email — Blendn host application",
+    subject: "Confirm your email — Blend'n host application",
     text: [
       `Hi ${name},`,
       "",
-      "Confirm this address to finish your Blendn host application:",
+      "Confirm this address to finish your Blend'n host application:",
       link,
       "",
       "The link expires in 24 hours. Once confirmed, our team reviews your application — you'll hear back by email.",
@@ -113,9 +113,9 @@ export function onboardingVerifyEmail(name: string, link: string) {
 
 export function inviteEmail(orgName: string, inviterName: string, link: string) {
   return {
-    subject: `${inviterName} invited you to ${orgName} on Blendn`,
+    subject: `${inviterName} invited you to ${orgName} on Blend'n`,
     text: [
-      `${inviterName} has invited you to join ${orgName} on Blendn.`,
+      `${inviterName} has invited you to join ${orgName} on Blend'n.`,
       "",
       link,
       "",
@@ -128,11 +128,11 @@ export function inviteEmail(orgName: string, inviterName: string, link: string) 
 
 export function approvedEmail(name: string, orgName: string, email: string, password: string) {
   return {
-    subject: "Your Blendn host account is ready",
+    subject: "Your Blend'n host account is ready",
     text: [
       `Hi ${name},`,
       "",
-      `${orgName} has been approved. You can sign in to the Blendn dashboard now:`,
+      `${orgName} has been approved. You can sign in to the Blend'n dashboard now:`,
       `${appUrl()}/login`,
       "",
       `Email:    ${email}`,
@@ -145,7 +145,7 @@ export function approvedEmail(name: string, orgName: string, email: string, pass
 
 export function declinedEmail(name: string, reason: string) {
   return {
-    subject: "About your Blendn host application",
+    subject: "About your Blend'n host application",
     text: [
       `Hi ${name},`,
       "",
@@ -160,9 +160,9 @@ export function declinedEmail(name: string, reason: string) {
 
 export function domainVerifyEmail(domain: string, link: string) {
   return {
-    subject: `Verify ${domain} for Blendn`,
+    subject: `Verify ${domain} for Blend'n`,
     text: [
-      `Someone has asked to verify ${domain} for an organisation on Blendn.`,
+      `Someone has asked to verify ${domain} for an organisation on Blend'n.`,
       "",
       "If that was you or someone at your organisation, confirm here:",
       link,

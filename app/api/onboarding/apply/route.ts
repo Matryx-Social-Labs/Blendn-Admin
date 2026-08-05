@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     })
     if (existingUser && existingUser.role !== "attendee") {
       return NextResponse.json(
-        { success: false, error: "This email already has a Blendn host account. Sign in instead." },
+        { success: false, error: "This email already has a Blend'n host account. Sign in instead." },
         { status: 409 }
       )
     }

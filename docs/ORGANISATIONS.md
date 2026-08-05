@@ -192,6 +192,27 @@ not that every address on it should reach the dashboard. Granting more than
 
 `lib/email.ts` — Resend's REST API over `fetch`, no SDK.
 
+```
+RESEND_API_KEY=re_...
+EMAIL_FROM="Blend'n" <hello@blendn.app>
+```
+
+Send from **`blendn.app`**, not the parent company domain: the recipient applied
+to Blend'n, and a mail from a domain they have never heard of — asking them to
+click a link, and later carrying a password — reads as phishing.
+
+**Not a no-reply address.** The decline template ends *"reply to this email with
+more detail about your organisation"*, and someone declined at onboarding is
+exactly the host worth hearing back from.
+
+Resend only *sends*. Verifying the domain via DNS does not create a mailbox, so
+`hello@blendn.app` will send perfectly well while every reply hard-bounces —
+mail hosting on the domain is a separate thing to set up.
+
+If marketing email is ever added, put it on its own subdomain. Spam complaints
+there would otherwise poison the sending reputation of the domain carrying
+password and invite mail.
+
 **Unconfigured is a first-class state.** Without `RESEND_API_KEY` and
 `EMAIL_FROM` every flow still completes; the caller gets
 `{ sent: false, reason: "not_configured" }` and the dashboard shows the link or
