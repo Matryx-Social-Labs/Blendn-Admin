@@ -79,6 +79,7 @@ describe("visibleNavFor", () => {
       "Venues",
       "Applications",
       "Organisations",
+      "Reports",
       "Audit log",
     ])
   })
@@ -92,6 +93,7 @@ describe("visibleNavFor", () => {
       "Attendees",
       "Chatrooms",
       "My organisation",
+      "Reports",
       "Audit log",
     ])
     expect(titles("venue_owner")).toEqual([
@@ -100,6 +102,7 @@ describe("visibleNavFor", () => {
       "My venues",
       "Chatrooms",
       "My organisation",
+      "Reports",
       "Audit log",
     ])
   })
