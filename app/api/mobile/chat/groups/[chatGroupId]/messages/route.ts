@@ -20,6 +20,7 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
+import { chatWindowState, chatClosedMessage } from "@/lib/chat-window"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
@@ -231,6 +232,9 @@ export async function POST(
         members: {
           where: { user_id: user.userId },
         },
+        // end_time decides the write window; without it this path had no idea
+        // how long ago the event finished.
+        event: { select: { end_time: true } },
       },
     })
 
@@ -274,12 +278,18 @@ export async function POST(
       )
     }
 
-    // Check if chat group is locked
-    if (chatGroup.status === "locked") {
+    /*
+     * One rule for whether this room accepts writes — shared with the other
+     * write path, which rejected anything not `active` while this one rejected
+     * only `locked`. An archived room was therefore still writable from here,
+     * so a membership row from an event months ago never expired.
+     */
+    const window = chatWindowState(chatGroup.event, chatGroup)
+    if (!window.open) {
       return errorResponse(
-        "This chat group is currently locked by the organiser",
+        chatClosedMessage(window.reason),
         403,
-        ErrorCode.CHAT_LOCKED
+        window.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
       )
     }
 

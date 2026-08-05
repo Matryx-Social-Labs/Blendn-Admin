@@ -1,0 +1,12 @@
+-- Close event chatrooms properly.
+--
+-- A membership row was a permanent licence to write: one write path checked
+-- only for `locked`, so an archived room stayed open, and archiving itself was
+-- opportunistic (piggybacked on a mobile list request) so it often never ran.
+-- People could post into rooms from events months past.
+--
+-- `left` marks a member whose window has closed. The row is kept rather than
+-- deleted because `anonymous_name` lives on it — deleting it would strip the
+-- pseudonyms off every historical message, which breaks the post-event feedback
+-- digest and anonymises nobody, it just blanks them.
+ALTER TYPE "member_status" ADD VALUE IF NOT EXISTS 'left';

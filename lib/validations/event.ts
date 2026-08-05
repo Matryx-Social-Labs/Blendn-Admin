@@ -21,6 +21,16 @@ export const eventQuerySchema = z.object({
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
 
+  /**
+   * Include events that have already finished. Off by default — discovery
+   * should not be a list of things you cannot go to. History screens opt in.
+   */
+  includePast: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .transform((v) => v === true || v === "true")
+    .optional()
+    .default(false),
+
   // Status filter
   status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
 

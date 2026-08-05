@@ -13,6 +13,7 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
+import { chatWindowState, chatClosedMessage } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
@@ -292,6 +293,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Get chat group for event (create on demand if user is checked in)
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
+      // end_time decides the write window — see lib/chat-window.ts.
+      include: { event: { select: { end_time: true } } },
     })
 
     if (!chatGroup) {
@@ -311,23 +314,34 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
       const event = await db.events.findUnique({
         where: { id: eventId, deleted_at: null },
-        select: { title: true },
+        select: { title: true, end_time: true },
       })
+      if (!event) {
+        return notFoundResponse("Chat not available for this event")
+      }
 
       chatGroup = await db.chat_groups.create({
         data: {
           event_id: eventId,
-          name: `${event?.title || "Event"} Chat`,
-          description: `Chat for ${event?.title || "Event"}`,
+          name: `${event.title || "Event"} Chat`,
+          description: `Chat for ${event.title || "Event"}`,
           status: "active",
           member_count: 0,
         },
+        include: { event: { select: { end_time: true } } },
       })
     }
 
-    // Check if chat group is active
-    if (chatGroup.status !== "active") {
-      return forbiddenResponse("This chat is no longer active")
+    /*
+     * Same rule as the other write path — see lib/chat-window.ts.
+     *
+     * Applied after the create-on-demand branch on purpose: a room created for
+     * an event that finished last month must close immediately, not be born
+     * open because it happens to be new.
+     */
+    const window = chatWindowState(chatGroup.event, chatGroup)
+    if (!window.open) {
+      return forbiddenResponse(chatClosedMessage(window.reason))
     }
 
     // Check if user is a member of the chat group
