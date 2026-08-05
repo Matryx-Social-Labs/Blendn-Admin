@@ -5,6 +5,113 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-05
+
+### Added
+
+- **Live tab on event detail.** The dashboard was blind to an event while it was
+  happening — everything was either forward-looking pacing or a next-day
+  digest. Shows who is inside against capacity, arrival rate against this
+  event's own median, check-outs, chat pace, active chatters, open flags, the
+  rolling mood split, and complaints by category. Updates over the socket
+  channel; pre-event, live and post-event states are all designed.
+- Alerts rendered from the same aggregates, with an explicit resting state
+  saying that alerts combine chat and check-in signal rather than leaving a
+  blank panel.
+- `ArrivalCurve` and `CategoryBars` charts.
+
+### Changed
+
+- **Event detail is a tab host, gated on operational access rather than
+  editing.** A venue owner can now open an event held in their building — its
+  live view, guest list and chatroom — with the editor reserved for whoever
+  runs it, and a note saying so rather than a silently missing button.
+- Tabs are lifecycle-aware: Live only while the event runs, Feedback only after
+  it ends and while the chat window is open. A tab that is permanently empty
+  teaches people to stop clicking tabs.
+- **Chatrooms is a triage list.** It listed live events only, so a room full of
+  post-event feedback — the entire point of the feedback window — was
+  unreachable unless you already knew the event. It now covers any room whose
+  chat is open, live or in its feedback window.
+
+### Fixed
+
+- The Live tab was offered to users without operational access. Live data is
+  attendance and chat, not a public summary, and the socket room behind it
+  gates on exactly that permission — a tab list offering something the server
+  will deny is its own bug. Caught by a test before it shipped.
+
+## [0.11.0] - 2026-08-05
+
+### Added
+
+- **Dashboard clients can hold a socket.** The handshake accepted mobile JWTs
+  only, so a NextAuth session could not connect at all — which is why the
+  "live" chat feed is a 5-second poll. A second, strictly separate scheme reads
+  the session cookie; the mobile verify runs first and, when it succeeds,
+  nothing new executes.
+- **`event:{id}:ops` room** carrying a live aggregate snapshot every 5s:
+  inside now, arrival rate against this event's own median, check-outs,
+  messages/min, active chatters, open flags, sentiment split, and negative
+  messages by category.
+- **Live alerts** derived from those aggregates. The rules that matter combine
+  chat and check-in signal, because neither means much alone — a check-in spike
+  is a popular act arriving, and grumbling about a queue is routine; together
+  they are a door that has stopped moving.
+- Optional `@socket.io/redis-adapter`, attached when `REDIS_URL` is set.
+
+### Notes
+
+- **The ops room carries aggregates only.** No attendee row, user id, name or
+  message text crosses it. Event chat is pseudonymous and that has to hold on a
+  long-lived channel nobody inspects, not just in the REST payload. A test
+  asserts the snapshot has no field that could name anyone.
+- The socket role is re-read from the database rather than trusted from the
+  session token. A NextAuth JWT is signed so it cannot be forged, but it can be
+  stale — and for a socket that outlives the request that opened it, a
+  demotion or suspension issued mid-session would otherwise never take effect.
+- Snapshot timers run per event and only while someone is watching, stopping
+  when the last watcher leaves.
+- **Do not raise the replica count until `REDIS_URL` is set.** Without it the
+  default in-memory adapter stands, which is correct at one replica and wrong
+  at several. The adapter path is unexercised until a Redis instance exists.
+
+## [0.10.0] - 2026-08-05
+
+### Added
+
+- **Feedback classification pipeline.** Post-event chat messages are labelled
+  with a sentiment *and* an issue category, because sentiment alone is not
+  actionable — "12 negative" tells an organiser nothing, "9 of 12 are the bar
+  queue" tells them to open another bar.
+
+  The category set is drawn from live-event operations research rather than
+  invented: `entry_queue`, `crowding`, `facilities`, `sound_av`,
+  `staff_service`, `food_drink`, `wayfinding`, `technical`, `safety_conduct`,
+  `other`. Crowd mismanagement is the largest single cause of venue incidents,
+  with queueing, wayfinding and technical failures the other recurring themes.
+
+- Two-tier classification. A free lexicon pass labels only what is unambiguous
+  and escalates everything else to a batched LLM call — most event chat is
+  neutral logistics, and paying to read those is the waste worth removing. At
+  ~500 messages an hour that is single-digit API calls per hour per event.
+
+- `event_feedback` table. Separate from `chat_messages` because only a small
+  subset of messages are ever classified and that table is the hot one.
+
+### Notes
+
+- `safety_conduct` escalates to moderation regardless of sentiment: a calmly
+  worded report of harassment is still a report, and routing on tone would
+  deprioritise it for being composed.
+- The mobile client's on-device label is **advisory only and never reaches this
+  pipeline**. A patched client could otherwise suppress a negative or
+  manufacture an alert that pushes to the organiser's phone.
+- With no API key or during an outage, messages the lexicon declined come back
+  at low confidence marked `lexicon` — never a confident wrong label. The UI is
+  expected to render low confidence differently, which is why `confidence` and
+  `source` are stored rather than just the label.
+
 ## [0.9.0] - 2026-08-05
 
 ### Added

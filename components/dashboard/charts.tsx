@@ -377,3 +377,145 @@ export function UtilHeatmap({
     </ChartFrame>
   )
 }
+
+/* -------------------------------------------------------------------------- */
+
+export type ArrivalPoint = { label: string; checkedIn: number; checkedOut: number }
+
+/**
+ * Live arrivals: cumulative check-ins and check-outs against wall-clock, with
+ * the capacity line and a "now" marker.
+ *
+ * Two series rather than one net figure, because they say different things —
+ * a flat check-in line with a rising check-out line is people leaving, and a
+ * single "inside now" number hides that entirely until it is too late.
+ */
+export function ArrivalCurve({
+  data,
+  capacity,
+  doorsLabel,
+  endLabel,
+  empty,
+}: {
+  data: ArrivalPoint[]
+  capacity: number | null
+  doorsLabel: string
+  endLabel: string
+  empty?: boolean
+}) {
+  return (
+    <ChartFrame
+      title="Arrivals"
+      hint={capacity ? `doors ${doorsLabel} · capacity ${capacity} · ends ${endLabel}` : `doors ${doorsLabel}`}
+      empty={empty}
+      emptyText="Plots from doors open — cumulative GPS check-ins against capacity, check-outs alongside."
+    >
+      <ChartContainer
+        config={{
+          checkedIn: { label: "checked in", color: "var(--chart-1)" },
+          checkedOut: { label: "checked out", color: "var(--muted-foreground)" },
+        }}
+        className="h-[200px] w-full"
+      >
+        <LineChart data={data} margin={{ left: 4, right: 12, top: 8 }}>
+          <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+          <XAxis
+            dataKey="label"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+          />
+          <YAxis
+            domain={[0, "auto"]}
+            allowDecimals={false}
+            tickLine={false}
+            axisLine={false}
+            width={32}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+          />
+          {capacity ? (
+            <ReferenceLine
+              y={capacity}
+              stroke="var(--chart-3)"
+              strokeDasharray="4 4"
+              label={{
+                value: "capacity",
+                position: "insideTopRight",
+                fill: "var(--chart-3)",
+                fontSize: 11,
+              }}
+            />
+          ) : null}
+          <ChartTooltip
+            content={<ChartTooltipContent className="rounded-xl border-border bg-card" />}
+          />
+          <Line dataKey="checkedIn" type="monotone" stroke="var(--chart-1)" strokeWidth={2.5} dot={false} />
+          <Line
+            dataKey="checkedOut"
+            type="monotone"
+            stroke="var(--muted-foreground)"
+            strokeWidth={1.5}
+            strokeDasharray="3 3"
+            dot={false}
+          />
+        </LineChart>
+      </ChartContainer>
+    </ChartFrame>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Message counts by issue category.
+ *
+ * `safety_conduct` always draws destructive and is annotated, because it
+ * escalates regardless of how few there are — one is enough.
+ */
+export function CategoryBars({
+  data,
+  title = "By category",
+  hint,
+  empty,
+  emptyText = "Categorised messages count up here.",
+}: {
+  data: Array<{ category: string; count: number }>
+  title?: string
+  hint?: string
+  empty?: boolean
+  emptyText?: string
+}) {
+  const max = Math.max(1, ...data.map((d) => d.count))
+  return (
+    <ChartFrame title={title} hint={hint} empty={empty} emptyText={emptyText}>
+      <div className="flex flex-col gap-1.5">
+        {data.map((d) => {
+          const safety = d.category === "safety_conduct"
+          return (
+            <div key={d.category} className="flex items-center gap-2.5">
+              <span
+                className={cn(
+                  "w-24 shrink-0 text-right text-[0.75rem]",
+                  safety ? "font-medium text-destructive" : "text-muted-foreground"
+                )}
+              >
+                {d.category.replace(/_/g, " ")}
+              </span>
+              <div className="h-4 flex-1 overflow-hidden rounded bg-surface-raised">
+                <div
+                  className={cn("h-full rounded", safety ? "bg-destructive" : "bg-chart-1")}
+                  style={{ width: `${barWidth(d.count, max)}%` }}
+                />
+              </div>
+              <span className="w-16 text-[0.75rem] tabular-nums">
+                <b className="font-bold">{d.count}</b>
+                {safety ? <span className="text-destructive"> → mod</span> : null}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </ChartFrame>
+  )
+}

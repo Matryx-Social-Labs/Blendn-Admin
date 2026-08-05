@@ -16,6 +16,9 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canAccessDashboard } from "@/lib/rbac"
 
+/** Matches the chat auto-archive window and the event Feedback tab. */
+const FEEDBACK_WINDOW_HOURS = 24
+
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -50,19 +53,25 @@ export default async function ChatroomsPage() {
 
   const now = new Date()
   /*
-   * Rooms this user may operate, which is now two things rather than one:
-   * events they run, and events at a venue they own. The old version scoped on
-   * organizer_id alone, so a venue owner saw nothing here — and the previous
-   * attempt to fix that let them onto this list while the messaging page still
-   * denied them, producing a dead end where every room bounced them back.
+   * Triage list, not a second index of every event. A room belongs here while
+   * its chat is open, which is two states rather than one:
+   *
+   *   live      the event is running
+   *   feedback  it has ended but the window is still open, and what people say
+   *             in it is the honest review the whole feature exists for
+   *
+   * The old version listed live events only, so a room full of post-event
+   * feedback was unreachable from here — you had to already know the event.
    */
+  const feedbackWindowStart = new Date(now.getTime() - FEEDBACK_WINDOW_HOURS * 60 * 60 * 1000)
   const isPlatformAdmin = session.user.role === "app_admin"
   const liveEvents = await db.events.findMany({
     where: {
       deleted_at: null,
       status: "published",
       start_time: { lte: now },
-      end_time: { gte: now },
+      // Ended less than the feedback window ago, or still running.
+      end_time: { gte: feedbackWindowStart },
       ...(isPlatformAdmin
         ? {}
         : {
