@@ -89,6 +89,10 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Your organisation",
     description: "Colleagues, invites, and domain verification.",
   },
+  "/dashboard/categories": {
+    title: "Categories",
+    description: "The two-level taxonomy events are filtered by on the app.",
+  },
   "/dashboard/reports": {
     title: "Reports",
     description: "Download events, attendance, ratings and moderation as CSV.",

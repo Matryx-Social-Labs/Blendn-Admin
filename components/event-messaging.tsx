@@ -276,11 +276,17 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState("")
   const [sending, setSending] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [audience, setAudience] = useState({ members: 0, reachable: 0 })
 
   const fetchAnnouncements = useCallback(async () => {
     try {
       const res = await fetch(`/api/events/${eventId}/announcements`)
-      if (res.ok) setAnnouncements(await res.json())
+      if (res.ok) {
+        const body = await res.json()
+        setAnnouncements(body.announcements ?? [])
+        setAudience(body.audience ?? { members: 0, reachable: 0 })
+      }
     } finally {
       setLoading(false)
     }
@@ -304,7 +310,12 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
       const created: Announcement = await res.json()
       setAnnouncements((prev) => [created, ...prev])
       setContent("")
-      toast.success("Announcement sent to chatroom")
+      setConfirming(false)
+      toast.success(
+        audience.reachable > 0
+          ? `Sent to the chatroom · ${audience.reachable} phone${audience.reachable === 1 ? "" : "s"} notified`
+          : "Announcement sent to chatroom"
+      )
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to send announcement")
     } finally {
@@ -347,9 +358,52 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
           value={content}
           onChange={(e) => setContent(e.target.value)}
         />
-        <Button onClick={send} disabled={sending || !content.trim()} className="w-full">
-          {sending ? "Sending…" : "Send Announcement"}
-        </Button>
+        {/*
+          The blast radius, before the send rather than after it.
+          An announcement pushes a notification to every attendee's phone — the
+          most powerful and most abusable thing a host can do — and this was a
+          textarea with one button and no indication of how many people that
+          was. The confirm names the number, and the number is distinct people
+          who will actually get a notification, not chatroom members.
+        */}
+        {confirming ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+            <p className="text-[0.8125rem] leading-6">
+              This posts to the chatroom for{" "}
+              <b className="font-semibold">{audience.members} member{audience.members === 1 ? "" : "s"}</b>
+              {audience.reachable > 0 ? (
+                <>
+                  {" "}and pushes a notification to{" "}
+                  <b className="font-semibold">
+                    {audience.reachable} phone{audience.reachable === 1 ? "" : "s"}
+                  </b>
+                </>
+              ) : (
+                " · nobody has notifications enabled, so it appears in the chatroom only"
+              )}
+              . It cannot be unsent.
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={send} disabled={sending} size="sm">
+                {sending ? "Sending…" : "Send now"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirming(false)} disabled={sending}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            onClick={() => setConfirming(true)}
+            disabled={sending || !content.trim()}
+            className="w-full"
+          >
+            Send Announcement
+          </Button>
+        )}
+        <p className="text-[0.6875rem] text-muted-foreground">
+          Limited to 3 per minute. Attendees see the sender as the event host, never your name.
+        </p>
       </div>
 
       <Separator />

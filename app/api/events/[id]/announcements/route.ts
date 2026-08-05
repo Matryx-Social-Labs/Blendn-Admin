@@ -36,7 +36,39 @@ export async function GET(_: Request, { params }: RouteContext) {
       },
     })
 
-    return NextResponse.json(announcements)
+    /*
+     * The blast radius, returned alongside the history.
+     *
+     * The composer sent to every attendee with no indication of how many that
+     * was — the most powerful and most abusable thing a host can do, behind a
+     * textarea and one button. `reachable` is the number who will actually get
+     * a phone notification, which is lower than `members` and is the figure
+     * that matters.
+     */
+    const chatGroup = await db.chat_groups.findUnique({
+      where: { event_id: eventId },
+      select: { id: true },
+    })
+    const members = chatGroup
+      ? await db.chat_group_members.count({
+          where: { chat_group_id: chatGroup.id, status: { not: "banned" } },
+        })
+      : 0
+    // Distinct users, not tokens: one person with a phone and a tablet is one
+    // recipient, and counting tokens would overstate the reach.
+    const reachable = chatGroup
+      ? (
+          await db.push_tokens.findMany({
+            where: {
+              user: { chat_group_memberships: { some: { chat_group_id: chatGroup.id } } },
+            },
+            select: { user_id: true },
+            distinct: ["user_id"],
+          })
+        ).length
+      : 0
+
+    return NextResponse.json({ announcements, audience: { members, reachable } })
   } catch (err) {
     logger.error("Error fetching announcements", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
