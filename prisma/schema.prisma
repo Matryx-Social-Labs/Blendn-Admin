@@ -193,6 +193,7 @@ model events {
   sponsored_messages event_sponsored_messages[]
   announcements      event_announcements[]
   rsvps              event_rsvps[]
+  feedback           event_feedback[]
   venue              venues?             @relation(fields: [venue_id], references: [id], onDelete: SetNull)
 
   @@index([latitude, longitude])
@@ -342,6 +343,7 @@ model chat_messages {
   replies          chat_messages[]     @relation("MessageReplies")
   reactions        message_reactions[]
   moderation_flags moderation_flags[]
+  feedback         event_feedback?
 
   @@index([chat_group_id, created_at])
   @@index([chat_group_id, deleted_at])
@@ -651,6 +653,68 @@ enum venue_link_status {
   auto_linked
   confirmed
   disputed
+}
+
+/// One classified chat message from an event's feedback window.
+///
+/// Separate table rather than columns on chat_messages: only a small subset of
+/// messages are ever classified, and chat_messages is the hot table — half a
+/// million rows at load-test volume — so keeping it lean matters more than
+/// avoiding a join.
+///
+/// `corrected_*` is the organiser's override, and it is the ground truth. The
+/// classifier is wrong about sarcasm often enough that correction is a designed
+/// affordance rather than an escape hatch, and the corrections are worth
+/// keeping for future tuning.
+model event_feedback {
+  id           String             @id @default(uuid()) @db.Uuid
+  event_id     String             @db.Uuid
+  message_id   String             @unique @db.Uuid
+  sentiment    feedback_sentiment
+  category     issue_category
+  /// 0-1. Drives whether the UI presents this as certain or as a guess — a
+  /// lexicon label and an LLM label must not look equally authoritative.
+  confidence   Float
+  source       feedback_source
+  corrected_by String?
+  corrected_at DateTime?          @db.Timestamptz(6)
+  created_at   DateTime           @default(now()) @db.Timestamptz(6)
+
+  event   events        @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  message chat_messages @relation(fields: [message_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id, created_at])
+  @@index([event_id, category])
+  @@index([event_id, sentiment])
+}
+
+enum feedback_sentiment {
+  positive
+  neutral
+  negative
+}
+
+/// Drawn from live-event operations research rather than invented. Crowd
+/// mismanagement is the largest single cause of venue incidents; queueing,
+/// wayfinding and technical failures are the other recurring themes.
+/// safety_conduct escalates to moderation regardless of sentiment.
+enum issue_category {
+  entry_queue
+  crowding
+  facilities
+  sound_av
+  staff_service
+  food_drink
+  wayfinding
+  technical
+  safety_conduct
+  other
+}
+
+enum feedback_source {
+  lexicon
+  llm
+  human
 }
 
 enum rsvp_status {
