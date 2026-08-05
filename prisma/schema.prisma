@@ -780,6 +780,11 @@ enum member_status {
   active
   muted
   banned
+  /// Window closed and the room archived. The row is kept rather than deleted
+  /// because `anonymous_name` lives on it, and deleting it would strip the
+  /// pseudonyms off every historical message — breaking the feedback digest and
+  /// un-anonymising nobody, just blanking them.
+  left
 }
 
 enum report_status {

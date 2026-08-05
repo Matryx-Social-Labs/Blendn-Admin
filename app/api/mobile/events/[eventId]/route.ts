@@ -56,7 +56,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             id: true,
             name: true,
             image: true,
-            email: true,
+            // No email. A host's public identity is their name and picture;
+            // their address is not part of an event listing, and the list
+            // endpoint never included it — only this one did.
           },
         },
         details: true,

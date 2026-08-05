@@ -5,6 +5,45 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-05
+
+### Fixed
+
+- **Event chatrooms never closed.** A membership row was a permanent licence to
+  write: people were still posting into rooms for events that finished months
+  earlier. Two causes, both now removed.
+
+  There were two write paths with two different gates. `events/[id]/chat`
+  rejected anything not `active`; `chat/groups/[id]/messages` rejected only
+  `locked`, so an **archived room stayed writable**. Both now call one rule,
+  `chatWindowState` in `lib/chat-window.ts`, so they cannot fork again.
+
+  Archiving was also opportunistic — it piggybacked on a mobile chat-list
+  request, so a room nobody opened stayed `active` indefinitely. It is now a
+  cron (`/api/cron/archive-chats`) that runs whether or not anyone opens the
+  app, and marks members `left`.
+
+  The write gate deliberately does **not** depend on that job having run: it
+  compares against the event's own `end_time`, so a room the job has not
+  reached yet is still closed. Jobs are late, get stuck, or have never run for
+  a given row.
+
+- **The mobile events feed served only finished events.** There was no time
+  filter at all — on production that meant all ten events, every one already
+  over, presented as things to go to. Discovery now excludes ended events;
+  `includePast=true` still returns them for history screens.
+
+- **The organiser's email address** was returned by `GET /api/mobile/events/[id]`.
+  The list endpoint never included it; only the detail endpoint did.
+
+### Notes
+
+- Members are marked `left`, not deleted. `anonymous_name` lives on the
+  membership row and every historical message resolves its pseudonym through
+  it — deleting the rows would strip names off the whole transcript, which
+  anonymises nobody and breaks the feedback digest. Banned members keep that
+  status, since a ban is a moderation record that should outlive the room.
+
 ## [0.12.1] - 2026-08-05
 
 ### Fixed

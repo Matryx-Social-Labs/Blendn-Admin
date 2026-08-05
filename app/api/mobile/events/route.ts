@@ -51,6 +51,7 @@ function buildEventsCacheKey(input: {
   categorySlug?: string
   startDate?: string
   endDate?: string
+  includePast?: boolean
   status?: string
   sortBy: string
   sortOrder: string
@@ -66,6 +67,7 @@ function buildEventsCacheKey(input: {
     categorySlug: input.categorySlug || null,
     startDate: input.startDate || null,
     endDate: input.endDate || null,
+    includePast: input.includePast,
     status: input.status || null,
     sortBy: input.sortBy,
     sortOrder: input.sortOrder,
@@ -98,6 +100,7 @@ export async function GET(request: NextRequest) {
       categorySlug,
       startDate,
       endDate,
+      includePast,
       status,
       sortBy,
       sortOrder,
@@ -118,6 +121,20 @@ export async function GET(request: NextRequest) {
       deleted_at: null,
       status: status || "published",
       visibility: "public",
+    }
+
+    /*
+     * Discovery excludes events that have already finished.
+     *
+     * There was no time filter at all, so every event ever published stayed in
+     * the feed forever — on production that meant all ten events, every one of
+     * them already over, presented as things to go to.
+     *
+     * `includePast=true` still returns them, because "my past events" and
+     * "search history" are real screens; they just have to ask.
+     */
+    if (!includePast) {
+      where.end_time = { gte: new Date() }
     }
 
     // Search filter
@@ -151,7 +168,9 @@ export async function GET(request: NextRequest) {
       where.start_time = { gte: new Date(startDate) }
     }
     if (endDate) {
-      where.end_time = { lte: new Date(endDate) }
+      // Merge rather than assign: overwriting would silently drop the
+      // not-yet-ended constraint set above and put past events back in the feed.
+      where.end_time = { ...(where.end_time as object ?? {}), lte: new Date(endDate) }
     }
 
     const shouldSortByDistance =
@@ -168,6 +187,10 @@ export async function GET(request: NextRequest) {
       categorySlug,
       startDate,
       endDate,
+      // Part of the key, not decoration: two requests differing only by this
+      // return different event sets, so omitting it would let a history
+      // response be served straight back to a discovery request.
+      includePast,
       status,
       sortBy,
       sortOrder,
