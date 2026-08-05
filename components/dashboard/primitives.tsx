@@ -24,10 +24,18 @@ export function DeltaBadge({
   value,
   /** For metrics where down is good — no-show rate, moderation backlog. */
   invert = false,
+  /**
+   * `pts` when the metric is itself a percentage.
+   *
+   * A turn-up rate going 60% → 66% is "+6 pts". Rendering that as "+6%" invites
+   * reading it as 70%, which is a different number entirely.
+   */
+  suffix = "%",
   className,
 }: {
   value: number
   invert?: boolean
+  suffix?: string
   className?: string
 }) {
   const flat = value === 0
@@ -41,7 +49,8 @@ export function DeltaBadge({
       )}
     >
       {flat ? "±" : good ? "↑" : "↓"}
-      {Math.abs(value)}%
+      {Math.abs(value)}
+      {suffix === "%" ? "%" : ` ${suffix}`}
     </span>
   )
 }
@@ -58,6 +67,7 @@ export function MetricTile({
   value,
   delta,
   deltaInvert,
+  deltaSuffix,
   hint,
   href,
   className,
@@ -67,6 +77,8 @@ export function MetricTile({
   value: string | number | null
   delta?: number
   deltaInvert?: boolean
+  /** `pts` for metrics that are themselves percentages. */
+  deltaSuffix?: string
   hint?: string
   href?: string
   className?: string
@@ -80,7 +92,9 @@ export function MetricTile({
         {value ?? "—"}
       </span>
       <span className="flex min-h-[18px] items-center gap-2">
-        {delta !== undefined ? <DeltaBadge value={delta} invert={deltaInvert} /> : null}
+        {delta !== undefined ? (
+          <DeltaBadge value={delta} invert={deltaInvert} suffix={deltaSuffix} />
+        ) : null}
         {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
       </span>
     </>

@@ -161,6 +161,14 @@ export interface VenueOverview {
   utilisation: number[][]
   peakWindow: string | null
   turnUpRatePct: number | null
+  /**
+   * Last 90 days against the 90 before, in **percentage points**.
+   *
+   * Points rather than a percent change: 60% → 66% is "+6 points", and calling
+   * that "+10%" invites reading it as 70%. Null when either window had no
+   * committed RSVPs to measure against.
+   */
+  turnUpDelta: number | null
   eventsNext14d: number
 }
 

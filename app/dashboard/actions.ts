@@ -536,27 +536,74 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
     orderBy: { start_time: "asc" },
   })
 
-  const [committed, attended, upcoming14d] = await Promise.all([
-    db.event_rsvps.count({
-      where: {
-        status: { in: COMMITTED },
-        event: { ...eventScope(userId), start_time: { lt: now } },
-      },
-    }),
-    db.event_check_ins.count({
-      where: {
-        status: { in: ATTENDED },
-        event: { ...eventScope(userId), start_time: { lt: now } },
-      },
-    }),
-    db.events.count({
-      where: {
-        ...eventScope(userId),
-        status: "published",
-        start_time: { gte: now, lte: new Date(now.getTime() + 14 * DAY_MS) },
-      },
-    }),
-  ])
+  /*
+   * Turn-up rate is the one venue metric that can carry a delta. "Peak window"
+   * is a label ("Fri eve") and "events next 14d" is forward-looking — there is
+   * no previous version of the future. Forcing a percentage onto either would
+   * be a number with nothing behind it.
+   *
+   * The comparison is the last 90 days against the 90 before, rather than the
+   * all-time figure against itself: a venue open two years has an all-time rate
+   * that barely moves, so the delta would read 0% while this quarter fell off a
+   * cliff.
+   */
+  const RECENT_MS = 90 * DAY_MS
+  const recentFrom = new Date(now.getTime() - RECENT_MS)
+  const priorFrom = new Date(now.getTime() - 2 * RECENT_MS)
+
+  const [committed, attended, upcoming14d, recentCommitted, recentAttended, priorCommitted, priorAttended] =
+    await Promise.all([
+      db.event_rsvps.count({
+        where: {
+          status: { in: COMMITTED },
+          event: { ...eventScope(userId), start_time: { lt: now } },
+        },
+      }),
+      db.event_check_ins.count({
+        where: {
+          status: { in: ATTENDED },
+          event: { ...eventScope(userId), start_time: { lt: now } },
+        },
+      }),
+      db.events.count({
+        where: {
+          ...eventScope(userId),
+          status: "published",
+          start_time: { gte: now, lte: new Date(now.getTime() + 14 * DAY_MS) },
+        },
+      }),
+      db.event_rsvps.count({
+        where: {
+          status: { in: COMMITTED },
+          event: { ...eventScope(userId), start_time: { gte: recentFrom, lt: now } },
+        },
+      }),
+      db.event_check_ins.count({
+        where: {
+          status: { in: ATTENDED },
+          event: { ...eventScope(userId), start_time: { gte: recentFrom, lt: now } },
+        },
+      }),
+      db.event_rsvps.count({
+        where: {
+          status: { in: COMMITTED },
+          event: { ...eventScope(userId), start_time: { gte: priorFrom, lt: recentFrom } },
+        },
+      }),
+      db.event_check_ins.count({
+        where: {
+          status: { in: ATTENDED },
+          event: { ...eventScope(userId), start_time: { gte: priorFrom, lt: recentFrom } },
+        },
+      }),
+    ])
+
+  // Percentage points, not a percentage of a percentage: turn-up going 60% → 66%
+  // is "+6 points", and calling it "+10%" invites reading it as 70%.
+  const recentTurnUp = pct(Math.min(recentAttended, recentCommitted), recentCommitted)
+  const priorTurnUp = pct(Math.min(priorAttended, priorCommitted), priorCommitted)
+  const turnUpDelta =
+    recentTurnUp === null || priorTurnUp === null ? null : round1(recentTurnUp - priorTurnUp)
 
   /* Venues are grouped by venue_name because there is no venues table. Two
      spellings of one room therefore read as two venues — flagged in the UI. */
@@ -650,6 +697,7 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
     utilisation,
     peakWindow,
     turnUpRatePct: round1(pct(Math.min(attended, committed), committed)),
+    turnUpDelta,
     eventsNext14d: upcoming14d,
   }
 }

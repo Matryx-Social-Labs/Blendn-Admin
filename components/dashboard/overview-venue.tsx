@@ -129,7 +129,11 @@ export function OverviewVenue({ data }: { data: VenueOverview }) {
         <MetricTile
           label="Turn-up rate"
           value={data.turnUpRatePct === null ? null : formatPct(data.turnUpRatePct)}
-          hint="across your venues"
+          // Percentage points, so the badge carries "pts" rather than "%" —
+          // "+6%" on a rate already in percent reads as 6% of the rate.
+          delta={data.turnUpDelta ?? undefined}
+          deltaSuffix="pts"
+          hint={data.turnUpDelta === null ? "across your venues" : "vs previous 90 days"}
         />
         <MetricTile
           label="Events next 14d"
