@@ -77,8 +77,24 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
         </div>
       )}
 
+      {/*
+        Deltas are period-over-period, from the range in the URL. These tiles
+        rendered bare counts before — the `delta` prop existed on MetricTile and
+        nothing ever filled it, so every figure answered "how many" and none
+        answered "is that good".
+
+        `hint` falls back to the static descriptor only when there is no delta
+        to show, so a tile never carries both a percentage and a label competing
+        for the same line.
+      */}
       <div className="flex flex-wrap gap-1">
-        <MetricTile label="Users" value={formatCompact(data.users)} hint="accounts" href="/dashboard/users" />
+        <MetricTile
+          label="Users"
+          value={formatCompact(data.users)}
+          {...data.deltas.users}
+          hint={data.deltas.users.hint ?? "accounts"}
+          href="/dashboard/users"
+        />
         <MetricTile
           label="Active this week"
           value={formatCompact(data.activeThisWeek)}
@@ -88,13 +104,15 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
         <MetricTile
           label="Events published"
           value={formatCompact(data.publishedEvents)}
-          hint="all time"
+          {...data.deltas.publishedEvents}
+          hint={data.deltas.publishedEvents.hint ?? "all time"}
           href="/dashboard/events"
         />
         <MetricTile
           label="Check-ins"
           value={formatCompact(data.checkIns)}
-          hint="GPS-validated"
+          {...data.deltas.checkIns}
+          hint={data.deltas.checkIns.hint ?? "GPS-validated"}
         />
         <MetricTile
           label="Publishing hosts"

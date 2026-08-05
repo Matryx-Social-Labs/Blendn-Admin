@@ -94,6 +94,19 @@ export interface CityRow {
   favourites: number
 }
 
+/**
+ * What a `MetricTile` needs to render a change.
+ *
+ * Both optional, and both genuinely absent sometimes: `delta` is omitted when
+ * the baseline was zero (no honest percentage exists), and `hint` carries
+ * "new" for the case where something appeared from nothing. See
+ * `lib/metric-delta.ts`.
+ */
+export interface TileDelta {
+  delta?: number
+  hint?: string
+}
+
 export interface AdminOverview {
   role: "app_admin"
   attention: ModerationAttention
@@ -101,6 +114,14 @@ export interface AdminOverview {
   activeThisWeek: number
   publishedEvents: number
   checkIns: number
+  /** Period-over-period change for the tiles that carry one. */
+  deltas: {
+    users: TileDelta
+    publishedEvents: TileDelta
+    checkIns: TileDelta
+  }
+  /** The window these figures cover, for the tiles' hint text. */
+  rangeLabel: string
   publishingHosts: { publishing: number; total: number }
   growth: Array<{ label: string; signups: number; active: number }>
   funnel: Array<{ label: string; value: number }>

@@ -4,6 +4,8 @@ import type { check_in_status, rsvp_status } from "@prisma/client"
 
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
+import { tileDelta } from "@/lib/metric-delta"
+import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
 import type {
   AdminOverview,
   CityRow,
@@ -263,9 +265,22 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
 /* Admin                                                                       */
 /* -------------------------------------------------------------------------- */
 
-async function buildAdminOverview(): Promise<AdminOverview> {
+async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
   const now = new Date()
   const weekStart = new Date(now.getTime() - 7 * DAY_MS)
+
+  /*
+   * Deltas are this window against the one immediately before it, same length.
+   *
+   * The tiles carried no delta at all before — a bare count answers "how many"
+   * and never "is that good", which is the only question anyone opens this
+   * screen with. `percentDelta` returns null when the earlier window is empty,
+   * which at 44 users is most of them; inventing "+500%" for 0 → 5 would put a
+   * meaningless number in the most trusted place on the page.
+   */
+  const prior = previousRange(range)
+  const inRange = { gte: range.from, lt: range.to }
+  const inPrior = { gte: prior.from, lt: prior.to }
 
   const [
     pendingFlags,
@@ -426,6 +441,31 @@ async function buildAdminOverview(): Promise<AdminOverview> {
     cityMap.set(city, existing)
   }
 
+  /*
+   * Two shapes of comparison, because the metrics are two shapes.
+   *
+   * `users` and `publishedEvents` are cumulative totals, so the honest question
+   * is "how much did the total grow across this window" — the baseline is the
+   * total as it stood at `range.from`. `checkIns` is naturally window-scoped, so
+   * it compares this window's count against the previous window's.
+   *
+   * Comparing a cumulative total against a windowed count would be the classic
+   * version of this bug: an all-time figure divided by 30 days of activity,
+   * rendering a delta in the thousands of percent.
+   */
+  const [usersAtStart, eventsAtStart, checkInsNow, checkInsPrior] = await Promise.all([
+    db.user.count({ where: { createdAt: { lt: range.from } } }),
+    db.events.count({
+      where: { ...eventScope(), status: "published", created_at: { lt: range.from } },
+    }),
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inRange },
+    }),
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inPrior },
+    }),
+  ])
+
   return {
     role: "app_admin",
     attention: {
@@ -440,6 +480,12 @@ async function buildAdminOverview(): Promise<AdminOverview> {
     activeThisWeek,
     publishedEvents,
     checkIns,
+    deltas: {
+      users: tileDelta({ current: users, previous: usersAtStart }),
+      publishedEvents: tileDelta({ current: publishedEvents, previous: eventsAtStart }),
+      checkIns: tileDelta({ current: checkInsNow, previous: checkInsPrior }),
+    },
+    rangeLabel: rangeLabel(range),
     publishingHosts: { publishing: publishingHosts, total: hostAccounts },
     growth,
     funnel: [
@@ -610,9 +656,13 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
 
 /* -------------------------------------------------------------------------- */
 
-export async function getDashboardOverview(role: DashboardRole, userId?: string) {
+export async function getDashboardOverview(
+  role: DashboardRole,
+  userId?: string,
+  range: DateRange = resolveRange({})
+) {
   try {
-    if (role === "app_admin") return await buildAdminOverview()
+    if (role === "app_admin") return await buildAdminOverview(range)
     if (!userId) throw new Error("User ID is required for scoped dashboard reports")
     if (role === "venue_owner") return await buildVenueOverview(userId)
     return await buildOrganizerOverview(userId)
