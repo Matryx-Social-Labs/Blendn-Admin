@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { Prisma, event_status } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import {
@@ -284,6 +285,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return unauthorizedResponse("Authentication required")
     }
 
+    const limited = await rateLimit(request, userLimit("heavy", "event-mutate", authUser.userId))
+    if (limited) return limited
+
     // Validate eventId is a valid UUID
     const uuidRegex =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -347,6 +351,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("heavy", "event-mutate", authUser.userId))
+    if (limited) return limited
 
     // Validate eventId is a valid UUID
     const uuidRegex =

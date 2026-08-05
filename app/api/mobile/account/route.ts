@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // DELETE /api/mobile/account — Delete the authenticated user's own account.
@@ -19,6 +20,9 @@ export async function DELETE(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("heavy", "account-delete", authUser.userId))
+    if (limited) return limited
 
     const anonymizedEmail = `deleted-${authUser.userId}@deleted.blendn.invalid`
 

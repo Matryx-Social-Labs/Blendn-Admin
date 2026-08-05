@@ -5,6 +5,39 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-05
+
+### Security
+
+- **Rate limiting now covers the mutating API.** 22 mobile routes had none at
+  all, including `users/[id]/block`, both report endpoints,
+  `uploads/presigned-url`, and `events/[eventId]/announce` — which sends a push
+  notification to every attendee of an event. One is left deliberately
+  unlimited: `auth/signout`, where refusing the request leaves a session the
+  user asked to end.
+
+- **Counters live in Redis when `REDIS_URL` is set.** They were held in a
+  process-local `Map`, so every limit was per-replica: 30/min silently became
+  30/min *per instance*, and each replica added made every limit weaker.
+
+  With no Redis, or if Redis is unreachable, it degrades to the in-process
+  counter rather than failing open or failing closed. Failing open would let an
+  attacker disable every limit in the product by taking one dependency down;
+  failing closed would turn a Redis blip into an outage.
+
+### Changed
+
+- `rateLimit()` is now async, since the counter is remote. All call sites
+  updated.
+- Authenticated routes are keyed on the **user**, not the IP. For an
+  authenticated endpoint the abuse case is one account misbehaving, and IP
+  keying is actively wrong there — everyone behind one NAT shares a bucket
+  while an attacker rotates address.
+- Limits are named policies (`broadcast`, `upload`, `safety`, `write`,
+  `heavy`) rather than numbers scattered across routes. `safety` is
+  deliberately loose: rate limiting a report or a block is a trade-off against
+  someone in trouble, so it sits where only automation notices it.
+
 ## [0.14.0] - 2026-08-05
 
 ### Changed

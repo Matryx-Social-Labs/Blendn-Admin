@@ -36,7 +36,7 @@ const appleAuthSchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
-  const rateLimitResult = rateLimit(request, createAuthRateLimit("apple"))
+  const rateLimitResult = await rateLimit(request, createAuthRateLimit("apple"))
   if (rateLimitResult) {
     return rateLimitResult
   }

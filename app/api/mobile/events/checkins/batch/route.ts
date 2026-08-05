@@ -16,7 +16,7 @@ const batchCheckinsSchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
-  const rateLimitResult = rateLimit(request, createBatchRateLimit())
+  const rateLimitResult = await rateLimit(request, createBatchRateLimit())
   if (rateLimitResult) return rateLimitResult
 
   try {

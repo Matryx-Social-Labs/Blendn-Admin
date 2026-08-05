@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
@@ -70,6 +71,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("heavy", "conversation-mutate", authUser.userId))
+    if (limited) return limited
 
     const conversation = await db.private_conversations.findUnique({
       where: { id: conversationId },

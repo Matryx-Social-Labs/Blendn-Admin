@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   validationErrorResponse,
@@ -61,6 +62,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "profile-interests", authUser.userId))
+    if (limited) return limited
 
     // Users can only update their own interests
     if (authUser.userId !== userId) {
@@ -127,6 +131,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "profile-interests", authUser.userId))
+    if (limited) return limited
 
     // Users can only update their own interests
     if (authUser.userId !== userId) {

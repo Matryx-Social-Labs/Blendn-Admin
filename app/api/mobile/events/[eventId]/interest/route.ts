@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
 import { emitEventInterestUpdate } from "@/lib/socket-server"
 import {
@@ -20,6 +21,9 @@ export async function POST(
     if (!user) {
       return unauthorizedResponse("Authentication required")
     }
+
+    const limited = await rateLimit(request, userLimit("write", "interest", user.userId))
+    if (limited) return limited
 
     const { eventId } = await params
 
