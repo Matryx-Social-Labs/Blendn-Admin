@@ -42,22 +42,37 @@ export async function POST(req: NextRequest) {
       { success: false, error: "This link is invalid or has expired. Apply again to get a new one." },
       { status: 400 }
     )
-    if (!row || row.used_at || row.expires_at.getTime() <= Date.now()) return invalid
+    if (!row) return invalid
 
     const request = await db.organiser_onboarding_requests.findUnique({
       where: { id: row.request_id },
-      select: { id: true, status: true, display_name: true },
+      select: { id: true, status: true, display_name: true, email_verified_at: true },
     })
     if (!request) return invalid
 
-    // Already verified is a success, not an error — people click twice.
-    if (request.status !== "email_pending") {
+    /*
+     * Already confirmed is a SUCCESS, and this check has to come before the
+     * spent-token check or it never runs.
+     *
+     * People click the link twice — they re-open the mail, or their client
+     * prefetches it. The first version rejected the second click with "invalid
+     * or expired, apply again", which sent someone to re-submit an application
+     * that was already sitting in the queue, where the duplicate guard then
+     * refused them outright. A dead end reached by doing nothing wrong.
+     *
+     * Found by clicking twice against staging, not by reading the code.
+     */
+    if (request.email_verified_at) {
       return NextResponse.json({
         success: true,
         alreadyVerified: true,
         displayName: request.display_name,
       })
     }
+
+    // Spent or expired without ever confirming: genuinely no longer usable.
+    if (row.used_at || row.expires_at.getTime() <= Date.now()) return invalid
+    if (request.status !== "email_pending") return invalid
 
     await db.$transaction([
       db.onboarding_email_tokens.update({
