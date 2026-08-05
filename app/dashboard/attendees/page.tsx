@@ -102,25 +102,34 @@ export default async function AttendeesPage() {
     totalCommitted === 0 ? null : Math.max(0, 100 - (Math.min(totalAttended, totalCommitted) / totalCommitted) * 100)
 
   const columns: Column<AttendeeRow>[] = [
-    { key: "name", label: "Person" },
-    { key: "attended", label: "Attended", align: "right" },
-    { key: "rsvps", label: "RSVPs", align: "right", secondary: true },
+    { key: "name", label: "Person", sortType: "string", primary: true },
+    { key: "attended", label: "Attended", align: "right", sortType: "number" },
+    { key: "rsvps", label: "RSVPs", align: "right", secondary: true, sortType: "number" },
     {
       key: "noShows",
       label: "No-shows",
       align: "right",
+      sortType: "number",
       render: (r) => <span className={r.noShows > 1 ? "text-warning" : undefined}>{r.noShows}</span>,
     },
     {
       key: "lastAttendedAt",
       label: "Last attended",
       align: "right",
+      // The cell renders "3d ago", so the sort has to run on the timestamp —
+      // sorting the rendered string puts "3d" next to "30d" and before "1d".
+      // Nulls (never attended) sort last in both directions, which is what you
+      // want when looking for the most recent.
+      sortType: "date",
+      sortValue: (r) => (r.lastAttendedAt ? new Date(r.lastAttendedAt) : null),
       render: (r) => formatSince(r.lastAttendedAt),
       secondary: true,
     },
     {
       key: "repeat",
       label: "",
+      hideable: false,
+      sortable: false,
       render: (r) => (r.repeat ? <Badge>repeat</Badge> : null),
     },
   ]
@@ -148,6 +157,14 @@ export default async function AttendeesPage() {
       <DataTable
         columns={columns}
         rows={rows}
+        sortable
+        // Most-attended first is the meaningful default; the third click on any
+        // header returns to it.
+        defaultSort={{ key: "attended", dir: "desc" }}
+        search
+        searchPlaceholder="Search attendees…"
+        pagination
+        columnMenu
         emptyState={
           <EmptyState
             icon={<IconUsers />}

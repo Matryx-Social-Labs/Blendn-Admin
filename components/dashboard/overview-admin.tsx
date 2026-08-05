@@ -18,24 +18,35 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
   const { attention } = data
 
   const supplyColumns: Column<OrganiserSupplyRow>[] = [
-    { key: "name", label: "Organiser" },
-    { key: "published", label: "Published", align: "right" },
-    { key: "drafts", label: "Drafts", align: "right", secondary: true },
-    { key: "sharePct", label: "Share", align: "right", render: (r) => `${r.sharePct}%` },
+    { key: "name", label: "Organiser", sortType: "string", primary: true },
+    { key: "published", label: "Published", align: "right", sortType: "number" },
+    { key: "drafts", label: "Drafts", align: "right", secondary: true, sortType: "number" },
+    {
+      key: "sharePct",
+      label: "Share",
+      align: "right",
+      sortType: "number",
+      render: (r) => `${r.sharePct}%`,
+    },
     {
       key: "lastEventAt",
       label: "Last event",
       align: "right",
+      // Sorting the rendered "31d ago" string puts 31d before 3d. Sort the
+      // date; a host who has never run one sorts last either way, which is
+      // what you want when hunting for the most recent.
+      sortType: "date",
+      sortValue: (r) => (r.lastEventAt ? new Date(r.lastEventAt) : null),
       render: (r) => formatSince(r.lastEventAt),
       secondary: true,
     },
   ]
 
   const cityColumns: Column<CityRow & { id: string }>[] = [
-    { key: "city", label: "City" },
-    { key: "events", label: "Events", align: "right" },
-    { key: "rsvps", label: "RSVPs", align: "right" },
-    { key: "favourites", label: "Saves", align: "right", secondary: true },
+    { key: "city", label: "City", sortType: "string", primary: true },
+    { key: "events", label: "Events", align: "right", sortType: "number" },
+    { key: "rsvps", label: "RSVPs", align: "right", sortType: "number" },
+    { key: "favourites", label: "Saves", align: "right", secondary: true, sortType: "number" },
   ]
 
   const topThreeShare = data.supply
@@ -144,6 +155,7 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           <DataTable
             columns={supplyColumns}
             rows={data.supply}
+            sortable
             rowHref={(row) => `/dashboard/organisers/${row.id}`}
             emptyState={
               <EmptyState
@@ -165,6 +177,7 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           <DataTable
             columns={cityColumns}
             rows={data.cities.map((city) => ({ ...city, id: city.city }))}
+            sortable
             emptyState={
               <EmptyState
                 icon={<IconMapPin />}
