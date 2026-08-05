@@ -82,9 +82,10 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Per-event rooms: activity, flags, and moderation.",
     url: "/dashboard/chatrooms",
     icon: IconMessage2,
-    // venue_owner belongs here: `canModerateChat` in lib/rbac.ts grants venue
-    // owners moderation over their own events, and the messaging page gates on
-    // `canManageEvent`, which agrees.
+    // venue_owner belongs here: `eventPermissions` grants them the operational
+    // bucket for events at a venue they own, and for events they run
+    // themselves. Every screen behind this item gates on the same resolver, so
+    // the nav and the pages cannot disagree the way they did before.
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
     isActive: (pathname) =>
       pathname === "/dashboard/chatrooms" || pathname.endsWith("/messaging"),

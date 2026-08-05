@@ -49,10 +49,13 @@ export default async function ChatroomsPage() {
   }
 
   const now = new Date()
-  // Scope to owned events for everyone except app_admin. venue_owner used to be
-  // bounced off this page entirely, which contradicted `canModerateChat` and
-  // the messaging page's own `canManageEvent` gate — both already allow a venue
-  // owner to moderate their own events.
+  /*
+   * Rooms this user may operate, which is now two things rather than one:
+   * events they run, and events at a venue they own. The old version scoped on
+   * organizer_id alone, so a venue owner saw nothing here — and the previous
+   * attempt to fix that let them onto this list while the messaging page still
+   * denied them, producing a dead end where every room bounced them back.
+   */
   const isPlatformAdmin = session.user.role === "app_admin"
   const liveEvents = await db.events.findMany({
     where: {
@@ -60,7 +63,14 @@ export default async function ChatroomsPage() {
       status: "published",
       start_time: { lte: now },
       end_time: { gte: now },
-      ...(isPlatformAdmin ? {} : { organizer_id: session.user.id }),
+      ...(isPlatformAdmin
+        ? {}
+        : {
+            OR: [
+              { organizer_id: session.user.id },
+              { venue: { owner_id: session.user.id } },
+            ],
+          }),
     },
     select: {
       id: true,

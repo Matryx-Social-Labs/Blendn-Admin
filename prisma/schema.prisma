@@ -26,12 +26,21 @@ model User {
   deletedAt     DateTime? // set when the user deletes their account; PII is scrubbed, row is kept for FK integrity
   role          user_role @default(attendee)
 
+  // Suspension, not deletion. Deleting a host cascades their events, every
+  // check-in and every chat message — destroying other people's history to
+  // punish one person. Reversible; `suspended_by` mirrors the plain-String
+  // pattern used by chat_group_members.banned_by, with audit_logs as the trail.
+  suspended_at      DateTime? @db.Timestamptz(6)
+  suspended_by      String?
+  suspension_reason String?
+
   accounts Account[]
   sessions Session[]
   profile  profiles?
 
   // Event relations
   organized_events       events[]
+  owned_venues           venues[]            @relation("VenueOwner")
   event_check_ins        event_check_ins[]
   chat_messages          chat_messages[]
   chat_group_memberships chat_group_members[]
@@ -144,7 +153,11 @@ model events {
   latitude          Float?
   longitude         Float?
   address           String?
+  // Free text, kept deliberately: most events are at places that are not on
+  // the platform, so venue_id is null and this is all there is.
   venue_name        String?
+  venue_id          String?           @db.Uuid
+  venue_link_status venue_link_status?
   city              String?
   state             String?
   country           String?
@@ -180,9 +193,11 @@ model events {
   sponsored_messages event_sponsored_messages[]
   announcements      event_announcements[]
   rsvps              event_rsvps[]
+  venue              venues?             @relation(fields: [venue_id], references: [id], onDelete: SetNull)
 
   @@index([latitude, longitude])
   @@index([status, start_time])
+  @@index([venue_id])
   @@index([organizer_id])
   @@index([deleted_at])
   @@index([city])
@@ -592,6 +607,52 @@ model event_rsvps {
 }
 
 // Enums
+/// A physical place. Optional on an event and usually absent: most events are
+/// at venues that are not on the platform, in which case events.venue_name
+/// carries a free-text location and no venue owner has any rights.
+///
+/// `owner_id` null means unclaimed — the record exists (an admin created it, or
+/// it was seeded) but nobody operates it yet.
+model venues {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String
+  address    String?
+  city       String?
+  latitude   Float?
+  longitude  Float?
+  capacity   Int?
+  owner_id   String?
+  claimed_at DateTime?    @db.Timestamptz(6)
+  status     venue_status @default(active)
+  created_by String?
+  created_at DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at DateTime?    @db.Timestamptz(6)
+
+  // SetNull, not Cascade: removing an owner must orphan the venue, never delete
+  // a real place and every event that happened in it.
+  owner  User?    @relation("VenueOwner", fields: [owner_id], references: [id], onDelete: SetNull)
+  events events[]
+
+  @@index([owner_id])
+  @@index([city])
+  @@index([status])
+}
+
+enum venue_status {
+  active
+  archived
+}
+
+/// How an event came to be attached to a venue. An organiser picking a claimed
+/// venue links it immediately without asking; the owner finds out because it
+/// appears on their dashboard, and can dispute it.
+enum venue_link_status {
+  auto_linked
+  confirmed
+  disputed
+}
+
 enum rsvp_status {
   going
   maybe
