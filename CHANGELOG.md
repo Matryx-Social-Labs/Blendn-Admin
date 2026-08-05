@@ -5,6 +5,42 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-05
+
+### Added
+
+- **Feedback classification pipeline.** Post-event chat messages are labelled
+  with a sentiment *and* an issue category, because sentiment alone is not
+  actionable — "12 negative" tells an organiser nothing, "9 of 12 are the bar
+  queue" tells them to open another bar.
+
+  The category set is drawn from live-event operations research rather than
+  invented: `entry_queue`, `crowding`, `facilities`, `sound_av`,
+  `staff_service`, `food_drink`, `wayfinding`, `technical`, `safety_conduct`,
+  `other`. Crowd mismanagement is the largest single cause of venue incidents,
+  with queueing, wayfinding and technical failures the other recurring themes.
+
+- Two-tier classification. A free lexicon pass labels only what is unambiguous
+  and escalates everything else to a batched LLM call — most event chat is
+  neutral logistics, and paying to read those is the waste worth removing. At
+  ~500 messages an hour that is single-digit API calls per hour per event.
+
+- `event_feedback` table. Separate from `chat_messages` because only a small
+  subset of messages are ever classified and that table is the hot one.
+
+### Notes
+
+- `safety_conduct` escalates to moderation regardless of sentiment: a calmly
+  worded report of harassment is still a report, and routing on tone would
+  deprioritise it for being composed.
+- The mobile client's on-device label is **advisory only and never reaches this
+  pipeline**. A patched client could otherwise suppress a negative or
+  manufacture an alert that pushes to the organiser's phone.
+- With no API key or during an outage, messages the lexicon declined come back
+  at low confidence marked `lexicon` — never a confident wrong label. The UI is
+  expected to render low confidence differently, which is why `confidence` and
+  `source` are stored rather than just the label.
+
 ## [0.9.0] - 2026-08-05
 
 ### Added
