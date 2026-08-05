@@ -154,12 +154,28 @@ export async function GET(request: NextRequest) {
       where.longitude = { gte: bbox.minLon, lte: bbox.maxLon }
     }
 
-    // Category filter
+    /*
+     * Category filter, parent-inclusive.
+     *
+     * Events are tagged to leaves — "IPL screening", not "Sports" — so matching
+     * the id exactly means picking a parent returns nothing at all. Filtering
+     * by a parent has to sweep in its children.
+     *
+     * Expressed as a relation OR rather than a second query for the children:
+     * one round trip, and it is correct for a leaf too, since a leaf simply has
+     * no rows whose parent is it.
+     *
+     * This assumes the two-level taxonomy the product actually uses. A third
+     * level would be matched at depth one and silently miss its grandchildren,
+     * which is why the seed keeps the tree flat at two.
+     */
     if (categoryId || categorySlug) {
       where.categories = {
-        some: categoryId
-          ? { category_id: categoryId }
-          : { category: { slug: categorySlug } },
+        some: {
+          category: categoryId
+            ? { OR: [{ id: categoryId }, { parent_id: categoryId }] }
+            : { OR: [{ slug: categorySlug }, { parent: { slug: categorySlug } }] },
+        },
       }
     }
 

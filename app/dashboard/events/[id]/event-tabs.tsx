@@ -60,7 +60,11 @@ export function EventTabs({
           href={
             tab.key === "overview"
               ? `/dashboard/events/${eventId}`
-              : `/dashboard/events/${eventId}?tab=${tab.key}`
+              : // Feedback is a real page, not a tab rendered inline — it has
+                // its own data shape and is worth linking to directly.
+                tab.key === "feedback"
+                ? `/dashboard/events/${eventId}/feedback`
+                : `/dashboard/events/${eventId}?tab=${tab.key}`
           }
           aria-current={tab.key === active ? "page" : undefined}
           className={cn(
