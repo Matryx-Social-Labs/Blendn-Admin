@@ -10,28 +10,40 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 
 const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard": {
-    title: "Performance Overview",
+    title: "Overview",
     description: "Live reporting across growth, attendance, and event activity.",
+  },
+  "/dashboard/moderation": {
+    title: "Moderation",
+    description: "Flags and reports across the platform, oldest first.",
   },
   "/dashboard/events": {
     title: "Events",
-    description: "Manage event supply, publishing status, and operational detail.",
+    description: "Every event on the platform — search, filter, and drill in.",
+  },
+  "/dashboard/attendees": {
+    title: "Attendees",
+    description: "Who comes back, and who RSVPs but doesn't show.",
+  },
+  "/dashboard/venues": {
+    title: "My venues",
+    description: "Utilisation, ratings and bookings — one section per venue.",
   },
   "/dashboard/chatrooms": {
     title: "Chatrooms",
-    description: "Choose a live event and open its chatroom workspace.",
+    description: "Every room whose chat is open — live events and post-event feedback windows.",
   },
   "/dashboard/users": {
     title: "Users",
-    description: "Track onboarding, verification, and user activity quality.",
+    description: "Accounts, onboarding, and reachability.",
   },
   "/dashboard/organisers": {
     title: "Organisers",
-    description: "Review host activity, publishing cadence, and account coverage.",
+    description: "The supply side: who publishes, and how concentrated it is.",
   },
   "/dashboard/venue-owners": {
-    title: "Venue Owners",
-    description: "Understand venue portfolios and their event contribution.",
+    title: "Venues",
+    description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
   },
 }
 
@@ -45,14 +57,31 @@ export function SiteHeader() {
   const pathname = usePathname()
   const { data: session } = useSession()
 
+  const role = session?.user?.role
+
   const content = useMemo(() => {
+    // The overview says something different per role, as the design does — the
+    // three dashboards answer different questions and a shared subtitle would
+    // describe none of them.
+    if (pathname === "/dashboard") {
+      return {
+        title: "Overview",
+        description:
+          role === "app_admin"
+            ? "Platform health: what needs attention, growth vs vanity, and supply."
+            : role === "organizer"
+              ? "Your next event first — pacing, then what your past events say."
+              : "Each venue on its own terms — utilisation, ratings, bookings.",
+      }
+    }
+
     const exact = routeContent[pathname]
     if (exact) return exact
 
     if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/messaging")) {
       return {
-        title: "Chatroom Management",
-        description: "Moderate the live feed, send announcements, and manage sponsored messages.",
+        title: "Chatrooms",
+        description: "Every room whose chat is open — live events and post-event feedback windows.",
       }
     }
 
@@ -64,7 +93,7 @@ export function SiteHeader() {
     }
 
     return routeContent["/dashboard"]
-  }, [pathname])
+  }, [pathname, role])
 
   const today = new Intl.DateTimeFormat("en-US", {
     month: "short",

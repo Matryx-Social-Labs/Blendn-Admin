@@ -36,7 +36,7 @@ export interface DashboardNavItem {
 export const dashboardNav: DashboardNavItem[] = [
   {
     title: "Overview",
-    description: "Role-based reporting across platform, organisers, and venues.",
+    description: "Platform health: what needs attention, growth vs vanity, and supply.",
     url: "/dashboard",
     icon: IconDashboard,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
@@ -54,7 +54,7 @@ export const dashboardNav: DashboardNavItem[] = [
   },
   {
     title: "Events",
-    description: "Manage event setup, publishing status, and operational detail.",
+    description: "Every event on the platform — search, filter, and drill in.",
     url: "/dashboard/events",
     icon: IconListDetails,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
@@ -79,7 +79,7 @@ export const dashboardNav: DashboardNavItem[] = [
   },
   {
     title: "Chatrooms",
-    description: "Per-event rooms: activity, flags, and moderation.",
+    description: "Every room whose chat is open — live events and post-event feedback windows.",
     url: "/dashboard/chatrooms",
     icon: IconMessage2,
     // venue_owner belongs here: `eventPermissions` grants them the operational
@@ -105,8 +105,8 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["app_admin"],
   },
   {
-    title: "Venue owners",
-    description: "Venue-owner accounts and their portfolios.",
+    title: "Venues",
+    description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
     url: "/dashboard/venue-owners",
     icon: IconBuildingStore,
     allowedRoles: ["app_admin"],
