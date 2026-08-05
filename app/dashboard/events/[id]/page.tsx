@@ -3,6 +3,7 @@ import { EventEditor } from "@/components/event-editor"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { eventPermissions } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 import { LiveTab } from "@/components/dashboard/live-tab"
 import { EventTabs, eventTabsFor, type EventTabKey } from "./event-tabs"
 
@@ -52,7 +53,7 @@ export default async function EventDetailPage({ params, searchParams }: EventPag
         },
         // eventPermissions needs the venue owner: an event at a claimed venue
         // grants that owner operational access even though they cannot edit it.
-        venue: { select: { owner_id: true } },
+        venue: { select: { owner_org_id: true } },
       },
     }),
     db.categories.findMany({
@@ -76,7 +77,7 @@ export default async function EventDetailPage({ params, searchParams }: EventPag
    * chatroom — while the editor stays with whoever runs it. Gating the whole
    * page on canEdit locked them out of the event entirely.
    */
-  const permissions = eventPermissions(session.user, event)
+  const permissions = eventPermissions(await actorFor(session.user), event)
   if (!permissions.canOperate) {
     redirect("/dashboard/events")
   }

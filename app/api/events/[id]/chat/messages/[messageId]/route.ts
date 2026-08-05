@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 import { emitChatMessageDeleted } from "@/lib/socket-server"
 
 interface RouteContext {
@@ -18,10 +19,10 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { organizer_id: true, venue: { select: { owner_id: true } }, chat_group: { select: { id: true } } },
+      select: { organizer_org_id: true, venue: { select: { owner_org_id: true } }, chat_group: { select: { id: true } } },
     })
     if (!event) return new NextResponse("Not found", { status: 404 })
-    if (!eventPermissions(session.user, event).canOperate) {
+    if (!eventPermissions(await actorFor(session.user), event).canOperate) {
       return new NextResponse("Forbidden", { status: 403 })
     }
     if (!event.chat_group) return new NextResponse("No chat group", { status: 404 })

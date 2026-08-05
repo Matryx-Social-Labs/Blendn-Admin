@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { eventPermissions } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       where: { id: eventId, deleted_at: null },
       select: {
         id: true,
-        organizer_id: true, venue: { select: { owner_id: true } },
+        organizer_org_id: true, venue: { select: { owner_org_id: true } },
         chat_group: { select: { id: true } },
       },
     })
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 })
     }
 
-    if (!eventPermissions(session.user, event).canOperate) {
+    if (!eventPermissions(await actorFor(session.user), event).canOperate) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
