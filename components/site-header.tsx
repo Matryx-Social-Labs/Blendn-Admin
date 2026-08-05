@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { useSession } from "next-auth/react"
 
 import { AccountMenu } from "@/components/account-menu"
+import { CommandPalette, CommandPaletteTrigger } from "@/components/command-palette"
 import { DateRangeControl } from "@/components/date-range-control"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 
@@ -36,6 +37,8 @@ const TIMELESS = new Set([
   "/dashboard/categories",
   "/dashboard/events/new",
 ])
+
+/** Reports read the range, so the control stays. */
 
 const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard/moderation": {
@@ -85,6 +88,14 @@ const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard/organisation": {
     title: "Your organisation",
     description: "Colleagues, invites, and domain verification.",
+  },
+  "/dashboard/reports": {
+    title: "Reports",
+    description: "Download events, attendance, ratings and moderation as CSV.",
+  },
+  "/dashboard/audit": {
+    title: "Audit log",
+    description: "Who did what, when. Written automatically and never editable.",
   },
   "/dashboard/settings": {
     title: "Settings",
@@ -151,6 +162,9 @@ export function SiteHeader() {
           <h1 className="truncate text-[1.25rem] font-bold leading-[1.25]">{content.title}</h1>
           <p className="truncate text-[0.78125rem] text-muted-foreground">{content.description}</p>
         </div>
+
+        <CommandPalette />
+        <CommandPaletteTrigger className="hidden @2xl/main:inline-flex" />
 
         {showRange ? (
           // useSearchParams needs a Suspense boundary or the whole route opts

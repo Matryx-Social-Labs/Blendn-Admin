@@ -2,6 +2,7 @@ import {
   IconBuilding,
   IconBuildingStore,
   IconDashboard,
+  IconFileSpreadsheet,
   IconFlag,
   IconHistory,
   IconInbox,
@@ -139,6 +140,15 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/organisation",
     icon: IconBuilding,
     allowedRoles: ["organizer", "venue_owner"],
+  },
+  {
+    // The login page has always advertised "Exportable reporting". Until now
+    // nothing in the product exported anything.
+    title: "Reports",
+    description: "Download events, attendance, ratings and moderation as CSV.",
+    url: "/dashboard/reports",
+    icon: IconFileSpreadsheet,
+    allowedRoles: ["app_admin", "organizer", "venue_owner"],
   },
   {
     // `audit_logs` was written by every sensitive action and read by nothing.
