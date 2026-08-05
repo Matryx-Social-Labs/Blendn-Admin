@@ -7,70 +7,74 @@ import { type Icon } from "@tabler/icons-react"
 import {
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
+/**
+ * Compact single-line navigation.
+ *
+ * The previous version rendered each item as a two-line block with a bordered
+ * icon tile and a wrapped description. At three items that was merely heavy; an
+ * admin now has nine, and the nav would have run taller than the viewport while
+ * repeating information the destination page already states.
+ *
+ * The description survives as the tooltip, which is where it was useful.
+ */
 export function NavMain({
   items,
+  badges,
 }: {
   items: {
     title: string
     description: string
     url: string
     icon?: Icon
+    badgeKey?: string
     isActive?: (pathname: string) => boolean
   }[]
+  badges?: Record<string, number>
 }) {
   const pathname = usePathname()
 
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel className="px-3 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-        Workspace
-      </SidebarGroupLabel>
+    <SidebarGroup className="px-2">
       <SidebarGroupContent>
-        <SidebarMenu className="gap-2">
+        <SidebarMenu className="gap-0.5">
           {items.map((item) => {
             const isActive = item.isActive
               ? item.isActive(pathname)
               : pathname === item.url ||
                 (item.url !== "/dashboard" && pathname.startsWith(item.url))
+            const badge = item.badgeKey ? badges?.[item.badgeKey] : undefined
 
             return (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
                   asChild
                   isActive={isActive}
-                  size="lg"
-                  tooltip={item.title}
+                  tooltip={item.description}
                   className={cn(
-                    "h-auto rounded-xl border border-transparent px-3 py-3 transition-all",
+                    "h-9 rounded-md px-2.5 transition-colors",
                     isActive
-                      ? "border-border bg-accent text-accent-foreground shadow-sm"
-                      : "bg-transparent text-muted-foreground hover:border-border hover:bg-accent/50 hover:text-accent-foreground"
+                      ? "bg-accent font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                   )}
                 >
-                  <Link href={item.url} className="flex w-full items-start gap-3">
+                  <Link href={item.url} className="flex w-full items-center gap-2.5">
                     {item.icon ? (
-                      <div
-                        className={cn(
-                          "mt-0.5 rounded-lg border border-border p-2",
-                          isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                        )}
-                      >
-                        <item.icon className="size-4" />
-                      </div>
+                      <item.icon
+                        className={cn("size-[18px] shrink-0", isActive && "text-primary")}
+                      />
                     ) : null}
-                    <div className="min-w-0 space-y-1">
-                      <p className="truncate text-sm font-semibold">{item.title}</p>
-                      <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-                        {item.description}
-                      </p>
-                    </div>
+                    <span className="flex-1 truncate text-[0.8125rem]">{item.title}</span>
+                    {badge ? (
+                      <span className="shrink-0 rounded-full bg-destructive px-1.5 py-0.5 text-[0.6875rem] font-bold leading-none text-destructive-foreground tabular-nums">
+                        {badge > 99 ? "99+" : badge}
+                      </span>
+                    ) : null}
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

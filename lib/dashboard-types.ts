@@ -1,119 +1,146 @@
 export type DashboardRole = "app_admin" | "organizer" | "venue_owner"
 
-export type DashboardTrendKey = "users" | "events" | "attendees" | "engagement"
+/* -------------------------------------------------------------------------- */
+/* Shared                                                                      */
+/* -------------------------------------------------------------------------- */
 
-export interface DashboardMetric {
-  label: string
-  value: string
-  delta: string
-  trend: "up" | "down" | "flat"
-  detail: string
-}
-
-export interface DashboardTrendPoint {
-  label: string
-  date: string
-  users: number
-  events: number
-  attendees: number
-  engagement: number
-}
-
-export interface DashboardFunnelStage {
-  label: string
-  value: number
-  detail: string
-}
-
-export interface DashboardSpotlightCard {
-  title: string
-  value: string
-  description: string
-}
-
-export interface DashboardPerformanceRow {
+export interface EventRow {
   id: string
   name: string
-  segment: string
-  status: string
-  city: string
   startAt: string
-  attendees: number
-  demand: number
-  engagement: number
-  rating: number | null
-  capacity: number | null
+  city: string
+  venue: string
+  status: string
+  going: number
+  /** null when the event states no capacity — there is no target to fill. */
+  fillPct: number | null
+  /** null until the event has run. */
+  turnUpPct: number | null
 }
+
+/** Cumulative RSVPs at a given number of days before the event starts. */
+export interface PacingPoint {
+  daysOut: number
+  cumulative: number
+}
+
+/** Index 0 is one star, index 4 is five. */
+export type RatingCounts = [number, number, number, number, number]
+
+/* -------------------------------------------------------------------------- */
+/* Organiser                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface NextEvent {
+  id: string
+  title: string
+  startAt: string
+  venue: string
+  city: string
+  daysOut: number
+  going: number
+  maybe: number
+  favourites: number
+  capacity: number | null
+  fillPct: number | null
+  /**
+   * Comparison against the previous event's curve at the same point. null when
+   * there is no previous event to compare to — an invented benchmark is worse
+   * than none.
+   */
+  pacingNote: string | null
+}
+
+export interface OrganizerOverview {
+  role: "organizer"
+  nextEvent: NextEvent | null
+  pacing: PacingPoint[]
+  pacingCapacity: number | null
+  ratings: RatingCounts
+  noShowRatePct: number | null
+  noShowDelta: number | null
+  repeatAttendees: number | null
+  averageRating: number | null
+  ratingCount: number
+  chatToday: number
+  events: EventRow[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Admin                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export interface ModerationAttention {
+  pending: number
+  /** Age of the oldest pending flag, in hours. The SLA is age, not count. */
+  oldestHours: number | null
+  highConfidence: number
+  affectedRooms: number
+}
+
+export interface OrganiserSupplyRow {
+  id: string
+  name: string
+  published: number
+  drafts: number
+  sharePct: number
+  lastEventAt: string | null
+}
+
+export interface CityRow {
+  city: string
+  events: number
+  rsvps: number
+  favourites: number
+}
+
+export interface AdminOverview {
+  role: "app_admin"
+  attention: ModerationAttention
+  users: number
+  activeThisWeek: number
+  publishedEvents: number
+  checkIns: number
+  publishingHosts: { publishing: number; total: number }
+  growth: Array<{ label: string; signups: number; active: number }>
+  funnel: Array<{ label: string; value: number }>
+  supply: OrganiserSupplyRow[]
+  cities: CityRow[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Venue owner                                                                 */
+/* -------------------------------------------------------------------------- */
 
 /**
- * A published event that has not happened yet.
+ * A venue, derived by grouping events on `events.venue_name`.
  *
- * Every other number on this dashboard is trailing. This is the only
- * forward-looking one, and it is the first thing a host actually asks: how is
- * the next event pacing, and do I need to do something about it.
+ * There is no `venues` table — see docs/DASHBOARD_REDESIGN.md. Consequences
+ * that show up in the UI: `capacity` is the largest capacity any event at this
+ * venue declared (a proxy, not the room's real capacity), and two spellings of
+ * the same room are two venues.
  */
-export interface DashboardUpcomingRow {
-  id: string
+export interface VenueRow {
   name: string
-  startAt: string
-  daysOut: number
-  /** RSVPs of going or maybe — the people who have signalled intent. */
-  committed: number
-  capacity: number | null
-  /** null when the event has no stated capacity, so there is nothing to fill. */
-  fillPct: number | null
-  city: string
+  eventsInWindow: number
+  /** Events per week over the trailing 8 weeks. */
+  nightsPerWeek: number
+  averageRating: number | null
+  ratings: RatingCounts
+  nextBooking: { id: string; name: string; startAt: string; going: number } | null
+  capacityProxy: number | null
+  tone: "success" | "neutral" | "destructive"
+  note: string
 }
 
-/** One bar of the role-specific breakdown chart. */
-export interface DashboardBreakdownBar {
-  label: string
-  value: number
-  detail: string
-  /** Set when the bar leads somewhere actionable, e.g. a moderation queue. */
-  href?: string
+export interface VenueOverview {
+  role: "venue_owner"
+  venues: VenueRow[]
+  /** counts[dayIndex][slotIndex], Monday-first, four slots per day. */
+  utilisation: number[][]
+  peakWindow: string | null
+  turnUpRatePct: number | null
+  eventsNext14d: number
 }
 
-export interface DashboardExportBundle {
-  name: string
-  filename: string
-  columns: string[]
-  rows: Array<Record<string, string | number | null>>
-}
-
-export interface DashboardReport {
-  role: DashboardRole
-  headline: string
-  summary: string
-  metrics: DashboardMetric[]
-  trend: {
-    title: string
-    description: string
-    points: DashboardTrendPoint[]
-    defaultKey: DashboardTrendKey
-  }
-  funnel: {
-    title: string
-    description: string
-    stages: DashboardFunnelStage[]
-  }
-  spotlights: DashboardSpotlightCard[]
-  upcoming: {
-    title: string
-    description: string
-    rows: DashboardUpcomingRow[]
-    emptyMessage: string
-  }
-  breakdown: {
-    title: string
-    description: string
-    bars: DashboardBreakdownBar[]
-    emptyMessage: string
-  }
-  performance: {
-    title: string
-    description: string
-    rows: DashboardPerformanceRow[]
-  }
-  exports: DashboardExportBundle[]
-}
+export type DashboardOverview = OrganizerOverview | AdminOverview | VenueOverview

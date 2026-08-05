@@ -1,0 +1,126 @@
+import Link from "next/link"
+import { redirect } from "next/navigation"
+import { IconAlertTriangle, IconBuildingStore, IconCalendar } from "@tabler/icons-react"
+
+import { EmptyState, MetricTile, RatingBars } from "@/components/dashboard/primitives"
+import { Badge } from "@/components/ui/badge"
+import { getAuth } from "@/lib/auth"
+import { formatDay, formatNumber } from "@/lib/dashboard-format"
+
+import { getDashboardOverview } from "../actions"
+
+export const dynamic = "force-dynamic"
+
+const toneVariant = {
+  success: "default",
+  neutral: "secondary",
+  destructive: "destructive",
+} as const
+
+/**
+ * Venue owner: one section per venue, never blended.
+ *
+ * Reuses the venue-owner overview payload — the overview shows the comparison
+ * table and this screen expands each row, so recomputing would be two versions
+ * of the same arithmetic that could drift apart.
+ */
+export default async function MyVenuesPage() {
+  const session = await getAuth()
+  if (!session?.user) redirect("/login")
+  if (session.user.role !== "venue_owner") redirect("/dashboard")
+
+  const overview = await getDashboardOverview("venue_owner", session.user.id)
+  if (overview.role !== "venue_owner") redirect("/dashboard")
+
+  if (overview.venues.length === 0) {
+    return (
+      <EmptyState
+        icon={<IconBuildingStore />}
+        title="No venues yet"
+        description="Venues are read from the venue name set on your events. Publish an event with a venue and it gets its own section here — utilisation, ratings and upcoming bookings, never blended into one number."
+      />
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-[0.8125rem] text-muted-foreground">
+        Venues are grouped by the venue name on each event, so two spellings of the same room
+        read as two venues. Capacity is the largest any event there has declared.
+      </p>
+
+      {overview.venues.map((venue) => {
+        const lowSkew = venue.ratings[0] + venue.ratings[1] > venue.ratings[3] + venue.ratings[4]
+        return (
+          <section
+            key={venue.name}
+            className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
+              <Badge variant={toneVariant[venue.tone]}>{venue.note}</Badge>
+            </div>
+
+            <div className="flex flex-wrap gap-1">
+              <MetricTile
+                label="Nights/week"
+                value={venue.nightsPerWeek}
+                hint="last 8 weeks"
+              />
+              <MetricTile label="Events (8w)" value={venue.eventsInWindow} />
+              <MetricTile
+                label="Capacity"
+                value={venue.capacityProxy}
+                hint={venue.capacityProxy === null ? "none declared" : "largest declared"}
+              />
+              <MetricTile label="Avg rating" value={venue.averageRating} />
+            </div>
+
+            <div className="grid gap-5 @2xl/main:grid-cols-2">
+              {venue.ratings.every((n) => n === 0) ? (
+                <EmptyState
+                  compact
+                  description="No ratings for events at this venue yet."
+                />
+              ) : (
+                <RatingBars counts={venue.ratings} />
+              )}
+
+              {venue.nextBooking ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+                    Next booking
+                  </p>
+                  <Link
+                    href={`/dashboard/events/${venue.nextBooking.id}`}
+                    className="rounded-lg border border-border p-3 transition-colors hover:bg-accent"
+                  >
+                    <p className="font-medium">{venue.nextBooking.name}</p>
+                    <p className="text-[0.8125rem] text-muted-foreground">
+                      {formatDay(venue.nextBooking.startAt)} ·{" "}
+                      {formatNumber(venue.nextBooking.going)} going
+                    </p>
+                  </Link>
+                </div>
+              ) : (
+                <EmptyState
+                  compact
+                  icon={<IconCalendar />}
+                  description="No upcoming bookings for this room — it drops off organisers' radar without listed availability."
+                />
+              )}
+            </div>
+
+            {lowSkew ? (
+              <p className="flex items-start gap-2 text-[0.8125rem] text-destructive">
+                <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
+                Ratings skew low here across different events — likely a facilities problem
+                rather than an event problem.
+              </p>
+            ) : null}
+          </section>
+        )
+      })}
+    </div>
+  )
+}
