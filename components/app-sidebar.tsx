@@ -5,11 +5,9 @@ import { useSession } from "next-auth/react"
 
 import { BrandLogo } from "@/components/brand-logo"
 import { NavMain } from "@/components/nav-main"
-import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar"
 import { visibleNavFor } from "@/lib/dashboard-nav"
@@ -46,16 +44,6 @@ export function AppSidebar({
       <SidebarContent className="py-1">
         <NavMain items={nav} badges={badges} />
       </SidebarContent>
-      <SidebarFooter className="px-2 pb-2">
-        <NavUser
-          user={{
-            name: session?.user?.name ?? "Blend'n",
-            email: session?.user?.email ?? "",
-            avatar: session?.user?.image ?? "",
-            role,
-          }}
-        />
-      </SidebarFooter>
     </Sidebar>
   )
 }
