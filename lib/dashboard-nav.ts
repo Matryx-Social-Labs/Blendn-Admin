@@ -3,6 +3,7 @@ import {
   IconBuildingStore,
   IconDashboard,
   IconFlag,
+  IconHistory,
   IconInbox,
   IconListDetails,
   IconMessage2,
@@ -139,7 +140,27 @@ export const dashboardNav: DashboardNavItem[] = [
     icon: IconBuilding,
     allowedRoles: ["organizer", "venue_owner"],
   },
+  {
+    // `audit_logs` was written by every sensitive action and read by nothing.
+    // Hosts see only their own organisation's activity; the scoping is enforced
+    // in lib/audit-actions.ts rather than by hiding the link.
+    title: "Audit log",
+    description: "Who did what, when. Written automatically and never editable.",
+    url: "/dashboard/audit",
+    icon: IconHistory,
+    allowedRoles: ["app_admin", "organizer", "venue_owner"],
+  },
 ]
+
+/**
+ * Reachable but not in the sidebar.
+ *
+ * Settings is reached from the account menu, where people look for it, and a
+ * nav item would be a second door to the same room. It is listed here so the
+ * route inventory stays honest — a screen with no entry in either list is one
+ * nobody can find.
+ */
+export const unlistedRoutes = ["/dashboard/settings"] as const
 
 /** Fails closed: an unknown or absent role sees nothing. */
 export function visibleNavFor(role: string | undefined): DashboardNavItem[] {

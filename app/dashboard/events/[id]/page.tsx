@@ -104,13 +104,13 @@ export default async function EventDetailPage({ params, searchParams }: EventPag
             {event.city ? `, ${event.city}` : ""}
           </p>
         </div>
-        {!permissions.canEdit ? (
+        {permissions.canEdit ? null : (
           <p className="max-w-sm rounded-lg border border-border bg-card px-3.5 py-2.5 text-[0.78rem] leading-relaxed text-muted-foreground">
             <b className="font-medium text-foreground">Operational access.</b> You operate this
             venue, so you get the live view, attendees and the chatroom. Editing, publishing and
             cancelling belong to whoever runs the event.
           </p>
-        ) : null}
+        )}
       </div>
       <EventTabs eventId={event.id} active={activeTab} tabs={tabs} />
     </div>

@@ -7,7 +7,11 @@ export const dynamic = "force-dynamic"
 
 export default async function NewEventPage() {
   const session = await getAuth()
-  if (!session?.user || (session.user.role !== "app_admin" && session.user.role !== "organizer")) {
+  // venue_owner was redirected away from here, but `eventPermissions` grants
+  // them both buckets on an event their own org runs — a venue owner hosting
+  // their own night is a case the model explicitly supports and the UI
+  // forbade. Attendees are the only role with no business on this screen.
+  if (!session?.user || session.user.role === "attendee") {
     redirect("/dashboard/events")
   }
 
