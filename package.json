@@ -1,6 +1,6 @@
 {
   "name": "blendn-admin",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "scripts": {
     "dev": "ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
@@ -80,6 +80,7 @@
     "redis": "^6.2.0",
     "slugify": "^1.6.6",
     "socket.io": "^4.7.4",
+    "socket.io-client": "^4.8.3",
     "sonner": "^2.0.3",
     "swagger-ui-react": "^5.32.0",
     "tailwind-merge": "^3.2.0",
