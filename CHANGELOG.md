@@ -5,6 +5,91 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-05
+
+### Added
+
+- Forward-looking reporting on the dashboard overview. Every figure on it was
+  trailing 30-day, so a host could see how last month went but nothing about the
+  event running on Thursday. `Upcoming events` shows committed RSVPs against
+  capacity for each published event that has not started, coloured by how far
+  short it is.
+- A second chart per role, chosen for what that role actually decides on:
+  moderation queue by review state for `app_admin`, rating spread for
+  `organizer`, events by venue for `venue_owner`.
+- Moderation backlog for `app_admin` — pending flag count, affected chatrooms,
+  and flags per 1,000 messages. `moderation_flags` is a core table and the only
+  way to see any of it was to open one event's messaging page at a time.
+- Turn-up rate for hosts: committed RSVPs against actual check-ins on past
+  events. The remainder is the no-show rate, which is what decides catering and
+  whether to overbook.
+- `scripts/create-dashboard-user.ts` to create or reset a dashboard login. The
+  password is generated rather than taken as an argument, so it never lands in
+  shell history or the process list.
+- Both new sections are included in the CSV export bundles.
+
+## [0.6.0] - 2026-08-05
+
+### Added
+
+- Brand design system. Colour, type, and layout now follow the Blend'n Brand
+  Guideline instead of shadcn's defaults; documented in `docs/DESIGN_SYSTEM.md`.
+  Every theme token was previously `oklch(L 0 0)` — zero chroma, pure greyscale —
+  so the only brand element on screen was the logo image.
+- Satoshi as the interface typeface, self-hosted (`app/fonts/`) so the first
+  render does not block on Fontshare's CDN.
+- `--success` token for positive deltas. The metric arrows used `--chart-1`,
+  which in the dark theme rendered a positive change in blue against a red
+  negative.
+- Indexes on ten foreign keys that had none, and an integration test asserting
+  the class of bug is gone rather than the ten instances.
+
+### Fixed
+
+- Two of the four spotlight cards rendered twice on the overview — once in the
+  hero rail and again in the section below. The hero now carries the export
+  action, which belongs at page level anyway.
+- The page header rendered the description sentence as the `h1` and the page
+  name as a 0.68rem eyebrow, putting the wrong string in the document's only
+  landmark heading. There were also two `h1`s on the overview.
+- Funnel stages with a value of zero drew a bar a tenth as wide as the largest
+  stage, so a funnel that dropped to nothing still looked like it converted.
+- Venue owners could not reach Chatrooms. `canModerateChat` and the messaging
+  page's `canManageEvent` gate had always allowed it; the nav list and the
+  chatrooms index were the only things saying no.
+- The "top performers" table drew from the 24 most *recent* events and then
+  ranked them by traction, so a host with more than 24 events got a recency
+  window presented as a whole-portfolio leaderboard. It now ranks from the
+  most-attended events.
+- The KPI grid and the spotlight grid used container queries and viewport
+  breakpoints respectively, so collapsing the sidebar reflowed them at different
+  widths.
+- Role badges in the users table hardcoded violet/blue/green hexes.
+
+### Performance
+
+- `chat_messages.parent_id` is a self-referencing foreign key and had no index,
+  so deleting a chat group made Postgres scan the whole table once per cascaded
+  message. At 500,000 rows that is roughly 2.5e10 comparisons and the delete
+  never returns — three attempts to remove the load-test dataset from staging
+  failed on this before the cause was found. The same path runs on event
+  deletion and on account deletion.
+
+## [0.5.2] - 2026-08-05
+
+### Added
+
+- Tooling to measure API performance against realistic data volume, and a
+  recorded baseline. The previous benchmark only measured endpoints that reject
+  the request, so it never exercised a single database query.
+
+### Verified
+
+- With 1000x the current data (10,000 accounts, 2,000 events, 500,000 chat
+  messages) the real endpoints respond in 207-238ms, against a 200ms floor that
+  is network round-trip. The heaviest one adds about 38ms of actual work. No
+  slow queries, and no missing indexes.
+
 ## [0.5.1] - 2026-08-05
 
 ### Fixed

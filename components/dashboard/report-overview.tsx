@@ -4,6 +4,8 @@ import { useMemo, useState } from "react"
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   XAxis,
   YAxis,
@@ -11,6 +13,7 @@ import {
 import {
   IconArrowDownRight,
   IconArrowUpRight,
+  IconCalendarEvent,
   IconMinus,
   IconSearch,
 } from "@tabler/icons-react"
@@ -38,6 +41,7 @@ import type {
   DashboardReport,
   DashboardTrendKey,
 } from "@/lib/dashboard-types"
+import { fillTone, formatCountdown, funnelBarWidth } from "@/lib/dashboard-view"
 import { cn } from "@/lib/utils"
 
 const trendKeyStyles: Record<DashboardTrendKey, { color: string }> = {
@@ -62,7 +66,10 @@ function trendLabel(key: DashboardTrendKey, role: DashboardReport["role"]) {
 
 function metricIcon(trend: DashboardMetric["trend"]) {
   if (trend === "up") {
-    return <IconArrowUpRight className="size-4 text-chart-1" />
+    // `text-chart-1` used to be here, which in the dark theme rendered a
+    // positive delta in blue while a negative one was red — two colours with
+    // no shared axis. `--success` exists for exactly this.
+    return <IconArrowUpRight className="size-4 text-success" />
   }
 
   if (trend === "down") {
@@ -127,7 +134,15 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
       <section className="px-4 lg:px-6">
         <Card className="rounded-xl">
           <CardContent className="px-6 py-7 lg:px-8">
-            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            {/*
+              The right-hand rail used to render `spotlights.slice(0, 2)`,
+              which the spotlight section further down then rendered again —
+              two of the four cards appeared twice on one screen. The rail now
+              carries the export action instead, which belongs at page level
+              anyway: the bundles cover metrics, trend and table, not just the
+              table it was previously nested inside.
+            */}
+            <div className="flex flex-col gap-6 @3xl/main:flex-row @3xl/main:items-start @3xl/main:justify-between">
               <div className="max-w-3xl space-y-4">
                 <Badge variant="secondary" className="rounded-full px-3 py-1 font-medium">
                   {report.role === "app_admin"
@@ -137,33 +152,30 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                       : "Venue reporting"}
                 </Badge>
                 <div className="space-y-3">
-                  <h1 className="text-3xl font-semibold sm:text-4xl">
+                  {/* h2, not h1 — SiteHeader owns the page's single h1. */}
+                  <h2 className="text-3xl font-semibold sm:text-4xl">
                     {report.headline}
-                  </h1>
+                  </h2>
                   <p className="max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
                     {report.summary}
                   </p>
                 </div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:w-[430px]">
-                {report.spotlights.slice(0, 2).map((card) => (
-                  <Card key={card.title} className="rounded-lg bg-muted">
-                    <CardContent className="p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        {card.title}
-                      </p>
-                      <p className="mt-3 text-2xl font-semibold">{card.value}</p>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">{card.description}</p>
-                    </CardContent>
-                  </Card>
-                ))}
+              <div className="shrink-0">
+                <ExportMenu bundles={report.exports} />
               </div>
             </div>
           </CardContent>
         </Card>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+      {/*
+        Every grid on this page is keyed to @container/main, not the viewport.
+        The spotlight grid below used md:/xl: while this one used @xl/@5xl, so
+        collapsing the sidebar reflowed the two rows at different widths and
+        they visibly fell out of step.
+      */}
+      <section className="grid grid-cols-1 gap-4 px-4 lg:px-6 @sm/main:grid-cols-2 @5xl/main:grid-cols-4">
         {report.metrics.map((metric) => (
           <Card key={metric.label} className="rounded-xl shadow-none">
             <CardContent className="space-y-4 px-5 py-5">
@@ -185,7 +197,128 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
         ))}
       </section>
 
-      <section className="grid gap-6 px-4 lg:px-6 xl:grid-cols-[1.45fr_0.55fr]">
+      {/*
+        Forward-looking pair, placed directly under the KPIs because everything
+        below them is trailing 30-day reporting. The dashboard could previously
+        tell you how last month went and nothing at all about the event running
+        on Thursday.
+      */}
+      <section className="grid gap-6 px-4 lg:px-6 @4xl/main:grid-cols-[1.15fr_0.85fr]">
+        <Card className="rounded-xl shadow-none">
+          <CardHeader className="border-b pb-5">
+            <CardTitle className="text-xl">{report.upcoming.title}</CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {report.upcoming.description}
+            </p>
+          </CardHeader>
+          <CardContent className="px-5 py-5">
+            {report.upcoming.rows.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+                <IconCalendarEvent className="size-8 text-muted-foreground" />
+                <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+                  {report.upcoming.emptyMessage}
+                </p>
+              </div>
+            ) : (
+              <ul className="space-y-4">
+                {report.upcoming.rows.map((row) => (
+                  <li key={row.id} className="space-y-2 rounded-lg border border-border bg-muted p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{row.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDate(row.startAt)} · {row.city}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold">
+                          {formatNumericValue(row.committed)}
+                          {row.capacity ? ` / ${formatNumericValue(row.capacity)}` : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatCountdown(row.daysOut)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="h-2 rounded-full bg-border">
+                      <div
+                        className={cn("h-2 rounded-full transition-[width]", fillTone(row.fillPct))}
+                        style={{ width: `${funnelBarWidth(row.fillPct ?? 0, 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {row.fillPct === null
+                        ? "No capacity set — commitment shown without a target."
+                        : `${formatNumericValue(Math.round(row.fillPct))}% of capacity committed`}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl shadow-none">
+          <CardHeader className="border-b pb-5">
+            <CardTitle className="text-xl">{report.breakdown.title}</CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {report.breakdown.description}
+            </p>
+          </CardHeader>
+          <CardContent className="px-4 py-5 sm:px-6">
+            {report.breakdown.bars.every((bar) => bar.value === 0) ? (
+              <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+                <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+                  {report.breakdown.emptyMessage}
+                </p>
+              </div>
+            ) : (
+              <ChartContainer
+                config={{ value: { label: "Count", color: "var(--chart-1)" } }}
+                className="h-[280px] w-full"
+              >
+                {/* Horizontal: the labels are words ("5 stars", venue names), and
+                    words do not fit under a vertical axis without rotating. */}
+                <BarChart data={report.breakdown.bars} layout="vertical" margin={{ left: 8 }}>
+                  <CartesianGrid horizontal={false} stroke="var(--border)" />
+                  <XAxis type="number" tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)" }} />
+                  <YAxis
+                    type="category"
+                    dataKey="label"
+                    width={96}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: "var(--muted-foreground)" }}
+                  />
+                  <ChartTooltip
+                    cursor={{ fill: "var(--accent)" }}
+                    content={
+                      <ChartTooltipContent
+                        className="rounded-xl border-border bg-card text-foreground"
+                        formatter={(value, _name, item) => (
+                          <div className="space-y-1">
+                            <p className="font-medium">{formatNumericValue(Number(value))}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {(item?.payload as { detail?: string })?.detail}
+                            </p>
+                          </div>
+                        )}
+                      />
+                    }
+                  />
+                  <Bar dataKey="value" fill="var(--chart-1)" radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ChartContainer>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/*
+        Was 1.45/0.55, which left the funnel ~370px for four stacked stage
+        cards while the chart column had slack it did not need.
+      */}
+      <section className="grid gap-6 px-4 lg:px-6 @4xl/main:grid-cols-[1.4fr_0.85fr]">
         <Card className="rounded-xl shadow-none">
           <CardHeader className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-2">
@@ -318,10 +451,11 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
                     {formatNumericValue(stage.value)}
                   </p>
                 </div>
+                {/* chart-1 -> 2 -> 3 is now the brand gradient: orange, rose, purple. */}
                 <div className="h-2 rounded-full bg-border">
                   <div
                     className="h-2 rounded-full bg-gradient-to-r from-chart-1 via-chart-2 to-chart-3"
-                    style={{ width: `${Math.max(10, (stage.value / funnelMax) * 100)}%` }}
+                    style={{ width: `${funnelBarWidth(stage.value, funnelMax)}%` }}
                   />
                 </div>
                 <p className="text-sm leading-6 text-muted-foreground">{stage.detail}</p>
@@ -331,7 +465,8 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
         </Card>
       </section>
 
-      <section className="grid gap-4 px-4 lg:px-6 md:grid-cols-2 xl:grid-cols-4">
+      {/* Five spotlights for every role now, so one grid rule covers both. */}
+      <section className="grid gap-4 px-4 lg:px-6 @sm/main:grid-cols-2 @3xl/main:grid-cols-3 @5xl/main:grid-cols-5">
         {report.spotlights.map((card) => (
           <Card key={card.title} className="rounded-xl shadow-none">
             <CardContent className="space-y-3 px-5 py-5">
@@ -347,14 +482,13 @@ export function ReportOverview({ report }: { report: DashboardReport }) {
 
       <section className="px-4 lg:px-6">
         <Card className="rounded-xl shadow-none">
-          <CardHeader className="gap-4 border-b pb-5 lg:flex-row lg:items-start lg:justify-between">
+          <CardHeader className="gap-4 border-b pb-5">
             <div className="space-y-2">
               <CardTitle className="text-xl">{report.performance.title}</CardTitle>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
                 {report.performance.description}
               </p>
             </div>
-            <ExportMenu bundles={report.exports} />
           </CardHeader>
           <CardContent className="space-y-5 px-5 py-5">
             <div className="relative max-w-sm">

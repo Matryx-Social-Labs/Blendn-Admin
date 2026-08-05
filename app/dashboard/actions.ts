@@ -1,10 +1,11 @@
 "use server"
 
 import { logger } from "@/lib/logger"
-import type { check_in_status } from "@prisma/client"
+import type { check_in_status, rsvp_status } from "@prisma/client"
 
 import { db } from "@/lib/db"
 import type {
+  DashboardBreakdownBar,
   DashboardExportBundle,
   DashboardMetric,
   DashboardPerformanceRow,
@@ -12,6 +13,7 @@ import type {
   DashboardRole,
   DashboardSpotlightCard,
   DashboardTrendPoint,
+  DashboardUpcomingRow,
 } from "@/lib/dashboard-types"
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
@@ -279,11 +281,31 @@ async function getMonthlyTrend(role: DashboardRole, userId?: string): Promise<Da
   )
 }
 
+/**
+ * Candidate pool for the "top performers" table.
+ *
+ * This used to take the 24 most RECENT events and then re-rank them by a
+ * traction score, so a host with thirty events got a leaderboard drawn from a
+ * recency window and presented as if it covered the whole portfolio — an event
+ * from four months ago that outdrew everything since could not appear.
+ *
+ * Ordering by check-in count instead makes the pool the most-attended events,
+ * which is the dominant term of the score below (attendees is weighted 2x), so
+ * the final ranking is the real one. The pool stays bounded because app_admin
+ * runs this across every event on the platform.
+ *
+ * The orderBy counts all check-ins rather than only attended statuses —
+ * relation-count ordering takes no filter in Prisma. That only affects which
+ * events are considered, never how they are scored; the exact attended count
+ * is computed in the `_count` select below.
+ */
+const PERFORMANCE_POOL = 50
+
 async function getPerformanceRows(userId?: string): Promise<DashboardPerformanceRow[]> {
   const events = await db.events.findMany({
     where: eventScope(userId),
-    take: 24,
-    orderBy: { start_time: "desc" },
+    take: PERFORMANCE_POOL,
+    orderBy: { check_ins: { _count: "desc" } },
     include: {
       categories: {
         include: {
@@ -347,6 +369,88 @@ async function getPerformanceRows(userId?: string): Promise<DashboardPerformance
     .slice(0, 12)
 }
 
+/** RSVP states that count as intent to attend. `not_going` is a decline. */
+const COMMITTED_RSVPS: rsvp_status[] = ["going", "maybe"]
+
+/**
+ * The next published events that have not started.
+ *
+ * Every other figure on this dashboard looks backwards over 30 days, which
+ * answers "how did we do" and never "what needs attention now". A host with a
+ * sold-out event tomorrow and an empty one next week could not tell those
+ * apart from this screen.
+ */
+async function getUpcomingRows(userId?: string): Promise<DashboardUpcomingRow[]> {
+  const now = new Date()
+  const events = await db.events.findMany({
+    where: {
+      ...eventScope(userId),
+      status: "published",
+      start_time: { gte: now },
+    },
+    orderBy: { start_time: "asc" },
+    take: 8,
+    select: {
+      id: true,
+      title: true,
+      start_time: true,
+      city: true,
+      venue_name: true,
+      max_capacity: true,
+      _count: {
+        select: { rsvps: { where: { status: { in: COMMITTED_RSVPS } } } },
+      },
+    },
+  })
+
+  return events.map((event) => {
+    const capacity = event.max_capacity
+    const committed = event._count.rsvps
+    return {
+      id: event.id,
+      name: event.title,
+      startAt: event.start_time.toISOString(),
+      daysOut: Math.max(
+        0,
+        Math.ceil((event.start_time.getTime() - now.getTime()) / DAY_IN_MS)
+      ),
+      committed,
+      capacity,
+      // No stated capacity means there is nothing to be full of; a percentage
+      // would be invented rather than unknown.
+      fillPct: capacity && capacity > 0 ? Math.min(100, (committed / capacity) * 100) : null,
+      city: event.city ?? event.venue_name ?? "TBD",
+    }
+  })
+}
+
+/**
+ * Share of committed RSVPs on past events that actually checked in.
+ *
+ * The gap between the two is the no-show rate, which is what decides catering,
+ * staffing, and whether to overbook. Nothing on this dashboard exposed it.
+ */
+async function getShowUpRate(userId?: string) {
+  const pastEvents = { ...eventScope(userId), start_time: { lt: new Date() } }
+
+  const [committed, attended] = await Promise.all([
+    db.event_rsvps.count({
+      where: { status: { in: COMMITTED_RSVPS }, event: pastEvents },
+    }),
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED_STATUSES }, event: pastEvents },
+    }),
+  ])
+
+  return {
+    committed,
+    attended,
+    // Capped at 100: walk-ins check in without ever having RSVP'd, so the raw
+    // ratio can exceed 1 and "112% turned up" reads as a bug, not a good day.
+    rate: committed === 0 ? null : Math.min(100, (attended / committed) * 100),
+  }
+}
+
 async function buildAdminReport(): Promise<DashboardReport> {
   const now = new Date()
   const currentStart = startOfDay(new Date(now.getTime() - 29 * DAY_IN_MS))
@@ -398,6 +502,10 @@ async function buildAdminReport(): Promise<DashboardReport> {
     publishedCities,
     performanceRows,
     trendPoints,
+    upcomingRows,
+    moderationByStatus,
+    pendingFlagGroups,
+    totalMessages,
   ] = await Promise.all([
     getDistinctUserIdsForPeriod(currentStart, addDays(now, 1), undefined, true),
     getDistinctUserIdsForPeriod(previousStart, currentStart, undefined, true),
@@ -461,6 +569,21 @@ async function buildAdminReport(): Promise<DashboardReport> {
     }),
     getPerformanceRows(),
     getMonthlyTrend("app_admin"),
+    getUpcomingRows(),
+    // Trust and safety was invisible on this dashboard: `moderation_flags` is a
+    // core table and the pending count is the most time-sensitive number an
+    // admin has, but the only way to see it was to open one event's messaging
+    // page at a time.
+    db.moderation_flags.groupBy({
+      by: ["status"],
+      _count: { _all: true },
+    }),
+    db.moderation_flags.findMany({
+      where: { status: "pending" },
+      select: { chat_group_id: true },
+      distinct: ["chat_group_id"],
+    }),
+    db.chat_messages.count(),
   ])
 
   const currentActiveAudience = currentActiveAudienceIds.length
@@ -469,6 +592,16 @@ async function buildAdminReport(): Promise<DashboardReport> {
 
   const topCity = topValue(publishedCities.map((event) => event.city))
   const averageRating = normalizeAverage(ratingsAggregate._avg.rating)
+
+  const flagCount = (status: string) =>
+    moderationByStatus.find((row) => row.status === status)?._count._all ?? 0
+  const pendingFlags = flagCount("pending")
+  const totalFlags = moderationByStatus.reduce((sum, row) => sum + row._count._all, 0)
+  // Flags per thousand messages, so the number stays comparable as volume grows
+  // — a raw flag count only ever goes up and says nothing about whether chat is
+  // getting worse.
+  const flagRate = totalMessages === 0 ? 0 : (totalFlags / totalMessages) * 1000
+
   const metrics: DashboardMetric[] = [
     toMetric(
       "Total users",
@@ -524,6 +657,14 @@ async function buildAdminReport(): Promise<DashboardReport> {
           ? `Based on ${wholeNumber(ratingsAggregate._count.rating)} submitted event ratings.`
           : "Ratings will populate as event feedback comes in.",
     },
+    {
+      title: "Moderation backlog",
+      value: wholeNumber(pendingFlags),
+      description:
+        pendingFlags > 0
+          ? `Flags awaiting review across ${wholeNumber(pendingFlagGroups.length)} chatroom${pendingFlagGroups.length === 1 ? "" : "s"}. ${oneDecimal(flagRate)} flags per 1,000 messages platform-wide.`
+          : `Nothing awaiting review. ${oneDecimal(flagRate)} flags per 1,000 messages platform-wide.`,
+    },
   ]
 
   const exports: DashboardExportBundle[] = [
@@ -545,6 +686,20 @@ async function buildAdminReport(): Promise<DashboardReport> {
       ],
     },
     {
+      name: "Upcoming events",
+      filename: "blendn-upcoming-events.csv",
+      columns: ["event", "start_at", "days_out", "committed_rsvps", "capacity", "fill_pct", "city"],
+      rows: upcomingRows.map((row) => ({
+        event: row.name,
+        start_at: row.startAt,
+        days_out: row.daysOut,
+        committed_rsvps: row.committed,
+        capacity: row.capacity,
+        fill_pct: row.fillPct === null ? null : Math.round(row.fillPct),
+        city: row.city,
+      })),
+    },
+    {
       name: "Growth trend",
       filename: "blendn-growth-trend.csv",
       columns: ["month", "new_users", "published_events", "check_ins", "engagement_actions"],
@@ -555,6 +710,17 @@ async function buildAdminReport(): Promise<DashboardReport> {
         check_ins: point.attendees,
         engagement_actions: point.engagement,
       })),
+    },
+    {
+      name: "Moderation queue",
+      filename: "blendn-moderation-queue.csv",
+      columns: ["state", "count", "detail"],
+      rows: [
+        { state: "Pending", count: pendingFlags, detail: `${pendingFlagGroups.length} chatrooms affected` },
+        { state: "Approved", count: flagCount("approved"), detail: "Reviewed and allowed to stand" },
+        { state: "Rejected", count: flagCount("rejected"), detail: "Reviewed and actioned" },
+        { state: "Flags per 1,000 messages", count: Math.round(flagRate * 10) / 10, detail: "Platform-wide rate" },
+      ],
     },
     {
       name: "Event performance",
@@ -614,6 +780,37 @@ async function buildAdminReport(): Promise<DashboardReport> {
       ],
     },
     spotlights,
+    upcoming: {
+      title: "Next events on the platform",
+      description:
+        "Published events that have not started, in the order they run. Commitment is RSVPs of going or maybe.",
+      rows: upcomingRows,
+      emptyMessage: "No published events are scheduled. Every event on the platform has already run.",
+    },
+    breakdown: {
+      title: "Moderation queue",
+      description:
+        "Flags raised by the moderation pipeline, by review state. Pending flags are content the filters caught that nobody has ruled on yet.",
+      bars: [
+        {
+          label: "Pending",
+          value: pendingFlags,
+          detail: `Awaiting review across ${wholeNumber(pendingFlagGroups.length)} chatroom${pendingFlagGroups.length === 1 ? "" : "s"}`,
+        },
+        {
+          label: "Approved",
+          value: flagCount("approved"),
+          detail: "Reviewed and allowed to stand",
+        },
+        {
+          label: "Rejected",
+          value: flagCount("rejected"),
+          detail: "Reviewed and actioned",
+        },
+      ],
+      emptyMessage:
+        "No content has been flagged yet. This fills in as the moderation pipeline runs against live chat.",
+    },
     performance: {
       title: "Top event performers",
       description:
@@ -651,6 +848,10 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
     ratings30d,
     performanceRows,
     trendPoints,
+    upcomingRows,
+    showUp,
+    ratingSpread,
+    venueSpread,
   ] = await Promise.all([
     db.events.count({
       where: eventScope(userId),
@@ -764,6 +965,24 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
     }),
     getPerformanceRows(userId),
     getMonthlyTrend(role, userId),
+    getUpcomingRows(userId),
+    getShowUpRate(userId),
+    // The spread behind the average. A 4.2 mean hides a 5/1 split, and those
+    // are completely different events to run next time.
+    db.event_ratings.groupBy({
+      by: ["rating"],
+      where: { event: eventScope(userId) },
+      _count: { _all: true },
+    }),
+    // A venue owner with three venues saw one blended number for all of them,
+    // which is the opposite of what the role exists to answer.
+    db.events.groupBy({
+      by: ["venue_name"],
+      where: { ...eventScope(userId), venue_name: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { venue_name: "desc" } },
+      take: 8,
+    }),
   ])
 
   const currentAudience = currentAudienceIds.length
@@ -785,6 +1004,48 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
   const topCity = topValue(eventsForMix.map((event) => event.city))
   const topVenue = topValue(eventsForMix.map((event) => event.venue_name))
   const averageRating = normalizeAverage(ratedAggregate._avg.rating)
+
+  /*
+   * The two roles want different second charts. A venue owner's question is
+   * "which of my venues is working" — that cannot be answered by an average
+   * across all of them, which is all this dashboard used to offer. An
+   * organiser's is "is the 4.2 average a consensus or a split", which the mean
+   * actively hides.
+   */
+  const ratingBars: DashboardBreakdownBar[] = [5, 4, 3, 2, 1].map((star) => {
+    const count = ratingSpread.find((row) => row.rating === star)?._count._all ?? 0
+    const share =
+      ratedAggregate._count.rating === 0 ? 0 : (count / ratedAggregate._count.rating) * 100
+    return {
+      label: `${star} star${star === 1 ? "" : "s"}`,
+      value: count,
+      detail: `${oneDecimal(share)}% of ratings`,
+    }
+  })
+
+  const venueBars: DashboardBreakdownBar[] = venueSpread.map((row) => ({
+    label: row.venue_name ?? "Unnamed venue",
+    value: row._count._all,
+    detail: `${wholeNumber(row._count._all)} event${row._count._all === 1 ? "" : "s"} in your portfolio`,
+  }))
+
+  const venueBreakdown =
+    role === "venue_owner"
+      ? {
+          title: "Events by venue",
+          description:
+            "How your portfolio is distributed across venues. A venue carrying most of the inventory is either your strongest room or your single point of failure.",
+          bars: venueBars,
+          emptyMessage:
+            "No events carry a venue name yet. Set one on an event and the split appears here.",
+        }
+      : {
+          title: "Rating spread",
+          description:
+            "The distribution behind the average. A mean of 4.2 can be broad agreement or a split between people who loved it and people who did not.",
+          bars: ratingBars,
+          emptyMessage: "No ratings submitted yet. This fills in as attendees leave feedback.",
+        }
 
   const metrics: DashboardMetric[] = [
     toMetric(
@@ -844,6 +1105,14 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
           ? "Venue name appearing most often across your managed event inventory."
           : "City showing the highest concentration of your current event portfolio.",
     },
+    {
+      title: "Turn-up rate",
+      value: showUp.rate === null ? "No RSVPs yet" : `${oneDecimal(showUp.rate)}%`,
+      description:
+        showUp.rate === null
+          ? "Appears once past events have RSVPs to compare against check-ins."
+          : `${wholeNumber(showUp.attended)} of ${wholeNumber(showUp.committed)} committed RSVPs checked in. The remainder is your no-show rate.`,
+    },
   ]
 
   const exports: DashboardExportBundle[] = [
@@ -863,6 +1132,30 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
           detail: card.description,
         })),
       ],
+    },
+    {
+      name: "Upcoming events",
+      filename: `blendn-${role}-upcoming.csv`,
+      columns: ["event", "start_at", "days_out", "committed_rsvps", "capacity", "fill_pct", "city"],
+      rows: upcomingRows.map((row) => ({
+        event: row.name,
+        start_at: row.startAt,
+        days_out: row.daysOut,
+        committed_rsvps: row.committed,
+        capacity: row.capacity,
+        fill_pct: row.fillPct === null ? null : Math.round(row.fillPct),
+        city: row.city,
+      })),
+    },
+    {
+      name: venueBreakdown.title,
+      filename: `blendn-${role}-${role === "venue_owner" ? "venues" : "rating-spread"}.csv`,
+      columns: ["label", "count", "detail"],
+      rows: venueBreakdown.bars.map((bar) => ({
+        label: bar.label,
+        count: bar.value,
+        detail: bar.detail,
+      })),
     },
     {
       name: "Trend lines",
@@ -936,6 +1229,15 @@ async function buildHostReport(role: Exclude<DashboardRole, "app_admin">, userId
       ],
     },
     spotlights,
+    upcoming: {
+      title: "Your next events",
+      description:
+        "Published events that have not started, soonest first. Commitment is RSVPs of going or maybe, measured against stated capacity.",
+      rows: upcomingRows,
+      emptyMessage:
+        "Nothing scheduled. Publish an event and it will appear here with live commitment against capacity.",
+    },
+    breakdown: venueBreakdown,
     performance: {
       title: "Event leaderboard",
       description:
