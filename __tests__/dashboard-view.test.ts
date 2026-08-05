@@ -79,6 +79,7 @@ describe("visibleNavFor", () => {
       "Venues",
       "Applications",
       "Organisations",
+      "Categories",
       "Reports",
       "Audit log",
     ])

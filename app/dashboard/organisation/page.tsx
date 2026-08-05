@@ -1,12 +1,11 @@
 import { redirect } from "next/navigation"
-import { IconBuilding } from "@tabler/icons-react"
 
-import { EmptyState } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
 import { getMyOrgs, getOrgMembers } from "@/lib/org-actions"
 import { orgPermissions } from "@/lib/org-permissions"
 import { emailConfigured } from "@/lib/email"
 
+import { JoinRequest } from "./join-request"
 import { OrgPanel } from "./panel"
 
 export const dynamic = "force-dynamic"
@@ -25,15 +24,10 @@ export default async function OrganisationPage() {
 
   const orgs = await getMyOrgs()
 
-  if (orgs.length === 0) {
-    return (
-      <EmptyState
-        icon={<IconBuilding />}
-        title="No organisation"
-        description="Your account isn't attached to an organisation yet, which is why events and venues don't appear. Contact support — this shouldn't happen."
-      />
-    )
-  }
+  // Not a dead end any more. The approval half of request-to-join shipped with
+  // the tenant model and the requester's half had no UI, so someone with no org
+  // was told to contact support about a flow that already existed.
+  if (orgs.length === 0) return <JoinRequest />
 
   // An agency belonging to several orgs gets one panel each, loaded in parallel.
   const panels = await Promise.all(

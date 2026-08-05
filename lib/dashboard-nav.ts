@@ -1,6 +1,7 @@
 import {
   IconBuilding,
   IconBuildingStore,
+  IconCategory,
   IconDashboard,
   IconFileSpreadsheet,
   IconFlag,
@@ -140,6 +141,15 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/organisation",
     icon: IconBuilding,
     allowedRoles: ["organizer", "venue_owner"],
+  },
+  {
+    // Categories were seeded by a script and by nothing else — an admin could
+    // not fix a typo or retire a dead one.
+    title: "Categories",
+    description: "The two-level taxonomy events are filtered by on the app.",
+    url: "/dashboard/categories",
+    icon: IconCategory,
+    allowedRoles: ["app_admin"],
   },
   {
     // The login page has always advertised "Exportable reporting". Until now
