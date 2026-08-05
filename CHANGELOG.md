@@ -5,6 +5,41 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-05
+
+### Added
+
+- **Dashboard clients can hold a socket.** The handshake accepted mobile JWTs
+  only, so a NextAuth session could not connect at all — which is why the
+  "live" chat feed is a 5-second poll. A second, strictly separate scheme reads
+  the session cookie; the mobile verify runs first and, when it succeeds,
+  nothing new executes.
+- **`event:{id}:ops` room** carrying a live aggregate snapshot every 5s:
+  inside now, arrival rate against this event's own median, check-outs,
+  messages/min, active chatters, open flags, sentiment split, and negative
+  messages by category.
+- **Live alerts** derived from those aggregates. The rules that matter combine
+  chat and check-in signal, because neither means much alone — a check-in spike
+  is a popular act arriving, and grumbling about a queue is routine; together
+  they are a door that has stopped moving.
+- Optional `@socket.io/redis-adapter`, attached when `REDIS_URL` is set.
+
+### Notes
+
+- **The ops room carries aggregates only.** No attendee row, user id, name or
+  message text crosses it. Event chat is pseudonymous and that has to hold on a
+  long-lived channel nobody inspects, not just in the REST payload. A test
+  asserts the snapshot has no field that could name anyone.
+- The socket role is re-read from the database rather than trusted from the
+  session token. A NextAuth JWT is signed so it cannot be forged, but it can be
+  stale — and for a socket that outlives the request that opened it, a
+  demotion or suspension issued mid-session would otherwise never take effect.
+- Snapshot timers run per event and only while someone is watching, stopping
+  when the last watcher leaves.
+- **Do not raise the replica count until `REDIS_URL` is set.** Without it the
+  default in-memory adapter stands, which is correct at one replica and wrong
+  at several. The adapter path is unexercised until a Redis instance exists.
+
 ## [0.10.0] - 2026-08-05
 
 ### Added
