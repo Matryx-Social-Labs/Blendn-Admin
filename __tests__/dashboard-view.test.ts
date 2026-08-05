@@ -1,89 +1,104 @@
-import { fillTone, formatCountdown, funnelBarWidth } from "@/lib/dashboard-view"
+import { barWidth } from "@/lib/dashboard-view"
 import { visibleNavFor } from "@/lib/dashboard-nav"
+import { formatAge, formatPct, formatSince } from "@/lib/dashboard-format"
 
-describe("funnelBarWidth", () => {
+describe("barWidth", () => {
   it("draws nothing for a stage nobody reached", () => {
-    // The bug this replaces: `Math.max(10, ...)` gave an empty stage a bar a
-    // tenth as wide as the best one, so a funnel that dropped to zero still
+    // The bug this replaces: `Math.max(10, …)` gave an empty funnel stage a bar
+    // a tenth as wide as the best one, so a funnel that dropped to zero still
     // looked like it converted.
-    expect(funnelBarWidth(0, 500)).toBe(0)
+    expect(barWidth(0, 500)).toBe(0)
   })
 
-  it("is proportional to the largest stage", () => {
-    expect(funnelBarWidth(250, 500)).toBe(50)
-    expect(funnelBarWidth(500, 500)).toBe(100)
+  it("is proportional to the largest value", () => {
+    expect(barWidth(250, 500)).toBe(50)
+    expect(barWidth(500, 500)).toBe(100)
   })
 
-  it("keeps a tiny non-zero stage visible", () => {
-    expect(funnelBarWidth(1, 50_000)).toBe(2)
+  it("keeps a tiny non-zero value visible", () => {
+    expect(barWidth(1, 50_000)).toBe(2)
+    expect(barWidth(1, 50_000, 3)).toBe(3)
   })
 
   it("never exceeds full width", () => {
-    expect(funnelBarWidth(900, 500)).toBe(100)
+    expect(barWidth(900, 500)).toBe(100)
   })
 
-  it("returns zero rather than dividing by zero on an empty funnel", () => {
-    expect(funnelBarWidth(0, 0)).toBe(0)
-    expect(funnelBarWidth(5, 0)).toBe(0)
-  })
-})
-
-describe("formatCountdown", () => {
-  it("names today and tomorrow instead of counting them", () => {
-    expect(formatCountdown(0)).toBe("Today")
-    expect(formatCountdown(1)).toBe("Tomorrow")
-    expect(formatCountdown(9)).toBe("In 9 days")
-  })
-
-  it("treats an event already under way as today, not as negative days", () => {
-    expect(formatCountdown(-3)).toBe("Today")
+  it("returns zero rather than dividing by zero", () => {
+    expect(barWidth(0, 0)).toBe(0)
+    expect(barWidth(5, 0)).toBe(0)
   })
 })
 
-describe("fillTone", () => {
-  it("keeps an event with no stated capacity neutral", () => {
-    // No capacity is not the same as empty: there is no target to fall short
-    // of, so it must not render as the alarm colour.
-    expect(fillTone(null)).toBe("bg-muted-foreground/40")
+describe("formatPct", () => {
+  it("renders an em dash for null, not 0%", () => {
+    // Load-bearing across the dashboard: an event with no stated capacity has
+    // no fill percentage, which is not the same as being empty.
+    expect(formatPct(null)).toBe("—")
+    expect(formatPct(0)).toBe("0%")
   })
 
-  it("escalates as an event fails to fill", () => {
-    expect(fillTone(95)).toBe("bg-success")
-    expect(fillTone(80)).toBe("bg-success")
-    expect(fillTone(60)).toBe("bg-chart-1")
-    expect(fillTone(25)).toBe("bg-chart-1")
-    expect(fillTone(24)).toBe("bg-destructive")
-    expect(fillTone(0)).toBe("bg-destructive")
+  it("rounds to whole percent", () => {
+    expect(formatPct(72.4)).toBe("72%")
+  })
+})
+
+describe("formatAge", () => {
+  it("scales the unit with the age", () => {
+    expect(formatAge(0.5)).toBe("just now")
+    expect(formatAge(9)).toBe("9h")
+    expect(formatAge(26)).toBe("1d")
+    expect(formatAge(null)).toBe("—")
+  })
+})
+
+describe("formatSince", () => {
+  it("says never rather than inventing a date", () => {
+    expect(formatSince(null)).toBe("never")
+  })
+
+  it("uses relative words near today", () => {
+    const now = Date.now()
+    expect(formatSince(new Date(now).toISOString())).toBe("today")
+    expect(formatSince(new Date(now - 26 * 60 * 60 * 1000).toISOString())).toBe("yesterday")
+    expect(formatSince(new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString())).toBe("5d ago")
   })
 })
 
 describe("visibleNavFor", () => {
-  const titles = (role: string | undefined) =>
-    visibleNavFor(role).map((item) => item.title)
+  const titles = (role: string | undefined) => visibleNavFor(role).map((item) => item.title)
 
-  it("gives app_admin every section", () => {
+  it("gives app_admin the platform sections including Moderation", () => {
     expect(titles("app_admin")).toEqual([
       "Overview",
+      "Moderation",
       "Events",
       "Chatrooms",
       "Users",
       "Organisers",
-      "Venue Owners",
+      "Venue owners",
     ])
+  })
+
+  it("gives each host role its own screens, not a shared list", () => {
+    // The whole point of the redesign's IA: venue_owner used to get the
+    // organiser's nav, which is why the role's actual questions had no home.
+    expect(titles("organizer")).toEqual(["Overview", "Events", "Attendees", "Chatrooms"])
+    expect(titles("venue_owner")).toEqual(["Overview", "Events", "My venues", "Chatrooms"])
   })
 
   it("keeps platform administration away from hosts", () => {
     for (const role of ["organizer", "venue_owner"]) {
       expect(titles(role)).not.toContain("Users")
       expect(titles(role)).not.toContain("Organisers")
-      expect(titles(role)).not.toContain("Venue Owners")
+      expect(titles(role)).not.toContain("Venue owners")
+      expect(titles(role)).not.toContain("Moderation")
     }
   })
 
   it("shows Chatrooms to venue owners", () => {
     // lib/rbac.ts `canModerateChat` grants venue_owner moderation over its own
     // events and the messaging page gates on `canManageEvent`, which agrees.
-    // The nav was the only thing saying no.
     expect(titles("venue_owner")).toContain("Chatrooms")
   })
 
@@ -91,6 +106,12 @@ describe("visibleNavFor", () => {
     expect(titles("attendee")).toEqual([])
     expect(titles(undefined)).toEqual([])
     expect(titles("not-a-role")).toEqual([])
+  })
+
+  it("badges only the moderation queue", () => {
+    const badged = visibleNavFor("app_admin").filter((item) => item.badgeKey)
+    expect(badged.map((item) => item.title)).toEqual(["Moderation"])
+    expect(badged[0].badgeKey).toBe("pendingFlags")
   })
 })
 

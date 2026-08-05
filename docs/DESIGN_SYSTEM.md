@@ -104,44 +104,65 @@ start at `h2`. The header used to render the page name as a 0.68rem uppercase
 eyebrow with the description sentence as the `h1`, which put the wrong string in
 the document's only landmark heading.
 
-### Do not floor a bar chart's width
+### Hierarchy comes from type, not boxes
 
-`funnelBarWidth` in `lib/dashboard-view.ts` returns 0 for a zero value. The
-previous inline version was `Math.max(10, …)`, which drew an empty funnel stage
-as if it had a tenth of the best stage's traffic. A non-zero value still gets a
-2% floor so a single check-in out of fifty thousand stays visible — that is a
-rounding courtesy for values already above zero, not an invented one.
+`MetricTile` has no card chrome at all, and exactly **one** `HeroMetric` per
+screen carries the brand gradient. If a second element wants the gradient, the
+screen has two priorities and one of them is wrong.
+
+The old overview put eleven things in bordered rounded cards at identical visual
+weight, so nothing read as primary and the eye had nowhere to land.
+
+### Charts are honest by construction
+
+Three rules, enforced in `components/dashboard/charts.tsx`:
+
+1. **Axes start at zero.** A truncated axis turns a 3% move into a cliff.
+2. **Zero draws as zero.** `barWidth` in `lib/dashboard-view.ts` returns 0 for a
+   zero value; the previous inline version was `Math.max(10, …)`, which drew an
+   empty funnel stage as if it had a tenth of the best stage's traffic. A
+   non-zero value gets a 2% floor so one check-in out of fifty thousand stays
+   visible — a rounding courtesy for values already above zero, not an invented
+   one.
+3. **Empty says what will fill it**, rather than rendering a bare grid that
+   reads as a broken chart.
+
+**Funnel stages must be nested subsets.** The first implementation counted four
+independent populations — onboarded profiles, users with an RSVP, users with a
+check-in — and drew them as a funnel; staging had 7 onboarded and 10 RSVP'd, so
+the funnel widened downward. Each stage now filters on the one above it. The
+integration suite asserts the sequence is non-increasing.
 
 ## What each role sees
 
-Every figure on the overview used to be trailing 30-day reporting, which answers
-"how did we do" and never "what needs attention now". `upcoming` and `breakdown`
-sit directly under the KPI cards for that reason.
+The redesign's central correction: the three roles get genuinely different
+screens, and the forward-looking question comes before any trailing report.
+Every figure on the old overview was a 30-day lookback, which answers "how did
+we do" and never "what needs attention now".
 
-| Section | app_admin | organizer | venue_owner |
+| | app_admin | organizer | venue_owner |
 |---|---|---|---|
-| Metrics (4) | users, active audience, supply, check-ins | portfolio, audience, demand, chat | same as organizer |
-| Spotlights (5) | repeat, host activation, push reach, rating, **moderation backlog** | repeat, fill, rating, top city, **turn-up rate** | …top venue, **turn-up rate** |
-| `upcoming` | next events platform-wide | own next events | own next events |
-| `breakdown` | **moderation queue** by review state | **rating spread** 1–5 | **events by venue** |
-| Trend | acquisition / supply / attendance / engagement | audience-scoped equivalent | same |
-| Funnel | signups → onboarded → active → checked in | events → published → audience → ratings | same |
+| Leads with | moderation attention strip | next event's fill %, in 40px type | per-venue comparison table |
+| Primary chart | signups vs active (the gap is the vanity) | RSVP pacing vs capacity | utilisation heatmap, day x slot |
+| Secondary | activation funnel | rating distribution | rating distribution, busiest venue |
+| Own screens | Moderation, Users, Organisers, Venue owners | Attendees | My venues |
 
-Three of these close gaps the audit found:
+### The moderation queue is new
 
-- **Moderation was invisible.** `moderation_flags` is a core table and its
-  pending count is the most time-sensitive number an admin has, but the only way
-  to see it was to open one event's messaging page at a time.
-- **Turn-up rate** is the gap between committed RSVPs and actual check-ins — the
-  no-show rate, which decides catering and whether to overbook. It is capped at
-  100% because walk-ins check in without ever RSVPing, and "112% turned up"
-  reads as a bug rather than a good night.
-- **Events by venue.** A venue owner with three venues previously saw one
-  blended number, which is the opposite of what the role exists to answer.
+`moderation_flags` is a core table whose pending count is the most
+time-sensitive number an admin has, and the only way to see any of it was to
+open one event's messaging page at a time. `/dashboard/moderation` is
+platform-wide, ordered oldest-first because **age is the SLA**, and every
+decision writes to `audit_logs`.
 
-`fillPct` is `null`, not `0`, when an event states no capacity. There is no
-target to fall short of, so `fillTone` renders it neutral — zero would paint it
-in the alarm colour.
+The sidebar badge count is fetched in the server layout, not by a client
+effect — an alert that pops in after paint is one the operator has already
+scrolled past.
+
+### Venues are derived, not modelled
+
+There is no `venues` table; a venue is a free-text string on an event. See
+`docs/DASHBOARD_DATA_GAPS.md` for what that costs and what the UI says about it.
 
 ## Navigation and roles
 

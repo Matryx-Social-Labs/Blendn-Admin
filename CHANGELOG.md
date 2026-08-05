@@ -5,6 +5,56 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-05
+
+### Changed
+
+- **Dashboard rebuilt from the Claude Design system.** The three roles now get
+  genuinely different screens rather than one layout with strings swapped, and
+  the forward-looking question leads each of them.
+  - `organizer` opens on the next event's fill against capacity in 40px type,
+    with an RSVP pacing curve plotted against days-to-event and the capacity
+    line drawn in — the question the old dashboard could not answer at all.
+  - `app_admin` opens on a moderation attention strip, then signups vs active
+    users on one axis, where the gap between the lines is the vanity.
+  - `venue_owner` gets per-venue rows, a day x slot utilisation heatmap, and
+    per-venue rating distributions. It previously received the organiser's
+    dashboard with two strings changed.
+- Navigation is per role: Moderation / Users / Organisers / Venue owners for
+  admins, Attendees for organisers, My venues for venue owners. Nav items are
+  single-line — the old two-line blocks with bordered icon tiles would have run
+  taller than the viewport at nine items.
+- Hierarchy now comes from type rather than boxes. The old overview put eleven
+  elements in identical bordered cards, so nothing read as primary.
+
+### Added
+
+- **Platform-wide moderation queue** at `/dashboard/moderation`. `moderation_flags`
+  is a core table and the only way to see any of it was to open one event's
+  messaging page at a time. Ordered oldest-first because age is the SLA; keep
+  and remove decisions write to `audit_logs`; the sidebar badge is fetched in
+  the server layout so it is correct on first paint.
+- Attendees screen for organisers (repeat attendance, no-shows) and My venues
+  for venue owners (one section per venue, never blended).
+- `docs/DASHBOARD_DATA_GAPS.md` — every metric was mapped to a real query before
+  being built; this records the ones that could not be produced honestly, what
+  shipped instead, and what it would take to close them.
+
+### Fixed
+
+- Funnel stages were four independently-counted populations drawn as a funnel.
+  Staging had 7 onboarded and 10 RSVP'd, so the chart widened downward. Each
+  stage now filters on the one above it, and the integration suite asserts the
+  sequence is non-increasing.
+
+### Removed
+
+- CSV export. The redesign has no export affordance, so the menu was removed
+  rather than left orphaned against a report shape that no longer exists. See
+  the note in `docs/DASHBOARD_DATA_GAPS.md` if it should come back.
+- Four dead files (`section-cards`, `chart-area-interactive`, duplicated under
+  both `app/dashboard/` and `components/`), referenced by nothing.
+
 ## [0.7.0] - 2026-08-05
 
 ### Added
