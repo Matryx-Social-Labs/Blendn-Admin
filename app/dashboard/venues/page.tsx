@@ -4,6 +4,7 @@ import { IconAlertTriangle, IconBuildingStore, IconCalendar } from "@tabler/icon
 
 import { EmptyState, MetricTile, RatingBars } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { getAuth } from "@/lib/auth"
 import { formatDay, formatNumber } from "@/lib/dashboard-format"
 
@@ -37,17 +38,27 @@ export default async function MyVenuesPage() {
       <EmptyState
         icon={<IconBuildingStore />}
         title="No venues yet"
-        description="Venues are read from the venue name set on your events. Publish an event with a venue and it gets its own section here — utilisation, ratings and upcoming bookings, never blended into one number."
+        description="Add your venue and events held there inherit its location, capacity and check-in area. Sections here are still built from the venue name on each event, so a venue with no events yet stays quiet until one runs."
+        action={
+          <Button asChild>
+            <Link href="/dashboard/venues/new">Add a venue</Link>
+          </Button>
+        }
       />
     )
   }
 
   return (
     <div className="flex flex-col gap-5">
-      <p className="text-[0.8125rem] text-muted-foreground">
-        Venues are grouped by the venue name on each event, so two spellings of the same room
-        read as two venues. Capacity is the largest any event there has declared.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-prose text-[0.8125rem] text-muted-foreground">
+          Venues are grouped by the venue name on each event, so two spellings of the same room
+          read as two venues. Capacity is the largest any event there has declared.
+        </p>
+        <Button asChild>
+          <Link href="/dashboard/venues/new">Add a venue</Link>
+        </Button>
+      </div>
 
       {overview.venues.map((venue) => {
         const lowSkew = venue.ratings[0] + venue.ratings[1] > venue.ratings[3] + venue.ratings[4]

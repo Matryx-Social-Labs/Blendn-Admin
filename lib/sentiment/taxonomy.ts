@@ -5,12 +5,20 @@
  * they can act on. "9 of 12 are the bar queue" tells them to open another bar.
  * So every classified message carries a category as well as a polarity.
  *
- * The set is drawn from live-event operations research rather than invented.
- * Crowd mismanagement is the single largest cause of venue incidents (~45% in
- * 2023), with queueing and bottlenecks, wayfinding confusion, and technical
- * failures the other recurring themes. Keeping it small matters — a taxonomy
- * with thirty labels gets used inconsistently by both the classifier and the
- * humans correcting it.
+ * The set is drawn from live-event operations guidance rather than invented:
+ * crowd density and bottlenecks, queueing, wayfinding confusion, and technical
+ * failures are the recurring themes across crowd-management write-ups.
+ *
+ * No share-of-incidents figure is attached, because none of the sources
+ * consulted actually carries one — an earlier version of this comment claimed
+ * "~45% of venue incidents" and that number was not in either source. The
+ * argument for real-time categories does not need it: post-event surveys draw
+ * 5–15% responses, attendees forget most detail within a day, and every
+ * alternative to reading the chatroom needs cameras, wearables or attendee
+ * effort.
+ *
+ * Keeping it small matters — a taxonomy with thirty labels gets used
+ * inconsistently by both the classifier and the humans correcting it.
  */
 export const ISSUE_CATEGORIES = [
   /** Doors, entry lines, ID checks, slow scanning. */

@@ -6,6 +6,7 @@ import {
   IconFileSpreadsheet,
   IconFlag,
   IconHistory,
+  IconFileCheck,
   IconInbox,
   IconListDetails,
   IconMessage2,
@@ -114,6 +115,14 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
     url: "/dashboard/venue-owners",
     icon: IconBuildingStore,
+    allowedRoles: ["app_admin"],
+  },
+  {
+    title: "Venue claims",
+    description:
+      "Ownership requests. Approving one hands over the events other organisers hold there.",
+    url: "/dashboard/venue-claims",
+    icon: IconFileCheck,
     allowedRoles: ["app_admin"],
   },
   {

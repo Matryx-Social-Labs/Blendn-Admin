@@ -1,7 +1,9 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getAuth } from "@/lib/auth"
 import { getRoleUsers } from "@/lib/admin-role-actions"
 import { RoleUsersTable } from "@/components/role-users-table"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { IconCalendarEvent, IconUsers, IconBuildingStore } from "@tabler/icons-react"
 
@@ -18,11 +20,24 @@ export default async function VenueOwnersPage() {
   return (
     <div className="flex flex-col gap-6 py-6">
       <div className="px-4 lg:px-6">
-        <div className="rounded-xl border bg-card px-6 py-6">
-          <h1 className="text-3xl font-semibold">Venue Owners</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Track venue-side operators, inventory depth, and the event portfolio each venue supports.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border bg-card px-6 py-6">
+          <div>
+            <h1 className="text-3xl font-semibold">Venue Owners</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Track venue-side operators, inventory depth, and the event portfolio each venue
+              supports.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link href="/dashboard/venue-claims">Review claims</Link>
+            </Button>
+            <Button asChild>
+              {/* Admin-created venues land unclaimed, which is how the directory
+                  gets seeded before any owner is on the platform. */}
+              <Link href="/dashboard/venues/new">Add a venue</Link>
+            </Button>
+          </div>
         </div>
       </div>
 
