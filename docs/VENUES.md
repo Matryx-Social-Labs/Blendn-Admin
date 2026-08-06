@@ -228,6 +228,7 @@ Tests: `__tests__/venue-types.test.ts`, `venue-actions.test.ts`,
   read as two venues. It has not been switched over to the real table.
 - **No PostGIS.** All geometry is pure JS over one event's fence at a time. The
   seam is "events near me", which would want a spatial index.
-- **Five production events carry oversized check-in radii**, including one at
-  100 km. The 2000 m cap guards new writes only; existing rows were not
-  migrated.
+- ~~Five production events carry oversized check-in radii~~ — **fixed in
+  v0.35.0**. `scripts/clamp-oversized-radii.ts` replaced the five pre-cap radii
+  (100 km, 10 km ×2, 5 km ×2) with real geofences. All five were past events, so
+  no live check-in was affected.
