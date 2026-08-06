@@ -1,8 +1,8 @@
 "use client"
 
 import Image from "next/image"
-import { Suspense, useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { signIn, useSession } from "next-auth/react"
 
 import { Button } from "@/components/ui/button"
@@ -28,15 +28,28 @@ import { Label } from "@/components/ui/label"
  */
 function SignInForm() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const { status } = useSession()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // `/invite?token=…` sends people here and expects them back afterwards.
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard"
+  /*
+   * `/invite?token=…` sends people here and expects them back afterwards.
+   *
+   * Read from `window.location` rather than `useSearchParams`, which would
+   * force this whole form behind a Suspense boundary — and a statically
+   * rendered page flushes the *fallback*, so the initial HTML would be the word
+   * "Loading" and the form would only appear after hydration. The callback is
+   * not needed until submit, which is long after that.
+   */
+  const [callbackUrl, setCallbackUrl] = useState("/dashboard")
+  useEffect(() => {
+    const target = new URLSearchParams(window.location.search).get("callbackUrl")
+    // Relative paths only. An absolute URL here is an open redirect: an invite
+    // link could bounce someone to a look-alike sign-in on another host.
+    if (target && target.startsWith("/") && !target.startsWith("//")) setCallbackUrl(target)
+  }, [])
 
   useEffect(() => {
     if (status === "authenticated") router.push(callbackUrl)
@@ -150,9 +163,7 @@ export default function LoginPage() {
         height={560}
         className="pointer-events-none absolute -bottom-[18%] -right-[8%] w-[560px] max-w-none opacity-[0.04]"
       />
-      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
-        <SignInForm />
-      </Suspense>
+      <SignInForm />
     </main>
   )
 }
