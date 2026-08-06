@@ -102,6 +102,9 @@ issuance and rotation, moderation — are the ones worth keeping covered.
 | `docs/API.md` | REST endpoint reference |
 | `docs/SOCKET_EVENTS.md` | Socket.io event catalog and room authorization |
 | `docs/chat-moderation.md` | Moderation pipeline and thresholds |
+| `docs/VENUES.md` | Venues, claims, geofencing, and how events link to a venue |
+| `docs/ORGANISATIONS.md` | Organisations, membership, and how permissions resolve |
+| `docs/ROADMAP.md` | Claimed-but-not-built, known product gaps, open decisions |
 | `DEPLOYMENT.md` | Railway deployment and environment variables |
 | `CHANGELOG.md` | Release history |
 
