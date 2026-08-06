@@ -8,6 +8,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { chatClosesAt } from "@/lib/chat-window"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
+import { actorFor } from "@/lib/org-membership"
 
 export interface FeedbackMessage {
   id: string
@@ -54,7 +55,7 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
     },
   })
   if (!event) return null
-  if (!eventPermissions(session.user, event).canOperate) return null
+  if (!eventPermissions(await actorFor(session.user), event).canOperate) return null
 
   const feedback = await db.event_feedback.findMany({
     where: { event_id: eventId },
@@ -161,7 +162,7 @@ export async function correctFeedbackLabel(
     },
   })
   if (!row) throw new Error("Feedback not found")
-  if (!eventPermissions(session.user, row.event).canOperate) {
+  if (!eventPermissions(await actorFor(session.user), row.event).canOperate) {
     throw new Error("Not authorised to correct this label")
   }
 

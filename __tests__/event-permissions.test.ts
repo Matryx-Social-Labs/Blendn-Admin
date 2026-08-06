@@ -179,3 +179,26 @@ describe("eventPermissions — editorial always implies operational", () => {
     }
   })
 })
+
+describe("the actor must carry its memberships — the bug the compiler now blocks", () => {
+  it("denies an actor built without orgIds", () => {
+    // `eventPermissions(session.user, event)` used to typecheck, because
+    // `orgIds` was optional and a NextAuth session user simply does not have
+    // it. The resolver read `undefined`, took the empty-set branch, and denied
+    // every non-admin — the feedback screen shipped broken for every organiser
+    // and venue owner, and rendered as an ordinary empty state.
+    //
+    // `orgIds` is required now, so this cannot be written by accident. The cast
+    // reproduces what used to compile.
+    const sessionShaped = { id: ALICE, role: "organizer" } as unknown as PermissionActor
+    expect(eventPermissions(sessionShaped, event(ORG_HOST)).canOperate).toBe(false)
+  })
+
+  it("grants the same actor once its memberships are loaded", () => {
+    // The contrast that makes the bug legible: identical person, identical
+    // event, and the only difference is whether actorFor() was called.
+    expect(eventPermissions(actor(ALICE, "organizer", [ORG_HOST]), event(ORG_HOST)).canOperate).toBe(
+      true
+    )
+  })
+})
