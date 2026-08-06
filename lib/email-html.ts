@@ -233,3 +233,22 @@ export function domainVerifyHtml(domain: string, link: string): string {
     ].join("\n"),
   })
 }
+
+export function passwordResetHtml(name: string, link: string): string {
+  return shell({
+    title: "Reset your Blend'n password",
+    preheader: "A link to set a new password. It expires in an hour.",
+    body: [
+      heading("Set a new password"),
+      para(`Hi ${esc(name)}, someone asked to reset the password on your Blend&#39;n account.`),
+      button(link, "Set a new password"),
+      fallbackLink(link),
+      // One hour, and the mail says so. A reset link is the one credential in
+      // the product that changes another credential.
+      note("&#9202; This link expires in one hour and can only be used once."),
+      note(
+        "Didn&#39;t ask for this? Ignore this email &mdash; your password has not changed. If it keeps happening, reply and tell us."
+      ),
+    ].join("\n"),
+  })
+}

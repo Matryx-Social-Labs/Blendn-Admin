@@ -1,6 +1,7 @@
 "use client"
 
 import Image from "next/image"
+import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { signIn, useSession } from "next-auth/react"
@@ -23,9 +24,8 @@ import { safeRedirect } from "@/lib/safe-redirect"
  * and wants to be past it, so the design is a single centred column and one
  * card.
  *
- * No "forgotten password" link, deliberately: there is no reset flow, and a
- * link that 404s is worse than an absent one. See the note in the sign-in
- * failure copy — support is the honest route until the flow exists.
+ * The "forgotten password" link was absent in the first import because there
+ * was no reset flow and a 404 is worse than a missing link. There is one now.
  */
 function SignInForm() {
   const router = useRouter()
@@ -146,6 +146,15 @@ function SignInForm() {
         <Button type="submit" size="lg" disabled={loading} className="w-full">
           {loading ? "Signing in…" : "Sign in"}
         </Button>
+
+        {/* Now a real destination. It was left out of the design import because
+            there was no reset flow and a 404 is worse than an absent link. */}
+        <Link
+          href="/forgot-password"
+          className="text-center text-[0.8125rem] text-muted-foreground hover:text-foreground"
+        >
+          Forgotten your password?
+        </Link>
       </form>
 
       <p className="mx-auto max-w-[40ch] text-center text-[0.78125rem] text-faint-foreground">
