@@ -2,11 +2,12 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { haversineDistanceMeters } from "@/lib/geo"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
-import { rateLimit } from "@/lib/rate-limit"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { evaluateCheckIn, legacyGeofence, validateGeofence } from "@/lib/geofence"
 import {
+  ErrorCode,
   successResponse,
   validationErrorResponse,
   unauthorizedResponse,
@@ -22,17 +23,6 @@ interface RouteParams {
 }
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
-  // Rate limit: max 10 check-in attempts per user per 10 minutes
-  const rateLimited = await rateLimit(request, {
-    windowMs: 10 * 60 * 1000,
-    maxRequests: 10,
-    keyGenerator: (req) => {
-      const auth = req.headers.get("authorization") || "anon"
-      return `checkin:${auth.slice(-16)}`
-    },
-  })
-  if (rateLimited) return rateLimited
-
   try {
     const { eventId } = await params
 
@@ -41,6 +31,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    /*
+     * Rate limited on the user id, after authentication.
+     *
+     * It previously keyed on the last 16 characters of the raw Authorization
+     * header and ran before auth — so refreshing the token handed the caller a
+     * fresh bucket, which is exactly what someone probing the geofence
+     * boundary would do. `userLimit` exists for this and carries a comment
+     * saying header keying is the wrong choice for an authenticated route;
+     * this route predates it.
+     */
+    const rateLimited = await rateLimit(request, userLimit("safety", "checkin", authUser.userId))
+    if (rateLimited) return rateLimited
 
     const body = await request.json()
 
@@ -52,11 +55,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { latitude, longitude, deviceInfo } = parsed.data
 
-    // Reject submissions with poor GPS accuracy to prevent spoofing
+    // A fix this vague tells us nothing at all — it is not evidence of being
+    // anywhere. Below the ceiling, accuracy is no longer a pass/fail gate: it
+    // is folded into the distance test below, which is where it belongs.
     const gpsAccuracy = deviceInfo?.gpsAccuracy
     if (gpsAccuracy !== undefined && gpsAccuracy > MAX_GPS_ACCURACY_METERS) {
       return errorResponse(
-        `GPS signal is too weak (accuracy: ${Math.round(gpsAccuracy)}m). Move to an area with better signal and try again.`
+        `GPS signal is too weak (accuracy: ${Math.round(gpsAccuracy)}m). Move to an area with better signal and try again.`,
+        400,
+        ErrorCode.OUT_OF_RANGE
       )
     }
 
@@ -77,29 +84,58 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Check if event has started
     const now = new Date()
     if (now < event.start_time) {
-      return errorResponse("Event has not started yet")
+      return errorResponse("Event has not started yet", 400, ErrorCode.EVENT_NOT_STARTED)
     }
 
     // Check if event has ended
     if (now > event.end_time) {
-      return errorResponse("Event has already ended")
+      return errorResponse("Event has already ended", 400, ErrorCode.EVENT_ENDED)
     }
 
-    // Validate location if event has coordinates
-    if (event.latitude && event.longitude) {
-      const distanceMeters = haversineDistanceMeters(
-        latitude,
-        longitude,
-        event.latitude,
-        event.longitude
-      )
+    /*
+     * The geofence.
+     *
+     * Three things changed here, all of which were letting people in who should
+     * not have been:
+     *
+     *  1. `if (event.latitude && event.longitude)` was truthiness, so an event
+     *     at longitude 0 skipped the check entirely.
+     *  2. An event with NO coordinates skipped it too — and nothing required
+     *     coordinates to publish, so such an event accepted check-ins from
+     *     anywhere on earth. It is now refused outright.
+     *  3. The device's reported accuracy was a separate pass/fail gate rather
+     *     than part of the distance test, so a 140m-accuracy fix 25m away
+     *     passed while a good fix 35m away failed.
+     *
+     * `evaluateCheckIn` folds buffer and accuracy into one comparison. Legacy
+     * events with no `geofence` column go through `legacyGeofence`, which maps
+     * the old radius to pure extent with a zero buffer — strictly more
+     * permissive than before, so nobody who could check in yesterday is
+     * refused today.
+     */
+    // A stored geofence that fails validation falls back rather than locking
+    // everyone out — bad data in one column must not take the venue offline.
+    const stored = event.geofence ? validateGeofence(event.geofence) : null
+    const fence = stored?.ok
+      ? stored.fence
+      : legacyGeofence(event.latitude, event.longitude, event.check_in_radius)
 
-      // check_in_radius is stored in meters
-      if (distanceMeters > event.check_in_radius) {
-        return errorResponse(
-          `You must be within ${event.check_in_radius} meters of the event to check in. You are currently ${Math.round(distanceMeters)} meters away.`
-        )
-      }
+    if (!fence) {
+      logger.error("Check-in attempted on an event with no geofence", { eventId })
+      return errorResponse(
+        "This event has no location set, so check-in is unavailable. Contact the organiser.",
+        400,
+        ErrorCode.OUT_OF_RANGE
+      )
+    }
+
+    const verdict = evaluateCheckIn({ lat: latitude, lng: longitude }, fence, gpsAccuracy)
+    if (!verdict.ok) {
+      return errorResponse(
+        `You're about ${Math.round(verdict.shortfall)}m outside the check-in area. Move closer to the venue and try again.`,
+        400,
+        ErrorCode.OUT_OF_RANGE
+      )
     }
 
     // Fix #25: Prevent checking in to multiple events simultaneously.
