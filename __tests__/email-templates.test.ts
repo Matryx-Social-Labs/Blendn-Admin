@@ -4,6 +4,7 @@ import {
   approvedEmail,
   declinedEmail,
   domainVerifyEmail,
+  applyUrl,
 } from "@/lib/email"
 
 /**
@@ -232,5 +233,51 @@ describe("the approval email's credential block", () => {
     expect(html).toMatch(/change this password/i)
     // And it points at the screen that now exists to do it.
     expect(html).toMatch(/Settings/)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Which host each link points at                                              */
+/* -------------------------------------------------------------------------- */
+
+describe("host-facing links can move; session-bound links cannot", () => {
+  const ORIGINAL = { ...process.env }
+  afterEach(() => {
+    process.env.NEXTAUTH_URL = ORIGINAL.NEXTAUTH_URL
+    delete process.env.PUBLIC_APPLY_URL
+  })
+
+  it("applyUrl falls back to the dashboard when unset", () => {
+    process.env.NEXTAUTH_URL = "https://api.blendn.app"
+    delete process.env.PUBLIC_APPLY_URL
+    expect(applyUrl()).toBe("https://api.blendn.app")
+  })
+
+  it("applyUrl follows PUBLIC_APPLY_URL when set", () => {
+    process.env.PUBLIC_APPLY_URL = "https://organizers.blendn.app"
+    expect(applyUrl()).toBe("https://organizers.blendn.app")
+  })
+
+  it("strips a trailing slash so links never double up", () => {
+    // `https://x.app//apply/verify` is a 404 on most hosts.
+    process.env.PUBLIC_APPLY_URL = "https://organizers.blendn.app/"
+    expect(applyUrl()).toBe("https://organizers.blendn.app")
+  })
+
+  it("ignores a blank value rather than emitting a relative link", () => {
+    process.env.PUBLIC_APPLY_URL = "   "
+    process.env.NEXTAUTH_URL = "https://api.blendn.app"
+    expect(applyUrl()).toBe("https://api.blendn.app")
+  })
+
+  it("keeps the sign-in link on the dashboard even when apply has moved", () => {
+    // The approval email hands over a password for a dashboard that lives on
+    // NEXTAUTH_URL. Sending someone to the marketing host to sign in would be a
+    // 404 at the exact moment they first try to use the product.
+    process.env.NEXTAUTH_URL = "https://api.blendn.app"
+    process.env.PUBLIC_APPLY_URL = "https://organizers.blendn.app"
+    const t = approvedEmail("Asha", "Byg Brewski", "a@byg.in", "pw")
+    expect(t.text).toContain("https://api.blendn.app/login")
+    expect(t.text).not.toContain("organizers.blendn.app")
   })
 })

@@ -114,6 +114,7 @@ blendn.app          A        <landing-page-ip>
 | `OPENAI_API_KEY` | No | AI moderation. Without it, moderation falls back to keyword matching only |
 | `RESEND_API_KEY` | No | Transactional email. Without it onboarding and invites still work, but nothing is sent — the dashboard shows the link/password to pass on by hand |
 | `EMAIL_FROM` | No | Sender, `"Blend'n" <hello@blendn.app>`. Quote the display name — the apostrophe is legal unquoted per RFC 5322 but quoting is free. Required alongside `RESEND_API_KEY`; email is off unless both are set |
+| `PUBLIC_APPLY_URL` | No | Host for the public apply flow, e.g. `https://organizers.blendn.app`. Only the apply/confirm emails follow it — invite, approval and domain links stay on `NEXTAUTH_URL` because they need a session. Unset, everything uses `NEXTAUTH_URL` |
 | `EMAIL_FOOTER_ADDRESS` | No | Registered office, shown in the email footer. Omitted entirely when unset — a made-up address in a compliance footer is worse than none. Set it before any bulk sending |
 | `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
