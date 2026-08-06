@@ -89,12 +89,6 @@ protects the only geocoder the product has.
 `venue_link_status: "disputed"` is written and read, but no screen lets an owner
 set it. See [VENUES.md](./VENUES.md#known-gaps).
 
-### Oversized production check-in radii
-
-Five live events carry radii above the 2000 m cap, including one at 100 km. The
-cap guards new writes only. Fixing existing rows is live event config and needs
-a decision, not a migration run quietly.
-
 ---
 
 ## Business model
