@@ -6,7 +6,7 @@ import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { canSubmitApplication, onboardingTier, hashInviteToken, newInviteToken } from "@/lib/org-invites"
 import { validateGstin } from "@/lib/gstin"
-import { sendEmail, onboardingVerifyEmail, appUrl, emailConfigured } from "@/lib/email"
+import { sendEmail, onboardingVerifyEmail, applyUrl, emailConfigured } from "@/lib/email"
 
 /**
  * The public host application.
@@ -153,7 +153,9 @@ export async function POST(req: NextRequest) {
           expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       })
-      const link = `${appUrl()}/apply/verify?token=${encodeURIComponent(token)}`
+      // applyUrl(), not appUrl(): the confirmation lands on a public page that
+      // needs no session, so it can live on the organiser marketing host.
+      const link = `${applyUrl()}/apply/verify?token=${encodeURIComponent(token)}`
       const result = await sendEmail({
         to: input.contact_email,
         ...onboardingVerifyEmail(request.contact_name, link, request.display_name),

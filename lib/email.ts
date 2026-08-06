@@ -39,9 +39,37 @@ function emailFrom(): string | undefined {
   return process.env.EMAIL_FROM
 }
 
-/** Base URL for links in emails. Falls back to NEXTAUTH_URL, which is required. */
+/** Where the dashboard lives. Sign-in and every authenticated link uses this. */
 export function appUrl(): string {
   return (process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(/\/$/, "")
+}
+
+/**
+ * Where a *host-facing* link should point.
+ *
+ * The apply flow is marketing-adjacent — someone reading the organiser pitch on
+ * `organizers.blendn.app` should stay there through applying and confirming,
+ * rather than being thrown onto `api.blendn.app`, which is a strange domain to
+ * hand a human.
+ *
+ * Set `PUBLIC_APPLY_URL` to that host and the apply emails follow. Unset, it is
+ * `appUrl()` and nothing changes.
+ *
+ * **This is deliberately not used for the invite, the approval, or the domain
+ * emails.** Those land on pages that need a NextAuth session, and the session
+ * cookie is scoped to the dashboard host — pointing them elsewhere would break
+ * acceptance for everyone, and it would break it silently, because the page
+ * renders fine and only the accept fails.
+ *
+ * The intended shape is a rewrite (`organizers.blendn.app/apply/*` → this app)
+ * rather than a second implementation of the form. `/apply` imports its tier
+ * gate straight from `lib/org-invites` so the hint shown and the rule enforced
+ * cannot drift; a re-implementation loses that, and the drift is invisible —
+ * the form says "submit" and the server says 400.
+ */
+export function applyUrl(): string {
+  const configured = process.env.PUBLIC_APPLY_URL?.trim()
+  return configured ? configured.replace(/\/$/, "") : appUrl()
 }
 
 export async function sendEmail(opts: {
