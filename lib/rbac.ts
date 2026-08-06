@@ -19,8 +19,19 @@ export function canSendPushNotifications(role: user_role): boolean {
 export interface PermissionActor {
   id: string
   role: user_role
-  /** Organisations this actor is a member of. Empty denies everything. */
-  orgIds?: string[]
+  /**
+   * Organisations this actor is a member of. Empty denies everything.
+   *
+   * **Required, not optional.** It was optional, and that let
+   * `eventPermissions(session.user, event)` typecheck — a NextAuth session user
+   * has no `orgIds`, so the resolver read `undefined`, took the empty-set
+   * branch, and denied every non-admin. The feedback screen shipped broken for
+   * every organiser and venue owner and looked like an empty state.
+   *
+   * Making it required means the only way to build an actor is `actorFor()`,
+   * which loads memberships. The compiler now catches what a test could not.
+   */
+  orgIds: string[]
 }
 
 /**

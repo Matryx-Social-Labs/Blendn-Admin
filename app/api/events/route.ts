@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
+import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
 import slugify from "slugify"
 import { PAGINATION } from "@/lib/constants"
@@ -20,9 +21,34 @@ export async function GET(req: NextRequest) {
     const session = await getAuth()
     if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
 
+    /*
+     * Scoped on ORGANISATION MEMBERSHIP, not on who created the row.
+     *
+     * This was `organizer_id === session.user.id`, which predates the move to
+     * organisations and had two consequences nobody would report as a bug: a
+     * colleague at the same company saw an empty list because they had not
+     * personally created anything, and a venue owner saw nothing at all
+     * despite `eventPermissions` granting them operational access to every
+     * event in their building.
+     *
+     * The three clauses mirror `eventPermissions.canOperate` exactly.
+     */
     const where: Record<string, unknown> = { deleted_at: null }
     if (session.user.role !== "app_admin") {
-      where.organizer_id = session.user.id
+      const actor = await actorFor(session.user)
+      where.OR = [
+        ...(actor.orgIds.length
+          ? [
+              { organizer_org_id: { in: actor.orgIds } },
+              ...(session.user.role === "venue_owner"
+                ? [{ venue: { owner_org_id: { in: actor.orgIds } } }]
+                : []),
+            ]
+          : []),
+        // Kept so an event created before organisations existed, or by someone
+        // whose org link is missing, stays visible to its creator.
+        { organizer_id: session.user.id },
+      ]
     }
 
     // Bounded so the payload can't grow without limit as events accumulate.
