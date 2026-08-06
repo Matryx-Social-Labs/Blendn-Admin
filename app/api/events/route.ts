@@ -6,6 +6,7 @@ import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
 import slugify from "slugify"
 import { PAGINATION } from "@/lib/constants"
+import { resolveVenueLink } from "@/lib/venue-link"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -92,6 +93,7 @@ export async function POST(req: Request) {
       description,
       short_description,
       venue_name,
+      venue_id,
       address,
       city,
       state,
@@ -157,8 +159,12 @@ export async function POST(req: Request) {
       return new NextResponse("Missing full description", { status: 400 })
     }
 
+    // Derived, never taken from the body — see lib/venue-link.ts.
+    const venueLink = await resolveVenueLink(venue_id)
+
     const event = await db.events.create({
       data: {
+        ...venueLink,
         title,
         slug: slugify(title, { lower: true, strict: true }),
         description,

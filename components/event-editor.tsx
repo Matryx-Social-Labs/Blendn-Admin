@@ -22,6 +22,7 @@ interface EventEditorData {
   full_description: string
   short_description?: string | null
   venue_name?: string | null
+  venue_id?: string | null
   address?: string | null
   city?: string | null
   state?: string | null
@@ -117,6 +118,8 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
       full_description: initialEvent.full_description,
       short_description: initialEvent.short_description ?? undefined,
       venue_name: initialEvent.venue_name ?? undefined,
+      // Re-hydrates the picker; the location section loads the venue from it.
+      venue_id: initialEvent.venue_id ?? null,
       address: initialEvent.address ?? undefined,
       city: initialEvent.city ?? undefined,
       state: initialEvent.state ?? undefined,

@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
+import { resolveVenueLink } from "@/lib/venue-link"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -60,6 +61,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       description,
       short_description,
       venue_name,
+      venue_id,
       address,
       city,
       state,
@@ -134,6 +136,16 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     // Fix #35: When cancelling an event, cascade to active check-ins
     const isCancelling = status === "cancelled" && event.status !== "cancelled"
 
+    // Omitted means "leave the link alone" — a PATCH that only changes the
+    // title must not unlink the venue. Explicit null unlinks.
+    const venueLink =
+      venue_id === undefined
+        ? {}
+        : await resolveVenueLink(venue_id, {
+            venue_id: event.venue_id,
+            venue_link_status: event.venue_link_status,
+          })
+
     const updatedEvent = await db.events.update({
       where: { id: resolvedParams.id },
       data: {
@@ -142,6 +154,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         description: description ?? undefined,
         short_description: short_description ?? undefined,
         venue_name: venue_name ?? undefined,
+        ...venueLink,
         address: address ?? undefined,
         city: city ?? undefined,
         state: state ?? undefined,

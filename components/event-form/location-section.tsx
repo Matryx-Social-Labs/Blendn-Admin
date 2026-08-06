@@ -1,6 +1,8 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
+import { IconAlertTriangle } from "@tabler/icons-react"
 import {
   FormControl,
   FormField,
@@ -14,6 +16,9 @@ import type { Geofence } from "@/lib/geofence"
 import { LocationPicker, type LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
+import { VenuePicker } from "@/components/event-form/venue-picker"
+import { venueById, type VenueOption } from "@/lib/venue-actions"
+import { validateGeofence } from "@/lib/geofence"
 
 export function LocationSection({
   form,
@@ -26,6 +31,84 @@ export function LocationSection({
   const initialLat = form.getValues("latitude")
   const initialLng = form.getValues("longitude")
 
+  const [venue, setVenue] = useState<VenueOption | null>(null)
+  const venueId = form.watch("venue_id")
+
+  // Editing an existing linked event: the id is on the form, the venue is not.
+  useEffect(() => {
+    if (!venueId || venue?.id === venueId) return
+    let cancelled = false
+    venueById(venueId)
+      .then((v) => {
+        if (!cancelled && v) setVenue(v)
+      })
+      .catch(() => {
+        // A failed lookup leaves the free-text name showing, which is still
+        // correct — the link is on the form either way.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [venueId, venue?.id])
+
+  /**
+   * Picking a venue fills what the venue already knows.
+   *
+   * Verify-once, not hide: everything below stays editable, because an event on
+   * the rooftop of a three-floor venue legitimately differs from the venue's
+   * own footprint.
+   */
+  function inherit(picked: VenueOption) {
+    setVenue(picked)
+    form.setValue("venue_id", picked.id)
+    // auto_linked, not confirmed — the organiser picked the venue, but nobody
+    // has confirmed this event actually belongs to it. The owner's dispute path
+    // reads this.
+    form.setValue("venue_link_status", "auto_linked")
+    form.setValue("venue_name", picked.name)
+    if (picked.address) form.setValue("address", picked.address)
+    if (picked.city) form.setValue("city", picked.city)
+    if (picked.lat !== null && picked.lng !== null) {
+      form.setValue("latitude", picked.lat)
+      form.setValue("longitude", picked.lng)
+      // Keeps the map pin in step. The remaining address parts stay as the
+      // organiser left them — the venue record does not carry them.
+      onLocationChange({
+        lat: picked.lat,
+        lng: picked.lng,
+        address: picked.address ?? form.getValues("address") ?? "",
+        city: picked.city ?? form.getValues("city") ?? "",
+        state: form.getValues("state") ?? "",
+        country: form.getValues("country") ?? "",
+        postal_code: form.getValues("postal_code") ?? "",
+      })
+    }
+    // Prefill only when empty. Overwriting a capacity the organiser already
+    // typed would silently change the number they meant.
+    if (!form.getValues("max_capacity") && picked.capacity) {
+      form.setValue("max_capacity", picked.capacity)
+    }
+    // The check-in area is a property of the place, and was being redrawn per
+    // event. Validated rather than trusted — it came from the database, but so
+    // did the 100km radius.
+    if (picked.geofence) {
+      const parsed = validateGeofence(picked.geofence)
+      if (parsed.ok) form.setValue("geofence", parsed.fence)
+    }
+  }
+
+  function unlink() {
+    setVenue(null)
+    form.setValue("venue_id", null)
+    form.setValue("venue_link_status", null)
+    // The name, location and geofence stay — the organiser typed an event at
+    // this place, and clearing it all would punish them for unlinking.
+  }
+
+  const capacity = form.watch("max_capacity")
+  const overVenueCapacity =
+    venue?.capacity != null && capacity != null && capacity > venue.capacity
+
   return (
     <FormSection title="Location">
       <FormField
@@ -33,14 +116,31 @@ export function LocationSection({
         name="venue_name"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Venue Name</FormLabel>
+            <FormLabel>Venue</FormLabel>
             <FormControl>
-              <Input placeholder="Venue or venue name" {...field} />
+              <VenuePicker
+                value={field.value ?? ""}
+                selected={venue}
+                onTextChange={field.onChange}
+                onSelect={inherit}
+                onClear={unlink}
+              />
             </FormControl>
             <FormMessage />
           </FormItem>
         )}
       />
+
+      {overVenueCapacity ? (
+        <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3.5 py-2.5 text-[0.78125rem]">
+          <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <span>
+            {venue!.name} is listed at {venue!.capacity} and this event is set to {capacity}. A
+            warning, not a block — the venue figure is the room&rsquo;s maximum and may be out of
+            date.
+          </span>
+        </p>
+      ) : null}
 
       <div>
         <FormLabel>Map Location</FormLabel>

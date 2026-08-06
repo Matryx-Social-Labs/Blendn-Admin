@@ -165,6 +165,7 @@ export default async function EventDetailPage({ params, searchParams }: EventPag
         full_description: event.details?.full_description ?? event.description,
         short_description: event.short_description,
         venue_name: event.venue_name,
+        venue_id: event.venue_id,
         address: event.address,
         city: event.city,
         state: event.state,
