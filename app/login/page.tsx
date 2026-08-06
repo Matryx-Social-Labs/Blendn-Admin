@@ -8,6 +8,7 @@ import { signIn, useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { safeRedirect } from "@/lib/safe-redirect"
 
 /**
  * Sign in.
@@ -45,10 +46,7 @@ function SignInForm() {
    */
   const [callbackUrl, setCallbackUrl] = useState("/dashboard")
   useEffect(() => {
-    const target = new URLSearchParams(window.location.search).get("callbackUrl")
-    // Relative paths only. An absolute URL here is an open redirect: an invite
-    // link could bounce someone to a look-alike sign-in on another host.
-    if (target && target.startsWith("/") && !target.startsWith("//")) setCallbackUrl(target)
+    setCallbackUrl(safeRedirect(new URLSearchParams(window.location.search).get("callbackUrl")))
   }, [])
 
   useEffect(() => {
@@ -76,10 +74,18 @@ function SignInForm() {
     }
   }
 
-  if (status === "loading") {
-    return <p className="text-sm text-muted-foreground">Loading…</p>
-  }
-
+  /*
+   * No loading gate.
+   *
+   * `useSession()` reports "loading" during server rendering — there is no
+   * session to read yet — so returning early on it meant the server rendered
+   * the word "Loading" and *nothing else*. The form only existed after
+   * hydration, which is what `curl /login` showed and what a slow connection
+   * got.
+   *
+   * Someone signed out should see the form immediately; someone already signed
+   * in is moved along by the effect above. Neither case wants a spinner.
+   */
   return (
     <div className="relative flex w-full max-w-[400px] flex-col gap-7">
       <div className="flex flex-col items-center gap-3.5">
