@@ -1,180 +1,158 @@
 "use client"
 
-import { logger } from "@/lib/logger"
-import Link from "next/link"
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import Image from "next/image"
+import { Suspense, useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { signIn, useSession } from "next-auth/react"
-import {
-  IconArrowRight,
-  IconChartHistogram,
-  IconDownload,
-  IconSparkles,
-} from "@tabler/icons-react"
-import { toast } from "sonner"
 
-import { BrandLogo } from "@/components/brand-logo"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
-const valueProps = [
-  {
-    icon: IconChartHistogram,
-    title: "Performance reporting",
-    description: "User activity, event supply, attendance, and engagement in one operating layer.",
-  },
-  {
-    icon: IconSparkles,
-    title: "Role-aware insights",
-    description: "Admin, organiser, and venue views share the same brand system with different KPIs.",
-  },
-  {
-    icon: IconDownload,
-    title: "Exportable reporting",
-    description: "Download platform, organiser, and venue reports directly from the dashboard.",
-  },
-]
-
-export default function LoginPage() {
+/**
+ * Sign in.
+ *
+ * The one screen where the gradient monogram carries the brand — everywhere
+ * else the gradient is reserved for a single hero metric.
+ *
+ * This replaces a two-column marketing split: a hero lockup beside three
+ * value-prop cards ("Performance reporting", "Role-aware insights",
+ * "Exportable reporting"). That layout was selling the product to someone who
+ * has already decided to use it. Everyone who reaches this page has an account
+ * and wants to be past it, so the design is a single centred column and one
+ * card.
+ *
+ * No "forgotten password" link, deliberately: there is no reset flow, and a
+ * link that 404s is worse than an absent one. See the note in the sign-in
+ * failure copy — support is the honest route until the flow exists.
+ */
+function SignInForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { status } = useSession()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // `/invite?token=…` sends people here and expects them back afterwards.
+  const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard"
 
   useEffect(() => {
-    if (status === "authenticated") {
-      router.push("/dashboard")
-    }
-  }, [status, router])
+    if (status === "authenticated") router.push(callbackUrl)
+  }, [status, router, callbackUrl])
 
-  const handleLogin = async (event: React.FormEvent) => {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     setLoading(true)
-
+    setError(null)
     try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
-      })
-
+      const result = await signIn("credentials", { email, password, redirect: false })
       if (result?.error) {
-        throw new Error(result.error)
+        // One message for a wrong email and a wrong password. Distinguishing
+        // them confirms which addresses have accounts.
+        setError("That email and password don't match an operator account.")
+        return
       }
-
-      toast.success("Signed in")
-      router.push("/dashboard")
+      router.push(callbackUrl)
       router.refresh()
-    } catch (error) {
-      logger.error("Error logging in", { error: error instanceof Error ? error.message : String(error) })
-      toast.error("Invalid email or password")
+    } catch {
+      setError("Couldn't reach the server. Try again in a moment.")
     } finally {
       setLoading(false)
     }
   }
 
   if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="rounded-full border border-border bg-muted px-5 py-3 text-sm text-muted-foreground">
-          Loading workspace...
-        </div>
-      </div>
-    )
+    return <p className="text-sm text-muted-foreground">Loading…</p>
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden px-6 py-6 md:px-10">
-      <div className="relative mx-auto grid min-h-[calc(100vh-3rem)] max-w-7xl overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="flex flex-col justify-between border-b border-border px-6 py-8 lg:border-b-0 lg:border-r lg:px-10 lg:py-10">
-          <div className="space-y-8">
-            <div className="flex items-start justify-between gap-4">
-              <BrandLogo size="hero" />
-              <Badge variant="secondary" className="rounded-full px-3 py-1 font-medium">
-                Workspace access
-              </Badge>
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                Blend&apos;n workspace
-              </p>
-              <h1 className="max-w-xl text-4xl font-semibold leading-tight text-foreground sm:text-5xl">
-                Manage events, venues, and reporting from one place.
-              </h1>
-              <p className="max-w-xl text-base leading-7 text-muted-foreground">
-                Sign in to manage events, review performance, and monitor venue and audience
-                activity across Blend&apos;n.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-10 grid gap-4">
-            {valueProps.map((item) => (
-              <div key={item.title} className="rounded-xl border border-border bg-muted/40 p-5">
-                <div className="flex items-start gap-4">
-                  <div className="rounded-full bg-muted p-2">
-                    <item.icon className="size-5 text-primary" />
-                  </div>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{item.title}</h2>
-                    <p className="text-sm leading-6 text-muted-foreground">{item.description}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="flex items-center justify-center px-6 py-8 lg:px-10 lg:py-10">
-          <Card className="w-full max-w-md rounded-xl shadow-none">
-            <CardContent className="space-y-6 px-6 py-7">
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                  Welcome back
-                </p>
-                <h2 className="text-3xl font-semibold text-foreground">Sign in</h2>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Use your app admin, organiser, or venue owner credentials.
-                </p>
-              </div>
-
-              <form onSubmit={handleLogin} className="space-y-4">
-                <Input
-                  type="email"
-                  placeholder="Email address"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="h-12 rounded-xl"
-                  required
-                />
-                <Input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="h-12 rounded-xl"
-                  required
-                />
-                <Button type="submit" disabled={loading} className="h-12 w-full rounded-xl">
-                  {loading ? "Signing in..." : "Continue to dashboard"}
-                  {!loading ? <IconArrowRight className="size-4" /> : null}
-                </Button>
-              </form>
-
-              <p className="text-sm text-muted-foreground">
-                Need the public overview instead?{" "}
-                <Link href="/" className="text-foreground underline underline-offset-4">
-                  Return to landing
-                </Link>
-              </p>
-            </CardContent>
-          </Card>
-        </section>
+    <div className="relative flex w-full max-w-[400px] flex-col gap-7">
+      <div className="flex flex-col items-center gap-3.5">
+        <Image src="/brand/monogram-gradient.png" alt="Blend'n" width={64} height={64} priority />
+        <div className="text-center">
+          <h1 className="text-[length:var(--text-h1)] font-bold">Blend&apos;n dashboard</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            For the people who run the platform and the events on it.
+          </p>
+        </div>
       </div>
+
+      <form
+        onSubmit={handleSubmit}
+        className="relative flex flex-col gap-4 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-6"
+      >
+        {/* The brand gradient, on the one screen it belongs to. */}
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-[3px] bg-[image:var(--gradient-brand)]"
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@venue.com"
+            autoComplete="email"
+            required
+            className="h-11"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            required
+            aria-invalid={!!error}
+            aria-describedby={error ? "signin-error" : undefined}
+            className="h-11"
+          />
+          {error ? (
+            <p id="signin-error" role="alert" className="text-[0.8125rem] text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
+
+        <Button type="submit" size="lg" disabled={loading} className="w-full">
+          {loading ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
+
+      <p className="mx-auto max-w-[40ch] text-center text-[0.78125rem] text-faint-foreground">
+        Operator access only — attendees use the Blend&apos;n app. Your role decides what you see
+        after signing in.
+      </p>
+    </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-6">
+      {/* Oversized, barely-there monogram. Decorative, so it is hidden from
+          assistive tech and cannot be clicked through to. */}
+      <Image
+        src="/brand/monogram-gradient.png"
+        alt=""
+        aria-hidden
+        width={560}
+        height={560}
+        className="pointer-events-none absolute -bottom-[18%] -right-[8%] w-[560px] max-w-none opacity-[0.04]"
+      />
+      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+        <SignInForm />
+      </Suspense>
     </main>
   )
 }
