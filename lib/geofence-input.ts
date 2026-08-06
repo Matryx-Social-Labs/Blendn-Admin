@@ -69,6 +69,8 @@ const GEOFENCE_MESSAGES: Record<string, string> = {
   buffer_out_of_range: `Geofence buffer must be between 0 and ${GEOFENCE_LIMITS.MAX_BUFFER} m.`,
   ring_too_short: "A polygon geofence needs at least three points.",
   ring_too_long: `A polygon geofence cannot have more than ${GEOFENCE_LIMITS.MAX_RING} points.`,
+  ring_self_intersects:
+    "The outline crosses itself. Drag the corners until the edges untangle — a figure-of-eight has no inside.",
 }
 
 /**

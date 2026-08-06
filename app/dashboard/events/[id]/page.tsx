@@ -182,6 +182,7 @@ export default async function EventDetailPage({ params, searchParams }: EventPag
         external_link: event.external_link,
         is_featured: event.is_featured,
         check_in_radius: event.check_in_radius,
+        geofence: event.geofence ?? undefined,
         category_ids: categoryIds,
         primary_category_id: primaryCategory,
         house_rules: event.details?.house_rules,

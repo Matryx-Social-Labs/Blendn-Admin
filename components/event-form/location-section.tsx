@@ -9,7 +9,8 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { Slider } from "@/components/ui/slider"
+import { GeofenceEditor } from "@/components/geofence-editor"
+import type { Geofence } from "@/lib/geofence"
 import { LocationPicker, type LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
@@ -134,30 +135,45 @@ export function LocationSection({
         </div>
       </div>
 
+      {/*
+        The geofence, replacing a lone radius slider.
+
+        One number could not serve both a 20m cafe and a 200m stadium, because
+        it was doing three jobs at once — the venue's size, the organiser's
+        tolerance, and slack for bad GPS. The editor shows those as three rings,
+        and the third one is the point: once an organiser can see that GPS noise
+        is handled for them, they stop drawing the shape "bigger to be safe".
+
+        That is not hypothetical. A real football match on production carries a
+        100km radius, which is someone working around exactly this.
+
+        check_in_radius is still written for older mobile clients that read it;
+        `geofence` is what the check-in route prefers.
+      */}
       <FormField
         control={form.control}
-        name="check_in_radius"
+        name="geofence"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>
-              Check-in Radius —{" "}
-              <span className="font-normal text-muted-foreground">
-                {field.value ?? 100} m
-              </span>
-            </FormLabel>
+            <FormLabel>Where check-in counts</FormLabel>
             <FormControl>
-              <Slider
-                min={10}
-                max={2000}
-                step={10}
-                value={[field.value ?? 100]}
-                onValueChange={(vals) => field.onChange(vals[0])}
+              <GeofenceEditor
+                value={(field.value as Geofence | null) ?? null}
+                onChange={(fence) => {
+                  field.onChange(fence)
+                  // Keep the legacy column roughly in step: mobile builds in
+                  // the wild still read check_in_radius.
+                  if (fence.type === "circle") {
+                    form.setValue("check_in_radius", Math.round(fence.radius + fence.buffer))
+                  }
+                }}
+                fallbackCentre={
+                  form.watch("latitude") && form.watch("longitude")
+                    ? { lat: form.watch("latitude")!, lng: form.watch("longitude")! }
+                    : undefined
+                }
               />
             </FormControl>
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>10 m</span>
-              <span>2 000 m</span>
-            </div>
             <FormMessage />
           </FormItem>
         )}
