@@ -22,6 +22,12 @@ if (!dev) {
   try {
     validateEnv()
     console.log(`[${new Date().toISOString()}] > All required environment variables present and valid`)
+    // Not fatal — an environment without the organiser landing page is valid.
+    // But an unset token means every lead POST 401s and the public demo form
+    // shows an error indefinitely, which is otherwise invisible from here.
+    if (!process.env.LANDING_INGEST_TOKEN) {
+      console.warn(`[${new Date().toISOString()}] ⚠ LANDING_INGEST_TOKEN unset — POST /api/leads will reject every request`)
+    }
   } catch {
     console.error(`[${new Date().toISOString()}] ❌ Environment validation failed, see errors above`)
     process.exit(1)

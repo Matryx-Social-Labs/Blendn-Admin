@@ -77,6 +77,7 @@ describe("visibleNavFor", () => {
       "Users",
       "Organisers",
       "Venues",
+      "Leads",
       "Venue claims",
       "Applications",
       "Organisations",
