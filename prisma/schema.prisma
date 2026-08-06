@@ -653,6 +653,7 @@ model venues {
 
   // SetNull, not Cascade: removing an owner must orphan the venue, never delete
   // a real place and every event that happened in it.
+  claims    venue_claims[]
   owner     User?          @relation("VenueOwner", fields: [owner_id], references: [id], onDelete: SetNull)
   owner_org organisations? @relation(fields: [owner_org_id], references: [id], onDelete: SetNull)
   events    events[]
@@ -692,6 +693,7 @@ model organisations {
   invites       organisation_invites[]
   join_requests organisation_join_requests[]
   onboarding    organiser_onboarding_requests[]
+  venue_claims  venue_claims[]
 
   @@index([status])
 }
@@ -917,6 +919,56 @@ enum org_role {
 /// geofence looks like, what capacity is plausible, and what an organiser is
 /// searching for. Grouped by the comments so the picker can present them in
 /// sections rather than as a flat list of thirty.
+/// A venue owner asserting a place is theirs.
+///
+/// Not data entry — owning a venue record means moderating other people's
+/// events held there, so a claim is an **access request**. Nothing in the
+/// evidence can be verified automatically (GSTIN is checksum-only and labelled
+/// as such), so every claim is decided by a person, in the same queue shape as
+/// organiser onboarding.
+///
+/// A claim against a venue that already has an owner is a `dispute`.
+model venue_claims {
+  id       String @id @default(uuid()) @db.Uuid
+  venue_id String @db.Uuid
+  /// The organisation that would own the venue, not the person filing.
+  org_id   String @db.Uuid
+  filed_by String
+
+  status     venue_claim_status @default(pending)
+  /// True when the venue already had an owner at filing time.
+  is_dispute Boolean            @default(false)
+
+  /// Checksum-validated only. The reviewer checks the registered address.
+  gstin    String?
+  /// Uploaded document URLs, keyed by kind (trade, fssai, liquor, photo).
+  /// Free-shaped because the required set differs by venue type — a park has
+  /// no FSSAI licence.
+  evidence Json?
+
+  reviewed_by   String?
+  reviewed_at   DateTime? @db.Timestamptz(6)
+  decision_note String?
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  venue venues        @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  org   organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  /// One live claim per org per venue. Re-filing after a decline updates the
+  /// row rather than stacking duplicates in the queue.
+  @@unique([venue_id, org_id])
+  @@index([status])
+  @@index([venue_id])
+  @@index([org_id])
+}
+
+enum venue_claim_status {
+  pending
+  approved
+  declined
+}
+
 enum venue_type {
   // Food & drink
   restaurant
