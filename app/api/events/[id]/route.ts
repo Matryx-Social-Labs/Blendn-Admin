@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
+import { validateLocationInput } from "@/lib/geofence-input"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
@@ -88,7 +89,13 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       category_ids,
       primary_category_id,
       media_items,
+      geofence,
     } = body
+
+    const location = validateLocationInput({ check_in_radius, geofence })
+    if (!location.ok) {
+      return NextResponse.json({ error: location.error }, { status: 400 })
+    }
 
     // Debug: Log cover_image_url being updated
     logger.info("Updating event - cover_image_url", { error: cover_image_url instanceof Error ? cover_image_url.message : String(cover_image_url) })
@@ -153,7 +160,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         external_link: external_link ?? undefined,
         is_featured: is_featured ?? undefined,
         is_recurring: is_recurring ?? undefined,
-        check_in_radius: check_in_radius ?? undefined,
+        check_in_radius: location.values.check_in_radius ?? undefined,
+        ...("geofence" in location.values ? { geofence: location.values.geofence ?? undefined } : {}),
         details:
           full_description ||
           house_rules ||

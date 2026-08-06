@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
+import { validateLocationInput } from "@/lib/geofence-input"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
 import slugify from "slugify"
@@ -120,7 +121,16 @@ export async function POST(req: Request) {
       category_ids,
       primary_category_id,
       media_items,
+      geofence,
     } = body
+
+    // Bounded server-side. This route previously passed check_in_radius from
+    // the request body straight into Prisma, so the only limit in the product
+    // was a slider in a form — which is a suggestion, not a limit.
+    const location = validateLocationInput({ check_in_radius, geofence })
+    if (!location.ok) {
+      return NextResponse.json({ error: location.error }, { status: 400 })
+    }
 
     // Debug: Log cover_image_url
     logger.info("Creating event - cover_image_url", { error: cover_image_url instanceof Error ? cover_image_url.message : String(cover_image_url) })
@@ -172,7 +182,8 @@ export async function POST(req: Request) {
         external_link,
         is_featured,
         is_recurring,
-        check_in_radius,
+        check_in_radius: location.values.check_in_radius ?? undefined,
+        geofence: location.values.geofence ?? undefined,
         organizer_id: session.user.id,
         details: {
           create: {

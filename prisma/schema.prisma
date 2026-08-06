@@ -184,6 +184,10 @@ model events {
   is_featured       Boolean            @default(false)
   is_recurring      Boolean            @default(false)
   check_in_radius   Float              @default(30)
+  /// Extent + buffer, superseding check_in_radius. Null falls back to
+  /// latitude/longitude/check_in_radius so no existing event needs a backfill.
+  /// Circle or polygon — see lib/geofence.ts for why both, and why not PostGIS.
+  geofence          Json?
 
   // Relations
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
