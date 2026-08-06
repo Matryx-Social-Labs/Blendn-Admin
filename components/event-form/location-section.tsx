@@ -148,7 +148,7 @@ export function LocationSection({
             <FormControl>
               <Slider
                 min={10}
-                max={5000}
+                max={2000}
                 step={10}
                 value={[field.value ?? 100]}
                 onValueChange={(vals) => field.onChange(vals[0])}
@@ -156,7 +156,7 @@ export function LocationSection({
             </FormControl>
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>10 m</span>
-              <span>5 000 m</span>
+              <span>2 000 m</span>
             </div>
             <FormMessage />
           </FormItem>

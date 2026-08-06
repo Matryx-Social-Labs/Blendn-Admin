@@ -25,7 +25,11 @@ export const eventFormSchema = z.object({
   postal_code: z.string().optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
-  check_in_radius: z.number().min(10).max(5000).optional(),
+  // 2000 matches GEOFENCE_LIMITS.MAX_RADIUS in lib/geofence.ts. It was 5000,
+  // which meant anything between 2001 and 5000 passed here and was rejected by
+  // the server with a bare 400 — client validation saying yes to what the
+  // server says no to is worse than having no client validation.
+  check_in_radius: z.number().min(10).max(2000).optional(),
   start_time: z.string().min(1, { message: "Start time is required." }),
   end_time: z.string().min(1, { message: "End time is required." }),
   timezone: z.string().min(1, { message: "Timezone is required." }),
