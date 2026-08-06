@@ -41,9 +41,36 @@ const slugify = (name: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
 
-/** Parent -> children. Parents match the names production already uses. */
+/**
+ * Parent -> children. Parents match the names production already uses.
+ *
+ * **Purely additive.** Every slug already in production is preserved, because
+ * slugs are what the mobile filter matches on and what every shared link
+ * carries — `renameCategory` declines to regenerate them for the same reason.
+ * Nothing here is renamed or removed; retiring a category is a merge, done from
+ * /dashboard/categories.
+ *
+ * The three new parents exist because the taxonomy was shaped for social and
+ * leisure events only. It could not express a cricket match at a stadium, a
+ * trade expo, or a conference — and "Sports" contained screenings but no way to
+ * say "the match itself, at the ground".
+ *
+ * Note the four separate screening children are kept rather than collapsed into
+ * one "Screenings". IPL, cricket, football and F1 draw different crowds on
+ * different nights, and that granularity is the India-specific discovery the
+ * product wants.
+ */
 const TAXONOMY: Record<string, string[]> = {
-  Music: ["Live gigs", "Club nights", "Tours", "Open mic", "Festivals"],
+  Music: [
+    "Live gigs",
+    "Club nights",
+    "Tours",
+    "Open mic",
+    "Festivals",
+    "Indie and alt",
+    "Electronic",
+    "Classical and Carnatic",
+  ],
   Sports: [
     // The India-specific ones the product wants to surface.
     "IPL screening",
@@ -52,15 +79,45 @@ const TAXONOMY: Record<string, string[]> = {
     "F1 screening",
     "Running",
     "Play and train",
+    // The match itself, at the ground — the taxonomy had screenings and no
+    // way to list a stadium fixture.
+    "Live matches",
+    "Marathons and races",
+    "Tournaments",
   ],
   "Food & Drink": ["Tastings", "Supper clubs", "Brunch", "Pop-ups", "Food festivals"],
   Nightlife: ["Parties", "DJ sets", "Comedy", "Karaoke"],
-  "Arts & Culture": ["Theatre", "Exhibitions", "Film screenings", "Workshops", "Literature"],
+  "Arts & Culture": [
+    "Theatre",
+    "Exhibitions",
+    "Film screenings",
+    "Workshops",
+    "Literature",
+    "Art fairs",
+    "Heritage walks",
+  ],
+  // New: the professional and large-venue class the taxonomy could not express.
+  "Business & Professional": [
+    "Conferences",
+    "Expos and trade shows",
+    "Seminars",
+    "Workshops and training",
+    "Job fairs",
+    "Product launches",
+  ],
+  "Markets & Fairs": ["Flea markets", "Craft markets", "Farmers markets", "Pop-up shops"],
+  Learning: ["Classes and courses", "Bootcamps", "Kids and family"],
   Tech: ["Meetups", "Hackathons", "Talks", "Demo days"],
   Networking: ["Professional", "Founders", "Industry mixers", "Career"],
   Outdoor: ["Hikes", "Cycling", "Adventure", "Camping"],
   Wellness: ["Yoga", "Fitness", "Meditation", "Mental health"],
-  Community: ["Volunteering", "Language exchange", "Hobby groups", "Family"],
+  Community: [
+    "Volunteering",
+    "Language exchange",
+    "Hobby groups",
+    "Family",
+    "Festivals and celebrations",
+  ],
 }
 
 async function main() {

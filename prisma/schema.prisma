@@ -635,6 +635,13 @@ model venues {
   latitude     Float?
   longitude    Float?
   capacity     Int?
+  /// What kind of place this is. Nullable because venues predating this, and
+  /// venues an admin adds in a hurry, should not be blocked on classifying.
+  venue_type   venue_type?
+  /// Extent + buffer for check-in, in the shape lib/geofence.ts understands.
+  /// Events at this venue inherit it and may override per event — a rooftop
+  /// event at a three-floor venue is a real case.
+  geofence     Json?
   owner_id     String?
   owner_org_id String?      @db.Uuid
   claimed_at   DateTime?    @db.Timestamptz(6)
@@ -901,6 +908,59 @@ enum org_role {
   owner
   admin
   staff
+}
+
+/// What kind of place a venue is.
+///
+/// There was no way to tell a restaurant from a stadium, which matters for
+/// every question the product asks about a venue: what a sensible check-in
+/// geofence looks like, what capacity is plausible, and what an organiser is
+/// searching for. Grouped by the comments so the picker can present them in
+/// sections rather than as a flat list of thirty.
+enum venue_type {
+  // Food & drink
+  restaurant
+  pub_bar
+  brewery
+  cafe
+  lounge_rooftop
+  // Nightlife
+  nightclub
+  live_music_venue
+  // Events & hospitality
+  banquet_hall
+  convention_centre
+  conference_centre
+  hotel
+  resort
+  farmhouse
+  // Sport
+  stadium
+  sports_complex
+  gym_fitness_studio
+  // Culture
+  theatre
+  cinema
+  art_gallery
+  museum
+  amphitheatre
+  // Community
+  community_hall
+  coworking
+  campus
+  school
+  library
+  religious_venue
+  // Open air
+  park_ground
+  beach_waterfront
+  terrace
+  // Other
+  studio
+  warehouse
+  retail_mall
+  private_residence
+  other
 }
 
 enum venue_status {
