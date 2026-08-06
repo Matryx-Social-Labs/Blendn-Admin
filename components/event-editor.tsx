@@ -39,6 +39,7 @@ interface EventEditorData {
   external_link?: string | null
   is_featured?: boolean | null
   check_in_radius?: number | null
+  geofence?: unknown
   category_ids?: string[]
   primary_category_id?: string | null
   house_rules?: string | null
@@ -133,6 +134,7 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
       external_link: initialEvent.external_link ?? undefined,
       is_featured: initialEvent.is_featured ?? false,
       check_in_radius: initialEvent.check_in_radius ?? 100,
+      geofence: initialEvent.geofence ?? undefined,
       category_ids: initialEvent.category_ids ?? [],
       primary_category_id: initialEvent.primary_category_id ?? undefined,
       house_rules: initialEvent.house_rules ?? undefined,

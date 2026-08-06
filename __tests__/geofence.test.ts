@@ -8,6 +8,7 @@ import {
   boundingCircle,
   fencesOverlap,
   validateGeofence,
+  ringSelfIntersects,
   GEOFENCE_LIMITS,
   type Geofence,
 } from "@/lib/geofence"
@@ -354,5 +355,52 @@ describe("validateGeofence — nothing bounded this server-side before", () => {
     const r = validateGeofence({ type: "circle", lat: 12.97, lng: 77.59, radius: 50 })
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.fence.buffer).toBe(0)
+  })
+})
+
+describe("self-crossing rings are refused", () => {
+  it("accepts an ordinary convex ring", () => {
+    expect(ringSelfIntersects(SQUARE)).toBe(false)
+  })
+
+  it("accepts a concave ring — an L-shaped venue is legitimate", () => {
+    const L: [number, number][] = [
+      [12.9700, 77.5900], [12.9700, 77.5910], [12.9705, 77.5910],
+      [12.9705, 77.5905], [12.9710, 77.5905], [12.9710, 77.5900],
+    ]
+    expect(ringSelfIntersects(L)).toBe(false)
+  })
+
+  it("catches a bow tie", () => {
+    // Swapping two adjacent corners of a square crosses the edges. Ray casting
+    // then reports the middle of one lobe as OUTSIDE, so an attendee standing
+    // in the venue is refused with nothing anyone could act on.
+    const bowTie: [number, number][] = [
+      [12.9700, 77.5900], [12.9700, 77.5909],
+      [12.9709, 77.5900], [12.9709, 77.5909],
+    ]
+    expect(ringSelfIntersects(bowTie)).toBe(true)
+  })
+
+  it("never flags a triangle, which cannot cross itself", () => {
+    expect(ringSelfIntersects([[12.97, 77.59], [12.971, 77.59], [12.971, 77.591]])).toBe(false)
+  })
+
+  it("does not mistake adjacent edges sharing a vertex for a crossing", () => {
+    // Every edge touches its neighbour by construction, including the closing
+    // edge meeting the first — a naive check reports every ring as crossed.
+    expect(ringSelfIntersects(SQUARE)).toBe(false)
+    const pentagon: [number, number][] = [
+      [12.9700, 77.5900], [12.9700, 77.5910], [12.9706, 77.5914],
+      [12.9712, 77.5910], [12.9712, 77.5900],
+    ]
+    expect(ringSelfIntersects(pentagon)).toBe(false)
+  })
+
+  it("is rejected by validateGeofence with a message you can act on", () => {
+    const bowTie = [[12.9700, 77.5900], [12.9700, 77.5909], [12.9709, 77.5900], [12.9709, 77.5909]]
+    expect(validateGeofence({ type: "polygon", ring: bowTie, buffer: 0 })).toEqual({
+      ok: false, error: "ring_self_intersects",
+    })
   })
 })

@@ -295,6 +295,40 @@ export const GEOFENCE_LIMITS = {
   MAX_RING: 200,
 } as const
 
+/**
+ * Does a ring cross itself?
+ *
+ * A bow-tie polygon makes point-in-polygon meaningless — ray casting returns
+ * "outside" for the middle of one lobe, so an attendee standing inside the
+ * venue is refused with no explanation anyone could act on. Cheap to detect
+ * and impossible to reason about later, so it is refused at the door.
+ *
+ * O(n^2) over edges. Rings are capped at MAX_RING points, so the worst case is
+ * 200^2 — trivial, and it runs once on save rather than per check-in.
+ */
+export function ringSelfIntersects(ring: [number, number][]): boolean {
+  const n = ring.length
+  if (n < 4) return false // a triangle cannot cross itself
+
+  const ccw = (a: [number, number], b: [number, number], c: [number, number]) =>
+    (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+  const segmentsCross = (
+    a: [number, number], b: [number, number],
+    c: [number, number], d: [number, number]
+  ) => ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d)
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      // Adjacent edges share a vertex and always "touch"; the first and last
+      // edges are adjacent too once the ring closes.
+      if (i === 0 && j === n - 1) continue
+      if (segmentsCross(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) return true
+    }
+  }
+  return false
+}
+
 export type GeofenceError =
   | "bad_type"
   | "bad_coordinates"
@@ -302,6 +336,7 @@ export type GeofenceError =
   | "buffer_out_of_range"
   | "ring_too_short"
   | "ring_too_long"
+  | "ring_self_intersects"
 
 export function validateGeofence(value: unknown): { ok: true; fence: Geofence } | { ok: false; error: GeofenceError } {
   if (!value || typeof value !== "object") return { ok: false, error: "bad_type" }
@@ -341,6 +376,8 @@ export function validateGeofence(value: unknown): { ok: true; fence: Geofence } 
       if (!isValidLatLng(lat, lng)) return { ok: false, error: "bad_coordinates" }
       clean.push([lat, lng])
     }
+    if (ringSelfIntersects(clean)) return { ok: false, error: "ring_self_intersects" }
+
     return { ok: true, fence: { type: "polygon", ring: clean, buffer } }
   }
 
