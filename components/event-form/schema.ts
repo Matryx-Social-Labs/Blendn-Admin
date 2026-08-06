@@ -18,6 +18,10 @@ export const eventFormSchema = z.object({
   full_description: z.string().min(10, { message: "Full description must be at least 10 characters." }),
   short_description: z.string().optional(),
   venue_name: z.string().optional(),
+  // Set only when a listed venue is picked. Free text leaves this null, which
+  // is the common case — most events are at places not on the platform.
+  venue_id: z.string().nullable().optional(),
+  venue_link_status: z.enum(["auto_linked", "confirmed", "disputed"]).nullable().optional(),
   address: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),

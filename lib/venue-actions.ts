@@ -6,7 +6,7 @@ import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters, getBoundingBox } from "@/lib/geo"
 import { validateGeofence, type Geofence } from "@/lib/geofence"
-import { defaultExtentMetres } from "@/lib/venue-types"
+import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
 import type { venue_type } from "@prisma/client"
 
 /**
@@ -321,4 +321,107 @@ export async function assignVenueOwner(venueId: string, orgId: string): Promise<
   })
   revalidatePath("/dashboard/venue-owners")
   revalidatePath(`/dashboard/venues/${venueId}`)
+}
+
+export interface VenueOption {
+  id: string
+  name: string
+  venueTypeLabel: string
+  address: string | null
+  city: string | null
+  lat: number | null
+  lng: number | null
+  capacity: number | null
+  geofence: unknown
+  claimed: boolean
+}
+
+/**
+ * Venues an organiser can pick from when creating an event.
+ *
+ * Picking one is what makes the event form stop re-asking for a building's
+ * address, capacity and check-in area — six of the ten venue-shaped fields on
+ * the form describe a building that does not move.
+ *
+ * Deliberately unscoped by ownership: an organiser holding a night at someone
+ * else's brewery must be able to find it. What picking grants the *owner* is
+ * handled by `venue_link_status`, not by hiding the venue.
+ */
+export async function searchVenues(query: string): Promise<VenueOption[]> {
+  await requireUser()
+
+  const q = query.trim()
+  if (q.length < 2) return []
+
+  const venues = await db.venues.findMany({
+    where: {
+      deleted_at: null,
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { address: { contains: q, mode: "insensitive" } },
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      venue_type: true,
+      address: true,
+      city: true,
+      latitude: true,
+      longitude: true,
+      capacity: true,
+      geofence: true,
+      owner_org_id: true,
+    },
+    orderBy: { name: "asc" },
+    take: 8,
+  })
+
+  return venues.map((v) => ({
+    id: v.id,
+    name: v.name,
+    venueTypeLabel: venueTypeLabel(v.venue_type),
+    address: v.address,
+    city: v.city,
+    lat: v.latitude,
+    lng: v.longitude,
+    capacity: v.capacity,
+    geofence: v.geofence,
+    // Shown so an organiser knows the owner will see this event's operational
+    // side. Who that owner *is* stays hidden — that would be a customer list.
+    claimed: v.owner_org_id !== null,
+  }))
+}
+
+/** Re-hydrate the picker when an existing event is opened for editing. */
+export async function venueById(id: string): Promise<VenueOption | null> {
+  await requireUser()
+  const v = await db.venues.findUnique({
+    where: { id, deleted_at: null },
+    select: {
+      id: true,
+      name: true,
+      venue_type: true,
+      address: true,
+      city: true,
+      latitude: true,
+      longitude: true,
+      capacity: true,
+      geofence: true,
+      owner_org_id: true,
+    },
+  })
+  if (!v) return null
+  return {
+    id: v.id,
+    name: v.name,
+    venueTypeLabel: venueTypeLabel(v.venue_type),
+    address: v.address,
+    city: v.city,
+    lat: v.latitude,
+    lng: v.longitude,
+    capacity: v.capacity,
+    geofence: v.geofence,
+    claimed: v.owner_org_id !== null,
+  }
 }
