@@ -1,29 +1,18 @@
 import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
-import { IconCalendar, IconMapPin } from "@tabler/icons-react"
+import { IconMapPin } from "@tabler/icons-react"
 
-import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState, MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
+import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { formatNumber, formatPct, formatSince } from "@/lib/dashboard-format"
+import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
 
 export const dynamic = "force-dynamic"
 
 const ATTENDED = ["checked_in", "checked_out"] as const
-
-interface VenueEventRow {
-  id: string
-  title: string
-  startAt: string
-  status: string
-  organiser: string
-  going: number
-  attended: number
-  fillPct: number | null
-}
 
 /**
  * One venue.
@@ -137,33 +126,6 @@ export default async function VenueDetailPage({
   for (const r of rows) repeatOrganisers.set(r.organiser, (repeatOrganisers.get(r.organiser) ?? 0) + 1)
   const returning = [...repeatOrganisers.values()].filter((n) => n > 1).length
 
-  const columns: Column<VenueEventRow>[] = [
-    { key: "title", label: "Event", sortType: "string", primary: true },
-    {
-      key: "startAt",
-      label: "Date",
-      align: "right",
-      sortType: "date",
-      sortValue: (r) => new Date(r.startAt),
-      render: (r) => formatSince(r.startAt),
-    },
-    { key: "organiser", label: "Organiser", sortType: "string", secondary: true },
-    { key: "going", label: "Going", align: "right", sortType: "number" },
-    { key: "attended", label: "Attended", align: "right", sortType: "number" },
-    {
-      key: "fillPct",
-      label: "Fill",
-      align: "right",
-      sortType: "number",
-      render: (r) => formatPct(r.fillPct),
-    },
-    {
-      key: "status",
-      label: "",
-      sortable: false,
-      render: (r) => <Badge variant={r.status === "published" ? "default" : "secondary"}>{r.status}</Badge>,
-    },
-  ]
 
   return (
     <div className="flex flex-col gap-5">
@@ -214,23 +176,7 @@ export default async function VenueDetailPage({
           <SectionTitle hint={rows.length ? `${rows.length} in window` : undefined}>
             Events here
           </SectionTitle>
-          <DataTable
-            columns={columns}
-            rows={rows}
-            sortable
-            defaultSort={{ key: "startAt", dir: "desc" }}
-            search
-            searchPlaceholder="Search events at this venue…"
-            pagination
-            rowHref={(r) => `/dashboard/events/${r.id}`}
-            emptyState={
-              <EmptyState
-                icon={<IconCalendar />}
-                title="No events in this window"
-                description="Events linked to this venue appear here. Widen the date range in the top bar to see further back."
-              />
-            }
-          />
+          <VenueEventsTable rows={rows} />
         </div>
         <div className="flex flex-col gap-3">
           <SectionTitle hint={ratingTotal ? `avg ${averageRating}` : undefined}>Ratings</SectionTitle>

@@ -1,3 +1,10 @@
+"use client"
+
+// Client because it hands DataTable `render`/`sortValue` functions, and
+// DataTable is a client component. A server component cannot serialise a
+// function across that boundary — it throws at render, not at build. These
+// take their data as a prop and touch nothing server-only, so the directive
+// is the whole fix.
 import { IconAlertTriangle, IconBuildingStore, IconStar } from "@tabler/icons-react"
 
 import { UtilHeatmap } from "@/components/dashboard/charts"
