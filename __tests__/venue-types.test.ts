@@ -124,7 +124,9 @@ describe("venueTypeFromOsm — suggest rather than ask", () => {
 
   it("only ever returns a value the picker can display", () => {
     const known = new Set(VENUE_TYPE_GROUPS.flatMap((g) => g.types.map((t) => t.value)))
-    const tagSets = [
+    // Annotated, or the literal widens to a union where each member has
+    // `undefined` for the keys it omits — which is not a Record<string,string>.
+    const tagSets: Record<string, string>[] = [
       { amenity: "restaurant" }, { amenity: "pub" }, { amenity: "place_of_worship" },
       { leisure: "stadium" }, { leisure: "fitness_centre" }, { tourism: "hotel" },
       { tourism: "museum" }, { building: "warehouse" }, { shop: "supermarket" },
