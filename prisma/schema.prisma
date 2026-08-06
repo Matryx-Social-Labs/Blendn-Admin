@@ -84,6 +84,8 @@ model User {
   user_reports_filed    user_reports[]    @relation("UserReportReporter")
   user_reports_received user_reports[]    @relation("UserReportReported")
   message_reports       message_reports[]
+  leads_assigned        leads[]
+  lead_notes            lead_notes[]
 }
 
 model Account {
@@ -1296,4 +1298,96 @@ model moderation_flags {
   @@index([chat_group_id])
   @@index([user_id])
   @@index([message_id])
+}
+
+/// A demo request from the organiser landing page.
+///
+/// Not an application. Applying for an account happens at `/apply` and has its
+/// own tier gate and review queue (`organiser_onboarding_requests`); this is
+/// someone asking for a walkthrough. The two stay separate tables and
+/// cross-reference by email — merging them would put an unvetted marketing
+/// contact into a queue that grants platform access.
+model leads {
+  id     String      @id @default(uuid()) @db.Uuid
+  type   lead_type
+  status lead_status @default(new)
+  source String      @default("organizers-landing")
+
+  /// Lowercased on write. The landing page lowercases too, but this is the
+  /// side that has to be right — see lib/leads.ts.
+  email        String
+  /// Plus-addressing stripped (sam+2@x → sam@x), for abuse counting only.
+  /// Never shown, never emailed; `email` is what a human contacts.
+  email_root   String
+  name         String?
+  organization String?
+  event_types  String?
+  city         String?
+
+  user_agent String?
+  ip         String? @db.Inet
+
+  /// Idempotency, scoped to leads that are still open. `"<type>:<email>"` while
+  /// the lead is open, NULL once it is finished.
+  ///
+  /// A permanent UNIQUE(type, email) would show a visitor who returns months
+  /// later a success they never got — the same silent-drop class this endpoint
+  /// exists to prevent. A *partial* unique index expresses that exactly, but
+  /// Prisma cannot declare one, so it would live only in migration SQL: present
+  /// in production (`migrate deploy`) and absent in CI (`db push`). The
+  /// duplicate test would then pass in prod and fail in CI for a real reason.
+  ///
+  /// A nullable unique column gets the same semantics — Postgres unique indexes
+  /// permit unlimited NULLs — and both paths create it identically.
+  open_key String? @unique
+
+  assigned_to String?
+  notes       lead_notes[]
+
+  /// When the visitor pressed submit, as reported by the caller.
+  submitted_at DateTime  @db.Timestamptz(6)
+  /// When the row landed here. A gap between the two is the only evidence
+  /// that ingest was failing and retrying.
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @updatedAt @db.Timestamptz(6)
+  contacted_at DateTime? @db.Timestamptz(6)
+
+  assignee User? @relation(fields: [assigned_to], references: [id], onDelete: SetNull)
+
+  @@index([status, created_at(sort: Desc)])
+  @@index([type, created_at(sort: Desc)])
+  @@index([email])
+  @@index([email_root, created_at])
+  @@index([assigned_to])
+}
+
+/// Append-only. "Called, no answer" and "called again, keen" are both worth
+/// keeping; a single overwritable field loses the first one.
+model lead_notes {
+  id         String   @id @default(uuid()) @db.Uuid
+  lead_id    String   @db.Uuid
+  author_id  String
+  body       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  lead   leads @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [author_id], references: [id], onDelete: Cascade)
+
+  @@index([lead_id, created_at])
+  @@index([author_id])
+}
+
+/// One value today. An enum so adding a kind is a migration rather than a
+/// free-text column that quietly accumulates typos.
+enum lead_type {
+  demo_request
+}
+
+enum lead_status {
+  new
+  contacted
+  qualified
+  converted
+  archived
+  spam
 }

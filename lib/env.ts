@@ -29,6 +29,20 @@ const envSchema = z.object({
   // OpenAI (optional — moderation degrades to keyword-only if absent)
   OPENAI_API_KEY: z.string().optional(),
 
+  // Landing-page lead ingest. Optional because an environment that does not
+  // serve organizers.blendn.app is a valid environment — but validated when
+  // present, because a short shared secret is worse than an obvious absence.
+  //
+  // Comma-separated to make rotation two deploys instead of a flag day. The
+  // length check applies to the whole list, which is deliberately loose: the
+  // real guarantee is constant-time comparison in lib/leads.ts, not this.
+  LANDING_INGEST_TOKEN: z
+    .string()
+    .min(32, "LANDING_INGEST_TOKEN must be at least 32 characters")
+    .optional(),
+  /// Where a new demo request is announced. Unset means no notification.
+  LEADS_NOTIFY_EMAIL: z.string().email().optional(),
+
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.string().default("3000"),

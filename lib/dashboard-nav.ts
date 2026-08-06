@@ -118,6 +118,13 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["app_admin"],
   },
   {
+    title: "Leads",
+    description: "Demo requests from the organiser landing page. Oldest untouched first.",
+    url: "/dashboard/leads",
+    icon: IconInbox,
+    allowedRoles: ["app_admin"],
+  },
+  {
     title: "Venue claims",
     description:
       "Ownership requests. Approving one hands over the events other organisers hold there.",
