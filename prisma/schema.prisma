@@ -43,6 +43,7 @@ model User {
   owned_venues           venues[]                     @relation("VenueOwner")
   org_memberships        organisation_members[]
   org_join_requests      organisation_join_requests[]
+  password_resets        password_reset_tokens[]
   event_check_ins        event_check_ins[]
   chat_messages          chat_messages[]
   chat_group_memberships chat_group_members[]
@@ -829,6 +830,25 @@ model organiser_onboarding_requests {
 
 /// The token for verifying an applicant's email, before they have an account.
 /// Separate from `organisation_invites` because there is no org yet.
+/// A password-reset token.
+///
+/// Mirrors `onboarding_email_tokens`: only the SHA-256 hash is stored, it is
+/// single-use, and it expires. The TTL is deliberately shorter than the
+/// onboarding one — an hour rather than a day — because this token changes a
+/// credential rather than confirming an address, so a link sitting in an
+/// inherited mailbox is worth much more to whoever finds it.
+model password_reset_tokens {
+  token_hash String    @id
+  user_id    String
+  expires_at DateTime  @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+}
+
 model onboarding_email_tokens {
   token_hash String    @id
   request_id String    @db.Uuid

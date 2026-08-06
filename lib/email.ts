@@ -3,6 +3,7 @@ import {
   approvedHtml,
   declinedHtml,
   domainVerifyHtml,
+  passwordResetHtml,
   inviteHtml,
   onboardingVerifyHtml,
 } from "./email-html"
@@ -204,6 +205,23 @@ export function declinedEmail(name: string, reason: string) {
       reason,
       "",
       "If you think this is a mistake, reply to this email with more detail about your organisation.",
+    ].join("\n"),
+  }
+}
+
+export function passwordResetEmail(name: string, link: string) {
+  return {
+    html: passwordResetHtml(name, link),
+    subject: "Reset your Blend'n password",
+    text: [
+      `Hi ${name},`,
+      "",
+      "Someone asked to reset the password on your Blend'n account. Set a new one here:",
+      link,
+      "",
+      "The link expires in one hour and can only be used once.",
+      "",
+      "Didn't ask for this? Ignore this email — your password has not changed.",
     ].join("\n"),
   }
 }
