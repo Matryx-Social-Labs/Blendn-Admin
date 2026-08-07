@@ -8,7 +8,10 @@ import { Button } from "@/components/ui/button"
 import { getAuth } from "@/lib/auth"
 import { formatDay, formatNumber } from "@/lib/dashboard-format"
 
+import { getLinkedEventsForOwner } from "@/lib/venue-link-actions"
+
 import { getDashboardOverview } from "../actions"
+import { LinkedEvents } from "./linked-events"
 
 export const dynamic = "force-dynamic"
 
@@ -30,10 +33,15 @@ export default async function MyVenuesPage() {
   if (!session?.user) redirect("/login")
   if (session.user.role !== "venue_owner") redirect("/dashboard")
 
-  const overview = await getDashboardOverview("venue_owner", session.user.id)
+  const [overview, linkedEvents] = await Promise.all([
+    getDashboardOverview("venue_owner", session.user.id),
+    // Read from events.venue_id, not the venue_name grouping below — this is
+    // the real link, and it is what grants the owner operational access.
+    getLinkedEventsForOwner(),
+  ])
   if (overview.role !== "venue_owner") redirect("/dashboard")
 
-  if (overview.venues.length === 0) {
+  if (overview.venues.length === 0 && linkedEvents.length === 0) {
     return (
       <EmptyState
         icon={<IconBuildingStore />}
@@ -59,6 +67,8 @@ export default async function MyVenuesPage() {
           <Link href="/dashboard/venues/new">Add a venue</Link>
         </Button>
       </div>
+
+      <LinkedEvents events={linkedEvents} />
 
       {overview.venues.map((venue) => {
         const lowSkew = venue.ratings[0] + venue.ratings[1] > venue.ratings[3] + venue.ratings[4]
