@@ -48,6 +48,14 @@ const envSchema = z.object({
   /// secret: anyone holding the URL can post to that channel.
   LEADS_SLACK_WEBHOOK_URL: z.string().url().optional(),
 
+  // Two names for one deployment: the dashboard is served on one host and the
+  // mobile API on the other. Both optional, and the rule only applies when
+  // BOTH are set — half-configured is a mistake, not a policy, and enforcing
+  // half of it would break one surface for no stated reason. Unset everywhere
+  // means everything serves everywhere, which is right for local development.
+  DASHBOARD_HOST: z.string().optional(),
+  API_HOST: z.string().optional(),
+
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.string().default("3000"),

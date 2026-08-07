@@ -59,24 +59,25 @@ a venue's own systems.
 
 ## Product gaps worth knowing about
 
-### Multi-day events — the model landed, two pieces did not
+### Multi-day events — mostly landed
 
-`event_occurrences` exists and check-in is per-day (v0.40.0), so "who came on
-Wednesday" is answerable and Tuesday no longer overwrites Monday.
+`event_occurrences`, per-day check-in, per-day attendance with new-vs-returning
+and retention (v0.40.0–v0.43.0). Occupancy is derived, so the overbooking SQL
+that used to block per-day capacity is gone.
 
-Still event-level, deliberately:
+Still open:
 
-- **Capacity.** `events.current_capacity` counts the whole run. Moving it
-  per-day means changing the atomic conditional `UPDATE` that prevents
-  overbooking, which is the one piece of concurrency-critical SQL in the
-  product. `event_occurrences.capacity` exists and is unread — it is the column
-  that work would fill.
+- **Per-occurrence capacity.** `event_occurrences.capacity` exists and is
+  unread. A conference selling fewer seats on the last day wants it, and it is
+  now a small change rather than a concurrency problem.
 - **The feedback window.** The chatroom still closes 24 h after the *last* day,
   so day-one problems surface at the end of the week. This is the one that
   actually costs an organiser something, and it belongs to the chat lifecycle
-  sweeper rather than to check-in.
-
-Neither blocks the other. Both are now additive.
+  sweeper.
+- **No client sends presence pings yet.** The endpoint and sweeper are live; the
+  mobile app has to start calling `…/presence` for the loop to close.
+- **The attendance panel has no UI.** `docs/CLAUDE_DESIGN_BRIEF_ATTENDANCE.md`
+  is written and waiting on a design round.
 
 ### Attendee unmasking
 
@@ -86,13 +87,6 @@ sees one attendee's real identity, audited and admin-reviewed.
 **Deliberately not built.** It inverts a privacy guarantee the product makes
 everywhere else — today real identities never reach a host at all — and deserves
 deciding on its own rather than arriving inside a layout import.
-
-### Nominatim usage policy
-
-The geocoder is called from the browser with no identifying `User-Agent`,
-against [OSM's usage policy](https://operations.osmfoundation.org/policies/nominatim/)
-and a ban risk at volume. Proxying it server-side with caching is small work and
-protects the only geocoder the product has.
 
 ---
 
