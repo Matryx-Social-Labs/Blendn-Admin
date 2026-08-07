@@ -1,101 +1,175 @@
 # Roadmap
 
-Things the marketing site says, or will say, that the product does not do yet.
+The working ledger. Four sections: **Now**, **Next**, **Validated — not doing**,
+and **Done**.
 
-This file exists because of a decision made during the organiser landing-page
-audit: keep the aspirational copy, mark it as roadmap, and **write down what
-would have to be true**. Copy promising a feature is a debt. Undocumented copy
-promising a feature is a debt nobody is tracking.
+**The rule.** Every item from any plan lands in `Now` or `Next` before work
+starts, and moves to `Done` in the same PR that finishes it. Nothing ships
+without this file moving. An item that turns out to be a bad idea goes to
+**Validated — not doing** with the reason, so nobody proposes it again in three
+months.
 
-Nothing here is scheduled. Pricing is undecided — everything is free for now.
+This started as "things the marketing site claims that the product does not do".
+That list still lives here, marked, because copy promising a feature is a debt
+and undocumented copy promising a feature is a debt nobody is tracking.
+
+Nothing here is scheduled. Pricing is undecided — everything is free.
 
 ---
 
-## Claimed on the landing page, not built
+## Now
 
-### Real-time sentiment analysis of the event chatroom
+Nothing in flight.
 
-**Partly real.** `lib/sentiment/` classifies feedback-window messages into
-polarity plus an issue category (`entry_queue`, `crowding`, facilities, and so
-on), and the live event screen surfaces alerts.
+---
 
-**Not real:** it runs over the post-event feedback window, not live during the
-event, and there is no "the bar queue is going wrong *right now*, go fix it"
-push to the organiser's phone.
+## Next
 
-What would have to be true: the classifier runs on the live socket stream rather
-than a batch sweep; an alert threshold that does not fire on three grumpy
-messages; and a delivery path (push, not a dashboard tile someone has to be
-looking at).
+### 1. Identity and DM holes — blocks matchmaking
 
-The argument for this feature does not need inflated statistics, and an earlier
-version of `lib/sentiment/taxonomy.ts` carried one — "~45% of venue incidents" —
-that appears in neither source it was attributed to. It has been removed. The
-honest case is stronger: post-event surveys draw
+Seven live defects found while mapping the matchmaking surface. Matchmaking is
+built on the first one, so these come first.
+
+| # | Defect | Where |
+|---|---|---|
+| 1 | `/events/[eventId]/checkins` returns every attendee's **real name and photo**, while every chat surface returns a pseudonym | `app/api/mobile/events/[eventId]/checkins/route.ts` |
+| 2 | `POST /conversations` opens a DM with no message-request and no block check | `app/api/mobile/conversations/route.ts` |
+| 3 | Responding `block` sets the request to `blocked` but writes no `blocked_users` row — not a real block | `.../message-requests/[requestId]/respond/route.ts` |
+| 4 | The two conversation-creation paths order `user1_id`/`user2_id` differently, so `@@unique` is evadable | both of the above |
+| 5 | Message requests have no co-presence requirement — any user can request any user id | `app/api/mobile/message-requests/route.ts` |
+| 6 | `goals` / `looking_for` survive account deletion | `app/api/mobile/account/route.ts` |
+| 7 | Blocked users can still read your public profile — stale "Phase 6" comment | `app/api/mobile/users/[userId]/route.ts` |
+
+(1) is load-bearing: the room is pseudonymous everywhere else, and this endpoint
+undoes it. It must return `chat_group_members.anonymous_name`, never `User.name`.
+
+### 2. Sentiment — write the keystone
+
+**Correction to a previous entry here, which said this was "partly real".** It is
+not running anywhere. `classifyMessages` has **zero production call sites** and
+nothing issues `event_feedback.create`. The live event screen and the feedback
+screen both read a permanently empty table.
+
+Everything else is built and tested: the taxonomy, the free lexicon tier, the
+LLM tier with `BATCH_SIZE = 20`, the `event_feedback` table with three indexes
+and a unique `message_id` for in-place re-classification, `buildLiveSnapshot`
+aggregation, and two alert rules (`safety` fires on one message; `mood_sliding`
+at ≥10 classified and ≥40% negative).
+
+What is missing is the call. It belongs on the fire-and-forget seam beside
+`void moderateMessage(...)`, never inside the 1 s pre-broadcast race, and it must
+drain a per-event queue in batches — one API call per message defeats the
+two-tier design that keeps this at single-digit calls per hour.
+
+The honest case for the feature needs no inflated statistics, and an earlier
+`taxonomy.ts` carried one ("~45% of venue incidents") that appears in neither
+source it cited. Removed. Post-event surveys draw
 [5–15% responses](https://www.explori.com/blog/what-is-a-good-post-event-survey-response-rate),
 attendees forget [most detail within a day](https://www.surveysensum.com/blog/post-event-feedback-survey),
-and [real-time room sentiment remains rare](https://www.aiforevents.co/blog/ai-sentiment-analysis-events)
+and [real-time room sentiment stays rare](https://www.aiforevents.co/blog/ai-sentiment-analysis-events)
 because every alternative needs cameras, wearables or attendee effort — while
-this reads a chatroom people are already using.
+this reads a chatroom people already use.
 
-### Analytics the dashboard does not have
+### 3. Matchmaking
 
-The forked template's copy promises funnels, cohort retention and revenue
-attribution. The dashboard has attendance, RSVPs, check-ins, ratings and
-feedback. There is no ticketing and therefore no revenue to attribute.
+**Does not exist**, despite the README describing it — no route, no ranking
+module, and git history has never held one. `/events/[eventId]/checkins` is the
+raw material: the room, sorted by check-in time.
 
-Either the copy goes or the features do. The copy is cheaper to change.
+Decided:
 
-### Crowd-management positioning
+- **One pool.** Intent is a tag and a ranking signal, never a partition
+- **Anonymous by default**, opt in to reveal, per event
+- **No match score.** Name the concrete overlaps — "you both picked Techno and
+  Board games"
+- Rank on the **structured** `user_interests → categories` graph, IDF-weighted so
+  a shared niche category outweighs a shared "Music". `profiles.interests` is
+  free text and cannot be compared
+- Onboarding asks **nothing before check-in**; intent and interests are collected
+  at first check-in, and both are things matching needs anyway. Gender is asked
+  only if intent includes dating
 
-The landing page positions Blendn against crowd mismanagement. What exists today
-that supports it: GPS-gated check-in with polygon geofencing, live check-in
-counts, capacity warnings, and the sentiment categories above.
+### 4. Host coverage gaps
 
-What does not: any prediction, any staffing recommendation, any integration with
-a venue's own systems.
+Measured against 2026 industry KPI guidance
+([vFairs](https://www.vfairs.com/blog/event-kpis/),
+[Bizzabo](https://www.bizzabo.com/blog/kpis-to-measure-event-success),
+[InEvent](https://inevent.com/blog/others/25-key-metrics-for-measuring-event-success.html)).
+The during-event story is the strong one and the differentiator; these are the
+holes.
+
+| Gap | Note |
+|---|---|
+| **Waitlist** | Nothing exists. Real for capacity-constrained events |
+| **Portfolio calendar** | Events are a table only — no month view across a run |
+| **Venue: multi-room / concurrent events** | Occupancy is per event; an owner running two rooms has no building total |
+| **Venue: availability calendar** | "My venues" shows utilisation after the fact, not what is bookable |
+| **NPS** | Ratings exist; NPS is the benchmark every organiser reports upward |
+| **Attendee demographics** | Deliberately thin for privacy. Decide explicitly rather than leave it implied |
+
+### 5. Smaller, known
+
+- **Per-occurrence capacity.** `event_occurrences.capacity` exists and is unread.
+  A conference selling fewer seats on the last day wants it
+- **The feedback window** closes 24 h after the *last* day, so day-one problems
+  surface at the end of the week. Belongs to the chat lifecycle sweeper
+- **No client sends presence pings.** Endpoint and sweeper are live; the Expo app
+  has to call `…/presence` for the loop to close
+- **`events.current_capacity`** is written by nothing and read by nothing. Drop
+  the column once production logs confirm it
+- **`is_recurring`** is a dead flag still exposed to mobile as `isRecurring`
+- **`room_died`** is a declared `LiveAlertKind` no branch ever emits
+- The 1 s moderation `Promise.race` never clears its losing timer
+- **Analytics the copy promises** — funnels, cohort retention, revenue
+  attribution. There is no ticketing and therefore no revenue. The copy is
+  cheaper to change than the features
 
 ---
 
-## Product gaps worth knowing about
+## Validated — not doing
 
-### Multi-day events — mostly landed
+**Dual profile for dating vs networking.** A second profile doubles the
+onboarding friction the design exists to minimise, and splitting a new app's pool
+empties both halves. The overlap-based card already carries the context a
+separate dating profile would have.
 
-`event_occurrences`, per-day check-in, per-day attendance with new-vs-returning
-and retention (v0.40.0–v0.43.0). Occupancy is derived, so the overbooking SQL
-that used to block per-day capacity is gone.
+**A match percentage.** A number implies a precision the data cannot support and
+invites gaming. Naming the actual overlapping categories explains itself.
 
-Still open:
+**Attendee unmasking.** A design round proposed a break-glass flow: a host files
+a safety report and sees one attendee's real identity, audited. It inverts a
+privacy guarantee the product makes everywhere else — today real identities never
+reach a host at all — and deserves deciding on its own rather than arriving
+inside a layout import.
 
-- **Per-occurrence capacity.** `event_occurrences.capacity` exists and is
-  unread. A conference selling fewer seats on the last day wants it, and it is
-  now a small change rather than a concurrency problem.
-- **The feedback window.** The chatroom still closes 24 h after the *last* day,
-  so day-one problems surface at the end of the week. This is the one that
-  actually costs an organiser something, and it belongs to the chat lifecycle
-  sweeper.
-- **No client sends presence pings yet.** The endpoint and sweeper are live; the
-  mobile app has to start calling `…/presence` for the loop to close.
-- **The attendance panel has no UI.** `docs/CLAUDE_DESIGN_BRIEF_ATTENDANCE.md`
-  is written and waiting on a design round.
-
-### Attendee unmasking
-
-A design round proposed a break-glass flow: a host files a safety report and
-sees one attendee's real identity, audited and admin-reviewed.
-
-**Deliberately not built.** It inverts a privacy guarantee the product makes
-everywhere else — today real identities never reach a host at all — and deserves
-deciding on its own rather than arriving inside a layout import.
+**Financial, sponsorship and pipeline metrics.** Every one assumes ticketing.
+There is none, so there is no revenue to attribute.
 
 ---
 
-## Business model
+## Done
 
-Undecided. Everything is free.
+### 0.45.0
 
-The one place this has already shaped a decision: GPS check-in is **mandatory
-for all physical events**, with no off toggle. A no-GPS tier is the obvious
-thing to gate behind a subscription later, and the geofence model already
-separates extent from buffer from per-check-in accuracy, so relaxing it is a
-policy change rather than a rewrite.
+- Attendance panel and occupancy hero (#156). Also unified the two divergent fill
+  calculations — the live tab capped at 100% against staff-inclusive occupancy
+  while the occupancy panel measured guests uncapped, so one room read "full" and
+  "110%, 8 over" on two screens
+- `/` is the login rather than a second marketing pitch (#155)
+- Dashboard screens size against the content column, not the window (#157)
+- Host-split documentation and the certificate ordering constraint (#154)
+
+### 0.44.x
+
+- `dashboard.blendn.app` as a second domain on one service (#152)
+- Humans redirected to the dashboard host, misconfigured clients rejected (#153)
+
+### 0.40–0.43
+
+- Occupancy derived rather than stored; check-in stops refusing at capacity;
+  staff told from guests by organisation membership
+- One checkout path, and the check-in route finally has an integration test
+- Presence: ping while checked in, prompt on leaving, sweep the rest, with a
+  mass-checkout guard
+- Multi-day: `event_occurrences`, per-day check-in, new-vs-returning, retention
+- Nominatim proxied server-side
