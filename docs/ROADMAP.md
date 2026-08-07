@@ -25,25 +25,7 @@ Nothing in flight.
 
 ## Next
 
-### 1. Identity and DM holes — blocks matchmaking
-
-Seven live defects found while mapping the matchmaking surface. Matchmaking is
-built on the first one, so these come first.
-
-| # | Defect | Where |
-|---|---|---|
-| 1 | `/events/[eventId]/checkins` returns every attendee's **real name and photo**, while every chat surface returns a pseudonym | `app/api/mobile/events/[eventId]/checkins/route.ts` |
-| 2 | `POST /conversations` opens a DM with no message-request and no block check | `app/api/mobile/conversations/route.ts` |
-| 3 | Responding `block` sets the request to `blocked` but writes no `blocked_users` row — not a real block | `.../message-requests/[requestId]/respond/route.ts` |
-| 4 | The two conversation-creation paths order `user1_id`/`user2_id` differently, so `@@unique` is evadable | both of the above |
-| 5 | Message requests have no co-presence requirement — any user can request any user id | `app/api/mobile/message-requests/route.ts` |
-| 6 | `goals` / `looking_for` survive account deletion | `app/api/mobile/account/route.ts` |
-| 7 | Blocked users can still read your public profile — stale "Phase 6" comment | `app/api/mobile/users/[userId]/route.ts` |
-
-(1) is load-bearing: the room is pseudonymous everywhere else, and this endpoint
-undoes it. It must return `chat_group_members.anonymous_name`, never `User.name`.
-
-### 2. Sentiment — write the keystone
+### 1. Sentiment — write the keystone
 
 **Correction to a previous entry here, which said this was "partly real".** It is
 not running anywhere. `classifyMessages` has **zero production call sites** and
@@ -70,7 +52,7 @@ and [real-time room sentiment stays rare](https://www.aiforevents.co/blog/ai-sen
 because every alternative needs cameras, wearables or attendee effort — while
 this reads a chatroom people already use.
 
-### 3. Matchmaking
+### 2. Matchmaking
 
 **Does not exist**, despite the README describing it — no route, no ranking
 module, and git history has never held one. `/events/[eventId]/checkins` is the
@@ -89,7 +71,7 @@ Decided:
   at first check-in, and both are things matching needs anyway. Gender is asked
   only if intent includes dating
 
-### 4. Host coverage gaps
+### 3. Host coverage gaps
 
 Measured against 2026 industry KPI guidance
 ([vFairs](https://www.vfairs.com/blog/event-kpis/),
@@ -107,7 +89,7 @@ holes.
 | **NPS** | Ratings exist; NPS is the benchmark every organiser reports upward |
 | **Attendee demographics** | Deliberately thin for privacy. Decide explicitly rather than leave it implied |
 
-### 5. Smaller, known
+### 4. Smaller, known
 
 - **Per-occurrence capacity.** `event_occurrences.capacity` exists and is unread.
   A conference selling fewer seats on the last day wants it
@@ -148,6 +130,16 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.46.0
+
+- **The seven identity and DM holes closed** (#159). The attendee list handed out
+  every attendee's real name and photo while every other view of the room
+  returned a pseudonym; `POST /conversations` opened a DM from two user ids and
+  nothing else; "block" wrote no block; the send path checked one direction of
+  it; the two conversation-creation paths ordered the pair differently so the
+  unique constraint could be evaded; message requests had no co-presence test;
+  and `goals` / `looking_for` survived account deletion.
 
 ### 0.45.0
 

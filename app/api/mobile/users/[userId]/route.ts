@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
@@ -69,9 +70,17 @@ export async function GET(
       return notFoundResponse("User not found")
     }
 
-    // Check if the current user has blocked this user or vice versa
-    // For now, we'll skip blocking check since the blocked_users table doesn't exist yet
-    // This would be implemented in Phase 6
+    /*
+     * The table this comment used to say did not exist has existed for a long
+     * time; the check was never written. So someone you blocked could keep
+     * reading your profile, which is most of what a block is for.
+     *
+     * 404 rather than 403: confirming the account exists tells a blocked person
+     * they were blocked, and that is information the block is meant to withhold.
+     */
+    if (await blockedEitherWay(authUser.userId, userId)) {
+      return notFoundResponse("User not found")
+    }
 
     // Format the response
     // Build photos array: prefer profile gallery, fall back to single user image

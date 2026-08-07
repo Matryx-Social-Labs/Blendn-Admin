@@ -5,6 +5,50 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] - 2026-08-07
+
+### Security
+
+- **The attendee list handed out real names and photos.** Every other view of a
+  room — group chat, the participants list, the socket payloads, the dashboard —
+  carefully returned `chat_group_members.anonymous_name`. `GET
+  /events/:eventId/checkins` returned `User.name` and `User.image` to any
+  authenticated caller, so the pseudonymity was readable straight out of the
+  network tab. It is the same defect `__tests__/chat-identity.test.ts` was
+  written for on the dashboard side, living on the mobile side the whole time.
+  It now returns the room pseudonym and no photo.
+
+- **`POST /conversations` opened a DM from two user ids and nothing else** — no
+  accepted message request, no block check. DMs are meant to be gated behind a
+  request the other person accepted; the gate existed only on the screen that
+  happened to use it.
+
+- **Responding "block" did not block.** It set the request's status to `blocked`
+  and wrote no `blocked_users` row, so the only thing enforcing blocks saw
+  nothing and the sender could simply send again.
+
+- **Blocks were checked in one direction.** The DM send path asked only whether
+  the recipient had blocked the sender, so someone who had blocked another person
+  could still message them — and keep receiving replies from someone they had
+  chosen not to hear from. Now checked both ways everywhere, including on the
+  public profile, which blocked users could still read.
+
+- **Message requests had no co-presence requirement.** Any authenticated caller
+  could request any user id they could guess or scrape. Now both people must have
+  checked in to the same event — ever, not currently, because messaging someone
+  the morning after is the ordinary case. An RSVP does not count.
+
+- **`goals` and `looking_for` survived account deletion**, quietly the most
+  sensitive pair on the profile.
+
+### Fixed
+
+- **One pair of people could get two conversation rows.** `POST /conversations`
+  sorted the two ids before writing; the message-request accept handler wrote
+  them in request order. `@@unique([user1_id, user2_id])` cannot tell that
+  (a, b) and (b, a) are the same pair. Both paths now go through
+  `lib/conversations.ts`, where sorting is not a detail anyone has to remember.
+
 ## [0.45.0] - 2026-08-07
 
 ### Added

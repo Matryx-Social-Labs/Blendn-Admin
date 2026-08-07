@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { pseudonymsForEvent } from "@/lib/anonymous-names"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { normalizeLocationToCity } from "@/lib/location"
@@ -11,6 +12,24 @@ import {
 } from "@/lib/api-response"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
 
+/**
+ * Who is in the room.
+ *
+ * Pseudonymous, like every other view of the room. This endpoint used to return
+ * each attendee's real `User.name` and `image` to any authenticated caller,
+ * while group chat, the participants list, the socket payloads and the dashboard
+ * all carefully returned `chat_group_members.anonymous_name`. One endpoint undid
+ * all of them, and it was readable straight out of the network tab — the same
+ * defect `__tests__/chat-identity.test.ts` was written for on the dashboard side,
+ * living on the mobile side the whole time.
+ *
+ * `userId` stays: a message request, a block and a report each need to name a
+ * person, and the id alone discloses nothing.
+ *
+ * Age and city remain because they are what someone decides to say hello with,
+ * and neither identifies. When the reveal flag lands, real name and photo become
+ * available for attendees who have chosen it — never by default.
+ */
 interface RouteParams {
   params: Promise<{ eventId: string }>
 }
@@ -72,8 +91,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         user: {
           select: {
             id: true,
-            name: true,
-            image: true,
             profile: {
               select: {
                 age: true,
@@ -88,12 +105,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       take: limit,
     })
 
+    const pseudonyms = await pseudonymsForEvent(eventId)
+
     return successResponse({
       attendees: await Promise.all(
         checkIns.map(async (c) => ({
+          // Kept: a message request, a block and a report all need to name a
+          // person, and the id discloses nothing on its own.
           userId: c.user.id,
-          name: c.user.name,
-          image: c.user.image,
+          name: pseudonyms.get(c.user.id) ?? "Attendee",
+          // Deliberately absent: `image` and the real `name`. See the header.
           age: c.user.profile?.age,
           location: await normalizeLocationToCity(c.user.profile?.location),
           checkInTime: c.check_in_time,

@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { media_type } from "@prisma/client"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -165,16 +166,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         ? conversation.user2_id
         : conversation.user1_id
 
-    const isBlocked = await db.blocked_users.findFirst({
-      where: {
-        blocker_id: recipientId,
-        blocked_id: authUser.userId,
-      },
-      select: { id: true },
-    })
-
-    if (isBlocked) {
-      // Return forbidden without leaking which direction the block is in
+    /*
+     * Both directions. This only asked whether the recipient had blocked the
+     * sender, so someone who had blocked the other person could still message
+     * them — which is not what "block" means to either party, and leaves the
+     * blocker receiving replies from a person they have chosen not to hear from.
+     */
+    if (await blockedEitherWay(authUser.userId, recipientId)) {
+      // Deliberately does not say which direction the block runs in.
       return forbiddenResponse("You cannot send messages to this user")
     }
 

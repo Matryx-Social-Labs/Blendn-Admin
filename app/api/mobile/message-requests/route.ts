@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
+import { haveSharedAnEvent } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -69,6 +70,20 @@ export async function POST(request: NextRequest) {
     if (blockExists) {
       // Return generic not-found to avoid leaking block status to the sender
       return notFoundResponse("User not found")
+    }
+
+    /*
+     * You have to have been in the room.
+     *
+     * There was no such check: any authenticated caller could send a request to
+     * any user id they could guess or scrape, which turns the product from "talk
+     * to people you met" into a directory of strangers — and makes every other
+     * privacy measure here decorative.
+     *
+     * "Ever", not "right now", deliberately. See `haveSharedAnEvent`.
+     */
+    if (!(await haveSharedAnEvent(authUser.userId, recipientId))) {
+      return errorResponse("You can only message people from an event you have both attended")
     }
 
     // Check if a request already exists between these users (in either direction)

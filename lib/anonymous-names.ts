@@ -65,3 +65,28 @@ export async function generateUniqueAnonymousName(chatGroupId: string): Promise<
 
   return `Attendee ${Date.now()}`
 }
+
+/**
+ * Everyone's pseudonym in an event's room, keyed by user id.
+ *
+ * The room is pseudonymous everywhere it is rendered — group chat, the
+ * participants list, the socket payloads, the dashboard. The attendee list was
+ * the exception: it returned real names and photos to any authenticated caller,
+ * so the anonymity was readable straight out of the network tab.
+ *
+ * One pseudonym per person per event, so the name in the attendee list is the
+ * same name in the chatroom. Two identities for one person in one room would be
+ * worse than none — it would let someone be recognised in chat and not in the
+ * list, or the reverse.
+ *
+ * Falls back to "Attendee" rather than to the real name. A missing pseudonym is
+ * a bug, and degrading to the thing we are trying not to disclose turns that bug
+ * into a disclosure.
+ */
+export async function pseudonymsForEvent(eventId: string): Promise<Map<string, string>> {
+  const members = await db.chat_group_members.findMany({
+    where: { chat_group: { event_id: eventId } },
+    select: { user_id: true, anonymous_name: true },
+  })
+  return new Map(members.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
+}
