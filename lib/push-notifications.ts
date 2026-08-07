@@ -12,7 +12,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
