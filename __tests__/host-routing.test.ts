@@ -2,74 +2,106 @@
  * Two names for one deployment.
  *
  * `api.blendn.app` is a poor URL for a human to log into, so the dashboard gets
- * its own name. Both point at the same Railway service — the split is in
- * routing, not infrastructure.
+ * its own name. Both point at the same Railway service — the split is routing,
+ * not infrastructure.
  *
- * The rule has to fail *open* when unconfigured, or local development and any
- * environment without a second domain would 404 its own dashboard.
+ * The asymmetry is the point. A person on the wrong host followed a link, very
+ * possibly one of our own lead-notification emails, which deep-link to
+ * `NEXTAUTH_URL` and have already been sent — 404ing them would break every
+ * mail in every inbox the day this is switched on. A mobile client on the
+ * dashboard host is misconfigured, and a redirect would hide that.
+ *
+ * And it must fail OPEN when unconfigured, or localhost 404s its own dashboard.
  */
 
-function wrongHost(
+type HostVerdict = { kind: "ok" } | { kind: "redirect"; host: string } | { kind: "reject" }
+
+function checkHost(
   pathname: string,
   host: string | null,
   dashboardHost: string | null,
   apiHost: string | null
-): boolean {
-  if (!host || !dashboardHost || !apiHost) return false
+): HostVerdict {
+  if (!host || !dashboardHost || !apiHost) return { kind: "ok" }
   const bare = host.split(":")[0]
-  if (pathname.startsWith("/dashboard")) return bare === apiHost
-  if (pathname.startsWith("/api/mobile")) return bare === dashboardHost
-  return false
+  if (pathname.startsWith("/dashboard") || pathname === "/login") {
+    return bare === apiHost ? { kind: "redirect", host: dashboardHost } : { kind: "ok" }
+  }
+  if (pathname.startsWith("/api/mobile")) {
+    return bare === dashboardHost ? { kind: "reject" } : { kind: "ok" }
+  }
+  return { kind: "ok" }
 }
 
 const DASH = "dashboard.blendn.app"
 const API = "api.blendn.app"
-const check = (path: string, host: string | null) => wrongHost(path, host, DASH, API)
+const check = (path: string, host: string | null) => checkHost(path, host, DASH, API)
 
-describe("each surface on its own host", () => {
-  it("refuses a dashboard page on the API host", () => {
-    expect(check("/dashboard/events", API)).toBe(true)
+describe("humans are redirected", () => {
+  it("moves a dashboard page off the API host", () => {
+    expect(check("/dashboard/events", API)).toEqual({ kind: "redirect", host: DASH })
   })
 
-  it("refuses a mobile endpoint on the dashboard host", () => {
-    expect(check("/api/mobile/events", DASH)).toBe(true)
+  it("moves an already-sent lead notification link", () => {
+    // These emails deep-link to NEXTAUTH_URL and are in inboxes now. A 404 here
+    // would break every one of them.
+    expect(check("/dashboard/leads", API)).toEqual({ kind: "redirect", host: DASH })
   })
 
-  it("allows each on its own host", () => {
-    expect(check("/dashboard/events", DASH)).toBe(false)
-    expect(check("/api/mobile/events", API)).toBe(false)
+  it("moves /login too", () => {
+    // Signing in on the API host would land you on a dashboard not served there.
+    expect(check("/login", API)).toEqual({ kind: "redirect", host: DASH })
   })
 
-  it("leaves shared routes alone on both", () => {
-    // /api/health, /api/leads, /login, /apply — these belong to neither surface
-    // exclusively and must keep working wherever they are hit.
-    for (const path of ["/api/health", "/api/leads", "/login", "/apply"]) {
-      expect(check(path, DASH)).toBe(false)
-      expect(check(path, API)).toBe(false)
+  it("leaves them alone on the dashboard host", () => {
+    expect(check("/dashboard/events", DASH)).toEqual({ kind: "ok" })
+    expect(check("/login", DASH)).toEqual({ kind: "ok" })
+  })
+})
+
+describe("misconfigured clients are rejected", () => {
+  it("404s a mobile endpoint on the dashboard host", () => {
+    // Nothing linked it there. Redirecting would hide the misconfiguration.
+    expect(check("/api/mobile/events", DASH)).toEqual({ kind: "reject" })
+  })
+
+  it("allows the mobile API on its own host", () => {
+    expect(check("/api/mobile/events", API)).toEqual({ kind: "ok" })
+  })
+})
+
+describe("shared routes serve on both", () => {
+  it("leaves everything neither surface owns alone", () => {
+    // /api/leads is called server-to-server by the landing page and must not
+    // move; /api/health is what Railway polls.
+    for (const path of ["/api/health", "/api/leads", "/api/geocode", "/apply", "/"]) {
+      expect(check(path, DASH)).toEqual({ kind: "ok" })
+      expect(check(path, API)).toEqual({ kind: "ok" })
     }
-  })
-
-  it("ignores the port", () => {
-    expect(check("/dashboard/events", `${API}:8080`)).toBe(true)
   })
 })
 
 describe("fails open when unconfigured", () => {
   it("allows everything when neither host is set", () => {
-    // Local development, and any environment that has not been given a second
-    // domain. Getting this wrong would 404 the dashboard on localhost.
-    expect(wrongHost("/dashboard/events", "localhost:3000", null, null)).toBe(false)
-    expect(wrongHost("/api/mobile/events", "localhost:3000", null, null)).toBe(false)
+    // Local development, and any environment without a second domain. Getting
+    // this backwards would 404 the dashboard on localhost.
+    expect(checkHost("/dashboard/events", "localhost:3000", null, null)).toEqual({ kind: "ok" })
+    expect(checkHost("/api/mobile/events", "localhost:3000", null, null)).toEqual({ kind: "ok" })
   })
 
   it("allows everything when only one host is set", () => {
-    // Half-configured is not a rule, it is a mistake, and enforcing half of it
-    // would break one surface for no stated reason.
-    expect(wrongHost("/dashboard/events", API, DASH, null)).toBe(false)
-    expect(wrongHost("/api/mobile/events", DASH, null, API)).toBe(false)
+    // Half-configured is a mistake, not a policy.
+    expect(checkHost("/dashboard/events", API, DASH, null)).toEqual({ kind: "ok" })
+    expect(checkHost("/api/mobile/events", DASH, null, API)).toEqual({ kind: "ok" })
   })
 
   it("allows everything when the host header is missing", () => {
-    expect(wrongHost("/dashboard/events", null, DASH, API)).toBe(false)
+    expect(checkHost("/dashboard/events", null, DASH, API)).toEqual({ kind: "ok" })
+  })
+})
+
+describe("ports are ignored", () => {
+  it("matches the hostname regardless of port", () => {
+    expect(check("/dashboard/events", `${API}:8080`)).toEqual({ kind: "redirect", host: DASH })
   })
 })

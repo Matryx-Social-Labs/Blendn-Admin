@@ -68,8 +68,10 @@ Run a single test file: `npx jest __tests__/socket-auth.test.ts`
   production (Railway sets `HOSTNAME` to the container name, not a bind address).
 - **`middleware.ts`** — branches by path: version rewriting and CORS for
   `/api/mobile/*`, session and role checks for `/dashboard/*`. When
-  `DASHBOARD_HOST` and `API_HOST` are both set it also serves each surface only
-  on its own hostname.
+  `DASHBOARD_HOST` and `API_HOST` are both set it also serves each surface on
+  its own hostname — `/dashboard` and `/login` **redirect** to the dashboard
+  host (people follow links, including our own emails), while `/api/mobile` on
+  the dashboard host **404s** (a misconfigured client, not a bookmark).
 - **Two auth systems.** `lib/auth.ts` (NextAuth, dashboard) and
   `lib/mobile-auth.ts` (JWT, mobile). They do not overlap — mobile routes never
   read the session, dashboard pages never read the JWT.
