@@ -211,3 +211,99 @@
     @apply bg-background text-foreground;
   }
 }
+
+/*
+ * `/apply` is a public marketing page, not a dashboard screen.
+ *
+ * A visitor clicks "List your event" on the organiser landing page and gets
+ * redirected here, so this is the last step of the marketing funnel — and it
+ * broke continuity at the exact moment someone is deciding whether to trust us
+ * with an application. The dashboard stays dark; sign-in after approval is
+ * where dark begins.
+ *
+ * `app/layout.tsx` puts `dark` on <html> and a nested layout cannot undo that,
+ * so this re-declares the light values for one subtree. A descendant
+ * re-declaring a custom property wins for everything inside it.
+ *
+ * Values are copied verbatim from `:root` — inventing new ones here would
+ * create exactly the drift this exists to remove, and
+ * `__tests__/apply-theme.test.ts` fails if any of them stop matching.
+ * `--primary` and `--primary-foreground` are deliberately absent: identical in
+ * both themes already, and already the landing page's brand-500 on ink.
+ */
+.apply-light {
+  --background: oklch(0.995 0.002 60);
+  --foreground: oklch(0.156 0.002 17.3);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.156 0.002 17.3);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.156 0.002 17.3);
+  --secondary: oklch(0.968 0.006 40);
+  --secondary-foreground: oklch(0.24 0.01 330);
+  --muted: oklch(0.968 0.006 40);
+  --muted-foreground: oklch(0.5 0.012 330);
+  --accent: oklch(0.958 0.012 40);
+  --accent-foreground: oklch(0.24 0.01 330);
+  --destructive: oklch(0.55 0.215 15);
+  --faint-foreground: oklch(0.62 0.012 330);
+  --surface-raised: oklch(0.968 0.006 40);
+  --border: oklch(0.905 0.006 40);
+  --border-strong: oklch(0.85 0.008 40);
+  --input: oklch(0.905 0.006 40);
+  --ring: oklch(0.652 0.2 36.7);
+}
+
+/*
+ * The landing hero's warm wash, as CSS.
+ *
+ * The real page uses `Header-background.webp` — 245 kB to draw a gradient, which
+ * is not a trade worth making on a page someone is about to type into.
+ *
+ * It is a *band*, not a fade: saturated brand orange peaking low-centre and
+ * falling back to white above and below, wide enough to bleed off both edges. A
+ * plain 180deg linear ramp reads as a different page — the orange ends up
+ * pooled along the bottom edge instead of glowing through the middle.
+ *
+ * Behind the card, never inside it; the card stays white.
+ */
+.apply-gradient {
+  background:
+    radial-gradient(
+      125% 52% at 50% 74%,
+      #f05423 0%,
+      rgb(240 84 35 / 78%) 20%,
+      rgb(250 122 78 / 32%) 46%,
+      rgb(255 245 241 / 0%) 72%
+    ),
+    linear-gradient(180deg, #fff 0%, #fff5f1 50%, #fff 100%);
+  background-attachment: fixed;
+}
+
+/* The card sits in the middle of that wash, so it needs room to read as
+   floating on it rather than covering it. */
+.apply-shell {
+  max-width: 72rem;
+}
+
+/*
+ * The landing page's brand chip and its `shadow-elegant`.
+ *
+ * `brand-700` for the text is not a preference. On `brand-100` the lighter
+ * steps fail AA — 500 is 3.50 and 600 is 4.41 — and only 700 (6.10) passes.
+ */
+.apply-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: #ffe6dc;
+  color: #b43411;
+  border: 1px solid #ffc9b3;
+}
+
+.apply-card {
+  box-shadow: 0 4px 20px rgb(0 0 0 / 8%);
+}

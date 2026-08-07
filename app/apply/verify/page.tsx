@@ -61,7 +61,7 @@ function Verify() {
   }, [token])
 
   return (
-    <Card className="w-full max-w-lg rounded-xl shadow-none">
+    <Card className="apply-card w-full max-w-lg rounded-3xl">
       <CardContent className="space-y-5 px-8 py-10 text-center">
         {state === "working" ? (
           <p className="text-sm text-muted-foreground">Confirming your address...</p>
@@ -72,11 +72,11 @@ function Verify() {
             ) : (
               <IconAlertTriangle className="mx-auto size-12 text-amber-500" />
             )}
-            <h1 className="text-2xl font-semibold text-foreground">
+            <h1 className="text-2xl font-bold text-foreground">
               {state === "ok" ? "Email confirmed" : "That link didn't work"}
             </h1>
             <p className="text-sm leading-6 text-muted-foreground">{message}</p>
-            <Button asChild variant="outline" className="rounded-xl">
+            <Button asChild variant="outline" className="rounded-2xl">
               <Link href={state === "ok" ? "/" : "/apply"}>
                 {state === "ok" ? "Back to Blend'n" : "Apply again"}
               </Link>
@@ -90,7 +90,10 @@ function Verify() {
 
 export default function VerifyPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-10">
+    // Same funnel, same theme. The confirmation link is the last step before
+    // approval, and letting it fall back to dark would break continuity at the
+    // one moment someone is checking they did the right thing.
+    <main className="apply-light apply-gradient flex min-h-screen items-center justify-center px-6 py-10">
       {/* useSearchParams needs a Suspense boundary or the whole route opts out
           of static rendering and the build warns. */}
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>

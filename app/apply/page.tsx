@@ -1,12 +1,11 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { IconArrowRight, IconBuildingStore, IconCalendarEvent, IconCircleCheck } from "@tabler/icons-react"
 import { toast } from "sonner"
 
-import { BrandLogo } from "@/components/brand-logo"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -28,6 +27,19 @@ import { onboardingTier } from "@/lib/org-invites"
  */
 
 type Role = "organizer" | "venue_owner"
+
+/**
+ * The three objections someone actually has with the form in front of them.
+ *
+ * All three are true today and all three are checked elsewhere: pricing is
+ * undecided and everything is free (`docs/ROADMAP.md`), nothing in this flow
+ * touches payment, and `/dashboard/onboarding` is a queue a human reads.
+ */
+const REASSURANCES = [
+  "Free while we're in development — pricing isn't decided yet.",
+  "No card. There's nothing to enter and no trial to expire.",
+  "Read by a person, not a filter. Usually within two working days.",
+] as const
 
 const ROLES: { value: Role; title: string; blurb: string; icon: typeof IconCalendarEvent }[] = [
   {
@@ -98,11 +110,18 @@ export default function ApplyPage() {
 
   if (done) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-6 py-10">
-        <Card className="w-full max-w-lg rounded-xl shadow-none">
+      <main className="apply-light apply-gradient flex min-h-screen items-center justify-center px-6 py-10">
+        <Card className="apply-card w-full max-w-lg rounded-3xl">
           <CardContent className="space-y-5 px-8 py-10 text-center">
+            <Image
+              src="/brand/lockup-dark.webp"
+              alt="Blend'n"
+              width={852}
+              height={240}
+              className="mx-auto h-9 w-auto"
+            />
             <IconCircleCheck className="mx-auto size-12 text-primary" />
-            <h1 className="text-2xl font-semibold text-foreground">
+            <h1 className="text-2xl font-bold text-foreground">
               {done.emailSent ? "Check your email" : "Application received"}
             </h1>
             <p className="text-sm leading-6 text-muted-foreground">{done.message}</p>
@@ -110,7 +129,7 @@ export default function ApplyPage() {
               Applications are reviewed by a person, usually within two working days. No account has
               been created yet.
             </p>
-            <Button asChild variant="outline" className="rounded-xl">
+            <Button asChild variant="outline" className="rounded-2xl">
               <Link href="/">Back to Blend&apos;n</Link>
             </Button>
           </CardContent>
@@ -120,41 +139,59 @@ export default function ApplyPage() {
   }
 
   return (
-    <main className="relative min-h-screen px-6 py-6 md:px-10">
-      <div className="mx-auto grid max-w-7xl overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[0.9fr_1.1fr]">
-        <section className="flex flex-col justify-between border-b border-border px-6 py-8 lg:border-b-0 lg:border-r lg:px-10 lg:py-10">
-          <div className="space-y-8">
-            <div className="flex items-start justify-between gap-4">
-              <BrandLogo size="hero" />
-              <Badge variant="secondary" className="rounded-full px-3 py-1 font-medium">
-                Host application
-              </Badge>
-            </div>
-            <div className="space-y-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                Become a host
-              </p>
-              <h1 className="max-w-xl text-4xl font-semibold leading-tight text-foreground">
-                List your events where people are looking for them.
-              </h1>
-              <p className="max-w-xl text-base leading-7 text-muted-foreground">
-                Tell us about your organisation. We review every application by hand — it keeps the
-                listings worth browsing.
-              </p>
-            </div>
+    <main className="apply-light apply-gradient relative min-h-screen px-6 py-10 md:px-10">
+      <div className="apply-card apply-shell mx-auto grid overflow-hidden rounded-3xl border border-border bg-card lg:grid-cols-[0.9fr_1.1fr]">
+        <section className="flex flex-col gap-8 border-b border-border px-6 py-10 lg:border-b-0 lg:border-r lg:px-10 lg:py-12">
+          {/* The landing page's own lockup, not the monogram-plus-wordmark used
+              in dashboard chrome — that pairing appears nowhere on the marketing
+              site and would read as a third brand at the moment someone is
+              deciding whether to trust us. */}
+          <Image
+            src="/brand/lockup-dark.webp"
+            alt="Blend'n"
+            width={852}
+            height={240}
+            priority
+            className="h-9 w-auto self-start"
+          />
+
+          <div className="space-y-4">
+            <span className="apply-chip">Become a host</span>
+            <h1 className="max-w-xl text-4xl font-bold leading-tight tracking-tight text-foreground">
+              List your events where people are looking for them.
+            </h1>
+            <p className="max-w-xl text-base leading-7 text-muted-foreground">
+              Tell us about your organisation. We review every application by hand — it keeps the
+              listings worth browsing.
+            </p>
           </div>
 
-          <div className="mt-10 space-y-3 rounded-xl border border-border bg-muted/40 p-5">
-            <h2 className="text-sm font-semibold text-foreground">What happens next</h2>
+          {/* Directly under the intro, not pinned to the bottom. `justify-between`
+              left roughly 600px of dead space at desktop width, which reads as a
+              rendering fault rather than as breathing room. */}
+          <div className="space-y-3 rounded-2xl border border-border bg-muted/40 p-5">
+            <h2 className="text-sm font-bold text-foreground">What happens next</h2>
             <ol className="space-y-2 text-sm leading-6 text-muted-foreground">
               <li>1. Confirm your email address.</li>
               <li>2. We review your application, usually within two working days.</li>
               <li>3. You get sign-in details and can invite your colleagues.</li>
             </ol>
           </div>
+
+          {/* What actually goes through someone's head on this page. Not a
+              testimonial — the landing page deleted two invented ones and this
+              page must not restart the habit. */}
+          <ul className="space-y-3.5">
+            {REASSURANCES.map((r) => (
+              <li key={r} className="flex items-start gap-2.5 text-sm leading-6 text-muted-foreground">
+                <IconCircleCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+                {r}
+              </li>
+            ))}
+          </ul>
         </section>
 
-        <section className="px-6 py-8 lg:px-10 lg:py-10">
+        <section className="px-6 py-10 lg:px-10 lg:py-12">
           <form onSubmit={submit} className="mx-auto max-w-xl space-y-7">
             <fieldset className="space-y-3">
               <legend className="text-sm font-semibold text-foreground">Which are you?</legend>
@@ -165,7 +202,7 @@ export default function ApplyPage() {
                     key={r.value}
                     onClick={() => setRole(r.value)}
                     aria-pressed={role === r.value}
-                    className={`rounded-xl border p-4 text-left transition ${
+                    className={`rounded-2xl border p-4 text-left transition ${
                       role === r.value
                         ? "border-primary bg-primary/5"
                         : "border-border bg-muted/30 hover:border-muted-foreground/40"
@@ -222,7 +259,7 @@ export default function ApplyPage() {
                 </Field>
               </div>
               <Field label="Address">
-                <Textarea value={form.address} onChange={set("address")} rows={2} className="rounded-xl" />
+                <Textarea value={form.address} onChange={set("address")} rows={2} className="rounded-2xl" />
               </Field>
               <Field label="GSTIN" hint="15 characters. Checked for format only — we don't share it.">
                 <Input
@@ -277,7 +314,7 @@ export default function ApplyPage() {
 
               {needsProof ? (
                 <div
-                  className={`rounded-xl border p-4 text-sm leading-6 ${
+                  className={`rounded-2xl border p-4 text-sm leading-6 ${
                     proofGiven
                       ? "border-border bg-muted/40 text-muted-foreground"
                       : "border-amber-500/40 bg-amber-500/5 text-foreground"
@@ -293,7 +330,7 @@ export default function ApplyPage() {
             <Button
               type="submit"
               disabled={loading || (needsProof && !proofGiven)}
-              className="h-12 w-full rounded-xl"
+              className="h-12 w-full rounded-2xl"
             >
               {loading ? "Submitting..." : "Submit application"}
               {!loading ? <IconArrowRight className="size-4" /> : null}
