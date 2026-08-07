@@ -31,12 +31,36 @@ const ALLOWED_ORIGINS = [
 const DASHBOARD_HOST = process.env.DASHBOARD_HOST ?? null
 const API_HOST = process.env.API_HOST ?? null
 
-function wrongHost(pathname: string, host: string | null): boolean {
-  if (!host || !DASHBOARD_HOST || !API_HOST) return false
+/**
+ * Humans get redirected; machines get an error.
+ *
+ * A person on `api.blendn.app/dashboard/leads?lead=…` followed a link — very
+ * possibly one of our own lead-notification emails, which deep-link to
+ * `NEXTAUTH_URL` and have already been sent. 404ing them would break every mail
+ * in every inbox the day the host split is switched on. So `/dashboard` and
+ * `/login` move to the dashboard host, query string intact.
+ *
+ * A mobile client on the dashboard host is a different thing: nothing linked it
+ * there, it is misconfigured, and a redirect would hide that until something
+ * subtler broke. That one 404s.
+ */
+type HostVerdict = { kind: "ok" } | { kind: "redirect"; host: string } | { kind: "reject" }
+
+function checkHost(pathname: string, host: string | null): HostVerdict {
+  if (!host || !DASHBOARD_HOST || !API_HOST) return { kind: "ok" }
   const bare = host.split(":")[0]
-  if (pathname.startsWith("/dashboard")) return bare === API_HOST
-  if (pathname.startsWith("/api/mobile")) return bare === DASHBOARD_HOST
-  return false
+
+  // `/login` travels with `/dashboard`: signing in on the API host would land
+  // the user on a dashboard that is not served there.
+  if (pathname.startsWith("/dashboard") || pathname === "/login") {
+    return bare === API_HOST ? { kind: "redirect", host: DASHBOARD_HOST } : { kind: "ok" }
+  }
+  if (pathname.startsWith("/api/mobile")) {
+    return bare === DASHBOARD_HOST ? { kind: "reject" } : { kind: "ok" }
+  }
+  // Everything else — /api/health, /api/leads, /api/geocode, /apply — belongs to
+  // neither surface exclusively and serves on both.
+  return { kind: "ok" }
 }
 
 function getCorsHeaders(origin: string | null): Record<string, string> {
@@ -67,15 +91,19 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
 }
 
 export async function middleware(req: NextRequest) {
-  /*
-   * Each surface on its own host, when both are configured.
-   *
-   * A 404 rather than a redirect: `dashboard.blendn.app/api/mobile/...` is not
-   * a page that moved, it is a client pointed at the wrong name, and silently
-   * redirecting would hide that until something subtler broke.
-   */
-  if (wrongHost(req.nextUrl.pathname, req.headers.get("host"))) {
+  // Each surface on its own host, when both are configured. See checkHost.
+  const hostVerdict = checkHost(req.nextUrl.pathname, req.headers.get("host"))
+  if (hostVerdict.kind === "reject") {
     return new NextResponse("Not found", { status: 404 })
+  }
+  if (hostVerdict.kind === "redirect") {
+    const target = new URL(req.nextUrl)
+    target.host = hostVerdict.host
+    target.port = ""
+    target.protocol = "https:"
+    // 308 rather than 302: the move is permanent and the method must survive,
+    // so a form POST to /login does not silently become a GET.
+    return NextResponse.redirect(target, 308)
   }
 
   const { pathname } = req.nextUrl
