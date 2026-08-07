@@ -5,6 +5,81 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] - 2026-08-07
+
+### Added
+
+- **The attendance panel and the occupancy hero.** The last part of the check-in
+  reframing that had data but no UI. Occupancy shows the guest/staff split beside
+  the headline rather than folded into it — "142 in the room, 138 guests, 4
+  staff" answers two questions the same person asks ten seconds apart. Attendance
+  degrades to one honest number for a single-day event, because most events are
+  one evening and a five-column chart rendering a single bar is worse than a
+  figure. Cancelled days keep their slot, hatched, since dropping them leaves an
+  unexplained gap in the dates and a zero bar reads as a day nobody came to.
+
+- **A test that walks the import graph from `server.ts`.** `build:server`
+  compiles with plain `tsc`, which resolves the `@/` alias for typechecking and
+  then emits it verbatim into the `require()` — so the build goes green, CI
+  passes, and the container dies on boot with `MODULE_NOT_FOUND`. Every layer
+  that could catch this is blind to it. The test names the chain that made a file
+  reachable, not just the file.
+
+### Fixed
+
+- **Two screens disagreed about how full a room was.** `lib/live-snapshot.ts`
+  computed fill as `min(100, inside / capacity)` — capped, and against
+  staff-inclusive occupancy — while `lib/occupancy.ts` computed guests against
+  capacity, uncapped, and reported `overCapacity`. A room at 88 guests and 4 crew
+  against a stated 80 read "100%, full" on the live tab and "110%, 8 over" on the
+  occupancy panel. The cap was the worse half: it did not round a number down, it
+  made an over-capacity room unrepresentable — the one situation the live screen
+  exists to surface. `occupancyFrom()` is now the only implementation.
+
+- **`/` was a second marketing pitch** shown to people who already have an
+  account and are trying to sign in. The 141-line page is gone; `/` resolves in
+  middleware to `/dashboard` when signed in and `/login` otherwise, and travels
+  with them under the host split so the bare domain is not also the slowest way
+  in.
+
+- **Dashboard screens measured the window, not the content column.** The sidebar
+  is 16rem and collapsible, so `lg:grid-cols-2` fired at 1024px of window whether
+  or not 256px of it was sidebar. 21 breakpoints across five screens moved to
+  `@container/main`, with a test to stop the drift returning.
+
+### Documentation
+
+- `DASHBOARD_HOST` and `API_HOST` documented in `.env.example` and
+  `DEPLOYMENT.md`, including the ordering constraint that actually bites: Railway
+  serves its `*.up.railway.app` wildcard until Let's Encrypt issues, so turning
+  the split on before the certificate lands redirects the dashboard to a host the
+  browser refuses — unreachable on both names.
+
+- `docs/ROADMAP.md` restructured into a working ledger — Now, Next,
+  Validated-not-doing, Done — with the rule that nothing ships without it moving.
+
+## [0.44.1] - 2026-08-06
+
+### Fixed
+
+- **Humans are redirected, machines are rejected.** A person on
+  `api.blendn.app/dashboard/leads?lead=…` followed a link, very possibly one of
+  our own lead-notification emails, which deep-link to `NEXTAUTH_URL` and were
+  already sent. A 404 would have broken every one of them in every inbox. A
+  mobile client on the dashboard host is a different thing — nothing linked it
+  there, it is misconfigured, and a redirect would hide that until something
+  subtler broke.
+
+## [0.44.0] - 2026-08-06
+
+### Added
+
+- **`dashboard.blendn.app` as a second domain on the same service.** Organisers
+  were logging in at a URL called `api`. The split is routing, not
+  infrastructure: one deployment, one Socket.io, one Prisma client. Both
+  `DASHBOARD_HOST` and `API_HOST` must be set or the split is skipped entirely,
+  so local development and any single-host environment are unaffected.
+
 ## [0.43.0] - 2026-08-07
 
 ### Added
