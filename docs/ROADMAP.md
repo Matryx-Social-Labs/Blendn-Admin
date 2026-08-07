@@ -59,14 +59,24 @@ a venue's own systems.
 
 ## Product gaps worth knowing about
 
-### Multi-day events
+### Multi-day events — the model landed, two pieces did not
 
-Conferences and exhibitions run for days. The schema has one `start_time` and
-one `end_time`, and the chat lifecycle closes a room 24 h after the end. A
-week-long exhibition today is one very long event with one room open throughout.
+`event_occurrences` exists and check-in is per-day (v0.40.0), so "who came on
+Wednesday" is answerable and Tuesday no longer overwrites Monday.
 
-Flagged rather than fixed — it touches the chat lifecycle sweeper, the check-in
-window and the feedback window together.
+Still event-level, deliberately:
+
+- **Capacity.** `events.current_capacity` counts the whole run. Moving it
+  per-day means changing the atomic conditional `UPDATE` that prevents
+  overbooking, which is the one piece of concurrency-critical SQL in the
+  product. `event_occurrences.capacity` exists and is unread — it is the column
+  that work would fill.
+- **The feedback window.** The chatroom still closes 24 h after the *last* day,
+  so day-one problems surface at the end of the week. This is the one that
+  actually costs an organiser something, and it belongs to the chat lifecycle
+  sweeper rather than to check-in.
+
+Neither blocks the other. Both are now additive.
 
 ### Attendee unmasking
 

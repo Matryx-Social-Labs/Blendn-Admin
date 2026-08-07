@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import slugify from "slugify"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
+import { syncOccurrences } from "@/lib/occurrences"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -230,6 +231,10 @@ export async function POST(req: Request) {
           : undefined,
       },
     })
+
+    // Every event has at least one occurrence, and check-in resolves through
+    // them — an event created without one could not be checked into at all.
+    await syncOccurrences(event.id, new Date(start_time), new Date(end_time), timezone)
 
     return NextResponse.json(event)
   } catch (error) {

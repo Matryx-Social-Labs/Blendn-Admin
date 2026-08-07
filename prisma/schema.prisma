@@ -201,7 +201,7 @@ model events {
   favorites          event_favorites[]
   ratings            event_ratings[]
   reports            event_reports[]
-  recurring_pattern  recurring_events?
+  occurrences        event_occurrences[]
   sponsored_messages event_sponsored_messages[]
   announcements      event_announcements[]
   rsvps              event_rsvps[]
@@ -291,6 +291,9 @@ model event_media {
 model event_check_ins {
   id             String          @id @default(uuid()) @db.Uuid
   event_id       String          @db.Uuid
+  /// Which day of the event this belongs to. Not null: every event has at
+  /// least one occurrence, so there is always a right answer.
+  occurrence_id  String          @db.Uuid
   user_id        String
   status         check_in_status @default(pending)
   check_in_time  DateTime?       @db.Timestamptz(6)
@@ -302,11 +305,19 @@ model event_check_ins {
   updated_at     DateTime        @default(now()) @db.Timestamptz(6)
 
   // Relations
-  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  event      events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Cascade)
+  user       User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@unique([event_id, user_id])
+  /// One check-in per person **per occurrence**, not per event.
+  ///
+  /// This was `@@unique([event_id, user_id])`, which made per-day attendance
+  /// unrepresentable: a five-day conference held one row per attendee, and the
+  /// check-in route's upsert overwrote Monday's timestamp with Tuesday's.
+  /// "Who came on Wednesday" had no answer.
+  @@unique([occurrence_id, user_id])
   @@index([event_id, status])
+  @@index([occurrence_id, status])
   @@index([user_id])
   @@index([user_id, status])
 }
@@ -499,17 +510,40 @@ model message_reports {
   @@index([reporter_id])
 }
 
-model recurring_events {
-  id                 String   @id @default(uuid()) @db.Uuid
-  parent_event_id    String   @unique @db.Uuid
-  recurrence_pattern Json
-  start_date         DateTime @db.Date
-  end_date           DateTime @db.Date
-  created_at         DateTime @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime @default(now()) @db.Timestamptz(6)
+/// One day (or session) of an event.
+///
+/// **Every event has at least one.** A single-evening club night has exactly
+/// one and behaves as it always did; a five-day conference has five. Making it
+/// total rather than optional is the point: a nullable occurrence would put a
+/// null branch in every query, and — because Postgres allows unlimited NULLs in
+/// a unique index — check-in uniqueness would silently evaporate for every
+/// single-day event.
+///
+/// Replaces `recurring_events`, which was schema-only: zero rows, zero reads,
+/// zero writes, and an abandoned attempt at this same concept. Adding a second
+/// occurrence table beside it would have left two.
+model event_occurrences {
+  id           String    @id @default(uuid()) @db.Uuid
+  event_id     String    @db.Uuid
+  /// The local calendar day this session belongs to. What "who came on
+  /// Wednesday" is actually asking.
+  occurs_on    DateTime  @db.Date
+  start_time   DateTime  @db.Timestamptz(6)
+  end_time     DateTime  @db.Timestamptz(6)
+  /// Per-day capacity, for a conference selling fewer seats on the last day.
+  /// Null falls back to the event's own.
+  capacity     Int?
+  /// A day can be called off without cancelling the whole run.
+  cancelled_at DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @updatedAt @db.Timestamptz(6)
 
-  // Relations
-  parent_event events @relation(fields: [parent_event_id], references: [id], onDelete: Cascade)
+  event     events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  check_ins event_check_ins[]
+
+  @@unique([event_id, occurs_on])
+  @@index([event_id, start_time])
+  @@index([start_time])
 }
 
 model mobile_refresh_tokens {

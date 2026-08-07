@@ -51,13 +51,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!chatGroup) {
-      const checkIn = await db.event_check_ins.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
+      const checkIn = await db.event_check_ins.findFirst({
+      // Event-level, not per-day: attending any day of a run gets you the room.
+      where: { event_id: eventId, user_id: authUser.userId },
         select: { status: true },
       })
 
@@ -92,13 +88,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!membership || membership.status !== "active") {
-      const checkIn = await db.event_check_ins.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
+      const checkIn = await db.event_check_ins.findFirst({
+      // Event-level, not per-day: attending any day of a run gets you the room.
+      where: { event_id: eventId, user_id: authUser.userId },
         select: { status: true },
       })
 
@@ -302,13 +294,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!chatGroup) {
-      const checkIn = await db.event_check_ins.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
+      const checkIn = await db.event_check_ins.findFirst({
+      // Event-level, not per-day: attending any day of a run gets you the room.
+      where: { event_id: eventId, user_id: authUser.userId },
         select: { status: true },
       })
 
@@ -381,13 +369,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Auto-join: if not a member yet, check if user is checked in
     if (!membership) {
-      const checkIn = await db.event_check_ins.findUnique({
-        where: {
-          event_id_user_id: {
-            event_id: eventId,
-            user_id: authUser.userId,
-          },
-        },
+      const checkIn = await db.event_check_ins.findFirst({
+      // Event-level, not per-day: attending any day of a run gets you the room.
+      where: { event_id: eventId, user_id: authUser.userId },
         select: { status: true },
       })
 

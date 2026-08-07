@@ -149,13 +149,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         }),
-        db.event_check_ins.findUnique({
-          where: {
-            event_id_user_id: {
-              event_id: eventId,
-              user_id: authUser.userId,
-            },
-          },
+        db.event_check_ins.findFirst({
+          // Event-level: "have you been to this?" for the detail screen. A
+          // multi-day run has one row per day attended, and the most recent is
+          // the one whose status the client cares about.
+          where: { event_id: eventId, user_id: authUser.userId },
+          orderBy: { check_in_time: "desc" },
         }),
         db.event_rsvps.findUnique({
           where: {

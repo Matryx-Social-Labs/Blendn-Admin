@@ -80,5 +80,27 @@ export async function makeEvent(
       deleted_at: overrides.deleted_at ?? null,
     },
   })
+
+  // Every event has at least one occurrence — the API guarantees it, and
+  // check-ins are NOT NULL on it. A fixture without one would be a shape that
+  // cannot exist in production.
+  await db.event_occurrences.create({
+    data: {
+      event_id: event.id,
+      occurs_on: new Date(event.start_time.toISOString().slice(0, 10)),
+      start_time: event.start_time,
+      end_time: event.end_time,
+    },
+  })
   return event.id
+}
+
+/** The (single) occurrence a fixture event was created with. */
+export async function occurrenceOf(eventId: string): Promise<string> {
+  const o = await db.event_occurrences.findFirst({
+    where: { event_id: eventId },
+    select: { id: true },
+  })
+  if (!o) throw new Error(`fixture event ${eventId} has no occurrence`)
+  return o.id
 }
