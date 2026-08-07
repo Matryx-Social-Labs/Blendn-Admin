@@ -5,6 +5,51 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0] - 2026-08-07
+
+### Added
+
+- **Matchmaking: the schema and the ranking.** `connection_intent`
+  (dating / networking / friendship / just_here), per-event intent and reveal
+  flags on `event_check_ins`, profile defaults, and `event_likes`.
+
+  Intent is multi-select and **never a partition**. Splitting the match surface
+  by it would empty both halves of a new app's already-small pool, and a visible
+  "dating" tab deters the people who came to network — so it shapes ranking and
+  shows on the card, and filters nobody out. `just_here` is a first-class answer
+  rather than a null.
+
+  `lib/matching.ts` ranks on the **structured** `user_interests → categories`
+  graph, IDF-weighted: everyone at a music event likes "Music", so sharing it
+  says nothing, while two people who both picked "Modular synths" have found each
+  other. Without the weighting the ranking collapses into "who ticked the most
+  boxes", which rewards indiscriminate tagging.
+
+  **No score is ever emitted.** The card names the actual overlapping
+  categories — "you both picked Techno and Board games" — which explains itself
+  and is checkable by the person reading it. That is also what makes anonymity
+  nearly free: a list naming *what you have in common* loses little by
+  withholding *who*. The reveal decision is enforced inside the ranking rather
+  than at the route, so no caller can forget it.
+
+  Likes are event-scoped. A like is something you felt about someone in a
+  particular room on a particular night; carrying it across events would turn a
+  room into a follower graph.
+
+### Fixed
+
+- **The migration disagreed with `db push` and would have broken every
+  check-in.** Prisma models a scalar list as a *nullable* column with no default
+  and omits it from an INSERT when not given. Declaring the intent arrays
+  `NOT NULL DEFAULT '{}'` — which reads like the obvious choice — produced a
+  database that `db push` reported as "in sync" and that then failed every
+  check-in with a null constraint violation.
+
+  CI runs `db push` and production runs `migrate deploy`, so this is invisible
+  until the deploy. Caught by applying the migration to a copy of the production
+  schema and diffing `information_schema.columns` against a `db push` of the
+  same schema; the integration suite now runs green against both.
+
 ## [0.48.0] - 2026-08-07
 
 ### Added

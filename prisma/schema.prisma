@@ -45,6 +45,8 @@ model User {
   org_join_requests      organisation_join_requests[]
   password_resets        password_reset_tokens[]
   event_check_ins        event_check_ins[]
+  likes_sent             event_likes[]        @relation("LikesSent")
+  likes_received         event_likes[]        @relation("LikesReceived")
   chat_messages          chat_messages[]
   chat_group_memberships chat_group_members[]
   message_reactions      message_reactions[]
@@ -143,6 +145,23 @@ model profiles {
   goals       String[]
   looking_for String[]
   onboarded   Boolean  @default(false)
+
+  /// What this person is generally open to. Overridable per event — people
+  /// differ on a Tuesday and a Saturday — so this is the default, not the truth.
+  intent_default connection_intent[]
+
+  /// Anonymous unless asked. The room is pseudonymous everywhere else, and a
+  /// match list that named people would be the one screen that undid it.
+  ///
+  /// Revealing is per event (`event_check_ins.revealed`); this only sets what
+  /// that starts as.
+  reveal_by_default Boolean @default(false)
+
+  /// Collected **only** when intent includes dating, and unread otherwise. A
+  /// networking user is never asked their gender — less friction, and less data
+  /// held about people who had no reason to give it.
+  gender        String?
+  interested_in String[]
   // push_token and push_platform removed — use push_tokens table instead
   created_at  DateTime @default(now()) @db.Timestamptz(6)
   updated_at  DateTime @default(now()) @db.Timestamptz(6)
@@ -195,6 +214,7 @@ model events {
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
   details            event_details?
   check_ins          event_check_ins[]
+  likes              event_likes[]
   chat_group         chat_groups?
   media              event_media[]
   categories         event_categories[]
@@ -311,6 +331,14 @@ model event_check_ins {
   latitude       Float?
   longitude      Float?
   device_info    Json?
+
+  /// Why they are here tonight, and whether they want to be named.
+  ///
+  /// Per check-in rather than per profile because both genuinely change by
+  /// event: someone open to dating at a Friday party is often only there for
+  /// the talk on Tuesday. Empty falls back to `profiles.intent_default`.
+  intent   connection_intent[]
+  revealed Boolean            @default(false)
 
   /// Presence. See lib/presence.ts — `left_area_at` is both the state and the
   /// clock, and a ping back inside clears it, so there is no enum to drift out
@@ -1174,6 +1202,56 @@ enum media_type {
 }
 
 /// Working, or attending. See `event_check_ins.kind`.
+/// Why someone is in the room tonight.
+///
+/// Multi-select and deliberately not a partition. Splitting the match surface
+/// by intent would empty both halves of a new app's already-small pool, and a
+/// visible "dating" tab deters the people who came to network. Intent is shown
+/// on the card and shapes the ranking; it never filters anyone out.
+///
+/// `just_here` is a first-class answer, not a null. Plenty of people come for
+/// the event and nothing else, and making them pick a social reason would be
+/// both a lie and a worse experience.
+
+/// One person liking another, scoped to the event where they were in the room
+/// together.
+///
+/// Event-scoped deliberately. The product is "the people who are actually here",
+/// and a like is a thing you felt about someone in a particular room on a
+/// particular night. Carrying it across events would turn a room into a
+/// follower graph, which is a different product.
+///
+/// A mutual like is the only thing that opens a conversation, and the only
+/// moment identity is exchanged — and then only if both sides chose to reveal.
+model event_likes {
+  id         String   @id @default(uuid()) @db.Uuid
+  event_id   String   @db.Uuid
+  liker_id   String
+  liked_id   String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  liker User   @relation("LikesSent", fields: [liker_id], references: [id], onDelete: Cascade)
+  liked User   @relation("LikesReceived", fields: [liked_id], references: [id], onDelete: Cascade)
+
+  /// Liking twice is the same as liking once.
+  @@unique([event_id, liker_id, liked_id])
+  /// "Has anyone liked me back?" — the mutual check, on every like.
+  @@index([event_id, liked_id])
+  /// Both sides of the pair get a leading index. Deleting a User cascades here
+  /// on each, and an unindexed FK makes Postgres scan the whole table per
+  /// deleted row — the same shape as chat_messages.parent_id.
+  @@index([liker_id])
+  @@index([liked_id])
+}
+
+enum connection_intent {
+  dating
+  networking
+  friendship
+  just_here
+}
+
 enum check_in_kind {
   attendee
   staff
