@@ -294,6 +294,16 @@ model event_check_ins {
   /// Which day of the event this belongs to. Not null: every event has at
   /// least one occurrence, so there is always a right answer.
   occurrence_id  String          @db.Uuid
+  /// Whether this person was working or attending.
+  ///
+  /// Derived server-side from organisation membership at check-in time — the
+  /// client app has no idea and does not need one. Stored rather than computed
+  /// on read because membership changes: someone who leaves the organisation
+  /// next month should not retroactively become a guest at last month's event.
+  ///
+  /// Occupancy counts both (fire safety counts bodies); attendance, turn-up and
+  /// new-vs-returning count guests only.
+  kind           check_in_kind   @default(attendee)
   user_id        String
   status         check_in_status @default(pending)
   check_in_time  DateTime?       @db.Timestamptz(6)
@@ -317,6 +327,7 @@ model event_check_ins {
   /// "Who came on Wednesday" had no answer.
   @@unique([occurrence_id, user_id])
   @@index([event_id, status])
+  @@index([event_id, kind])
   @@index([occurrence_id, status])
   @@index([user_id])
   @@index([user_id, status])
@@ -1150,6 +1161,12 @@ enum media_type {
   image
   video
   document
+}
+
+/// Working, or attending. See `event_check_ins.kind`.
+enum check_in_kind {
+  attendee
+  staff
 }
 
 enum check_in_status {

@@ -15,6 +15,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canAccessDashboard } from "@/lib/rbac"
+import { getOccupancies } from "@/lib/occupancy"
 
 /** Matches the chat auto-archive window and the event Feedback tab. */
 const FEEDBACK_WINDOW_HOURS = 24
@@ -88,7 +89,6 @@ export default async function ChatroomsPage() {
       city: true,
       start_time: true,
       end_time: true,
-      current_capacity: true,
       max_capacity: true,
       organizer: {
         select: {
@@ -112,7 +112,15 @@ export default async function ChatroomsPage() {
 
   const liveCount = liveEvents.length
   const chatroomCount = liveEvents.filter((event) => event.chat_group).length
-  const audienceOnSite = liveEvents.reduce((sum, event) => sum + event.current_capacity, 0)
+  /*
+   * Counted from check-in rows, not from a stored column.
+   *
+   * This screen and the live event screen answered the same question with
+   * different numbers: `lib/live-snapshot.ts` has always counted directly,
+   * while this summed `events.current_capacity`. One of them was always stale.
+   */
+  const occupancies = await getOccupancies(liveEvents.map((e) => e.id))
+  const audienceOnSite = [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
 
   return (
     <div className="flex flex-col gap-6 py-6">
@@ -176,8 +184,8 @@ export default async function ChatroomsPage() {
           <div className="grid gap-4 xl:grid-cols-2">
             {liveEvents.map((event) => {
               const attendeeSummary = event.max_capacity
-                ? `${event.current_capacity}/${event.max_capacity} on site`
-                : `${event.current_capacity} on site`
+                ? `${occupancies.get(event.id)?.inside ?? 0}/${event.max_capacity} on site`
+                : `${occupancies.get(event.id)?.inside ?? 0} on site`
 
               return (
                 <Card key={event.id} className="shadow-none">

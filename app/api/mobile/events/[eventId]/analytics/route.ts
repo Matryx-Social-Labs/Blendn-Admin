@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { getOccupancy } from "@/lib/occupancy"
 import {
   successResponse,
   unauthorizedResponse,
@@ -28,11 +29,12 @@ export async function GET(
         id: true,
         organizer_id: true,
         max_capacity: true,
-        current_capacity: true,
         start_time: true,
         end_time: true,
       },
     })
+
+    const occupancy = await getOccupancy(eventId)
 
     if (!event) {
       return notFoundResponse("Event not found")
@@ -123,7 +125,7 @@ export async function GET(
           : null,
         conversionRate,
         capacityUsed: event.max_capacity
-          ? Math.round((event.current_capacity / event.max_capacity) * 100)
+          ? Math.round((occupancy.guestsInside / event.max_capacity) * 100)
           : null,
       },
       checkInTimeline: Object.entries(hourlyTimeline).map(([hour, count]) => ({

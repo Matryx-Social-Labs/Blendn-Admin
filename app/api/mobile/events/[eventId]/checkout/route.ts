@@ -95,12 +95,8 @@ export async function POST(
       },
     })
 
-    // Decrement event capacity (never below 0)
-    await db.$executeRaw`
-      UPDATE events
-      SET current_capacity = GREATEST(0, current_capacity - 1)
-      WHERE id = ${eventId}
-    `
+    // No counter to decrement. Occupancy is counted from these rows
+    // (lib/occupancy.ts), so checking out *is* the decrement.
 
     // Emit real-time event
     emitEventCheckOut(eventId, user.userId)

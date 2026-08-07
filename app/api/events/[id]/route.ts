@@ -74,7 +74,6 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       status,
       visibility,
       max_capacity,
-      current_capacity,
       latitude,
       longitude,
       cover_image_url,
@@ -130,9 +129,6 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         return new NextResponse("max_capacity cannot exceed 100,000", { status: 400 })
       }
     }
-    if (current_capacity !== undefined && current_capacity < 0) {
-      return new NextResponse("current_capacity cannot be negative", { status: 400 })
-    }
 
     // Fix #35: When cancelling an event, cascade to active check-ins
     const isCancelling = status === "cancelled" && event.status !== "cancelled"
@@ -167,7 +163,6 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         status: status ?? undefined,
         visibility: visibility ?? undefined,
         max_capacity: max_capacity ?? undefined,
-        current_capacity: current_capacity ?? undefined,
         latitude: latitude ?? undefined,
         longitude: longitude ?? undefined,
         cover_image_url: cover_image_url ?? undefined,

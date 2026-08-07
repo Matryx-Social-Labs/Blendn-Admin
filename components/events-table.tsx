@@ -42,7 +42,8 @@ interface Event {
   postal_code?: string | null
   timezone: string
   status: "draft" | "published" | "cancelled" | "completed"
-  current_capacity: number
+  /** Counted from check-in rows, not a stored column. See lib/occupancy.ts. */
+  occupancy: number
   max_capacity?: number | null
   external_link?: string | null
   organizer_id: string
@@ -94,13 +95,13 @@ const getColumns = (
     header: "Status",
   },
   {
-    accessorKey: "current_capacity",
+    accessorKey: "occupancy",
     header: "Capacity",
     cell: ({ row }) => {
       const maxCapacity = row.original.max_capacity
       return maxCapacity
-        ? `${row.getValue("current_capacity")} / ${maxCapacity}`
-        : row.getValue("current_capacity")
+        ? `${row.getValue("occupancy")} / ${maxCapacity}`
+        : row.getValue("occupancy")
     },
   },
   {

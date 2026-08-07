@@ -18,6 +18,7 @@ import {
 import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { resolveOccurrence } from "@/lib/occurrences"
+import { checkInKindFor } from "@/lib/checkin-kind"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -71,6 +72,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Fetch event
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
+      // The venue relation is needed to tell staff from guests: a check-in is
+      // staff work if the person's org runs the event or owns the venue.
+      include: { venue: { select: { owner_org_id: true } } },
     })
 
     if (!event) {
@@ -174,11 +178,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         where: { id: otherActiveCheckIn.id },
         data: { status: "checked_out", check_out_time: now, updated_at: now },
       })
-      await db.$executeRaw`
-        UPDATE events
-        SET current_capacity = GREATEST(0, current_capacity - 1)
-        WHERE id = ${otherActiveCheckIn.event_id}
-      `
       // Close chat access for the other event
       const otherChatGroup = await db.chat_groups.findUnique({
         where: { event_id: otherActiveCheckIn.event_id },
@@ -192,60 +191,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Find existing check-in record to determine if this is a new, returning, or duplicate check-in
-    // Scoped to today's occurrence. Checking in on Tuesday must not find
-    // Monday's row and call it a duplicate.
-    const existingCheckIn = await db.event_check_ins.findUnique({
-      where: {
-        occurrence_id_user_id: { occurrence_id: occurrence.id, user_id: authUser.userId },
-      },
-      select: { id: true, status: true },
-    })
-
-    const isAlreadyCheckedIn = existingCheckIn?.status === "checked_in"
-
     /*
-     * Capacity counts **distinct people**, not check-in events.
+     * Capacity does not gate check-in.
      *
-     * `current_capacity` lives on the event, but check-ins are now per-day.
-     * Incrementing on every day's check-in would have someone attending a
-     * five-day conference consume five seats, so a 500-capacity event would
-     * reject the 101st attendee.
+     * The geofence deliberately covers the pavement and the door, so a
+     * 100-capacity venue with 100 inside and 20 queuing has 120 people
+     * legitimately within the boundary. Refusing the hundred-and-first denied
+     * them the chatroom — the actual product — and erased them from attendance,
+     * leaving the organiser believing 100 came when 120 did.
      *
-     * So the question is "has this person ever checked in to this event",
-     * across every occurrence — which is exactly what `current_capacity` meant
-     * before occurrences existed, and still means for a single-day event.
-     *
-     * Per-day capacity is a real thing a conference wants and
-     * `event_occurrences.capacity` is the column for it, but it needs this
-     * atomic UPDATE reworked and is deliberately not in this change.
+     * Check-in is a presence proof, not a ticket. Nothing here sells admission;
+     * the door does. Occupancy is now counted from these rows (lib/occupancy.ts)
+     * rather than kept in a column, so a room over its stated size becomes a
+     * signal the organiser can see instead of an error the attendee hits.
      */
-    const attendedBefore =
-      isAlreadyCheckedIn ||
-      (await db.event_check_ins.count({
-        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null } },
-      })) > 0
-    const needsCapacityIncrement = !attendedBefore
-
-    // Atomically check capacity and increment in one SQL statement to prevent overbooking.
-    // Only runs for new or returning (checked_out) attendees — already-checked-in users don't count twice.
-    if (needsCapacityIncrement && event.max_capacity) {
-      const updated = await db.$executeRaw`
-        UPDATE events
-        SET current_capacity = current_capacity + 1
-        WHERE id = ${eventId}
-          AND current_capacity < max_capacity
-      `
-      if (updated === 0) {
-        return errorResponse("Event is at full capacity")
-      }
-    } else if (needsCapacityIncrement) {
-      // No max_capacity — increment freely
-      await db.events.update({
-        where: { id: eventId },
-        data: { current_capacity: { increment: 1 } },
-      })
-    }
+    // Memberships read directly rather than through `actorFor`, which wants a
+    // dashboard role the mobile JWT does not carry. Passing a fabricated role
+    // to get at the membership lookup would break the day `actorFor` starts
+    // branching on it.
+    const memberships = await db.organisation_members.findMany({
+      where: { user_id: authUser.userId },
+      select: { org_id: true },
+    })
+    const kind = checkInKindFor({ orgIds: memberships.map((m) => m.org_id) }, event)
 
     // Create or update check-in record
     const checkIn = await db.event_check_ins.upsert({
@@ -256,6 +224,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         event_id: eventId,
         occurrence_id: occurrence.id,
         user_id: authUser.userId,
+        kind,
         status: "checked_in",
         check_in_time: now,
         latitude,
