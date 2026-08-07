@@ -289,6 +289,44 @@ export const BatchInterestCountsResponseSchema = z
   })
   .openapi("BatchInterestCountsResponse")
 
+
+export const MatchListResponseSchema = z
+  .object({
+    matches: z.array(
+      z.object({
+        userId: z.string(),
+        /** Room pseudonym unless that person revealed themselves at this event. */
+        displayName: z.string(),
+        /** Null unless revealed — a photo identifies as surely as a name. */
+        photo: z.string().nullable(),
+        /** Category names, which is what the card renders. */
+        sharedInterests: z.array(z.string()),
+        sharedIntents: z.array(z.enum(["dating", "networking", "friendship", "just_here"])),
+        insideNow: z.boolean(),
+        /** Whether you liked them. Never whether they liked you. */
+        youLiked: z.boolean(),
+      })
+    ),
+  })
+  .openapi("MatchListResponse")
+
+export const LikeRequestSchema = z
+  .object({ userId: z.string() })
+  .openapi("LikeRequest")
+
+export const LikeResponseSchema = z
+  .object({ mutual: z.boolean(), conversationId: z.string().optional() })
+  .openapi("LikeResponse")
+
+export const MatchPreferencesSchema = z
+  .object({
+    intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).optional(),
+    revealed: z.boolean().optional(),
+    /** Also write the profile default, not just this event. */
+    remember: z.boolean().optional(),
+  })
+  .openapi("MatchPreferences")
+
 export const AttendeeListResponseSchema = z
   .object({
     attendees: z.array(
@@ -346,6 +384,10 @@ const schemas = {
   BatchInterestsResponse: BatchInterestsResponseSchema,
   BatchInterestCountsResponse: BatchInterestCountsResponseSchema,
   AttendeeListResponse: AttendeeListResponseSchema,
+  MatchListResponse: MatchListResponseSchema,
+  LikeRequest: LikeRequestSchema,
+  LikeResponse: LikeResponseSchema,
+  MatchPreferences: MatchPreferencesSchema,
   InterestedUsersResponse: InterestedUsersResponseSchema,
 }
 

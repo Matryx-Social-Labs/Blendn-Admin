@@ -85,6 +85,43 @@ person they were blocked.
 | GET | `/events/:eventId/checkins/export` | Export attendees CSV |
 | POST | `/events/:eventId/announce` | Send announcement |
 | GET | `/events/:eventId/chat` | Get event chat group |
+| GET | `/events/:eventId/matches` | Who else was in the room, ranked |
+| POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
+| PUT | `/events/:eventId/matches/preferences` | Your intent and reveal, for this event |
+
+### Matches
+
+`GET /events/:eventId/matches` is **only for people who were in the room** —
+`403` otherwise. It is a view of an event you attended, not a directory.
+
+Each card names what the two of you share rather than who the other person is:
+
+```json
+{ "userId": "...", "displayName": "Cosmic Panda", "photo": null,
+  "sharedInterests": ["Techno", "Board games"],
+  "sharedIntents": ["networking"], "insideNow": true, "youLiked": false }
+```
+
+`displayName` is the room pseudonym and `photo` is null unless that person chose
+to be revealed at this event. **There is no score** — the ordering is not
+exposed, because a number implies a precision the data cannot support.
+
+Staff are excluded. People who have checked out are not: they were in the room
+with you, and rank lower rather than disappearing.
+
+`youLiked` says whether *you* liked them. **Nothing anywhere says whether they
+liked you** — a mutual like is the only thing that reveals it, and there is no
+endpoint that leaks it early.
+
+`POST .../likes` takes `{ "userId": "..." }` and returns
+`{ "mutual": false }` or `{ "mutual": true, "conversationId": "..." }`. A mutual
+like opens the conversation directly: a message request exists to establish that
+both people agreed to talk, and two likes are exactly that.
+
+`PUT .../preferences` takes `{ intent?: ("dating"|"networking"|"friendship"|"just_here")[],
+revealed?: boolean, remember?: boolean }`. Per event, because both change —
+someone open to dating on a Friday is often only there for the talk on Tuesday.
+`remember` also writes the profile default.
 
 ### GET /events - Query Parameters
 

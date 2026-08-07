@@ -23,6 +23,10 @@ import {
   BatchInterestsResponseSchema,
   BatchInterestCountsResponseSchema,
   AttendeeListResponseSchema,
+  LikeRequestSchema,
+  LikeResponseSchema,
+  MatchListResponseSchema,
+  MatchPreferencesSchema,
   InterestedUsersResponseSchema,
   EventSummarySchema,
 } from "@/lib/openapi/schemas/event"
@@ -364,6 +368,62 @@ registry.registerPath({
   },
   responses: {
     200: { description: "Attendee list", content: { "application/json": { schema: wrap(AttendeeListResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+
+// GET /api/mobile/events/{eventId}/matches
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/matches",
+  tags: ["Mobile Events"],
+  summary: "Who else was in the room, ranked",
+  description:
+    "Only for people who checked in — 403 otherwise. Pseudonymous unless someone revealed themselves for this event. No score is exposed.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    query: z.object({ limit: z.number().optional() }),
+  },
+  responses: {
+    200: { description: "Ranked matches", content: { "application/json": { schema: wrap(MatchListResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+// POST /api/mobile/events/{eventId}/matches/likes
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/matches/likes",
+  tags: ["Mobile Events"],
+  summary: "Like someone from this event",
+  description:
+    "A mutual like opens a conversation. The response never reveals whether the other person liked you first.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    body: { content: { "application/json": { schema: LikeRequestSchema } } },
+  },
+  responses: {
+    200: { description: "Like recorded", content: { "application/json": { schema: wrap(LikeResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+// PUT /api/mobile/events/{eventId}/matches/preferences
+registry.registerPath({
+  method: "put",
+  path: "/api/mobile/events/{eventId}/matches/preferences",
+  tags: ["Mobile Events"],
+  summary: "Set your intent and reveal for this event",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    body: { content: { "application/json": { schema: MatchPreferencesSchema } } },
+  },
+  responses: {
+    200: { description: "Saved", content: { "application/json": { schema: wrap(MatchPreferencesSchema) } } },
     ...standardErrors,
   },
 })

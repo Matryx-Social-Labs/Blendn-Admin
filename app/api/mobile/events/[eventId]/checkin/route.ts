@@ -191,6 +191,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
     const kind = checkInKindFor({ orgIds: memberships.map((m) => m.org_id) }, event)
 
+    /*
+     * Seed matching preferences from the profile.
+     *
+     * Only on create. Someone who set "just here" for tonight and then stepped
+     * out for a cigarette must not have that silently reset to their default
+     * when they check back in — the per-event answer is the one they gave most
+     * recently, and re-checking in is not a decision to change it.
+     */
+    const prefs = await db.profiles.findUnique({
+      where: { id: authUser.userId },
+      select: { intent_default: true, reveal_by_default: true },
+    })
+
     // Create or update check-in record
     const checkIn = await db.event_check_ins.upsert({
       where: {
@@ -203,6 +216,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         kind,
         status: "checked_in",
         check_in_time: now,
+        intent: prefs?.intent_default ?? [],
+        revealed: prefs?.reveal_by_default ?? false,
         latitude,
         longitude,
         device_info: deviceInfo,

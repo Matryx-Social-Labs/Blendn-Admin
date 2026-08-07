@@ -5,6 +5,44 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.0] - 2026-08-07
+
+### Added
+
+- **The match API.** `GET /events/:eventId/matches`,
+  `POST .../matches/likes`, `PUT .../matches/preferences`.
+
+  The list is **only for people who were in the room** — a view of an event you
+  attended, not a directory anyone with a token can browse. Same rule the message
+  request flow enforces, applied one step earlier.
+
+  Rarity is measured against **this room**, not the platform. "Techno" is
+  unremarkable at a techno night and a strong signal at a conference; a global
+  count would rank the same two people differently depending on events they have
+  nothing to do with.
+
+  Staff are excluded — they are working, and offering the bar manager as a match
+  would be strange. People who have checked out are **not** excluded: they were
+  in the room with you, and rank lower rather than disappearing, which also stops
+  the screen emptying an hour after doors.
+
+  A mutual like opens the conversation directly. That is not a bypass of the
+  message request flow: a request exists to establish that both people agreed to
+  talk, and two likes are exactly that, reached without either side having to
+  compose an opener to a stranger. `mayConverse` accepts the result through its
+  existing rule rather than a special case.
+
+  **Nothing anywhere says whether someone liked you first.** There is no endpoint
+  that leaks it and no field on the card. Surfacing it is how this becomes a
+  product where the interesting information sits behind a payment, and it would
+  drain the gesture of the only thing that makes it mean anything.
+
+  Intent and reveal are set per event, because both genuinely change — someone
+  open to dating on a Friday is often only there for the talk on Tuesday.
+  Check-in seeds them from the profile default **on create only**, so someone who
+  chose "just here" tonight and then stepped out for a cigarette does not have it
+  silently reset when they check back in.
+
 ## [0.49.0] - 2026-08-07
 
 ### Added
