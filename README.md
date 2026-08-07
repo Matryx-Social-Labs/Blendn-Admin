@@ -45,14 +45,18 @@ Run a single test file: `npx jest __tests__/socket-auth.test.ts`
 ## How the product works
 
 1. **Check in** (`app/api/mobile/events/[eventId]/checkin`) is the gate everything
-   hangs off. It validates that the event is live, that you are within
-   `check_in_radius` metres of it, and that your GPS fix is accurate enough to
-   be trustworthy. Capacity is incremented in a single conditional SQL update so
-   concurrent check-ins cannot overbook.
+   hangs off. It validates that today's session is running and that you are
+   inside its geofence, with GPS accuracy folded into the distance test rather
+   than used as a separate pass/fail. **It does not refuse at capacity** — the
+   fence covers the queue outside, and turning away someone standing at the door
+   would deny them the chatroom and erase them from attendance. Occupancy is
+   counted from check-in rows, never stored. See `docs/CHECKIN.md`.
 2. **You join the event chat automatically**, under a generated anonymous name
    (`Cosmic Panda`). Group chat is pseudonymous by design.
 3. **You can only be checked into one event at a time.** Checking into another
    checks you out of the first and closes your chat write access there.
+   While you are checked in the app pings `…/presence`, so leaving the venue
+   eventually checks you out instead of leaving you counted for ever.
 4. **Match** shows the other people currently checked into your event, ranked by
    shared interests.
 5. **DMs are gated** behind a message request the other person has to accept.
@@ -63,7 +67,9 @@ Run a single test file: `npx jest __tests__/socket-auth.test.ts`
   attached. Validates required env vars before binding and binds `0.0.0.0` in
   production (Railway sets `HOSTNAME` to the container name, not a bind address).
 - **`middleware.ts`** — branches by path: version rewriting and CORS for
-  `/api/mobile/*`, session and role checks for `/dashboard/*`.
+  `/api/mobile/*`, session and role checks for `/dashboard/*`. When
+  `DASHBOARD_HOST` and `API_HOST` are both set it also serves each surface only
+  on its own hostname.
 - **Two auth systems.** `lib/auth.ts` (NextAuth, dashboard) and
   `lib/mobile-auth.ts` (JWT, mobile). They do not overlap — mobile routes never
   read the session, dashboard pages never read the JWT.
@@ -91,9 +97,24 @@ Two that fail quietly and are worth checking in a new environment:
 
 ## Testing
 
-`npm test`. Tests live in `__tests__/` and mock `lib/db`, so no database is
-needed. The security-sensitive modules — socket room authorization, RBAC, token
-issuance and rotation, moderation — are the ones worth keeping covered.
+```bash
+npm test                  # unit; mocks lib/db, no database needed
+npm run test:integration  # real Postgres, real route handlers
+```
+
+The unit suite mocks `lib/db`, which means it cannot tell a working route from
+one that throws — a boundary bug reached production that way. The integration
+suite exists to close that: it drives real handlers against a real database,
+including check-in, which is the mechanic everything else hangs off.
+
+Run it against a throwaway Postgres:
+
+```bash
+docker run -d --name blendn-test -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=t -p 55432:5432 postgres:16
+DATABASE_URL=postgresql://postgres:test@localhost:55432/t npx prisma db push
+DATABASE_URL=postgresql://postgres:test@localhost:55432/t npm run test:integration
+```
 
 ## Docs
 
@@ -103,6 +124,7 @@ issuance and rotation, moderation — are the ones worth keeping covered.
 | `docs/SOCKET_EVENTS.md` | Socket.io event catalog and room authorization |
 | `docs/chat-moderation.md` | Moderation pipeline and thresholds |
 | `docs/VENUES.md` | Venues, claims, geofencing, and how events link to a venue |
+| `docs/CHECKIN.md` | Check-in, occupancy, attendance, presence and multi-day events |
 | `docs/LEADS.md` | Demo-request ingest from the organiser landing page, and the inbox |
 | `docs/ORGANISATIONS.md` | Organisations, membership, and how permissions resolve |
 | `docs/ROADMAP.md` | Claimed-but-not-built, known product gaps, open decisions |

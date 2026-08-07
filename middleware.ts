@@ -7,9 +7,37 @@ import type { user_role } from "@prisma/client"
 
 const ALLOWED_ORIGINS = [
   "https://api.blendn.app",
+  "https://dashboard.blendn.app",
   "https://blendn.app",
   process.env.NEXTAUTH_URL,
 ].filter(Boolean) as string[]
+
+/**
+ * Two names for one deployment.
+ *
+ * `api.blendn.app` is a poor URL for a human to log into, so the dashboard gets
+ * `dashboard.blendn.app`. Both point at the same Railway service — splitting
+ * into two would double the deploy surface and force a decision about which one
+ * owns Socket.io, which both surfaces use.
+ *
+ * Serving each surface only on its own host keeps that from being cosmetic: a
+ * dashboard page on the API host, or a mobile endpoint on the dashboard host,
+ * is a routing accident rather than something anyone meant.
+ *
+ * Unset means "no host split configured", which is the correct behaviour for
+ * local development and for any environment that has not been given a second
+ * domain — everything serves everywhere, exactly as before.
+ */
+const DASHBOARD_HOST = process.env.DASHBOARD_HOST ?? null
+const API_HOST = process.env.API_HOST ?? null
+
+function wrongHost(pathname: string, host: string | null): boolean {
+  if (!host || !DASHBOARD_HOST || !API_HOST) return false
+  const bare = host.split(":")[0]
+  if (pathname.startsWith("/dashboard")) return bare === API_HOST
+  if (pathname.startsWith("/api/mobile")) return bare === DASHBOARD_HOST
+  return false
+}
 
 function getCorsHeaders(origin: string | null): Record<string, string> {
   const baseHeaders = {
@@ -39,6 +67,17 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
 }
 
 export async function middleware(req: NextRequest) {
+  /*
+   * Each surface on its own host, when both are configured.
+   *
+   * A 404 rather than a redirect: `dashboard.blendn.app/api/mobile/...` is not
+   * a page that moved, it is a client pointed at the wrong name, and silently
+   * redirecting would hide that until something subtler broke.
+   */
+  if (wrongHost(req.nextUrl.pathname, req.headers.get("host"))) {
+    return new NextResponse("Not found", { status: 404 })
+  }
+
   const { pathname } = req.nextUrl
   const origin = req.headers.get("origin")
 

@@ -5,6 +5,158 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-08-07
+
+### Added
+
+- **Per-day attendance: new versus returning, and retention.** `occurrence_id`
+  made this askable for the first time — before it a five-day conference held
+  one row per attendee and "who came on Wednesday" had no answer. For a
+  conference the retention figure is the question: a run drawing 400 on Monday
+  and 120 on Wednesday has a problem the total hides completely. Staff are
+  excluded, since they attend every day by definition and would swamp
+  "returning".
+
+- **Nominatim is proxied server-side.** Three browser call sites hit it with no
+  `User-Agent`, against OSM's usage policy. Not hypothetical — Overpass returned
+  `406` to exactly that request shape while backfilling venue data, and
+  Nominatim is the only geocoder this product has.
+
+- **`dashboard.blendn.app`.** Organisers were logging in at a URL called `api`.
+  Two names, one Railway service; each surface refuses the other's host when
+  both are configured, and everything serves everywhere when they are not.
+
+## [0.42.0] - 2026-08-07
+
+### Added
+
+- **Presence.** Check-in was a one-shot gate: it proved you were at the venue
+  once and nothing revisited the claim, so anyone who left without checking out
+  stayed counted for ever. The client now pings while checked in; leaving the
+  fence starts a grace period, then a prompt, then a checkout.
+
+  **Silence is not departure.** No ping can mean a backgrounded app, a basement,
+  a dead battery, a revoked permission. Silence alone does nothing; silence
+  *after* a confirmed out-of-fence reading lets the clock run.
+
+  The sweeper **refuses to check out more than a quarter of a room at once** and
+  raises an alert instead. A venue whose wifi dies produces readings identical to
+  everyone leaving, and the organiser is better served by "this count is
+  unreliable" than by a confidently wrong number.
+
+  Staff are never swept out mid-event.
+
+### Fixed
+
+- The first version of the silence rule short-circuited on any missing ping, and
+  the sweeper never carries one — so the grace and prompt clocks were
+  unreachable and nobody would ever have been checked out. Caught by the
+  integration tests before release.
+
+## [0.41.0] - 2026-08-07
+
+### Changed
+
+- **Occupancy is counted, never stored.** `events.current_capacity` was one
+  counter doing three contradictory jobs — what the room holds, who is in it,
+  and who came. Two production bugs came from it in a single day. `lib/live-snapshot.ts`
+  had already abandoned it and counted rows directly; the chatrooms screen still
+  summed the column, so **two screens answered the same question with different
+  numbers**. There is now a test asserting they agree.
+
+- **Check-in no longer refuses at capacity.** The geofence covers the pavement,
+  so a 100-capacity venue with 100 inside and 20 queuing has 120 people
+  legitimately within it. Refusing the hundred-and-first denied them the
+  chatroom and erased them from attendance. Over-capacity is now a **signal**,
+  which is the crowd-safety event this product is positioned around and was
+  previously impossible to observe.
+
+- **Staff are told apart from guests**, with no client change. The server
+  decides from organisation membership — an organiser at someone else's event is
+  correctly a guest, which a role check would get wrong. Occupancy counts staff
+  because fire safety counts bodies; attendance and turn-up do not.
+
+### Added
+
+- `performCheckout` — one path for the manual route, the event switch, and the
+  sweeper. Three copies of "check someone out" is how they drift.
+- **The check-in route finally has an integration test.** It is the mechanic the
+  whole product rests on and no test had ever invoked it; 2 of 74 route files
+  had coverage, which is how a capacity bug shipped twice in one day.
+
+## [0.40.0] - 2026-08-07
+
+### Added
+
+- **Multi-day events.** `event_check_ins` carried `UNIQUE(event_id, user_id)`,
+  so a five-day conference could hold exactly one row per attendee and the
+  upsert overwrote Monday's timestamp with Tuesday's. `event_occurrences` — every
+  event has at least one. A club night running past midnight stays **one**
+  occurrence; days are cut in the event's own timezone.
+
+- Retired `recurring_events`: zero rows, zero reads, an abandoned earlier attempt
+  at the same concept.
+
+### Fixed
+
+- Two latent bugs the change introduced, found by audit rather than failure:
+  capacity counted check-ins rather than people, and shortening a run silently
+  destroyed attendance. A dropped day with attendance is now cancelled, not
+  deleted.
+
+## [0.39.0] - 2026-08-07
+
+### Changed
+
+- **The event overview is an overview.** It rendered the staged editor, so
+  opening an event to see how it was doing put you in a seven-stage form. One
+  hero metric, changing with lifecycle state; the editor moved to `/edit`.
+  `?tab=` kept, since bookmarks and notification deep links use it.
+
+## [0.36.0] – [0.38.1] - 2026-08-06/07
+
+### Added
+
+- **Leads.** `POST /api/leads` ingests demo requests from the organiser landing
+  page, with an admin inbox, CSV export and a PII retention script. Three
+  departures from the contract, each because the spec could not do what it said:
+  rate limits key on the body (every lead arrives from one Vercel address);
+  the per-email cap strips plus-addressing; and idempotency is scoped to *open*
+  leads via a nullable unique column, because a partial index would exist in
+  production and be missing in CI.
+- Notifications by Slack or email, both optional, both free.
+- **Venue owners can dispute an event's link.** `venue_link_status: "disputed"`
+  had been in the schema since v0.18.0 written by nothing.
+
+### Fixed
+
+- **The dashboard root was throwing for every signed-in user.** `DataTable`
+  gained `"use client"` in the table-system PR while five call sites had been
+  passing `render` functions since the design rebuild. No new code was wrong — a
+  directive moved a boundary underneath code that already existed. `tsc` cannot
+  see it, `next build` never renders `force-dynamic` pages, and no test rendered
+  a route. `__tests__/rsc-boundary.test.ts` now asserts the invariant.
+- The venue-owner screen grouped by typed venue name, so two spellings read as
+  two venues.
+
+## [0.29.0] – [0.35.1] - 2026-08-06
+
+### Added
+
+- **Geofencing.** `check_in_radius` conflated three quantities: the venue's
+  size, the organiser's tolerance, and slack for bad GPS. Separated into extent,
+  buffer and a per-check-in accuracy allowance. Polygon fences with one-click
+  OpenStreetMap footprint import.
+- **Venues became real.** The table had a detail page, a search index and a
+  permission resolver reading it, and nothing had ever written a row. Create,
+  claim, dispute, 35 venue types, and inheritance into the event form.
+
+### Fixed
+
+- **A real ISL match carried a 100 km check-in radius** — most of Bengaluru.
+  Five events were over the cap; all were past events, so nothing live was
+  affected.
+
 ## [0.15.0] - 2026-08-05
 
 ### Security
