@@ -311,8 +311,16 @@ model event_check_ins {
   latitude       Float?
   longitude      Float?
   device_info    Json?
-  created_at     DateTime        @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime        @default(now()) @db.Timestamptz(6)
+
+  /// Presence. See lib/presence.ts — `left_area_at` is both the state and the
+  /// clock, and a ping back inside clears it, so there is no enum to drift out
+  /// of sync with what the pings actually said.
+  last_seen_at          DateTime? @db.Timestamptz(6)
+  left_area_at          DateTime? @db.Timestamptz(6)
+  departure_prompted_at DateTime? @db.Timestamptz(6)
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
   event      events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
@@ -328,6 +336,8 @@ model event_check_ins {
   @@unique([occurrence_id, user_id])
   @@index([event_id, status])
   @@index([event_id, kind])
+  /// Drives the sweeper: everyone still inside with a departure pending.
+  @@index([status, left_area_at])
   @@index([occurrence_id, status])
   @@index([user_id])
   @@index([user_id, status])
