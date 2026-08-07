@@ -197,6 +197,32 @@ Three behaviours the tests pin down:
 
 ---
 
+## Reversing a link — layer 4, finally implemented
+
+`lib/venue-link-actions.ts`. The two directions are deliberately asymmetric.
+
+| Who | Action | Effect |
+|---|---|---|
+| Venue owner | **Dispute** | Flags the link `disputed`, with a reason. Does **not** detach. |
+| Venue owner | **Confirm** | Sets `confirmed` — the only place that value can ever be written |
+| Organiser | **Unlink** | Detaches immediately. No review. |
+
+An owner who could unlink freely could hide events they would rather not answer
+for, so disputing flags rather than detaches and an admin resolves it.
+
+An organiser detaches outright, because nobody should have to wait on a review
+to stop a stranger seeing their attendee list.
+
+Unlinking **keeps `venue_name` as free text**: the event really was held there,
+and clearing it would punish an organiser for correcting a bad link.
+
+Authorization resolves on **org membership**, not role — the same rule as
+`eventPermissions`. The organisation that owns the venue speaks for it, whoever
+in that organisation clicks. A test asserting role-based denial was wrong about
+this and was corrected rather than the code.
+
+---
+
 ## Files
 
 | File | What lives there |
@@ -220,9 +246,8 @@ Tests: `__tests__/venue-types.test.ts`, `venue-actions.test.ts`,
 
 ## Known gaps
 
-- **Venue owner's dispute UI.** `venue_link_status: "disputed"` is written and
-  read, but there is no screen for an owner to set it — today an organiser
-  unlinks, or an admin intervenes.
+- ~~Venue owner's dispute UI~~ — **built in v0.37.0**, `lib/venue-link-actions.ts`
+  and the "Events at your venues" section of `/dashboard/venues`.
 - **`/dashboard/venues` still groups by `events.venue_name`.** The venue-owner
   overview reconstructs venues by string-grouping event names, so two spellings
   read as two venues. It has not been switched over to the real table.

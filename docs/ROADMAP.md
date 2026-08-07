@@ -84,11 +84,6 @@ against [OSM's usage policy](https://operations.osmfoundation.org/policies/nomin
 and a ban risk at volume. Proxying it server-side with caching is small work and
 protects the only geocoder the product has.
 
-### Venue owner's dispute UI
-
-`venue_link_status: "disputed"` is written and read, but no screen lets an owner
-set it. See [VENUES.md](./VENUES.md#known-gaps).
-
 ---
 
 ## Business model
