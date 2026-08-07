@@ -8,6 +8,7 @@ import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { startChatLifecycleSweeper } from "./chat-lifecycle"
 import { startPresenceSweeper } from "./presence-sweeper"
+import { startSentimentSweeper } from "./sentiment-sweeper"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -711,6 +712,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
   startChatLifecycleSweeper()
   // Same place, same reason: one entry point that starts every background loop.
   startPresenceSweeper()
+  // Classifies chatroom messages into event_feedback, which is what the live
+  // screen's mood and category panels have always read and never had.
+  startSentimentSweeper()
 
   logger.info("Socket.io server initialized")
   return io

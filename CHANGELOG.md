@@ -5,6 +5,50 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.0] - 2026-08-07
+
+### Added
+
+- **Sentiment actually runs.** The taxonomy, both classifier tiers, the
+  `event_feedback` table with its three indexes, the live aggregation, the alert
+  rules and the human-correction UI were all built and tested. Nothing ever
+  called `classifyMessages` and nothing ever wrote a feedback row, so the live
+  event screen and the feedback screen both read a permanently empty table — a
+  complete arch with no keystone, and no test noticed because every test was of a
+  part rather than of the join between them.
+
+  `lib/sentiment-sweeper.ts` is a sweeper rather than a send-time queue. It
+  survives a restart, because the work list is derived from the database rather
+  than held in memory and deploys happen mid-event; it touches nothing on the
+  chat send path, which already runs spam, keywords, a persist and a 1 s
+  moderation race; and it retries by construction, since a message whose
+  classification failed still has no feedback row and the next pass finds it.
+
+- **`room_died` fires.** It was a declared alert kind no branch ever emitted —
+  the one alert about the product failing rather than the venue. A full room that
+  has said nothing for half an hour means the introductions are not happening.
+  Guarded three ways against crying wolf: thirty minutes in (arrivals do not chat
+  immediately), at least ten people, and nobody at all rather than "quieter than
+  usual".
+
+### Fixed
+
+- **`not: "hidden"` silently skipped every unmoderated message.**
+  `moderation_status` is nullable and set to "clean" by a fire-and-forget write
+  *after* the response, so a message is NULL for its first moments. SQL's
+  `<> 'hidden'` is NULL for a NULL row, and NULL is not true. The newest messages
+  are exactly the ones still NULL, and exactly what a live mood reading is made
+  of — it would have looked like the classifier working, on a permanent lag.
+  Caught by an integration test, not by review.
+
+- **`feedback: null` did not filter.** Prisma needs `{ is: null }` for a to-one
+  relation; the bare form matches everything, so the sweeper's work list was the
+  whole table.
+
+- **The 1 s moderation race leaked its timer** in both chat routes.
+  `Promise.race` settles on the first result and abandons the rest, but a pending
+  `setTimeout` is a live handle the event loop still holds — one per message.
+
 ## [0.47.0] - 2026-08-07
 
 ### Changed

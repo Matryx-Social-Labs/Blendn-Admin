@@ -76,8 +76,14 @@ export function LiveTab({
   const { snapshot, status } = useOpsSnapshot(eventId, phase === "live")
 
   const alerts = useMemo(
-    () => (snapshot ? deriveAlerts(snapshot, { scheduledEnd: new Date(endAt) }) : []),
-    [snapshot, endAt]
+    () =>
+      snapshot
+        ? deriveAlerts(snapshot, {
+            scheduledEnd: new Date(endAt),
+            scheduledStart: new Date(startAt),
+          })
+        : [],
+    [snapshot, endAt, startAt]
   )
 
   const arrival: ArrivalPoint[] = useMemo(() => {

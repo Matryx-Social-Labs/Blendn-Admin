@@ -484,10 +484,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     if (type === "text") {
       try {
+        /*
+         * The loser of this race used to keep its timer alive: `Promise.race`
+         * settles on the first result and abandons the rest, but a pending
+         * `setTimeout` is a live handle the event loop still holds. One per
+         * message, for a second each — harmless at rest, and exactly the kind of
+         * thing that stops being harmless under load.
+         */
+        let timeoutHandle: NodeJS.Timeout | undefined
         const openaiResult = await Promise.race([
           checkTextContent(content),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
-        ])
+          new Promise<null>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve(null), 1000)
+          }),
+        ]).finally(() => clearTimeout(timeoutHandle))
         if (openaiResult && openaiResult.action === "hide") {
           await hideMessage(message.id, chatGroup.id, authUser.userId, openaiResult)
           await flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
