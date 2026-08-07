@@ -702,6 +702,8 @@ model event_rsvps {
 
   @@unique([event_id, user_id])
   @@index([event_id])
+  /// Promotion reads the oldest waitlisted person for one event.
+  @@index([event_id, status, created_at])
   @@index([user_id])
 }
 
@@ -1180,6 +1182,9 @@ enum rsvp_status {
   going
   maybe
   not_going
+  /// Wanted to come to a full event. Promoted to `going` in the order people
+  /// joined, as seats are released.
+  waitlisted
 }
 
 enum event_status {

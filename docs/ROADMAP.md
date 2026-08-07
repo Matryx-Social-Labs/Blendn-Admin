@@ -65,7 +65,6 @@ holes.
 
 | Gap | Note |
 |---|---|
-| **Waitlist** | Nothing exists. Real for capacity-constrained events |
 | **Portfolio calendar** | Events are a table only — no month view across a run |
 | **Venue: multi-room / concurrent events** | Occupancy is per event; an owner running two rooms has no building total |
 | **Venue: availability calendar** | "My venues" shows utilisation after the fact, not what is bookable |
@@ -111,6 +110,14 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.51.0
+
+- **The RSVP waitlist** (#164). RSVP enforced no capacity at all — anyone could
+  say "going" to a 100-capacity room without limit, which made `going` useless
+  as a planning number. Full events now waitlist rather than refuse, and
+  releasing a seat promotes whoever waited longest. Not a door policy: check-in
+  still refuses nobody.
 
 ### 0.50.0
 

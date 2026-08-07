@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { placeRsvp, promoteFromWaitlist } from "@/lib/waitlist"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -41,19 +42,13 @@ export async function POST(
       return errorResponse("Invalid RSVP status", 400)
     }
 
-    const rsvp = await db.event_rsvps.upsert({
-      where: {
-        event_id_user_id: { event_id: eventId, user_id: user.userId },
-      },
-      create: { event_id: eventId, user_id: user.userId, status },
-      update: { status, updated_at: new Date() },
-    })
+    // Capacity was not enforced here at all: anyone could say "going" to a
+    // 100-capacity room without limit, which made `going` useless as a planning
+    // number. `placeRsvp` waitlists instead of refusing, and promotes whoever
+    // is next when this RSVP frees a seat.
+    const { status: placed, goingCount } = await placeRsvp(eventId, user.userId, status)
 
-    const rsvpCount = await db.event_rsvps.count({
-      where: { event_id: eventId, status: "going" },
-    })
-
-    return successResponse({ rsvpStatus: rsvp.status, rsvpCount })
+    return successResponse({ rsvpStatus: placed, rsvpCount: goingCount })
   } catch (error) {
     logger.error("RSVP error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to update RSVP")
@@ -77,6 +72,9 @@ export async function DELETE(
     await db.event_rsvps.deleteMany({
       where: { event_id: eventId, user_id: user.userId },
     })
+
+    // Cancelling releases a seat, so somebody on the waitlist gets it.
+    await promoteFromWaitlist(eventId)
 
     const rsvpCount = await db.event_rsvps.count({
       where: { event_id: eventId, status: "going" },

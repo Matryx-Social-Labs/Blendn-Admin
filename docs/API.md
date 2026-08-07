@@ -80,6 +80,7 @@ person they were blocked.
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
 | GET | `/events/:eventId/interested-users` | List interested users |
 | POST | `/events/:eventId/rating` | Rate an event |
+| POST | `/events/:eventId/rsvp` | RSVP — waitlists when full |
 | GET | `/events/:eventId/analytics` | Organiser analytics |
 | POST | `/events/:eventId/clone` | Clone event (organiser) |
 | GET | `/events/:eventId/checkins/export` | Export attendees CSV |
@@ -88,6 +89,24 @@ person they were blocked.
 | GET | `/events/:eventId/matches` | Who else was in the room, ranked |
 | POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
 | PUT | `/events/:eventId/matches/preferences` | Your intent and reveal, for this event |
+
+### RSVP and the waitlist
+
+`POST /events/:eventId/rsvp` with `{ status: "going" | "maybe" | "not_going" }`.
+
+When the event has a `max_capacity` and is already full, a `going` request comes
+back as **`waitlisted`** rather than being refused. Releasing a seat — cancelling,
+or moving to `maybe`/`not_going` — promotes whoever has waited longest, and they
+get a push.
+
+An event with no stated capacity is unbounded, exactly as before.
+
+**The waitlist is not a door policy.** Check-in still refuses nobody: someone who
+turns up and is inside the geofence gets in and is counted whether they were
+`going` or `waitlisted`. See `CHECKIN.md` — check-in is a presence proof, not a
+ticket.
+
+---
 
 ### Matches
 

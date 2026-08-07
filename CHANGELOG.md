@@ -5,6 +5,32 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] - 2026-08-07
+
+### Added
+
+- **The RSVP waitlist.** RSVP enforced no capacity whatsoever: anyone could say
+  "going" to a 100-capacity room, without limit. That made `going` useless as a
+  planning number — an organiser could not tell 60 interested people from 600 —
+  and made turn-up a ratio against something arbitrary.
+
+  A `going` request to a full event now comes back **`waitlisted`** rather than
+  refused, and releasing a seat promotes whoever has waited longest, with a push.
+
+  **It is not a door policy.** Check-in still refuses nobody: the geofence covers
+  the queue outside, and someone who turns up gets in and is counted whether they
+  were `going` or `waitlisted`. A waitlist that quietly became a bouncer would
+  undo the reason check-in stopped refusing at capacity in the first place.
+
+  An event with no `max_capacity` stays unbounded — inventing a limit would
+  refuse people on the strength of a number nobody chose.
+
+  Promotion is one conditional `updateMany` per seat, filtered on
+  `status: "waitlisted"`, so two concurrent cancellations cannot promote the same
+  person twice. Read-the-list-then-write-it is the shape that double-promotes
+  under exactly the load an event release produces; reverting to it turns a test
+  red.
+
 ## [0.50.0] - 2026-08-07
 
 ### Added
