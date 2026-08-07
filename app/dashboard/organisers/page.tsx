@@ -26,7 +26,7 @@ export default async function OrganisersPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 px-4 lg:px-6 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Organisers</CardTitle>

@@ -571,7 +571,7 @@ export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <IconLayoutColumns />
-                <span className="hidden lg:inline">Columns</span>
+                <span className="hidden @2xl/main:inline">Columns</span>
                 <IconChevronDown />
               </Button>
             </DropdownMenuTrigger>
@@ -652,12 +652,12 @@ export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps
         </Table>
       </div>
       <div className="flex items-center justify-between px-4">
-        <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
+        <div className="text-muted-foreground hidden flex-1 text-sm @2xl/main:flex">
           {table.getFilteredSelectedRowModel().rows.length} of{" "}
           {table.getFilteredRowModel().rows.length} row(s) selected.
         </div>
-        <div className="flex w-full items-center gap-8 lg:w-fit">
-          <div className="hidden items-center gap-2 lg:flex">
+        <div className="flex w-full items-center gap-8 @2xl/main:w-fit">
+          <div className="hidden items-center gap-2 @2xl/main:flex">
             <Label htmlFor="rows-per-page" className="text-sm font-medium">
               Rows per page
             </Label>
@@ -685,10 +685,10 @@ export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps
             Page {table.getState().pagination.pageIndex + 1} of{" "}
             {table.getPageCount()}
           </div>
-          <div className="ml-auto flex items-center gap-2 lg:ml-0">
+          <div className="ml-auto flex items-center gap-2 @2xl/main:ml-0">
             <Button
               variant="outline"
-              className="hidden h-8 w-8 p-0 lg:flex"
+              className="hidden h-8 w-8 p-0 @2xl/main:flex"
               onClick={() => table.setPageIndex(0)}
               disabled={!table.getCanPreviousPage()}
             >
@@ -717,7 +717,7 @@ export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps
             </Button>
             <Button
               variant="outline"
-              className="hidden size-8 lg:flex"
+              className="hidden size-8 @2xl/main:flex"
               size="icon"
               onClick={() => table.setPageIndex(table.getPageCount() - 1)}
               disabled={!table.getCanNextPage()}

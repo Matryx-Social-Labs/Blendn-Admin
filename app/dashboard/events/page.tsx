@@ -109,7 +109,7 @@ export default function EventsPage() {
   return (
     <div className="flex flex-col gap-6 py-6">
       <div className="px-4 lg:px-6">
-        <div className="flex flex-col gap-4 rounded-xl border bg-card px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-4 rounded-xl border bg-card px-6 py-6 @2xl/main:flex-row @2xl/main:items-end @2xl/main:justify-between">
           <div>
             <h1 className="text-3xl font-semibold text-foreground">Events</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
