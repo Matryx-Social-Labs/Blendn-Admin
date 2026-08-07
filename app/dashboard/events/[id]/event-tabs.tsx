@@ -1,7 +1,7 @@
 import Link from "next/link"
 
 import { cn } from "@/lib/utils"
-import { livePhaseFor } from "@/components/dashboard/live-tab"
+import { livePhaseFor } from "@/lib/event-phase"
 
 export type EventTabKey = "overview" | "live" | "attendees" | "chat" | "feedback"
 
