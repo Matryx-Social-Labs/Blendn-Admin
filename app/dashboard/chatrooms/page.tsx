@@ -129,7 +129,7 @@ export default async function ChatroomsPage() {
           <Badge className="rounded-full px-3 py-1 font-medium">
             Live event messaging
           </Badge>
-          <div className="mt-4 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="mt-4 flex flex-col gap-6 @2xl/main:flex-row @2xl/main:items-end @2xl/main:justify-between">
             <div>
               <h1 className="text-3xl font-semibold text-foreground">Chatrooms</h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
@@ -137,7 +137,7 @@ export default async function ChatroomsPage() {
                 sponsored messages from one workspace.
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 @xl/main:grid-cols-3">
               <div className="rounded-lg border bg-muted px-4 py-4">
                 <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                   Live now
@@ -181,7 +181,7 @@ export default async function ChatroomsPage() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-4 @4xl/main:grid-cols-2">
             {liveEvents.map((event) => {
               const attendeeSummary = event.max_capacity
                 ? `${occupancies.get(event.id)?.inside ?? 0}/${event.max_capacity} on site`
@@ -215,7 +215,7 @@ export default async function ChatroomsPage() {
                       </div>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 @xl/main:grid-cols-3">
                       <div className="rounded-lg border bg-muted p-4">
                         <div className="flex items-center gap-2 text-muted-foreground">
                           <IconCalendarEvent className="size-4" />
@@ -249,7 +249,7 @@ export default async function ChatroomsPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-4 rounded-lg border bg-muted p-4 md:flex-row md:items-center md:justify-between">
+                    <div className="flex flex-col gap-4 rounded-lg border bg-muted p-4 @xl/main:flex-row @xl/main:items-center @xl/main:justify-between">
                       <div className="space-y-1">
                         <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                           Messaging readiness
