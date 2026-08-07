@@ -1,5 +1,5 @@
 import { getDashboardOverview } from "@/app/dashboard/actions"
-import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
+import { db, cleanup, closeDb, makeUser, testId , occurrenceOf } from "./helpers"
 
 /**
  * The three overviews are ~20 parallel Prisma calls between them, several of
@@ -41,6 +41,17 @@ async function makeScheduledEvent(
       organizer_id: organizerId,
       max_capacity: opts.capacity ?? null,
       venue_name: opts.venue ?? null,
+    },
+  })
+  // Every event has at least one occurrence — the API guarantees it and
+  // check-ins are NOT NULL on it, so a fixture without one is a shape that
+  // cannot exist in production.
+  await db.event_occurrences.create({
+    data: {
+      event_id: event.id,
+      occurs_on: new Date(event.start_time.toISOString().slice(0, 10)),
+      start_time: event.start_time,
+      end_time: event.end_time,
     },
   })
   events.push(event.id)
@@ -144,9 +155,11 @@ describe("organiser overview", () => {
     await db.event_rsvps.create({
       data: { event_id: past, user_id: attendees[0], status: "going" },
     })
+    const pastOcc = await occurrenceOf(past)
     await db.event_check_ins.createMany({
       data: attendees.map((id) => ({
         event_id: past,
+        occurrence_id: pastOcc,
         user_id: id,
         status: "checked_in" as const,
         check_in_time: new Date(),
@@ -171,11 +184,12 @@ describe("organiser overview", () => {
     const once = await makeUser("ovw_once")
     users.push(loyal, once)
 
+    const [firstOcc, secondOcc] = await Promise.all([occurrenceOf(first), occurrenceOf(second)])
     await db.event_check_ins.createMany({
       data: [
-        { event_id: first, user_id: loyal, status: "checked_in", check_in_time: new Date() },
-        { event_id: second, user_id: loyal, status: "checked_in", check_in_time: new Date() },
-        { event_id: first, user_id: once, status: "checked_in", check_in_time: new Date() },
+        { event_id: first, occurrence_id: firstOcc, user_id: loyal, status: "checked_in", check_in_time: new Date() },
+        { event_id: second, occurrence_id: secondOcc, user_id: loyal, status: "checked_in", check_in_time: new Date() },
+        { event_id: first, occurrence_id: firstOcc, user_id: once, status: "checked_in", check_in_time: new Date() },
       ],
     })
 

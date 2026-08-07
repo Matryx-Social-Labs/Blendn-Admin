@@ -51,13 +51,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Check if user was checked in to this event
-    const checkIn = await db.event_check_ins.findUnique({
-      where: {
-        event_id_user_id: {
-          event_id: eventId,
-          user_id: authUser.userId,
-        },
-      },
+    const checkIn = await db.event_check_ins.findFirst({
+      // Event-level: you may rate an event you attended on any of its days.
+      where: { event_id: eventId, user_id: authUser.userId },
     })
 
     if (!checkIn || checkIn.status !== "checked_in") {

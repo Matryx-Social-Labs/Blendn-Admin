@@ -51,14 +51,12 @@ export async function POST(
       return notFoundResponse("Event not found")
     }
 
-    // Find the user's active check-in for this event
-    const checkIn = await db.event_check_ins.findUnique({
-      where: {
-        event_id_user_id: {
-          event_id: eventId,
-          user_id: user.userId,
-        },
-      },
+    // The occurrence they are currently inside, not merely one they attended.
+    // A five-day conference has five check-ins for one person; checking out
+    // of Monday when it is Wednesday would be wrong.
+    const checkIn = await db.event_check_ins.findFirst({
+      where: { event_id: eventId, user_id: user.userId, status: "checked_in" },
+      orderBy: { check_in_time: "desc" },
     })
 
     if (!checkIn) {

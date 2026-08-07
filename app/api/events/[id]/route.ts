@@ -8,6 +8,7 @@ import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
 import { resolveVenueLink } from "@/lib/venue-link"
+import { syncOccurrences } from "@/lib/occurrences"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -239,6 +240,17 @@ export async function PATCH(req: Request, { params }: RouteContext) {
           : undefined,
       },
     })
+
+    // Reconcile the days whenever the schedule moves. Idempotent — a day that
+    // survives the change keeps its id, and therefore its check-ins.
+    if (start_time !== undefined || end_time !== undefined || timezone !== undefined) {
+      await syncOccurrences(
+        updatedEvent.id,
+        updatedEvent.start_time,
+        updatedEvent.end_time,
+        updatedEvent.timezone
+      )
+    }
 
     // Fix #35: Cancel all pending/checked_in check-ins when event is cancelled
     if (isCancelling) {

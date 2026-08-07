@@ -17,6 +17,7 @@ import {
 } from "@/lib/api-response"
 import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
+import { resolveOccurrence } from "@/lib/occurrences"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -81,16 +82,34 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Cannot check in to an unpublished event")
     }
 
-    // Check if event has started
+    /*
+     * Which day are they checking in to?
+     *
+     * Every event has at least one occurrence, so a single-evening event
+     * resolves to its only one and behaves exactly as before. A multi-day run
+     * resolves to today's session — which is what makes "who came on Wednesday"
+     * answerable, and what stops Tuesday's check-in overwriting Monday's.
+     *
+     * This replaces the old start/end comparison against the whole event: on a
+     * five-day conference that window was open for five days straight, so
+     * someone could check in at 3am on the Wednesday from the hotel bar.
+     */
     const now = new Date()
-    if (now < event.start_time) {
-      return errorResponse("Event has not started yet", 400, ErrorCode.EVENT_NOT_STARTED)
-    }
+    const slot = await resolveOccurrence(eventId, now)
 
-    // Check if event has ended
-    if (now > event.end_time) {
+    if (!slot.ok) {
+      if (slot.reason === "too_early") {
+        return errorResponse("Event has not started yet", 400, ErrorCode.EVENT_NOT_STARTED)
+      }
+      if (slot.reason === "cancelled") {
+        return errorResponse("This day has been cancelled", 400, ErrorCode.EVENT_ENDED)
+      }
+      // "none" means the event has no occurrences at all, which should be
+      // impossible — every event gets one. Treated as ended rather than 500:
+      // the attendee cannot act on the difference.
       return errorResponse("Event has already ended", 400, ErrorCode.EVENT_ENDED)
     }
+    const occurrence = slot.occurrence
 
     /*
      * The geofence.
@@ -174,8 +193,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Find existing check-in record to determine if this is a new, returning, or duplicate check-in
+    // Scoped to today's occurrence. Checking in on Tuesday must not find
+    // Monday's row and call it a duplicate.
     const existingCheckIn = await db.event_check_ins.findUnique({
-      where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
+      where: {
+        occurrence_id_user_id: { occurrence_id: occurrence.id, user_id: authUser.userId },
+      },
       select: { id: true, status: true },
     })
 
@@ -205,13 +228,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Create or update check-in record
     const checkIn = await db.event_check_ins.upsert({
       where: {
-        event_id_user_id: {
-          event_id: eventId,
-          user_id: authUser.userId,
-        },
+        occurrence_id_user_id: { occurrence_id: occurrence.id, user_id: authUser.userId },
       },
       create: {
         event_id: eventId,
+        occurrence_id: occurrence.id,
         user_id: authUser.userId,
         status: "checked_in",
         check_in_time: now,
