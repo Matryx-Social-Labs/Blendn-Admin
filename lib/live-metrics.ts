@@ -11,13 +11,24 @@
 export interface LiveSnapshot {
   eventId: string
   at: string
-  /** Currently inside: checked in and not checked out. */
+  /** Currently inside — staff included, because fire safety counts bodies. */
   inside: number
+  /** Of those inside, the ones who are not working the event. */
+  guestsInside: number
+  staffInside: number
   checkedInTotal: number
   checkedOutTotal: number
   capacity: number | null
-  /** Percent of capacity currently inside, or null when no capacity is set. */
+  /**
+   * Guests as a percent of capacity, or null when no capacity is set.
+   *
+   * Measured against guests rather than everyone inside — four crew must not
+   * fill a room of four — and **uncapped**, so a full room reads 110% rather
+   * than pinning at 100 and hiding the breach.
+   */
   fillPct: number | null
+  /** Over its stated capacity. A signal to show, never an error to raise. */
+  overCapacity: boolean
   /** Check-ins in the last 10 minutes — the arrival-rate signal. */
   checkInRate10m: number
   /** Median 10-minute rate so far tonight, for "×3 median" style context. */
@@ -35,6 +46,7 @@ const MINUTE = 60 * 1000
 export type LiveAlertKind =
   | "entry_backing_up"
   | "approaching_capacity"
+  | "over_capacity"
   | "leaving_early"
   | "safety"
   | "mood_sliding"
@@ -90,12 +102,27 @@ export function deriveAlerts(
     })
   }
 
-  if (snapshot.fillPct !== null && snapshot.fillPct >= 90) {
+  /*
+   * Past capacity is a different alert from nearly-at-it, and it exists at all
+   * only because check-in stopped refusing at the line — the geofence covers the
+   * queue outside, so the hundred-and-first arrival is at the door rather than
+   * turned away. The room being over its stated size is now observable, and it
+   * is the crowd-safety moment this screen is for. Nothing is broken, so it is a
+   * signal rather than an error, but it outranks "approaching".
+   */
+  if (snapshot.overCapacity && snapshot.capacity !== null) {
+    alerts.push({
+      kind: "over_capacity",
+      severity: "critical",
+      title: "Over stated capacity",
+      body: `${snapshot.guestsInside} guests against capacity ${snapshot.capacity} — ${snapshot.guestsInside - snapshot.capacity} over. Staff aren't counted toward fill; ${snapshot.inside} bodies are in the room.`,
+    })
+  } else if (snapshot.fillPct !== null && snapshot.fillPct >= 90) {
     alerts.push({
       kind: "approaching_capacity",
       severity: "warning",
       title: "Approaching capacity",
-      body: `${snapshot.inside} inside of ${snapshot.capacity} — ${Math.round(snapshot.fillPct)}%.`,
+      body: `${snapshot.guestsInside} guests of ${snapshot.capacity} — ${Math.round(snapshot.fillPct)}%.`,
     })
   }
 

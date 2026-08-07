@@ -1,9 +1,11 @@
 import Link from "next/link"
 import { IconAlertTriangle, IconCheck, IconEdit, IconMessage2, IconUsers } from "@tabler/icons-react"
 
+import { AttendancePanel } from "@/components/dashboard/attendance-panel"
 import { HeroMetric, MetricTile } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import type { EventAttendance } from "@/lib/attendance"
 import { STATE_QUESTION } from "@/lib/event-phase"
 import type { EventOverview } from "@/lib/event-overview"
 
@@ -25,11 +27,14 @@ export function Overview({
   eventId,
   canEdit,
   venueName,
+  attendance,
 }: {
   overview: EventOverview
   eventId: string
   canEdit: boolean
   venueName: string | null
+  /** Null before the event has run — there is nothing to count yet. */
+  attendance: EventAttendance | null
 }) {
   const { state, hero, tiles, blockers, publishable } = overview
   const blocking = blockers.filter((b) => b.blocking)
@@ -62,6 +67,15 @@ export function Overview({
           <MetricTile key={t.label} label={t.label} value={t.value} hint={t.hint} />
         ))}
       </div>
+
+      {/* Below the hero, deliberately. This answers "who came", the hero
+          answers whatever the lifecycle state makes most urgent, and two
+          gradients on one screen means two priorities. */}
+      {attendance ? (
+        <section className="rounded-lg border border-border bg-card p-5">
+          <AttendancePanel attendance={attendance} live={state === "live"} />
+        </section>
+      ) : null}
 
       {state === "draft" ? (
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5">

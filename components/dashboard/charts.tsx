@@ -3,6 +3,8 @@
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
@@ -663,6 +665,113 @@ export function CategoryBars({
             </Row>
           )
         })}
+      </div>
+    </ChartFrame>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+export type AttendanceDay = {
+  occursOn: string
+  unique: number
+  newcomers: number
+  returning: number
+  cancelled: boolean
+}
+
+/**
+ * Per-day attendance for a multi-day run — new against returning.
+ *
+ * The question a conference actually asks is not "how many came" but **did it
+ * hold**. A run that draws 400 on Monday and 120 on Wednesday has a problem the
+ * total attendance figure hides completely, so returning sits on the bottom of
+ * the stack where its shrinking is visible against the axis.
+ *
+ * Cancelled days keep their slot, hatched. Dropping them would leave an
+ * unexplained gap in the dates; drawing them as a zero bar would read as a day
+ * nobody came to. They are excluded from every denominator — `lib/attendance.ts`
+ * does that upstream, and the hint says so.
+ *
+ * Single-day events never reach here: one bar is a worse answer than one
+ * number, and `AttendancePanel` renders the number instead.
+ */
+export function AttendanceDays({
+  days,
+  retentionPct,
+}: {
+  days: AttendanceDay[]
+  retentionPct: number | null
+}) {
+  const ran = days.filter((d) => !d.cancelled)
+  const fmt = (iso: string) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+
+  return (
+    <ChartFrame
+      title="Did it hold?"
+      hint="cancelled days sit outside every denominator"
+      empty={ran.every((d) => d.unique === 0)}
+      emptyText="Per-day attendance fills in as people check in."
+    >
+      <div className="flex flex-col gap-2">
+        <ChartContainer
+          config={{
+            returning: { label: "Came back", color: "var(--chart-3)" },
+            newcomers: { label: "New that day", color: "var(--chart-1)" },
+          }}
+          className="h-[180px] w-full"
+        >
+          <BarChart data={days} margin={{ left: 4, right: 12, top: 16 }}>
+            <defs>
+              <pattern
+                id="attendance-cancelled"
+                width={7}
+                height={7}
+                patternTransform="rotate(45)"
+                patternUnits="userSpaceOnUse"
+              >
+                <line x1="0" y1="0" x2="0" y2="7" stroke="var(--border-strong)" strokeWidth={1.5} />
+              </pattern>
+            </defs>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              dataKey="occursOn"
+              tickFormatter={fmt}
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+            />
+            {/* Whole people only — half an attendee is not a reading. */}
+            <YAxis allowDecimals={false} width={28} tickLine={false} axisLine={false} />
+            {days
+              .filter((d) => d.cancelled)
+              .map((d) => (
+                <ReferenceArea
+                  key={d.occursOn}
+                  x1={d.occursOn}
+                  x2={d.occursOn}
+                  fill="url(#attendance-cancelled)"
+                  stroke="var(--border-strong)"
+                  strokeDasharray="3 3"
+                  label={{ value: "cancelled", fontSize: 9, fill: "var(--muted-foreground)" }}
+                />
+              ))}
+            <ChartTooltip content={<ChartTooltipContent labelFormatter={(l) => fmt(String(l))} />} />
+            <Bar dataKey="returning" stackId="day" fill="var(--color-returning)" />
+            <Bar dataKey="newcomers" stackId="day" fill="var(--color-newcomers)" radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ChartContainer>
+        {retentionPct !== null && ran.length >= 2 ? (
+          <p className="text-[0.8125rem]">
+            <span className="font-bold">Held {retentionPct}%</span>
+            <span className="text-muted-foreground">
+              {" "}
+              — of day one&rsquo;s {ran[0].unique},{" "}
+              {Math.round((ran[0].unique * retentionPct) / 100)} were back on the final day.
+            </span>
+          </p>
+        ) : null}
       </div>
     </ChartFrame>
   )

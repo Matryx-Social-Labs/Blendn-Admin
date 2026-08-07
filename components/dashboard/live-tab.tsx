@@ -11,7 +11,8 @@ import {
 } from "@tabler/icons-react"
 
 import { ArrivalCurve, CategoryBars, type ArrivalPoint } from "@/components/dashboard/charts"
-import { EmptyState, HeroMetric, MetricTile } from "@/components/dashboard/primitives"
+import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
+import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
 import { deriveAlerts, type LiveAlert } from "@/lib/live-metrics"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
@@ -142,11 +143,12 @@ export function LiveTab({
     <div className="flex flex-col gap-5">
       <div className="grid gap-5 @3xl/main:grid-cols-[3fr_2fr]">
         <div className="flex flex-col gap-4">
-          <HeroMetric
-            eyebrow="Inside now · live"
-            value={formatNumber(snapshot.inside)}
-            unit={snapshot.capacity ? `of ${snapshot.capacity}` : "checked in"}
-            progress={snapshot.fillPct}
+          <OccupancyHero
+            occupancy={snapshot}
+            time={new Date(snapshot.at).toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
             description={`${formatNumber(snapshot.checkedInTotal)} checked in, ${formatNumber(snapshot.checkedOutTotal)} left${
               snapshot.medianRate10m > 0
                 ? `. Arrival rate ${snapshot.checkInRate10m}/10min — ×${(snapshot.checkInRate10m / snapshot.medianRate10m).toFixed(1)} tonight's median.`

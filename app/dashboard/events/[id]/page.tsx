@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation"
 
 import { LiveTab } from "@/components/dashboard/live-tab"
 import { Badge } from "@/components/ui/badge"
+import { getEventAttendance } from "@/lib/attendance"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
@@ -138,6 +139,16 @@ export default async function EventDetailPage({
   const overview = await getEventOverview(event.id)
   if (!overview) notFound()
 
+  /**
+   * Only once there is something to count. A draft or upcoming event has no
+   * check-ins by definition, and "0 came" against an event that has not
+   * happened reads as a failure rather than as a date in the future.
+   */
+  const attendance =
+    overview.state === "live" || overview.state === "over"
+      ? await getEventAttendance(event.id)
+      : null
+
   return (
     <div className="flex flex-col gap-5">
       {header}
@@ -146,6 +157,7 @@ export default async function EventDetailPage({
         eventId={event.id}
         canEdit={permissions.canEdit}
         venueName={venueName}
+        attendance={attendance}
       />
     </div>
   )
