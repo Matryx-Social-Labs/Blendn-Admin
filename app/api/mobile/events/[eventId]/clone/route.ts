@@ -73,7 +73,6 @@ export async function POST(
         status: "draft",
         visibility: event.visibility,
         max_capacity: event.max_capacity,
-        current_capacity: 0,
         organizer_id: authUser.userId,
         cover_image_url: event.cover_image_url,
         external_link: event.external_link,

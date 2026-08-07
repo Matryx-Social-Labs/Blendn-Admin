@@ -24,8 +24,9 @@ interface Event {
   postal_code?: string | null
   timezone: string
   status: "draft" | "published" | "cancelled" | "completed"
-  current_capacity: number
   max_capacity?: number | null
+  /** Counted from check-in rows. See lib/occupancy.ts. */
+  occupancy: number
   external_link?: string | null
   organizer_id: string
 }

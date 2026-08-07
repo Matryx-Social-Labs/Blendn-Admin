@@ -8,6 +8,7 @@ import slugify from "slugify"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
+import { getOccupancies } from "@/lib/occupancy"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -68,7 +69,13 @@ export async function GET(req: NextRequest) {
       take: limit,
     })
 
-    return NextResponse.json(events)
+    // Occupancy is counted from check-in rows, not stored on the event. One
+    // grouped query for the whole page rather than one per row.
+    const occupancies = await getOccupancies(events.map((e) => e.id))
+
+    return NextResponse.json(
+      events.map((e) => ({ ...e, occupancy: occupancies.get(e.id)?.inside ?? 0 }))
+    )
   } catch (error) {
     logger.error("Error fetching events", { error: error instanceof Error ? error.message : String(error) })
     return new NextResponse("Internal error", { status: 500 })
@@ -106,7 +113,6 @@ export async function POST(req: Request) {
       status,
       visibility,
       max_capacity,
-      current_capacity,
       latitude,
       longitude,
       cover_image_url,
@@ -151,9 +157,6 @@ export async function POST(req: Request) {
         return new NextResponse("max_capacity cannot exceed 100,000", { status: 400 })
       }
     }
-    if (current_capacity !== undefined && current_capacity < 0) {
-      return new NextResponse("current_capacity cannot be negative", { status: 400 })
-    }
 
     const resolvedFullDescription = full_description || description
     if (!resolvedFullDescription) {
@@ -182,7 +185,6 @@ export async function POST(req: Request) {
         status: status ?? "draft",
         visibility: visibility ?? "public",
         max_capacity,
-        current_capacity,
         latitude,
         longitude,
         cover_image_url,

@@ -6,6 +6,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
+import { getOccupancy } from "@/lib/occupancy"
 import {
   successResponse,
   errorResponse,
@@ -105,6 +106,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!event) {
       return notFoundResponse("Event not found")
     }
+
+    // Counted from check-in rows rather than a stored column.
+    const occupancy = await getOccupancy(eventId)
 
     // Get user's relationship with this event
     type InterestedUserFavorite = Prisma.event_favoritesGetPayload<{
@@ -216,7 +220,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       latitude: event.latitude,
       longitude: event.longitude,
       maxCapacity: event.max_capacity,
-      currentCapacity: event.current_capacity,
+      // Counted, not stored. The field name stays so no client breaks.
+      currentCapacity: occupancy.inside,
       checkInRadius: event.check_in_radius,
       isFeatured: event.is_featured,
       isRecurring: event.is_recurring,

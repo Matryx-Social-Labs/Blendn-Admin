@@ -19,7 +19,8 @@ interface Event {
   end_time: Date
   venue_name?: string
   status: "draft" | "published" | "cancelled" | "completed"
-  current_capacity: number
+  /** Counted from check-in rows, not a stored column. See lib/occupancy.ts. */
+  occupancy: number
   max_capacity?: number
 }
 
@@ -57,8 +58,8 @@ export function EventList({ events }: { events: Event[] }) {
                   </TableCell>
                   <TableCell>
                     {event.max_capacity
-                      ? `${event.current_capacity} / ${event.max_capacity}`
-                      : event.current_capacity}
+                      ? `${event.occupancy} / ${event.max_capacity}`
+                      : event.occupancy}
                   </TableCell>
                 </TableRow>
               ))
