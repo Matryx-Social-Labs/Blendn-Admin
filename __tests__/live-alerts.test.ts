@@ -189,3 +189,52 @@ describe("the snapshot carries no identity", () => {
     }
   })
 })
+
+describe("a room that has gone quiet", () => {
+  const START = new Date("2026-08-05T21:00:00.000Z") // 1h45m before NOW
+  const quiet = { ...base, inside: 20, activeChatters30m: 0, messagesPerMinute: 0 }
+  // Deliberately not a default parameter: passing `undefined` to one falls back
+  // to the default, so the "no start time" case would have silently asserted the
+  // opposite of what it reads as. It did, on the first run.
+  const withStart = (s: typeof base, start: Date | null) =>
+    deriveAlerts(s, {
+      scheduledEnd: END_LATER,
+      ...(start ? { scheduledStart: start } : {}),
+      now: NOW,
+    }).map((a) => a.kind)
+
+  it("fires when a full room has said nothing for half an hour", () => {
+    // The one alert about the product failing rather than the venue: people came,
+    // they are still here, and the introductions are not happening.
+    expect(withStart(quiet, START)).toContain("room_died")
+  })
+
+  it("cannot fire without a start time", () => {
+    // Arrivals do not chat immediately. With no way to know how long the event
+    // has been running, the rule declines rather than guessing.
+    expect(withStart(quiet, null)).not.toContain("room_died")
+  })
+
+  it("does not fire in the first half hour", () => {
+    // Firing at doors would put this on every event ever held.
+    const justStarted = new Date(NOW.getTime() - 20 * 60 * 1000)
+    expect(withStart(quiet, justStarted)).not.toContain("room_died")
+  })
+
+  it("does not fire on a nearly-empty room", () => {
+    // Three people not talking is three people, not a signal.
+    expect(withStart({ ...quiet, inside: 4 }, START)).not.toContain("room_died")
+  })
+
+  it("does not fire while anyone is still talking", () => {
+    // One person is enough to say the room is alive.
+    expect(withStart({ ...quiet, activeChatters30m: 1 }, START)).not.toContain("room_died")
+  })
+
+  it("does not fire as the event winds down", () => {
+    // A room emptying out near the end is what is supposed to happen.
+    expect(
+      deriveAlerts(quiet, { scheduledEnd: END_SOON, scheduledStart: START, now: NOW }).map((a) => a.kind)
+    ).not.toContain("room_died")
+  })
+})

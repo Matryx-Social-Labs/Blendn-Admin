@@ -3,6 +3,7 @@ import next from "next"
 import { initSocketServer, sponsoredMessageScheduler } from "./lib/socket-server"
 import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
 import { stopPresenceSweeper } from "./lib/presence-sweeper"
+import { stopSentimentSweeper } from "./lib/sentiment-sweeper"
 import { ensureBucketExists } from "./lib/tigris"
 import { validateEnv } from "./lib/env"
 
@@ -71,6 +72,7 @@ app.prepare().then(() => {
     sponsoredMessageScheduler.stopAll()
     stopChatLifecycleSweeper()
     stopPresenceSweeper()
+    stopSentimentSweeper()
     io?.close(() => {
       console.log(`[${new Date().toISOString()}] > Socket.io closed`)
     })

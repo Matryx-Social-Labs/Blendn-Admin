@@ -70,7 +70,7 @@ export interface LiveAlert {
  */
 export function deriveAlerts(
   snapshot: LiveSnapshot,
-  opts: { scheduledEnd: Date; now?: Date }
+  opts: { scheduledEnd: Date; scheduledStart?: Date; now?: Date }
 ): LiveAlert[] {
   const alerts: LiveAlert[] = []
   const now = opts.now ?? new Date(snapshot.at)
@@ -150,6 +150,46 @@ export function deriveAlerts(
       severity: "warning",
       title: "Mood sliding",
       body: `${snapshot.sentiment.negative} of ${classified} classified messages in the last 30 minutes are negative.`,
+    })
+  }
+
+  /*
+   * A full room that has stopped talking.
+   *
+   * This kind was declared and never emitted — the one alert about the actual
+   * product failing rather than the venue. People came, they are still here, and
+   * the networking the whole thing exists for is not happening.
+   *
+   * Three guards against crying wolf, because a quiet room is usually just a
+   * quiet moment:
+   *
+   *   - **Thirty minutes in.** Arrivals do not chat immediately; firing at doors
+   *     would be an alert on every event ever held. Without a start time the
+   *     rule cannot know that, so it does not fire at all.
+   *   - **Ten people.** Three people not talking is three people, not a signal.
+   *   - **Nobody at all in half an hour.** Not "quieter than usual" — silent.
+   *     `activeChatters30m` is distinct senders, so one person talking to
+   *     themselves is still enough to say the room is alive.
+   *
+   * And not once the event is nearly over, where a room winding down is what is
+   * supposed to happen.
+   */
+  const minutesSinceStart = opts.scheduledStart
+    ? (now.getTime() - opts.scheduledStart.getTime()) / MINUTE
+    : null
+  if (
+    minutesSinceStart !== null &&
+    minutesSinceStart >= 30 &&
+    minutesToEnd > 30 &&
+    snapshot.inside >= 10 &&
+    snapshot.activeChatters30m === 0 &&
+    snapshot.messagesPerMinute === 0
+  ) {
+    alerts.push({
+      kind: "room_died",
+      severity: "warning",
+      title: "Room has gone quiet",
+      body: `${snapshot.inside} people inside and nobody has posted in 30 minutes. The chatroom is the introduction — a silent room means it isn't happening.`,
     })
   }
 
