@@ -19,6 +19,7 @@ import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { resolveOccurrence } from "@/lib/occurrences"
 import { checkInKindFor } from "@/lib/checkin-kind"
+import { checkOutOfOtherEvents } from "@/lib/checkout"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -161,35 +162,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Fix #25: Prevent checking in to multiple events simultaneously.
-    // If the user is already checked in elsewhere, check them out first.
-    const otherActiveCheckIn = await db.event_check_ins.findFirst({
-      where: {
-        user_id: authUser.userId,
-        status: "checked_in",
-        event_id: { not: eventId },
-      },
-      select: { id: true, event_id: true },
-    })
-
-    if (otherActiveCheckIn) {
-      // Auto-checkout from the other event
-      await db.event_check_ins.update({
-        where: { id: otherActiveCheckIn.id },
-        data: { status: "checked_out", check_out_time: now, updated_at: now },
-      })
-      // Close chat access for the other event
-      const otherChatGroup = await db.chat_groups.findUnique({
-        where: { event_id: otherActiveCheckIn.event_id },
-        select: { id: true },
-      })
-      if (otherChatGroup) {
-        await db.chat_group_members.updateMany({
-          where: { chat_group_id: otherChatGroup.id, user_id: authUser.userId },
-          data: { last_allowed_at: now, updated_at: now },
-        })
-      }
-    }
+    // You cannot be in two rooms. Goes through the shared checkout path so the
+    // socket event and the chat cutoff cannot be forgotten here and remembered
+    // in the manual route.
+    await checkOutOfOtherEvents(authUser.userId, eventId, now)
 
     /*
      * Capacity does not gate check-in.

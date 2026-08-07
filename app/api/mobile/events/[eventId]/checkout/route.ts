@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
-import { emitEventCheckOut } from "@/lib/socket-server"
+import { performCheckout } from "@/lib/checkout"
 import { rateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -70,17 +70,12 @@ export async function POST(
       )
     }
 
-    // Update the check-in status
+    // Through the shared path, so this and the sweeper cannot drift.
     const now = new Date()
-    const updatedCheckIn = await db.event_check_ins.update({
-      where: {
-        id: checkIn.id,
-      },
-      data: {
-        status: "checked_out",
-        check_out_time: now,
-        updated_at: now,
-      },
+    await performCheckout(checkIn.id, "manual", now)
+
+    const updatedCheckIn = await db.event_check_ins.findUniqueOrThrow({
+      where: { id: checkIn.id },
       select: {
         id: true,
         status: true,
@@ -98,27 +93,6 @@ export async function POST(
     // No counter to decrement. Occupancy is counted from these rows
     // (lib/occupancy.ts), so checking out *is* the decrement.
 
-    // Emit real-time event
-    emitEventCheckOut(eventId, user.userId)
-
-    // Mark chat access cutoff for this user
-    const chatGroup = await db.chat_groups.findUnique({
-      where: { event_id: eventId },
-      select: { id: true },
-    })
-
-    if (chatGroup) {
-      await db.chat_group_members.updateMany({
-        where: {
-          chat_group_id: chatGroup.id,
-          user_id: user.userId,
-        },
-        data: {
-          last_allowed_at: now,
-          updated_at: now,
-        },
-      })
-    }
 
     return successResponse({
       message: "Successfully checked out",
