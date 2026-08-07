@@ -205,9 +205,38 @@ export async function syncOccurrences(
   const orphaned = existing.filter(
     (e) => !wantedKeys.has(e.occurs_on.toISOString().slice(0, 10))
   )
-  if (orphaned.length > 0) {
-    await db.event_occurrences.deleteMany({
-      where: { id: { in: orphaned.map((o) => o.id) } },
+  if (orphaned.length === 0) return
+
+  /*
+   * A day that falls outside the new span is cancelled, not deleted — unless
+   * nobody attended it.
+   *
+   * `event_check_ins.occurrence_id` cascades, so deleting an occurrence
+   * destroys its attendance. An organiser correcting an end date by a day
+   * would silently erase who came on the last day, with no warning and no
+   * undo. Attendance is a record of something that actually happened; the
+   * schedule changing does not unhappen it.
+   *
+   * Days nobody attended are deleted, because an empty row for a day that
+   * never ran is just noise.
+   */
+  const withAttendance = await db.event_check_ins.groupBy({
+    by: ["occurrence_id"],
+    where: { occurrence_id: { in: orphaned.map((o) => o.id) } },
+    _count: { _all: true },
+  })
+  const attended = new Set(withAttendance.map((r) => r.occurrence_id))
+
+  const toCancel = orphaned.filter((o) => attended.has(o.id)).map((o) => o.id)
+  const toDelete = orphaned.filter((o) => !attended.has(o.id)).map((o) => o.id)
+
+  if (toCancel.length > 0) {
+    await db.event_occurrences.updateMany({
+      where: { id: { in: toCancel }, cancelled_at: null },
+      data: { cancelled_at: new Date() },
     })
+  }
+  if (toDelete.length > 0) {
+    await db.event_occurrences.deleteMany({ where: { id: { in: toDelete } } })
   }
 }

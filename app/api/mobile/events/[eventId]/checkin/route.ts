@@ -203,7 +203,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     const isAlreadyCheckedIn = existingCheckIn?.status === "checked_in"
-    const needsCapacityIncrement = !isAlreadyCheckedIn // new or returning attendee
+
+    /*
+     * Capacity counts **distinct people**, not check-in events.
+     *
+     * `current_capacity` lives on the event, but check-ins are now per-day.
+     * Incrementing on every day's check-in would have someone attending a
+     * five-day conference consume five seats, so a 500-capacity event would
+     * reject the 101st attendee.
+     *
+     * So the question is "has this person ever checked in to this event",
+     * across every occurrence — which is exactly what `current_capacity` meant
+     * before occurrences existed, and still means for a single-day event.
+     *
+     * Per-day capacity is a real thing a conference wants and
+     * `event_occurrences.capacity` is the column for it, but it needs this
+     * atomic UPDATE reworked and is deliberately not in this change.
+     */
+    const attendedBefore =
+      isAlreadyCheckedIn ||
+      (await db.event_check_ins.count({
+        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null } },
+      })) > 0
+    const needsCapacityIncrement = !attendedBefore
 
     // Atomically check capacity and increment in one SQL statement to prevent overbooking.
     // Only runs for new or returning (checked_out) attendees — already-checked-in users don't count twice.
