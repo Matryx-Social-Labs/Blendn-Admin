@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
+import { normaliseVenueName } from "@/lib/venue-name"
 import type {
   AdminOverview,
   CityRow,
@@ -522,12 +523,19 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
   const windowStart = new Date(now.getTime() - WINDOW_WEEKS * 7 * DAY_MS)
 
   const events = await db.events.findMany({
-    where: { ...eventScope(userId), venue_name: { not: null } },
+    // An event linked to a venue counts even if its free-text name is null —
+    // the link is the stronger statement about where it happened.
+    where: {
+      ...eventScope(userId),
+      OR: [{ venue_name: { not: null } }, { venue_id: { not: null } }],
+    },
     select: {
       id: true,
       title: true,
       start_time: true,
       venue_name: true,
+      venue_id: true,
+      venue: { select: { name: true } },
       max_capacity: true,
       status: true,
       ratings: { select: { rating: true } },
@@ -605,16 +613,34 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
   const turnUpDelta =
     recentTurnUp === null || priorTurnUp === null ? null : round1(recentTurnUp - priorTurnUp)
 
-  /* Venues are grouped by venue_name because there is no venues table. Two
-     spellings of one room therefore read as two venues — flagged in the UI. */
-  const byVenue = new Map<string, typeof events>()
+  /*
+   * Grouped by `venue_id` where an event has one, and by a normalised name
+   * where it does not.
+   *
+   * This used to group on the raw `venue_name` string alone, because nothing
+   * ever wrote to the venues table. Two spellings of one room therefore read as
+   * two venues, and the owner's numbers were split accordingly.
+   *
+   * Pure id-only grouping was the tempting version, and it is wrong here: an
+   * organisation whose events predate the link — or any environment where the
+   * backfill has not run — would see its venues vanish rather than merge. The
+   * id is preferred when present and the name is the fallback, so the screen
+   * gets strictly more correct as links appear rather than emptying out.
+   *
+   * Normalising case and whitespace fixes "The Loft" vs "the loft" for the
+   * unlinked remainder, which the raw-string version never could.
+   */
+  const byVenue = new Map<string, { label: string; events: typeof events }>()
   for (const event of events) {
-    const key = event.venue_name as string
-    byVenue.set(key, [...(byVenue.get(key) ?? []), event])
+    const displayName = event.venue?.name ?? event.venue_name ?? "Unnamed venue"
+    const key = event.venue_id ?? `name:${normaliseVenueName(displayName)}`
+    const bucket = byVenue.get(key)
+    if (bucket) bucket.events.push(event)
+    else byVenue.set(key, { label: displayName, events: [event] })
   }
 
-  const venues: VenueRow[] = Array.from(byVenue.entries())
-    .map(([name, venueEvents]) => {
+  const venues: VenueRow[] = Array.from(byVenue.values())
+    .map(({ label: name, events: venueEvents }) => {
       const inWindow = venueEvents.filter((e) => e.start_time >= windowStart && e.start_time < now)
       const ratings = emptyRatings()
       let ratingTotal = 0

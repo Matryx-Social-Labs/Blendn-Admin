@@ -248,9 +248,10 @@ Tests: `__tests__/venue-types.test.ts`, `venue-actions.test.ts`,
 
 - ~~Venue owner's dispute UI~~ — **built in v0.37.0**, `lib/venue-link-actions.ts`
   and the "Events at your venues" section of `/dashboard/venues`.
-- **`/dashboard/venues` still groups by `events.venue_name`.** The venue-owner
-  overview reconstructs venues by string-grouping event names, so two spellings
-  read as two venues. It has not been switched over to the real table.
+- ~~`/dashboard/venues` groups by `events.venue_name`~~ — **fixed in v0.38.1.**
+  Grouped by `venue_id` where an event has one, and by a normalised name where
+  it does not. Pure id-only grouping was rejected: an organisation whose events
+  predate the link would see its venues vanish rather than merge.
 - **No PostGIS.** All geometry is pure JS over one event's fence at a time. The
   seam is "events near me", which would want a spatial index.
 - ~~Five production events carry oversized check-in radii~~ — **fixed in
