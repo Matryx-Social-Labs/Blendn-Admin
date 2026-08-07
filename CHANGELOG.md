@@ -5,6 +5,40 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.0] - 2026-08-07
+
+### Changed
+
+- **`/apply` is continuous with the organiser landing page.** A visitor clicks
+  "List your event", gets redirected here, and used to land on a page that looked
+  like a different company — at the exact moment they are deciding whether to
+  trust us with an application. It is the last step of the marketing funnel, not
+  a dashboard screen, so it is now light: a scoped `.apply-light` token override,
+  the landing page's warm wash behind a white `rounded-3xl` card, its brand chip,
+  and its own lockup rather than the dashboard's monogram-plus-wordmark, which
+  appears nowhere on the marketing site and reads as a third brand.
+
+  The dashboard stays dark. Sign-in after approval is where dark begins.
+
+  The left column had roughly 600px of dead space between the intro and "What
+  happens next", which reads as a rendering fault rather than as breathing room.
+  "What happens next" moved up under the intro, and the space below now carries
+  the three objections someone actually has with the form in front of them —
+  free while in development, no card, read by a person. Not a testimonial: the
+  landing page deleted two invented ones and this page does not restart the
+  habit.
+
+  The form itself is unchanged. The two-option selector, the field grouping and
+  the helper text were already right.
+
+### Fixed
+
+- **The lockup rendered stretched.** It is a flex child in a `flex-col`, so
+  `align-items: stretch` resolved `w-auto` to the full column width while `h-9`
+  pinned the height — 437×36 for an image whose aspect is 3.55:1. Also declared
+  at `132×36` rather than its true `852×240`, so Next generated a 132px-wide file
+  that CSS then scaled up.
+
 ## [0.46.0] - 2026-08-07
 
 ### Security

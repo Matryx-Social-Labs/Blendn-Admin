@@ -131,6 +131,13 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.47.0
+
+- **`/apply` matches the landing page** (#160). Scoped light theme, the warm
+  wash, the brand chip, the real lockup, and the dead 600px gap in the left
+  column filled with the three honest reassurances. Per
+  `blendnorglanding/rabat/docs/APPLY_PAGE_DESIGN_BRIEF.md`.
+
 ### 0.46.0
 
 - **The seven identity and DM holes closed** (#159). The attendee list handed out
