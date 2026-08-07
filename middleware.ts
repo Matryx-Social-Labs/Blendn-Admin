@@ -50,9 +50,10 @@ function checkHost(pathname: string, host: string | null): HostVerdict {
   if (!host || !DASHBOARD_HOST || !API_HOST) return { kind: "ok" }
   const bare = host.split(":")[0]
 
-  // `/login` travels with `/dashboard`: signing in on the API host would land
-  // the user on a dashboard that is not served there.
-  if (pathname.startsWith("/dashboard") || pathname === "/login") {
+  // `/login` and `/` travel with `/dashboard`: signing in on the API host would
+  // land the user on a dashboard that is not served there, and `/` is the
+  // dashboard's front door now that the marketing page is gone.
+  if (pathname.startsWith("/dashboard") || pathname === "/login" || pathname === "/") {
     return bare === API_HOST ? { kind: "redirect", host: DASHBOARD_HOST } : { kind: "ok" }
   }
   if (pathname.startsWith("/api/mobile")) {
@@ -155,11 +156,20 @@ export async function middleware(req: NextRequest) {
   // Handle dashboard auth
   const token = await getToken({ req })
 
-  // Redirect authenticated users away from landing and login pages
-  if (pathname === "/" || pathname === "/login") {
-    if (token && canAccessDashboard(token.role as user_role)) {
-      return NextResponse.redirect(new URL("/dashboard", req.url))
-    }
+  const signedIn = Boolean(token) && canAccessDashboard(token?.role as user_role)
+
+  // There is no page at `/`. The marketing site is blendn.app, on Vercel — this
+  // deployment is the dashboard, so its root is the way in rather than a second
+  // description of the product. Resolved here rather than by a redirect in
+  // next.config.ts so a signed-in user makes one hop instead of two.
+  if (pathname === "/") {
+    const url = req.nextUrl.clone()
+    url.pathname = signedIn ? "/dashboard" : "/login"
+    return NextResponse.redirect(url)
+  }
+
+  if (pathname === "/login" && signedIn) {
+    return NextResponse.redirect(new URL("/dashboard", req.url))
   }
 
   if (pathname.startsWith("/dashboard")) {

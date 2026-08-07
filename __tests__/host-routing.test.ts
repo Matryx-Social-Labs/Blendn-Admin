@@ -24,7 +24,7 @@ function checkHost(
 ): HostVerdict {
   if (!host || !dashboardHost || !apiHost) return { kind: "ok" }
   const bare = host.split(":")[0]
-  if (pathname.startsWith("/dashboard") || pathname === "/login") {
+  if (pathname.startsWith("/dashboard") || pathname === "/login" || pathname === "/") {
     return bare === apiHost ? { kind: "redirect", host: dashboardHost } : { kind: "ok" }
   }
   if (pathname.startsWith("/api/mobile")) {
@@ -53,6 +53,14 @@ describe("humans are redirected", () => {
     expect(check("/login", API)).toEqual({ kind: "redirect", host: DASH })
   })
 
+  it("moves the root, which is now the dashboard's front door", () => {
+    // There is no page at `/` any more — the marketing site is blendn.app, and
+    // this deployment sends `/` straight to the login. Left on the API host it
+    // would redirect to /login and only then change host: two hops for the most
+    // common way anyone arrives.
+    expect(check("/", API)).toEqual({ kind: "redirect", host: DASH })
+  })
+
   it("leaves them alone on the dashboard host", () => {
     expect(check("/dashboard/events", DASH)).toEqual({ kind: "ok" })
     expect(check("/login", DASH)).toEqual({ kind: "ok" })
@@ -73,8 +81,9 @@ describe("misconfigured clients are rejected", () => {
 describe("shared routes serve on both", () => {
   it("leaves everything neither surface owns alone", () => {
     // /api/leads is called server-to-server by the landing page and must not
-    // move; /api/health is what Railway polls.
-    for (const path of ["/api/health", "/api/leads", "/api/geocode", "/apply", "/"]) {
+    // move; /api/health is what Railway polls. `/` is deliberately absent — it
+    // belongs to the dashboard now.
+    for (const path of ["/api/health", "/api/leads", "/api/geocode", "/apply"]) {
       expect(check(path, DASH)).toEqual({ kind: "ok" })
       expect(check(path, API)).toEqual({ kind: "ok" })
     }
