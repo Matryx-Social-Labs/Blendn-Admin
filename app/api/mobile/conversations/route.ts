@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -142,35 +143,31 @@ export async function POST(request: NextRequest) {
       return notFoundResponse("User not found")
     }
 
-    // Sort user IDs to ensure consistent lookup (user1_id < user2_id)
-    const [user1Id, user2Id] = [authUser.userId, otherUserId].sort()
+    /*
+     * The gate. This endpoint used to create a conversation from nothing but
+     * two user ids — no accepted request, no block check — so the message
+     * request flow was enforced only on the screen that happened to use it, and
+     * anyone who could call the API could DM anyone.
+     *
+     * Blocks first, and reported as "not found" rather than "blocked": telling
+     * someone they have been blocked is itself information they should not have.
+     */
+    if (await blockedEitherWay(authUser.userId, otherUserId)) {
+      return notFoundResponse("User not found")
+    }
 
-    // Find or create conversation
-    let conversation = await db.private_conversations.findUnique({
-      where: {
-        user1_id_user2_id: {
-          user1_id: user1Id,
-          user2_id: user2Id,
-        },
-      },
+    if (!(await mayConverse(authUser.userId, otherUserId))) {
+      return errorResponse("Send a message request first")
+    }
+
+    const created = await openConversation(authUser.userId, otherUserId)
+    const conversation = await db.private_conversations.findUniqueOrThrow({
+      where: { id: created.id },
       include: {
         user1: { select: { id: true, name: true, image: true } },
         user2: { select: { id: true, name: true, image: true } },
       },
     })
-
-    if (!conversation) {
-      conversation = await db.private_conversations.create({
-        data: {
-          user1_id: user1Id,
-          user2_id: user2Id,
-        },
-        include: {
-          user1: { select: { id: true, name: true, image: true } },
-          user2: { select: { id: true, name: true, image: true } },
-        },
-      })
-    }
 
     const conversationOtherUser =
       conversation.user1_id === authUser.userId

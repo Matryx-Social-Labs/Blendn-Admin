@@ -45,6 +45,29 @@ Returns: `{ accessToken, refreshToken, user: { id, email, name, role } }`
 
 ---
 
+## Identity
+
+Two names for one person, and which you get depends on where you are.
+
+| Surface | You see |
+|---|---|
+| Event chat, participants, attendee list, sockets | **Pseudonym** — "Cosmic Panda" |
+| Direct messages, message requests | Real name and photo |
+
+The pseudonym is one per person per event, stable for the whole event and across
+check-out and check-in, and **different at every event** — there is no
+cross-event identity. It lives on `chat_group_members.anonymous_name` and
+survives the room closing, because historical messages resolve their author
+through it.
+
+Crossing from one column to the other is the message request, and it is the only
+crossing: `GET /events/:eventId/checkins` returns pseudonyms, never real names or
+photos. Blocks are honoured in both directions everywhere, and are reported as
+"not found" rather than "blocked" — confirming an account exists tells a blocked
+person they were blocked.
+
+---
+
 ## Events
 
 | Method | Endpoint | Description |
@@ -140,9 +163,15 @@ Same moderation pipeline and error codes apply.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/conversations` | List conversations |
+| POST | `/conversations` | Open a conversation — **requires an accepted request** |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
 | POST | `/conversations/:id/messages` | Send message |
+
+`POST /conversations` does not create a channel out of nothing. It requires an
+accepted message request between the two people, or a conversation that already
+exists — otherwise `400`. A block in **either** direction makes both this and
+sending return as though the other person were not there.
 
 ---
 
@@ -152,7 +181,15 @@ Same moderation pipeline and error codes apply.
 |--------|----------|-------------|
 | GET | `/message-requests` | List pending requests |
 | POST | `/message-requests` | Send a message request |
-| POST | `/message-requests/:id/respond` | Accept/decline request |
+| POST | `/message-requests/:id/respond` | Accept / decline / block |
+
+**You can only request someone you have shared an event with** — both of you
+checked in to the same event at some point. Ever, not currently: messaging
+someone the morning after is the ordinary case. An RSVP does not count; only an
+actual check-in puts you in the room.
+
+`respond` with `block` writes a real `blocked_users` row as well as setting the
+request status.
 
 ---
 

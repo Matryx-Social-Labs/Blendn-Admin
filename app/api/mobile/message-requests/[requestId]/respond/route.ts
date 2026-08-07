@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
+import { openConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -102,15 +103,38 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     let conversationId: string | null = null
 
-    // If accepted, create a private conversation
+    // If accepted, create a private conversation.
+    //
+    // Through the shared helper, which sorts the pair. This used to write
+    // (sender, recipient) in request order while POST /conversations wrote them
+    // sorted — and `@@unique([user1_id, user2_id])` cannot tell that (a, b) and
+    // (b, a) are the same two people, so one pair could end up with two rows.
     if (action === "accept") {
-      const conversation = await db.private_conversations.create({
-        data: {
-          user1_id: messageRequest.sender_id,
-          user2_id: authUser.userId,
-        },
-      })
+      const conversation = await openConversation(messageRequest.sender_id, authUser.userId)
       conversationId = conversation.id
+    }
+
+    /*
+     * "Block" has to actually block.
+     *
+     * This set the request's status to `blocked` and stopped there, writing no
+     * `blocked_users` row — so the only thing enforcing blocks anywhere saw
+     * nothing, and the sender could simply send again. The status was a label on
+     * a request; the block is a fact about two people.
+     *
+     * Idempotent: blocking someone who is already blocked is not an error.
+     */
+    if (action === "block") {
+      await db.blocked_users.upsert({
+        where: {
+          blocker_id_blocked_id: {
+            blocker_id: authUser.userId,
+            blocked_id: messageRequest.sender_id,
+          },
+        },
+        create: { blocker_id: authUser.userId, blocked_id: messageRequest.sender_id },
+        update: {},
+      })
     }
 
     // Notify the original sender of the response (async, don't await)

@@ -50,6 +50,12 @@ export async function DELETE(request: NextRequest) {
           education: null,
           interests: [],
           photos: [],
+          // Scrubbed like everything else. These were left populated on a
+          // deleted account — quietly the most sensitive pair on the profile,
+          // since "what are you looking for" is exactly what someone deleting
+          // their account would expect to be gone.
+          goals: [],
+          looking_for: [],
           onboarded: false,
         },
       }),

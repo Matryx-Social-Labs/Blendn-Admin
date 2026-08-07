@@ -294,8 +294,12 @@ export const AttendeeListResponseSchema = z
     attendees: z.array(
       z.object({
         userId: z.string(),
+        /**
+         * The room pseudonym ("Cosmic Panda"), not the real name — the same one
+         * this person carries in the event chat. `image` is deliberately absent:
+         * a photo identifies as surely as a name.
+         */
         name: z.string(),
-        image: z.string().nullable(),
         age: z.number().nullable(),
         location: z.string().nullable(),
         checkInTime: z.string().datetime(),
