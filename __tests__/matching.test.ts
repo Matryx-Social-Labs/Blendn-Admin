@@ -1,0 +1,214 @@
+import {
+  effectiveIntents,
+  interestWeight,
+  rankMatches,
+  type Intent,
+  type MatchCandidate,
+} from "@/lib/matching"
+
+/**
+ * Ranking people, pinned.
+ *
+ * The failure that matters is not a mediocre ordering — it is a ranking that
+ * quietly discloses someone who chose to stay anonymous, or that hard-filters
+ * the pool of a new app down to an empty screen.
+ */
+
+const T0 = new Date("2026-08-07T21:00:00.000Z")
+
+function candidate(over: Partial<MatchCandidate> & { userId: string }): MatchCandidate {
+  return {
+    pseudonym: `Anon ${over.userId}`,
+    interestIds: [],
+    intents: [],
+    insideNow: true,
+    checkedInAt: T0,
+    revealed: false,
+    name: null,
+    photo: null,
+    ...over,
+  }
+}
+
+/** A room where "music" is universal and "modular" is rare. */
+const HOLDERS = new Map([
+  ["music", 100],
+  ["techno", 12],
+  ["modular", 2],
+  ["boardgames", 8],
+])
+const POPULATION = 100
+
+const viewer = {
+  userId: "me",
+  interestIds: ["music", "techno", "modular", "boardgames"],
+  intents: ["networking"] as Intent[],
+}
+
+const rank = (candidates: MatchCandidate[]) =>
+  rankMatches(viewer, candidates, { interestHolders: HOLDERS, population: POPULATION })
+
+describe("rarity beats raw overlap", () => {
+  it("weights a niche category above a universal one", () => {
+    expect(interestWeight("modular", HOLDERS, POPULATION)).toBeGreaterThan(
+      interestWeight("techno", HOLDERS, POPULATION)
+    )
+    expect(interestWeight("techno", HOLDERS, POPULATION)).toBeGreaterThan(
+      interestWeight("music", HOLDERS, POPULATION)
+    )
+  })
+
+  it("ranks one rare match above two common ones", () => {
+    // The whole point. Counting boxes rewards indiscriminate tagging and buries
+    // the two people who actually found each other.
+    const ranked = rank([
+      candidate({ userId: "common", interestIds: ["music", "boardgames"] }),
+      candidate({ userId: "rare", interestIds: ["modular"] }),
+    ])
+    expect(ranked[0].userId).toBe("rare")
+  })
+
+  it("never scores a category negative, however universal", () => {
+    // A category everyone holds is worth nothing, not worth less than nothing.
+    expect(interestWeight("music", new Map([["music", 500]]), 100)).toBe(0)
+  })
+
+  it("survives a category nobody else holds", () => {
+    expect(Number.isFinite(interestWeight("unheard-of", new Map(), 100))).toBe(true)
+  })
+})
+
+describe("intent shapes the order and never filters", () => {
+  it("prefers someone here for the same reason", () => {
+    const ranked = rank([
+      candidate({ userId: "other", interestIds: ["techno"], intents: ["dating"] }),
+      candidate({ userId: "same", interestIds: ["techno"], intents: ["networking"] }),
+    ])
+    expect(ranked[0].userId).toBe("same")
+  })
+
+  it("still shows someone who came only for the event", () => {
+    // A hard filter is the partition the one-pool decision exists to avoid — and
+    // people change their minds during an evening.
+    const ranked = rank([candidate({ userId: "justhere", intents: ["just_here"] })])
+    expect(ranked.map((m) => m.userId)).toContain("justhere")
+  })
+
+  it("ranks them below someone open to meeting people", () => {
+    const ranked = rank([
+      candidate({ userId: "justhere", interestIds: ["techno"], intents: ["just_here"] }),
+      candidate({ userId: "open", interestIds: ["techno"], intents: ["networking"] }),
+    ])
+    expect(ranked[0].userId).toBe("open")
+  })
+
+  it("does not damp someone who picked just_here alongside something social", () => {
+    // "I'm here for the talk and open to meeting people" is not "leave me alone".
+    const ranked = rank([
+      candidate({ userId: "both", interestIds: ["techno"], intents: ["just_here", "networking"] }),
+      candidate({ userId: "only", interestIds: ["techno"], intents: ["just_here"] }),
+    ])
+    expect(ranked[0].userId).toBe("both")
+  })
+})
+
+describe("presence", () => {
+  it("puts someone still in the room above someone who left", () => {
+    const ranked = rank([
+      candidate({ userId: "gone", interestIds: ["techno"], insideNow: false }),
+      candidate({ userId: "here", interestIds: ["techno"], insideNow: true }),
+    ])
+    expect(ranked[0].userId).toBe("here")
+  })
+
+  it("does not hide people who left — they were still in the room with you", () => {
+    const ranked = rank([candidate({ userId: "gone", insideNow: false })])
+    expect(ranked).toHaveLength(1)
+  })
+})
+
+describe("anonymity is enforced in the ranking, not by the caller", () => {
+  it("shows the pseudonym and no photo by default", () => {
+    const [m] = rank([
+      candidate({ userId: "shy", name: "Priya Raman", photo: "https://x/p.jpg", revealed: false }),
+    ])
+    expect(m.displayName).toBe("Anon shy")
+    expect(m.photo).toBeNull()
+    expect(JSON.stringify(m)).not.toContain("Priya")
+  })
+
+  it("shows the real name only when they chose to reveal", () => {
+    const [m] = rank([
+      candidate({ userId: "open", name: "Priya Raman", photo: "https://x/p.jpg", revealed: true }),
+    ])
+    expect(m.displayName).toBe("Priya Raman")
+    expect(m.photo).toBe("https://x/p.jpg")
+  })
+
+  it("falls back to the pseudonym if a revealed profile has no name", () => {
+    // Degrading to "Anonymous" or an empty string would be a worse card; falling
+    // back to the name they already carry in the room is the honest default.
+    const [m] = rank([candidate({ userId: "nameless", revealed: true, name: null })])
+    expect(m.displayName).toBe("Anon nameless")
+  })
+
+  it("never emits a score", () => {
+    // A number implies a precision this data cannot support, and invites gaming.
+    const [m] = rank([candidate({ userId: "x", interestIds: ["techno"] })])
+    expect(Object.keys(m)).not.toContain("score")
+    expect(JSON.stringify(m)).not.toMatch(/score|rank|percent/i)
+  })
+})
+
+describe("the card carries the overlaps", () => {
+  it("names exactly what the two people share", () => {
+    const [m] = rank([
+      candidate({ userId: "x", interestIds: ["techno", "boardgames", "hiking"], intents: ["networking"] }),
+    ])
+    expect(m.sharedInterestIds.sort()).toEqual(["boardgames", "techno"])
+    expect(m.sharedIntents).toEqual(["networking"])
+  })
+
+  it("does not claim an overlap on just_here", () => {
+    // "We are both merely present" is not something to say to anyone.
+    const withJustHere = rankMatches(
+      { ...viewer, intents: ["just_here", "networking"] },
+      [candidate({ userId: "x", intents: ["just_here"] })],
+      { interestHolders: HOLDERS, population: POPULATION }
+    )
+    expect(withJustHere[0].sharedIntents).toEqual([])
+  })
+})
+
+describe("housekeeping", () => {
+  it("never returns the viewer", () => {
+    expect(rank([candidate({ userId: "me" }), candidate({ userId: "other" })])).toHaveLength(1)
+  })
+
+  it("orders identically on repeated calls", () => {
+    // Paging over an unstable sort silently drops and repeats people.
+    const pool = ["a", "b", "c", "d"].map((userId) => candidate({ userId }))
+    expect(rank(pool).map((m) => m.userId)).toEqual(rank([...pool].reverse()).map((m) => m.userId))
+  })
+
+  it("respects the limit", () => {
+    const pool = ["a", "b", "c"].map((userId) => candidate({ userId }))
+    expect(
+      rankMatches(viewer, pool, { interestHolders: HOLDERS, population: POPULATION, limit: 2 })
+    ).toHaveLength(2)
+  })
+
+  it("returns an empty room rather than throwing", () => {
+    expect(rankMatches(viewer, [], { interestHolders: new Map(), population: 0 })).toEqual([])
+  })
+})
+
+describe("intent falls back to the profile default", () => {
+  it("uses the per-event choice when there is one", () => {
+    expect(effectiveIntents(["dating"], ["networking"])).toEqual(["dating"])
+  })
+
+  it("falls back when they did not choose for this event", () => {
+    expect(effectiveIntents([], ["networking"])).toEqual(["networking"])
+  })
+})

@@ -25,11 +25,15 @@ Nothing in flight.
 
 ## Next
 
-### 1. Matchmaking
+### 1. Matchmaking — the surface
 
-**Does not exist**, despite the README describing it — no route, no ranking
-module, and git history has never held one. `/events/[eventId]/checkins` is the
-raw material: the room, sorted by check-in time.
+Schema and ranking shipped in 0.49.0. What is left is the API and the client:
+
+- `GET /events/[eventId]/matches` and `POST .../like`, with the mutual-like
+  handshake that opens a conversation
+- Collecting intent and interests at first check-in
+- **The Expo app.** None of this is reachable until the match screen, the intent
+  picker and the reveal toggle exist there
 
 Decided:
 
@@ -40,6 +44,8 @@ Decided:
 - Rank on the **structured** `user_interests → categories` graph, IDF-weighted so
   a shared niche category outweighs a shared "Music". `profiles.interests` is
   free text and cannot be compared
+- `gender` / `interested_in` exist on the schema and are **not yet read by the
+  ranking** — dating-specific filtering is its own decision
 - Onboarding asks **nothing before check-in**; intent and interests are collected
   at first check-in, and both are things matching needs anyway. Gender is asked
   only if intent includes dating
@@ -101,6 +107,14 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.49.0
+
+- **Matchmaking schema and ranking** (#162). `connection_intent`, per-event
+  intent and reveal, `event_likes`, and `lib/matching.ts` with IDF-weighted
+  overlap. Plus a migration bug that would have broken every check-in: Prisma
+  models scalar lists as nullable with no default, and `NOT NULL DEFAULT '{}'`
+  passed `db push` as "in sync" while failing every insert.
 
 ### 0.48.0
 
