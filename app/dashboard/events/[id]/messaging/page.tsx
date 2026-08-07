@@ -43,7 +43,7 @@ export default async function EventMessagingPage({ params }: Props) {
             <Link href="/dashboard/chatrooms">Back to Chatrooms</Link>
           </Button>
           <Button variant="outline" asChild size="sm">
-            <Link href={`/dashboard/events/${eventId}`}>Edit Event</Link>
+            <Link href={`/dashboard/events/${eventId}`}>Event overview</Link>
           </Button>
         </div>
       </div>

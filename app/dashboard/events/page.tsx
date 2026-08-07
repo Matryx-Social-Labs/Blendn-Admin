@@ -130,7 +130,7 @@ export default function EventsPage() {
         <div className="rounded-xl border bg-card p-5">
           <EventsTable
             events={events}
-            onEdit={(event) => router.push(`/dashboard/events/${event.id}`)}
+            onEdit={(event) => router.push(`/dashboard/events/${event.id}/edit`)}
             onDelete={handleDeleteEvent}
             currentUserId={currentUserId}
             currentUserRole={currentUserRole}

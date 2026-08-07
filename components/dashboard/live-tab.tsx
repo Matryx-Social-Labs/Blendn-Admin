@@ -16,17 +16,12 @@ import { deriveAlerts, type LiveAlert } from "@/lib/live-metrics"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { cn } from "@/lib/utils"
+import { livePhaseFor } from "@/lib/event-phase"
 
-export type LivePhase = "pre" | "live" | "post"
-
-/** Which phase the event is in, from its own schedule. */
-export function livePhaseFor(startAt: string, endAt: string, now = new Date()): LivePhase {
-  const start = new Date(startAt)
-  const end = new Date(endAt)
-  if (now < start) return "pre"
-  if (now > end) return "post"
-  return "live"
-}
+// Moved to lib/event-phase.ts so a server component can ask the question
+// without importing this whole client module. Re-exported because callers
+// already import it from here.
+export { livePhaseFor, type LivePhase } from "@/lib/event-phase"
 
 function AlertCard({ alert }: { alert: LiveAlert }) {
   const critical = alert.severity === "critical"
