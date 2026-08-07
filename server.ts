@@ -2,6 +2,7 @@ import { createServer } from "http"
 import next from "next"
 import { initSocketServer, sponsoredMessageScheduler } from "./lib/socket-server"
 import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
+import { stopPresenceSweeper } from "./lib/presence-sweeper"
 import { ensureBucketExists } from "./lib/tigris"
 import { validateEnv } from "./lib/env"
 
@@ -69,6 +70,7 @@ app.prepare().then(() => {
     // the event loop alive and the process waits for the forced-exit timeout.
     sponsoredMessageScheduler.stopAll()
     stopChatLifecycleSweeper()
+    stopPresenceSweeper()
     io?.close(() => {
       console.log(`[${new Date().toISOString()}] > Socket.io closed`)
     })

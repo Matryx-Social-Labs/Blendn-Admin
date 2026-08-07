@@ -181,6 +181,58 @@ registry.registerPath({
   },
 })
 
+// POST /api/mobile/events/{eventId}/presence
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/presence",
+  tags: ["Mobile Events"],
+  summary: "Report location while checked in",
+  description:
+    "Called every few minutes while checked in, so the live count reflects who is " +
+    "actually in the room. Judged with the same accuracy allowance as check-in, so " +
+    "GPS drift indoors does not read as leaving. A first reading outside starts a " +
+    "grace period; once it expires the response asks the attendee to confirm; if " +
+    "nothing comes back they are checked out. Silence alone never checks anyone out " +
+    "— a basement with no signal is not an empty room. Staff are never checked out " +
+    "automatically.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            latitude: z.number(),
+            longitude: z.number(),
+            accuracy: z.number().nullable().optional().openapi({
+              description: "Metres, as the device reports it. Omit if unknown.",
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Presence recorded",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              status: z.enum(["inside", "outside", "prompt", "checked_out", "not_checked_in"]),
+              reason: z.string().optional(),
+              shortfallMetres: z.number().nullable().optional(),
+              graceEndsAt: z.string().nullable().optional(),
+              nextPingInSeconds: z.number().optional(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // POST /api/mobile/events/{eventId}/rsvp
 registry.registerPath({
   method: "post",
