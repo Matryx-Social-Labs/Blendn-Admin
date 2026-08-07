@@ -159,11 +159,44 @@ oldest untouched. If the last two are ugly, the screen is doing its job.
 
 ## Notifications
 
-**Email via Resend, not Slack.** The contract offers either; this codebase
-already sends transactional mail and has no Slack integration. `LEADS_NOTIFY_EMAIL`
-is the recipient. Unset means no notification and an info log, never a throw.
+**Two channels, both optional, both free.** Which is right depends only on
+where the team actually looks, so the code does not decide.
 
-`lib/lead-notify.ts` is the one function to change if ops moves to Slack.
+| Env var | Channel |
+|---|---|
+| `LEADS_SLACK_WEBHOOK_URL` | Slack incoming webhook (Discord's Slack-compatible endpoint works too) |
+| `LEADS_NOTIFY_EMAIL` | An address or alias, via Resend |
+
+Set either, both, or neither. Nothing set means an info log naming both
+variables — never a throw.
+
+### Cost
+
+Neither needs a paid plan. Slack incoming webhooks are available on the free
+tier; Resend's free tier is far above demo-request volume.
+
+Two things to check before choosing Slack, because they are Slack's terms and
+they change: the free tier historically **caps a workspace at 10 app
+integrations** and keeps **90 days of history**. If the workspace is near that
+app limit this competes with something else, and a lead older than 90 days
+stops being findable in Slack — though it is still in the inbox, which is the
+real record.
+
+### The webhook URL is a secret
+
+Anyone holding it can post to that channel. It lives in Railway env vars, is
+validated as a URL in `lib/env.ts`, and is never logged.
+
+### Failure isolation
+
+Both channels are attempted with `Promise.allSettled`, so a Slack outage does
+not also cost you the email. Neither can reject: the caller does
+`void notifyNewLead(...)` **after** the write, and a rejection there would be an
+unhandled rejection — which on Node 15+ takes the process down. Tested.
+
+The Slack message carries a plain-text fallback alongside its Block Kit blocks,
+because a phone notification reading "[no preview]" defeats the point of sending
+it immediately. It deep-links to `?lead=<id>`, which opens the drawer directly.
 
 ---
 

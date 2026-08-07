@@ -40,8 +40,13 @@ const envSchema = z.object({
     .string()
     .min(32, "LANDING_INGEST_TOKEN must be at least 32 characters")
     .optional(),
-  /// Where a new demo request is announced. Unset means no notification.
+  /// Where a new demo request is announced. Both optional and both free —
+  /// set either, both, or neither. Nothing set means no notification and an
+  /// info log, never a throw.
   LEADS_NOTIFY_EMAIL: z.string().email().optional(),
+  /// A Slack (or Discord-compatible) incoming webhook. This is a bearer
+  /// secret: anyone holding the URL can post to that channel.
+  LEADS_SLACK_WEBHOOK_URL: z.string().url().optional(),
 
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
