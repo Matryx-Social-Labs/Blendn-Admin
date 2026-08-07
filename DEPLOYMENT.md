@@ -79,24 +79,59 @@ railway run npx prisma migrate deploy
 
 ## Domain Setup for blendn.app
 
-### Recommended Structure
+### Structure
 
 | Subdomain | Service | Purpose |
 |-----------|---------|---------|
-| `api.blendn.app` | This deployment | Admin dashboard + API |
-| `blendn.app` | Landing page | Marketing site (optional) |
+| `dashboard.blendn.app` | This deployment | Admin dashboard |
+| `api.blendn.app` | This deployment | Mobile API |
+| `staging-dashboard.blendn.app` | This deployment (staging) | Dashboard |
+| `staging-api.blendn.app` | This deployment (staging) | Mobile API |
+| `blendn.app` | Vercel | Organiser landing page |
+
+**One service, two hostnames.** The dashboard and the API are the same
+deployment — the split is cosmetic, so that organisers do not log in at a URL
+called `api`. There is no second container, Socket.io server, or Prisma client.
 
 ### DNS Configuration
 
-```
-# In your domain registrar (e.g., Cloudflare, Namecheap)
+Each custom domain gets its own Railway edge target — they are **not
+interchangeable**. Copy each `CNAME` from the Railway domain card that issued
+it rather than reusing another one.
 
-# Admin/API
-api.blendn.app    CNAME    <your-railway-app>.up.railway.app
-
-# Optional: Root domain redirect
-blendn.app          A        <landing-page-ip>
 ```
+dashboard.blendn.app          CNAME    <target-from-railway>.up.railway.app
+api.blendn.app                CNAME    <target-from-railway>.up.railway.app
+staging-dashboard.blendn.app  CNAME    <target-from-railway>.up.railway.app
+staging-api.blendn.app        CNAME    <target-from-railway>.up.railway.app
+```
+
+Do not proxy these through Cloudflare (orange cloud). Railway terminates TLS
+itself, and a proxy in front means Railway cannot complete the ACME challenge.
+
+### Turning the split on
+
+Order matters — the middleware redirects, so enabling it against a host without
+a valid certificate makes the dashboard unreachable on **both** names.
+
+1. Add the second custom domain to the service and point DNS at it.
+2. **Wait for the certificate.** Railway serves its `*.up.railway.app` wildcard
+   until Let's Encrypt issues, and a browser rejects that with
+   `ERR_CERT_COMMON_NAME_INVALID`. Confirm with:
+
+   ```bash
+   echo | openssl s_client -connect dashboard.blendn.app:443 \
+     -servername dashboard.blendn.app 2>/dev/null | openssl x509 -noout -subject
+   ```
+
+   `CN=dashboard.blendn.app` means ready. `CN=*.up.railway.app` means wait.
+   Issuance normally takes a few minutes; if it has not completed in ~30,
+   remove and re-add the domain in Railway.
+3. Set `DASHBOARD_HOST`, `API_HOST` and `NEXTAUTH_URL` for that environment.
+4. Log in on staging first.
+
+A cert error surfaces during the TLS handshake, before any request is sent —
+so it is never related to session or login state.
 
 ## Environment Variables Reference
 
