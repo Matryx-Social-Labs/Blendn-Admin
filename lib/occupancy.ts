@@ -1,4 +1,8 @@
-import { db } from "@/lib/db"
+// Relative, not "@/lib/db". `lib/live-snapshot.ts` imports the arithmetic below
+// and is reachable from server.ts, which `build:server` compiles with plain tsc
+// — that resolves the @/ alias for typechecking and then emits it verbatim into
+// the require(), so the build goes green and the container dies on boot.
+import { db } from "./db"
 
 /**
  * Who is in the room, and who came.
@@ -47,6 +51,44 @@ export interface Occupancy {
   overCapacity: boolean
 }
 
+/**
+ * The arithmetic, separated from the queries.
+ *
+ * `lib/live-snapshot.ts` already has every check-in row in memory and would
+ * otherwise redo this by hand — which is exactly how the live tab came to cap
+ * fill at 100% and measure it against staff-inclusive occupancy while this file
+ * measured guests and reported the breach. Two screens, one room, two answers.
+ * One implementation is the only thing that stops that recurring.
+ */
+export function occupancyFrom({
+  inside,
+  staffInside,
+  uniqueAttendance,
+  capacity,
+}: {
+  inside: number
+  staffInside: number
+  uniqueAttendance: number
+  capacity: number | null
+}): Occupancy {
+  const guestsInside = inside - staffInside
+  return {
+    inside,
+    guestsInside,
+    staffInside,
+    uniqueAttendance,
+    capacity,
+    // Guests against capacity: the room is sized for the audience, and counting
+    // the four staff towards "sold out" would be wrong.
+    //
+    // Uncapped, deliberately. Clamping to 100 is what made a room over its
+    // stated size unrepresentable, and that room is the entire crowd-safety
+    // moment this product is positioned around.
+    fillPct: capacity === null || capacity === 0 ? null : Math.round((guestsInside / capacity) * 100),
+    overCapacity: capacity !== null && capacity > 0 && guestsInside > capacity,
+  }
+}
+
 export async function getOccupancy(eventId: string): Promise<Occupancy> {
   const [event, inside, staffInside, uniqueGuests] = await Promise.all([
     db.events.findUnique({
@@ -66,20 +108,12 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
     }),
   ])
 
-  const capacity = event?.max_capacity ?? null
-  const guestsInside = inside - staffInside
-
-  return {
+  return occupancyFrom({
     inside,
-    guestsInside,
     staffInside,
     uniqueAttendance: uniqueGuests.length,
-    capacity,
-    // Guests against capacity: the room is sized for the audience, and counting
-    // the four staff towards "sold out" would be wrong.
-    fillPct: capacity === null ? null : Math.round((guestsInside / capacity) * 100),
-    overCapacity: capacity !== null && guestsInside > capacity,
-  }
+    capacity: event?.max_capacity ?? null,
+  })
 }
 
 /**

@@ -17,10 +17,13 @@ const base: LiveSnapshot = {
   eventId: "evt",
   at: "2026-08-05T22:45:00.000Z",
   inside: 40,
+  guestsInside: 38,
+  staffInside: 2,
   checkedInTotal: 45,
   checkedOutTotal: 5,
   capacity: 80,
-  fillPct: 50,
+  fillPct: 48,
+  overCapacity: false,
   checkInRate10m: 8,
   medianRate10m: 8,
   messagesPerMinute: 2,
@@ -129,6 +132,30 @@ describe("capacity", () => {
     expect(kinds({ ...base, capacity: null, fillPct: null })).not.toContain(
       "approaching_capacity"
     )
+  })
+
+  it("escalates to over_capacity past the line, and only one of the two fires", () => {
+    // Check-in no longer refuses at capacity, so a room over its stated size is
+    // observable for the first time. "Approaching" alongside "over" would be
+    // two alerts about one room, and the weaker one dilutes the stronger.
+    const over = kinds({ ...base, guestsInside: 88, inside: 92, fillPct: 110, overCapacity: true })
+    expect(over).toContain("over_capacity")
+    expect(over).not.toContain("approaching_capacity")
+  })
+
+  it("reports the breach against guests, not bodies", () => {
+    // Fill is a guest measure — four crew must not fill a room of four — but the
+    // organiser still needs the body count for the fire officer, so the alert
+    // carries both.
+    const [alert] = deriveAlerts(
+      { ...base, guestsInside: 88, inside: 92, staffInside: 4, fillPct: 110, overCapacity: true },
+      { scheduledEnd: END_LATER, now: NOW }
+    )
+    expect(alert.kind).toBe("over_capacity")
+    expect(alert.severity).toBe("critical")
+    expect(alert.body).toContain("88 guests against capacity 80")
+    expect(alert.body).toContain("8 over")
+    expect(alert.body).toContain("92 bodies")
   })
 })
 

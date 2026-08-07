@@ -4,6 +4,7 @@
 // MODULE_NOT_FOUND. Everything reachable from server.ts must use relative
 // paths.
 import { db } from "./db"
+import { occupancyFrom } from "./occupancy"
 
 import type { LiveSnapshot } from "./live-metrics"
 
@@ -43,7 +44,7 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
   const [checkIns, recentMessages, activeChatters, openFlags, feedback] = await Promise.all([
     db.event_check_ins.findMany({
       where: { event_id: eventId },
-      select: { check_in_time: true, check_out_time: true, status: true },
+      select: { check_in_time: true, check_out_time: true, status: true, kind: true },
     }),
     chatGroupId
       ? db.chat_messages.count({
@@ -82,6 +83,21 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
   const checkedOutTotal = checkIns.filter((c) => c.check_out_time !== null).length
   const inside = Math.max(0, checkedInTotal - checkedOutTotal)
 
+  /*
+   * Shared with `getOccupancy`, not recomputed. This screen used to cap fill at
+   * 100% and measure it against staff-inclusive occupancy, while the occupancy
+   * panel measured guests and reported the breach — so the same room read "full"
+   * here and "110%, 8 over" there. The rows are already in memory; only the
+   * arithmetic is borrowed.
+   */
+  const occupancy = occupancyFrom({
+    inside,
+    staffInside: checkIns.filter((c) => c.status === "checked_in" && c.kind === "staff").length,
+    // Not surfaced on the live tab — attendance is the Overview's question.
+    uniqueAttendance: 0,
+    capacity: event.max_capacity,
+  })
+
   const checkInRate10m = checkIns.filter(
     (c) => c.check_in_time && c.check_in_time >= tenMinutesAgo
   ).length
@@ -116,14 +132,14 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
   return {
     eventId,
     at: now.toISOString(),
-    inside,
+    inside: occupancy.inside,
+    guestsInside: occupancy.guestsInside,
+    staffInside: occupancy.staffInside,
     checkedInTotal,
     checkedOutTotal,
-    capacity: event.max_capacity,
-    fillPct:
-      event.max_capacity && event.max_capacity > 0
-        ? Math.min(100, (inside / event.max_capacity) * 100)
-        : null,
+    capacity: occupancy.capacity,
+    fillPct: occupancy.fillPct,
+    overCapacity: occupancy.overCapacity,
     checkInRate10m,
     medianRate10m: median(buckets),
     messagesPerMinute: Math.round((recentMessages / 10) * 10) / 10,
