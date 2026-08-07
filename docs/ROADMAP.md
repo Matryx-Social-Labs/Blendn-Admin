@@ -27,13 +27,17 @@ Nothing in flight.
 
 ### 1. Matchmaking — the surface
 
-Schema and ranking shipped in 0.49.0. What is left is the API and the client:
+Schema, ranking and the API have shipped (0.49.0, 0.50.0). What is left is the
+client:
 
-- `GET /events/[eventId]/matches` and `POST .../like`, with the mutual-like
-  handshake that opens a conversation
-- Collecting intent and interests at first check-in
 - **The Expo app.** None of this is reachable until the match screen, the intent
-  picker and the reveal toggle exist there
+  picker and the reveal toggle exist there. The server side is complete and
+  tested against a real database.
+- **Collecting interests at first check-in.** `PUT .../matches/preferences`
+  takes intent; interests still have to be picked somewhere, and the existing
+  `/profiles/:userId/interests` endpoint is the place
+- **Gender / `interested_in` are unread by the ranking.** Dating-specific
+  filtering is its own decision and has not been made
 
 Decided:
 
@@ -107,6 +111,13 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.50.0
+
+- **The match API** (#163). List, like with the mutual handshake, and per-event
+  intent/reveal. Rarity measured against the room rather than the platform;
+  staff excluded, people who left kept; nothing anywhere reveals who liked you
+  first.
 
 ### 0.49.0
 

@@ -1,0 +1,201 @@
+import { openConversation } from "@/lib/conversations"
+import { db } from "@/lib/db"
+import {
+  effectiveIntents,
+  rankMatches,
+  type Intent,
+  type MatchCandidate,
+} from "@/lib/matching"
+
+/**
+ * Everything `rankMatches` needs, gathered from the database.
+ *
+ * Split the way `getOccupancy` is split from `occupancyFrom`: the queries live
+ * here, the judgment lives in `lib/matching.ts` where it can be argued with in a
+ * unit test.
+ */
+
+export interface MatchCard {
+  userId: string
+  displayName: string
+  photo: string | null
+  /** Names, not ids — the card renders "Techno", and a uuid explains nothing. */
+  sharedInterests: string[]
+  sharedIntents: Intent[]
+  insideNow: boolean
+  /** Whether *you* have liked them. Never whether they have liked you. */
+  youLiked: boolean
+}
+
+/**
+ * The room, ranked for one person in it.
+ *
+ * Returns `null` when the viewer has never checked in to this event — the match
+ * list is a view of a room you were in, not a directory you can browse.
+ */
+export async function matchesForEvent(
+  eventId: string,
+  viewerId: string,
+  limit = 50
+): Promise<MatchCard[] | null> {
+  const viewerCheckIn = await db.event_check_ins.findFirst({
+    // Event-level rather than per-occurrence: attending any day of a run puts
+    // you in the room with everyone else who came, on any day.
+    where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null } },
+    select: { intent: true },
+  })
+  if (!viewerCheckIn) return null
+
+  const [viewerProfile, viewerInterests, checkIns, blocks, likes] = await Promise.all([
+    db.profiles.findUnique({
+      where: { id: viewerId },
+      select: { intent_default: true },
+    }),
+    db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
+    db.event_check_ins.findMany({
+      where: {
+        event_id: eventId,
+        check_in_time: { not: null },
+        // Staff are working, not mingling. They are excluded from attendance for
+        // the same reason and it would be strange to offer the bar manager as a
+        // match.
+        kind: "attendee",
+      },
+      select: {
+        user_id: true,
+        status: true,
+        check_in_time: true,
+        intent: true,
+        revealed: true,
+        user: {
+          select: {
+            name: true,
+            image: true,
+            profile: { select: { intent_default: true, photos: true } },
+            user_interests: { select: { category_id: true } },
+          },
+        },
+      },
+    }),
+    db.blocked_users.findMany({
+      where: { OR: [{ blocker_id: viewerId }, { blocked_id: viewerId }] },
+      select: { blocker_id: true, blocked_id: true },
+    }),
+    db.event_likes.findMany({
+      where: { event_id: eventId, liker_id: viewerId },
+      select: { liked_id: true },
+    }),
+  ])
+
+  // Blocks hide people in both directions. Someone you blocked should not
+  // reappear as a suggestion, and neither should someone who blocked you.
+  const hidden = new Set(
+    blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id))
+  )
+  const liked = new Set(likes.map((l) => l.liked_id))
+
+  const eligible = checkIns.filter((c) => c.user_id !== viewerId && !hidden.has(c.user_id))
+
+  /*
+   * Rarity is measured against *this room*, not the platform.
+   *
+   * "Techno" is unremarkable at a techno night and a strong signal at a
+   * conference. A global count would rank the same pair of people differently
+   * depending on events they have nothing to do with.
+   */
+  const interestHolders = new Map<string, number>()
+  for (const c of eligible) {
+    for (const { category_id } of c.user.user_interests) {
+      interestHolders.set(category_id, (interestHolders.get(category_id) ?? 0) + 1)
+    }
+  }
+
+  const pseudonyms = await db.chat_group_members.findMany({
+    where: { chat_group: { event_id: eventId } },
+    select: { user_id: true, anonymous_name: true },
+  })
+  const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
+
+  const candidates: MatchCandidate[] = eligible.map((c) => ({
+    userId: c.user_id,
+    pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
+    interestIds: c.user.user_interests.map((i) => i.category_id),
+    intents: effectiveIntents(c.intent, c.user.profile?.intent_default ?? []),
+    insideNow: c.status === "checked_in",
+    checkedInAt: c.check_in_time!,
+    revealed: c.revealed,
+    name: c.user.name,
+    photo: c.user.profile?.photos?.[0] ?? c.user.image,
+  }))
+
+  const ranked = rankMatches(
+    {
+      userId: viewerId,
+      interestIds: viewerInterests.map((i) => i.category_id),
+      intents: effectiveIntents(viewerCheckIn.intent, viewerProfile?.intent_default ?? []),
+    },
+    candidates,
+    { interestHolders, population: eligible.length, limit }
+  )
+
+  // Category names, resolved once for the whole page rather than per card.
+  const sharedIds = [...new Set(ranked.flatMap((m) => m.sharedInterestIds))]
+  const categories = sharedIds.length
+    ? await db.categories.findMany({
+        where: { id: { in: sharedIds } },
+        select: { id: true, name: true },
+      })
+    : []
+  const nameOf = new Map(categories.map((c) => [c.id, c.name]))
+
+  return ranked.map((m) => ({
+    userId: m.userId,
+    displayName: m.displayName,
+    photo: m.photo,
+    sharedInterests: m.sharedInterestIds.map((id) => nameOf.get(id) ?? id),
+    sharedIntents: m.sharedIntents,
+    insideNow: m.insideNow,
+    youLiked: liked.has(m.userId),
+  }))
+}
+
+export interface LikeOutcome {
+  mutual: boolean
+  /** Present only on a mutual like — the conversation it just opened. */
+  conversationId?: string
+}
+
+/**
+ * Like someone you were in a room with.
+ *
+ * A mutual like is the moment a conversation opens, and the only moment
+ * identity is exchanged. It stands in for the message request rather than
+ * bypassing it: a request exists to establish that both people consented to
+ * talk, and two likes are exactly that, arrived at without either side having to
+ * compose an opener to a stranger.
+ *
+ * **What this deliberately never tells you is whether they liked you first.**
+ * Surfacing that turns the whole thing into a different product — one where the
+ * interesting information is behind a payment — and it removes the only reason
+ * the gesture means anything.
+ */
+export async function likeAtEvent(
+  eventId: string,
+  likerId: string,
+  likedId: string
+): Promise<LikeOutcome> {
+  await db.event_likes.upsert({
+    where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likerId, liked_id: likedId } },
+    create: { event_id: eventId, liker_id: likerId, liked_id: likedId },
+    update: {},
+  })
+
+  const back = await db.event_likes.findUnique({
+    where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likedId, liked_id: likerId } },
+    select: { id: true },
+  })
+  if (!back) return { mutual: false }
+
+  const conversation = await openConversation(likerId, likedId)
+  return { mutual: true, conversationId: conversation.id }
+}
