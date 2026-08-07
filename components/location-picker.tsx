@@ -85,7 +85,7 @@ export function LocationPicker({
     async (lat: number, lng: number) => {
       try {
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+          `/api/geocode?lat=${lat}&lon=${lng}`,
           { headers: { "Accept-Language": "en" } }
         )
         const data: NominatimResult = await res.json()
@@ -203,7 +203,7 @@ export function LocationPicker({
       setIsSearching(true)
       try {
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1&countrycodes=in`,
+          `/api/geocode?q=${encodeURIComponent(query)}`,
           { headers: { "Accept-Language": "en" } }
         )
         const data: NominatimResult[] = await res.json()

@@ -130,7 +130,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
     setSearching(true)
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1&countrycodes=in`
+        `/api/geocode?q=${encodeURIComponent(q)}`
       )
       const hits = (await res.json()) as {
         lat: string
