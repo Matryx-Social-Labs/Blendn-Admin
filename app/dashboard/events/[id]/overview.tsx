@@ -55,7 +55,6 @@ export function Overview({
         eyebrow={hero.label}
         value={hero.value}
         description={hero.hint}
-        tone={state === "live" ? "brand" : "brand"}
       />
 
       <div className="flex flex-wrap gap-1">
