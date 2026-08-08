@@ -30,9 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The signal is derived, never stored. A `trust_score` column would be a number
   every write path has to maintain, which is exactly what
   `events.current_capacity` was before it drifted and shipped two bugs in a day.
-  And it is **for moderation, not attendees** — a visible reputation number turns
-  a safety mechanism into a status game and makes one bad night follow someone
-  permanently.
+
+  **It is never shown to an attendee, and that is a safety constraint.** The
+  person most likely to rate someone badly is the person who felt least safe with
+  them; surfacing it tells the man that the woman who met him rated him down, at
+  an event where he knows who she is and may still be in the room. The feature
+  meant to protect her would become what exposes her.
+  `__tests__/trust-not-exposed.test.ts` fails the build if anything under
+  `app/api/mobile` even imports the trust module.
 
 ### Fixed
 

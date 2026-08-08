@@ -10,11 +10,26 @@ import { db } from "@/lib/db"
  *
  * ## Who this is for
  *
- * **Moderation, not attendees.** No endpoint returns a trust signal to another
- * user and none should. A visible reputation number turns a safety mechanism
- * into a status game, gives people a reason to trade ratings, and makes a single
- * bad night follow someone permanently. It exists so a human reviewing a report
- * has context.
+ * **Moderation, not attendees. This is a safety constraint, not a preference.**
+ *
+ * The person most likely to rate someone badly is the person who felt least safe
+ * with them. Make that rating visible and you have told the man that the woman
+ * who met him rated him down — at an event where he knows who she is, has her
+ * pseudonym, and may still be in the room. The feature intended to protect her
+ * becomes the thing that exposes her.
+ *
+ * That is the reason. The secondary ones are real but would not on their own
+ * justify the constraint: a visible number turns a safety mechanism into a
+ * status game, gives people a reason to trade ratings, and makes one bad night
+ * follow someone permanently.
+ *
+ * **No endpoint returns a trust signal to another user, and none may be added.**
+ * `__tests__/trust-not-exposed.test.ts` enforces it, because this is exactly the
+ * kind of rule that erodes when someone wants a "verified" badge.
+ *
+ * A known limit worth stating rather than hiding: at a small event with one
+ * connection, acting visibly on a report can identify the reporter by
+ * elimination. Moderation has to weigh that; the schema cannot.
  *
  * ## Derived, never stored
  *

@@ -117,9 +117,19 @@ Four rules, each load-bearing:
 moderation on its own and is never averaged into a score. Four glowing ratings
 and one harassment report is not a 4.2.
 
-The trust signal derived from these is **for moderation, not attendees**. No
-endpoint exposes it to another user. A visible reputation number turns a safety
-mechanism into a status game and makes one bad night follow someone permanently.
+The trust signal derived from these is **for moderation, not attendees, and that
+is a safety constraint rather than a preference**.
+
+The person most likely to rate someone badly is the person who felt least safe
+with them. Surface that rating and you have told the man that the woman who met
+him rated him down — at an event where he knows who she is, has her pseudonym,
+and may still be in the room. The feature meant to protect her becomes what
+exposes her.
+
+No endpoint returns it and none may be added.
+`__tests__/trust-not-exposed.test.ts` fails the build if anything under
+`app/api/mobile` so much as imports the trust module, because this is exactly the
+rule that erodes when someone wants a "verified" badge.
 
 ---
 
