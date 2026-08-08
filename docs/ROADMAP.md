@@ -13,6 +13,10 @@ This started as "things the marketing site claims that the product does not do".
 That list still lives here, marked, because copy promising a feature is a debt
 and undocumented copy promising a feature is a debt nobody is tracking.
 
+**`USER_JOURNEY.md` is the contract** — designed vs built vs served, for all three
+repos. Items here are the API half of it; the app half is `blendn/ROADMAP.md`.
+Do not restate the journey in either.
+
 Nothing here is scheduled. Pricing is undecided — everything is free.
 
 ---
@@ -25,7 +29,45 @@ Nothing in flight.
 
 ## Next
 
-### 1. Matchmaking — the surface
+### 1. Interests reach the structured graph — blocks matchmaking entirely
+
+Onboarding writes interests to `profiles.interests` (free text, from a hardcoded
+emoji list). `lib/matching.ts` ranks on `user_interests → categories`, and the
+endpoints that populate it (`/profiles/:id/interests`) have **zero call sites**.
+
+Every match card therefore returns **no shared interests, for everyone**. The
+ranking, the IDF weighting and the overlap-naming card are all correct and all
+fed by an empty table.
+
+Mostly app-side, but ours to make easy: decide whether `/events/:id/checkins`
+should carry interests so the client need not fan out, and whether
+`profiles.interests` becomes display-only or is retired.
+
+### 2. The four designed features now in scope
+
+From `DESIGN_HANDOFF.md`. All are in the Figma and in neither repo.
+
+| | API today | Work |
+|---|---|---|
+| **Search / Filter** | `/events/search` exists and is **never called**; `/events` filters on category, date, distance | Verify the surface covers the design — then it is app-only |
+| **Map** | Events carry lat/lng; `/events` sorts by distance from a point | A viewport/bounding-box query — a map pans rather than searching a radius |
+| **Profile strength** | Nothing computes completeness; the attendee list hardcodes its own three-field notion | One shared definition server-side, so the meter and that filter cannot disagree |
+| **Notifications centre** | Push tokens exist; no record of what was sent | The largest — a table, a write on every push, list/read endpoints |
+
+### 3. A coarse match band
+
+Agreed in place of the design's `Match Percentage`: **Strong / Good / Some**,
+never a raw number. Not thresholds on the score — that is IDF-weighted, so its
+scale depends on how rare the room's interests are, and a fixed cut would mean
+different things at a techno night and a conference. Proposed:
+
+- **Strong** — two or more shared interests, at least one rare in that room
+- **Good** — one or more shared
+- **Some** — nothing shared, compatible intent
+
+Degrades honestly: a room sharing nothing shows "Some", not a fabricated 34%.
+
+### 4. Matchmaking — the surface
 
 Schema, ranking and the API have shipped (0.49.0, 0.50.0). What is left is the
 client:
@@ -54,7 +96,7 @@ Decided:
   at first check-in, and both are things matching needs anyway. Gender is asked
   only if intent includes dating
 
-### 2. Host coverage gaps
+### 5. Host coverage gaps
 
 Measured against 2026 industry KPI guidance
 ([vFairs](https://www.vfairs.com/blog/event-kpis/),
@@ -68,7 +110,7 @@ holes.
 | **Portfolio calendar** | Events are a table only — no month view across a run |
 | **Venue: availability calendar** | "My venues" shows utilisation after the fact, not what is bookable |
 
-### 3. Open questions
+### 6. Open questions
 
 - **Counting staff needs staff identities.** `check_in_kind` derives staff from
   organisation membership at check-in, which is free and correct — and fires
@@ -79,13 +121,19 @@ holes.
 - **Attendee demographics.** Deliberately thin for privacy. Decide explicitly
   rather than leave it implied.
 
-### 4. Smaller, known
+### 7. Smaller, known
 
 - **No client sends presence pings.** Endpoint and sweeper are live; the Expo app
   has to call `…/presence` for the loop to close
 - **`events.current_capacity`** is written by nothing and read by nothing. Drop
   the column once production logs confirm it
 - **`is_recurring`** is a dead flag still exposed to mobile as `isRecurring`
+- **Phone + SMS OTP** is designed (pp. 1, 3) and unserved. A provider, a cost, a
+  rate limit and a fraud surface OAuth does not have — a decision, not a task
+- **Pre-event chat.** The design opens the room before the event; we open it on
+  check-in. Additive, and needs a decision about what an empty room is for
+- **`Create` and `Circles`** appear in the design's navigation with no data model
+  behind them at all. Worth understanding before either repo builds anything
 - **Analytics the copy promises** — funnels, cohort retention, revenue
   attribution. There is no ticketing and therefore no revenue. The copy is
   cheaper to change than the features
@@ -135,6 +183,13 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.55.0
+
+- **Peer ratings and a trust signal** (#168), and four settings toggles that had
+  persisted nowhere. The trust signal is never visible to an attendee — enforced
+  by a test, because the person most likely to rate someone badly is the person
+  who felt least safe with them.
 
 ### 0.54.0
 
