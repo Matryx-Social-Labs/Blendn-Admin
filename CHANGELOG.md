@@ -5,6 +5,43 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.0] - 2026-08-07
+
+### Added
+
+- **Building occupancy for venue owners.** Occupancy is per event, which is the
+  right unit for an organiser and the wrong one for the person who owns the
+  room. A venue running two events at once — the main room and the basement, a
+  wedding upstairs and a club night below — had two correct figures and no answer
+  to the only question a fire officer asks.
+
+  The total counts **bodies**, staff included, for the same reason per-event
+  occupancy does. The per-room rows keep the guest/staff split, so an owner can
+  still see that the basement is thirty guests and four crew.
+
+  Measured against **the venue's own capacity**, not the sum of the events'. Two
+  rooms can each sit comfortably under their stated number while the building is
+  past what it is licensed for — which is exactly the case the per-event figure
+  cannot express, and now the one the panel is built around.
+
+  Fill is uncapped, like the event figure. Clamping at 100 is what made an
+  over-capacity room unrepresentable on the live screen; the same mistake was
+  available here and a test now blocks it.
+
+  The panel is silent when nothing is running. A venue with no live event is not
+  a venue with a problem, and a zero every afternoon would train someone to
+  ignore the panel by the time it matters.
+
+### Changed
+
+- **Closing the feedback window per day moved to "not doing"**, with the reason.
+  It had been listed as a defect — day-one problems surfacing at the end of the
+  week. That was wrong twice: since 0.48.0 the sentiment sweeper classifies
+  within a minute, so day-one problems surface on day one; and the post-event
+  window does a different job, collecting reflective feedback on the run as a
+  whole, where someone may well look back on day one. Per-day closure would
+  remove that.
+
 ## [0.51.0] - 2026-08-07
 
 ### Added

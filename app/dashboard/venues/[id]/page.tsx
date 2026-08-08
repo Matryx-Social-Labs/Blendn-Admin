@@ -2,10 +2,12 @@ import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 import { IconMapPin } from "@tabler/icons-react"
 
+import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
 import { EmptyState, MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
 import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
+import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
@@ -64,6 +66,8 @@ export default async function VenueDetailPage({
       : null
     if (!membership) redirect("/dashboard/venues")
   }
+
+  const building = await getBuildingOccupancy(id)
 
   const [events, ratingRows] = await Promise.all([
     db.events.findMany({
@@ -150,6 +154,10 @@ export default async function VenueDetailPage({
           )}
         </div>
       </div>
+
+      {/* Above the window metrics, deliberately: everything below is about a
+          date range someone chose, and this is about right now. */}
+      <BuildingOccupancyPanel occupancy={building} />
 
       <div className="flex flex-wrap gap-1">
         <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />

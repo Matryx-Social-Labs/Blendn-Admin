@@ -66,7 +66,6 @@ holes.
 | Gap | Note |
 |---|---|
 | **Portfolio calendar** | Events are a table only — no month view across a run |
-| **Venue: multi-room / concurrent events** | Occupancy is per event; an owner running two rooms has no building total |
 | **Venue: availability calendar** | "My venues" shows utilisation after the fact, not what is bookable |
 | **NPS** | Ratings exist; NPS is the benchmark every organiser reports upward |
 | **Attendee demographics** | Deliberately thin for privacy. Decide explicitly rather than leave it implied |
@@ -75,8 +74,6 @@ holes.
 
 - **Per-occurrence capacity.** `event_occurrences.capacity` exists and is unread.
   A conference selling fewer seats on the last day wants it
-- **The feedback window** closes 24 h after the *last* day, so day-one problems
-  surface at the end of the week. Belongs to the chat lifecycle sweeper
 - **No client sends presence pings.** Endpoint and sweeper are live; the Expo app
   has to call `…/presence` for the loop to close
 - **`events.current_capacity`** is written by nothing and read by nothing. Drop
@@ -104,12 +101,28 @@ privacy guarantee the product makes everywhere else — today real identities ne
 reach a host at all — and deserves deciding on its own rather than arriving
 inside a layout import.
 
+**Closing the feedback window per day.** It was listed here as a defect — "the
+window closes 24 h after the *last* day, so day-one problems surface at the end
+of the week". That was wrong twice over. Since 0.48.0 the sentiment sweeper
+classifies messages within a minute, so day-one problems surface on day one. And
+the post-event window is doing a **different job**: collecting reflective
+feedback on the run as a whole, where someone may well look back and say what
+they thought of day one. Per-day closure would remove that. The room stays open
+24 h after the last day, deliberately.
+
 **Financial, sponsorship and pipeline metrics.** Every one assumes ticketing.
 There is none, so there is no revenue to attribute.
 
 ---
 
 ## Done
+
+### 0.52.0
+
+- **Building occupancy** (#165). A venue running two events at once had two
+  correct occupancy figures and no building total — the only number a fire
+  officer asks for. Counts bodies, measured against the venue's own licensed
+  capacity rather than the sum of the events', uncapped.
 
 ### 0.51.0
 
