@@ -220,16 +220,46 @@ cannot ask someone to optimise a profile that is deliberately hidden until a
 mutual like. The meter and the pseudonym are arguing about what the product is.
 
 **Sessions, per-session ratings, Q&A and live polls.** Proposed after auditing
-EventMobi's analytics page, and withdrawn one turn later. They are Whova and
-Brella table stakes: building them means competing with ten-year-old incumbents,
-at Indian price points, on features that have nothing to do with approach
-anxiety. The dashboard is a distribution channel, not a product, so its analytics
-only have to be good enough to close an organiser.
+EventMobi's analytics page, withdrawn one turn later, and then checked against
+what Indian organisers actually use. The check made the cut stronger, not weaker.
 
-**Exhibitor lead capture, zone dwell time, CE credits.** Genuinely the
-commercial centre of EventMobi's pitch, and genuinely a later decade. A B2B2B
-motion needs a B2B that does not exist yet. Worth revisiting once organisers are
-paying for anything at all.
+The relevant incumbent here is not Whova, it is **KonfHub** (Bengaluru), and it
+already ships Q&A with AI question generation, live quizzing, session tracking,
+analytics, automated badges and QR check-in — with **WhatsApp confirmation
+messages available only to Indian organisers**. Pricing is **free for free
+events and 1.75% per ticket for paid ones, no subscription, no setup fee**.
+
+So this is not "compete with a ten-year-old incumbent". It is "compete with a
+funded, localised incumbent that gives these away". India's event-tech startups
+raised **$380M+ across 2023-24**, and domestic platforms are taking share from
+global players specifically on regional language support and UPI payment flows.
+Feature parity is the worst possible ground to fight on.
+
+What KonfHub does **not** have is the thing we already built: live occupancy
+against licensed capacity, building occupancy across concurrent events, crowd
+sentiment read from the room's own chat, and whether anyone actually met anyone.
+Lead with those; do not chase the rest.
+
+**Exhibitor lead capture, zone dwell time, CE credits.** Still not doing them,
+but the India check turned up a real distinction worth recording, because the
+first version of this entry was imprecise.
+
+There *is* a documented, unserved pain here: Indian exhibitor management is
+"held together by spreadsheets, shared drives, PDF manuals, email chains and a
+whole lot of chasing", with organisers juggling 15+ Excel sheets and 8 WhatsApp
+groups for a single event. That is a genuine status-quo answer, and better
+evidence of pain than anything on the attendee side.
+
+But it is **exhibitor operations**, not exhibitor **analytics**. Zone dwell time
+does not fix fifteen spreadsheets. Cvent LeadCapture and ExpoPlatform already
+serve the measurement half globally. So the gap is real and it is a different
+product from the one we would have built.
+
+Worth keeping as a **future revenue hypothesis**: if attendee engagement
+features are commoditised to free in India (KonfHub proves they are), then the
+money in Indian events is in operations and exhibitors, not in engagement. That
+is an argument for never charging organisers and using them purely as
+distribution, which is what this roadmap now assumes.
 
 **Gamification** — top players, challenges, point totals. An organiser
 engagement toy. Moves no part of the approach-anxiety loop.
