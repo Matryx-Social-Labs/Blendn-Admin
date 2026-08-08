@@ -1,6 +1,8 @@
 import { logger } from "@/lib/logger"
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { pseudonymsForEvent } from "@/lib/anonymous-names"
+import { csvResponse, toCsv } from "@/lib/csv"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
   unauthorizedResponse,
@@ -41,52 +43,59 @@ export async function GET(
       }
     }
 
+    /*
+     * Pseudonymous, like every other host-facing view of a room.
+     *
+     * This shipped `name`, `email` and `phone` for every attendee, revealed or
+     * not. `lib/reports.ts` says in as many words that "an organiser sees who
+     * came to their events... and never an email address" and that "attendees
+     * are pseudonymous to hosts everywhere in this product, and an export is
+     * not a way around that" -- this route was the way around it, and it
+     * returned strictly more than the screen it backs.
+     *
+     * It also hand-rolled its own CSV escaping, which did RFC 4180 quoting and
+     * no formula neutralisation, so an attendee could set their display name to
+     * `=HYPERLINK(...)` and have it execute in the organiser's spreadsheet.
+     * `lib/csv.ts` has handled that since the reports work; the fix is to
+     * delete the local copy and use it. That also picks up the UTF-8 BOM and
+     * CRLF endings this route lacked, so non-ASCII pseudonyms stop mojibaking
+     * in Excel.
+     */
     const checkIns = await db.event_check_ins.findMany({
       where: { event_id: eventId },
-      include: {
-        user: {
-          select: {
-            name: true,
-            email: true,
-            profile: {
-              select: { phone: true },
-            },
-          },
-        },
-      },
       orderBy: { check_in_time: "asc" },
     })
 
-    // Build CSV
-    const headers = ["Name", "Email", "Phone", "Status", "Check-in Time", "Check-out Time"]
-    const rows = checkIns.map((ci) => [
-      escapeCsv(ci.user.name || ""),
-      escapeCsv(ci.user.email),
-      escapeCsv(ci.user.profile?.phone || ""),
-      ci.status,
-      ci.check_in_time ? ci.check_in_time.toISOString() : "",
-      ci.check_out_time ? ci.check_out_time.toISOString() : "",
-    ])
+    const pseudonyms = await pseudonymsForEvent(eventId)
 
-    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n")
+    const csv = toCsv(
+      [
+        {
+          key: "attendee",
+          label: "Attendee",
+          value: (ci: (typeof checkIns)[number]) => pseudonyms.get(ci.user_id) ?? "Attendee",
+        },
+        { key: "status", label: "Status", value: (ci: (typeof checkIns)[number]) => ci.status },
+        {
+          key: "checkIn",
+          label: "Check-in Time",
+          value: (ci: (typeof checkIns)[number]) =>
+            ci.check_in_time ? ci.check_in_time.toISOString() : "",
+        },
+        {
+          key: "checkOut",
+          label: "Check-out Time",
+          value: (ci: (typeof checkIns)[number]) =>
+            ci.check_out_time ? ci.check_out_time.toISOString() : "",
+        },
+      ],
+      checkIns
+    )
 
     const safeTitle = event.title.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 50)
-    return new NextResponse(csv, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${safeTitle}_attendees.csv"`,
-      },
-    })
+    return csvResponse(`${safeTitle}_attendees.csv`, csv)
   } catch (error) {
     logger.error("Export attendees error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to export attendees")
   }
-}
-
-function escapeCsv(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`
-  }
-  return value
 }

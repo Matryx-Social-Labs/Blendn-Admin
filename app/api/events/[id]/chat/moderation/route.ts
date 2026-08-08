@@ -44,6 +44,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "No chat group for this event" }, { status: 404 })
     }
 
+    // Hosts get the pseudonym the room shows; only platform admins get the
+    // person behind it. Same rule as `chat/messages`.
+    const isPlatformAdmin = session.user.role === "app_admin"
+    const anonByUser = new Map(
+      (
+        await db.chat_group_members.findMany({
+          where: { chat_group_id: event.chat_group.id },
+          select: { user_id: true, anonymous_name: true },
+        })
+      ).map((m) => [m.user_id, m.anonymous_name])
+    )
+
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get("status") || "pending"
     const page = Math.max(1, parseInt(searchParams.get("page") || "1"))
@@ -102,8 +114,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           id: f.id,
           messageId: f.message_id,
           userId: f.user_id,
-          userName: f.user.name,
-          userEmail: f.user.email,
+          anonymousName: anonByUser.get(f.user_id) ?? null,
+          /*
+           * Admin-only, and absent rather than null for hosts so a client
+           * reading `userName` gets undefined instead of a convincing blank.
+           *
+           * The sibling `chat/messages` route was fixed for exactly this and
+           * this one was missed. `canOperate` is organiser and venue owner, not
+           * admin, so any host could read the real name and email address of
+           * every "anonymous" attendee who had ever been auto-flagged -- and
+           * the pseudonym sits next to it on the adjacent Chat tab, keyed on
+           * the same `userId`. The admin-only moderation CSV in `lib/reports.ts`
+           * deliberately carries no user id at all, which is the clearest sign
+           * this was an oversight rather than a decision.
+           */
+          ...(isPlatformAdmin ? { userName: f.user.name, userEmail: f.user.email } : {}),
           source: f.source,
           status: f.status,
           categories: f.categories,

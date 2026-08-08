@@ -8,6 +8,7 @@ import {
   successResponse,
   unauthorizedResponse,
   notFoundResponse,
+  forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
@@ -59,6 +60,29 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     if (!event) {
       return notFoundResponse("Event not found")
+    }
+
+    /*
+     * You have to have been in the room to see who else was.
+     *
+     * Every sibling room surface enforces this -- `matches` returns null
+     * without a check-in, `chat` says "You must check in to the event to access
+     * chat", `peer-ratings` needs a mutual like. This one authenticated and
+     * then handed the roster to anybody, so a timestamped guest list for any
+     * event was one request away from any account, from anywhere.
+     *
+     * That matters more than it looks because the roster carries the real
+     * `userId` next to the pseudonym, and `GET /users/:id` turns a `userId`
+     * into a real name and photos. See SECURITY_BACKLOG.md -- the id itself is
+     * the deeper problem and is still open.
+     */
+    const attended = await db.event_check_ins.findFirst({
+      where: { event_id: eventId, user_id: authUser.userId },
+      select: { id: true },
+    })
+
+    if (!attended) {
+      return forbiddenResponse("Check in to see who else is here")
     }
 
     // Get total count — same completeness filter as the list query below

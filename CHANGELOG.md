@@ -5,6 +5,56 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.0] - 2026-08-08
+
+### Fixed
+
+Eleven security findings from a full six-domain sweep of the API and backend.
+`docs/SECURITY_BACKLOG.md` carries the detail, the coverage table, and what is
+still open. The sharpest:
+
+- **Account pre-hijacking through OAuth email linking.** Signup creates a user
+  from any email with no proof of ownership, and both OAuth paths linked an
+  unknown provider `sub` to whatever row shared that email. An attacker could
+  sign up as someone else's address, wait for that person's first "Continue with
+  Google", and then sign in with the password they had set. Ownership proven by
+  Google or Apple now wins over an unverified password credential, which is
+  dropped on link.
+- **Google's audience check failed open** when no client ID was configured —
+  `aud` is the only claim tying a Google token to us, so any token Google ever
+  issued would have authenticated.
+- **The audit log's tenant scope was overwritten by a caller-supplied filter**,
+  and because action arguments are attacker-controlled JSON, an object arrived
+  as a Prisma operator and unscoped the query to the whole platform.
+- **`GET /api/events/[id]` was unauthenticated** and returned the whole row,
+  including the geofence — which is the check-in boundary every organiser number
+  rests on.
+- **The organiser CSV export shipped attendee name, email and phone**, which
+  `lib/reports.ts` says in as many words never happens, and did so through
+  hand-rolled escaping with no formula neutralisation.
+- **The dashboard moderation queue leaked real name and email to hosts.** The
+  sibling chat route was fixed for this and this one was missed.
+- **Role revocation did not take effect** — a demoted admin kept `app_admin` in a
+  live cookie for up to 30 days and could re-promote themselves.
+
+Plus: draft events were listable by any attendee, the attendee roster was
+readable without attending, `users/:id/favorites` had no ownership check, and
+`profiles/:id` used a deny-list that shipped `gender` and `interested_in` to
+strangers while bypassing blocks.
+
+**Still open, deliberately:** the room's join key is the real user id, so
+pseudonymity is one request deep. That is a schema and client-contract change
+rather than a guard, and it is written up in the backlog rather than patched
+under cover of a sweep.
+
+### Fixed (not security)
+
+- **The live operations room never worked.** `join:eventOps` was registered
+  inside the body of the `leave:event` handler — one missing brace — so it did
+  not exist until a client emitted `leave:event`, which the ops hook never does.
+  `ops:snapshot` fired for nobody. Authorisation was never wrong; the handler
+  holding it was unreachable.
+
 ## [0.57.0] - 2026-08-08
 
 ### Fixed

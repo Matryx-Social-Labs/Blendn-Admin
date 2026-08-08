@@ -29,15 +29,41 @@ interface RouteContext {
 export async function GET(_: Request, { params }: RouteContext) {
   try {
     const resolvedParams = await params
+
+    /*
+     * PATCH and DELETE below both authenticate and run `eventPermissions`.
+     * This one did neither, and `middleware.ts` does not match `/api/events`,
+     * so it was the only gate and there was none: an unauthenticated GET
+     * returned the whole row for any event id, drafts and private events
+     * included.
+     *
+     * The row carries `geofence`, `latitude`/`longitude` and
+     * `check_in_radius` -- the server-side check-in boundary. Reading it tells
+     * you exactly which coordinates to submit to the mobile check-in route to
+     * pass `evaluateCheckIn` from anywhere, which turns the one guarantee the
+     * organiser's numbers rest on into a formality.
+     */
+    const session = await getAuth()
+    if (!session?.user) {
+      return new NextResponse("Unauthorized", { status: 401 })
+    }
+
     const event = await db.events.findFirst({
       where: {
         id: resolvedParams.id,
         deleted_at: null,
       },
+      include: {
+        venue: { select: { owner_org_id: true } },
+      },
     })
 
     if (!event) {
       return new NextResponse("Event not found", { status: 404 })
+    }
+
+    if (!eventPermissions(await actorFor(session.user), event).canOperate) {
+      return new NextResponse("Forbidden", { status: 403 })
     }
 
     return NextResponse.json(event)

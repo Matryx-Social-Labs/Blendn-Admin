@@ -116,10 +116,21 @@ export async function GET(request: NextRequest) {
     )
     const previewLimit = interestedPreviewLimit ?? 3
 
-    // Build where clause
+    /*
+     * `status` used to be caller-supplied and the schema accepts "draft", with
+     * no ownership scoping anywhere in this handler. Since `events.status`
+     * defaults to `draft` and `visibility` to `public`, every event is a
+     * public draft from creation until it is published -- so
+     * `?status=draft&includePast=true` returned every unannounced event on the
+     * platform to any attendee, line-up, venue, date and capacity included.
+     * `/events/search` gets this right and pins both columns in SQL.
+     *
+     * Discovery serves published public events. A host reads their own drafts
+     * through the dashboard, which scopes by organisation.
+     */
     const where: Record<string, unknown> = {
       deleted_at: null,
-      status: status || "published",
+      status: "published",
       visibility: "public",
     }
 
