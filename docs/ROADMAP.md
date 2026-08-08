@@ -21,6 +21,36 @@ Nothing here is scheduled. Pricing is undecided — everything is free.
 
 ---
 
+## What this product is
+
+**Not an event networking app. A way to approach someone at an event without
+risking rejection.**
+
+People are shy or scared to approach others at events, parties and concerts,
+because they do not know whether the other person is willing to meet. Everything
+here is mechanism for that one problem:
+
+- **GPS check-in** — they are actually here, actually real, right now. No catfish.
+- **Mutual like opens the conversation** — you never approach someone who has
+  not already said yes. Rejection risk is zero.
+- **Pseudonymity by default** — expressing interest costs nothing.
+- **Group check-in** — nobody approaches alone.
+- **Contextual room chat** — a reason to speak at all, about a thing you are
+  both currently at.
+
+**The organiser dashboard is not a product, it is the distribution channel.**
+Organisers do not need to pay; they need to put a QR code on the screen, because
+that is the only way to get **room-level liquidity**. Dating apps need liquidity
+in a city. This needs it in a room, on a night, and it resets at the next event.
+So build the minimum analytics that closes an organiser, not the best analytics
+in the market. Two numbers nobody else has are enough: live occupancy against
+licensed capacity, and whether anyone actually met anyone.
+
+Full reasoning, competitive position and market data:
+`~/.gstack/projects/Matryx-Social-Labs-Blendn-Admin/2026-08-08-design-approach-anxiety-thesis.md`
+
+---
+
 ## Now
 
 Nothing in flight.
@@ -29,7 +59,29 @@ Nothing in flight.
 
 ## Next
 
-### 1. Interests reach the structured graph — blocks matchmaking entirely
+### 1. Group-to-group matching — the mixing mechanic
+
+**The single most important unbuilt thing, and it does not exist in any form.**
+
+Group check-in is both the best idea in the product and the biggest threat to
+it. It manufactures cold-start liquidity (one download brings three or four), it
+matches how people actually attend (nobody goes to a concert alone), and the
+group is the retention loop the event cannot be — the event is temporary, the
+group persists.
+
+But friends who arrive together talk to each other. That is what they already
+do. If groups do not mix, this is a group chat for people standing next to each
+other, with zero network value.
+
+**Whatever forces mixing is the actual product.** Leading candidate: two groups
+both opt in, and the app tells them where the other group is. Nobody approaches
+alone, nobody is rejected alone.
+
+Needs: a `groups` model scoped per event, group check-in, group-level like and
+mutual handshake, and a ranking that scores group-to-group overlap rather than
+summing pairs.
+
+### 2. Interests reach the structured graph — blocks matchmaking entirely
 
 Onboarding writes interests to `profiles.interests` (free text, from a hardcoded
 emoji list). `lib/matching.ts` ranks on `user_interests → categories`, and the
@@ -43,18 +95,39 @@ Mostly app-side, but ours to make easy: decide whether `/events/:id/checkins`
 should carry interests so the client need not fan out, and whether
 `profiles.interests` becomes display-only or is retired.
 
-### 2. The four designed features now in scope
+### 3. Moderation is core product, not compliance
 
-From `DESIGN_HANDOFF.md`. All are in the Figma and in neither repo.
+Promoted after reading why Yik Yak actually died: not lack of context — context
+was why it worked — but **harassment**. Racist threats, bomb and shooting threats
+that triggered campus evacuations, two students arrested, a federal complaint
+against a university for failing to protect students. Campuses banned it. It
+relaunched in 2021 and the abuse returned immediately.
+
+The risk here is not that nobody uses the room. It is that the room turns ugly
+once, and that ends the product — especially in India, especially with women in
+it. The differentiator versus Yik Yak is **accountability**: a GPS-verified human
+behind every pseudonym, a moderation pipeline, and peer ratings routed to
+moderation rather than displayed.
+
+Treat the moderation surface as a first-class product area with its own budget.
+
+---
+
+## Next — supporting
+
+### 4. Designed features still in scope
+
+From `DESIGN_HANDOFF.md`. In the Figma, in neither repo. **Profile strength was
+cut** — see *Validated — not doing*. None of these three is a wedge; do them when
+they are cheap, not before the three items above.
 
 | | API today | Work |
 |---|---|---|
 | **Search / Filter** | `/events/search` exists and is **never called**; `/events` filters on category, date, distance | Verify the surface covers the design — then it is app-only |
 | **Map** | Events carry lat/lng; `/events` sorts by distance from a point | A viewport/bounding-box query — a map pans rather than searching a radius |
-| **Profile strength** | Nothing computes completeness; the attendee list hardcodes its own three-field notion | One shared definition server-side, so the meter and that filter cannot disagree |
 | **Notifications centre** | Push tokens exist; no record of what was sent | The largest — a table, a write on every push, list/read endpoints |
 
-### 3. A coarse match band
+### 5. A coarse match band
 
 Agreed in place of the design's `Match Percentage`: **Strong / Good / Some**,
 never a raw number. Not thresholds on the score — that is IDF-weighted, so its
@@ -67,7 +140,7 @@ different things at a techno night and a conference. Proposed:
 
 Degrades honestly: a room sharing nothing shows "Some", not a fabricated 34%.
 
-### 4. Matchmaking — the surface
+### 6. Matchmaking — the surface
 
 Schema, ranking and the API have shipped (0.49.0, 0.50.0). What is left is the
 client:
@@ -96,7 +169,7 @@ Decided:
   at first check-in, and both are things matching needs anyway. Gender is asked
   only if intent includes dating
 
-### 5. Host coverage gaps
+### 7. Host coverage gaps
 
 Measured against 2026 industry KPI guidance
 ([vFairs](https://www.vfairs.com/blog/event-kpis/),
@@ -110,7 +183,7 @@ holes.
 | **Portfolio calendar** | Events are a table only — no month view across a run |
 | **Venue: availability calendar** | "My venues" shows utilisation after the fact, not what is bookable |
 
-### 6. Open questions
+### 8. Open questions
 
 - **Counting staff needs staff identities.** `check_in_kind` derives staff from
   organisation membership at check-in, which is free and correct — and fires
@@ -121,7 +194,7 @@ holes.
 - **Attendee demographics.** Deliberately thin for privacy. Decide explicitly
   rather than leave it implied.
 
-### 7. Smaller, known
+### 9. Smaller, known
 
 - **No client sends presence pings.** Endpoint and sweeper are live; the Expo app
   has to call `…/presence` for the loop to close
@@ -141,6 +214,32 @@ holes.
 ---
 
 ## Validated — not doing
+
+**A profile strength meter.** In the Figma, and it contradicts the product. You
+cannot ask someone to optimise a profile that is deliberately hidden until a
+mutual like. The meter and the pseudonym are arguing about what the product is.
+
+**Sessions, per-session ratings, Q&A and live polls.** Proposed after auditing
+EventMobi's analytics page, and withdrawn one turn later. They are Whova and
+Brella table stakes: building them means competing with ten-year-old incumbents,
+at Indian price points, on features that have nothing to do with approach
+anxiety. The dashboard is a distribution channel, not a product, so its analytics
+only have to be good enough to close an organiser.
+
+**Exhibitor lead capture, zone dwell time, CE credits.** Genuinely the
+commercial centre of EventMobi's pitch, and genuinely a later decade. A B2B2B
+motion needs a B2B that does not exist yet. Worth revisiting once organisers are
+paying for anything at all.
+
+**Gamification** — top players, challenges, point totals. An organiser
+engagement toy. Moves no part of the approach-anxiety loop.
+
+**Banner ad impressions, clicks and conversion.** No ad surface, and putting one
+into a pseudonymous room is off-brand for the one thing the product is trying to
+protect.
+
+**Video session analytics.** No video.
+
 
 **Dual profile for dating vs networking.** A second profile doubles the
 onboarding friction the design exists to minimise, and splitting a new app's pool

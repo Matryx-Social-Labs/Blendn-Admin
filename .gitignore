@@ -47,3 +47,4 @@ dist/
 
 # dev tool config
 .claude/
+.gstack/
