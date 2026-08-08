@@ -1,6 +1,6 @@
 import { getTrustSignal, MIN_RATINGS, ratablePeers } from "@/lib/trust"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
 
 /**
  * Who may rate whom, and what the signal says.
