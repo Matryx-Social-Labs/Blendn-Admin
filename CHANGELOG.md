@@ -5,6 +5,39 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.59.0] - 2026-08-08
+
+### Fixed
+
+The rest of `docs/SECURITY_BACKLOG.md`. The Open section is now empty.
+
+- **Pseudonymity was one request deep.** Every room surface hands out the real
+  user id — the client needs it to block, report and message — and
+  `GET /users/:id` exchanged any id for a real name and photos. Two requests
+  de-anonymised a room, and the same join attributed every "anonymous" chat
+  message to a named person.
+
+  The obvious fix was a per-event opaque handle, and it was the wrong first
+  move: that id is in the mobile contract everywhere. **The id was never the
+  secret; the lookup was.** `lib/identity.ts` gates identity on a relationship —
+  you matched, you are in a conversation, or they chose to be public in a room
+  you were in. Co-presence alone is deliberately not enough. `interested-users`
+  returned `{id, name, photo}` in bulk and would have made the gate decorative;
+  it now returns avatars only.
+
+- **Export pseudonyms are an HMAC**, salted per organisation. They were the
+  first eight characters of the real user id, which is an abbreviation rather
+  than a pseudonym — and hosts hold full user ids for chat participants, so
+  prefix-matching recovered every row.
+
+- **The two event write routes have a schema.** The last writes without one. The
+  type checker then caught that they were using the raw body rather than the
+  parsed data, which would have made the schema decorative.
+
+- **Moderation flag scoped to its event**, **venue-claim evidence URLs
+  validated** (a TypeScript interface is not a validator), and **HSTS plus a
+  report-only CSP**.
+
 ## [0.58.0] - 2026-08-08
 
 ### Fixed

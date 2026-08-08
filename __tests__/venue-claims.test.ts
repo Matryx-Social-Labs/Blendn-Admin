@@ -46,7 +46,7 @@ describe("who may file a claim", () => {
     // over other people's events, and an organiser has no claim to that.
     signIn("organizer")
     await expect(
-      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "u" } })
+      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "https://cdn.example/licence.pdf" } })
     ).rejects.toThrow(/only a venue owner/i)
     expect(mockDb.venue_claims.upsert).not.toHaveBeenCalled()
   })
@@ -54,20 +54,35 @@ describe("who may file a claim", () => {
   it("refuses an attendee", async () => {
     signIn("attendee")
     await expect(
-      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "u" } })
+      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "https://cdn.example/licence.pdf" } })
     ).rejects.toThrow(/only a venue owner/i)
   })
 
   it("refuses a signed-out caller before touching the database", async () => {
     mockAuth.mockResolvedValue(null)
     await expect(
-      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "u" } })
+      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "https://cdn.example/licence.pdf" } })
     ).rejects.toThrow(/unauthorized/i)
     expect(mockDb.venues.findUnique).not.toHaveBeenCalled()
   })
 })
 
 describe("evidence", () => {
+  it("refuses a non-http evidence link", async () => {
+    // `ClaimEvidence` is a TypeScript interface and is erased at runtime, so
+    // these arrived unchecked from a server-action argument and were rendered
+    // into an `<a href>` for a reviewing admin. React 19 blocks `javascript:`,
+    // which is the only reason this was never exploitable.
+    signIn("venue_owner")
+    await expect(
+      fileVenueClaim({
+        venueId: VENUE,
+        evidence: { tradeLicence: "javascript:alert(document.cookie)" },
+      })
+    ).rejects.toThrow(/http\(s\) URLs/i)
+  })
+
+
   beforeEach(() => {
     signIn("venue_owner")
     mockDb.venues.findUnique.mockResolvedValue({ id: VENUE, name: "Toit", owner_org_id: null })
@@ -92,7 +107,7 @@ describe("evidence", () => {
       fileVenueClaim({
         venueId: VENUE,
         gstin: "29AABCU9603R1ZX",
-        evidence: { tradeLicence: "u" },
+        evidence: { tradeLicence: "https://cdn.example/licence.pdf" },
       })
     ).rejects.toThrow()
   })
@@ -101,7 +116,7 @@ describe("evidence", () => {
     await fileVenueClaim({
       venueId: VENUE,
       gstin: VALID_GSTIN.toLowerCase(),
-      evidence: { tradeLicence: "u" },
+      evidence: { tradeLicence: "https://cdn.example/licence.pdf" },
     })
     expect(mockDb.venue_claims.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ create: expect.objectContaining({ gstin: VALID_GSTIN }) })
@@ -120,7 +135,7 @@ describe("claiming a venue that already has an owner", () => {
       name: "Toit",
       owner_org_id: THEIR_ORG,
     })
-    const result = await fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "u" } })
+    const result = await fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "https://cdn.example/licence.pdf" } })
     expect(result.isDispute).toBe(true)
     expect(mockDb.venue_claims.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ create: expect.objectContaining({ is_dispute: true }) })
@@ -130,7 +145,7 @@ describe("claiming a venue that already has an owner", () => {
   it("refuses when the claimant already owns it", async () => {
     mockDb.venues.findUnique.mockResolvedValue({ id: VENUE, name: "Toit", owner_org_id: MY_ORG })
     await expect(
-      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "u" } })
+      fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "https://cdn.example/licence.pdf" } })
     ).rejects.toThrow(/already owns/i)
   })
 })
@@ -141,7 +156,7 @@ describe("re-filing", () => {
     // for a reviewer to wade through.
     signIn("venue_owner")
     mockDb.venues.findUnique.mockResolvedValue({ id: VENUE, name: "Toit", owner_org_id: null })
-    await fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "u" } })
+    await fileVenueClaim({ venueId: VENUE, evidence: { tradeLicence: "https://cdn.example/licence.pdf" } })
 
     const call = mockDb.venue_claims.upsert.mock.calls[0][0]
     expect(call.where).toEqual({ venue_id_org_id: { venue_id: VENUE, org_id: MY_ORG } })
@@ -242,7 +257,7 @@ describe("the review queue", () => {
         filed_by: "user_1",
         is_dispute: true,
         gstin: VALID_GSTIN,
-        evidence: { tradeLicence: "u" },
+        evidence: { tradeLicence: "https://cdn.example/licence.pdf" },
         created_at: new Date("2026-01-01"),
         org: { display_name: "Mine Ltd" },
         venue: {

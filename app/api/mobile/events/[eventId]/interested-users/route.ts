@@ -70,12 +70,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       take: limit,
     })
 
+    /*
+     * Social proof, not a directory.
+     *
+     * This returned `{ real id, real name, real photo }` for everyone who had
+     * favourited an event, to any authenticated caller, paginated with no cap
+     * on total enumeration. That made it a bulk source of `{userId -> real
+     * name}` pairs which key straight against the pseudonymous attendee list
+     * for anyone who both saved the event and turned up -- the ordinary path.
+     * Gating `users/:id` would have been decorative while this stood.
+     *
+     * The screen wants "some people are interested". A count and avatars carry
+     * that; names and ids are what made it a lookup table. `events/route.ts`
+     * already uses this avatar-only shape.
+     */
     return successResponse({
-      users: favorites.map((f) => ({
-        id: f.user.id,
-        name: f.user.name,
-        avatar: f.user.image,
-      })),
+      users: favorites.map((f) => ({ avatar: f.user.image })),
       pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {

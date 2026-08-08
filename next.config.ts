@@ -41,6 +41,47 @@ const nextConfig: NextConfig = {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
           },
+          {
+            /*
+             * HSTS. The dashboard holds a session cookie, so a single plaintext
+             * request is a chance to steal it. Two years with preload is the
+             * submission requirement.
+             *
+             * Ignored on plain HTTP, so it is inert in local development.
+             */
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains; preload",
+          },
+          {
+            /*
+             * CSP, in report-only to begin with.
+             *
+             * No XSS sink is known -- React escapes by default, the one
+             * `dangerouslySetInnerHTML` builds CSS from a static config, and the
+             * email templates escape every interpolation. CSP is what makes the
+             * *next* one non-catastrophic, which is why it is worth having and
+             * why it is not urgent.
+             *
+             * Report-only because enforcing it blind would break Swagger UI and
+             * the chart library on a Friday. `'unsafe-inline'` and
+             * `'unsafe-eval'` are here because Next's dev overlay and the
+             * Swagger bundle both need them; tightening those is the work that
+             * turns this into an enforcing policy, and it needs a report
+             * endpoint and a week of data first.
+             */
+            key: "Content-Security-Policy-Report-Only",
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob: https:",
+              "font-src 'self' data:",
+              "connect-src 'self' https: wss:",
+              "frame-ancestors 'none'",
+              "base-uri 'self'",
+              "form-action 'self'",
+            ].join("; "),
+          },
         ],
       },
       // CORS for /api/mobile/* is handled per-request in middleware.ts

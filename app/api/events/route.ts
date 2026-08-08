@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
+import { eventWriteSchema } from "@/lib/validations/event"
 import { validateLocationInput } from "@/lib/geofence-input"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
@@ -96,6 +97,21 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json()
+
+    /*
+     * The last write endpoints in the codebase without a schema. The
+     * destructure below is an allow-list, so mass assignment was never
+     * possible, but nothing bounded a string's length or checked that
+     * `latitude` was a number -- and `parseJsonField` put unvalidated
+     * `JSON.parse` output into Json columns.
+     */
+    const parsed = eventWriteSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid event payload", issues: parsed.error.issues },
+        { status: 400 }
+      )
+    }
     const {
       title,
       description,
@@ -131,7 +147,7 @@ export async function POST(req: Request) {
       primary_category_id,
       media_items,
       geofence,
-    } = body
+    } = parsed.data
 
     // Bounded server-side. This route previously passed check_in_radius from
     // the request body straight into Prisma, so the only limit in the product
@@ -142,7 +158,7 @@ export async function POST(req: Request) {
     }
 
     // Debug: Log cover_image_url
-    logger.info("Creating event - cover_image_url", { error: cover_image_url instanceof Error ? cover_image_url.message : String(cover_image_url) })
+    logger.info("Creating event - cover_image_url", { coverImageUrl: cover_image_url ?? null })
 
     if (!title || !description || !start_time || !end_time || !timezone) {
       return new NextResponse("Missing required fields", { status: 400 })
@@ -189,8 +205,8 @@ export async function POST(req: Request) {
         longitude,
         cover_image_url,
         external_link,
-        is_featured,
-        is_recurring,
+        is_featured: is_featured ?? undefined,
+        is_recurring: is_recurring ?? undefined,
         check_in_radius: location.values.check_in_radius ?? undefined,
         geofence: location.values.geofence ?? undefined,
         organizer_id: session.user.id,

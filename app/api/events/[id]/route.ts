@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
+import { eventWriteSchema } from "@/lib/validations/event"
 import { validateLocationInput } from "@/lib/geofence-input"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
@@ -83,6 +84,21 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     const resolvedParams = await params
     const body = await req.json()
+
+    /*
+     * The last write endpoints in the codebase without a schema. The
+     * destructure below is an allow-list, so mass assignment was never
+     * possible, but nothing bounded a string's length or checked that
+     * `latitude` was a number -- and `parseJsonField` put unvalidated
+     * `JSON.parse` output into Json columns.
+     */
+    const parsed = eventWriteSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid event payload", issues: parsed.error.issues },
+        { status: 400 }
+      )
+    }
     const {
       title,
       description,
@@ -118,7 +134,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       primary_category_id,
       media_items,
       geofence,
-    } = body
+    } = parsed.data
 
     const location = validateLocationInput({ check_in_radius, geofence })
     if (!location.ok) {
@@ -126,7 +142,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     }
 
     // Debug: Log cover_image_url being updated
-    logger.info("Updating event - cover_image_url", { error: cover_image_url instanceof Error ? cover_image_url.message : String(cover_image_url) })
+    logger.info("Updating event - cover_image_url", { coverImageUrl: cover_image_url ?? null })
 
     const event = await db.events.findFirst({
       where: {
