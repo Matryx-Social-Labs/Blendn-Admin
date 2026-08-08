@@ -122,6 +122,8 @@ DATABASE_URL=postgresql://postgres:test@localhost:55432/t npm run test:integrati
 
 | File | Contents |
 |---|---|
+| `docs/USER_JOURNEY.md` | **The contract** — the whole product as designed vs built vs served, across all three repos |
+| `docs/DESIGN_HANDOFF.md` | For the UI/UX designer: the rules, what changes in the Figma, and why |
 | `docs/API.md` | REST endpoint reference |
 | `docs/SOCKET_EVENTS.md` | Socket.io event catalog and room authorization |
 | `docs/chat-moderation.md` | Moderation pipeline and thresholds |
