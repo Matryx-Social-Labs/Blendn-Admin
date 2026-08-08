@@ -1,7 +1,18 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
 import { addInterestsSchema, updateProfileSchema } from "@/lib/validations/profile"
 import { PaginationMetaSchema } from "./common"
+
+/*
+ * Idempotent, and not redundant with the call in `registry.ts`. The schemas
+ * below are built in `lib/validations`, outside this directory, and under
+ * Next's bundler the module that defines them can be evaluated before the
+ * registry patches zod -- which fails the build with ".openapi is not a
+ * function" while jest, resolving modules differently, passes. Patching here
+ * removes the ordering dependence rather than relying on import order holding.
+ */
+extendZodWithOpenApi(z)
 
 /**
  * Request schemas are the route's own validators, not copies of them.
