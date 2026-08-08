@@ -322,8 +322,27 @@ export async function verifyGoogleIdToken(
 
     const payload = (await response.json()) as GoogleTokenPayload
 
-    // Verify the audience matches one of our client IDs
-    if (GOOGLE_CLIENT_IDS.length > 0 && !GOOGLE_CLIENT_IDS.includes(payload.aud)) {
+    /*
+     * Fail closed when no client id is configured.
+     *
+     * This used to read `GOOGLE_CLIENT_IDS.length > 0 && !includes(aud)`, so
+     * with the three optional env vars unset the audience was not checked at
+     * all -- and `aud` is the only claim that ties a Google token to *us*.
+     * Everything else (`iss`, `exp`, signature) is satisfied by any token
+     * Google ever issued to anyone. Someone could stand up an unrelated app
+     * with Google Sign-In, collect its users' id tokens legitimately, replay
+     * one here, and be handed Blendn tokens for that person's account.
+     *
+     * The Apple path never had this hole: it pins `APPLE_AUDIENCE` with a
+     * literal fallback rather than falling back to no check.
+     */
+    if (GOOGLE_CLIENT_IDS.length === 0) {
+      logger.error(
+        "Google sign-in attempted with no GOOGLE_*_CLIENT_ID configured; refusing to skip the audience check"
+      )
+      return null
+    }
+    if (!GOOGLE_CLIENT_IDS.includes(payload.aud)) {
       logger.warn("Google token audience mismatch")
       return null
     }
@@ -340,8 +359,19 @@ export async function verifyGoogleIdToken(
       return null
     }
 
-    // Verify email is verified
-    if (!payload.email_verified) {
+    /*
+     * Compare explicitly, because this payload comes from Google's `tokeninfo`
+     * endpoint rather than a locally-decoded JWT, and that endpoint returns
+     * every claim as a **string**: `"email_verified": "false"`. A truthiness
+     * test therefore accepted an unverified address, since `"false"` is a
+     * non-empty string. The `exp` check above survives the same coercion only
+     * by luck -- `"1433981953" * 1000` happens to work.
+     *
+     * `AppleTokenPayload` already types this field `boolean | string`, so the
+     * string form was known here; it just was not applied to the path where it
+     * decides whether someone owns an address.
+     */
+    if (payload.email_verified !== true && String(payload.email_verified) !== "true") {
       logger.warn("Google email not verified")
       return null
     }
@@ -357,6 +387,70 @@ export async function verifyGoogleIdToken(
  * Find or create a user from Google OAuth
  * Returns the user ID and whether this is a new user
  */
+/**
+ * Attach a provider identity to an existing account, safely.
+ *
+ * ## The hole this closes
+ *
+ * `POST /auth/signup` creates a `User` from any email with **no proof of
+ * ownership** -- no verification mail is sent and `emailVerified` is left null.
+ * Both OAuth paths then resolved an unknown provider `sub` by looking the email
+ * up and silently linking to whatever row they found. So:
+ *
+ *   1. Attacker signs up as `victim@gmail.com` with a password they choose.
+ *      Nothing is sent to the victim; nothing tells them an account exists.
+ *   2. Victim later taps "Continue with Google". Their token is genuine, the
+ *      `sub` is unknown, the email matches -- and they are logged into the
+ *      **attacker's row**. They onboard, check in, send DMs.
+ *   3. The attacker signs in with the password they set in step 1 and has the
+ *      victim's account, conversations and check-in history.
+ *
+ * ## Why the password is cleared
+ *
+ * Google and Apple have *proved* control of the address. An unverified password
+ * signup has proved nothing. So when the two disagree the OAuth identity wins:
+ * we mark the address verified and drop the password credential, which evicts
+ * a squatter and costs a legitimate user -- someone who really did sign up with
+ * a password and never verified -- one password reset.
+ *
+ * An account whose email is already verified was reached by proving ownership,
+ * so its password is left alone and the link is ordinary.
+ */
+async function linkVerifiedOAuthIdentity(
+  existingUser: { id: string; emailVerified: Date | null; password: string | null },
+  provider: "google" | "apple",
+  providerId: string,
+  email: string
+): Promise<void> {
+  const unproven = existingUser.emailVerified === null
+
+  await db.$transaction([
+    db.user_oauth_accounts.create({
+      data: {
+        user_id: existingUser.id,
+        provider,
+        provider_id: providerId,
+        email,
+      },
+    }),
+    db.user.update({
+      where: { id: existingUser.id },
+      data: unproven
+        ? { emailVerified: new Date(), password: null }
+        : { emailVerified: existingUser.emailVerified },
+    }),
+  ])
+
+  if (unproven && existingUser.password) {
+    // Worth knowing about: either a squatter was just evicted, or someone will
+    // wonder why their password stopped working.
+    logger.warn("Cleared an unverified password credential on OAuth link", {
+      userId: existingUser.id,
+      provider,
+    })
+  }
+}
+
 export async function findOrCreateGoogleUser(
   googlePayload: GoogleTokenPayload
 ): Promise<{ userId: string; email: string; isNewUser: boolean }> {
@@ -385,15 +479,7 @@ export async function findOrCreateGoogleUser(
   })
 
   if (existingUser) {
-    // Link the Google account to the existing user
-    await db.user_oauth_accounts.create({
-      data: {
-        user_id: existingUser.id,
-        provider: "google",
-        provider_id: googlePayload.sub,
-        email: googlePayload.email,
-      },
-    })
+    await linkVerifiedOAuthIdentity(existingUser, "google", googlePayload.sub, googlePayload.email)
 
     return {
       userId: existingUser.id,
@@ -506,14 +592,7 @@ export async function findOrCreateAppleUser(
     const existingUser = await db.user.findUnique({ where: { email } })
 
     if (existingUser) {
-      await db.user_oauth_accounts.create({
-        data: {
-          user_id: existingUser.id,
-          provider: "apple",
-          provider_id: applePayload.sub,
-          email,
-        },
-      })
+      await linkVerifiedOAuthIdentity(existingUser, "apple", applePayload.sub, email)
 
       return {
         userId: existingUser.id,

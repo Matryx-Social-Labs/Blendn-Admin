@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { blockedEitherWay } from "@/lib/conversations"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -48,22 +49,41 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
     const isSelf = authUser.userId === userId
 
-    // Email and phone are only for the profile owner -- everyone else gets
-    // the same public-safe shape as /api/mobile/users/[userId].
-    //
-    // The four preference columns go with them. They are settings, not profile
-    // content: whether someone has push on, or shares their location, is a
-    // statement about how careful they are being and is nobody else's business.
-    // `show_online` governs what others may infer about presence, and the
-    // endpoints that honour it read the column directly -- nothing needs it here.
-    const {
-      phone: _phone,
-      push_enabled: _push,
-      show_online: _online,
-      read_receipts: _receipts,
-      share_location: _shareLocation,
-      ...publicProfileFields
-    } = user.profile ?? {}
+    /*
+     * `users/[userId]` checks this with the comment "someone you blocked could
+     * keep reading your profile, which is most of what a block is for". This
+     * route served a superset of that data and had no such check, so the block
+     * was bypassed by changing `/users/` to `/profiles/` in the URL.
+     */
+    if (!isSelf && (await blockedEitherWay(authUser.userId, userId))) {
+      return notFoundResponse("User not found")
+    }
+
+    /*
+     * An allow-list, because a deny-list ships every column added later.
+     *
+     * This used to spread the whole `profiles` model and delete five fields,
+     * which meant `gender`, `interested_in`, `goals`, `looking_for`,
+     * `intent_default` and `reveal_by_default` all went to any authenticated
+     * caller for any user id. `schema.prisma` says `gender`/`interested_in` are
+     * collected **only** when intent includes dating, so that "less data is
+     * held about people who had no reason to give it" -- and then this handed
+     * both to strangers. Sexual orientation and stated dating intent for any
+     * account on the platform.
+     *
+     * `users/[userId]` next door already selects explicitly. This now matches.
+     */
+    const p = user.profile
+    const publicProfileFields = p && {
+      id: p.id,
+      age: p.age,
+      bio: p.bio,
+      occupation: p.occupation,
+      education: p.education,
+      photos: p.photos,
+      interests: p.interests,
+      onboarded: p.onboarded,
+    }
 
     return successResponse({
       id: user.id,

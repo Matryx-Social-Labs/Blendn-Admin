@@ -7,6 +7,7 @@ import { resolveEventCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
+  forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 
@@ -22,6 +23,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
+    }
+
+    /*
+     * Your saved events are yours. The path `userId` drove the query and
+     * `authUser` was used only to prove *someone* was logged in, so any
+     * account could read any other account's list -- and the default
+     * `timeFilter=upcoming` returns future events with venue, address,
+     * coordinates and start time. On a product where people meet strangers
+     * that is a location-prediction primitive: where a named person intends to
+     * be, and when. A blocked user could run it too.
+     *
+     * There is no cross-user use case for this endpoint.
+     */
+    if (authUser.userId !== userId) {
+      return forbiddenResponse("Cannot view another user's favorites")
     }
 
     // Parse query parameters

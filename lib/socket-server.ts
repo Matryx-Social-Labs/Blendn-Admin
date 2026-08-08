@@ -595,7 +595,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       const room = `event:${eventId}`
       authSocket.leave(room)
       logger.debug("Socket left room", { room, userId: authSocket.data.userId })
-
+    })
 
     /*
      * Live operations room. Deliberately separate from `event:{id}` — that room
@@ -631,7 +631,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     authSocket.on("leave:eventOps", (eventId) => {
       authSocket.leave(`event:${eventId}:ops`)
-    })
     })
 
     // Chat room handlers

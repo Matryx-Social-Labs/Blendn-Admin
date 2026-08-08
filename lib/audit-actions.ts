@@ -56,7 +56,24 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
 
   const isAdmin = session.user.role === "app_admin"
 
-  const where: Prisma.audit_logsWhereInput = {}
+  /*
+   * The tenant scope is an invariant, not a default.
+   *
+   * These used to be assignments onto one `where` object, and `filters.actorId`
+   * wrote the same key the scope did -- so a caller-supplied actor id replaced
+   * the membership scope outright and returned any user's history from any
+   * company. Worse, `filters` is the argument to a `"use server"` export and is
+   * therefore attacker-controlled JSON however it is typed: `{ not: null }`
+   * reaches Prisma as an operator rather than an id and unscopes the query
+   * completely, returning the platform-wide audit trail with other owners'
+   * names and email addresses in it.
+   *
+   * Collecting the conditions into `AND` means a filter can only ever narrow.
+   * The `typeof` guards keep an object from becoming an operator; applied to
+   * all three string filters, since only `actorId` was load-bearing today and
+   * that is not a property worth relying on.
+   */
+  const and: Prisma.audit_logsWhereInput[] = []
 
   if (!isAdmin) {
     // Scope to the actors who are members of the viewer's organisations. An
@@ -73,18 +90,22 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
       where: { org_id: { in: manageable.map((m) => m.org_id) } },
       select: { user_id: true },
     })
-    where.user_id = { in: colleagues.map((c) => c.user_id) }
+    and.push({ user_id: { in: colleagues.map((c) => c.user_id) } })
   }
 
-  if (filters.action) where.action = filters.action
-  if (filters.actorId) where.user_id = filters.actorId
-  if (filters.resource) where.resource = filters.resource
-  if (filters.from || filters.to) {
-    where.created_at = {
-      ...(filters.from ? { gte: filters.from } : {}),
-      ...(filters.to ? { lt: filters.to } : {}),
-    }
+  if (typeof filters.action === "string") and.push({ action: filters.action })
+  if (typeof filters.actorId === "string") and.push({ user_id: filters.actorId })
+  if (typeof filters.resource === "string") and.push({ resource: filters.resource })
+  if (filters.from instanceof Date || filters.to instanceof Date) {
+    and.push({
+      created_at: {
+        ...(filters.from instanceof Date ? { gte: filters.from } : {}),
+        ...(filters.to instanceof Date ? { lt: filters.to } : {}),
+      },
+    })
   }
+
+  const where: Prisma.audit_logsWhereInput = and.length ? { AND: and } : {}
 
   const [rows, total, actionGroups] = await Promise.all([
     db.audit_logs.findMany({
