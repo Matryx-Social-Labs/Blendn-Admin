@@ -70,8 +70,10 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
               {room.title}
             </Link>
             <span className="shrink-0 tabular-nums text-muted-foreground">
-              <b className="font-bold text-foreground">{room.inside}</b> — {room.guestsInside}{" "}
-              guests, {room.staffInside} staff
+              <b className="font-bold text-foreground">{room.inside}</b>
+              {/* The split only when there is one to show — see the note in
+                  occupancy-hero.tsx. */}
+              {room.staffInside > 0 ? ` — ${room.guestsInside} guests, ${room.staffInside} staff` : null}
             </span>
           </li>
         ))}

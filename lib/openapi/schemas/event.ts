@@ -237,6 +237,23 @@ export const RatingResponseSchema = z
   })
   .openapi("RatingResponse")
 
+export const ConnectionMetricsSchema = z
+  .object({
+    attendees: z.number(),
+    /** Mutual likes — pairs where both people said yes. */
+    connections: z.number(),
+    connected: z.number(),
+    /** The industry benchmark figure. Null when suppressed. */
+    perAttendee: z.number().nullable(),
+    connectedPct: z.number().nullable(),
+    /**
+     * Too few attendees for these to be aggregates rather than facts about
+     * named people. Everything derived is null; `attendees` still shows.
+     */
+    suppressed: z.boolean(),
+  })
+  .openapi("ConnectionMetrics")
+
 export const AnalyticsResponseSchema = z
   .object({
     eventId: z.string().uuid(),
@@ -249,6 +266,8 @@ export const AnalyticsResponseSchema = z
       conversionRate: z.number(),
       capacityUsed: z.number(),
     }),
+    /** Whether anyone actually met anyone. Suppressed for small rooms. */
+    connections: ConnectionMetricsSchema,
     checkInTimeline: z.array(
       z.object({ hour: z.string(), count: z.number() })
     ),
@@ -288,6 +307,7 @@ export const BatchInterestCountsResponseSchema = z
     counts: z.record(z.string(), z.number()),
   })
   .openapi("BatchInterestCountsResponse")
+
 
 
 export const MatchListResponseSchema = z
@@ -384,6 +404,7 @@ const schemas = {
   BatchInterestsResponse: BatchInterestsResponseSchema,
   BatchInterestCountsResponse: BatchInterestCountsResponseSchema,
   AttendeeListResponse: AttendeeListResponseSchema,
+  ConnectionMetrics: ConnectionMetricsSchema,
   MatchListResponse: MatchListResponseSchema,
   LikeRequest: LikeRequestSchema,
   LikeResponse: LikeResponseSchema,

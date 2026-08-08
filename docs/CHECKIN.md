@@ -82,6 +82,22 @@ Keyed on **membership, not role**, deliberately:
 who leaves the organisation next month should not retroactively become a guest
 at last month's event.
 
+### In practice this is nearly always zero
+
+The mechanism is right and the population is not. It only fires when an
+organisation member checks in **through the attendee app**, and there is no plan
+for crew to have accounts there — staff log into the dashboard, not the phone. On
+production today: 9 check-ins, all `attendee`, zero `staff`.
+
+Kept because it costs nothing — a derived flag at check-in, no client change, no
+extra query — and because it is correct the moment an organiser does check in,
+which they plausibly will. But the UI no longer prints "0 staff" beside a real
+number: the split renders only when there is one, since a permanent zero beside a
+live figure is noise pretending to be a reading.
+
+If crew ever do need to be counted, that is a **separate decision** about giving
+them identities, and it is not this flag's job to pretend it has been made.
+
 ---
 
 ## Multi-day

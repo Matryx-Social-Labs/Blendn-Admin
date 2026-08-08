@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation"
 import { LiveTab } from "@/components/dashboard/live-tab"
 import { Badge } from "@/components/ui/badge"
 import { getEventAttendance } from "@/lib/attendance"
+import { getConnectionMetrics } from "@/lib/connection-metrics"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
@@ -144,10 +145,10 @@ export default async function EventDetailPage({
    * check-ins by definition, and "0 came" against an event that has not
    * happened reads as a failure rather than as a date in the future.
    */
-  const attendance =
+  const [attendance, connections] =
     overview.state === "live" || overview.state === "over"
-      ? await getEventAttendance(event.id)
-      : null
+      ? await Promise.all([getEventAttendance(event.id), getConnectionMetrics(event.id)])
+      : [null, null]
 
   return (
     <div className="flex flex-col gap-5">
@@ -158,6 +159,7 @@ export default async function EventDetailPage({
         canEdit={permissions.canEdit}
         venueName={venueName}
         attendance={attendance}
+        connections={connections}
       />
     </div>
   )

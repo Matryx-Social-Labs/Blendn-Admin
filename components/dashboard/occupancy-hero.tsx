@@ -123,10 +123,18 @@ export function OccupancyHero({
           <i aria-hidden className="size-2 rounded-[2px] bg-chart-1" />
           <b className="font-bold tabular-nums text-foreground">{guestsInside}</b> guests
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <i aria-hidden className="size-2 rounded-[2px] bg-chart-3" />
-          <b className="font-bold tabular-nums text-foreground">{staffInside}</b> staff
-        </span>
+        {/* Only when there are any.
+            Staff are told from guests by organisation membership at check-in,
+            which costs nothing and needs no client change — but it only fires if
+            an org member checks in through the attendee app, and there is no
+            plan for crew to have accounts there. In practice this is zero, and
+            "0 staff" beside a real number is noise pretending to be a reading. */}
+        {staffInside > 0 ? (
+          <span className="inline-flex items-center gap-1.5">
+            <i aria-hidden className="size-2 rounded-[2px] bg-chart-3" />
+            <b className="font-bold tabular-nums text-foreground">{staffInside}</b> staff
+          </span>
+        ) : null}
         {unreliable && lastGood ? (
           <span className="text-[0.75rem] text-faint-foreground">as of {lastGood}</span>
         ) : null}

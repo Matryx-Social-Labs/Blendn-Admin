@@ -90,6 +90,30 @@ person they were blocked.
 | POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
 | PUT | `/events/:eventId/matches/preferences` | Your intent and reveal, for this event |
 
+### Connections — did anyone meet anyone
+
+`GET /events/:eventId/analytics` now carries a `connections` object. Attendance
+says people came and ratings say how it felt; neither says whether the thing the
+product exists for happened.
+
+```json
+{ "attendees": 40, "connections": 26, "connected": 31,
+  "perAttendee": 0.7, "connectedPct": 78, "suppressed": false }
+```
+
+`perAttendee` is the industry benchmark — two connections at a 200-person event
+means the format failed, twelve means it worked — and `connectedPct` is the
+shape the mean hides: formats are generally considered to be working above 50%.
+
+**A connection is mutual.** One-sided likes are never counted or exposed; a like
+nobody returned is private to whoever sent it.
+
+**Suppressed below 8 attendees.** `perAttendee` and `connectedPct` come back
+null and the counts as zero, because "one connection among three attendees"
+names both of them to anyone who was there. `attendees` still reports.
+
+---
+
 ### RSVP and the waitlist
 
 `POST /events/:eventId/rsvp` with `{ status: "going" | "maybe" | "not_going" }`.
