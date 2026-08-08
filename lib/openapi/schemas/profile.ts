@@ -1,28 +1,23 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
+import { addInterestsSchema, updateProfileSchema } from "@/lib/validations/profile"
 import { PaginationMetaSchema } from "./common"
 
-// Request schemas
-export const UpdateProfileRequestSchema = z
-  .object({
-    name: z.string().min(1).max(100).optional(),
-    phone: z.string().max(20).optional().nullable(),
-    age: z.number().int().min(13).max(120).optional().nullable(),
-    location: z.string().max(200).optional().nullable(),
-    bio: z.string().max(500).optional().nullable(),
-    occupation: z.string().max(100).optional().nullable(),
-    education: z.string().max(100).optional().nullable(),
-    interests: z.array(z.string()).optional(),
-    photos: z.array(z.string().url()).max(6).optional(),
-    onboarded: z.boolean().optional(),
-  })
-  .openapi("UpdateProfileRequest")
+/**
+ * Request schemas are the route's own validators, not copies of them.
+ *
+ * They used to be hand-written duplicates and they drifted, silently: the spec
+ * was missing `goals`, `looking_for` and the four preference fields, so the one
+ * client reading it sent key names the route does not accept and every settings
+ * toggle persisted nothing. `openapi-coverage.test.ts` checks that every *path*
+ * is documented, which is why a missing *field* got through.
+ *
+ * Documenting the schema the route validates with makes that class of drift
+ * impossible rather than merely tested for.
+ */
+export const UpdateProfileRequestSchema = updateProfileSchema.openapi("UpdateProfileRequest")
 
-export const InterestCategoryIdsSchema = z
-  .object({
-    categoryIds: z.array(z.string().uuid()).min(1),
-  })
-  .openapi("InterestCategoryIds")
+export const InterestCategoryIdsSchema = addInterestsSchema.openapi("InterestCategoryIds")
 
 // Response schemas
 const InterestSchema = z.object({
@@ -50,7 +45,17 @@ export const ProfileResponseSchema = z
       occupation: z.string().nullable(),
       education: z.string().nullable(),
       photos: z.array(z.string()).nullable(),
+      goals: z.array(z.string()),
+      looking_for: z.array(z.string()),
       onboarded: z.boolean(),
+
+      // Read these back under `profile`, with these names. The client had been
+      // looking for `shareReadReceipts` and falling back to `true`, so every
+      // switch showed ON whatever the user had chosen.
+      push_enabled: z.boolean(),
+      show_online: z.boolean(),
+      read_receipts: z.boolean(),
+      share_location: z.boolean(),
     }).nullable(),
     interests: z.array(InterestSchema),
   })

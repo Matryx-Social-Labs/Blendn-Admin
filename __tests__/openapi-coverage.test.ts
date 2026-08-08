@@ -2,6 +2,7 @@ import { readdirSync, statSync } from "fs"
 import { join } from "path"
 
 import { generateOpenApiDocument } from "@/lib/openapi/registry"
+import { updateProfileSchema } from "@/lib/validations/profile"
 
 /*
  * The registry is populated as a side effect of importing the path modules —
@@ -90,6 +91,25 @@ describe("OpenAPI spec covers the mobile API", () => {
       }
     }
     expect(bare).toEqual([])
+  })
+
+  it("documents every field the profile route actually accepts", () => {
+    /*
+     * Path coverage above cannot catch field drift, and field drift is what
+     * actually bit: the spec's UpdateProfileRequest was a hand-copy that had
+     * fallen six fields behind the route's validator. The Expo app read the
+     * spec, sent key names the route ignores, and every settings toggle
+     * persisted nothing while reading ON.
+     *
+     * Fixed structurally -- the spec now documents `updateProfileSchema`
+     * itself -- so this asserts that the two have not been split apart again
+     * rather than re-listing the fields.
+     */
+    const documented = Object.keys(
+      (doc.components?.schemas as Record<string, { properties?: Record<string, unknown> }>)
+        ?.UpdateProfileRequest?.properties ?? {}
+    )
+    expect(documented).toEqual(expect.arrayContaining(Object.keys(updateProfileSchema.shape)))
   })
 })
 

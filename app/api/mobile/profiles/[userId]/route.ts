@@ -50,7 +50,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Email and phone are only for the profile owner -- everyone else gets
     // the same public-safe shape as /api/mobile/users/[userId].
-    const { phone: _phone, ...publicProfileFields } = user.profile ?? {}
+    //
+    // The four preference columns go with them. They are settings, not profile
+    // content: whether someone has push on, or shares their location, is a
+    // statement about how careful they are being and is nobody else's business.
+    // `show_online` governs what others may infer about presence, and the
+    // endpoints that honour it read the column directly -- nothing needs it here.
+    const {
+      phone: _phone,
+      push_enabled: _push,
+      show_online: _online,
+      read_receipts: _receipts,
+      share_location: _shareLocation,
+      ...publicProfileFields
+    } = user.profile ?? {}
 
     return successResponse({
       id: user.id,
