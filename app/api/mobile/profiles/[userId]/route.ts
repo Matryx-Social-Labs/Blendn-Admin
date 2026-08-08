@@ -103,7 +103,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { name, phone, age, location, bio, occupation, education, interests, photos, goals, looking_for, onboarded } = parsed.data
+    const {
+      name, phone, age, location, bio, occupation, education, interests, photos,
+      goals, looking_for, onboarded,
+      push_enabled, show_online, read_receipts, share_location,
+    } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
 
     // Update user record (name and/or primary photo)
@@ -134,6 +138,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         goals: goals || [],
         looking_for: looking_for || [],
         onboarded: onboarded ?? false,
+        // Omitted rather than defaulted: the column defaults to true, which is
+        // what the settings screen has always claimed, so nobody's apparent
+        // settings change on the day these start being honoured.
+        ...(push_enabled !== undefined && { push_enabled }),
+        ...(show_online !== undefined && { show_online }),
+        ...(read_receipts !== undefined && { read_receipts }),
+        ...(share_location !== undefined && { share_location }),
       },
       update: {
         ...(name !== undefined && { name }),
@@ -148,6 +159,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(goals !== undefined && { goals }),
         ...(looking_for !== undefined && { looking_for }),
         ...(onboarded !== undefined && { onboarded }),
+        ...(push_enabled !== undefined && { push_enabled }),
+        ...(show_online !== undefined && { show_online }),
+        ...(read_receipts !== undefined && { read_receipts }),
+        ...(share_location !== undefined && { share_location }),
         updated_at: new Date(),
       },
     })

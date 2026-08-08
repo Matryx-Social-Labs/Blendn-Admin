@@ -310,6 +310,23 @@ export const BatchInterestCountsResponseSchema = z
 
 
 
+export const PeerRatingRequestSchema = z
+  .object({
+    userId: z.string(),
+    rating: z.number().int().min(1).max(5),
+    issue: z.enum(["none", "uncomfortable", "no_show", "misrepresented", "harassment"]).optional(),
+    /** Read only by moderation. Never rendered to another attendee. */
+    note: z.string().max(1000).optional(),
+  })
+  .openapi("PeerRatingRequest")
+
+export const RatablePeersResponseSchema = z
+  .object({
+    /** Everyone you connected with at this event and have not yet rated. */
+    userIds: z.array(z.string()),
+  })
+  .openapi("RatablePeersResponse")
+
 export const MatchListResponseSchema = z
   .object({
     matches: z.array(
@@ -405,6 +422,8 @@ const schemas = {
   BatchInterestCountsResponse: BatchInterestCountsResponseSchema,
   AttendeeListResponse: AttendeeListResponseSchema,
   ConnectionMetrics: ConnectionMetricsSchema,
+  PeerRatingRequest: PeerRatingRequestSchema,
+  RatablePeersResponse: RatablePeersResponseSchema,
   MatchListResponse: MatchListResponseSchema,
   LikeRequest: LikeRequestSchema,
   LikeResponse: LikeResponseSchema,

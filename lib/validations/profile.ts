@@ -13,6 +13,14 @@ export const updateProfileSchema = z.object({
   goals: z.array(z.string()).optional(),
   looking_for: z.array(z.string()).optional(),
   onboarded: z.boolean().optional(),
+
+  // Settings the app has always shown and never stored. Four switches with no
+  // columns behind them meant every toggle read ON regardless of what anyone
+  // chose.
+  push_enabled: z.boolean().optional(),
+  show_online: z.boolean().optional(),
+  read_receipts: z.boolean().optional(),
+  share_location: z.boolean().optional(),
 })
 
 export const addInterestsSchema = z.object({

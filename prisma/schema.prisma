@@ -47,6 +47,8 @@ model User {
   event_check_ins        event_check_ins[]
   likes_sent             event_likes[]        @relation("LikesSent")
   likes_received         event_likes[]        @relation("LikesReceived")
+  ratings_given          peer_ratings[]       @relation("RatingsGiven")
+  ratings_received       peer_ratings[]       @relation("RatingsReceived")
   chat_messages          chat_messages[]
   chat_group_memberships chat_group_members[]
   message_reactions      message_reactions[]
@@ -162,6 +164,21 @@ model profiles {
   /// held about people who had no reason to give it.
   gender        String?
   interested_in String[]
+
+  /// Settings the app has always shown and never stored.
+  ///
+  /// There were four switches on the settings screen and no columns behind them,
+  /// so hydration fell back to `true` for all four and every toggle read ON
+  /// whatever the user had chosen. A switch that lies is worse than no switch.
+  ///
+  /// Default true because that is what the UI has been claiming, so nobody's
+  /// apparent settings change on the day these start being honoured.
+  push_enabled      Boolean @default(true)
+  show_online       Boolean @default(true)
+  read_receipts     Boolean @default(true)
+  /// Distinct from the GPS permission. This governs whether other attendees see
+  /// how far away you are; check-in still needs a fix regardless.
+  share_location    Boolean @default(true)
   // push_token and push_platform removed — use push_tokens table instead
   created_at  DateTime @default(now()) @db.Timestamptz(6)
   updated_at  DateTime @default(now()) @db.Timestamptz(6)
@@ -215,6 +232,7 @@ model events {
   details            event_details?
   check_ins          event_check_ins[]
   likes              event_likes[]
+  peer_ratings       peer_ratings[]
   chat_group         chat_groups?
   media              event_media[]
   categories         event_categories[]
@@ -1248,6 +1266,72 @@ model event_likes {
   /// deleted row — the same shape as chat_messages.parent_id.
   @@index([liker_id])
   @@index([liked_id])
+}
+
+
+/// What went wrong, if anything.
+///
+/// Deliberately short and concrete. A free-text-only report gets written by
+/// almost nobody and read by almost nobody; a list someone can tap is the
+/// difference between a signal and an empty table.
+enum peer_issue {
+  none
+  /// The catch-all for "I would rather not meet them again" without an accusation.
+  uncomfortable
+  /// Agreed to meet and did not turn up.
+  no_show
+  /// The person was materially not who their profile said.
+  misrepresented
+  /// Escalates immediately. Never aggregated away into a score.
+  harassment
+}
+
+/// Rating someone you actually met.
+///
+/// Attendance and connections say a night happened. This is the only thing that
+/// says whether meeting a specific stranger was a good experience — which is the
+/// risk the product asks people to take, and the one thing it currently asks
+/// them to take on faith.
+///
+/// Four rules, each load-bearing:
+///
+///   - **Only someone you connected with.** A mutual like, which means both
+///     people opted in. Rating anyone who was merely in the room is a
+///     review-bombing surface and a way to punish someone for declining.
+///   - **Only after it is over.** Asked at check-out or once the event ends, so
+///     it reads as reflection rather than as leverage during the night.
+///   - **Never shown to the person rated.** Nobody reports discomfort honestly
+///     when the person they are reporting will see it and knows who was there.
+///   - **One per pair per event**, so a grudge cannot be expressed twice.
+///
+/// The trust signal derived from these is deliberately not stored on the user —
+/// `lib/trust.ts` computes it. A denormalised reputation column is a number every
+/// write path has to maintain, and `events.current_capacity` already taught this
+/// codebase what happens next.
+model peer_ratings {
+  id         String     @id @default(uuid()) @db.Uuid
+  event_id   String     @db.Uuid
+  rater_id   String
+  rated_id   String
+  /// 1–5. The everyday signal; `issue` is the exceptional one.
+  rating     Int
+  issue      peer_issue @default(none)
+  /// Only ever read by moderation, never rendered to another attendee.
+  note       String?
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  rater User   @relation("RatingsGiven", fields: [rater_id], references: [id], onDelete: Cascade)
+  rated User   @relation("RatingsReceived", fields: [rated_id], references: [id], onDelete: Cascade)
+
+  /// One rating per pair per event.
+  @@unique([event_id, rater_id, rated_id])
+  /// The trust signal reads every rating about one person.
+  @@index([rated_id])
+  /// Both sides get a leading index — deleting a User cascades on each.
+  @@index([rater_id])
+  /// The moderation queue: everything that reported something, newest first.
+  @@index([issue, created_at])
 }
 
 enum connection_intent {
