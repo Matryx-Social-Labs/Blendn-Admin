@@ -2,10 +2,12 @@ import Link from "next/link"
 import { IconAlertTriangle, IconCheck, IconEdit, IconMessage2, IconUsers } from "@tabler/icons-react"
 
 import { AttendancePanel } from "@/components/dashboard/attendance-panel"
+import { ConnectionsPanel } from "@/components/dashboard/connections-panel"
 import { HeroMetric, MetricTile } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { EventAttendance } from "@/lib/attendance"
+import type { ConnectionMetrics } from "@/lib/connection-metrics"
 import { STATE_QUESTION } from "@/lib/event-phase"
 import type { EventOverview } from "@/lib/event-overview"
 
@@ -28,6 +30,7 @@ export function Overview({
   canEdit,
   venueName,
   attendance,
+  connections,
 }: {
   overview: EventOverview
   eventId: string
@@ -35,6 +38,7 @@ export function Overview({
   venueName: string | null
   /** Null before the event has run — there is nothing to count yet. */
   attendance: EventAttendance | null
+  connections: ConnectionMetrics | null
 }) {
   const { state, hero, tiles, blockers, publishable } = overview
   const blocking = blockers.filter((b) => b.blocking)
@@ -74,6 +78,15 @@ export function Overview({
       {attendance ? (
         <section className="rounded-lg border border-border bg-card p-5">
           <AttendancePanel attendance={attendance} live={state === "live"} />
+        </section>
+      ) : null}
+
+      {/* Below attendance, deliberately. Who came is the question an organiser
+          asks first; whether they met anyone is the one that decides whether to
+          run it again. */}
+      {connections ? (
+        <section className="rounded-lg border border-border bg-card p-5">
+          <ConnectionsPanel metrics={connections} />
         </section>
       ) : null}
 

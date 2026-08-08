@@ -68,9 +68,19 @@ holes.
 | **Portfolio calendar** | Events are a table only — no month view across a run |
 | **Venue: availability calendar** | "My venues" shows utilisation after the fact, not what is bookable |
 | **NPS** | Ratings exist; NPS is the benchmark every organiser reports upward |
-| **Attendee demographics** | Deliberately thin for privacy. Decide explicitly rather than leave it implied |
 
-### 3. Smaller, known
+### 3. Open questions
+
+- **Counting staff needs staff identities.** `check_in_kind` derives staff from
+  organisation membership at check-in, which is free and correct — and fires
+  almost never, because it needs an org member to check in through the *attendee*
+  app and crew have no accounts there. Production: 9 check-ins, zero staff. The
+  UI no longer shows a permanent zero. Counting crew for real is a decision about
+  giving them identities, and it has not been made.
+- **Attendee demographics.** Deliberately thin for privacy. Decide explicitly
+  rather than leave it implied.
+
+### 4. Smaller, known
 
 - **Per-occurrence capacity.** `event_occurrences.capacity` exists and is unread.
   A conference selling fewer seats on the last day wants it
@@ -116,6 +126,14 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.53.0
+
+- **Connection metrics** (#166). Whether anyone actually met anyone — mutual
+  connections, per attendee, and the share who made one, against the published
+  benchmarks. Suppressed below 8 attendees, where a count names people rather
+  than describing a room. Plus: the guest/staff split renders only when there is
+  one, since in practice there is not.
 
 ### 0.52.0
 

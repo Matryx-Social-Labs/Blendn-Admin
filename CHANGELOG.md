@@ -5,6 +5,45 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.53.0] - 2026-08-07
+
+### Added
+
+- **Connection metrics for organisers.** Attendance says people came and ratings
+  say how it felt. Neither says whether the thing the product exists for
+  happened — a full room where nobody connects is a successful party and a failed
+  networking event, and only this can tell them apart.
+
+  Reported on the event Overview and in `GET /events/:eventId/analytics`:
+  connections made, connections per attendee, and the share who made at least
+  one. The mean alone hides the shape — ten people making twelve connections each
+  while everyone else makes none averages beautifully and is a bad night — so
+  both are shown, against the published benchmarks (2 per attendee at a 200-person
+  event means the format failed; above 50% making one is considered working).
+
+  **A connection is mutual.** One-sided likes are never counted or exposed. A
+  like nobody returned is private to whoever sent it, and an organiser learning
+  how many went unreciprocated would be learning about individuals dressed as a
+  statistic.
+
+  **Suppressed below 8 attendees.** "One connection among three attendees" names
+  both of them to anyone who was there; aggregates stop being aggregates at small
+  n. Attendance still reports, since it is already on the page.
+
+### Changed
+
+- **The guest/staff split only renders when there is one.** Staff are told from
+  guests by organisation membership at check-in, which costs nothing and needs no
+  client change — but it only fires if an org member checks in through the
+  *attendee* app, and there is no plan for crew to have accounts there. On
+  production today: 9 check-ins, all `attendee`, zero `staff`.
+
+  The mechanism stays, because it is free and correct the moment an organiser
+  does check in. What stops is printing "0 staff" beside a real number, which is
+  noise pretending to be a reading. `docs/CHECKIN.md` now says so plainly, and
+  records that counting crew properly is a separate decision about giving them
+  identities — not something this flag should pretend has been made.
+
 ## [0.52.0] - 2026-08-07
 
 ### Added

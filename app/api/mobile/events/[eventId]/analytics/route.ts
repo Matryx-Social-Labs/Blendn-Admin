@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { getConnectionMetrics } from "@/lib/connection-metrics"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getOccupancy } from "@/lib/occupancy"
@@ -128,6 +129,13 @@ export async function GET(
           ? Math.round((occupancy.guestsInside / event.max_capacity) * 100)
           : null,
       },
+      /*
+       * Whether anyone actually met anyone — the outcome the product exists for,
+       * and the one attendance and ratings cannot report. Suppressed below a
+       * floor, where a connection count names the people who made it rather than
+       * describing the room.
+       */
+      connections: await getConnectionMetrics(eventId),
       checkInTimeline: Object.entries(hourlyTimeline).map(([hour, count]) => ({
         hour,
         count,
