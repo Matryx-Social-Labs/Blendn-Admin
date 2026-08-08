@@ -26,6 +26,8 @@ import {
   LikeRequestSchema,
   LikeResponseSchema,
   MatchListResponseSchema,
+  PeerRatingRequestSchema,
+  RatablePeersResponseSchema,
   MatchPreferencesSchema,
   InterestedUsersResponseSchema,
   EventSummarySchema,
@@ -424,6 +426,41 @@ registry.registerPath({
   },
   responses: {
     200: { description: "Saved", content: { "application/json": { schema: wrap(MatchPreferencesSchema) } } },
+    ...standardErrors,
+  },
+})
+
+
+// GET + POST /api/mobile/events/{eventId}/peer-ratings
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/peer-ratings",
+  tags: ["Mobile Events"],
+  summary: "Who you can still rate for this event",
+  description:
+    "Only people you connected with (a mutual like), and only once the event has ended. Empty is the common case.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string().uuid() }) },
+  responses: {
+    200: { description: "Ratable peers", content: { "application/json": { schema: wrap(RatablePeersResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/peer-ratings",
+  tags: ["Mobile Events"],
+  summary: "Rate someone you met",
+  description:
+    "Never visible to the person rated, and no endpoint returns it to them. A harassment report goes to moderation on its own and is never averaged into a score.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    body: { content: { "application/json": { schema: PeerRatingRequestSchema } } },
+  },
+  responses: {
+    200: { description: "Recorded", content: { "application/json": { schema: wrap(z.object({ recorded: z.boolean() })) } } },
     ...standardErrors,
   },
 })

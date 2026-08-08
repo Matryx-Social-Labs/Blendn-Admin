@@ -5,6 +5,52 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.55.0] - 2026-08-08
+
+### Added
+
+- **Peer ratings, and a trust signal for moderation.** The product asks strangers
+  to meet strangers. Attendance says a night happened and connections say people
+  paired up; neither says whether meeting a specific person was a good
+  experience — which is the risk being asked of everyone and the one thing taken
+  on faith.
+
+  Four rules, each load-bearing. **Only someone you connected with** — a mutual
+  like, so both opted in; rating anyone who merely shared a room is a
+  review-bombing surface and a way to punish someone for declining. **Only once
+  the event has ended**, because during the night a rating is leverage. **Never
+  visible to the person rated**, and no endpoint returns it to them — nobody
+  reports discomfort honestly when the subject will see it and knows who was
+  there. **One per pair per event.**
+
+  **Harassment is not a low rating with a label.** It is carried separately and
+  never averaged into a score: four glowing ratings and one harassment report is
+  not a 4.2.
+
+  The signal is derived, never stored. A `trust_score` column would be a number
+  every write path has to maintain, which is exactly what
+  `events.current_capacity` was before it drifted and shipped two bugs in a day.
+
+  **It is never shown to an attendee, and that is a safety constraint.** The
+  person most likely to rate someone badly is the person who felt least safe with
+  them; surfacing it tells the man that the woman who met him rated him down, at
+  an event where he knows who she is and may still be in the room. The feature
+  meant to protect her would become what exposes her.
+  `__tests__/trust-not-exposed.test.ts` fails the build if anything under
+  `app/api/mobile` even imports the trust module.
+
+### Fixed
+
+- **Four settings toggles that persisted nowhere.** Push notifications, online
+  status, read receipts and location sharing were shown in the app with no
+  columns behind them, so hydration fell back to `true` and every switch read ON
+  regardless of what anyone had chosen. A switch that lies is worse than no
+  switch. They default true because that is what the UI has always claimed, so
+  nobody's apparent settings change on the day they start being honoured.
+
+  `share_location` is deliberately not the GPS permission — check-in still needs
+  a fix regardless; this governs only whether other attendees see your distance.
+
 ## [0.54.0] - 2026-08-07
 
 ### Fixed

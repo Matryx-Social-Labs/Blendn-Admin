@@ -86,9 +86,52 @@ person they were blocked.
 | GET | `/events/:eventId/checkins/export` | Export attendees CSV |
 | POST | `/events/:eventId/announce` | Send announcement |
 | GET | `/events/:eventId/chat` | Get event chat group |
+| GET | `/events/:eventId/peer-ratings` | Who you can still rate |
+| POST | `/events/:eventId/peer-ratings` | Rate someone you met |
 | GET | `/events/:eventId/matches` | Who else was in the room, ranked |
 | POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
 | PUT | `/events/:eventId/matches/preferences` | Your intent and reveal, for this event |
+
+### Peer ratings and trust
+
+`POST /events/:eventId/peer-ratings` with
+`{ userId, rating: 1..5, issue?, note? }`.
+
+The product asks strangers to meet strangers. Attendance says a night happened
+and connections say people paired up; neither says whether meeting a specific
+person was a good experience.
+
+Four rules, each load-bearing:
+
+- **Only someone you connected with** — a mutual like, so both people opted in.
+  Rating anyone who merely shared a room is a review-bombing surface and a way to
+  punish someone for declining. `GET` returns exactly who is eligible.
+- **Only once the event has ended.** During the night a rating is leverage.
+- **Never visible to the person rated.** There is no endpoint that returns it to
+  them, and there will not be — nobody reports discomfort honestly when the
+  subject will see it and knows who was there.
+- **One per pair per event.**
+
+`issue` is one of `none`, `uncomfortable`, `no_show`, `misrepresented`,
+`harassment`. **Harassment is not a low rating with a label** — it goes to
+moderation on its own and is never averaged into a score. Four glowing ratings
+and one harassment report is not a 4.2.
+
+The trust signal derived from these is **for moderation, not attendees, and that
+is a safety constraint rather than a preference**.
+
+The person most likely to rate someone badly is the person who felt least safe
+with them. Surface that rating and you have told the man that the woman who met
+him rated him down — at an event where he knows who she is, has her pseudonym,
+and may still be in the room. The feature meant to protect her becomes what
+exposes her.
+
+No endpoint returns it and none may be added.
+`__tests__/trust-not-exposed.test.ts` fails the build if anything under
+`app/api/mobile` so much as imports the trust module, because this is exactly the
+rule that erodes when someone wants a "verified" badge.
+
+---
 
 ### Connections — did anyone meet anyone
 
@@ -270,6 +313,28 @@ actual check-in puts you in the room.
 
 `respond` with `block` writes a real `blocked_users` row as well as setting the
 request status.
+
+---
+
+## Settings
+
+`PUT /profiles/:userId` accepts four preference booleans, all defaulting to
+**true**:
+
+| Field | Governs |
+|---|---|
+| `push_enabled` | Push notifications |
+| `show_online` | Whether others see you as active |
+| `read_receipts` | Whether DM reads are reported back |
+| `share_location` | Whether other attendees see your distance |
+
+These had been shown in the app and stored nowhere — there were no columns, so
+hydration fell back to `true` and every switch read ON whatever the user chose.
+They default true because that is what the UI has always claimed, so nobody's
+apparent settings change on the day they start being honoured.
+
+`share_location` is **not** the GPS permission. Check-in still needs a fix
+regardless; this governs only whether others see how far away you are.
 
 ---
 
