@@ -34,7 +34,7 @@ export default async function MyVenuesPage() {
   if (session.user.role !== "venue_owner") redirect("/dashboard")
 
   const [overview, linkedEvents] = await Promise.all([
-    getDashboardOverview("venue_owner", session.user.id),
+    getDashboardOverview(),
     // Read from events.venue_id, not the venue_name grouping below — this is
     // the real link, and it is what grants the owner operational access.
     getLinkedEventsForOwner(),

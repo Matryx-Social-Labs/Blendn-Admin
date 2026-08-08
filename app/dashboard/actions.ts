@@ -2,6 +2,10 @@
 
 import type { check_in_status, rsvp_status } from "@prisma/client"
 
+import type { user_role } from "@prisma/client"
+
+import { getAuth } from "@/lib/auth"
+import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
@@ -730,14 +734,31 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
 
 /* -------------------------------------------------------------------------- */
 
-export async function getDashboardOverview(
-  role: DashboardRole,
-  userId?: string,
-  range: DateRange = resolveRange({})
-) {
+/**
+ * Role and identity come from the session, never from the caller.
+ *
+ * These are `"use server"` exports, which means each one is a POST endpoint
+ * that anyone reaching `/dashboard` can invoke directly with arguments of their
+ * choosing -- the page component is not in the path. Taking `role` as a
+ * parameter therefore let any organiser or venue owner pass `"app_admin"` and
+ * receive the whole-platform report, including every other organiser's name and
+ * email; taking `userId` let them read a competitor's pacing, drafts and
+ * no-show rate. The page-level `role !== "app_admin"` redirects guard the view
+ * and not the data, so they never applied here.
+ */
+async function dashboardActor(): Promise<{ role: DashboardRole; userId: string }> {
+  const session = await getAuth()
+  const role = session?.user?.role as DashboardRole | undefined
+  if (!session?.user?.id || !role || !canAccessDashboard(role as user_role)) {
+    throw new Error("Not authorised")
+  }
+  return { role, userId: session.user.id }
+}
+
+export async function getDashboardOverview(range: DateRange = resolveRange({})) {
+  const { role, userId } = await dashboardActor()
   try {
     if (role === "app_admin") return await buildAdminOverview(range)
-    if (!userId) throw new Error("User ID is required for scoped dashboard reports")
     if (role === "venue_owner") return await buildVenueOverview(userId)
     return await buildOrganizerOverview(userId)
   } catch (error) {
@@ -749,11 +770,19 @@ export async function getDashboardOverview(
   }
 }
 
-/** Shared by the events screen for all three roles; scoped by the caller. */
-export async function getEventRows(userId?: string): Promise<EventRow[]> {
+/**
+ * Shared by the events screen for all three roles, scoped by the session.
+ *
+ * It used to take an optional `userId` and scope to it -- so omitting the
+ * argument widened the query to every event on the platform, drafts included.
+ * "Scoped by the caller" is not a scope when the caller is whoever sent the
+ * POST.
+ */
+export async function getEventRows(): Promise<EventRow[]> {
+  const { role, userId } = await dashboardActor()
   const now = new Date()
   const events = await db.events.findMany({
-    where: eventScope(userId),
+    where: eventScope(role === "app_admin" ? undefined : userId),
     orderBy: { start_time: "desc" },
     take: 100,
     select: {
