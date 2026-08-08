@@ -1,34 +1,53 @@
-import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { addInterestsSchema, updateProfileSchema } from "@/lib/validations/profile"
 import { PaginationMetaSchema } from "./common"
 
-/*
- * Idempotent, and not redundant with the call in `registry.ts`. The schemas
- * below are built in `lib/validations`, outside this directory, and under
- * Next's bundler the module that defines them can be evaluated before the
- * registry patches zod -- which fails the build with ".openapi is not a
- * function" while jest, resolving modules differently, passes. Patching here
- * removes the ordering dependence rather than relying on import order holding.
- */
-extendZodWithOpenApi(z)
-
 /**
- * Request schemas are the route's own validators, not copies of them.
+ * These mirror `lib/validations/profile.ts`, and a test holds them to it.
  *
- * They used to be hand-written duplicates and they drifted, silently: the spec
- * was missing `goals`, `looking_for` and the four preference fields, so the one
- * client reading it sent key names the route does not accept and every settings
- * toggle persisted nothing. `openapi-coverage.test.ts` checks that every *path*
- * is documented, which is why a missing *field* got through.
+ * They drifted silently once: the spec was six fields behind the route --
+ * `goals`, `looking_for` and the four preference booleans -- so the client
+ * coding against `/api-docs` sent key names the route ignores and every
+ * settings toggle persisted nothing. `openapi-coverage.test.ts` verified that
+ * every *path* was documented, which is exactly why a missing *field* got
+ * through; it now compares this body against the validator's own keys.
  *
- * Documenting the schema the route validates with makes that class of drift
- * impossible rather than merely tested for.
+ * Importing the validator directly would be better and does not survive the
+ * build: `zod-to-openapi` patches the zod instance it is handed, Next gives the
+ * two modules separate copies, and `.openapi()` is then missing from anything
+ * built in `lib/validations`. Jest resolves modules differently and passes,
+ * which is the worst version of this -- green locally, broken in CI. So the
+ * duplication stays and the test is what makes it safe.
  */
-export const UpdateProfileRequestSchema = updateProfileSchema.openapi("UpdateProfileRequest")
+export const UpdateProfileRequestSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    phone: z.string().max(20).optional().nullable(),
+    age: z.number().int().min(13).max(120).optional().nullable(),
+    location: z.string().max(200).optional().nullable(),
+    bio: z.string().max(500).optional().nullable(),
+    occupation: z.string().max(100).optional().nullable(),
+    education: z.string().max(100).optional().nullable(),
+    interests: z.array(z.string()).optional(),
+    photos: z.array(z.string().url()).max(6).optional(),
+    goals: z.array(z.string()).optional(),
+    looking_for: z.array(z.string()).optional(),
+    onboarded: z.boolean().optional(),
 
-export const InterestCategoryIdsSchema = addInterestsSchema.openapi("InterestCategoryIds")
+    // Top level, snake_case, no `preferences` wrapper and no camelCase alias.
+    // The app was sending twelve variants of these four and matching none.
+    push_enabled: z.boolean().optional(),
+    show_online: z.boolean().optional(),
+    read_receipts: z.boolean().optional(),
+    share_location: z.boolean().optional(),
+  })
+  .openapi("UpdateProfileRequest")
+
+export const InterestCategoryIdsSchema = z
+  .object({
+    categoryIds: z.array(z.string().uuid()).min(1),
+  })
+  .openapi("InterestCategoryIds")
 
 // Response schemas
 const InterestSchema = z.object({
