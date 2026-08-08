@@ -1,3 +1,18 @@
+import type { DashboardRole } from "@/lib/dashboard-types"
+
+/**
+ * The action reads role and identity from the session rather than taking them
+ * as arguments -- it is a POST endpoint, and a caller-supplied `role` let any
+ * organiser ask for the admin report. So the test drives the session instead,
+ * which is also the only way left to exercise the three overviews.
+ */
+let session: { user: { id: string; role: DashboardRole } } | null = null
+jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+
+const as = (role: DashboardRole, id = "no-user") => {
+  session = { user: { id, role } }
+}
+
 import { getDashboardOverview } from "@/app/dashboard/actions"
 import { db, cleanup, closeDb, makeUser, testId , occurrenceOf } from "./helpers"
 
@@ -87,7 +102,7 @@ describe("organiser overview", () => {
       ],
     })
 
-    const overview = await getDashboardOverview("organizer", owner)
+    const overview = (as("organizer", owner), await getDashboardOverview())
     if (overview.role !== "organizer") throw new Error("wrong overview role")
 
     expect(overview.nextEvent?.id).toBe(soon)
@@ -109,7 +124,7 @@ describe("organiser overview", () => {
       data: { event_id: event, user_id: attendee, status: "going" },
     })
 
-    const overview = await getDashboardOverview("organizer", owner)
+    const overview = (as("organizer", owner), await getDashboardOverview())
     if (overview.role !== "organizer") throw new Error("wrong overview role")
 
     // There is no target to fall short of, so a percentage would be invented.
@@ -128,7 +143,7 @@ describe("organiser overview", () => {
       data: attendees.map((id) => ({ event_id: event, user_id: id, status: "going" as const })),
     })
 
-    const overview = await getDashboardOverview("organizer", owner)
+    const overview = (as("organizer", owner), await getDashboardOverview())
     if (overview.role !== "organizer") throw new Error("wrong overview role")
 
     expect(overview.pacing.length).toBeGreaterThan(0)
@@ -166,7 +181,7 @@ describe("organiser overview", () => {
       })),
     })
 
-    const overview = await getDashboardOverview("organizer", owner)
+    const overview = (as("organizer", owner), await getDashboardOverview())
     if (overview.role !== "organizer") throw new Error("wrong overview role")
 
     // 3 attended against 1 RSVP is a 300% turn-up; a negative no-show rate
@@ -193,7 +208,7 @@ describe("organiser overview", () => {
       ],
     })
 
-    const overview = await getDashboardOverview("organizer", owner)
+    const overview = (as("organizer", owner), await getDashboardOverview())
     if (overview.role !== "organizer") throw new Error("wrong overview role")
     expect(overview.repeatAttendees).toBe(1)
   })
@@ -212,7 +227,7 @@ describe("organiser overview", () => {
       ],
     })
 
-    const overview = await getDashboardOverview("organizer", owner)
+    const overview = (as("organizer", owner), await getDashboardOverview())
     if (overview.role !== "organizer") throw new Error("wrong overview role")
 
     // The mean is 3.0, which describes neither rater.
@@ -233,7 +248,7 @@ describe("venue owner overview", () => {
     await makeScheduledEvent(owner, { startsInDays: -6, venue: "Rooftop" })
     await makeScheduledEvent(owner, { startsInDays: -9, venue: "Basement" })
 
-    const overview = await getDashboardOverview("venue_owner", owner)
+    const overview = (as("venue_owner", owner), await getDashboardOverview())
     if (overview.role !== "venue_owner") throw new Error("wrong overview role")
 
     const byName = Object.fromEntries(overview.venues.map((v) => [v.name, v.eventsInWindow]))
@@ -247,7 +262,7 @@ describe("venue owner overview", () => {
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
     await makeScheduledEvent(owner, { startsInDays: -4, venue: "Grid Room" })
 
-    const overview = await getDashboardOverview("venue_owner", owner)
+    const overview = (as("venue_owner", owner), await getDashboardOverview())
     if (overview.role !== "venue_owner") throw new Error("wrong overview role")
 
     expect(overview.utilisation).toHaveLength(7)
@@ -260,7 +275,7 @@ describe("venue owner overview", () => {
 
 describe("admin overview", () => {
   it("executes every query and reports the moderation queue", async () => {
-    const overview = await getDashboardOverview("app_admin")
+    const overview = (as("app_admin"), await getDashboardOverview())
     if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
     expect(overview.growth).toHaveLength(8)
@@ -277,7 +292,7 @@ describe("admin overview", () => {
   })
 
   it("keeps the funnel monotonically non-increasing", async () => {
-    const overview = await getDashboardOverview("app_admin")
+    const overview = (as("app_admin"), await getDashboardOverview())
     if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
     // Each stage is a subset of the one above it. If this ever inverts, the
@@ -290,8 +305,32 @@ describe("admin overview", () => {
 })
 
 describe("role gating", () => {
-  it("refuses a scoped role without a user id", async () => {
-    await expect(getDashboardOverview("organizer")).rejects.toThrow(/User ID is required/)
-    await expect(getDashboardOverview("venue_owner")).rejects.toThrow(/User ID is required/)
+  /*
+   * This used to assert "a scoped role needs a user id", which was a check on
+   * an argument the caller supplied -- and therefore on nothing at all. The
+   * action is a POST endpoint: an organiser could pass `"app_admin"` and read
+   * the whole-platform report, every other organiser's name and email included.
+   * Role and identity now come from the session, so these pin the boundary
+   * instead of the argument.
+   */
+  it("refuses a caller with no session", async () => {
+    session = null
+    await expect(getDashboardOverview()).rejects.toThrow(/Not authorised/)
+  })
+
+  it("refuses an attendee", async () => {
+    // Middleware already keeps attendees out of /dashboard. It is one control,
+    // and it never sees which action is being invoked.
+    session = { user: { id: "someone", role: "attendee" as never } }
+    await expect(getDashboardOverview()).rejects.toThrow(/Not authorised/)
+  })
+
+  it("gives an organiser the organiser overview, whatever they ask for", async () => {
+    // The point of the fix: there is no argument left that can change this.
+    const owner = await makeUser("ovw_gate", "organizer")
+    users.push(owner)
+    as("organizer", owner)
+    const overview = await getDashboardOverview()
+    expect(overview.role).toBe("organizer")
   })
 })

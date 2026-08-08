@@ -120,6 +120,14 @@ export async function getUsers(
 
 export async function getUserById(id: string): Promise<UserWithProfile | null> {
   try {
+    // Every other export in this file checks this; this one was missed. It
+    // takes an arbitrary user id and returns that person's email, phone, age,
+    // location and role, so it was the one worth having.
+    const session = await getAuth()
+    if (!session?.user || session.user.role !== "app_admin") {
+      throw new Error("Not authorised")
+    }
+
     const user = await db.user.findUnique({
       where: { id },
       include: {

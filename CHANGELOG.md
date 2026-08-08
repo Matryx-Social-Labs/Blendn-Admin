@@ -5,6 +5,45 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.0] - 2026-08-08
+
+### Fixed
+
+- **Four server actions were authorised at the view layer only.** A
+  `"use server"` export is a POST endpoint; Next dispatches it by action id with
+  the page component nowhere in the request path. So the `role !== "app_admin"`
+  redirect in `page.tsx` guarded the view and never the data behind it, and four
+  exports relied on exactly that.
+
+  `getDashboardOverview` took `role` as an **argument** — any organiser or venue
+  owner could pass `"app_admin"` and receive the whole-platform report,
+  including every other organiser's name and email, or pass a rival's id and get
+  their pacing, no-show rate and drafts. `getEventRows`'s scope argument was
+  **optional**, so omitting it returned every event on the platform.
+  `getModerationQueue` returned flagged private chat content paired with the
+  author's real name and email. `getUserById` returned any user's email, phone,
+  age, location and role.
+
+  Not unauthenticated — `middleware.ts` requires a session for `/dashboard/*`
+  and rejects attendees — so the bar is any approved organiser or venue owner.
+  That is still a straight crossing of the RBAC boundary.
+
+  Fixed by removing the capability rather than adding a check: the two dashboard
+  actions no longer accept `role` or `userId` at all and read both from the
+  session, so there is no argument left to lie in. The other two gained the
+  `app_admin` check their siblings already had.
+
+### Added
+
+- **`docs/SECURITY_BACKLOG.md`**, the standing ledger for security findings and
+  fixes. It records what was reviewed *and what was not* — this pass covered
+  server actions completely and five other domains were cut short, which the
+  coverage table says plainly rather than letting silence read as clean.
+- **`__tests__/server-action-authz.test.ts`** asserts every `"use server"` file
+  reads the session. It guards the shape rather than the four instances, since
+  this was one mistake in four places and a test naming four functions would not
+  have caught the fifth.
+
 ## [0.56.0] - 2026-08-08
 
 ### Fixed

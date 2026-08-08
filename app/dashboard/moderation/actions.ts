@@ -45,6 +45,14 @@ function topCategory(categories: unknown, fallback: string): string {
 }
 
 export async function getModerationQueue(status: moderation_status_type = "pending") {
+  // The screen this feeds is app_admin-only and `resolveFlag` below checks for
+  // it. The read half did not, and it is the half that returns the sensitive
+  // data: private chat message content paired with the author's real name and
+  // email, for every flagged message on the platform. The page's redirect
+  // guards the view, not this endpoint.
+  const session = await getAuth()
+  if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
+
   const now = Date.now()
 
   const [flags, counts] = await Promise.all([
