@@ -73,98 +73,85 @@ domain from scratch against `6bb16be`.
 
 ## Open
 
-### HIGH — the room's join key is the real user id, so pseudonymity is one request deep
+Nothing outstanding. Everything the 2026-08-08 sweep found is closed below.
 
-**This is the architectural one, and it is not fixed.**
+The next pass should start where this one could not reach: **the mobile client**
+(`Blendn/SECURITY_RELIABILITY_BACKLOG.md` tracks that half), and a re-read of
+whatever ships next — a sweep is a snapshot, not a property.
 
-Every room surface returns the real platform `userId` beside the pseudonym —
-`checkins/route.ts:115`, `chat/groups/[id]/participants:92`,
-`chat/groups/[id]/messages:157` (which also ships raw `user_id` on every
-reaction). The header comment on the check-ins route asserts *"the id alone
-discloses nothing"*. It does: `GET /users/:userId` needs only a valid mobile
-JWT — no membership, no reveal check — and returns real `name`, `photos[]`,
-`bio`, `occupation`.
+Two things deliberately left as they are, with reasons:
 
-`revealed` is consulted in exactly one place in the whole codebase
-(`lib/matching.ts:169`). Everything `rankMatches` withholds is recoverable in a
-second HTTP call. So the same join de-anonymises every "anonymous" chatroom
-message — including the ones the sentiment classifier reads and the ones
-`lib/trust.ts` cites as the reason ratings are hidden.
-
-Requiring a check-in for the roster (fixed below) raises the bar to *having
-attended*, and `interested-users` still hands out `{real id → real name +
-photo}` in bulk to any authenticated caller.
-
-**The fix is a schema and API change, not a guard**: the room must key on a
-per-event opaque handle, resolved server-side for block/report/message-request
-targeting, so a real user id never leaves the server for a room surface.
-Alternatively gate `users/:id` and `profiles/:id` on an existing relationship —
-mutual like, open conversation, or `revealed` at a shared event.
-
-Deliberately not attempted in the same pass as the fixes below; it touches the
-mobile client contract and deserves its own design.
-
-### MEDIUM — `interested-users` returns real name, photo and id to any caller
-
-`app/api/mobile/events/[eventId]/interested-users/route.ts:18`, also reachable
-as `GET /events/:id?include=interestedUsers`. Auth only — no check-in, no block
-check. An independent bulk source for the join above: one call returns
-`{userId → real name}` pairs that key straight against the pseudonymous
-attendee list for anyone who both favourited and attended, which is the ordinary
-path.
-
-Left open because it may be intentional social proof; it needs a product
-decision about whether interest is public, not a unilateral patch.
-
-### MEDIUM — report pseudonyms are a prefix of the real user id
-
-`lib/reports.ts:189` builds `attendee-${userId.slice(0, 8)}` and labels the
-export "Pseudonymous", while `chat/messages` hands the same host the full id for
-every participant. A host prefix-matches one against the other to recover who
-each export row is, and to link the same attendee across every event they run.
-Should be an HMAC with a server secret, salted per organisation.
-
-### MEDIUM — two event write routes have no schema
-
-`app/api/events/route.ts` POST and `app/api/events/[id]/route.ts` PATCH are the
-only write endpoints with no zod validation — they destructure 37 fields as
-their allow-list. `parseJsonField` `JSON.parse`s three body fields straight into
-Prisma JSON columns with no shape or size validation. Not an injection (nothing
-is spread into a query) and both are behind `canEdit`, so it is data integrity
-rather than access — but they are the last unvalidated writes in the codebase.
-
-### LOW — moderation flag is not scoped to the event
-
-`app/api/events/[id]/chat/moderation/[flagId]/route.ts:48` checks `canOperate`
-against the event in the URL, then loads the flag by id alone. An organiser
-passing their own `eventId` with another org's `flagId` could un-hide a message
-in a room they have no rights to. Requires guessing a v4 UUID, and the listing
-endpoint is correctly scoped, so it is not practically reachable — but the
-sibling message route already carries the `chat_group_id` predicate and this one
-should too. One line.
-
-### LOW — `fileVenueClaim` stores unvalidated evidence URLs
-
-`lib/venue-claim-actions.ts:52`. `ClaimEvidence` is a TypeScript interface and
-erased at runtime, so the URLs are unchecked and render into `<a href>` for a
-reviewing admin. React 19.2 hard-blocks `javascript:` hrefs, so this is not
-exploitable today — it is one React downgrade from mattering.
-
-### LOW — no Content-Security-Policy or HSTS
-
-`next.config.ts:27`. Three good headers, and neither of the two that matter most
-for a dashboard that renders user-supplied event and profile text.
-
-Not a concrete vulnerability today — no XSS sink is known — which is exactly why
-it is LOW rather than ignored: CSP is what makes an unknown future XSS
-non-catastrophic. HSTS matters because `dashboard.blendn.app` handles session
-cookies.
-
-Do both when someone is next in that file.
-
----
+- **A per-event opaque handle instead of the real user id.** Now defence in
+  depth rather than a fix: `maySeeIdentity` means the id no longer buys anything.
+  Worth doing eventually so an id cannot be correlated across events at all, and
+  not worth churning the mobile contract for today.
+- **CSP is report-only.** Enforcing it blind would break Swagger UI and the
+  chart library. It needs a report endpoint and a week of data before the
+  `'unsafe-inline'` and `'unsafe-eval'` come out.
 
 ## Closed
+
+### 2026-08-08 — the backlog's remaining items
+
+**Fixed in `fix/identity-gate`.** Everything left open by the sweep.
+
+**Pseudonymity is no longer one request deep** (was the top HIGH). Every room
+surface hands out the real user id — the client needs it to block, report and
+open a message request — and `GET /users/:id` would exchange any id for a real
+name and photos. Two requests de-anonymised a whole room, and the same join
+attributed every "anonymous" chat message to a named person.
+
+The obvious fix was a per-event opaque handle, and it was the wrong first move:
+the id is in the mobile contract everywhere. **The id was never the secret; the
+lookup was.** `lib/identity.ts` gates identity on a relationship — you matched
+(mutual like at one event), you are in a conversation, or they chose to be
+public in a room you were in. Co-presence alone is deliberately not enough:
+sharing a room is what lets you send a request, not consent to be identified.
+Withheld fields are absent rather than null, and `occupation`/`education` go
+with the name because "Principal @ Arclight Labs" identifies about as well as a
+photograph. Applied to `users/:id` and `profiles/:id`.
+
+`interested-users` returned `{real id, real name, real photo}` in bulk to any
+caller, which would have made the gate decorative — it now returns avatars only,
+matching the shape `events/route.ts` already used.
+
+Nine cases pinned in `__tests__/integration/identity-gate.itest.ts` against a
+real database, including the four ways in that must **not** work: a stranger, a
+room-mate, a one-sided like, and two likes at different events.
+
+**Export pseudonyms are an HMAC** (`lib/pseudonym.ts`). They were
+`attendee-${userId.slice(0, 8)}` — an abbreviation, not a pseudonym. The same
+host is handed full user ids for chat participants, so prefix-matching recovered
+who each export row was, and linked the same attendee across every event they
+run. Now keyed on `NEXTAUTH_SECRET` and salted per organisation, so two hosts
+cannot compare notes either. Salted per org rather than per event because the
+attendees report counts events per person and needs the label stable across
+them.
+
+**The two event write routes have a schema** — `eventWriteSchema` on
+`POST /api/events` and `PATCH /api/events/[id]`, the last writes in the codebase
+without one. They destructured 37 fields as their allow-list, so mass assignment
+was never possible, but nothing bounded a string or checked that `latitude` was
+a number, and `parseJsonField` put unvalidated `JSON.parse` output into Json
+columns. The type checker immediately found the routes were also using the raw
+body rather than the parsed data, which would have made the schema decorative.
+
+**Moderation flag scoped to its event** — `canOperate` was checked against the
+event in the URL and the flag then loaded by id alone, so a host could un-hide a
+message in another organisation's room. Needed a UUID guess, so never practically
+reachable; the sibling route already carried the predicate.
+
+**Venue claim evidence is validated.** `ClaimEvidence` is a TypeScript interface
+and erased at runtime, so URLs arrived unchecked from a server-action argument
+and rendered into an `<a href>` for a reviewing admin. React 19 blocks
+`javascript:`, which is the only reason it was never exploitable. Validation
+sits **after** the role check — someone who may not file at all should be told
+that, not handed a critique of their input.
+
+**HSTS and a report-only CSP.** HSTS is enforcing (two years, preload); CSP
+reports only, because enforcing it blind would break Swagger UI and the chart
+library. Removing `'unsafe-inline'`/`'unsafe-eval'` needs a report endpoint and
+a week of data first.
 
 ### 2026-08-08 — the full-sweep findings
 

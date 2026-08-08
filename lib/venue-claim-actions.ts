@@ -1,5 +1,7 @@
 "use server"
 
+import { z } from "zod"
+
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -49,10 +51,34 @@ export interface FileClaimInput {
   evidence: ClaimEvidence
 }
 
+/**
+ * `ClaimEvidence` is a TypeScript interface and is erased at runtime, so these
+ * URLs arrived unchecked from a `"use server"` argument and were rendered into
+ * an `<a href>` for the reviewing admin. React 19 blocks `javascript:` hrefs,
+ * so it was not exploitable -- it was one React downgrade from being stored
+ * XSS aimed squarely at an administrator. A type is not a validator.
+ */
+const evidenceSchema = z
+  .object({
+    tradeLicence: z.string().url().max(2048).optional(),
+    fssai: z.string().url().max(2048).optional(),
+    liquor: z.string().url().max(2048).optional(),
+    photo: z.string().url().max(2048).optional(),
+  })
+  .strict()
+  .refine(
+    (e) =>
+      Object.values(e).every(
+        (u) => u === undefined || u.startsWith("https://") || u.startsWith("http://")
+      ),
+    { message: "Evidence links must be http(s) URLs" }
+  )
+
 export async function fileVenueClaim(
   input: FileClaimInput
 ): Promise<{ id: string; isDispute: boolean }> {
   const user = await requireHost()
+
   if (user.role !== "venue_owner" && user.role !== "app_admin") {
     // An organiser has no claim to operational control over other people's
     // events, which is what owning a venue grants.
@@ -65,6 +91,11 @@ export async function fileVenueClaim(
   if (!input.evidence.tradeLicence) {
     throw new Error("Attach a trade licence or Shops & Establishments registration.")
   }
+
+  // After the role and required-document checks: someone who may not file at
+  // all should be told that, not handed a critique of their input.
+  const evidence = evidenceSchema.safeParse(input.evidence)
+  if (!evidence.success) throw new Error("Evidence links must be http(s) URLs")
 
   if (input.gstin) {
     const result = validateGstin(input.gstin)
@@ -97,7 +128,7 @@ export async function fileVenueClaim(
       status: "pending",
       is_dispute: isDispute,
       gstin: input.gstin?.trim().toUpperCase() || null,
-      evidence: input.evidence as object,
+      evidence: evidence.data as object,
       filed_by: user.id,
       reviewed_by: null,
       reviewed_at: null,
@@ -109,7 +140,7 @@ export async function fileVenueClaim(
       filed_by: user.id,
       is_dispute: isDispute,
       gstin: input.gstin?.trim().toUpperCase() || null,
-      evidence: input.evidence as object,
+      evidence: evidence.data as object,
     },
     select: { id: true },
   })

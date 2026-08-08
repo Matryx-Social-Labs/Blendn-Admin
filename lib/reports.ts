@@ -2,6 +2,7 @@ import { db } from "./db"
 import type { DateRange } from "./date-range"
 import type { user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
+import { attendeeLabel } from "./pseudonym"
 
 /**
  * Report definitions.
@@ -89,6 +90,24 @@ export function canRunReport(key: string, role: user_role): boolean {
  * — for a venue owner — events at venues their organisations own, which mirrors
  * `eventPermissions.canOperate` exactly.
  */
+/**
+ * The salt for attendee pseudonyms.
+ *
+ * Stable for one organisation -- the attendees report counts events per person,
+ * so a label that changed between exports would make "returning attendee"
+ * meaningless -- and different across organisations, so two hosts cannot
+ * compare exports and discover they had the same person.
+ */
+async function pseudonymScope(role: user_role, userId: string): Promise<string> {
+  if (role === "app_admin") return "platform"
+  const memberships = await db.organisation_members.findMany({
+    where: { user_id: userId },
+    select: { org_id: true },
+  })
+  const orgIds = memberships.map((m) => m.org_id).sort()
+  return orgIds.length > 0 ? orgIds.join(",") : `user:${userId}`
+}
+
 async function eventScopeFor(role: user_role, userId: string) {
   if (role === "app_admin") return { deleted_at: null }
 
@@ -120,6 +139,7 @@ export async function buildReport(
   range: DateRange
 ): Promise<string> {
   const scope = await eventScopeFor(role, userId)
+  const labelScope = await pseudonymScope(role, userId)
   const inWindow = { gte: range.from, lt: range.to }
 
   switch (key) {
@@ -186,7 +206,7 @@ export async function buildReport(
       const rows = [...byUser.entries()].map(([userId, v]) => ({
         // Pseudonymous by design: attendees are pseudonymous to hosts
         // everywhere in this product, and an export is not a way around that.
-        attendee: `attendee-${userId.slice(0, 8)}`,
+        attendee: attendeeLabel(userId, labelScope),
         events_attended: v.events.size,
         last_attended: v.last,
         repeat: v.events.size > 1,
@@ -219,7 +239,7 @@ export async function buildReport(
         [
           { key: "created_at", label: "Checked in at" },
           { key: "status", label: "Status" },
-          { key: "attendee", label: "Attendee", value: (r) => `attendee-${r.user_id.slice(0, 8)}` },
+          { key: "attendee", label: "Attendee", value: (r) => attendeeLabel(r.user_id, labelScope) },
           { key: "event_id", label: "Event ID", value: (r) => r.event.id },
           { key: "event", label: "Event", value: (r) => r.event.title },
           { key: "event_start", label: "Event start", value: (r) => r.event.start_time },

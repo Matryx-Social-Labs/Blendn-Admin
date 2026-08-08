@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { blockedEitherWay } from "@/lib/conversations"
+import { maySeeIdentity } from "@/lib/identity"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -73,23 +74,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      *
      * `users/[userId]` next door already selects explicitly. This now matches.
      */
+    /*
+     * Same gate as `users/[userId]`. This route serves a superset of that one,
+     * so leaving it ungated would have made the other fix decorative.
+     */
+    const identified = isSelf || (await maySeeIdentity(authUser.userId, userId))
+
     const p = user.profile
     const publicProfileFields = p && {
       id: p.id,
       age: p.age,
-      bio: p.bio,
-      occupation: p.occupation,
-      education: p.education,
-      photos: p.photos,
       interests: p.interests,
       onboarded: p.onboarded,
+      // Identifying free text, same rule as the name. Someone's employer and
+      // their photographs single them out as surely as a name does.
+      ...(identified
+        ? { bio: p.bio, occupation: p.occupation, education: p.education, photos: p.photos }
+        : {}),
     }
 
     return successResponse({
       id: user.id,
       email: isSelf ? user.email : undefined,
-      name: user.name,
-      image: user.image,
+      name: identified ? user.name : "Attendee",
+      ...(identified ? { image: user.image } : {}),
       createdAt: user.createdAt,
       profile: user.profile
         ? {

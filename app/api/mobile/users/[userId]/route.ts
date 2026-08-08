@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay } from "@/lib/conversations"
+import { maySeeIdentity } from "@/lib/identity"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
@@ -90,16 +91,48 @@ export async function GET(
         ? [user.image]
         : []
 
+    /*
+     * The room is pseudonymous, and this endpoint was how that came undone.
+     *
+     * Every room surface returns the real user id -- the roster, the chat
+     * participant list, message authors, reactions -- because the client needs
+     * it to block, report and open a message request. Any of those ids could be
+     * handed straight to this route, which returned the real name and photos to
+     * anyone holding a valid token. Two requests turned a whole room's
+     * pseudonyms into named faces.
+     *
+     * `maySeeIdentity` is the gate: matched, in a conversation, or they chose to
+     * be public in a room you were in. Co-presence alone is deliberately not
+     * enough -- sharing a room is what lets you send a request, not consent to
+     * be identified.
+     */
+    const identified = await maySeeIdentity(authUser.userId, userId)
+
     const publicProfile = {
       id: user.id,
-      name: user.profile?.name || user.name,
-      image: user.image,
-      photos,
+      /*
+       * Pseudonyms are per event and this route has no event context, so there
+       * is no pseudonym to return -- the client already holds the room's one
+       * from the roster. A flat label is honest; inventing a second name here
+       * would let two surfaces disagree about who someone is.
+       *
+       * Withheld fields are **absent**, not null, so a client reading `image`
+       * gets undefined rather than a convincing blank. `occupation` and
+       * `education` go with the name: "Principal @ Arclight Labs" identifies
+       * about as well as a photograph does.
+       */
+      name: identified ? user.profile?.name || user.name : "Attendee",
+      ...(identified
+        ? {
+            image: user.image,
+            photos,
+            bio: user.profile?.bio || null,
+            occupation: user.profile?.occupation || null,
+            education: user.profile?.education || null,
+          }
+        : {}),
       age: user.profile?.age,
       location: await normalizeLocationToCity(user.profile?.location),
-      bio: user.profile?.bio || null,
-      occupation: user.profile?.occupation || null,
-      education: user.profile?.education || null,
       interests: user.user_interests.map((ui) => ui.category),
       memberSince: user.createdAt,
       stats: {
@@ -108,6 +141,7 @@ export async function GET(
         eventsOrganized: user._count.organized_events,
       },
       isOwnProfile: authUser.userId === userId,
+      identityVisible: identified,
     }
 
     return successResponse(publicProfile)

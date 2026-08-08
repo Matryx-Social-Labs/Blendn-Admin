@@ -24,7 +24,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, organizer_org_id: true, venue: { select: { owner_org_id: true } } },
+      select: {
+        id: true,
+        organizer_org_id: true,
+        venue: { select: { owner_org_id: true } },
+        chat_group: { select: { id: true } },
+      },
     })
 
     if (!event) {
@@ -45,8 +50,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const flag = await db.moderation_flags.findUnique({
-      where: { id: flagId },
+    /*
+     * Scope the flag to this event's room, not just to the id.
+     *
+     * `canOperate` was checked against the event in the URL and the flag was
+     * then loaded by id alone, so a host could pass their own `eventId` with
+     * another organisation's `flagId` and approve -- un-hide -- a message in a
+     * room they have no rights to. Reaching it needs a v4 UUID guess and the
+     * listing endpoint is correctly scoped, so it was not practically
+     * exploitable; the sibling message-delete route already carries this
+     * predicate and there is no reason for this one not to.
+     */
+    const flag = await db.moderation_flags.findFirst({
+      where: { id: flagId, chat_group_id: event.chat_group?.id },
       select: { id: true, message_id: true, status: true },
     })
 

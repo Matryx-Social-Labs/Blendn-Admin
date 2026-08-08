@@ -96,3 +96,63 @@ export const announcementSchema = z.object({
 export type EventQueryInput = z.infer<typeof eventQuerySchema>
 export type CheckinInput = z.infer<typeof checkinSchema>
 export type RatingInput = z.infer<typeof ratingSchema>
+
+/**
+ * The event write body.
+ *
+ * `POST /api/events` and `PATCH /api/events/[id]` were the last write endpoints
+ * in the codebase with no schema -- they destructured 37 fields and relied on
+ * that destructure as the allow-list. That stops mass assignment, so it was not
+ * an access hole, but nothing bounded a string's length or checked that
+ * `latitude` was a number, and `parseJsonField` `JSON.parse`d three body fields
+ * straight into Prisma Json columns with no shape or size limit at all.
+ *
+ * Deliberately permissive where the route already guards: `check_in_radius` and
+ * `geofence` pass through to `validateLocationInput`, which bounds them
+ * server-side, and capacity keeps its existing explicit check. This schema is
+ * about types and lengths, not about relitigating those.
+ *
+ * `.partial()` covers PATCH; the POST route keeps its own required-field check.
+ */
+const jsonish = z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())])
+
+export const eventWriteSchema = z
+  .object({
+    title: z.string().min(1).max(200),
+    description: z.string().max(5000),
+    short_description: z.string().max(500).nullish(),
+    venue_name: z.string().max(200).nullish(),
+    venue_id: z.string().uuid().nullish(),
+    address: z.string().max(500).nullish(),
+    city: z.string().max(100).nullish(),
+    state: z.string().max(100).nullish(),
+    country: z.string().max(100).nullish(),
+    postal_code: z.string().max(20).nullish(),
+    start_time: z.union([z.string(), z.date()]),
+    end_time: z.union([z.string(), z.date()]),
+    timezone: z.string().max(64).nullish(),
+    status: z.enum(["draft", "published", "cancelled", "completed"]).nullish(),
+    visibility: z.enum(["public", "private", "unlisted"]).nullish(),
+    max_capacity: z.number().int().nullish(),
+    latitude: z.number().min(-90).max(90).nullish(),
+    longitude: z.number().min(-180).max(180).nullish(),
+    cover_image_url: z.string().url().max(2048).nullish(),
+    external_link: z.string().url().max(2048).nullish(),
+    is_featured: z.boolean().nullish(),
+    is_recurring: z.boolean().nullish(),
+    check_in_radius: z.number().nullish(),
+    full_description: z.string().max(20000).nullish(),
+    house_rules: z.string().max(5000).nullish(),
+    cancellation_policy: z.string().max(5000).nullish(),
+    // Shape-checked and size-bounded rather than free JSON. These land in Json
+    // columns and were previously whatever `JSON.parse` returned.
+    additional_info: jsonish.nullish(),
+    faq: jsonish.nullish(),
+    accessibility_info: jsonish.nullish(),
+    covid_guidelines: z.string().max(5000).nullish(),
+    category_ids: z.array(z.string().uuid()).max(20).nullish(),
+    primary_category_id: z.string().uuid().nullish(),
+    media_items: z.array(z.record(z.string(), z.unknown())).max(50).nullish(),
+    geofence: z.unknown().nullish(),
+  })
+  .partial()
