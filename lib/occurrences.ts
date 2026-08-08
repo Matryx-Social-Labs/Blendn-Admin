@@ -1,4 +1,7 @@
-import { db } from "@/lib/db"
+// Relative, not "@/lib/db" — reachable from server.ts via lib/occupancy.ts, and
+// `build:server` emits the alias verbatim into the require(). Enforced by
+// __tests__/server-import-boundary.test.ts.
+import { db } from "./db"
 
 /**
  * Which day of an event a check-in belongs to.

@@ -67,7 +67,6 @@ holes.
 |---|---|
 | **Portfolio calendar** | Events are a table only — no month view across a run |
 | **Venue: availability calendar** | "My venues" shows utilisation after the fact, not what is bookable |
-| **NPS** | Ratings exist; NPS is the benchmark every organiser reports upward |
 
 ### 3. Open questions
 
@@ -82,8 +81,6 @@ holes.
 
 ### 4. Smaller, known
 
-- **Per-occurrence capacity.** `event_occurrences.capacity` exists and is unread.
-  A conference selling fewer seats on the last day wants it
 - **No client sends presence pings.** Endpoint and sweeper are live; the Expo app
   has to call `…/presence` for the loop to close
 - **`events.current_capacity`** is written by nothing and read by nothing. Drop
@@ -120,12 +117,30 @@ feedback on the run as a whole, where someone may well look back and say what
 they thought of day one. Per-day closure would remove that. The room stays open
 24 h after the last day, deliberately.
 
+**NPS from the existing ratings.** It was listed as a gap because NPS is the
+number organisers report upward. It cannot be computed from what we collect:
+NPS is defined on a **0–10** "how likely are you to recommend" question, and
+`event_ratings.rating` is a **1–5** star. Mapping 5★→promoter and 1–3★→detractor
+is what most tools quietly do, and it produces a number that is not NPS, gets
+reported upward as though it were, and cannot be compared with anyone else's.
+
+Real NPS needs a real 0–10 question — a schema column, an endpoint, and one more
+thing asked of someone in an already-thin post-event flow. That is a product
+decision about friction, not a metrics gap, and it has not been made. Average
+rating and the star distribution already exist and are honest.
+
 **Financial, sponsorship and pipeline metrics.** Every one assumes ticketing.
 There is none, so there is no revenue to attribute.
 
 ---
 
 ## Done
+
+### 0.54.0
+
+- **Per-occurrence capacity is read** (#167). Occupancy measured every day of a
+  run against the whole run's capacity, so a last day in a smaller room could be
+  over its number invisibly. Plus NPS recorded as not-doable from 1–5 stars.
 
 ### 0.53.0
 

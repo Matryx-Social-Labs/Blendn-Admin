@@ -3,6 +3,7 @@
 // — that resolves the @/ alias for typechecking and then emits it verbatim into
 // the require(), so the build goes green and the container dies on boot.
 import { db } from "./db"
+import { resolveOccurrence } from "./occurrences"
 
 /**
  * Who is in the room, and who came.
@@ -89,6 +90,29 @@ export function occupancyFrom({
   }
 }
 
+/**
+ * The capacity that applies **today**.
+ *
+ * `event_occurrences.capacity` existed from the multi-day work and was read by
+ * nothing, so a conference whose last day moves to a smaller room had its fill
+ * measured against the whole run's number — over-capacity on the day it mattered
+ * was invisible, which is the one thing the occupancy work exists to surface.
+ *
+ * Falls back to the event's, which is the common case: most events state one
+ * capacity and every day of them holds it.
+ *
+ * Resolved through `resolveOccurrence` — the same function check-in uses to
+ * decide which day someone is checking in to. Two implementations of "which day
+ * is it" would eventually disagree about a club night that runs past midnight.
+ */
+async function capacityForNow(eventId: string, eventCapacity: number | null): Promise<number | null> {
+  const slot = await resolveOccurrence(eventId)
+  // `ok: false` still carries the occurrence when the reason is timing rather
+  // than absence — an event between days should still measure against the day
+  // it is between, not lose its capacity entirely.
+  return slot.occurrence?.capacity ?? eventCapacity
+}
+
 export async function getOccupancy(eventId: string): Promise<Occupancy> {
   const [event, inside, staffInside, uniqueGuests] = await Promise.all([
     db.events.findUnique({
@@ -112,7 +136,7 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
     inside,
     staffInside,
     uniqueAttendance: uniqueGuests.length,
-    capacity: event?.max_capacity ?? null,
+    capacity: await capacityForNow(eventId, event?.max_capacity ?? null),
   })
 }
 
