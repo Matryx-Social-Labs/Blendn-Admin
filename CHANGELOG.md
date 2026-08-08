@@ -5,6 +5,37 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.56.0] - 2026-08-08
+
+### Fixed
+
+- **The OpenAPI spec stops lying about the profile body.** Auditing the Expo app
+  against this API turned up why 0.55.0's settings columns are still written by
+  nothing. The spec's `UpdateProfileRequest` was a **hand-copied duplicate** of
+  `updateProfileSchema` that had fallen six fields behind it — `goals`,
+  `looking_for`, and all four preference booleans. The client codes against
+  `/api-docs`, so it sent twelve variants of the four key names, nested and
+  camelCased, and matched none of the four the route accepts. `GET` returned the
+  columns fine — it spreads the whole profile — but never declared them either,
+  so hydration looked for `profile.shareReadReceipts`, found nothing, and fell
+  back to `true`. Every switch read ON regardless of choice.
+
+  Fixed structurally rather than by copying the fields across again: the spec now
+  documents the schema the route validates with. Two zod schemas for one body is
+  what generates this drift; there is now one.
+
+  `openapi-coverage.test.ts` asserted that every *path* was documented, which is
+  exactly why a missing *field* got through. It now checks this body against the
+  validator's own keys, so it guards the class rather than re-listing six fields.
+
+### Changed
+
+- **The four preference booleans are returned only to the profile's owner.** The
+  GET destructured `phone` out and nothing else, so any authenticated caller
+  could read whether you share your location. A setting is a statement about how
+  careful someone is being, not profile content. `show_online` is enforced by the
+  endpoints that report presence, which read the column directly.
+
 ## [0.55.0] - 2026-08-08
 
 ### Added

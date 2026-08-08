@@ -2,7 +2,23 @@ import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
 import { PaginationMetaSchema } from "./common"
 
-// Request schemas
+/**
+ * These mirror `lib/validations/profile.ts`, and a test holds them to it.
+ *
+ * They drifted silently once: the spec was six fields behind the route --
+ * `goals`, `looking_for` and the four preference booleans -- so the client
+ * coding against `/api-docs` sent key names the route ignores and every
+ * settings toggle persisted nothing. `openapi-coverage.test.ts` verified that
+ * every *path* was documented, which is exactly why a missing *field* got
+ * through; it now compares this body against the validator's own keys.
+ *
+ * Importing the validator directly would be better and does not survive the
+ * build: `zod-to-openapi` patches the zod instance it is handed, Next gives the
+ * two modules separate copies, and `.openapi()` is then missing from anything
+ * built in `lib/validations`. Jest resolves modules differently and passes,
+ * which is the worst version of this -- green locally, broken in CI. So the
+ * duplication stays and the test is what makes it safe.
+ */
 export const UpdateProfileRequestSchema = z
   .object({
     name: z.string().min(1).max(100).optional(),
@@ -14,7 +30,16 @@ export const UpdateProfileRequestSchema = z
     education: z.string().max(100).optional().nullable(),
     interests: z.array(z.string()).optional(),
     photos: z.array(z.string().url()).max(6).optional(),
+    goals: z.array(z.string()).optional(),
+    looking_for: z.array(z.string()).optional(),
     onboarded: z.boolean().optional(),
+
+    // Top level, snake_case, no `preferences` wrapper and no camelCase alias.
+    // The app was sending twelve variants of these four and matching none.
+    push_enabled: z.boolean().optional(),
+    show_online: z.boolean().optional(),
+    read_receipts: z.boolean().optional(),
+    share_location: z.boolean().optional(),
   })
   .openapi("UpdateProfileRequest")
 
@@ -50,7 +75,17 @@ export const ProfileResponseSchema = z
       occupation: z.string().nullable(),
       education: z.string().nullable(),
       photos: z.array(z.string()).nullable(),
+      goals: z.array(z.string()),
+      looking_for: z.array(z.string()),
       onboarded: z.boolean(),
+
+      // Read these back under `profile`, with these names. The client had been
+      // looking for `shareReadReceipts` and falling back to `true`, so every
+      // switch showed ON whatever the user had chosen.
+      push_enabled: z.boolean(),
+      show_online: z.boolean(),
+      read_receipts: z.boolean(),
+      share_location: z.boolean(),
     }).nullable(),
     interests: z.array(InterestSchema),
   })

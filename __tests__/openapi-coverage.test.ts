@@ -2,6 +2,7 @@ import { readdirSync, statSync } from "fs"
 import { join } from "path"
 
 import { generateOpenApiDocument } from "@/lib/openapi/registry"
+import { updateProfileSchema } from "@/lib/validations/profile"
 
 /*
  * The registry is populated as a side effect of importing the path modules —
@@ -90,6 +91,28 @@ describe("OpenAPI spec covers the mobile API", () => {
       }
     }
     expect(bare).toEqual([])
+  })
+
+  it("documents every field the profile route actually accepts", () => {
+    /*
+     * Path coverage above cannot catch field drift, and field drift is what
+     * actually bit: the spec's UpdateProfileRequest was a hand-copy that had
+     * fallen six fields behind the route's validator. The Expo app read the
+     * spec, sent key names the route ignores, and every settings toggle
+     * persisted nothing while reading ON.
+     *
+     * The spec cannot simply import the validator: `zod-to-openapi` patches the
+     * zod instance it is given, Next hands the two modules separate copies, and
+     * `.openapi()` then does not exist on anything built in `lib/validations`.
+     * So the duplication is deliberate and this is what makes it safe -- it
+     * compares against the validator's own keys rather than a second hardcoded
+     * list, so adding a field to the route and forgetting the spec fails here.
+     */
+    const documented = Object.keys(
+      (doc.components?.schemas as Record<string, { properties?: Record<string, unknown> }>)
+        ?.UpdateProfileRequest?.properties ?? {}
+    )
+    expect(documented).toEqual(expect.arrayContaining(Object.keys(updateProfileSchema.shape)))
   })
 })
 

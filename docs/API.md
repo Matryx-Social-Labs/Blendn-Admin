@@ -336,6 +336,17 @@ apparent settings change on the day they start being honoured.
 `share_location` is **not** the GPS permission. Check-in still needs a fix
 regardless; this governs only whether others see how far away you are.
 
+**Send them at the top level, with exactly these names**, and read them back
+from `profile.push_enabled` and friends on `GET /profiles/:userId`. There is no
+`preferences` wrapper and no camelCase alias. The Expo app was sending twelve
+variants of the four — nested and camelCased — and matching none of them, so
+0.55.0's columns were written by nothing and the toggles still lied.
+
+They are returned **only to the profile's owner**. Whether someone has push on,
+or shares their distance, is a statement about how careful they are being and is
+not other attendees' business. `show_online` is enforced by the endpoints that
+report presence, which read the column directly.
+
 ---
 
 ## Users & Profiles

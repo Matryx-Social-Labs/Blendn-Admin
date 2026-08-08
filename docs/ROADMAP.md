@@ -184,6 +184,26 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.56.0
+
+- **The spec stops lying about the profile body**. Auditing the Expo app against
+  this API turned up why 0.55.0's settings columns are still written by nothing:
+  the spec's `UpdateProfileRequest` was a **hand-copied duplicate** of
+  `updateProfileSchema` that had fallen six fields behind it — `goals`,
+  `looking_for` and all four preference booleans. The one client reading
+  `/api-docs` sent key names the route ignores.
+
+  Fixed structurally rather than by re-copying: the spec now documents the
+  schema the route validates with, so the two cannot diverge. `ProfileResponse`
+  gained the same fields, which the GET has always returned and never declared.
+
+  `openapi-coverage.test.ts` checked every *path* was documented, which is
+  exactly why a missing *field* got through; it now checks this one too.
+
+  Also: the four preference booleans no longer go to other users. The GET
+  stripped `phone` and nothing else, so anyone could see whether you share your
+  location.
+
 ### 0.55.0
 
 - **Peer ratings and a trust signal** (#168), and four settings toggles that had
