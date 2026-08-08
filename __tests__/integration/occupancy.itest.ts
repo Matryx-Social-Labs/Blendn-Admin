@@ -196,3 +196,54 @@ describe("the two screens must agree", () => {
     expect(snapshot!.inside).toBe(occ.inside)
   })
 })
+
+describe("per-occurrence capacity", () => {
+  /**
+   * `event_occurrences.capacity` existed from the multi-day work and was read by
+   * nothing, so a conference whose last day moves to a smaller room had its fill
+   * measured against the whole run's number — and over-capacity on the day it
+   * mattered was invisible, which is the one thing this module exists to show.
+   */
+  it("measures against today's capacity when the day states one", async () => {
+    const host = await makeUser("poc-host", "organizer")
+    users.push(host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    await db.events.update({ where: { id: eventId }, data: { max_capacity: 500 } })
+
+    // The room today holds 10, not the 500 the run is sized for.
+    const occurrenceId = await occurrenceOf(eventId)
+    await db.event_occurrences.update({ where: { id: occurrenceId }, data: { capacity: 10 } })
+
+    for (let i = 0; i < 12; i++) {
+      const u = await makeUser(`poc-g${i}`)
+      users.push(u)
+      await db.event_check_ins.create({
+        data: {
+          user_id: u,
+          event_id: eventId,
+          occurrence_id: occurrenceId,
+          check_in_time: new Date(),
+          status: "checked_in",
+        },
+      })
+    }
+
+    const o = await getOccupancy(eventId)
+    expect(o.capacity).toBe(10)
+    expect(o.overCapacity).toBe(true)
+    expect(o.fillPct).toBe(120)
+  })
+
+  it("falls back to the event's when the day states none", async () => {
+    // The common case: one capacity, and every day of the run holds it.
+    const host = await makeUser("poc-host2", "organizer")
+    users.push(host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    await db.events.update({ where: { id: eventId }, data: { max_capacity: 80 } })
+
+    const o = await getOccupancy(eventId)
+    expect(o.capacity).toBe(80)
+  })
+})

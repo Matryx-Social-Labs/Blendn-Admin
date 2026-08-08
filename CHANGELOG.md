@@ -5,6 +5,37 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.54.0] - 2026-08-07
+
+### Fixed
+
+- **Occupancy now measures against the capacity that applies today.**
+  `event_occurrences.capacity` shipped with the multi-day work and was read by
+  nothing, so a conference whose last day moves to a smaller room had its fill
+  measured against the whole run's number — and over-capacity on the day it
+  mattered was invisible, which is the one thing the occupancy work exists to
+  surface.
+
+  Falls back to the event's capacity, which is the common case. Resolved through
+  `resolveOccurrence`, the same function check-in uses to decide which day
+  someone is checking in to — two implementations of "which day is it" would
+  eventually disagree about a club night that runs past midnight.
+
+  That made `lib/occurrences.ts` reachable from `server.ts`, so its `@/lib/db`
+  import had to become relative. `__tests__/server-import-boundary.test.ts`
+  caught it and named the chain.
+
+### Changed
+
+- **NPS moved to "not doing", with the reason.** It was listed as a gap because
+  NPS is the number organisers report upward. It cannot be computed from what we
+  collect: NPS is defined on a 0–10 recommend question and `event_ratings.rating`
+  is a 1–5 star. Mapping 5★→promoter and 1–3★→detractor is what most tools
+  quietly do and it produces a number that is not NPS, gets reported upward as
+  though it were, and cannot be compared with anyone else's. Real NPS needs a real
+  0–10 question, which is a product decision about post-event friction rather
+  than a metrics gap.
+
 ## [0.53.0] - 2026-08-07
 
 ### Added

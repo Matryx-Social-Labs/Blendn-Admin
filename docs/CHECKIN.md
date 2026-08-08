@@ -261,8 +261,6 @@ Postgres).
 
 ## Known gaps
 
-- **Per-occurrence capacity.** `event_occurrences.capacity` exists and is
-  unread. A conference selling fewer seats on the last day wants it.
 - **No client yet sends presence pings.** The endpoint and sweeper are live; the
   mobile app has to start calling it for the loop to close.
 - **The attendance panel has no UI.** `docs/CLAUDE_DESIGN_BRIEF_ATTENDANCE.md`
