@@ -5,6 +5,77 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.61.0] - 2026-08-10
+
+The first three server PRs of the post-signup plan (#183, #184, and this one).
+
+### Added
+
+- **Reports reach a human.** `user_reports` and `message_reports` were written
+  by two mobile routes and read by **nothing in either repository** — a
+  harassment report produced a row nobody was ever going to see, in a product
+  whose stated differentiator over an anonymous board is that somebody is
+  accountable for the room. They now have a queue at
+  `/dashboard/moderation/reports`, beside the flags, with the reporter and the
+  reported person resolved to real names.
+
+  Separate from `moderation_flags` rather than folded into it:
+  `moderation_flags.message_id` is NOT NULL with a foreign key to
+  `chat_messages`, so it can hold neither a report about a *person* nor one
+  about a private message. A flag is the pipeline's opinion; a report is a
+  person asking for help.
+
+  Three decisions, and `report_status` distinguishes them: dismiss writes
+  `reviewed` ("a human looked, no action"), remove and suspend write `resolved`
+  ("a human acted"). Every decision writes `audit_logs` plus `reviewed_by` and
+  `reviewed_at` on the report.
+
+- **`intent_default`, `gender` and `interested_in` are writable from the
+  profile** (#183). `intent_default` has existed since the matchmaking
+  migration, with its own schema comment calling it "the default, not the
+  truth", and the only write path was the per-event preferences route — which
+  403s without a check-in. A stable fact about a person could only be recorded
+  after they had walked into a venue. `gender` and `interested_in` had no write
+  path at all. All three are returned to the owner and to nobody else;
+  `reveal_by_default` is deliberately still not settable here.
+
+- **`age` at signup**, accepted and optional (#183). Optional on purpose: the
+  shipped app does not send it and the server reaches staging first, so
+  requiring it now would 400 every new password signup. A test pins that a
+  signup without an age still returns 201.
+
+### Fixed
+
+- **Suspension now means something on the phone.** `users.suspended_at` shipped
+  with the venues migration and was read in exactly one place —
+  `socket-ops-auth.ts`, which guards the organiser ops socket. Suspending an
+  attendee stopped them opening a dashboard they never had and changed nothing
+  about the app they were actually in. It is now checked wherever a mobile token
+  is issued (sign-in, Google, Apple, refresh, session), and suspending revokes
+  the account's refresh tokens, so a live session dies within one 15-minute
+  access token.
+
+  On sign-in it is checked **after** the password, so the response cannot be
+  used to discover which addresses are suspended. Both OAuth routes previously
+  signed and stored a 30-day refresh token *before* loading the user at all;
+  that order is reversed.
+
+- **The honest answer stopped costing you rank** (#183). The `just_here` damping
+  guard read `intents.length > 0 && every(...)`, so an empty intent array
+  escaped the damping an explicit `just_here` received — two candidates with
+  identical interests scored differently, and the one who answered the question
+  truthfully ranked strictly below the one who declined to. The regression test
+  was verified in both directions.
+
+- **The roster is everyone checked in** (#184). `GET /events/:id/checkins`
+  filtered on `onboarded`, a non-null name and a non-empty `photos` array —
+  three fields it does not serve. Someone who had passed the GPS gate and was
+  standing in the room was invisible to everyone in it, and to themselves in the
+  count. It also disagreed with `/matches`, which never applied it.
+
+  The two still differ, by design: matches select on `check_in_time: not null`,
+  the roster on `status: "checked_in"` — "was here" versus "is here".
+
 ## [0.60.0] - 2026-08-10
 
 ### Added

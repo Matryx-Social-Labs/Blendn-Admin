@@ -79,13 +79,64 @@ Be honest that this is one or two people, not a rota:
 | Hide a message | Dashboard moderation queue | Yes |
 | Auto-mute a repeat offender | `lib/moderation/actions.ts` `checkAndAutoMute` | Yes, automatic |
 | Ban from an event chat | `chat_group_members.status` | Yes |
-| Suspend an account platform-wide | `users` / admin | Yes |
+| **See a user report at all** | `/dashboard/moderation/reports` | **Yes, since 0.61.0** |
+| Suspend an account platform-wide | Reports queue, or `users` | Yes, and it now **works on the phone** |
+| Reinstate a suspended account | Reports queue | Yes |
 | **Contact the reporter** | -- | **No** |
 | **Tell the organiser someone at their event is in trouble** | -- | **No** |
 | **Get paged when a flag lands** | -- | **No** |
 
 The three gaps at the bottom are the work. The last one is the most urgent,
 because without it the response time above is aspirational.
+
+---
+
+## Reports: the queue, and what a decision means
+
+Two mobile routes write reports — `POST /users/:userId/report` and
+`POST /messages/:messageId/report` — and until 0.61.0 **nothing anywhere read
+either table**. A harassment report produced a row no human was ever going to
+see. Everything above about response times was, for reports specifically,
+describing a queue that did not exist.
+
+They live at `/dashboard/moderation/reports`, beside the flag queue rather than
+inside it. `moderation_flags.message_id` is NOT NULL with a foreign key to
+`chat_messages`, so it can hold neither a report about a *person* (no message)
+nor one about a private message (wrong table) — and a flag is the pipeline's
+opinion, while a report is a person asking for help. Same screen, one click
+apart; the sidebar badge counts both.
+
+**Three decisions, and they mean different things.**
+
+| Decision | Status written | What it does |
+|---|---|---|
+| **Dismiss** | `reviewed` | A human looked and took no action |
+| **Remove message** | `resolved` | Soft-deletes the message. **Group rooms only** |
+| **Suspend** | `resolved` | Blocks the account everywhere and signs it out |
+
+`reviewed` versus `resolved` is the difference between "we found nothing" and
+"we acted", which is the question that gets asked about a report six weeks
+later. Every decision writes `audit_logs`, and `reviewed_by`/`reviewed_at` on
+the report itself.
+
+**Remove is group-only.** `private_messages` has no `deleted_at` column, so
+there is nothing to soft-delete in a DM — and adding one means filtering it in
+the socket handlers and every DM query, to remove evidence from a conversation
+only two people can see. The lever against a DM is the person, not the message.
+
+**Suspension now reaches the app.** `users.suspended_at` had been read in
+exactly one place, `socket-ops-auth.ts`, which guards the *organiser* ops
+socket. Suspending an attendee stopped them opening a dashboard they never had
+and changed nothing about the app they were in. It is now checked wherever a
+mobile token is issued — sign-in, Google, Apple, refresh, session — and
+suspending revokes the account's refresh tokens, so a live session dies within
+one 15-minute access token. The person is told they are suspended and given an
+address to appeal to; a silent failure to sign in is indistinguishable from a
+bug and produces a support thread instead of an appeal.
+
+**Reinstate is on the same row**, including after the fact. A suspension only an
+engineer with database access can reverse is not reversible in any sense the
+product can rely on.
 
 ---
 
@@ -99,8 +150,9 @@ So the room where abuse is most likely has a report button that does nothing,
 and the person who pressed it believes they have reported and concludes we
 ignored them. That is worse than having no button.
 
-`POST /api/mobile/messages/:messageId/report` exists and works. Wiring the tray
-to it is the fix, and it is tracked as T5 in the eng review.
+`POST /api/mobile/messages/:messageId/report` exists and works, and now lands in
+a queue somebody reads. Wiring the tray to it is the fix, and it is tracked as
+T5 in the eng review.
 
 ---
 
@@ -141,6 +193,7 @@ fault.
 1. **Paging on S1/S2 flags.** Without it every response time here is fiction.
 2. **Wire the group-chat report button** (T5, app-side).
 3. **A way to reply to a reporter.** Silence after a report reads as dismissal.
+   The queue now shows the reporter's name; it still cannot say anything back.
 4. **A way to tell an organiser** that something is happening at their event,
    without disclosing who reported it.
 5. **Group-chat abuse controls** (T7), before group chat ships.

@@ -19,14 +19,20 @@ export default async function DashboardLayout({
 
   // Only admins have these nav items, so only they pay for the counts.
   const isAdmin = session.user.role === "app_admin"
-  const [pendingFlags, pendingApplications] = isAdmin
+  // The badge covers both moderation queues. Counting only flags would leave a
+  // harassment report with no number anywhere in the chrome — and a report is
+  // the one of the two with a person waiting on the other end.
+  const [flagCount, userReportCount, messageReportCount, pendingApplications] = isAdmin
     ? await Promise.all([
         db.moderation_flags.count({ where: { status: "pending" } }),
+        db.user_reports.count({ where: { status: "pending" } }),
+        db.message_reports.count({ where: { status: "pending" } }),
         db.organiser_onboarding_requests.count({
           where: { status: { in: ["pending", "email_pending"] } },
         }),
       ])
-    : [0, 0]
+    : [0, 0, 0, 0]
+  const pendingFlags = flagCount + userReportCount + messageReportCount
 
   return (
     <SidebarProvider

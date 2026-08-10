@@ -3,14 +3,17 @@ import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
 import {
+  accountBlockReason,
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
+  SUSPENDED_MESSAGE,
 } from "@/lib/mobile-auth"
 import {
   successResponse,
   validationErrorResponse,
   unauthorizedResponse,
+  forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { signinSchema } from "@/lib/validations/auth"
@@ -73,6 +76,23 @@ export async function POST(request: NextRequest) {
     if (!isValidPassword) {
       return unauthorizedResponse("Invalid email or password")
     }
+
+    /*
+     * Checked after the password, deliberately.
+     *
+     * Refusing a suspended account before verifying the credential would turn
+     * this route into an oracle: anyone could learn which addresses are
+     * suspended without knowing a password. Suspension is not secret from the
+     * person suspended, but it is not public either.
+     *
+     * A deleted account cannot reach here — deletion nulls `password`, so the
+     * `!user.password` branch above already returned. The reason is handled
+     * anyway rather than assumed, because that is a property of a different
+     * file.
+     */
+    const blocked = accountBlockReason(user)
+    if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
+    if (blocked) return unauthorizedResponse("Invalid email or password")
 
     // Generate tokens
     const accessToken = signAccessToken(user.id, user.email)

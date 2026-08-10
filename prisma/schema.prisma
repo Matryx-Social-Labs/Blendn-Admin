@@ -541,6 +541,13 @@ model event_reports {
   @@index([user_id])
 }
 
+/// Someone reported a person.
+///
+/// Read by `/dashboard/moderation/reports`, beside `moderation_flags`. The two
+/// queues stay separate on purpose: a flag is the pipeline's opinion about one
+/// message and always has one, whereas `moderation_flags.message_id` is NOT
+/// NULL with a foreign key to `chat_messages` — so it cannot hold a report about
+/// a *person*, and cannot hold one about a private message either.
 model user_reports {
   id          String        @id @default(uuid()) @db.Uuid
   reporter_id String
@@ -551,14 +558,25 @@ model user_reports {
   created_at  DateTime      @default(now()) @db.Timestamptz(6)
   updated_at  DateTime      @default(now()) @db.Timestamptz(6)
 
+  /// A `User.id`, deliberately not a foreign key — the decision has to outlive
+  /// the reviewer's account. Same reasoning as `users.suspended_by`.
+  reviewed_by String?
+  reviewed_at DateTime? @db.Timestamptz(6)
+
   reporter User @relation("UserReportReporter", fields: [reporter_id], references: [id], onDelete: Cascade)
   reported User @relation("UserReportReported", fields: [reported_id], references: [id], onDelete: Cascade)
 
   @@index([reported_id])
   @@index([status])
   @@index([reporter_id])
+  @@index([status, created_at])
 }
 
+/// Someone reported a message, in a group room or a DM.
+///
+/// `message_id` has no foreign key because it points at one of two tables,
+/// discriminated by `message_type`. That is why these cannot be folded into
+/// `moderation_flags`, whose `message_id` is constrained to `chat_messages`.
 model message_reports {
   id           String        @id @default(uuid()) @db.Uuid
   reporter_id  String
@@ -570,11 +588,15 @@ model message_reports {
   created_at   DateTime      @default(now()) @db.Timestamptz(6)
   updated_at   DateTime      @default(now()) @db.Timestamptz(6)
 
+  reviewed_by String?
+  reviewed_at DateTime? @db.Timestamptz(6)
+
   reporter User @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
 
   @@index([message_id])
   @@index([status])
   @@index([reporter_id])
+  @@index([status, created_at])
 }
 
 /// One day (or session) of an event.
