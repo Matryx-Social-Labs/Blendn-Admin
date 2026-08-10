@@ -224,6 +224,23 @@ claim tying a Google token to *us* — went unchecked, so any token Google ever
 issued to any app would authenticate. Now returns null and logs an error when
 nothing is configured.
 
+> **Follow-up, 2026-08-10.** Setting the client ids on Railway exposed a
+> separate, pre-existing fault: only `GOOGLE_IOS_CLIENT_ID` was set on staging
+> *and* production. The native Google SDK audiences its id token to the **web**
+> client id, so `aud` never matched and Google sign-in had been failing for
+> every mobile user — under the old `length > 0` guard just as much as the new
+> one, since one id is still a non-empty list. Not caused by the fix above.
+>
+> All three ids are now set on both environments. The lesson is the silence:
+> the health check was green, email sign-in worked, and the only trace was a
+> `Google token audience mismatch` warning that reads like an attacker. Two
+> changes so the next one announces itself — `googleSignInConfigWarning()` in
+> `lib/env.ts`, warned at boot from `server.ts` (a warning, never a throw: an
+> email-only deployment is legitimate), and the mismatch log now carries the
+> received and configured audiences so misconfiguration is distinguishable from
+> a replayed token. Client ids ship in the app binary, so logging them leaks
+> nothing.
+
 **Audit log scope overwritten by a caller-supplied filter** —
 `lib/audit-actions.ts:80`. The tenant scope wrote `where.user_id`, then
 `filters.actorId` wrote the same key. Since action arguments are

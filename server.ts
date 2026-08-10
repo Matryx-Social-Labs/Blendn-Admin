@@ -5,7 +5,7 @@ import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
 import { stopPresenceSweeper } from "./lib/presence-sweeper"
 import { stopSentimentSweeper } from "./lib/sentiment-sweeper"
 import { ensureBucketExists } from "./lib/tigris"
-import { validateEnv } from "./lib/env"
+import { validateEnv, googleSignInConfigWarning } from "./lib/env"
 
 // Environment configuration
 const dev = process.env.NODE_ENV !== "production"
@@ -29,6 +29,16 @@ if (!dev) {
     // shows an error indefinitely, which is otherwise invisible from here.
     if (!process.env.LANDING_INGEST_TOKEN) {
       console.warn(`[${new Date().toISOString()}] ⚠ LANDING_INGEST_TOKEN unset — POST /api/leads will reject every request`)
+    }
+    // Same shape, same reason: a half-configured Google client set breaks
+    // sign-in for every mobile user while the health check stays green.
+    const googleWarning = googleSignInConfigWarning({
+      GOOGLE_WEB_CLIENT_ID: process.env.GOOGLE_WEB_CLIENT_ID,
+      GOOGLE_IOS_CLIENT_ID: process.env.GOOGLE_IOS_CLIENT_ID,
+      GOOGLE_ANDROID_CLIENT_ID: process.env.GOOGLE_ANDROID_CLIENT_ID,
+    })
+    if (googleWarning) {
+      console.warn(`[${new Date().toISOString()}] ⚠ Google sign-in: ${googleWarning}`)
     }
   } catch {
     console.error(`[${new Date().toISOString()}] ❌ Environment validation failed, see errors above`)

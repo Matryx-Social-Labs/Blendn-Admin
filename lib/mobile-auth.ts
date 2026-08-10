@@ -343,7 +343,18 @@ export async function verifyGoogleIdToken(
       return null
     }
     if (!GOOGLE_CLIENT_IDS.includes(payload.aud)) {
-      logger.warn("Google token audience mismatch")
+      /*
+       * Log which audience arrived. Client ids are public -- they ship inside
+       * the app binary and appear in every OAuth redirect -- so this leaks
+       * nothing, and without it the two causes are indistinguishable: a
+       * replayed token from someone else's app, and our own web client id
+       * missing from the environment. The second is what actually happened,
+       * and "Google token audience mismatch" alone read like the first.
+       */
+      logger.warn("Google token audience mismatch", {
+        received: payload.aud,
+        configured: GOOGLE_CLIENT_IDS,
+      })
       return null
     }
 
