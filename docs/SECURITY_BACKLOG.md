@@ -88,16 +88,6 @@ the night have both gone.
 This is the single highest-value piece of unbuilt moderation work. Everything
 else in the response plan depends on it.
 
-### HIGH — the group-chat report button does nothing
-
-`app/chat/[id].tsx:655` in the Expo app shows a confirmation tray, fires a
-haptic, and calls nothing. `POST /messages/:messageId/report` exists and the DM
-path uses it correctly; the group path was never wired.
-
-So the room where abuse is most likely has a report button that silently fails,
-and the person who pressed it believes they reported and concludes we ignored
-them. Worse than having no button. App-side fix, tracked as T5.
-
 ### MEDIUM — no way to reply to a reporter, or to warn an organiser
 
 Neither exists. Silence after a report reads as dismissal, and an organiser
@@ -123,6 +113,28 @@ Two things deliberately left as they are, with reasons:
   `'unsafe-inline'` and `'unsafe-eval'` come out.
 
 ## Closed
+
+### 2026-08-10 — the group-chat report button now reports
+
+**HIGH · fixed in Blendn#44**
+
+The Report action showed a confirmation tray, fired a **success** haptic, and
+called nothing. The room where abuse is most likely had a report button that
+silently did nothing and actively told the user it had worked — worse than no
+button, because they believe they reported it, nobody was told, and they
+conclude we ignored them.
+
+Fixed by reuse rather than new code: `showMessageReportOptions` in
+`lib/safetyUtils.ts` already did this correctly and `app/private-chat` already
+used it. The group screen had simply never imported it.
+
+**Two bugs, not one.** The handler cleared `selectedMessage` *before* showing
+the tray, so any callback would have seen it already gone. Wiring the API call
+without capturing the id first would have reported `undefined` and looked like
+it worked. The type checker then caught the second half — `Message` has no `id`,
+the field is `message_id` — which would have been the same silent-undefined
+failure.
+
 
 ### 2026-08-08 — the backlog's remaining items
 
