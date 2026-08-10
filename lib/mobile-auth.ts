@@ -58,6 +58,44 @@ export interface DecodedToken extends TokenPayload {
 const BCRYPT_ROUNDS = 12
 
 /**
+ * Why this account may not hold a session — or `null` if it may.
+ *
+ * Suspension existed as two columns and one check, in `socket-ops-auth.ts`,
+ * which guards the *organiser* ops socket. Nothing on the mobile side looked at
+ * it, so suspending an attendee stopped them opening a dashboard they never had
+ * and let them carry on in the app. A moderation queue whose only real lever
+ * does nothing is worse than one that admits it has no lever.
+ *
+ * Pure, and takes the fields rather than an id, because every caller has
+ * already loaded the user — a helper that re-queried would add a round trip to
+ * the two hottest auth paths to re-read what the caller is holding.
+ *
+ * Deletion comes back as its own reason so callers keep saying "invalid email
+ * or password" to a deleted account and never confirm it existed. Suspension is
+ * the opposite: the person is told, because a silent failure to sign in is
+ * indistinguishable from a bug and generates a support thread instead of an
+ * appeal.
+ *
+ * This is checked where tokens are *issued* — sign-in, OAuth, refresh, session
+ * — and not in `getAuthenticatedUser`, which is pure JWT verification with no
+ * database read. Putting it there would add a query to every mobile request to
+ * shorten a 15-minute access token's life. Suspending revokes refresh tokens,
+ * so the practical bound is: no new session, and the current one dies within
+ * one access-token expiry.
+ */
+export function accountBlockReason(
+  user: { deletedAt: Date | null; suspended_at: Date | null } | null
+): "deleted" | "suspended" | null {
+  if (!user || user.deletedAt) return "deleted"
+  if (user.suspended_at) return "suspended"
+  return null
+}
+
+/** What a suspended account is told, in the app, at every entry point. */
+export const SUSPENDED_MESSAGE =
+  "This account has been suspended. Contact support@blendn.app if you think that's a mistake."
+
+/**
  * Sign an access token (15 min expiry)
  */
 export function signAccessToken(userId: string, email: string): string {

@@ -3,10 +3,12 @@ import { redirect } from "next/navigation"
 import type { moderation_status_type } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
+import { db } from "@/lib/db"
 import { cn } from "@/lib/utils"
 
 import { getModerationQueue } from "./actions"
 import { ModerationTable } from "./moderation-table"
+import { QueueSwitch } from "./queue-switch"
 
 export const dynamic = "force-dynamic"
 
@@ -30,10 +32,20 @@ export default async function ModerationPage({
   const active = (TABS.find((tab) => tab.value === status)?.value ??
     "pending") as moderation_status_type
 
-  const { rows, counts, highConfidence } = await getModerationQueue(active)
+  const [{ rows, counts, highConfidence }, pendingReports] = await Promise.all([
+    getModerationQueue(active),
+    // Two cheap counts rather than the whole reports query: this page only
+    // needs the number on the tab.
+    Promise.all([
+      db.user_reports.count({ where: { status: "pending" } }),
+      db.message_reports.count({ where: { status: "pending" } }),
+    ]).then(([u, m]) => u + m),
+  ])
 
   return (
     <div className="flex flex-col gap-5">
+      <QueueSwitch active="flags" reportCount={pendingReports} />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <nav className="flex gap-1.5" aria-label="Moderation status">
           {TABS.map((tab) => (

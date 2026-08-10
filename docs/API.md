@@ -67,6 +67,27 @@ An account created through Google or Apple has no password and returns the same
 generic `401` as a wrong password — deliberately, so the response is not an
 account-existence oracle.
 
+### A suspended account
+
+Every route that issues a token — `signin`, `google`, `apple`, `refresh` and
+`session` — returns **403** with a message naming the suspension and an address
+to appeal to. The client should show it rather than treating 403 as a generic
+failure: a silent refusal to sign in is indistinguishable from a bug.
+
+```json
+{ "success": false, "error": "This account has been suspended. Contact support@blendn.app if you think that's a mistake." }
+```
+
+On `signin` it is checked **after** the password, so the response cannot be used
+to discover which addresses are suspended. Suspending also revokes the account's
+refresh tokens, so an existing session stops working within one 15-minute access
+token — `getAuthenticatedUser` verifies the JWT without a database read, and
+adding one there would cost a query on every mobile request to shorten that
+window.
+
+A deleted account keeps returning the generic 401 or `User not found` it always
+did; deletion is never confirmed to a caller.
+
 ### Password reset
 
 Mobile clients call the shared web endpoints; there is no `/api/mobile` twin.
@@ -491,6 +512,26 @@ Messages go through a **pre-emit** pipeline — moderation runs before the messa
 Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden messages in 1 hour. Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
 Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent.
+
+### Reports from the app
+
+| Method | Endpoint | Writes |
+|--------|----------|--------|
+| POST | `/users/:userId/report` | `user_reports` |
+| POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
+
+Both return `201 { reported: true }` and are rate limited per user.
+
+These are **not** moderation flags and are not returned by the admin flag API
+above. A flag is the pipeline's opinion about one message; a report is a person
+asking for help, and may be about a person rather than a message. They are read
+at `/dashboard/moderation/reports`, where an admin can dismiss, remove the
+message (group rooms only — `private_messages` has no `deleted_at`), or suspend
+the account. Until 0.61.0 both tables were written by these routes and read by
+nothing at all.
+
+Nothing is returned to the reporter beyond the 201. Replying to a reporter does
+not exist yet; see `docs/MODERATION_RESPONSE.md`.
 
 ---
 

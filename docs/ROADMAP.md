@@ -53,7 +53,33 @@ Full reasoning, competitive position and market data:
 
 ## Now
 
-Nothing in flight.
+**After signup: retire onboarding, ask once, gate at the point of use.** Fifteen
+PRs, reviewed by `/plan-eng-review` and by Codex. The app half is
+`blendn/ROADMAP.md`; these are the server ones. "Server first" means **deployed**
+— the app points at `staging-api.blendn.app`, so promotion to staging is part of
+each PR's definition of done, not merging to `dev`.
+
+| PR | What | State |
+|---|---|---|
+| 1 | `just_here` damping; `name` required, `age` accepted; `intent_default`/`gender`/`interested_in` writable | **Done** (#183) |
+| 2 | Delete the roster completeness filter | **Done** (#184) |
+| 3 | Reports reach a human; suspension reaches the phone | **Done** (#185) |
+| 4 | Age policy: dating needs 18+, `events.min_age`, enforced at check-in | Next |
+| 5 | `profiles.work_field` + `/work-fields`, on the card, suppressed in small rooms | Next |
+| 6 | Dating compatibility — `orientation`, `deriveInterestedIn`, tag not filter | Next |
+| 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | Next |
+| 8 | Email verification, gating chat from the *second* event | After app PR 13 |
+| 9 | Seed: fix the review account's missing occurrence; `seed:room` for a 30-day event | After 2 |
+| 15 | Scrub the new fields on account deletion | Last |
+
+PRs 10–14 are app-side and tracked in `blendn/ROADMAP.md`.
+
+**Two sequencing constraints, both learned the hard way.** `age` cannot become
+required until the app sends it — the first draft of this plan called PR 1 a
+no-op while making it required, which would have 400'd every production signup.
+And `checkin/route.ts:220`'s `reveal_by_default` seeding cannot stop before the
+app has the suggestion prompt, or existing users go silently anonymous with
+nothing offering the name back.
 
 ---
 
@@ -312,6 +338,24 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.61.0
+
+- **Reports reach a human** (#185). `user_reports` and `message_reports` were
+  written by two mobile routes and read by nothing in either repo. Now a queue
+  at `/dashboard/moderation/reports` with dismiss / remove message / suspend,
+  each writing `audit_logs`. Remove is group-rooms-only: `private_messages` has
+  no `deleted_at`, and the lever against a DM is the person, not the message.
+
+- **Suspension reaches the phone** (#185). `users.suspended_at` was read only by
+  `socket-ops-auth.ts`, so suspending an attendee changed nothing about the app
+  they were in. Checked now wherever a mobile token is issued, with refresh
+  tokens revoked at the moment of suspension.
+
+- **`intent_default`, `gender`, `interested_in` writable; `age` accepted at
+  signup; the `just_here` damping no longer punishes the honest answer** (#183).
+
+- **The roster stops filtering on fields it does not serve** (#184).
 
 ### 0.56.0
 

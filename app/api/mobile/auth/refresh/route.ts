@@ -2,16 +2,19 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import {
+  accountBlockReason,
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
   verifyRefreshToken,
   revokeRefreshToken,
+  SUSPENDED_MESSAGE,
 } from "@/lib/mobile-auth"
 import {
   successResponse,
   validationErrorResponse,
   unauthorizedResponse,
+  forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { refreshTokenSchema } from "@/lib/validations/auth"
@@ -46,9 +49,19 @@ export async function POST(request: NextRequest) {
       where: { id: decoded.userId },
     })
 
-    if (!user || user.deletedAt) {
-      return unauthorizedResponse("User not found")
-    }
+    /*
+     * The boundary that actually enforces a suspension.
+     *
+     * Access tokens are 15 minutes and are verified without a database read, so
+     * this — plus revoking refresh tokens at the moment of suspension — is what
+     * bounds a suspended session's remaining life. Refusing here without
+     * rotating means the token they are holding stays revoked-free but useless.
+     */
+    const blocked = accountBlockReason(user)
+    if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
+    // `!user` is already covered by `blocked === "deleted"`; naming it again is
+    // what narrows the type for everything below.
+    if (blocked || !user) return unauthorizedResponse("User not found")
 
     // Revoke the old refresh token (token rotation)
     await revokeRefreshToken(oldRefreshToken)

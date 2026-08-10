@@ -1,12 +1,13 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { accountBlockReason, getAuthenticatedUser, SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
   notFoundResponse,
+  forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 
@@ -26,9 +27,14 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    if (!user || user.deletedAt) {
-      return notFoundResponse("User not found")
-    }
+    // The app calls this on every cold start, so it is where a suspension the
+    // user has not yet been told about surfaces as something other than a
+    // screen that silently fails to load.
+    const blocked = accountBlockReason(user)
+    if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
+    // `!user` is already covered by `blocked === "deleted"`; naming it again is
+    // what narrows the type for everything below.
+    if (blocked || !user) return notFoundResponse("User not found")
 
     // Return user directly (not wrapped in { user: ... })
     const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
