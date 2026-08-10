@@ -5,6 +5,32 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.0] - 2026-08-10
+
+### Fixed
+
+- **Walking into a room can no longer name you.** Check-in seeded `revealed`
+  from `profiles.reveal_by_default`, so someone who chose to be visible at a
+  work meetup in March was visible at a club in August without touching
+  anything. `matches/preferences` says two files away that reveal is "never
+  flipped on implicitly" — this was the implicit flip.
+
+  Check-in now always creates `revealed: false`, and returns
+  `revealSuggestion: true` for those accounts instead. The app offers it, and a
+  tap applies it. Suggesting rather than undoing means there is no window in
+  which somebody is named before they have answered, and declining writes
+  nothing because the row is already false.
+
+- **`remember` was writing something it never said.** One flag set *both*
+  `intent_default` and `reveal_by_default`, while the app renders that switch
+  underneath the reveal toggle labelled "Do this at future events too". Agreeing
+  to be named at future events silently overwrote a person-level intent set on a
+  different screen, for a different reason, with no indication it had changed.
+
+  Split into `rememberIntent` and `rememberReveal`. `remember` is still accepted
+  and still means both, because a build in the store is a client you cannot
+  upgrade.
+
 ## [0.67.0] - 2026-08-10
 
 ### Fixed
