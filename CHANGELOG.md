@@ -5,6 +5,32 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.60.0] - 2026-08-10
+
+### Added
+
+- **Matching tells you when it has stopped working.** `user_interests` has been
+  empty in production while all 810 tests stayed green, so every match card
+  returned "no shared interests" for everyone and nobody noticed for weeks. The
+  ranking degrades honestly and silently, which is the worst combination:
+  nothing errors, so nothing tells you.
+
+  `/api/health` now reports the share of people who checked in over the last
+  seven days holding at least two structured interests. A row count would not
+  have caught this -- one person picking one category makes it non-zero while
+  the room stays unmatchable -- so the signal is coverage, not volume.
+
+  Kept out of the status code on purpose. Railway gates deploys on this
+  endpoint, and refusing to deploy the fix for a product problem because of the
+  product problem would be its own outage.
+
+- **Six tests pinning the room production actually has.** Every existing test in
+  `matching.test.ts` seeds interests, so none of them describe the live state.
+  These pin what broken is allowed to look like: everyone still returned rather
+  than an empty screen, no overlap claimed that cannot be substantiated, no
+  score invented to paper over it, ordering still on something real, and the
+  pseudonym rule intact when there is nothing else to put on the card.
+
 ## [0.59.0] - 2026-08-08
 
 ### Fixed
