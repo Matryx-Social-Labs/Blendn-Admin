@@ -98,6 +98,34 @@ who reported it. Both are in the build order in `MODERATION_RESPONSE.md`.
 
 Nothing else outstanding. Everything the 2026-08-08 sweep found is closed below.
 
+---
+
+## Closed — 2026-08-10
+
+### MEDIUM — a seed password hardcoded in a file that became public
+
+`scripts/seed-room.ts` carried `const PASSWORD = "correct horse battery staple"`
+as a constant. Both repositories were made public the same day, at which point
+twenty-five accounts on `staging-api.blendn.app` had a password anyone could
+read, with predictable addresses (`roomseed-aisha@blendn.invalid`) and the
+hostname documented two directories away in `DEPLOYMENT.md`.
+
+Staging is a separate database from production and holds only seeded fake data,
+so nothing real was reachable — but it was an unauthenticated stranger's path to
+a live API with a valid session, including the ability to send chat messages
+into a seeded room.
+
+**A hardcoded credential is only ever as private as the least private place the
+code ends up**, and that is not a property you can check on the day you write
+it. The rule this leaves behind: seeds take their password from the environment
+with no default, like `seed-review-account.ts` already did.
+
+Fixed: `SEED_ROOM_PASSWORD` is required and must be 12+ characters, the script
+refuses to run without it, the password is re-asserted on every run so a leak
+can be rotated by re-seeding, and the summary prints the variable name rather
+than the value. The staging accounts were rotated to a fresh 28-character
+password and the old one verified dead — signing in with it now returns 401.
+
 The next pass should start where this one could not reach: **the mobile client**
 (`Blendn/SECURITY_RELIABILITY_BACKLOG.md` tracks that half), and a re-read of
 whatever ships next — a sweep is a snapshot, not a property.

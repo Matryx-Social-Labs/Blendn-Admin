@@ -1,8 +1,8 @@
 /**
  * A room you can actually test in: one long-running event with people in it.
  *
- *   SEED_ROOM=yes DATABASE_URL=... npx tsx scripts/seed-room.ts
- *   SEED_ROOM=yes DATABASE_URL=... npx tsx scripts/seed-room.ts --clean
+ *   SEED_ROOM=yes SEED_ROOM_PASSWORD=... DATABASE_URL=... npx tsx scripts/seed-room.ts
+ *   SEED_ROOM=yes SEED_ROOM_PASSWORD=... DATABASE_URL=... npx tsx scripts/seed-room.ts --clean
  *   npm run seed:room
  *
  * Matching, the roster, the dating tag, the small-room floor and the work-field
@@ -77,8 +77,19 @@ const CITY = {
   timezone: "Asia/Kolkata",
 }
 
-/** Password for every seeded account. They are test accounts and say so. */
-const PASSWORD = "correct horse battery staple"
+/**
+ * Required, with no default, and deliberately not printed.
+ *
+ * This was a constant in this file — and the day the repository went public,
+ * twenty-five accounts on a reachable host had a password anybody could read,
+ * with predictable addresses (`roomseed-aisha@blendn.invalid`) and the hostname
+ * documented two directories away. Fake data on a separate database, so the
+ * blast radius was small; an open door either way, and one this file created.
+ *
+ * A hardcoded credential is only ever as private as the least private place the
+ * code ends up, which is not a property you can check at the time you write it.
+ */
+const PASSWORD = process.env.SEED_ROOM_PASSWORD
 
 type Gender = "woman" | "man" | "non_binary" | "prefer_not_to_say"
 type Intent = "dating" | "networking" | "friendship" | "just_here"
@@ -208,6 +219,14 @@ async function main() {
   const url = new URL(process.env.DATABASE_URL!)
   console.log(`target: ${url.host}${url.pathname}  (user: ${url.username})`)
 
+  if (!PASSWORD || PASSWORD.length < 12) {
+    console.error(
+      "REFUSING: set SEED_ROOM_PASSWORD to at least 12 characters.\n" +
+        "There is no default on purpose — see the comment above the constant."
+    )
+    process.exit(1)
+  }
+
   if (process.env.SEED_ROOM !== "yes") {
     console.error(
       "REFUSING: set SEED_ROOM=yes to confirm. This writes 25 accounts and an event.\n" +
@@ -303,7 +322,14 @@ async function main() {
 
     await db.user.upsert({
       where: { id },
-      update: { name: person.name },
+      /*
+       * The password is re-asserted, not just set on create.
+       *
+       * Otherwise re-running could never rotate a credential that had leaked —
+       * which is exactly what was needed the day it did. `seed-review-account.ts`
+       * re-asserts for the same reason.
+       */
+      update: { name: person.name, password: hashed },
       create: {
         id,
         email: `${TAG}-${person.handle}@blendn.invalid`,
@@ -404,7 +430,9 @@ async function main() {
   console.log(`geofence     ${CITY.latitude}, ${CITY.longitude} · 2000m`)
   console.log(`attendees    ${created} checked in, ${interestRows} interest rows`)
   console.log(`revealed     ${PEOPLE.filter((p) => p.revealed).length}`)
-  console.log(`sign in as   ${TAG}-aisha@blendn.invalid … password: ${PASSWORD}`)
+  // The address, never the password. It is in the environment of whoever ran
+  // this, and printing it puts it in a scrollback and a CI log.
+  console.log(`sign in as   ${TAG}-aisha@blendn.invalid … password: $SEED_ROOM_PASSWORD`)
   console.log("")
   console.log(`remove it    SEED_ROOM=yes npx tsx scripts/seed-room.ts --clean`)
 }
