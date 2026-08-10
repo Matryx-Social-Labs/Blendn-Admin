@@ -77,6 +77,36 @@ railway up
 railway run npx prisma migrate deploy
 ```
 
+### 7. Seed the App Store review account
+
+**Mandatory after any database wipe, and before any App Store or Play
+submission.**
+
+```bash
+APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... npm run seed:review
+```
+
+App Review signs in with a real account. If it does not exist — or the database
+was cleared after it was created — the build is rejected, and you find out days
+later rather than at deploy time. The script is idempotent, so running it when
+it is not needed costs nothing; forgetting it costs a review cycle.
+
+It also creates an event if none is upcoming. An empty Events tab reads as a
+broken app to a reviewer, which is a likelier rejection than anything about
+sign-in.
+
+Two constraints on the password, both enforced by the script rather than left to
+be discovered:
+
+- At least 12 characters, and it must pass `checkPassword` — the same rule
+  signup and password reset enforce.
+- **It must not contain `blendn`.** That stem is blocklisted and trailing digits
+  are stripped before the check, so `Blendn12345!` is refused.
+
+Put the credentials in **App Store Connect → App Review Information →
+Sign-In Information**. Note there that onboarding can be reviewed by creating a
+fresh account, since this one is deliberately already onboarded.
+
 ## Domain Setup for blendn.app
 
 ### Structure
