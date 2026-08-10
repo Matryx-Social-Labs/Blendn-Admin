@@ -56,9 +56,41 @@ export async function DELETE(request: NextRequest) {
           // their account would expect to be gone.
           goals: [],
           looking_for: [],
+          /*
+           * The matching inputs, which are the most sensitive fields on the row.
+           *
+           * `gender`, `orientation` and `interested_in` are collected only from
+           * people who ticked dating, and are returned to nobody but their
+           * owner. A deleted account that keeps its owner's sexual orientation
+           * is the kind of thing found in an audit rather than in a review —
+           * and "delete my account" plainly means this too.
+           *
+           * `interests` above is the free-text column. The structured rows live
+           * in `user_interests` and would cascade if the `User` row were
+           * deleted — it deliberately is not, so they are deleted explicitly
+           * below.
+           */
+          gender: null,
+          orientation: null,
+          interested_in: [],
+          intent_default: [],
+          reveal_by_default: false,
+          work_field: null,
           onboarded: false,
         },
       }),
+      // Structured interests. Nothing cascades here, because the `User` row is
+      // deliberately kept — deleting it would cascade other people's chat
+      // history and event history along with it.
+      db.user_interests.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * What they were open to, and whether they were named, at each event.
+       *
+       * `event_check_ins` stays: attendance is somebody else's history too —
+       * the organiser's headcount, and the co-presence that lets people who met
+       * them still hold a conversation. The *choices* are personal and go.
+       */
+      db.event_match_preferences.deleteMany({ where: { user_id: authUser.userId } }),
       db.mobile_refresh_tokens.deleteMany({ where: { user_id: authUser.userId } }),
       db.push_tokens.deleteMany({ where: { user_id: authUser.userId } }),
       db.user_oauth_accounts.deleteMany({ where: { user_id: authUser.userId } }),

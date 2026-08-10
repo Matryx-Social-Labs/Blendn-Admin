@@ -651,3 +651,29 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | GET | `/checkins/active` | Get user's active check-ins |
 | POST | `/notifications/token` | Register push token |
 | DELETE | `/notifications/token` | Remove push token |
+| DELETE | `/account` | Delete your own account |
+
+### DELETE /account
+
+**Anonymises rather than hard-deletes.** `organized_events`, `chat_messages` and
+several other relations cascade on `User`, so removing the row would destroy
+other people's event and chat history to honour one person's request. Instead
+the row is kept, every field on it is scrubbed, `deletedAt` is set, and all auth
+is revoked — refresh tokens, push tokens, OAuth links and dashboard sessions.
+The account can never be signed back into.
+
+That decision has a cost worth stating: **nothing is removed automatically**, so
+every column added to `profiles` survives deletion until it is explicitly
+scrubbed. `goals` and `looking_for` already survived a release that way.
+`__tests__/account-deletion.test.ts` now reads the schema and fails when a field
+is neither scrubbed nor listed as deliberately kept.
+
+Scrubbed: name, phone, age, location, bio, occupation, education, interests,
+photos, goals, looking_for, **gender, orientation, interested_in,
+intent_default, reveal_by_default, work_field**, plus the structured
+`user_interests` rows and every `event_match_preferences` row.
+
+Kept: the four settings booleans (how a dead account would behave, not who the
+person was), and `event_check_ins` — attendance is the organiser's history too,
+and it is the co-presence that keeps a conversation open for someone who
+actually met them. What they were *open to* is only theirs, and goes.
