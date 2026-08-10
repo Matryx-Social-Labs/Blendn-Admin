@@ -89,6 +89,48 @@ export function getEnv(): Env {
 }
 
 /**
+ * Why Google sign-in is about to fail, or null if the config is coherent.
+ *
+ * This exists because it already happened. Production ran with only
+ * `GOOGLE_IOS_CLIENT_ID` set, and `@react-native-google-signin/google-signin`
+ * asks Google to audience the id token to the **web** ("server") client id --
+ * so `verifyGoogleIdToken` rejected every real sign-in on `aud`, and the only
+ * trace was a `Google token audience mismatch` warning that reads like an
+ * attacker rather than like our own misconfiguration.
+ *
+ * Nothing failed loudly: the health check was green, the server booted, and
+ * email sign-in worked. A config that breaks one auth path and nothing else is
+ * exactly the config that survives unnoticed, so it has to announce itself at
+ * boot.
+ *
+ * Deliberately a warning and not a throw. An environment that offers only
+ * email sign-in is legitimate, and refusing to boot over it would turn a
+ * degraded login into an outage.
+ */
+export function googleSignInConfigWarning(
+  // The three values, not `process.env`. This repo's `ProcessEnv` is a closed
+  // type with no index signature, so neither a default nor a whole-env
+  // parameter typechecks without a cast — and a cast here would defeat the
+  // point of a function whose whole job is catching a config mistake.
+  env: {
+    GOOGLE_WEB_CLIENT_ID?: string
+    GOOGLE_IOS_CLIENT_ID?: string
+    GOOGLE_ANDROID_CLIENT_ID?: string
+  }
+): string | null {
+  const web = env.GOOGLE_WEB_CLIENT_ID
+  const native = env.GOOGLE_IOS_CLIENT_ID || env.GOOGLE_ANDROID_CLIENT_ID
+
+  if (!web && !native) {
+    return "no GOOGLE_*_CLIENT_ID set — every Google sign-in will be rejected (email sign-in is unaffected)"
+  }
+  if (!web) {
+    return "GOOGLE_WEB_CLIENT_ID unset while a native client id is set — the mobile SDK audiences its id token to the *web* client, so every Google sign-in will fail on `aud`"
+  }
+  return null
+}
+
+/**
  * Check if running in production
  */
 export function isProduction(): boolean {
