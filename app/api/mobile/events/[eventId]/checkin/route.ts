@@ -279,7 +279,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         event_id: eventId,
         user_id: authUser.userId,
         intent: seededIntents,
-        revealed: profile?.reveal_by_default ?? false,
+        /*
+         * Always false. Never seeded from `reveal_by_default`.
+         *
+         * This used to read the profile default, which meant walking into a
+         * room could name you — `matches/preferences` says two files away that
+         * reveal is "never flipped on implicitly", and this was the implicit
+         * flip. Someone who chose to be visible at a work meetup in March was
+         * visible at a club in August without touching anything.
+         *
+         * The default is not discarded: it comes back as `revealSuggestion`
+         * below, and the app offers it as a tap. Suggesting rather than undoing
+         * is the whole point — there is no window in which somebody is named
+         * before they have answered.
+         */
+        revealed: false,
       },
       update: {},
     })
@@ -402,6 +416,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         checkInTime: checkIn.check_in_time,
         eventId: checkIn.event_id,
       },
+      /*
+       * The suggestion, not the state.
+       *
+       * True when this person has `reveal_by_default` set — which used to mean
+       * they were silently revealed here. Now it means the app should ask:
+       * "you usually join as Sagar, do that here?" A tap turns it on.
+       *
+       * Sent on the check-in response rather than fetched separately so the
+       * prompt can be shown immediately, and because a second round trip is a
+       * window in which the room renders with no prompt at all.
+       *
+       * `revealed` is deliberately absent: it is always false at this point,
+       * and returning it would invite a client to treat it as the answer.
+       */
+      revealSuggestion: profile?.reveal_by_default === true,
       message: "Successfully checked in",
     })
   } catch (error) {

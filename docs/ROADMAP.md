@@ -82,9 +82,9 @@ using it means the previous build cannot run at all.
 **Two sequencing constraints, both learned the hard way.** `age` cannot become
 required until the app sends it — the first draft of this plan called PR 1 a
 no-op while making it required, which would have 400'd every production signup.
-And `checkin/route.ts:220`'s `reveal_by_default` seeding cannot stop before the
-app has the suggestion prompt, or existing users go silently anonymous with
-nothing offering the name back.
+And `reveal_by_default` seeding could not stop before the app had somewhere to
+offer the name back — **resolved in 0.68.0** by sending `revealSuggestion` on
+the check-in response, so the default is offered rather than discarded.
 
 ---
 
@@ -343,6 +343,15 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.68.0
+
+- **Check-in stops naming people implicitly** (#194) — `revealed` is always
+  false on create, and `reveal_by_default` comes back as `revealSuggestion` for
+  the app to offer as a tap.
+
+- **`remember` split into `rememberIntent` and `rememberReveal`** (#194). One
+  flag wrote both defaults while the UI labelled it as reveal only.
 
 ### 0.67.0
 

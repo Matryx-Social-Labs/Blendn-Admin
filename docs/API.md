@@ -415,6 +415,27 @@ absent from every response but the owner's, and a match card carries neither.
 has to be something a person did in that room, not a profile switch they flipped
 once — see `PUT /events/:eventId/matches/preferences`.
 
+### Reveal is suggested, never applied
+
+**Check-in always creates `revealed: false`.** It used to seed from
+`profiles.reveal_by_default`, which meant walking into a room could name you:
+someone who chose to be visible at a work meetup in March was visible at a club
+in August without touching anything.
+
+The default is not discarded. `POST /events/:eventId/checkin` returns
+**`revealSuggestion: true`** for those accounts, and the app offers it — *"You
+usually join as Sagar. Do that here?"* — applied by a tap. Suggesting rather than
+undoing means there is no window in which somebody is named before they have
+answered, and declining writes nothing at all because the row is already false.
+
+**`remember` on the preferences route is split.** It set *both*
+`intent_default` and `reveal_by_default`, while the app renders that switch
+under the reveal toggle labelled "Do this at future events too" — so agreeing to
+be named at future events silently overwrote a person-level intent set on a
+different screen. Send `rememberIntent` or `rememberReveal`. `remember` is still
+accepted and still means both, because a build in the store is a client you
+cannot upgrade.
+
 ### Dating compatibility is a tag filter, not a pool filter
 
 `lib/matches.ts` never read gender, so a straight man who ticked dating got

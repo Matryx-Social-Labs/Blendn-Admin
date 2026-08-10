@@ -271,3 +271,53 @@ describe("PUT /profiles/:userId — orientation and interested_in", () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe("PUT /events/:eventId/matches/preferences — remember means one thing at a time", () => {
+  beforeEach(() => {
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 30 })
+  })
+
+  it("rememberReveal writes the reveal default and NOT the intent default", async () => {
+    /*
+     * The bug this splits. `remember` set both, and the app renders that switch
+     * under the reveal toggle labelled "Do this at future events too" — so
+     * agreeing to be named at future work meetups silently overwrote a
+     * person-level intent set on a different screen for a different reason.
+     */
+    await putPrefs(prefsReq({ intent: ["networking"], revealed: true, rememberReveal: true }), {
+      params: Promise.resolve({ eventId: EVENT }),
+    })
+    expect(mockDb.profiles.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { reveal_by_default: true } })
+    )
+  })
+
+  it("rememberIntent writes the intent default and NOT the reveal default", async () => {
+    await putPrefs(prefsReq({ intent: ["networking"], revealed: true, rememberIntent: true }), {
+      params: Promise.resolve({ eventId: EVENT }),
+    })
+    expect(mockDb.profiles.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { intent_default: ["networking"] } })
+    )
+  })
+
+  it("still honours the deprecated `remember` as both", async () => {
+    // The shipped build sends this, and an app in the store is a client you
+    // cannot upgrade. Removing it the day the split lands would break them.
+    await putPrefs(prefsReq({ intent: ["dating"], revealed: true, remember: true }), {
+      params: Promise.resolve({ eventId: EVENT }),
+    })
+    expect(mockDb.profiles.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { intent_default: ["dating"], reveal_by_default: true },
+      })
+    )
+  })
+
+  it("writes no profile default when neither flag is sent", async () => {
+    await putPrefs(prefsReq({ intent: ["networking"], revealed: true }), {
+      params: Promise.resolve({ eventId: EVENT }),
+    })
+    expect(mockDb.profiles.update).not.toHaveBeenCalled()
+  })
+})

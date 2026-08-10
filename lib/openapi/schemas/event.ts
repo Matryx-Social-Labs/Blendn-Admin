@@ -183,6 +183,14 @@ export const CheckinResponseSchema = z
       checkInTime: z.string().datetime(),
       eventId: z.string().uuid(),
     }),
+    /**
+     * Offer to name them here — a *suggestion*, never a state.
+     *
+     * True when `profiles.reveal_by_default` is set. Check-in always creates
+     * `revealed: false`; the app asks "you usually join as Sagar, do that
+     * here?" and a tap applies it.
+     */
+    revealSuggestion: z.boolean(),
     message: z.string(),
   })
   .openapi("CheckinResponse")
@@ -367,6 +375,11 @@ export const MatchPreferencesSchema = z
   .object({
     intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).optional(),
     revealed: z.boolean().optional(),
+    /** Writes `profiles.intent_default`. */
+    rememberIntent: z.boolean().optional(),
+    /** Writes `profiles.reveal_by_default` — the *suggestion*, not a state. */
+    rememberReveal: z.boolean().optional(),
+    /** @deprecated Means both. Kept for builds already in the store. */
     /** Also write the profile default, not just this event. */
     remember: z.boolean().optional(),
   })

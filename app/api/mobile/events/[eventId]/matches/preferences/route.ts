@@ -21,7 +21,26 @@ interface RouteParams {
 const preferencesSchema = z.object({
   intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).max(4).optional(),
   revealed: z.boolean().optional(),
-  /** Also make this the default for future events. */
+
+  /*
+   * Two remembers, because one of them was writing something it never said.
+   *
+   * `remember` set **both** `intent_default` and `reveal_by_default`, and the
+   * app renders that switch underneath the reveal toggle, labelled "Do this at
+   * future events too". So somebody agreeing to be named at future work meetups
+   * silently overwrote their person-level intent as well — a field they had set
+   * on a different screen, for a different reason, and were given no indication
+   * had changed.
+   */
+  rememberIntent: z.boolean().optional(),
+  rememberReveal: z.boolean().optional(),
+
+  /**
+   * @deprecated Accepted so the shipped build keeps working; means both.
+   *
+   * Removable once no installed version sends it, which is not the same day
+   * this ships — an app in the store is a client you cannot upgrade.
+   */
   remember: z.boolean().optional(),
 })
 
@@ -32,12 +51,14 @@ const preferencesSchema = z.object({
  * party is often only there for the talk on Tuesday. Asking once at signup and
  * never again would get one of those wrong every time.
  *
- * `remember: true` also writes the profile default, which is what the "ask me
- * once" path in onboarding uses. Without it this is a one-night answer.
+ * `rememberIntent` and `rememberReveal` each write the matching profile default.
+ * Without one of them this is a one-night answer.
  *
- * Reveal defaults to false everywhere and is never flipped on implicitly — the
- * room is pseudonymous, and being named has to be something a person did rather
- * than something that happened to them.
+ * Reveal defaults to false everywhere and is **never** flipped on implicitly —
+ * the room is pseudonymous, and being named has to be something a person did in
+ * that room rather than something that happened to them. `reveal_by_default` is
+ * a suggestion the app offers after check-in, applied by a tap; check-in itself
+ * always creates `revealed: false`.
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
@@ -52,6 +73,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const parsed = preferencesSchema.safeParse(await request.json())
     if (!parsed.success) return validationErrorResponse(parsed.error)
     const { intent, revealed, remember } = parsed.data
+    // The deprecated flag means both, which is what it always did.
+    const rememberIntent = parsed.data.rememberIntent ?? remember ?? false
+    const rememberReveal = parsed.data.rememberReveal ?? remember ?? false
 
     const checkIn = await db.event_check_ins.findFirst({
       where: { event_id: eventId, user_id: authUser.userId },
@@ -103,12 +127,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       select: { intent: true, revealed: true },
     })
 
-    if (remember) {
+    if (rememberIntent || rememberReveal) {
       await db.profiles.update({
         where: { id: authUser.userId },
         data: {
-          ...(intent !== undefined ? { intent_default: intent } : {}),
-          ...(revealed !== undefined ? { reveal_by_default: revealed } : {}),
+          ...(rememberIntent && intent !== undefined ? { intent_default: intent } : {}),
+          ...(rememberReveal && revealed !== undefined ? { reveal_by_default: revealed } : {}),
         },
       })
     }
