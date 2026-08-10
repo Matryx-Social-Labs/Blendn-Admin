@@ -409,6 +409,29 @@ absent from every response but the owner's, and a match card carries neither.
 has to be something a person did in that room, not a profile switch they flipped
 once — see `PUT /events/:eventId/matches/preferences`.
 
+### Field of work
+
+`work_field` is a **slug from `GET /work-fields`**, never free text. Eighteen
+buckets, no employer, no seniority.
+
+It is deliberately a different column from `occupation`, which stays behind the
+identity gate: "works in design" is an attribute, "Principal Designer at Swiggy"
+is an address. So `work_field` is returned to anyone who can see the profile,
+and appears on match cards as a **label** (`"Design"`) — a client never receives
+a raw slug and never needs its own copy of the mapping.
+
+Serving the list rather than hardcoding it is the lesson from `interests`, which
+was collected as free text: "Software" and "software engineering" were two
+buckets that could never match, and the fix cost two PRs. A validator that only
+checked `z.string()` would repeat it exactly.
+
+**Suppressed in small rooms.** A match card omits `workField` when the room has
+fewer than 8 other attendees. The roster already gives an unrevealed person an
+age and a city; adding a field of work makes four attributes, and "29,
+Bengaluru, works in fintech, into techno and board games" is one specific person
+in a room of eight. Ranking still uses it there — the score never leaves the
+server, so suppressing the *attribute* costs nothing in ordering.
+
 ### Dating is 18+
 
 Enforced on **both** write paths — `PUT /profiles/:userId` and
@@ -581,6 +604,7 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/categories` | List all categories |
+| GET | `/work-fields` | The eighteen coarse fields of work, as `{ slug, label }` |
 | GET | `/checkins/active` | Get user's active check-ins |
 | POST | `/notifications/token` | Register push token |
 | DELETE | `/notifications/token` | Remove push token |

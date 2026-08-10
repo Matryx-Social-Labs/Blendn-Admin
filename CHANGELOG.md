@@ -5,6 +5,39 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.63.0] - 2026-08-10
+
+### Added
+
+- **Field of work, coarse enough to show a stranger.** A pseudonymous card could
+  say "you both picked Techno" and nothing about what anyone does, because the
+  only thing the profile held was `occupation` — free text like "Senior Backend
+  Engineer at Razorpay", which is an identity and stays behind the identity
+  gate.
+
+  `profiles.work_field` is a slug from a server-owned list of eighteen buckets:
+  no employer, no seniority, no free text. `GET /api/mobile/work-fields` serves
+  the list so a client cannot invent a nineteenth value and cannot go stale
+  against a build. That endpoint exists because of `profiles.interests`, which
+  was collected as free text — "Software" and "software engineering" were two
+  buckets that never matched, and unpicking it cost two PRs.
+
+  Returned **outside** the identity gate, which is the whole reason it is a
+  separate column: "works in design" is an attribute, "Principal Designer at
+  Swiggy" is an address.
+
+  **Suppressed in rooms under eight people.** The roster already gives an
+  unrevealed person an age and a city; a field of work makes four attributes,
+  and "29, Bengaluru, works in fintech, into techno and board games" is one
+  specific person in a room of eight. Same floor and reasoning as the organiser
+  metrics suppression, with a test asserting the two constants stay equal.
+  Ranking still uses it there — the score never leaves the server, so
+  suppressing the attribute costs nothing in ordering.
+
+  `WORK_FIELD_BONUS` is 0.3, below `INTENT_BONUS`: at a fintech meetup everyone
+  shares "Finance & Banking", so it is a tiebreak between similar cards rather
+  than a reason to reorder a list.
+
 ## [0.62.0] - 2026-08-10
 
 ### Added

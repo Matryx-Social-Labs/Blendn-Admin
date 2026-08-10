@@ -341,6 +341,12 @@ export const MatchListResponseSchema = z
         /** Category names, which is what the card renders. */
         sharedInterests: z.array(z.string()),
         sharedIntents: z.array(z.enum(["dating", "networking", "friendship", "just_here"])),
+        /**
+         * A label — "Design", never a slug and never an employer. Null when
+         * they have not said, and null in rooms below eight people, where an
+         * age, a city and a field of work name one person.
+         */
+        workField: z.string().nullable(),
         insideNow: z.boolean(),
         /** Whether you liked them. Never whether they liked you. */
         youLiked: z.boolean(),

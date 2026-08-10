@@ -141,6 +141,14 @@ model profiles {
   location    String?
   bio         String?
   occupation  String?
+  /// Coarse field of work — a slug from `lib/work-fields.ts`, never free text.
+  ///
+  /// `occupation` is "Senior Backend Engineer at Razorpay": an identity, and it
+  /// stays behind the identity gate. This is the version that can be shown to a
+  /// stranger in a pseudonymous room — no employer, no seniority, eighteen
+  /// buckets. Suppressed in rooms below eight people, where four attributes
+  /// name one person.
+  work_field  String?
   education   String?
   interests   String[]
   photos      String[]

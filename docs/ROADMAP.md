@@ -65,7 +65,7 @@ each PR's definition of done, not merging to `dev`.
 | 2 | Delete the roster completeness filter | **Done** (#184) |
 | 3 | Reports reach a human; suspension reaches the phone | **Done** (#185) |
 | 4 | Age policy: dating needs 18+, `events.min_age`, enforced at check-in | **Done** (#186) |
-| 5 | `profiles.work_field` + `/work-fields`, on the card, suppressed in small rooms | Next |
+| 5 | `profiles.work_field` + `/work-fields`, on the card, suppressed in small rooms | **Done** (#187) |
 | 6 | Dating compatibility — `orientation`, `deriveInterestedIn`, tag not filter | Next |
 | 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | Next |
 | 8 | Email verification, gating chat from the *second* event | After app PR 13 |
@@ -338,6 +338,15 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.63.0
+
+- **`profiles.work_field`** (#187) — eighteen server-owned buckets, served at
+  `GET /work-fields` so no client holds its own copy and no build goes stale.
+  Outside the identity gate, because a coarse bucket is an attribute where an
+  employer is an address. Suppressed on cards in rooms under eight people, where
+  four attributes name one person; still ranked on there, since the score never
+  leaves the server.
 
 ### 0.62.0
 

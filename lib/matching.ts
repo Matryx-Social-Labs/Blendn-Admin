@@ -1,5 +1,7 @@
 import type { connection_intent } from "@prisma/client"
 
+import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
+
 /**
  * Who to show someone in the room, and why.
  *
@@ -41,6 +43,16 @@ const SOCIAL_INTENTS: readonly Intent[] = ["dating", "networking", "friendship"]
  */
 export const INTENT_BONUS = 0.6
 
+/**
+ * Weight for both people working in the same coarse field.
+ *
+ * Below `INTENT_BONUS`, and that ordering is the point: at a fintech meetup
+ * everyone shares "Finance & Banking", so it says even less than two people
+ * both ticking "networking" at a networking event. It is a tiebreak between
+ * otherwise similar cards, not a reason to reorder the list.
+ */
+export const WORK_FIELD_BONUS = 0.3
+
 /** Still in the room beats someone who has gone home. */
 export const PRESENCE_BONUS = 1.5
 
@@ -60,6 +72,8 @@ export interface MatchCandidate {
   /** Structured category ids — `user_interests`, not the free-text field. */
   interestIds: string[]
   intents: Intent[]
+  /** Coarse field-of-work slug, or null. Never an employer or a job title. */
+  workField: string | null
   /** Currently checked in, as opposed to having attended earlier. */
   insideNow: boolean
   checkedInAt: Date
@@ -73,6 +87,7 @@ export interface MatchViewer {
   userId: string
   interestIds: string[]
   intents: Intent[]
+  workField: string | null
 }
 
 export interface Match {
@@ -84,6 +99,14 @@ export interface Match {
   /** The actual overlapping category ids — this is what the card renders. */
   sharedInterestIds: string[]
   sharedIntents: Intent[]
+  /**
+   * Their field of work, or null in a room too small to say it.
+   *
+   * Shown whether or not the viewer shares it — "works in design" is a reason
+   * to walk over even if you do not. The *bonus* needs both sides; the card
+   * only needs theirs.
+   */
+  workField: string | null
   insideNow: boolean
 }
 
@@ -143,6 +166,9 @@ export function rankMatches(
         0
       )
       score += INTENT_BONUS * sharedIntents.length
+      if (viewer.workField && candidate.workField === viewer.workField) {
+        score += WORK_FIELD_BONUS
+      }
       if (candidate.insideNow) score += PRESENCE_BONUS
 
       /*
@@ -171,6 +197,22 @@ export function rankMatches(
         a.candidate.userId.localeCompare(b.candidate.userId)
     )
 
+  /*
+   * The small-room floor.
+   *
+   * The roster already gives an unrevealed person an age and a city. Field of
+   * work makes four attributes with the interests, and "29, Bengaluru, works in
+   * fintech, into techno and board games" is one specific person in a room of
+   * eight — at which point the pseudonym is doing nothing.
+   *
+   * `population` is the room, not the page, so paging cannot shrink it into
+   * suppression. It counts everyone but the viewer, which is the right set:
+   * the anonymity set is the people a card *could* be, and the reader is not
+   * one of them. Same number and reasoning as the organiser metrics floor; a
+   * test asserts the two constants are equal.
+   */
+  const roomIsBigEnough = opts.population >= MIN_ROOM_FOR_WORK_FIELD
+
   return scored.slice(0, opts.limit ?? scored.length).map(({ candidate, sharedInterestIds, sharedIntents }) => ({
     userId: candidate.userId,
     // The reveal decision is enforced here rather than at the route, so no
@@ -179,6 +221,9 @@ export function rankMatches(
     photo: candidate.revealed ? candidate.photo : null,
     sharedInterestIds,
     sharedIntents,
+    // Suppressed, not scrubbed from the ranking: it still moved the order
+    // above, because the *score* is never shown and the attribute is.
+    workField: roomIsBigEnough ? candidate.workField : null,
     insideNow: candidate.insideNow,
   }))
 }
