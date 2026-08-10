@@ -90,6 +90,45 @@ describe("POST /api/mobile/auth/signup — password rules", () => {
   })
 })
 
+describe("POST /api/mobile/auth/signup — name and age", () => {
+  it("refuses a signup with no name", async () => {
+    // The app has always required it; the server permitting it was the only
+    // path producing an account the moderation queue can identify by nothing
+    // but an email address.
+    const res = await POST(req({ email: "a@b.com", password: VALID }))
+    expect(res.status).toBe(400)
+    expect(mockDb.user.create).not.toHaveBeenCalled()
+  })
+
+  it("still accepts a signup with no age", async () => {
+    /*
+     * The guarantee that keeps this deployable.
+     *
+     * The shipped app does not send `age` yet, and the server reaches staging
+     * before an app build does. If this ever starts failing, every new password
+     * signup in production is 400ing — make `age` required only in the release
+     * after the app ships the field.
+     */
+    const res = await POST(req({ email: "a@b.com", password: VALID, name: "A" }))
+    expect(res.status).toBe(201)
+  })
+
+  it("rejects an age below the floor", async () => {
+    const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age: 11 }))
+    expect(res.status).toBe(400)
+    expect(mockDb.user.create).not.toHaveBeenCalled()
+  })
+
+  it("stores the age on the profile when sent", async () => {
+    // There is nowhere else it can be collected: OAuth creates profiles without
+    // one and the onboarding screens that used to ask are being deleted.
+    await POST(req({ email: "a@b.com", password: VALID, name: "A", age: 29 }))
+    expect(mockDb.profiles.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ age: 29 }) })
+    )
+  })
+})
+
 describe("POST /api/mobile/auth/signup — account creation", () => {
   it("refuses an email that already exists", async () => {
     mockDb.user.findUnique.mockResolvedValue({ id: "existing" })

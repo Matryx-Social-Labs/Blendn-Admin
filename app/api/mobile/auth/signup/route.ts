@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { email, password, name, deviceInfo } = parsed.data
+    const { email, password, name, age, deviceInfo } = parsed.data
 
     /*
      * The same check `/api/auth/reset-password` runs, so signup and reset
@@ -90,6 +90,14 @@ export async function POST(request: NextRequest) {
         data: {
           id: createdUser.id,
           name,
+          /*
+           * Captured here because there is nowhere else it can be. Google and
+           * Apple create profiles with no age (`lib/mobile-auth.ts`), the
+           * eight onboarding screens that used to ask are being deleted, and
+           * the roster displays it. Undefined until the app sends it, which is
+           * why the field is optional for now.
+           */
+          age,
           onboarded: false,
         },
       })

@@ -37,9 +37,15 @@ Password reset is **not** under `/api/mobile`. See [Password reset](#password-re
 
 ### POST /auth/signup
 ```json
-{ "email": "string", "password": "string", "name": "string" }
+{ "email": "string", "password": "string", "name": "string", "age": 29 }
 ```
 Returns **201**: `{ accessToken, refreshToken, user: { id, email, name, profile } }`
+
+`name` is **required**. `age` is accepted and currently optional, and becomes
+required once the mobile app ships the field — it is stored on the profile
+because there is nowhere else to collect it: Google and Apple create profiles
+without an age, and the onboarding screens that used to ask are being removed.
+The floor here is 13; **dating intent separately requires 18+**.
 
 `profile` is returned so the client can decide where to route without a second
 call — it carries `onboarded`, which is what that decision reads.
@@ -345,6 +351,33 @@ actual check-in puts you in the room.
 
 `respond` with `block` writes a real `blocked_users` row as well as setting the
 request status.
+
+---
+
+## Matching inputs on the profile
+
+`PUT /profiles/:userId` also accepts what ranking reads.
+
+| Field | Values | Who sees it |
+|---|---|---|
+| `intent_default` | `dating` · `networking` · `friendship` · `just_here` | the shared subset only, via `sharedIntents` on a match card |
+| `gender` | `woman` · `man` · `non_binary` · `prefer_not_to_say` | **nobody but the owner** |
+| `interested_in` | array of the same values | **nobody but the owner** |
+
+`intent_default` is the person-level default; the per-event override is
+`PUT /events/:eventId/matches/preferences`, and `effectiveIntents` prefers the
+per-event value when one exists. Until now the default could **only** be written
+through that route with `remember: true`, which 403s without a check-in — so a
+stable fact about a person was unrecordable until they had walked into a venue.
+
+`gender` and `interested_in` are matching inputs, never card content. They are
+absent from every response but the owner's, and a match card carries neither.
+**Dating intent additionally requires the account to be 18+**, enforced wherever
+intent is written rather than in the UI.
+
+`reveal_by_default` is deliberately **not** settable here. Being named in a room
+has to be something a person did in that room, not a profile switch they flipped
+once — see `PUT /events/:eventId/matches/preferences`.
 
 ---
 
