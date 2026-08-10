@@ -38,6 +38,7 @@ export async function cleanup(userIds: string[], eventIds: string[]) {
     await db.chat_group_members.deleteMany({ where: { chat_group: { event_id: { in: eventIds } } } })
     await db.chat_groups.deleteMany({ where: { event_id: { in: eventIds } } })
     await db.event_check_ins.deleteMany({ where: { event_id: { in: eventIds } } })
+    await db.event_match_preferences.deleteMany({ where: { event_id: { in: eventIds } } })
     await db.event_rsvps.deleteMany({ where: { event_id: { in: eventIds } } })
     await db.events.deleteMany({ where: { id: { in: eventIds } } })
   }

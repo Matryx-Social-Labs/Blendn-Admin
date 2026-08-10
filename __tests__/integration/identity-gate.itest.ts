@@ -33,6 +33,15 @@ async function anEvent() {
 const like = (eventId: string, a: string, b: string) =>
   db.event_likes.create({ data: { event_id: eventId, liker_id: a, liked_id: b } })
 
+/**
+ * Check in, and record what they chose for this event.
+ *
+ * Two writes because they are two things now: attendance is per occurrence and
+ * the choice is per event. `revealed` used to sit on the check-in row, where a
+ * multi-day event gave one person several of them and the reader picked one at
+ * random — see `event_match_preferences`. This mirrors what the check-in route
+ * does, so the gate is exercised against the shape production actually stores.
+ */
 async function checkIn(eventId: string, userId: string, revealed = false) {
   await db.event_check_ins.create({
     data: {
@@ -41,8 +50,12 @@ async function checkIn(eventId: string, userId: string, revealed = false) {
       user_id: userId,
       status: "checked_in",
       check_in_time: new Date(),
-      revealed,
     },
+  })
+  await db.event_match_preferences.upsert({
+    where: { event_id_user_id: { event_id: eventId, user_id: userId } },
+    create: { event_id: eventId, user_id: userId, revealed },
+    update: { revealed },
   })
 }
 
