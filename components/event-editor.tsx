@@ -34,6 +34,7 @@ interface EventEditorData {
   status: "draft" | "published" | "cancelled" | "completed"
   visibility: "public" | "private" | "unlisted"
   max_capacity?: number | null
+  min_age?: number | null
   latitude?: number | null
   longitude?: number | null
   cover_image_url?: string | null
@@ -131,6 +132,7 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
       status: initialEvent.status,
       visibility: initialEvent.visibility,
       max_capacity: initialEvent.max_capacity ?? undefined,
+      min_age: initialEvent.min_age ?? undefined,
       latitude: initialEvent.latitude ?? undefined,
       longitude: initialEvent.longitude ?? undefined,
       cover_image_url: initialEvent.cover_image_url ?? undefined,
@@ -196,6 +198,10 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
           description: item.description || undefined,
           order: index,
         })),
+        // Explicit null, not undefined: `undefined` disappears in JSON and the
+        // PATCH route reads an absent field as "leave it alone", so clearing
+        // the box would silently keep the old restriction.
+        min_age: data.min_age ?? null,
         // Cover image: treat empty string as undefined
         cover_image_url: data.cover_image_url || undefined,
         external_link: data.external_link || undefined,

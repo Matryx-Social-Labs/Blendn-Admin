@@ -8,6 +8,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
+import { datingAgeRefusal } from "@/lib/age"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -57,6 +58,25 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       select: { id: true },
     })
     if (!checkIn) return forbiddenResponse("Check in to this event first")
+
+    /*
+     * The other place dating intent can be written, and the reason the rule
+     * lives in `lib/age.ts` rather than in the profile route.
+     *
+     * A gate on one of two write paths is not a gate. This one is the more
+     * likely bypass of the two: it is per-event, it is the path the app's
+     * check-in flow uses, and `remember: true` writes the profile default
+     * through it — so without this, the profile check could be walked straight
+     * around by setting the same value from inside a room.
+     */
+    if (intent !== undefined) {
+      const profile = await db.profiles.findUnique({
+        where: { id: authUser.userId },
+        select: { age: true },
+      })
+      const refusal = datingAgeRefusal(intent, profile?.age)
+      if (refusal) return forbiddenResponse(refusal)
+    }
 
     const updated = await db.event_check_ins.update({
       where: { id: checkIn.id },

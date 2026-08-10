@@ -5,6 +5,47 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.62.0] - 2026-08-10
+
+### Added
+
+- **Age is a rule now, not a number in a column.** `profiles.age` has accepted
+  13 since it existed and nothing anywhere connected that to anything: a
+  14-year-old could tick "open to dating" and be ranked into the same pool as
+  adults, on a card reading "Both open to dating".
+
+  Dating intent requires 18, enforced on **both** write paths — the profile PUT
+  and the per-event preferences route. A gate on one of two is not a gate, and
+  the per-event route is the more likely bypass: it is the path the check-in
+  flow uses, and `remember: true` writes the profile default straight through
+  it.
+
+  The rule lives in `lib/age.ts` because of one coercion: `age` is nullable,
+  every OAuth account is created without one, and `null < 18` is `true` in
+  JavaScript — so the obvious inline check admits exactly the case it was
+  written to stop. Written once, tested once, and five call sites cannot each
+  get it wrong differently.
+
+  Two edges the naive version misses. Age and intent may be **sent together**,
+  so the gate reads the age after the request rather than refusing a null the
+  user is in the act of filling in. And **lowering your age strips the tag** —
+  otherwise "set 25, tick dating, set 15" is two individually legal requests
+  that leave a 15-year-old in the dating pool.
+
+- **`events.min_age`.** A club night is 18+ whatever anyone ticked, and the
+  organiser is the only party who knows. Null for every existing event and for
+  almost every future one; set in the dashboard event form, bounded 13–25.
+
+  Enforced at **check-in**, with `errorCode: "AGE_RESTRICTED"` so the app can
+  tell "too young" from a generic refusal — it is the one refusal a user can
+  sometimes fix themselves. The listing and search hide the event from anyone
+  whose stated age is below it, but an **unknown** age does not hide it: OAuth
+  accounts have no age, and failing closed there would empty their feed to
+  punish a missing field. Discovery is permissive; the door is not.
+
+  `GET /events/:eventId` returns `minAge`, because a shared link reaches the
+  detail screen whatever the listing did.
+
 ## [0.61.0] - 2026-08-10
 
 The first three server PRs of the post-signup plan (#183, #184, and this one).

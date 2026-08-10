@@ -404,12 +404,53 @@ stable fact about a person was unrecordable until they had walked into a venue.
 
 `gender` and `interested_in` are matching inputs, never card content. They are
 absent from every response but the owner's, and a match card carries neither.
-**Dating intent additionally requires the account to be 18+**, enforced wherever
-intent is written rather than in the UI.
 
 `reveal_by_default` is deliberately **not** settable here. Being named in a room
 has to be something a person did in that room, not a profile switch they flipped
 once — see `PUT /events/:eventId/matches/preferences`.
+
+### Dating is 18+
+
+Enforced on **both** write paths — `PUT /profiles/:userId` and
+`PUT /events/:eventId/matches/preferences` — because a gate on one of two is not
+a gate, and the per-event route also writes the profile default via
+`remember: true`. Refused with **403** and a message that names the rule:
+
+```json
+{ "success": false, "error": "Dating is for 18+ only. Your other choices are fine." }
+```
+
+**An unknown age is refused too**, with different words (`"Add your age to your
+profile before choosing dating."`) because the user's next action differs. This
+matters more than it looks: `profiles.age` is nullable, OAuth accounts are
+created without one, and in JavaScript `null < 18` is `true` — so the obvious
+check admits exactly the case it was written to stop. The rule lives in
+`lib/age.ts` and is tested there.
+
+Three consequences worth knowing about:
+
+- **Age and intent may be sent together.** The gate reads the age *after* the
+  request, so the about-you screen can save both in one call.
+- **Lowering your age strips the tag.** Otherwise "set 25, tick dating, set 15"
+  is two individually legal requests that leave a 15-year-old in the pool.
+- **Check-in filters rather than refuses.** A profile written before this rule
+  can still carry `dating`; copying it onto a check-in row drops it silently,
+  because nobody should be kept out of a room over a stale profile field.
+
+### Events can require a minimum age
+
+`events.min_age` is null for almost every event. When set:
+
+- **Check-in returns 403 with `errorCode: "AGE_RESTRICTED"`** — this is the real
+  door, and it refuses an unknown age as well as one below the line.
+- **The events list and search omit the event** for anyone whose stated age is
+  below it. An unknown age does **not** hide restricted events: OAuth accounts
+  have no age, and hiding them all would empty the feed to punish a missing
+  field. Discovery is permissive, the door is not.
+- **`GET /events/:eventId` returns `minAge`**, so the detail screen can say
+  "18+" — a shared link reaches that screen whatever the listing did.
+
+Set by the organiser in the dashboard event form, bounded 13–25.
 
 ---
 

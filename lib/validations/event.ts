@@ -134,6 +134,16 @@ export const eventWriteSchema = z
     status: z.enum(["draft", "published", "cancelled", "completed"]).nullish(),
     visibility: z.enum(["public", "private", "unlisted"]).nullish(),
     max_capacity: z.number().int().nullish(),
+    /**
+     * Minimum age to check in. Null is the normal case.
+     *
+     * Bounded at 13 because that is the floor for holding an account at all —
+     * an event demanding less is expressing a rule the platform cannot have —
+     * and at 25 because beyond that it stops being a legal age restriction and
+     * starts being a way to keep people out, which the organiser should do at
+     * the door and own, not have the platform enforce invisibly.
+     */
+    min_age: z.number().int().min(13).max(25).nullish(),
     latitude: z.number().min(-90).max(90).nullish(),
     longitude: z.number().min(-180).max(180).nullish(),
     cover_image_url: z.string().url().max(2048).nullish(),

@@ -135,6 +135,27 @@ export async function GET(request: NextRequest) {
     }
 
     /*
+     * Don't show someone a room they would be turned away from.
+     *
+     * Only when we know their age. An unknown age does **not** hide restricted
+     * events: OAuth accounts are created without one, so failing closed here
+     * would empty the feed for most of them in order to punish a missing field.
+     * Check-in refuses an unknown age regardless — the listing is discovery,
+     * the door is the gate — so the worst case is a wasted tap with a message
+     * naming the fix, rather than a product that appears to have no events.
+     */
+    const viewer = await db.profiles.findUnique({
+      where: { id: authUser.userId },
+      select: { age: true },
+    })
+    if (typeof viewer?.age === "number") {
+      // In `AND`, not `OR`: the search filter below assigns `where.OR` outright,
+      // and an age restriction that a search term silently removes is worse
+      // than no age restriction at all.
+      where.AND = [{ OR: [{ min_age: null }, { min_age: { lte: viewer.age } }] }]
+    }
+
+    /*
      * Discovery excludes events that have already finished.
      *
      * There was no time filter at all, so every event ever published stayed in

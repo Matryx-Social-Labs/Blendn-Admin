@@ -220,6 +220,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       latitude: event.latitude,
       longitude: event.longitude,
       maxCapacity: event.max_capacity,
+      // Null for almost every event. Returned so the app can say "18+" on the
+      // detail screen rather than letting someone find out at check-in — the
+      // listing hides these events from anyone whose age is known and too low,
+      // but a shared link reaches this screen either way.
+      minAge: event.min_age,
       // Counted, not stored. The field name stays so no client breaks.
       currentCapacity: occupancy.inside,
       checkInRadius: event.check_in_radius,

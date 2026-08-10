@@ -116,6 +116,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       status,
       visibility,
       max_capacity,
+      min_age,
       latitude,
       longitude,
       cover_image_url,
@@ -205,6 +206,10 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         status: status ?? undefined,
         visibility: visibility ?? undefined,
         max_capacity: max_capacity ?? undefined,
+        // `?? undefined` everywhere else in this block means null cannot clear a
+        // field. Age restriction is the one that has to be removable — an event
+        // that stops being 18+ must be able to say so — so null is written.
+        min_age: min_age === undefined ? undefined : min_age,
         latitude: latitude ?? undefined,
         longitude: longitude ?? undefined,
         cover_image_url: cover_image_url ?? undefined,

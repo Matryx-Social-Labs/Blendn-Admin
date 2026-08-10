@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { datingAgeRefusal, stripDating } from "@/lib/age"
 import { blockedEitherWay } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -152,6 +153,42 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
 
+    /*
+     * Dating is 18+, and this is one of the two places it can be written.
+     *
+     * The age that matters is the age *after* this request: someone sending
+     * their age and their intent in one call — which is exactly what the
+     * about-you screen does — must not be refused for a null they are in the
+     * act of filling in.
+     */
+    const touchesAgeGate = intent_default !== undefined || age !== undefined
+    const existing = touchesAgeGate
+      ? await db.profiles.findUnique({
+          where: { id: userId },
+          select: { age: true, intent_default: true },
+        })
+      : null
+    const effectiveAge = age !== undefined ? age : (existing?.age ?? null)
+
+    const refusal = datingAgeRefusal(intent_default, effectiveAge)
+    if (refusal) return forbiddenResponse(refusal)
+
+    /*
+     * Lowering your age has to take the tag with it.
+     *
+     * Otherwise the gate is a one-time check at the moment of writing intent,
+     * and the way past it is to set 25, tick dating, then set 15 — two requests
+     * that are individually legal and leave a 15-year-old in the dating pool.
+     * Stripped rather than refused: the age they are giving us is more likely
+     * to be the true one, and refusing the correction is the wrong incentive.
+     */
+    const demotedIntents =
+      age !== undefined && intent_default === undefined && existing?.intent_default?.length
+        ? stripDating(existing.intent_default, effectiveAge)
+        : null
+    const stripsDating =
+      demotedIntents !== null && demotedIntents.length !== existing?.intent_default.length
+
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
     if (name !== undefined) userUpdate.name = name
@@ -208,6 +245,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(looking_for !== undefined && { looking_for }),
         ...(onboarded !== undefined && { onboarded }),
         ...(intent_default !== undefined && { intent_default }),
+        // Only when an age change has invalidated a tag they already had.
+        ...(stripsDating && { intent_default: demotedIntents! }),
         ...(gender !== undefined && { gender }),
         ...(interested_in !== undefined && { interested_in }),
         ...(push_enabled !== undefined && { push_enabled }),

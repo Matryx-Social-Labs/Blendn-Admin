@@ -22,6 +22,13 @@ export const ErrorCode = {
   EVENT_NOT_STARTED: "EVENT_NOT_STARTED",
   EVENT_ENDED: "EVENT_ENDED",
   OUT_OF_RANGE: "OUT_OF_RANGE",
+  /**
+   * Too young for this event, or no age on file.
+   *
+   * Distinct from `FORBIDDEN` because the client's response differs: this is
+   * the one refusal the user can sometimes fix themselves, by adding their age.
+   */
+  AGE_RESTRICTED: "AGE_RESTRICTED",
   ALREADY_CHECKED_IN: "ALREADY_CHECKED_IN",
   STORAGE_UNAVAILABLE: "STORAGE_UNAVAILABLE",
   USER_MUTED: "USER_MUTED",
