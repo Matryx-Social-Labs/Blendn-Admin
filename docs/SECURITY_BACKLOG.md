@@ -74,25 +74,27 @@ domain from scratch against `6bb16be`.
 
 ## Open
 
-### HIGH — nothing pages anyone when a moderation flag lands
+Tracked privately, in `Matryx-Social-Labs/blendn-ops` — **not** because they are
+embarrassing, but because of what they are.
 
-`moderation_flags` rows are written correctly and sit in the table until someone
-opens the dashboard. There is no alerting.
+Both repositories are public, and that is right: obscurity is not a control, and
+the moderation thresholds, geofence maths and rate limits are all readable in
+the source regardless. `AUTO_HIDE_THRESHOLD` sits in `lib/moderation/config.ts`.
+Removing that number from a document while the constant stays in a public file
+would be theatre, so those stay documented here.
 
-That makes every response time in `MODERATION_RESPONSE.md` aspirational rather
-than real. A credible threat at 11pm on a Saturday, at an event where the people
-involved are in the same building, gets looked at on Monday. The room closes 24
-hours after the event, so by then the evidence window and the ability to act on
-the night have both gone.
+What is not derivable from source is **operational posture** — who is watching,
+how quickly anyone responds, and which gaps we know about and have not closed.
+That is useful only to somebody who wants to abuse a room without being stopped,
+so it moves out for as long as it is unfixed.
 
-This is the single highest-value piece of unbuilt moderation work. Everything
-else in the response plan depends on it.
+The rule is narrow, and deliberately so:
 
-### MEDIUM — no way to reply to a reporter, or to warn an organiser
+> **A finding is private only while it is unfixed, and only when it describes
+> response capability rather than code.**
 
-Neither exists. Silence after a report reads as dismissal, and an organiser
-cannot be told that something is happening at their event without us disclosing
-who reported it. Both are in the build order in `MODERATION_RESPONSE.md`.
+Everything below is closed, and stays public with its reasoning intact — a fixed
+bug explained is worth more to the next engineer than it is to an attacker.
 
 ---
 
