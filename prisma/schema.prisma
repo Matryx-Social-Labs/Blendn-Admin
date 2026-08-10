@@ -209,6 +209,13 @@ model events {
   status            event_status       @default(draft)
   visibility        visibility_type    @default(public)
   max_capacity      Int?
+  /// Minimum age to check in. Null — almost every event — means no restriction.
+  ///
+  /// The organiser is the one who knows a club night is 18+, and no combination
+  /// of what an attendee ticked can substitute for that. Enforced at check-in,
+  /// which is the real door, and used to hide events from people whose stated
+  /// age is below it. See `lib/age.ts`.
+  min_age           Int?
   current_capacity  Int                @default(0)
   created_at        DateTime           @default(now()) @db.Timestamptz(6)
   updated_at        DateTime           @default(now()) @db.Timestamptz(6)

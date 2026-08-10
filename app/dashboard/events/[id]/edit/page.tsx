@@ -112,6 +112,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
         status: event.status,
         visibility: event.visibility,
         max_capacity: event.max_capacity,
+        min_age: event.min_age,
         latitude: event.latitude,
         longitude: event.longitude,
         cover_image_url: event.cover_image_url,

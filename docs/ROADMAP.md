@@ -64,7 +64,7 @@ each PR's definition of done, not merging to `dev`.
 | 1 | `just_here` damping; `name` required, `age` accepted; `intent_default`/`gender`/`interested_in` writable | **Done** (#183) |
 | 2 | Delete the roster completeness filter | **Done** (#184) |
 | 3 | Reports reach a human; suspension reaches the phone | **Done** (#185) |
-| 4 | Age policy: dating needs 18+, `events.min_age`, enforced at check-in | Next |
+| 4 | Age policy: dating needs 18+, `events.min_age`, enforced at check-in | **Done** (#186) |
 | 5 | `profiles.work_field` + `/work-fields`, on the card, suppressed in small rooms | Next |
 | 6 | Dating compatibility — `orientation`, `deriveInterestedIn`, tag not filter | Next |
 | 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | Next |
@@ -338,6 +338,20 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.62.0
+
+- **Dating requires 18, on both write paths** (#186). `profiles.age` accepted 13
+  and nothing connected that to anything — a 14-year-old could tick dating and
+  land in the same pool as adults. The rule is in `lib/age.ts` rather than
+  inline because `age` is nullable and `null < 18` is `true`, so the obvious
+  check admits exactly the case it was meant to stop.
+
+- **`events.min_age`** (#186), set by the organiser, enforced at check-in with
+  its own error code, and used to hide the event from anyone whose stated age is
+  below it. An unknown age is refused at the door but not hidden from in the
+  feed — OAuth accounts have no age yet, and failing closed there would empty
+  their listing.
 
 ### 0.61.0
 

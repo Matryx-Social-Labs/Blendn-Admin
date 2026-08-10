@@ -143,6 +143,8 @@ export const EventDetailSchema = z
     latitude: z.number().nullable(),
     longitude: z.number().nullable(),
     maxCapacity: z.number().nullable(),
+    /** Null for almost every event. Enforced at check-in, not on this response. */
+    minAge: z.number().nullable(),
     currentCapacity: z.number(),
     checkInRadius: z.number(),
     isFeatured: z.boolean(),

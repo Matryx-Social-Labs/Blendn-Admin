@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { minAgeRefusal, stripDating } from "@/lib/age"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
@@ -85,6 +86,30 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Check if event is published
     if (event.status !== "published") {
       return errorResponse("Cannot check in to an unpublished event")
+    }
+
+    /*
+     * The age gate, at the door.
+     *
+     * Check-in is where this belongs: the events list hides restricted events
+     * from anyone whose stated age is below the minimum, but a list is
+     * discovery and can be bypassed by a link, a share or a stale cache. This
+     * is the one place a person actually enters a room.
+     *
+     * An unknown age is refused here even though the listing tolerates it —
+     * hiding every restricted event from every OAuth account, none of which has
+     * an age yet, would empty their feed to punish a missing field, whereas
+     * refusing at the door costs them one clear message naming the fix. The
+     * same profile row is read once and reused for the intent seeding below.
+     */
+    const profile = await db.profiles.findUnique({
+      where: { id: authUser.userId },
+      select: { age: true, intent_default: true, reveal_by_default: true },
+    })
+
+    const ageRefusal = minAgeRefusal(profile?.age, event.min_age)
+    if (ageRefusal) {
+      return errorResponse(ageRefusal, 403, ErrorCode.AGE_RESTRICTED)
     }
 
     /*
@@ -199,10 +224,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * when they check back in — the per-event answer is the one they gave most
      * recently, and re-checking in is not a decision to change it.
      */
-    const prefs = await db.profiles.findUnique({
-      where: { id: authUser.userId },
-      select: { intent_default: true, reveal_by_default: true },
-    })
+    /*
+     * A profile written before the 18+ rule existed can still carry `dating`.
+     *
+     * Stripped rather than refused: the person is not making a choice at this
+     * moment, and keeping someone out of the room over a stale profile field
+     * would be a strange thing to do at a door they are standing at. The write
+     * paths refuse; this one, which only copies, filters.
+     */
+    const seededIntents = stripDating(profile?.intent_default ?? [], profile?.age)
 
     // Create or update check-in record
     const checkIn = await db.event_check_ins.upsert({
@@ -216,8 +246,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         kind,
         status: "checked_in",
         check_in_time: now,
-        intent: prefs?.intent_default ?? [],
-        revealed: prefs?.reveal_by_default ?? false,
+        intent: seededIntents,
+        revealed: profile?.reveal_by_default ?? false,
         latitude,
         longitude,
         device_info: deviceInfo,

@@ -103,6 +103,39 @@ export function CapacitySettingsSection({
         />
       </div>
 
+      <FormField
+        control={form.control}
+        name="min_age"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Minimum age</FormLabel>
+            <FormControl>
+              <Input
+                type="number"
+                min={13}
+                max={25}
+                placeholder="No age restriction"
+                value={field.value ?? ""}
+                onChange={(e) =>
+                  field.onChange(e.target.value === "" ? undefined : Number(e.target.value))
+                }
+              />
+            </FormControl>
+            <div className="text-muted-foreground text-sm">
+              {/*
+                Said plainly because it is a real refusal at the door, not a
+                label on a listing — an organiser setting this needs to know it
+                turns people away rather than warning them.
+              */}
+              Leave blank unless the event has one. Anyone below this age cannot
+              check in, and the event is hidden from them. Attendees who have not
+              given us an age are refused too.
+            </div>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
       <div className="grid grid-cols-2 gap-4">
         <FormField
           control={form.control}

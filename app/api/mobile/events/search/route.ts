@@ -46,6 +46,30 @@ export async function GET(request: NextRequest) {
       .map((word) => `${word}:*`)
       .join(" & ")
 
+    /*
+     * The same age filter the listing applies — search is the other way in.
+     *
+     * A filter on one of two discovery surfaces is decoration: typing the name
+     * of an 18+ event would otherwise return it to a 15-year-old that the feed
+     * had just finished hiding it from.
+     *
+     * Parameterised, like the tsquery: this file is `$queryRawUnsafe`, and an
+     * age interpolated into the string would be the one injection point in it.
+     * `NULL` for an unknown age makes both comparisons below fall through to
+     * `min_age IS NULL`... which would hide every restricted event, so the
+     * predicate is written to pass everything when the parameter is null.
+     */
+    const viewer = await db.profiles.findUnique({
+      where: { id: authUser.userId },
+      select: { age: true },
+    })
+    const viewerAge = typeof viewer?.age === "number" ? viewer.age : null
+    // The two queries below bind a different number of parameters, so the
+    // placeholder index is passed in rather than hardcoded — getting it wrong
+    // is a runtime error on a rarely-exercised path.
+    const ageFilter = (n: number) =>
+      `AND ($${n}::int IS NULL OR min_age IS NULL OR min_age <= $${n}::int)`
+
     // Full-text search with ranking
     const events = await db.$queryRawUnsafe<Array<{
       id: string
@@ -70,13 +94,15 @@ export async function GET(request: NextRequest) {
        WHERE deleted_at IS NULL
          AND status = 'published'
          AND visibility = 'public'
+         ${ageFilter(4)}
          AND to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(venue_name, '') || ' ' || coalesce(city, ''))
              @@ to_tsquery('english', $1)
        ORDER BY rank DESC, start_time ASC
        LIMIT $2 OFFSET $3`,
       tsquery,
       limit,
-      offset
+      offset,
+      viewerAge
     )
 
     const countResult = await db.$queryRawUnsafe<Array<{ count: bigint }>>(
@@ -85,9 +111,11 @@ export async function GET(request: NextRequest) {
        WHERE deleted_at IS NULL
          AND status = 'published'
          AND visibility = 'public'
+         ${ageFilter(2)}
          AND to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(venue_name, '') || ' ' || coalesce(city, ''))
              @@ to_tsquery('english', $1)`,
-      tsquery
+      tsquery,
+      viewerAge
     )
 
     const totalCount = Number(countResult[0]?.count ?? 0)

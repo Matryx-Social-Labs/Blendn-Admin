@@ -129,6 +129,7 @@ export async function POST(req: Request) {
       status,
       visibility,
       max_capacity,
+      min_age,
       latitude,
       longitude,
       cover_image_url,
@@ -201,6 +202,9 @@ export async function POST(req: Request) {
         status: status ?? "draft",
         visibility: visibility ?? "public",
         max_capacity,
+        // Null for almost every event. The organiser is the only party who
+        // knows a club night is 18+, and check-in is where it is enforced.
+        min_age,
         latitude,
         longitude,
         cover_image_url,
