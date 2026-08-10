@@ -265,6 +265,11 @@ export const ActiveCheckinSchema = z
     id: z.string().uuid(),
     eventId: z.string().uuid(),
     checkInTime: z.string().datetime(),
+    /**
+     * Whether **you** are named in this room. Never anyone else's state — this
+     * endpoint is scoped to the caller. Drives the status chip.
+     */
+    revealed: z.boolean(),
     event: z.object({
       id: z.string().uuid(),
       title: z.string(),

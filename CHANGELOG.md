@@ -5,6 +5,24 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.69.0] - 2026-08-10
+
+### Added
+
+- **`GET /checkins/active` returns whether you are named in each room.** The app
+  shows a chip — "You're anonymous here" / "You're visible as Sagar" — and
+  nothing could tell it which: the roster returns pseudonyms by design,
+  `/matches` never includes the viewer, and there is no GET for per-event
+  preferences.
+
+  Without it the chip would have to assume, and a chip that is wrong about your
+  own anonymity is worse than no chip — someone keeps quiet believing they are
+  named, or speaks believing they are not.
+
+  Scoped to the authenticated caller, so it cannot disclose anyone else's
+  choice. An absent preferences row reads as anonymous, which is the server's
+  default too.
+
 ## [0.68.0] - 2026-08-10
 
 ### Fixed
