@@ -16,7 +16,8 @@ Severity is about **what an attacker gets**, not how clever the bug is:
 | **MEDIUM** | Real, but needs specific conditions or yields less |
 | **LOW** | Defence in depth. Worth doing, not worth waking anyone |
 
-Related: `ROADMAP.md` is the feature ledger, `API.md` documents the endpoints,
+Related: `MODERATION_RESPONSE.md` is the human half of moderation --
+severity, escalation and the incident log. `ROADMAP.md` is the feature ledger, `API.md` documents the endpoints,
 and the app-side equivalent of this file is
 `Blendn/SECURITY_RELIABILITY_BACKLOG.md` — mobile client findings live there and
 are not duplicated here.
@@ -73,7 +74,39 @@ domain from scratch against `6bb16be`.
 
 ## Open
 
-Nothing outstanding. Everything the 2026-08-08 sweep found is closed below.
+### HIGH — nothing pages anyone when a moderation flag lands
+
+`moderation_flags` rows are written correctly and sit in the table until someone
+opens the dashboard. There is no alerting.
+
+That makes every response time in `MODERATION_RESPONSE.md` aspirational rather
+than real. A credible threat at 11pm on a Saturday, at an event where the people
+involved are in the same building, gets looked at on Monday. The room closes 24
+hours after the event, so by then the evidence window and the ability to act on
+the night have both gone.
+
+This is the single highest-value piece of unbuilt moderation work. Everything
+else in the response plan depends on it.
+
+### HIGH — the group-chat report button does nothing
+
+`app/chat/[id].tsx:655` in the Expo app shows a confirmation tray, fires a
+haptic, and calls nothing. `POST /messages/:messageId/report` exists and the DM
+path uses it correctly; the group path was never wired.
+
+So the room where abuse is most likely has a report button that silently fails,
+and the person who pressed it believes they reported and concludes we ignored
+them. Worse than having no button. App-side fix, tracked as T5.
+
+### MEDIUM — no way to reply to a reporter, or to warn an organiser
+
+Neither exists. Silence after a report reads as dismissal, and an organiser
+cannot be told that something is happening at their event without us disclosing
+who reported it. Both are in the build order in `MODERATION_RESPONSE.md`.
+
+---
+
+Nothing else outstanding. Everything the 2026-08-08 sweep found is closed below.
 
 The next pass should start where this one could not reach: **the mobile client**
 (`Blendn/SECURITY_RELIABILITY_BACKLOG.md` tracks that half), and a re-read of
