@@ -172,6 +172,13 @@ model profiles {
   /// held about people who had no reason to give it.
   gender        String?
   interested_in String[]
+  /// The label they hold, from `lib/dating.ts`. `interested_in` is what
+  /// matching actually reads; this is what the person calls themselves, and it
+  /// is only *sometimes* enough to derive the other. "Straight" plus
+  /// "non-binary" has no defined target set, so those combinations are asked
+  /// directly and this column is stored beside an `interested_in` that did not
+  /// come from it.
+  orientation   String?
 
   /// Settings the app has always shown and never stored.
   ///

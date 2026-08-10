@@ -6,6 +6,7 @@ import {
   type Intent,
   type MatchCandidate,
 } from "@/lib/matching"
+import type { Gender } from "@/lib/dating"
 import { workFieldLabel } from "@/lib/work-fields"
 
 /**
@@ -59,7 +60,7 @@ export async function matchesForEvent(
   const [viewerProfile, viewerInterests, checkIns, blocks, likes] = await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
-      select: { intent_default: true, work_field: true },
+      select: { intent_default: true, work_field: true, gender: true, interested_in: true },
     }),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
     db.event_check_ins.findMany({
@@ -81,7 +82,18 @@ export async function matchesForEvent(
           select: {
             name: true,
             image: true,
-            profile: { select: { intent_default: true, photos: true, work_field: true } },
+            profile: {
+              select: {
+                intent_default: true,
+                photos: true,
+                work_field: true,
+                // Read to decide whether `dating` may appear as a shared
+                // intent, and returned to nobody: `MatchCard` has no field for
+                // either, and a card has never stated anyone's gender.
+                gender: true,
+                interested_in: true,
+              },
+            },
             user_interests: { select: { category_id: true } },
           },
         },
@@ -132,6 +144,10 @@ export async function matchesForEvent(
     interestIds: c.user.user_interests.map((i) => i.category_id),
     intents: effectiveIntents(c.intent, c.user.profile?.intent_default ?? []),
     workField: c.user.profile?.work_field ?? null,
+    dating: {
+      gender: (c.user.profile?.gender ?? null) as Gender | null,
+      interestedIn: (c.user.profile?.interested_in ?? []) as Gender[],
+    },
     insideNow: c.status === "checked_in",
     checkedInAt: c.check_in_time!,
     revealed: c.revealed,
@@ -145,6 +161,10 @@ export async function matchesForEvent(
       interestIds: viewerInterests.map((i) => i.category_id),
       intents: effectiveIntents(viewerCheckIn.intent, viewerProfile?.intent_default ?? []),
       workField: viewerProfile?.work_field ?? null,
+      dating: {
+        gender: (viewerProfile?.gender ?? null) as Gender | null,
+        interestedIn: (viewerProfile?.interested_in ?? []) as Gender[],
+      },
     },
     candidates,
     { interestHolders, population: eligible.length, limit }

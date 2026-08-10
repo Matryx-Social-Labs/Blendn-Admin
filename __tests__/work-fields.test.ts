@@ -95,6 +95,7 @@ describe("the small-room floor", () => {
     interestIds: [],
     intents: [],
     workField: null,
+    dating: { gender: null, interestedIn: [] },
     insideNow: true,
     checkedInAt: new Date("2026-08-10T21:00:00.000Z"),
     revealed: false,
@@ -103,7 +104,13 @@ describe("the small-room floor", () => {
     ...over,
   })
 
-  const viewer = { userId: "me", interestIds: [], intents: [], workField: "design" }
+  const viewer = {
+    userId: "me",
+    interestIds: [],
+    intents: [],
+    workField: "design",
+    dating: { gender: null, interestedIn: [] },
+  }
   const rank = (population: number) =>
     rankMatches(viewer, [candidate({ userId: "x", workField: "design" })], {
       interestHolders: new Map(),
@@ -140,6 +147,7 @@ describe("the bonus", () => {
     interestIds: [],
     intents: [],
     workField: null,
+    dating: { gender: null, interestedIn: [] },
     insideNow: true,
     checkedInAt: new Date("2026-08-10T21:00:00.000Z"),
     revealed: false,
@@ -156,7 +164,13 @@ describe("the bonus", () => {
 
   it("prefers someone in the same field, all else equal", () => {
     const ranked = rankMatches(
-      { userId: "me", interestIds: [], intents: [], workField: "design" },
+      {
+        userId: "me",
+        interestIds: [],
+        intents: [],
+        workField: "design",
+        dating: { gender: null, interestedIn: [] },
+      },
       [candidate({ userId: "other", workField: "finance" }), candidate({ userId: "same", workField: "design" })],
       { interestHolders: new Map(), population: 20 }
     )
@@ -167,7 +181,13 @@ describe("the bonus", () => {
     // Otherwise every null-vs-null pair would score as a match, and the whole
     // room would tie on a field nobody filled in.
     const ranked = rankMatches(
-      { userId: "me", interestIds: [], intents: [], workField: null },
+      {
+        userId: "me",
+        interestIds: [],
+        intents: [],
+        workField: null,
+        dating: { gender: null, interestedIn: [] },
+      },
       [candidate({ userId: "a", workField: null }), candidate({ userId: "b", workField: "design" })],
       { interestHolders: new Map(), population: 20 }
     )
@@ -179,7 +199,13 @@ describe("the bonus", () => {
     // "Works in design" is a reason to walk over even if you do not. The bonus
     // needs both sides; the card only needs theirs.
     const [m] = rankMatches(
-      { userId: "me", interestIds: [], intents: [], workField: "finance" },
+      {
+        userId: "me",
+        interestIds: [],
+        intents: [],
+        workField: "finance",
+        dating: { gender: null, interestedIn: [] },
+      },
       [candidate({ userId: "x", workField: "design" })],
       { interestHolders: new Map(), population: 20 }
     )

@@ -185,3 +185,82 @@ describe("PUT /events/:eventId/matches/preferences — dating intent", () => {
     expect((await res.json()).error).toMatch(/check in/i)
   })
 })
+
+describe("PUT /profiles/:userId — orientation and interested_in", () => {
+  it("derives interested_in from gender and orientation", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: null,
+      orientation: null,
+    })
+    await putProfile(profileReq({ gender: "woman", orientation: "straight" }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(mockDb.profiles.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ orientation: "straight", interested_in: ["man"] }),
+      })
+    )
+  })
+
+  it("lets a client-supplied interested_in win over derivation", async () => {
+    /*
+     * The precedence that keeps a hand-picked preference from being replaced.
+     * Two writers to one column with no ordering is exactly how someone's
+     * explicit list becomes a derived empty set on the next save.
+     */
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: null,
+      orientation: null,
+    })
+    await putProfile(
+      profileReq({ gender: "woman", orientation: "straight", interested_in: ["woman", "man"] }),
+      { params: Promise.resolve({ userId: USER }) }
+    )
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update.interested_in).toEqual(["woman", "man"])
+  })
+
+  it("leaves interested_in alone when the pair implies nothing", async () => {
+    // "Straight" plus "non-binary" has no defined target set, so the column is
+    // untouched and the app asks directly — null must not mean "clear it".
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: null,
+      orientation: null,
+    })
+    await putProfile(profileReq({ gender: "non_binary", orientation: "straight" }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update).not.toHaveProperty("interested_in")
+    expect(update.orientation).toBe("straight")
+  })
+
+  it("re-derives against the stored half when only one is sent", async () => {
+    // Saving gender first and orientation second is a legal two-step, and it
+    // has to end up in the same place as sending both at once.
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: "man",
+      orientation: null,
+    })
+    await putProfile(profileReq({ orientation: "gay" }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update.interested_in).toEqual(["man"])
+  })
+
+  it("refuses an orientation that is not on the list", async () => {
+    const res = await putProfile(profileReq({ orientation: "heterosexual" }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(res.status).toBe(400)
+  })
+})

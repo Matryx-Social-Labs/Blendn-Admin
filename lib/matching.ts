@@ -1,5 +1,6 @@
 import type { connection_intent } from "@prisma/client"
 
+import { matchCompatibleForDating, type DatingProfile } from "@/lib/dating"
 import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
 
 /**
@@ -74,6 +75,11 @@ export interface MatchCandidate {
   intents: Intent[]
   /** Coarse field-of-work slug, or null. Never an employer or a job title. */
   workField: string | null
+  /**
+   * Dating inputs. Read here and emitted nowhere — a `Match` carries neither,
+   * and no card has ever stated anyone's gender.
+   */
+  dating: DatingProfile
   /** Currently checked in, as opposed to having attended earlier. */
   insideNow: boolean
   checkedInAt: Date
@@ -88,6 +94,7 @@ export interface MatchViewer {
   interestIds: string[]
   intents: Intent[]
   workField: string | null
+  dating: DatingProfile
 }
 
 export interface Match {
@@ -156,10 +163,30 @@ export function rankMatches(
     .filter((c) => c.userId !== viewer.userId)
     .map((candidate) => {
       const sharedInterestIds = intersect(viewer.interestIds, candidate.interestIds)
-      const sharedIntents = intersect(
-        viewer.intents.filter((i) => SOCIAL_INTENTS.includes(i)),
-        candidate.intents
-      ) as Intent[]
+      /*
+       * `dating` survives only if the two are plausibly a match.
+       *
+       * A tag filter, not a pool filter: nobody is removed from the list, and
+       * two men who both ticked dating still match on interests and on
+       * networking. What changes is that the card stops telling them they are a
+       * dating match, which it used to do for everyone — `matches.ts` never
+       * read gender at all.
+       *
+       * Removing the tag rather than the person is what keeps the one-pool
+       * decision intact (`JUST_HERE_DAMPING` above has the same shape), and it
+       * means "Both open to dating" has *already* had compatibility checked —
+       * so the card can be accurate without ever stating anyone's gender.
+       *
+       * Undeclared fails closed: no gender, no `interested_in`, no tag.
+       */
+      const sharedIntents = (
+        intersect(
+          viewer.intents.filter((i) => SOCIAL_INTENTS.includes(i)),
+          candidate.intents
+        ) as Intent[]
+      ).filter(
+        (i) => i !== "dating" || matchCompatibleForDating(viewer.dating, candidate.dating)
+      )
 
       let score = sharedInterestIds.reduce(
         (sum, id) => sum + interestWeight(id, opts.interestHolders, opts.population),
