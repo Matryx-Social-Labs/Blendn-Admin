@@ -3,6 +3,8 @@ import { join } from "path"
 
 import { generateOpenApiDocument } from "@/lib/openapi/registry"
 import { updateProfileSchema } from "@/lib/validations/profile"
+import { signupSchema, signinSchema } from "@/lib/validations/auth"
+import { MIN_PASSWORD_LENGTH } from "@/lib/password"
 
 /*
  * The registry is populated as a side effect of importing the path modules —
@@ -113,6 +115,45 @@ describe("OpenAPI spec covers the mobile API", () => {
         ?.UpdateProfileRequest?.properties ?? {}
     )
     expect(documented).toEqual(expect.arrayContaining(Object.keys(updateProfileSchema.shape)))
+  })
+
+  it("documents every field the auth routes actually accept", () => {
+    /*
+     * Same guard as above, for the schemas it was never extended to. Signup and
+     * signin were unguarded hand-copies, so a field added to either validator
+     * would have drifted silently — the exact failure the profile test exists
+     * to stop, one file over.
+     */
+    const schemas = doc.components?.schemas as Record<
+      string,
+      { properties?: Record<string, unknown> }
+    >
+    expect(Object.keys(schemas?.SignupRequest?.properties ?? {})).toEqual(
+      expect.arrayContaining(Object.keys(signupSchema.shape))
+    )
+    expect(Object.keys(schemas?.SigninRequest?.properties ?? {})).toEqual(
+      expect.arrayContaining(Object.keys(signinSchema.shape))
+    )
+  })
+
+  it("documents the password floor the signup route enforces", () => {
+    /*
+     * The number, not just the field name.
+     *
+     * The spec advertised a minimum of 8 while `checkPassword` — which the reset
+     * route runs — demanded 12. A client built against the spec would offer an
+     * 8-character password, the route would take it, and the user could then
+     * never reset to anything similar because reset refuses everything under 12.
+     * Documenting a floor looser than the one enforced is worse than documenting
+     * none, so this asserts the value rather than the presence.
+     */
+    const password = (
+      doc.components?.schemas as Record<
+        string,
+        { properties?: Record<string, { minLength?: number }> }
+      >
+    )?.SignupRequest?.properties?.password
+    expect(password?.minLength).toBe(MIN_PASSWORD_LENGTH)
   })
 })
 

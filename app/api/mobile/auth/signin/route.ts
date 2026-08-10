@@ -35,6 +35,27 @@ export async function POST(request: NextRequest) {
 
     const { email, password, deviceInfo } = parsed.data
 
+    /*
+     * A second limit, keyed on the account rather than the caller.
+     *
+     * The limit above is per-IP, and `createAuthRateLimit` cannot do better —
+     * its `keyGenerator` is synchronous and runs before the body is read. That
+     * was survivable while no client could reach this route with a password. It
+     * stops being survivable the moment the app ships a password form: per-IP
+     * alone lets a distributed attempt walk one account's password from a
+     * thousand addresses without ever tripping a counter.
+     *
+     * Same shape as the per-address limit in `/api/auth/forgot-password`.
+     * Deliberately looser than that one (10/15min vs 3/hr) because this is a
+     * person mistyping their own password, not a mailbomb.
+     */
+    const perAccount = await rateLimit(request, {
+      windowMs: 15 * 60 * 1000,
+      maxRequests: 10,
+      keyGenerator: () => `auth:signin:acct:${email.trim().toLowerCase()}`,
+    })
+    if (perAccount) return perAccount
+
     // Find user
     const user = await db.user.findUnique({
       where: { email },

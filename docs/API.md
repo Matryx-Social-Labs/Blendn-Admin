@@ -26,22 +26,54 @@ Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CON
 | Method | Endpoint | Description | Rate Limit |
 |--------|----------|-------------|------------|
 | POST | `/auth/signup` | Register with email/password | 3/hr |
-| POST | `/auth/signin` | Login with email/password | 5/15min |
+| POST | `/auth/signin` | Login with email/password | 5/15min per IP, 10/15min per email |
 | POST | `/auth/google` | Google OAuth login | 10/15min |
+| POST | `/auth/apple` | Apple Sign In | 10/15min |
 | POST | `/auth/refresh` | Refresh access token | 20/15min |
 | GET | `/auth/session` | Get current session info | - |
 | POST | `/auth/signout` | Revoke refresh token | - |
+
+Password reset is **not** under `/api/mobile`. See [Password reset](#password-reset) below.
 
 ### POST /auth/signup
 ```json
 { "email": "string", "password": "string", "name": "string" }
 ```
+Returns **201**: `{ accessToken, refreshToken, user: { id, email, name, profile } }`
+
+`profile` is returned so the client can decide where to route without a second
+call — it carries `onboarded`, which is what that decision reads.
+
+**Password rules.** At least **12 characters**, and rejected if it is an obvious
+choice (`password1234` is twelve characters and fails) or built from the local
+part of the address. This is `checkPassword` in `lib/password.ts`, the same
+function `/api/auth/reset-password` runs — so a password accepted here can
+always be reset to something similar. A shorter minimum here would mean users
+setting passwords they could never restore.
 
 ### POST /auth/signin
 ```json
 { "email": "string", "password": "string" }
 ```
-Returns: `{ accessToken, refreshToken, user: { id, email, name, role } }`
+Returns: `{ accessToken, refreshToken, user: { id, email, name, profile } }`
+
+An account created through Google or Apple has no password and returns the same
+generic `401` as a wrong password — deliberately, so the response is not an
+account-existence oracle.
+
+### Password reset
+
+Mobile clients call the shared web endpoints; there is no `/api/mobile` twin.
+
+| Method | Endpoint | Description | Rate Limit |
+|--------|----------|-------------|------------|
+| POST | `/api/auth/forgot-password` | Request a reset link | 5/15min per IP, 3/hr per address |
+| POST | `/api/auth/reset-password` | Set a new password with the token | 10/15min |
+
+`forgot-password` always responds `{ ok: true }` with the same message whether or
+not the address exists. The emailed link opens the **web** reset page in the
+browser; there is no deep link into the app. Completing a reset revokes every
+`mobile_refresh_tokens` row for that user, so all devices are signed out.
 
 ---
 

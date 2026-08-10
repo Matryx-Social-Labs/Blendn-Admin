@@ -103,7 +103,13 @@ export function createAuthRateLimit(
         const ip = req.headers.get("x-forwarded-for") ||
                    req.headers.get("x-real-ip") ||
                    "unknown"
-        // Try to get email from body for stricter per-account limiting
+        /*
+         * Per-IP only, and that is all this hook can be: `keyGenerator` is
+         * synchronous and runs before the route reads the body, so the email
+         * is not available here. The per-account limit lives in the signin
+         * route itself, after parsing — see the second `rateLimit` call in
+         * `app/api/mobile/auth/signin/route.ts`.
+         */
         return `auth:signin:${ip}`
       },
     },

@@ -19,7 +19,12 @@ registry.registerPath({
   path: "/api/mobile/auth/signup",
   tags: ["Mobile Auth"],
   summary: "Create a new account",
-  description: "Register a new user with email and password. Rate limited: 3 requests per hour.",
+  description:
+    "Register a new user with email and password. The password must be at least 12 characters " +
+    "and is additionally checked against obvious choices and against the local part of the " +
+    "address — the same rule `/api/auth/reset-password` enforces, so a password accepted here " +
+    "can always be reset to something similar. Returns the created profile alongside the user. " +
+    "Rate limited: 3 requests per hour.",
   request: {
     body: {
       content: { "application/json": { schema: SignupRequestSchema } },
@@ -43,7 +48,10 @@ registry.registerPath({
   path: "/api/mobile/auth/signin",
   tags: ["Mobile Auth"],
   summary: "Sign in with email and password",
-  description: "Authenticate with credentials. Rate limited: 5 requests per 15 minutes.",
+  description:
+    "Authenticate with credentials. Rate limited twice: 5 requests per 15 minutes per IP, and " +
+    "10 per 15 minutes per email address — the second stops a distributed attempt walking one " +
+    "account's password from many addresses.",
   request: {
     body: {
       content: { "application/json": { schema: SigninRequestSchema } },
