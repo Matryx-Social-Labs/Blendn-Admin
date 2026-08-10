@@ -75,7 +75,12 @@ export async function maySeeIdentity(viewerId: string, targetId: string): Promis
       .then(Boolean),
 
     // They revealed at an event the viewer also checked into.
-    db.event_check_ins
+    //
+    // Reads `event_match_preferences`, which holds one answer per person per
+    // event. It used to read `event_check_ins.revealed`, where a multi-day
+    // event gave one person several rows — so whether you could see someone's
+    // name depended on which of their check-ins matched first.
+    db.event_match_preferences
       .findFirst({
         where: {
           user_id: targetId,

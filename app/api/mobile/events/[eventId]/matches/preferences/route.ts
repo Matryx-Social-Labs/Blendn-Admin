@@ -78,11 +78,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       if (refusal) return forbiddenResponse(refusal)
     }
 
-    const updated = await db.event_check_ins.update({
-      where: { id: checkIn.id },
-      data: {
+    /*
+     * One row per person per event — not per check-in.
+     *
+     * This used to update the check-in row that `findFirst` happened to return.
+     * On a five-day conference that is one of five rows, chosen with no
+     * ordering, so writing your intent on Wednesday could land on Monday's row
+     * and reading it back could return Tuesday's. The unique key on
+     * `(event_id, user_id)` makes there be one answer to write.
+     */
+    const updated = await db.event_match_preferences.upsert({
+      where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
+      create: {
+        event_id: eventId,
+        user_id: authUser.userId,
+        intent: intent ?? [],
+        revealed: revealed ?? false,
+      },
+      update: {
         ...(intent !== undefined ? { intent } : {}),
         ...(revealed !== undefined ? { revealed } : {}),
+        updated_at: new Date(),
       },
       select: { intent: true, revealed: true },
     })

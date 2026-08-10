@@ -67,12 +67,17 @@ each PR's definition of done, not merging to `dev`.
 | 4 | Age policy: dating needs 18+, `events.min_age`, enforced at check-in | **Done** (#186) |
 | 5 | `profiles.work_field` + `/work-fields`, on the card, suppressed in small rooms | **Done** (#187) |
 | 6 | Dating compatibility — `orientation`, `deriveInterestedIn`, tag not filter | **Done** (#188) |
-| 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | Next |
+| 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | **Done** (#189) |
 | 8 | Email verification, gating chat from the *second* event | After app PR 13 |
 | 9 | Seed: fix the review account's missing occurrence; `seed:room` for a 30-day event | After 2 |
 | 15 | Scrub the new fields on account deletion | Last |
 
 PRs 10–14 are app-side and tracked in `blendn/ROADMAP.md`.
+
+**One follow-up owed:** `event_check_ins.intent` and `.revealed` are dead from
+0.65.0 and must be dropped in the release after. Kept one release so a rollback
+has something to roll back to — dropping a column in the same deploy that stops
+using it means the previous build cannot run at all.
 
 **Two sequencing constraints, both learned the hard way.** `age` cannot become
 required until the app sends it — the first draft of this plan called PR 1 a
@@ -338,6 +343,16 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.65.0
+
+- **`event_match_preferences`** (#189) — one row per person per event, replacing
+  two columns on `event_check_ins` that became ambiguous the day check-ins went
+  per-occurrence. Both readers used an unordered `findFirst`, so on a multi-day
+  event your intent and reveal state were whichever row came back first.
+
+- **The match list stopped listing a three-day attendee three times** (#189),
+  and `insideNow` now means their most recent day rather than an arbitrary one.
 
 ### 0.64.0
 

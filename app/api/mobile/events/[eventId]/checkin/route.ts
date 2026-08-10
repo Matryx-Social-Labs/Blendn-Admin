@@ -246,8 +246,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         kind,
         status: "checked_in",
         check_in_time: now,
-        intent: seededIntents,
-        revealed: profile?.reveal_by_default ?? false,
         latitude,
         longitude,
         device_info: deviceInfo,
@@ -262,6 +260,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
+    /*
+     * Seed the event preferences, once per event rather than once per day.
+     *
+     * `create`-only on purpose. Someone who set "just here" for tonight and
+     * stepped out for a cigarette must not have it reset to their default when
+     * they check back in — and on a multi-day event, day three must not
+     * overwrite what they chose on day one. Re-checking in is not a decision to
+     * change your answer.
+     *
+     * That guarantee used to be "only on create" of a *check-in* row, which
+     * stopped being the same thing the day check-ins became per-occurrence: on
+     * a five-day event, every new day was a create.
+     */
+    await db.event_match_preferences.upsert({
+      where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
+      create: {
+        event_id: eventId,
+        user_id: authUser.userId,
+        intent: seededIntents,
+        revealed: profile?.reveal_by_default ?? false,
+      },
+      update: {},
+    })
 
     // Ensure chat group exists and add user
     let chatGroup = await db.chat_groups.findUnique({
