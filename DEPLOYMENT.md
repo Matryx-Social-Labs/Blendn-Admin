@@ -93,7 +93,14 @@ it is not needed costs nothing; forgetting it costs a review cycle.
 
 It also creates an event if none is upcoming. An empty Events tab reads as a
 broken app to a reviewer, which is a likelier rejection than anything about
-sign-in.
+sign-in — and the event now gets its `event_occurrences` rows, without which
+**check-in refuses with "Event has already ended"** on an event starting
+tomorrow. `occurrence_id` is NOT NULL and `resolveOccurrence` treats "no
+occurrences" as over.
+
+After running it, sanity-check the reviewer's whole path once: sign in, open the
+event, check in. It takes a minute and it is the exact sequence a rejection
+would come from.
 
 Two constraints on the password, both enforced by the script rather than left to
 be discovered:
@@ -106,6 +113,31 @@ be discovered:
 Put the credentials in **App Store Connect → App Review Information →
 Sign-In Information**. Note there that onboarding can be reviewed by creating a
 fresh account, since this one is deliberately already onboarded.
+
+### 8. Populate a room — staging only
+
+```bash
+SEED_ROOM=yes DATABASE_URL=<staging> npm run seed:room
+SEED_ROOM=yes DATABASE_URL=<staging> npm run seed:room -- --clean
+```
+
+Matching, the roster, the dating tag, the small-room work-field floor and the
+`just_here` damping are all invisible in an empty room, and an empty room is
+what every environment has by default. This creates one event running thirty
+days with twenty-five people in it, shaped so each of those behaviours shows up
+on a screen rather than in a query plan.
+
+`/api/health` is the check that it worked: `matching.status` moves from
+`no_signal` to `ok` with a `rankableShare` around 0.8.
+
+**Two guards, and the second is the one that matters.** `SEED_ROOM=yes` is
+required, and the script prints the host it resolved from `DATABASE_URL` before
+it writes anything. Staging and production sit on the same internal hostname and
+differ only by credentials — `seed-volume.ts`'s ">1000 users means production"
+check passes on both and protects neither.
+
+Never on production. The accounts use `@blendn.invalid` addresses and a shared
+password, and they would appear in real rooms.
 
 ## Domain Setup for blendn.app
 

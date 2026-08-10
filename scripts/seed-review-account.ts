@@ -39,6 +39,7 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
+import { occurrencesForSpan } from "../lib/occurrences"
 import { checkPassword } from "../lib/password"
 
 const db = new PrismaClient({
@@ -173,7 +174,34 @@ async function main() {
         check_in_radius: 150,
       },
     })
-    eventNote = `created "${event.title}" (${event.id}) starting ${event.start_time.toISOString()}`
+
+    /*
+     * Without this, App Review cannot check in to the account we built for
+     * them.
+     *
+     * `event_check_ins.occurrence_id` is NOT NULL, and `resolveOccurrence`
+     * returns `none` for an event with no occurrence rows — which the check-in
+     * route reports as **"Event has already ended"**, on an event starting
+     * tomorrow. The reviewer would tap the one button the app is for and be
+     * told the event is over.
+     *
+     * Every event created through the dashboard gets its occurrences from
+     * `syncOccurrences`; this script wrote the `events` row directly and
+     * skipped it. Nothing in a unit test could catch that, because the failure
+     * is a missing row rather than a wrong one.
+     */
+    const days = occurrencesForSpan(event.start_time, event.end_time, event.timezone)
+    await db.event_occurrences.createMany({
+      data: days.map((d) => ({
+        event_id: event.id,
+        occurs_on: d.occursOn,
+        start_time: d.startTime,
+        end_time: d.endTime,
+      })),
+    })
+    eventNote =
+      `created "${event.title}" (${event.id}) starting ${event.start_time.toISOString()}` +
+      ` — ${days.length} occurrence(s)`
   }
 
   console.log("Review account ready.")

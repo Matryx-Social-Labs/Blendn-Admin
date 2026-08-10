@@ -5,6 +5,53 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.0] - 2026-08-10
+
+### Fixed
+
+- **App Review could not check in to the account built for them.**
+  `seed-review-account.ts` created the demo event by writing the `events` row
+  directly, which skips the `syncOccurrences` call every dashboard-created event
+  gets. `event_check_ins.occurrence_id` is NOT NULL and `resolveOccurrence`
+  returns `none` for an event with no occurrence rows — which the check-in route
+  reports as **"Event has already ended"**, on an event starting tomorrow. A
+  reviewer would tap the one button the app exists for and be told the event was
+  over.
+
+  No unit test could have caught it: the failure is a missing row, not a wrong
+  one.
+
+### Added
+
+- **`npm run seed:room`** — one event running thirty days with twenty-five
+  people in it. Matching, the roster, the dating tag, the small-room floor and
+  the work-field suppression are all invisible without a populated room, and
+  production has never had one: `user_interests` was empty for weeks while every
+  test stayed green.
+
+  Two guards, because the existing one protects nothing. `seed-volume.ts`
+  refuses above 1000 users, which passes on staging *and* production. This
+  requires `SEED_ROOM=yes` **and** prints the host resolved from `DATABASE_URL`
+  before writing — the two databases differ only by credentials on the same
+  hostname, which is exactly how the wrong one gets seeded.
+
+  **One occurrence spanning all thirty days**, deliberately unlike what the
+  product would create: `syncOccurrences` would make thirty, check-in resolves
+  today's, and a tester on day twelve would find an empty room.
+
+  The twenty-five are a shape, not noise — interest clusters so bands vary,
+  three people with one interest and two with none, silence beside `just_here`
+  (which must score alike), a dating cohort covering compatible, incompatible,
+  undeclared and the non-binary direct-selection path, one under-18 to prove the
+  age gate, mixed work fields, and three friend clusters arriving together as a
+  data shape for a future group matcher.
+
+  Verified against staging: `/api/health` moved from `no_signal` to
+  `{"status":"ok","checkedIn":25,"rankable":20,"rankableShare":0.8}`, and a
+  match list for a straight man returns his two straight-women matches tagged
+  `dating` while another straight man appears **without** the tag and with his
+  shared interests intact.
+
 ## [0.65.0] - 2026-08-10
 
 ### Fixed

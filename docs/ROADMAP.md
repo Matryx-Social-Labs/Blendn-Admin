@@ -69,7 +69,7 @@ each PR's definition of done, not merging to `dev`.
 | 6 | Dating compatibility — `orientation`, `deriveInterestedIn`, tag not filter | **Done** (#188) |
 | 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | **Done** (#189) |
 | 8 | Email verification, gating chat from the *second* event | After app PR 13 |
-| 9 | Seed: fix the review account's missing occurrence; `seed:room` for a 30-day event | After 2 |
+| 9 | Seed: fix the review account's missing occurrence; `seed:room` for a 30-day event | **Done** (#190) |
 | 15 | Scrub the new fields on account deletion | Last |
 
 PRs 10–14 are app-side and tracked in `blendn/ROADMAP.md`.
@@ -343,6 +343,16 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.66.0
+
+- **App Review could not check in to their own demo event** (#190). The seed
+  wrote the `events` row directly and skipped occurrences, so check-in reported
+  "Event has already ended" on an event starting tomorrow.
+
+- **`npm run seed:room`** (#190) — a thirty-day event with twenty-five people
+  shaped to make each matching behaviour visible. Staging went from
+  `matching: no_signal` to `rankableShare: 0.8`.
 
 ### 0.65.0
 
