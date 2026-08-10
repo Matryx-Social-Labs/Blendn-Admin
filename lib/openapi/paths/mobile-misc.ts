@@ -36,6 +36,36 @@ registry.registerPath({
   },
 })
 
+// === Work fields ===
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/work-fields",
+  tags: ["Mobile Categories"],
+  summary: "List the coarse fields of work",
+  description:
+    "The eighteen buckets `profiles.work_field` accepts, as `{ slug, label }`. Served rather " +
+    "than hardcoded in the client: a hardcoded copy cannot show a bucket added after the build " +
+    "shipped, and free text is the mistake `profiles.interests` made — 'Software' and 'software " +
+    "engineering' never match. Identical for every caller and safe to cache for an hour.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "Work fields",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              workFields: z.array(z.object({ slug: z.string(), label: z.string() })),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // === Users ===
 
 registry.registerPath({

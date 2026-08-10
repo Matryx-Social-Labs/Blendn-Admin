@@ -49,6 +49,12 @@ export const UpdateProfileRequestSchema = z
       .max(4)
       .optional(),
 
+    // A slug from GET /work-fields, never free text — "Software" and
+    // "software engineering" as two buckets is the mistake `interests` made.
+    // Unlike the fields above this one is public: a coarse bucket is an
+    // attribute, an employer is an address.
+    work_field: z.string().optional().nullable(),
+
     // Top level, snake_case, no `preferences` wrapper and no camelCase alias.
     // The app was sending twelve variants of these four and matching none.
     push_enabled: z.boolean().optional(),
@@ -92,6 +98,7 @@ export const ProfileResponseSchema = z
       photos: z.array(z.string()).nullable(),
       goals: z.array(z.string()),
       looking_for: z.array(z.string()),
+      work_field: z.string().nullable(),
       onboarded: z.boolean(),
 
       // Read these back under `profile`, with these names. The client had been

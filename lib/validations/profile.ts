@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { isWorkField } from "@/lib/work-fields"
+
 /** Mirrors the `connection_intent` enum in prisma/schema.prisma. */
 export const CONNECTION_INTENTS = ["dating", "networking", "friendship", "just_here"] as const
 
@@ -44,6 +46,24 @@ export const updateProfileSchema = z.object({
    */
   gender: z.enum(GENDERS).optional().nullable(),
   interested_in: z.array(z.enum(GENDERS)).max(4).optional(),
+
+  /*
+   * Coarse field of work — a slug the server owns, never free text.
+   *
+   * Validated against the list rather than as a string, because
+   * `profiles.interests` is the counter-example sitting in the same table:
+   * free text, so "Software" and "software engineering" never match, and the
+   * fix was two PRs. `GET /api/mobile/work-fields` serves the same list, so a
+   * client cannot invent a nineteenth value and discover it silently stored.
+   *
+   * Nullable: clearing it has to be possible, and unlike the four preference
+   * booleans there is no sensible default to fall back to.
+   */
+  work_field: z
+    .string()
+    .refine(isWorkField, { message: "Not a recognised field of work" })
+    .optional()
+    .nullable(),
 
   // Settings the app has always shown and never stored. Four switches with no
   // columns behind them meant every toggle read ON regardless of what anyone

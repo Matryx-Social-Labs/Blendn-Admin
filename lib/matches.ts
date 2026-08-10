@@ -6,6 +6,7 @@ import {
   type Intent,
   type MatchCandidate,
 } from "@/lib/matching"
+import { workFieldLabel } from "@/lib/work-fields"
 
 /**
  * Everything `rankMatches` needs, gathered from the database.
@@ -22,6 +23,15 @@ export interface MatchCard {
   /** Names, not ids — the card renders "Techno", and a uuid explains nothing. */
   sharedInterests: string[]
   sharedIntents: Intent[]
+  /**
+   * "Design", not "design" and not "Principal Designer at Swiggy".
+   *
+   * The label, resolved here, because a card must never render a raw slug and
+   * the client should not be holding its own copy of the mapping. Null in a
+   * room below `MIN_ROOM_FOR_WORK_FIELD`, where four attributes name one
+   * person, and null for anyone who has not said.
+   */
+  workField: string | null
   insideNow: boolean
   /** Whether *you* have liked them. Never whether they have liked you. */
   youLiked: boolean
@@ -49,7 +59,7 @@ export async function matchesForEvent(
   const [viewerProfile, viewerInterests, checkIns, blocks, likes] = await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
-      select: { intent_default: true },
+      select: { intent_default: true, work_field: true },
     }),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
     db.event_check_ins.findMany({
@@ -71,7 +81,7 @@ export async function matchesForEvent(
           select: {
             name: true,
             image: true,
-            profile: { select: { intent_default: true, photos: true } },
+            profile: { select: { intent_default: true, photos: true, work_field: true } },
             user_interests: { select: { category_id: true } },
           },
         },
@@ -121,6 +131,7 @@ export async function matchesForEvent(
     pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
     interestIds: c.user.user_interests.map((i) => i.category_id),
     intents: effectiveIntents(c.intent, c.user.profile?.intent_default ?? []),
+    workField: c.user.profile?.work_field ?? null,
     insideNow: c.status === "checked_in",
     checkedInAt: c.check_in_time!,
     revealed: c.revealed,
@@ -133,6 +144,7 @@ export async function matchesForEvent(
       userId: viewerId,
       interestIds: viewerInterests.map((i) => i.category_id),
       intents: effectiveIntents(viewerCheckIn.intent, viewerProfile?.intent_default ?? []),
+      workField: viewerProfile?.work_field ?? null,
     },
     candidates,
     { interestHolders, population: eligible.length, limit }
@@ -154,6 +166,9 @@ export async function matchesForEvent(
     photo: m.photo,
     sharedInterests: m.sharedInterestIds.map((id) => nameOf.get(id) ?? id),
     sharedIntents: m.sharedIntents,
+    // `rankMatches` has already applied the small-room floor; this only turns
+    // the surviving slug into something a person can read.
+    workField: workFieldLabel(m.workField),
     insideNow: m.insideNow,
     youLiked: liked.has(m.userId),
   }))

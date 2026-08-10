@@ -1,0 +1,21 @@
+-- Field of work, coarse enough to show a stranger.
+--
+-- `profiles.occupation` already exists and is free text: "Senior Backend
+-- Engineer at Razorpay". That is an identity, it sits behind the identity gate,
+-- and it should stay there — a pseudonymous room where one card names an
+-- employer is a room where one person is findable on LinkedIn in thirty
+-- seconds.
+--
+-- This is the version that survives being shown: a slug from
+-- `lib/work-fields.ts`, eighteen buckets, no employer and no seniority. Stored
+-- as TEXT with the list owned by the server and served at
+-- `GET /api/mobile/work-fields`, rather than as a Postgres enum — adding a
+-- nineteenth bucket should be a code change, not a migration on a table with
+-- every profile in it.
+--
+-- Not free text, which is the mistake `profiles.interests` made: two people who
+-- typed "Software" and "software engineering" never match, and the fix is a
+-- migration. `lib/interest-coverage.ts` exists to warn about exactly that
+-- column.
+
+ALTER TABLE "profiles" ADD COLUMN "work_field" TEXT;
