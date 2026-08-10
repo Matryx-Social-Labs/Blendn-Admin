@@ -117,9 +117,15 @@ fresh account, since this one is deliberately already onboarded.
 ### 8. Populate a room — staging only
 
 ```bash
-SEED_ROOM=yes DATABASE_URL=<staging> npm run seed:room
-SEED_ROOM=yes DATABASE_URL=<staging> npm run seed:room -- --clean
+SEED_ROOM=yes SEED_ROOM_PASSWORD=<pick one> DATABASE_URL=<staging> npm run seed:room
+SEED_ROOM=yes SEED_ROOM_PASSWORD=<same one> DATABASE_URL=<staging> npm run seed:room -- --clean
 ```
+
+`SEED_ROOM_PASSWORD` has **no default** and the script refuses to run without at
+least twelve characters. It was a constant in the file until the repositories
+went public, at which point twenty-five accounts on a reachable host had a
+password anyone could read. Re-running rotates it, so that is also how you
+recover if it leaks again.
 
 Matching, the roster, the dating tag, the small-room work-field floor and the
 `just_here` damping are all invisible in an empty room, and an empty room is
