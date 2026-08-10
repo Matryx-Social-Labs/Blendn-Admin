@@ -1,12 +1,25 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
+import { MIN_PASSWORD_LENGTH } from "@/lib/password"
 import { DeviceInfoSchema } from "./common"
+
+/*
+ * These duplicate `lib/validations/auth.ts` by hand, and they have to.
+ *
+ * `zod-to-openapi` patches the zod instance it is handed; Next gives the two
+ * modules separate copies, so `.openapi()` does not exist on anything built in
+ * `lib/validations`. Importing the validator here breaks the build while jest
+ * stays green — that has bitten this repo twice.
+ *
+ * A plain constant crosses that boundary safely, so at least the number cannot
+ * drift. `__tests__/openapi-coverage.test.ts` pins the rest field by field.
+ */
 
 // Request schemas (extending existing validations with OpenAPI metadata)
 export const SignupRequestSchema = z
   .object({
     email: z.string().email(),
-    password: z.string().min(8).max(100),
+    password: z.string().min(MIN_PASSWORD_LENGTH).max(100),
     name: z.string().min(1).max(100).optional(),
     deviceInfo: DeviceInfoSchema.optional(),
   })

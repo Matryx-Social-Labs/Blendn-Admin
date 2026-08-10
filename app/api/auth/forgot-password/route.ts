@@ -56,12 +56,24 @@ export async function POST(req: NextRequest) {
       select: { id: true, name: true, role: true, deletedAt: true, suspended_at: true },
     })
 
-    // Silent no-ops, all returning `ok`:
-    //  - no such account
-    //  - a deleted account
-    //  - an attendee, who has no dashboard to sign in to
-    // A suspended host CAN reset; suspension is not a lockout of the credential.
-    if (!user || user.deletedAt || user.role === "attendee") return ok
+    /*
+     * Silent no-ops, all returning `ok`:
+     *  - no such account
+     *  - a deleted account
+     * A suspended host CAN reset; suspension is not a lockout of the credential.
+     *
+     * Attendees used to be excluded here, on the reasoning that they "have no
+     * dashboard to sign in to". That stopped being true the moment the mobile
+     * app grew a password sign-in: an attendee is now exactly the person most
+     * likely to need this, and every mobile user is an attendee. The exclusion
+     * would have silently swallowed every reset request the app ever made,
+     * while still returning `ok` — the worst possible failure, because the app
+     * would show "check your email" for a mail that was never sent.
+     *
+     * Nothing downstream needed changing: `/api/auth/reset-password` already
+     * revokes `mobile_refresh_tokens` when the password changes.
+     */
+    if (!user || user.deletedAt) return ok
 
     // Outstanding tokens for this user are spent. Otherwise requesting a second
     // link leaves the first one live, and the older mail is the one more likely

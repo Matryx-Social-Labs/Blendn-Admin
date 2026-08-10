@@ -1,10 +1,21 @@
 import { z } from "zod"
+import { MIN_PASSWORD_LENGTH } from "@/lib/password"
 
 export const signupSchema = z.object({
   email: z.string().email("Invalid email address"),
+  /*
+   * The same floor the reset form enforces, imported rather than retyped.
+   *
+   * This was `.min(8)` while `lib/password.ts` required 12 and was never called
+   * on the mobile path. The two rules disagreeing is not a cosmetic
+   * inconsistency: a user could sign up with an eight-character password and
+   * then be permanently unable to reset to anything like it, because
+   * `/api/auth/reset-password` runs `checkPassword` and would refuse every
+   * replacement. One constant, one rule.
+   */
   password: z
     .string()
-    .min(8, "Password must be at least 8 characters")
+    .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
     .max(100, "Password must be at most 100 characters"),
   name: z.string().min(1, "Name is required").max(100, "Name is too long").optional(),
   deviceInfo: z
