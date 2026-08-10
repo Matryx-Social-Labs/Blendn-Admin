@@ -398,9 +398,13 @@ request status.
 | `orientation` | `straight` · `gay` · `lesbian` · `bisexual` · `pansexual` · `queer` · `asexual` · `prefer_not_to_say` | **nobody but the owner** |
 | `work_field` | a slug from `GET /work-fields` | anyone who can see the profile |
 
-`intent_default` is the person-level default; the per-event override is
+`intent_default` is the person-level default; the per-event override lives in
+`event_match_preferences`, written by
 `PUT /events/:eventId/matches/preferences`, and `effectiveIntents` prefers the
-per-event value when one exists. Until now the default could **only** be written
+per-event value when one exists. **One row per person per event** — it used to
+live on the check-in row, which stopped being one-per-event when check-ins went
+per-occurrence, so on a multi-day event the answer you got back was whichever of
+your check-ins the query happened to return. Until now the default could **only** be written
 through that route with `remember: true`, which 403s without a check-in — so a
 stable fact about a person was unrecordable until they had walked into a venue.
 

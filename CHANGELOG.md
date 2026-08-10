@@ -5,6 +5,43 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.65.0] - 2026-08-10
+
+### Fixed
+
+- **Per-event preferences stopped depending on which row Postgres returned
+  first.** `intent` and `revealed` lived on `event_check_ins`, which was correct
+  while a check-in was one row per event. The occurrences migration changed the
+  key to `(occurrence_id, user_id)`, so a five-day conference gives one person
+  five check-in rows — and both readers fetched the value with
+  `findFirst({ event_id, user_id })`: no occurrence scoping, no ordering.
+
+  Postgres may return any matching row for an unordered LIMIT 1, and which one
+  can change with a vacuum, a plan change or an index. So on any multi-day
+  event, your intent and your reveal state were whichever row came back first.
+  Silent, and not reliably reproducible.
+
+  `event_match_preferences` is keyed `(event_id, user_id)` — one answer per
+  person per event, enforced by a unique index rather than by intention. The
+  backfill folds `revealed` with `bool_or` (revealing on *any* day keeps you
+  revealed, which is what `lib/identity.ts` already assumed) and takes `intent`
+  from the most recent check-in.
+
+- **The match list stopped showing the same person once per day they attended.**
+  It mapped straight over check-in rows, so a regular at a five-day conference
+  appeared five times. Candidates are now deduplicated to their most recent
+  check-in, which also makes `insideNow` mean "here now" rather than "here on
+  whichever day sorted first".
+
+- **Check-in seeds preferences once per event, not once per day.** The
+  "create-only" guarantee — that stepping out for a cigarette does not reset
+  what you chose — was written against a check-in row, and stopped being the
+  same thing when every new day became a create.
+
+`event_check_ins.intent` and `.revealed` are read and written by nothing from
+this release. They are dropped in the next one, so a rollback has something to
+roll back to.
+
 ## [0.64.0] - 2026-08-10
 
 ### Fixed

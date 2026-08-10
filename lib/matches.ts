@@ -51,13 +51,15 @@ export async function matchesForEvent(
 ): Promise<MatchCard[] | null> {
   const viewerCheckIn = await db.event_check_ins.findFirst({
     // Event-level rather than per-occurrence: attending any day of a run puts
-    // you in the room with everyone else who came, on any day.
+    // you in the room with everyone else who came, on any day. Existence only —
+    // what they *chose* now lives in `event_match_preferences`, because this
+    // query returns an arbitrary one of their check-in rows.
     where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null } },
-    select: { intent: true },
+    select: { id: true },
   })
   if (!viewerCheckIn) return null
 
-  const [viewerProfile, viewerInterests, checkIns, blocks, likes] = await Promise.all([
+  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, likes] = await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
       select: { intent_default: true, work_field: true, gender: true, interested_in: true },
@@ -76,8 +78,6 @@ export async function matchesForEvent(
         user_id: true,
         status: true,
         check_in_time: true,
-        intent: true,
-        revealed: true,
         user: {
           select: {
             name: true,
@@ -99,6 +99,13 @@ export async function matchesForEvent(
         },
       },
     }),
+    // One row per person per event, fetched for the whole room in one query
+    // rather than joined per check-in row — a person attending three days has
+    // three check-ins and exactly one answer.
+    db.event_match_preferences.findMany({
+      where: { event_id: eventId },
+      select: { user_id: true, intent: true, revealed: true },
+    }),
     db.blocked_users.findMany({
       where: { OR: [{ blocker_id: viewerId }, { blocked_id: viewerId }] },
       select: { blocker_id: true, blocked_id: true },
@@ -116,7 +123,26 @@ export async function matchesForEvent(
   )
   const liked = new Set(likes.map((l) => l.liked_id))
 
-  const eligible = checkIns.filter((c) => c.user_id !== viewerId && !hidden.has(c.user_id))
+  const prefsOf = new Map(prefs.map((p) => [p.user_id, p]))
+
+  /*
+   * One candidate per person, not one per day they came.
+   *
+   * `event_check_ins` is keyed per occurrence, so somebody who attended three
+   * days of a conference has three rows here — and this used to map straight
+   * over them, putting the same person on the match list three times. Keeping
+   * the most recent row also makes `insideNow` mean "are they here now" rather
+   * than "were they here on whichever day sorted first".
+   */
+  const latestPerUser = new Map<string, (typeof checkIns)[number]>()
+  for (const c of checkIns) {
+    if (c.user_id === viewerId || hidden.has(c.user_id)) continue
+    const seen = latestPerUser.get(c.user_id)
+    if (!seen || (c.check_in_time?.getTime() ?? 0) > (seen.check_in_time?.getTime() ?? 0)) {
+      latestPerUser.set(c.user_id, c)
+    }
+  }
+  const eligible = [...latestPerUser.values()]
 
   /*
    * Rarity is measured against *this room*, not the platform.
@@ -142,7 +168,10 @@ export async function matchesForEvent(
     userId: c.user_id,
     pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
     interestIds: c.user.user_interests.map((i) => i.category_id),
-    intents: effectiveIntents(c.intent, c.user.profile?.intent_default ?? []),
+    intents: effectiveIntents(
+      prefsOf.get(c.user_id)?.intent ?? [],
+      c.user.profile?.intent_default ?? []
+    ),
     workField: c.user.profile?.work_field ?? null,
     dating: {
       gender: (c.user.profile?.gender ?? null) as Gender | null,
@@ -150,7 +179,7 @@ export async function matchesForEvent(
     },
     insideNow: c.status === "checked_in",
     checkedInAt: c.check_in_time!,
-    revealed: c.revealed,
+    revealed: prefsOf.get(c.user_id)?.revealed ?? false,
     name: c.user.name,
     photo: c.user.profile?.photos?.[0] ?? c.user.image,
   }))
@@ -159,7 +188,10 @@ export async function matchesForEvent(
     {
       userId: viewerId,
       interestIds: viewerInterests.map((i) => i.category_id),
-      intents: effectiveIntents(viewerCheckIn.intent, viewerProfile?.intent_default ?? []),
+      intents: effectiveIntents(
+        prefsOf.get(viewerId)?.intent ?? [],
+        viewerProfile?.intent_default ?? []
+      ),
       workField: viewerProfile?.work_field ?? null,
       dating: {
         gender: (viewerProfile?.gender ?? null) as Gender | null,

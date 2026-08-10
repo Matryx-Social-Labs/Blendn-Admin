@@ -13,6 +13,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 const mockDb = {
   profiles: { findUnique: jest.fn(), update: jest.fn(), upsert: jest.fn() },
   event_check_ins: { findFirst: jest.fn(), update: jest.fn() },
+  event_match_preferences: { upsert: jest.fn() },
   user: { update: jest.fn(), findUnique: jest.fn() },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -68,7 +69,7 @@ beforeEach(() => {
     user_interests: [],
   })
   mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "ci1" })
-  mockDb.event_check_ins.update.mockResolvedValue({ intent: [], revealed: false })
+  mockDb.event_match_preferences.upsert.mockResolvedValue({ intent: [], revealed: false })
 })
 
 describe("PUT /profiles/:userId — dating intent", () => {
@@ -156,7 +157,7 @@ describe("PUT /events/:eventId/matches/preferences — dating intent", () => {
       params: Promise.resolve({ eventId: EVENT }),
     })
     expect(res.status).toBe(403)
-    expect(mockDb.event_check_ins.update).not.toHaveBeenCalled()
+    expect(mockDb.event_match_preferences.upsert).not.toHaveBeenCalled()
     expect(mockDb.profiles.update).not.toHaveBeenCalled()
   })
 
@@ -166,7 +167,13 @@ describe("PUT /events/:eventId/matches/preferences — dating intent", () => {
       params: Promise.resolve({ eventId: EVENT }),
     })
     expect(res.status).toBe(200)
-    expect(mockDb.event_check_ins.update).toHaveBeenCalled()
+    // Keyed on (event_id, user_id), not on whichever check-in row came back:
+    // a five-day event gives one person five of those and one answer.
+    expect(mockDb.event_match_preferences.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { event_id_user_id: { event_id: EVENT, user_id: USER } },
+      })
+    )
   })
 
   it("does not read the profile when intent is not being set", async () => {

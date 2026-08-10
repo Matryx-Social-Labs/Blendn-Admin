@@ -45,6 +45,7 @@ model User {
   org_join_requests      organisation_join_requests[]
   password_resets        password_reset_tokens[]
   event_check_ins        event_check_ins[]
+  match_preferences      event_match_preferences[]
   likes_sent             event_likes[]        @relation("LikesSent")
   likes_received         event_likes[]        @relation("LikesReceived")
   ratings_given          peer_ratings[]       @relation("RatingsGiven")
@@ -163,8 +164,9 @@ model profiles {
   /// Anonymous unless asked. The room is pseudonymous everywhere else, and a
   /// match list that named people would be the one screen that undid it.
   ///
-  /// Revealing is per event (`event_check_ins.revealed`); this only sets what
-  /// that starts as.
+  /// Revealing is per event (`event_match_preferences.revealed`); this only
+  /// sets what the app *suggests* there, and the suggestion is applied by a tap
+  /// rather than by check-in — see `docs/API.md`.
   reveal_by_default Boolean @default(false)
 
   /// Collected **only** when intent includes dating, and unread otherwise. A
@@ -253,6 +255,7 @@ model events {
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
   details            event_details?
   check_ins          event_check_ins[]
+  match_preferences  event_match_preferences[]
   likes              event_likes[]
   peer_ratings       peer_ratings[]
   chat_group         chat_groups?
@@ -372,11 +375,17 @@ model event_check_ins {
   longitude      Float?
   device_info    Json?
 
-  /// Why they are here tonight, and whether they want to be named.
+  /// **Deprecated — read and written by nothing since 0.65.0.**
   ///
-  /// Per check-in rather than per profile because both genuinely change by
-  /// event: someone open to dating at a Friday party is often only there for
-  /// the talk on Tuesday. Empty falls back to `profiles.intent_default`.
+  /// These lived here because a check-in was once one row per event. When
+  /// occurrences arrived the key became `(occurrence_id, user_id)`, so a
+  /// five-day conference gave one person five rows — and both readers looked
+  /// the value up with `findFirst({ event_id, user_id })`, no ordering, so
+  /// which day's answer you got was whatever Postgres handed back first.
+  ///
+  /// `event_match_preferences` replaces them: one row per person per event,
+  /// which is what "per event" always meant. Kept for one release so a rollback
+  /// has something to roll back to; drop them in the release after 0.65.0.
   intent   connection_intent[]
   revealed Boolean            @default(false)
 
@@ -1288,6 +1297,41 @@ enum media_type {
 /// particular night. Carrying it across events would turn a room into a
 /// follower graph, which is a different product.
 ///
+/// Why one person is at one event, and whether they want to be named there.
+///
+/// One row per person per event, which is what "per event" was always supposed
+/// to mean. This lived on `event_check_ins` until 0.65.0, and stopped being
+/// correct the day check-ins became per-occurrence: a five-day conference gives
+/// one person five check-in rows, and both readers fetched the value with
+/// `findFirst({ event_id, user_id })` — no occurrence scoping, no ordering. So
+/// on any multi-day event your intent and your reveal state were whichever row
+/// Postgres happened to return first. Silent, and not reliably reproducible,
+/// which is the worst combination to debug.
+///
+/// Reveal deliberately does **not** live on the profile. Being named in a room
+/// has to be something a person did in that room; `profiles.reveal_by_default`
+/// is a suggestion the app offers after check-in, never a switch that names
+/// someone before they answer.
+model event_match_preferences {
+  id       String @id @default(uuid()) @db.Uuid
+  event_id String @db.Uuid
+  user_id  String
+
+  /// Empty falls back to `profiles.intent_default` — see `effectiveIntents`.
+  intent   connection_intent[]
+  revealed Boolean            @default(false)
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  /// The constraint that makes the ambiguity impossible rather than unlikely.
+  @@unique([event_id, user_id])
+  @@index([user_id])
+}
+
 /// A mutual like is the only thing that opens a conversation, and the only
 /// moment identity is exchanged — and then only if both sides chose to reveal.
 model event_likes {
