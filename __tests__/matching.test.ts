@@ -180,6 +180,67 @@ describe("the card carries the overlaps", () => {
   })
 })
 
+/**
+ * The room production actually has today.
+ *
+ * `user_interests` is empty in production -- onboarding writes free text to
+ * `profiles.interests` instead -- so every candidate arrives with
+ * `interestIds: []`. Nothing errors. Every existing test in this file seeds
+ * interests, so the whole suite is green while the feature returns nothing
+ * useful to anybody.
+ *
+ * These pin what "broken" is allowed to look like: honest, ordered, and
+ * complete. If the ranking ever starts inventing a number or silently dropping
+ * people to hide the emptiness, this block fails.
+ */
+describe("a room where nobody has structured interests", () => {
+  const emptyRoom = [
+    candidate({ userId: "a", intents: ["networking"], checkedInAt: new Date(T0.getTime() - 60_000) }),
+    candidate({ userId: "b", checkedInAt: T0 }),
+    candidate({ userId: "c", intents: ["dating"], insideNow: false, checkedInAt: T0 }),
+  ]
+
+  it("still returns everyone rather than an empty screen", () => {
+    // Hard-filtering on overlap would empty a new app's only screen.
+    expect(rank(emptyRoom).map((m) => m.userId).sort()).toEqual(["a", "b", "c"])
+  })
+
+  it("names no overlap it cannot substantiate", () => {
+    for (const match of rank(emptyRoom)) {
+      expect(match.sharedInterestIds).toEqual([])
+    }
+  })
+
+  it("emits no score to paper over the emptiness", () => {
+    // A percentage here would be pure fabrication -- there is nothing to
+    // compute it from.
+    for (const match of rank(emptyRoom)) {
+      expect(match).not.toHaveProperty("score")
+    }
+  })
+
+  it("still orders on something real: shared intent, then presence", () => {
+    // With interests gone, intent and presence are the only honest signals
+    // left. "a" shares networking with the viewer; "c" is both a different
+    // intent and already gone.
+    const order = rank(emptyRoom).map((m) => m.userId)
+    expect(order[0]).toBe("a")
+    expect(order[order.length - 1]).toBe("c")
+  })
+
+  it("is deterministic, so paging cannot repeat or drop someone", () => {
+    expect(rank(emptyRoom).map((m) => m.userId)).toEqual(rank(emptyRoom).map((m) => m.userId))
+  })
+
+  it("keeps the pseudonym rule when there is nothing else to show", () => {
+    // The temptation with a blank card is to fill it with a real name.
+    for (const match of rank(emptyRoom)) {
+      expect(match.displayName).toMatch(/^Anon /)
+      expect(match.photo).toBeNull()
+    }
+  })
+})
+
 describe("housekeeping", () => {
   it("never returns the viewer", () => {
     expect(rank([candidate({ userId: "me" }), candidate({ userId: "other" })])).toHaveLength(1)
