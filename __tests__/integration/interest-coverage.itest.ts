@@ -14,6 +14,29 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpe
 
 const users: string[] = []
 const events: string[] = []
+const categoryIds: string[] = []
+
+/**
+ * Seed our own categories rather than assuming any exist.
+ *
+ * The first version of this file read whatever `categories` happened to hold.
+ * That passed locally, where the table is populated, and failed in CI against a
+ * freshly pushed schema where it is empty -- so the fixture silently created
+ * zero interests and the assertion measured nothing. A test that depends on
+ * ambient data is not a test.
+ */
+async function ensureCategories(howMany: number): Promise<string[]> {
+  while (categoryIds.length < howMany) {
+    const n = categoryIds.length
+    const slug = `itest-cov-${n}-${Math.random().toString(36).slice(2, 8)}`
+    const row = await db.categories.create({
+      data: { name: `ITest Coverage ${n}`, slug },
+      select: { id: true },
+    })
+    categoryIds.push(row.id)
+  }
+  return categoryIds.slice(0, howMany)
+}
 
 async function checkedInUser(label: string, interestCount: number) {
   const userId = await makeUser(label)
@@ -35,12 +58,9 @@ async function checkedInUser(label: string, interestCount: number) {
   })
 
   if (interestCount > 0) {
-    const categories = await db.categories.findMany({
-      take: interestCount,
-      select: { id: true },
-    })
+    const ids = await ensureCategories(interestCount)
     await db.user_interests.createMany({
-      data: categories.map((c) => ({ user_id: userId, category_id: c.id })),
+      data: ids.map((id) => ({ user_id: userId, category_id: id })),
       skipDuplicates: true,
     })
   }
@@ -50,6 +70,12 @@ async function checkedInUser(label: string, interestCount: number) {
 
 afterAll(async () => {
   await cleanup(users, events)
+  // Categories are not owned by a user or an event, so `cleanup` cannot reach
+  // them. Left behind they would accumulate across runs and skew nothing, but
+  // they would still be litter in a shared database.
+  if (categoryIds.length > 0) {
+    await db.categories.deleteMany({ where: { id: { in: categoryIds } } })
+  }
   await closeDb()
 })
 
