@@ -85,31 +85,37 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Check in to see who else is here")
     }
 
-    // Get total count — same completeness filter as the list query below
-    const profileCompletedFilter = {
-      user: {
-        profile: {
-          onboarded: true,
-          name: { not: null },
-          photos: { isEmpty: false },
-        },
-      },
-    }
-
+    /*
+     * Everyone checked in is in the room.
+     *
+     * There used to be a completeness filter here -- `onboarded: true`, a
+     * non-null `name`, a non-empty `photos` -- gating the roster on two fields
+     * this endpoint does not serve. It returns a pseudonym, an age, a city and a
+     * time; whether someone has uploaded a photo changes none of those. So a
+     * person who walked through the door, passed the GPS gate and is standing in
+     * the room was invisible to everybody in it, and invisible to themselves in
+     * the count, for a reason nothing downstream could observe.
+     *
+     * It also disagreed with `/matches`, which has never applied it. The roster
+     * said eleven people and the match list offered nineteen, in the same room,
+     * at the same moment.
+     *
+     * That gap narrows but does not close, and it should not: matches select on
+     * `check_in_time: { not: null }`, this selects `status: "checked_in"`, so
+     * someone who has checked out stays matchable and stops being listed as
+     * present. That is the intended difference between "was here" and "is here".
+     */
     const totalCount = await db.event_check_ins.count({
       where: {
         event_id: eventId,
         status: "checked_in",
-        ...profileCompletedFilter,
       },
     })
 
-    // Fetch check-ins with user info — Fix #34: only include users with completed profiles
     const checkIns = await db.event_check_ins.findMany({
       where: {
         event_id: eventId,
         status: "checked_in",
-        ...profileCompletedFilter,
       },
       include: {
         user: {

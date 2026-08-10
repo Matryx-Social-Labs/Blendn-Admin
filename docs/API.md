@@ -104,6 +104,17 @@ photos. Blocks are honoured in both directions everywhere, and are reported as
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
 
+**The roster is everyone checked in.** It used to be filtered on `onboarded`, a
+non-null name and a non-empty `photos` array — three fields the endpoint does not
+serve. Someone who had passed the GPS gate and was standing in the room was
+absent from the list and from the count, for a reason nothing in the response
+could explain.
+
+It still will not equal `/matches`, and should not: matches select on
+`check_in_time: { not: null }`, the roster on `status: "checked_in"`. Someone who
+checked out stays matchable and stops being listed as present — "was here" versus
+"is here".
+
 ---
 
 ## Events
