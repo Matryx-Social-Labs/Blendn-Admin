@@ -5,6 +5,29 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.67.0] - 2026-08-10
+
+### Fixed
+
+- **Deleting an account now removes the matching inputs too.** `gender`,
+  `orientation`, `interested_in`, `intent_default`, `reveal_by_default` and
+  `work_field` survived deletion — the first three collected only from people
+  who ticked dating, and the most sensitive fields on the row. An account that
+  keeps its owner's sexual orientation after they asked for it to be gone is an
+  audit finding, not a review comment.
+
+  Also removed: the structured `user_interests` rows, which would cascade on a
+  `User` delete and therefore never got deleted at all — the `User` row is
+  deliberately kept, because removing it would cascade other people's event and
+  chat history. And every `event_match_preferences` row: what someone was open
+  to at an event is only theirs, while attendance is the organiser's history too
+  and stays.
+
+  The durable part is a test that reads `schema.prisma` and fails when any field
+  on `profiles` is neither scrubbed nor listed as deliberately kept. `goals` and
+  `looking_for` already survived one release this way; the next new column
+  cannot.
+
 ## [0.66.0] - 2026-08-10
 
 ### Fixed

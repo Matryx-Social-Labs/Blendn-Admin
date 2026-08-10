@@ -70,7 +70,7 @@ each PR's definition of done, not merging to `dev`.
 | 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | **Done** (#189) |
 | 8 | Email verification, gating chat from the *second* event | After app PR 13 |
 | 9 | Seed: fix the review account's missing occurrence; `seed:room` for a 30-day event | **Done** (#190) |
-| 15 | Scrub the new fields on account deletion | Last |
+| 15 | Scrub the new fields on account deletion | **Done** (#191) |
 
 PRs 10–14 are app-side and tracked in `blendn/ROADMAP.md`.
 
@@ -343,6 +343,14 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.67.0
+
+- **Account deletion scrubs the matching inputs** (#191) — gender, orientation,
+  interested_in, intent_default, reveal_by_default, work_field, the structured
+  interests and every per-event preference row. Guarded by a test that reads the
+  schema, so the next column added to `profiles` cannot survive deletion
+  quietly.
 
 ### 0.66.0
 
