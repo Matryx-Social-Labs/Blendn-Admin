@@ -1,5 +1,11 @@
 import { z } from "zod"
 
+/** Mirrors the `connection_intent` enum in prisma/schema.prisma. */
+export const CONNECTION_INTENTS = ["dating", "networking", "friendship", "just_here"] as const
+
+/** Mirrors the gender values the dating compatibility table understands. */
+export const GENDERS = ["woman", "man", "non_binary", "prefer_not_to_say"] as const
+
 export const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   phone: z.string().max(20).optional().nullable(),
@@ -13,6 +19,31 @@ export const updateProfileSchema = z.object({
   goals: z.array(z.string()).optional(),
   looking_for: z.array(z.string()).optional(),
   onboarded: z.boolean().optional(),
+
+  /*
+   * What this person is generally open to, settable from the profile at last.
+   *
+   * The column has existed since the matchmaking migration and its own schema
+   * comment calls it "the default, not the truth" — but the only write path was
+   * `PUT /events/:id/matches/preferences` with `remember: true`, which 403s
+   * without an existing check-in. So a stable, person-level fact could only be
+   * recorded after checking into an event, and the app was forced to ask at
+   * check-in for no better reason than that. Per-event override stays where it
+   * is; this is the default underneath it.
+   */
+  intent_default: z.array(z.enum(CONNECTION_INTENTS)).max(4).optional(),
+
+  /*
+   * Dating inputs. Matching consults them; nobody else ever sees them — they
+   * are absent from every non-self response by way of the allow-list in
+   * `app/api/mobile/profiles/[userId]/route.ts`, which exists because a
+   * deny-list once leaked exactly these two fields.
+   *
+   * `reveal_by_default` is deliberately NOT here. Being named has to be
+   * something a person did in a room, not a profile setting they flipped once.
+   */
+  gender: z.enum(GENDERS).optional().nullable(),
+  interested_in: z.array(z.enum(GENDERS)).max(4).optional(),
 
   // Settings the app has always shown and never stored. Four switches with no
   // columns behind them meant every toggle read ON regardless of what anyone

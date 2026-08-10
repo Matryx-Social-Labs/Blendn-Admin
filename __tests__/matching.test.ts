@@ -110,6 +110,33 @@ describe("intent shapes the order and never filters", () => {
     ])
     expect(ranked[0].userId).toBe("both")
   })
+
+  it("damps silence exactly as hard as an explicit just_here", () => {
+    /*
+     * The honest answer must not cost anything.
+     *
+     * The damping guard used to read `intents.length > 0 && every(...)`, so an
+     * empty intent array escaped it while an explicit `just_here` did not —
+     * with otherwise identical interests the two scored differently, and the
+     * person who answered the question truthfully ranked strictly below the
+     * person who declined to answer it. Neither says "come and talk to me", and
+     * a product built on knowing what someone is open to must not reward
+     * saying nothing.
+     */
+    const ranked = rank([
+      candidate({ userId: "silent", interestIds: ["techno"], intents: [] }),
+      candidate({ userId: "honest", interestIds: ["techno"], intents: ["just_here"] }),
+    ])
+
+    /*
+     * Both are damped, so they tie on score and fall through to the check-in
+     * time (identical here) and then to `userId.localeCompare`, which puts
+     * "honest" first. With the old guard "silent" was undamped, scored higher,
+     * and led — so this assertion is what actually distinguishes the fix from
+     * the bug rather than merely passing either way.
+     */
+    expect(ranked[0].userId).toBe("honest")
+  })
 })
 
 describe("presence", () => {

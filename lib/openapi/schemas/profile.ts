@@ -34,6 +34,21 @@ export const UpdateProfileRequestSchema = z
     looking_for: z.array(z.string()).optional(),
     onboarded: z.boolean().optional(),
 
+    // What this person is generally open to. The per-event override lives on
+    // PUT /events/:eventId/matches/preferences; this is the default under it.
+    intent_default: z
+      .array(z.enum(["dating", "networking", "friendship", "just_here"]))
+      .max(4)
+      .optional(),
+
+    // Matching inputs, never card content: these are returned to the owner and
+    // to nobody else. `reveal_by_default` is deliberately not settable here.
+    gender: z.enum(["woman", "man", "non_binary", "prefer_not_to_say"]).optional().nullable(),
+    interested_in: z
+      .array(z.enum(["woman", "man", "non_binary", "prefer_not_to_say"]))
+      .max(4)
+      .optional(),
+
     // Top level, snake_case, no `preferences` wrapper and no camelCase alias.
     // The app was sending twelve variants of these four and matching none.
     push_enabled: z.boolean().optional(),

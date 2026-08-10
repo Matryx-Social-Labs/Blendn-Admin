@@ -147,6 +147,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const {
       name, phone, age, location, bio, occupation, education, interests, photos,
       goals, looking_for, onboarded,
+      intent_default, gender, interested_in,
       push_enabled, show_online, read_receipts, share_location,
     } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
@@ -179,6 +180,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         goals: goals || [],
         looking_for: looking_for || [],
         onboarded: onboarded ?? false,
+        // Conditional for the same reason as the four switches below: absent
+        // must mean "unset", not "cleared". Writing `[]` here would look
+        // identical to someone deliberately choosing nothing.
+        ...(intent_default !== undefined && { intent_default }),
+        ...(gender !== undefined && { gender }),
+        ...(interested_in !== undefined && { interested_in }),
         // Omitted rather than defaulted: the column defaults to true, which is
         // what the settings screen has always claimed, so nobody's apparent
         // settings change on the day these start being honoured.
@@ -200,6 +207,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(goals !== undefined && { goals }),
         ...(looking_for !== undefined && { looking_for }),
         ...(onboarded !== undefined && { onboarded }),
+        ...(intent_default !== undefined && { intent_default }),
+        ...(gender !== undefined && { gender }),
+        ...(interested_in !== undefined && { interested_in }),
         ...(push_enabled !== undefined && { push_enabled }),
         ...(show_online !== undefined && { show_online }),
         ...(read_receipts !== undefined && { read_receipts }),

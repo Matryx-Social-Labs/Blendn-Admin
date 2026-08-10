@@ -145,10 +145,19 @@ export function rankMatches(
       score += INTENT_BONUS * sharedIntents.length
       if (candidate.insideNow) score += PRESENCE_BONUS
 
-      // Only when `just_here` is *all* they said — someone who picked it
-      // alongside "networking" is networking.
-      const onlyJustHere =
-        candidate.intents.length > 0 && candidate.intents.every((i) => i === "just_here")
+      /*
+       * Only when `just_here` is *all* they said — someone who picked it
+       * alongside "networking" is networking.
+       *
+       * `.every()` on an empty array is true, and that is deliberate: silence
+       * and "just here" are damped identically. The guard used to require
+       * `length > 0`, which meant answering the question honestly ranked you
+       * strictly below refusing to answer it — an empty intent array escaped
+       * the damping that an explicit `just_here` received, with an otherwise
+       * identical score. Punishing the honest answer is the wrong incentive in
+       * a product whose whole premise is knowing what someone is open to.
+       */
+      const onlyJustHere = candidate.intents.every((i) => i === "just_here")
       if (onlyJustHere) score *= JUST_HERE_DAMPING
 
       return { candidate, sharedInterestIds, sharedIntents, score }
