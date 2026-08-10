@@ -66,7 +66,7 @@ each PR's definition of done, not merging to `dev`.
 | 3 | Reports reach a human; suspension reaches the phone | **Done** (#185) |
 | 4 | Age policy: dating needs 18+, `events.min_age`, enforced at check-in | **Done** (#186) |
 | 5 | `profiles.work_field` + `/work-fields`, on the card, suppressed in small rooms | **Done** (#187) |
-| 6 | Dating compatibility — `orientation`, `deriveInterestedIn`, tag not filter | Next |
+| 6 | Dating compatibility — `orientation`, `deriveInterestedIn`, tag not filter | **Done** (#188) |
 | 7 | Per-event preferences get their own table (`findFirst` is nondeterministic on a multi-day event) | Next |
 | 8 | Email verification, gating chat from the *second* event | After app PR 13 |
 | 9 | Seed: fix the review account's missing occurrence; `seed:room` for a 30-day event | After 2 |
@@ -338,6 +338,19 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.64.0
+
+- **Dating compatibility, as a tag filter** (#188). `matches.ts` never read
+  gender, so "Both open to dating" appeared between people who were not a match.
+  The tag is dropped, never the person — everyone stays in the list and still
+  matches on interests and networking, and a card claiming a dating match has
+  had compatibility checked, so it never states anyone's gender.
+
+- **`profiles.orientation`** (#188), stored beside `interested_in` rather than
+  replacing it, because the label only sometimes implies the set. Ambiguous
+  pairs return null and are asked directly; client-supplied `interested_in`
+  always wins over derivation.
 
 ### 0.63.0
 

@@ -1,0 +1,24 @@
+-- Orientation, beside the target set it sometimes implies.
+--
+-- `gender` and `interested_in` already exist and had no write path at all until
+-- this week. `interested_in` is what matching reads; `orientation` is what a
+-- person calls themselves, and the two are stored separately because the label
+-- is only *sometimes* enough to derive the set.
+--
+-- "Straight" plus "non-binary" has no defined target set. Neither does "queer"
+-- or "pansexual" — those are identities, not tables. Every implementation that
+-- pretends otherwise is guessing about someone's dating life, so
+-- `deriveInterestedIn` covers the unambiguous pairs and returns null for the
+-- rest, and the app asks directly. Which means a row can legitimately hold an
+-- `orientation` alongside an `interested_in` that did not come from it — hence
+-- two columns rather than one derived view.
+--
+-- TEXT rather than an enum for the same reason as `work_field`: adding a label
+-- should be a code change, not a migration on a table holding every profile.
+--
+-- Returned to nobody but the owner. The allow-list in
+-- `app/api/mobile/profiles/[userId]/route.ts` keeps all three out of every
+-- other response, and it is an allow-list precisely because a deny-list once
+-- leaked this exact pair.
+
+ALTER TABLE "profiles" ADD COLUMN "orientation" TEXT;

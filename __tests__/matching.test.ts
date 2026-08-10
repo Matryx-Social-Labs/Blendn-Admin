@@ -22,6 +22,7 @@ function candidate(over: Partial<MatchCandidate> & { userId: string }): MatchCan
     interestIds: [],
     intents: [],
     workField: null,
+    dating: { gender: null, interestedIn: [] },
     insideNow: true,
     checkedInAt: T0,
     revealed: false,
@@ -45,6 +46,7 @@ const viewer = {
   interestIds: ["music", "techno", "modular", "boardgames"],
   intents: ["networking"] as Intent[],
   workField: null,
+  dating: { gender: null, interestedIn: [] },
 }
 
 const rank = (candidates: MatchCandidate[]) =>

@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { isOrientation } from "@/lib/dating"
 import { isWorkField } from "@/lib/work-fields"
 
 /** Mirrors the `connection_intent` enum in prisma/schema.prisma. */
@@ -46,6 +47,18 @@ export const updateProfileSchema = z.object({
    */
   gender: z.enum(GENDERS).optional().nullable(),
   interested_in: z.array(z.enum(GENDERS)).max(4).optional(),
+
+  /*
+   * The label they hold. `interested_in` is what matching reads, and the route
+   * derives it from this pair *only when the request does not supply it* —
+   * client-supplied always wins. Two writers to one column with no precedence
+   * is how a hand-picked preference gets replaced by a derived empty set.
+   */
+  orientation: z
+    .string()
+    .refine(isOrientation, { message: "Not a recognised orientation" })
+    .optional()
+    .nullable(),
 
   /*
    * Coarse field of work — a slug the server owns, never free text.

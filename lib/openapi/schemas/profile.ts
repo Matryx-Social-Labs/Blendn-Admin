@@ -49,6 +49,23 @@ export const UpdateProfileRequestSchema = z
       .max(4)
       .optional(),
 
+    // The label they hold. `interested_in` is what matching reads; this is only
+    // *sometimes* enough to derive it, so both are stored. Owner-only, like the
+    // two above. Send `interested_in` explicitly and it wins over derivation.
+    orientation: z
+      .enum([
+        "straight",
+        "gay",
+        "lesbian",
+        "bisexual",
+        "pansexual",
+        "queer",
+        "asexual",
+        "prefer_not_to_say",
+      ])
+      .optional()
+      .nullable(),
+
     // A slug from GET /work-fields, never free text — "Software" and
     // "software engineering" as two buckets is the mistake `interests` made.
     // Unlike the fields above this one is public: a coarse bucket is an

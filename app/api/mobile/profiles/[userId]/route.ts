@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { datingAgeRefusal, stripDating } from "@/lib/age"
+import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { blockedEitherWay } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -157,7 +158,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const {
       name, phone, age, location, bio, occupation, education, interests, photos,
       goals, looking_for, onboarded,
-      intent_default, gender, interested_in, work_field,
+      intent_default, gender, interested_in, work_field, orientation,
       push_enabled, show_online, read_receipts, share_location,
     } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
@@ -171,12 +172,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * act of filling in.
      */
     const touchesAgeGate = intent_default !== undefined || age !== undefined
-    const existing = touchesAgeGate
-      ? await db.profiles.findUnique({
-          where: { id: userId },
-          select: { age: true, intent_default: true },
-        })
-      : null
+    const touchesDating = gender !== undefined || orientation !== undefined
+    const existing =
+      touchesAgeGate || touchesDating
+        ? await db.profiles.findUnique({
+            where: { id: userId },
+            select: { age: true, intent_default: true, gender: true, orientation: true },
+          })
+        : null
     const effectiveAge = age !== undefined ? age : (existing?.age ?? null)
 
     const refusal = datingAgeRefusal(intent_default, effectiveAge)
@@ -197,6 +200,32 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         : null
     const stripsDating =
       demotedIntents !== null && demotedIntents.length !== existing?.intent_default.length
+
+    /*
+     * `interested_in` is derived from gender and orientation — but only when
+     * the request did not supply it.
+     *
+     * Client-supplied always wins, and that precedence is the load-bearing
+     * part. Two writers to one column with no ordering is exactly how someone's
+     * hand-picked list gets silently replaced by a derived empty set on the
+     * next save that happens to carry an orientation.
+     *
+     * Derivation returns null for every pair whose meaning is not settled —
+     * "straight" plus "non-binary", "queer", "pansexual" — and null here means
+     * *leave the column alone and let the app ask*, never "clear it".
+     */
+    const derivedInterestedIn =
+      interested_in === undefined && touchesDating
+        ? deriveInterestedIn(
+            // The values *after* this request, so changing one of the pair
+            // re-derives against the other rather than against nothing.
+            (gender !== undefined ? gender : existing?.gender) as Gender | null | undefined,
+            (orientation !== undefined ? orientation : existing?.orientation) as
+              | Orientation
+              | null
+              | undefined
+          )
+        : null
 
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
@@ -232,6 +261,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(intent_default !== undefined && { intent_default }),
         ...(gender !== undefined && { gender }),
         ...(interested_in !== undefined && { interested_in }),
+        ...(derivedInterestedIn !== null && { interested_in: derivedInterestedIn }),
+        ...(orientation !== undefined && { orientation }),
         ...(work_field !== undefined && { work_field }),
         // Omitted rather than defaulted: the column defaults to true, which is
         // what the settings screen has always claimed, so nobody's apparent
@@ -259,6 +290,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(stripsDating && { intent_default: demotedIntents! }),
         ...(gender !== undefined && { gender }),
         ...(interested_in !== undefined && { interested_in }),
+        // Only when the request did not supply it — client-supplied wins, and
+        // a null derivation leaves the column alone rather than clearing it.
+        ...(derivedInterestedIn !== null && { interested_in: derivedInterestedIn }),
+        ...(orientation !== undefined && { orientation }),
         ...(work_field !== undefined && { work_field }),
         ...(push_enabled !== undefined && { push_enabled }),
         ...(show_online !== undefined && { show_online }),

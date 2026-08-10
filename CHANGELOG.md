@@ -5,6 +5,43 @@ All notable changes to Blendn Admin are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.64.0] - 2026-08-10
+
+### Fixed
+
+- **Dating stopped claiming matches that are not matches.** `lib/matches.ts`
+  never read gender at all, so a straight man who ticked dating got "Both open
+  to dating" on cards for other straight men. Not a leak — just wrong, in the
+  way that makes a feature read as broken and stop being used.
+
+  The fix removes the **tag**, never the person. Everyone stays in the list;
+  what changes is whether `dating` appears in `sharedIntents`. Two men who both
+  ticked dating still match on interests and on networking. A hard filter here
+  would be "the partition the one-pool decision exists to avoid", and it would
+  make the *absence* of a card disclose something. The consequence worth having:
+  a card reading "Both open to dating" has already had compatibility checked, so
+  it never states anyone's gender to be accurate.
+
+  Compatibility is mutual, and anything undeclared fails closed.
+
+### Added
+
+- **`profiles.orientation`**, beside the `interested_in` it only sometimes
+  implies. "Straight" plus "non-binary" has no defined target set; neither do
+  `queer` or `pansexual`, which are identities rather than tables. So
+  `deriveInterestedIn` covers the pairs whose meaning is settled and returns
+  `null` for the rest — and `null` means *ask*, never *assume* or *clear*.
+  `asexual` derives to an empty set, which is a complete answer rather than a
+  missing one.
+
+  **Client-supplied `interested_in` always wins**, and that precedence is
+  load-bearing: two writers to one column with no ordering is how a hand-picked
+  preference gets replaced by a derived empty set on the next save. Sending only
+  one of the pair re-derives against the stored other, so a two-step save lands
+  where a one-step save would.
+
+  All three stay owner-only. A test asserts a match card contains none of them.
+
 ## [0.63.0] - 2026-08-10
 
 ### Added

@@ -395,6 +395,8 @@ request status.
 | `intent_default` | `dating` · `networking` · `friendship` · `just_here` | the shared subset only, via `sharedIntents` on a match card |
 | `gender` | `woman` · `man` · `non_binary` · `prefer_not_to_say` | **nobody but the owner** |
 | `interested_in` | array of the same values | **nobody but the owner** |
+| `orientation` | `straight` · `gay` · `lesbian` · `bisexual` · `pansexual` · `queer` · `asexual` · `prefer_not_to_say` | **nobody but the owner** |
+| `work_field` | a slug from `GET /work-fields` | anyone who can see the profile |
 
 `intent_default` is the person-level default; the per-event override is
 `PUT /events/:eventId/matches/preferences`, and `effectiveIntents` prefers the
@@ -408,6 +410,43 @@ absent from every response but the owner's, and a match card carries neither.
 `reveal_by_default` is deliberately **not** settable here. Being named in a room
 has to be something a person did in that room, not a profile switch they flipped
 once — see `PUT /events/:eventId/matches/preferences`.
+
+### Dating compatibility is a tag filter, not a pool filter
+
+`lib/matches.ts` never read gender, so a straight man who ticked dating got
+**"Both open to dating"** on cards for other straight men.
+
+The fix removes the **tag**, never the person. Everyone stays in the list — two
+men who both ticked dating still match on interests and on networking — and what
+changes is whether `dating` appears in `sharedIntents`. A hard filter here would
+be *"the partition the one-pool decision exists to avoid"*, and it would also
+mean a card whose absence discloses something. It follows that a card reading
+"Both open to dating" has already had compatibility checked, so it never has to
+state anyone's gender to be accurate.
+
+Compatibility is **mutual**: `A.gender ∈ B.interested_in && B.gender ∈
+A.interested_in`. Anything undeclared **fails closed** — no tag, person still
+listed.
+
+**`interested_in` is what matching reads; `orientation` is what someone calls
+themselves.** Both are stored, because the label only *sometimes* implies the
+set:
+
+| Sent | Result |
+|---|---|
+| `interested_in` explicitly | stored as given — **client always wins** |
+| `gender` + `orientation`, unambiguous pair | derived and stored |
+| `gender` + `orientation`, ambiguous pair | **column untouched** — the app asks directly |
+
+Ambiguous means what it says: "straight" plus "non-binary" has no defined target
+set, and neither do `pansexual` or `queer`, which are identities rather than
+tables. `asexual` derives to an **empty** set — a complete answer, not a missing
+one. Sending only one of the pair re-derives against the stored other, so saving
+gender and orientation in two steps ends up where sending both would.
+
+The precedence is the load-bearing part. Two writers to one column with no
+ordering is how a hand-picked preference gets silently replaced by a derived
+empty set on the next save.
 
 ### Field of work
 
