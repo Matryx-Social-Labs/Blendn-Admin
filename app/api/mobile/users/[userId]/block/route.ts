@@ -1,6 +1,8 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { closeConversation, conversationPair } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -57,15 +59,45 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       update: {},
     })
 
-    // Also cancel any pending message request from the blocked user
+    /*
+     * Cancel pending requests in BOTH directions.
+     *
+     * This cancelled only inbound ones, and the accept handler never re-checked
+     * blocks -- so A could request B, block B, and B could then accept, creating
+     * a `private_conversations` row between two blocked people. Sends were
+     * refused afterwards, but both ended up with a permanent dead thread, and
+     * `mayConverse` returns true forever once a row exists.
+     */
     await db.message_requests.updateMany({
       where: {
-        sender_id: targetId,
-        recipient_id: authUser.userId,
         status: "pending",
+        OR: [
+          { sender_id: targetId, recipient_id: authUser.userId },
+          { sender_id: authUser.userId, recipient_id: targetId },
+        ],
       },
       data: { status: "blocked" },
     })
+
+    /*
+     * Close the conversation, if there is one.
+     *
+     * Blocking left the thread sitting in both inboxes with its history fully
+     * readable -- so "block" removed the ability to send and nothing else. A
+     * block that leaves the conversation open is not what anyone means by it.
+     *
+     * Block implies unmatch, and unmatch is permanent: unblocking restores
+     * profile visibility and the ability to receive a request, never the match.
+     */
+    const [user1_id, user2_id] = conversationPair(authUser.userId, targetId)
+    const conversation = await db.private_conversations.findUnique({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+      select: { id: true, closed_at: true },
+    })
+    if (conversation && !conversation.closed_at) {
+      await closeConversation(conversation.id, authUser.userId, "block")
+      closeConversationRoom(conversation.id)
+    }
 
     return successResponse({ blocked: true })
   } catch (error) {

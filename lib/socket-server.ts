@@ -822,7 +822,23 @@ export function closeConversationRoom(conversationId: string): void {
 }
 
 /**
- * Emit a new chat message
+ * Emit a new chat message to the room, minus anyone who should not receive it.
+ *
+ * `blocked_users` was consulted **nowhere** in group chat: not when listing
+ * history, not here, and not when sending push. So blocking someone removed
+ * your ability to DM them and nothing else — walk into their event room and
+ * their messages arrived over the socket and lit up your lock screen. In a
+ * pseudonymous room you could not even tell which "Cosmic Panda" they were.
+ *
+ * **Filtered here rather than on the client**, which was the other option and is
+ * the wrong one. The block list is on the device, so the client *could* drop the
+ * message — but then the platform has still delivered it, and any client bug
+ * re-exposes it. A block is a safety promise, not a mute, and the same rule the
+ * photo work follows applies: never send what the viewer has not earned.
+ *
+ * `except()` takes room names, and every socket joins `user:${userId}` on
+ * connect, so this reaches sockets held by other instances through the Redis
+ * adapter rather than only the one that handled the request.
  */
 export function emitChatMessage(
   chatGroupId: string,
@@ -835,11 +851,17 @@ export function emitChatMessage(
     userImage?: string
     createdAt: string
     parentId?: string
-  }
+  },
+  excludeUserIds: readonly string[] = []
 ): void {
   if (!io) return
 
-  io.to(`chat:${chatGroupId}`).emit("chat:message", {
+  const room = io.to(`chat:${chatGroupId}`)
+  const scoped = excludeUserIds.length
+    ? room.except(excludeUserIds.map((id) => `user:${id}`))
+    : room
+
+  scoped.emit("chat:message", {
     chatGroupId,
     message,
   })

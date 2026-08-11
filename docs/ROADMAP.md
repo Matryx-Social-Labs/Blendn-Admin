@@ -63,8 +63,8 @@ pass found a live exploit path rather than a gap.
 | T23 | The close reaches every door: REST, socket join, joined sockets, `openConversation`, the likes endpoint | **Done** (#197) |
 | T22 | The reveal gate covers typing indicators and push titles | **Done** (#198) |
 | T24 | One atomic leave-and-report endpoint; gate the report route | |
-| T18 | Block reaches the event room (server-side, decision 23) | |
-| T20 | Block closes the conversation and cancels both request directions | |
+| T18 | Block reaches the event room — history, socket, push, check-in ping | **Done** (#199) |
+| T20 | Block closes the conversation and cancels both request directions | **Done** (#199) |
 
 **Why T17 was urgent.** Either participant could hard-delete a conversation,
 cascading every message. `message_reports.message_id` has no foreign key, so the

@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
+import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -149,8 +150,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Build where clause for messages — include moderation-hidden messages
     // for the sender so they see "This message was removed" placeholders
+    /*
+     * A blocked person's messages do not appear in the room.
+     *
+     * `blocked_users` had never been consulted anywhere in group chat, so
+     * blocking someone removed your ability to DM them and nothing else --
+     * their messages still arrived in the history, over the socket and as a
+     * push notification.
+     */
+    const blockedIds = await blockCounterparties(authUser.userId)
+
     const where: Record<string, unknown> = {
       chat_group_id: chatGroup.id,
+      ...(blockedIds.length ? { user_id: { notIn: blockedIds } } : {}),
       OR: [
         { deleted_at: null },
         { moderation_status: "hidden", user_id: authUser.userId },

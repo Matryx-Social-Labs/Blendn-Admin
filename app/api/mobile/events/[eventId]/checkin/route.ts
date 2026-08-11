@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { minAgeRefusal, stripDating } from "@/lib/age"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -385,16 +386,25 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       undefined
     )
 
-    // Send push notifications to other checked-in users (async, don't await)
-    db.event_check_ins
-      .findMany({
-        where: {
-          event_id: eventId,
-          status: "checked_in",
-          user_id: { not: authUser.userId },
-        },
-        select: { user_id: true },
-      })
+    /*
+     * Send push notifications to other checked-in users (async, don't await).
+     *
+     * Minus anyone in a block relationship with the arriver. This told you that
+     * a person you had blocked had just walked into the room -- the single most
+     * unwelcome notification the product could send, and the reason "block" has
+     * to mean more than "cannot DM me".
+     */
+    blockCounterparties(authUser.userId)
+      .then((blockedIds) =>
+        db.event_check_ins.findMany({
+          where: {
+            event_id: eventId,
+            status: "checked_in",
+            user_id: { not: authUser.userId, ...(blockedIds.length ? { notIn: blockedIds } : {}) },
+          },
+          select: { user_id: true },
+        })
+      )
       .then((checkIns) => {
         const userIds = checkIns.map((c) => c.user_id)
         if (userIds.length > 0) {

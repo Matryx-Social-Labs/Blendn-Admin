@@ -121,6 +121,22 @@ export async function closeConversation(
   })
 }
 
+/**
+ * Everyone this user has blocked, plus everyone who has blocked them.
+ *
+ * Blocks are symmetric in effect even though the row is directional: neither
+ * person should see the other, whichever way round it was filed. Used to keep a
+ * blocked person out of the room chat — the history, the live socket and the
+ * push — which `blocked_users` had never been consulted for.
+ */
+export async function blockCounterparties(userId: string): Promise<string[]> {
+  const rows = await db.blocked_users.findMany({
+    where: { OR: [{ blocker_id: userId }, { blocked_id: userId }] },
+    select: { blocker_id: true, blocked_id: true },
+  })
+  return [...new Set(rows.map((r) => (r.blocker_id === userId ? r.blocked_id : r.blocker_id)))]
+}
+
 /** Did these two leave each other? Checked in both directions, like a block. */
 export async function pairIsClosed(a: string, b: string): Promise<boolean> {
   const [user1_id, user2_id] = conversationPair(a, b)

@@ -367,6 +367,22 @@ accepted message request between the two people, or a conversation that already
 exists — otherwise `400`. A block in **either** direction makes both this and
 sending return as though the other person were not there.
 
+### Blocking
+
+Blocking is `POST /users/:id/block`, and it now reaches every surface rather
+than only DMs:
+
+- the conversation between you **closes** (see above) — block implies unmatch
+- their messages leave your **event room history**, live socket stream and push
+  notifications, in both directions
+- you are not told when they check in to an event you are at
+- pending message requests are cancelled **both ways**, and an old request
+  cannot be accepted into a conversation between two blocked people
+
+Unblocking (`DELETE /users/:id/block`) restores profile visibility and the
+ability to receive a request. It does **not** restore the match: leaving is
+permanent whichever door it came through.
+
 ### Leaving a conversation
 
 `DELETE /conversations/:id` **closes**, it does not delete. The conversation
