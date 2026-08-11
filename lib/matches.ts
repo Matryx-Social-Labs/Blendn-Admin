@@ -1,4 +1,4 @@
-import { openConversation } from "@/lib/conversations"
+import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import {
   effectiveIntents,
@@ -59,7 +59,8 @@ export async function matchesForEvent(
   })
   if (!viewerCheckIn) return null
 
-  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, likes] = await Promise.all([
+  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, closedPairs, likes] =
+    await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
       select: { intent_default: true, work_field: true, gender: true, interested_in: true },
@@ -110,6 +111,9 @@ export async function matchesForEvent(
       where: { OR: [{ blocker_id: viewerId }, { blocked_id: viewerId }] },
       select: { blocker_id: true, blocked_id: true },
     }),
+    // Leaving is permanent: an unmatched pair never appears to each other
+    // again. Same `hidden` set as blocks below -- one exclusion, two reasons.
+    closedPairKeys(viewerId),
     db.event_likes.findMany({
       where: { event_id: eventId, liker_id: viewerId },
       select: { liked_id: true },
@@ -118,9 +122,10 @@ export async function matchesForEvent(
 
   // Blocks hide people in both directions. Someone you blocked should not
   // reappear as a suggestion, and neither should someone who blocked you.
-  const hidden = new Set(
-    blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id))
-  )
+  const hidden = new Set([
+    ...blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id)),
+    ...closedPairs,
+  ])
   const liked = new Set(likes.map((l) => l.liked_id))
 
   const prefsOf = new Map(prefs.map((p) => [p.user_id, p]))
@@ -263,6 +268,20 @@ export async function likeAtEvent(
   })
   if (!back) return { mutual: false }
 
-  const conversation = await openConversation(likerId, likedId)
-  return { mutual: true, conversationId: conversation.id }
+  /*
+   * A closed pair can still reach here.
+   *
+   * `POST /matches/likes` refuses closed pairs before calling in, and closed
+   * pairs are hidden from the ranked list -- but this function is the shared
+   * write path, and defending the invariant where it lives beats trusting every
+   * present and future caller to have checked. `mutual: false` is the honest
+   * answer: the like is recorded, and there is no conversation to point at.
+   */
+  try {
+    const conversation = await openConversation(likerId, likedId)
+    return { mutual: true, conversationId: conversation.id }
+  } catch (e) {
+    if (e instanceof ConversationClosedError) return { mutual: false }
+    throw e
+  }
 }

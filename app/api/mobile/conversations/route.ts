@@ -28,6 +28,10 @@ export async function GET(request: NextRequest) {
 
     const conversations = await db.private_conversations.findMany({
       where: {
+        // Live only. A closed conversation is gone for BOTH people -- a
+        // one-sided hide would leave the other person messaging into a thread
+        // you have left, which is a harassment vector rather than a courtesy.
+        closed_at: null,
         OR: [
           { user1_id: authUser.userId },
           { user2_id: authUser.userId },

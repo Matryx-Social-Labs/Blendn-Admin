@@ -1,7 +1,9 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { closeConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { closeConversationRoom } from "@/lib/socket-server"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -45,6 +47,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Not authorized to view this conversation")
     }
 
+    // Closed conversations are gone for both people. Retained for moderation,
+    // not readable by the participants -- see lib/conversations.ts.
+    if (conversation.closed_at) {
+      return notFoundResponse("Conversation not found")
+    }
+
     const otherUser =
       conversation.user1_id === authUser.userId
         ? conversation.user2
@@ -62,7 +70,28 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// DELETE /api/mobile/conversations/[conversationId] - Delete conversation
+/**
+ * DELETE /api/mobile/conversations/[conversationId] — leave the conversation.
+ *
+ * **This used to hard-delete the row, cascading every message.** Either
+ * participant could call it, and the messages went with it — so one person
+ * could destroy the other's history without consent, and, far worse, the
+ * subject of a report could destroy the evidence against themselves.
+ * `message_reports.message_id` carries no foreign key, so the report survived
+ * while its content did not, and the admin queue was then left with a null
+ * excerpt, a null author, and `resolveReport` refusing to suspend anyone
+ * (`app/dashboard/moderation/reports/actions.ts:261`). Send abuse, get
+ * reported, delete the thread, walk away.
+ *
+ * It now closes: hidden from both inboxes, refuses new messages, retained for
+ * moderation. Old clients that still call DELETE get the safe behaviour instead
+ * of the destructive one, which is the reason this stayed on the same verb
+ * rather than moving to a new route.
+ *
+ * `reason` defaults to `unmatch`. Blocking closes the conversation through
+ * `POST /users/:id/block`, which passes `block` — nothing branches on the value
+ * (see the schema comment), it is moderation context.
+ */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
@@ -88,17 +117,26 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       conversation.user1_id !== authUser.userId &&
       conversation.user2_id !== authUser.userId
     ) {
-      return forbiddenResponse("Not authorized to delete this conversation")
+      return forbiddenResponse("Not authorized to leave this conversation")
     }
 
-    // Delete conversation (messages will cascade delete)
-    await db.private_conversations.delete({
-      where: { id: conversationId },
-    })
+    // Idempotent: closing an already-closed conversation keeps the first close,
+    // so a double tap or a client retry never rewrites who left or when.
+    await closeConversation(conversationId, authUser.userId, "unmatch")
 
-    return successResponse({ deleted: true })
+    /*
+     * Evict both sides from the socket room.
+     *
+     * `canJoinConversation` now refuses a closed conversation, but that only
+     * gates *new* joins — anyone already sitting in `conversation:${id}` keeps
+     * their subscription until they disconnect, and would go on receiving
+     * typing indicators and read receipts from a conversation that has ended.
+     */
+    closeConversationRoom(conversationId)
+
+    return successResponse({ closed: true })
   } catch (error) {
-    logger.error("Delete conversation error", { error: error instanceof Error ? error.message : String(error) })
-    return serverErrorResponse("Failed to delete conversation")
+    logger.error("Close conversation error", { error: error instanceof Error ? error.message : String(error) })
+    return serverErrorResponse("Failed to leave conversation")
   }
 }

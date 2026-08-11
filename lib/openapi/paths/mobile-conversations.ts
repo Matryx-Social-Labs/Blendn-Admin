@@ -64,11 +64,13 @@ registry.registerPath({
   method: "delete",
   path: "/api/mobile/conversations/{conversationId}",
   tags: ["Mobile Conversations"],
-  summary: "Delete conversation",
+  summary: "Leave the conversation (closes it for both people)",
+  description:
+    "Closes the conversation for BOTH participants: it leaves both inboxes, refuses new messages, and neither person appears on the other's match cards again. It is not reversible.\n\nThis used to hard-delete the row and cascade every message, which let the subject of a report destroy the evidence against them. Rows are now retained for moderation. Old clients calling DELETE get the safe behaviour.",
   security: bearerAuth,
   request: { params: z.object({ conversationId: z.string().uuid() }) },
   responses: {
-    200: { description: "Deleted", content: { "application/json": { schema: wrap(z.object({ deleted: z.literal(true) })) } } },
+    200: { description: "Closed", content: { "application/json": { schema: wrap(z.object({ closed: z.literal(true) })) } } },
     ...standardErrors,
   },
 })

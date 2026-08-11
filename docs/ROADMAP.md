@@ -53,6 +53,31 @@ Full reasoning, competitive position and market data:
 
 ## Now
 
+**Leaving a match.** Reviewed twice by `/plan-eng-review` and Codex; the second
+pass found a live exploit path rather than a gap.
+
+| # | What | State |
+|---|---|---|
+| T17 | `DELETE /conversations/:id` closes instead of destroying report evidence | **Done** (#197) |
+| T19 | `maySeeIdentity` stops surviving a close | **Done** (#197) |
+| T23 | The close reaches every door: REST, socket join, joined sockets, `openConversation`, the likes endpoint | **Done** (#197) |
+| T22 | The reveal gate must cover typing indicators and push titles — **blocks Stage 3a** | |
+| T24 | One atomic leave-and-report endpoint; gate the report route | |
+| T18 | Block reaches the event room (server-side, decision 23) | |
+| T20 | Block closes the conversation and cancels both request directions | |
+
+**Why T17 was urgent.** Either participant could hard-delete a conversation,
+cascading every message. `message_reports.message_id` has no foreign key, so the
+report survived while its evidence did not, and `resolveReport` then refused to
+suspend anyone. The delete button belonged to whoever was most motivated to
+erase the thread — the person being reported.
+
+**T22 is a pre-condition, not a hotfix.** `socket-server.ts:431` emits the real
+name as `userName` and the DM route puts it in the push title. Both are
+consistent with today's real-name DMs; they become a leak the moment
+pseudonymous DMs exist.
+
+
 **After signup: retire onboarding, ask once, gate at the point of use.** Fifteen
 PRs, reviewed by `/plan-eng-review` and by Codex. The app half is
 `blendn/ROADMAP.md`; these are the server ones. "Server first" means **deployed**

@@ -39,9 +39,13 @@ export async function canJoinConversation(
 ): Promise<boolean> {
   const conversation = await db.private_conversations.findUnique({
     where: { id: conversationId },
-    select: { user1_id: true, user2_id: true },
+    select: { user1_id: true, user2_id: true, closed_at: true },
   })
   if (!conversation) return false
+  // A closed conversation is not joinable. Without this, typing indicators and
+  // read receipts keep flowing between two people after one of them unmatched
+  // -- a live channel surviving the thing that was supposed to end it.
+  if (conversation.closed_at) return false
   return conversation.user1_id === userId || conversation.user2_id === userId
 }
 

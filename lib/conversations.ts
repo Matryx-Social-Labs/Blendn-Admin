@@ -20,14 +20,127 @@ export function conversationPair(a: string, b: string): [string, string] {
   return [a, b].sort() as [string, string]
 }
 
-/** Find or create, always in canonical order. Safe against a concurrent create. */
-export async function openConversation(a: string, b: string) {
+/** Thrown when a mutual like or accepted request lands on a closed pair. */
+export class ConversationClosedError extends Error {
+  constructor() {
+    super("This conversation was closed and cannot be reopened")
+    this.name = "ConversationClosedError"
+  }
+}
+
+/**
+ * Find or create, always in canonical order. Safe against a concurrent create.
+ *
+ * **Refuses a closed pair rather than returning it.** The upsert used
+ * `update: {}`, which was correct while every row was live and silently wrong
+ * the moment closing existed: a fresh mutual like or an accepted message
+ * request would get the *closed* row back — a dead conversation that reads as
+ * live to the caller, sits invisible in both inboxes, and refuses every message
+ * sent to it. Unmatching is permanent (nothing rematches a pair), so the honest
+ * answer here is an error, not a row.
+ *
+ * `ctx` is optional because only one of the three callers has an event.
+ * `likeAtEvent` passes it; the message-request accept handler and
+ * `POST /conversations` do not, and their conversations keep null pseudonyms —
+ * which is what makes them show real names, as they always have.
+ */
+export async function openConversation(
+  a: string,
+  b: string,
+  ctx?: {
+    eventId?: string
+    /** Room pseudonym per user id, snapshotted at creation. */
+    pseudonyms?: Record<string, string | null>
+    /** User ids already revealed in the originating room. */
+    revealed?: readonly string[]
+  }
+) {
   const [user1_id, user2_id] = conversationPair(a, b)
+
+  const existing = await db.private_conversations.findUnique({
+    where: { user1_id_user2_id: { user1_id, user2_id } },
+    select: { id: true, closed_at: true },
+  })
+  if (existing?.closed_at) throw new ConversationClosedError()
+  if (existing) {
+    /*
+     * Deliberately not backfilled.
+     *
+     * A pair who already talked through a message request and *then* match at
+     * an event keep the row they have: real names, no gating. They already know
+     * each other, and retro-anonymising a live conversation would be absurd.
+     */
+    return db.private_conversations.findUniqueOrThrow({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+    })
+  }
+
+  const revealed = new Set(ctx?.revealed ?? [])
   return db.private_conversations.upsert({
     where: { user1_id_user2_id: { user1_id, user2_id } },
-    create: { user1_id, user2_id },
+    create: {
+      user1_id,
+      user2_id,
+      origin_event_id: ctx?.eventId ?? null,
+      user1_pseudonym: ctx?.pseudonyms?.[user1_id] ?? null,
+      user2_pseudonym: ctx?.pseudonyms?.[user2_id] ?? null,
+      // Someone already public in the room has nothing left to reveal to a
+      // person who saw their card. Seeding this true is what makes the
+      // asymmetric case honest rather than theatre.
+      user1_revealed: revealed.has(user1_id),
+      user2_revealed: revealed.has(user2_id),
+    },
+    // Lost the create race: another request made the row a moment ago. Take it.
     update: {},
   })
+}
+
+/**
+ * Close a conversation. Mutual, soft, and one-way.
+ *
+ * Mutual because a one-sided hide leaves the other person messaging into a
+ * conversation you have left — no replies, but they can keep writing, which is
+ * a harassment vector rather than a courtesy.
+ *
+ * Soft because the person most motivated to erase a conversation is the one
+ * being reported in it. `message_reports.message_id` carries no foreign key, so
+ * a hard delete leaves the report standing with its evidence gone and the admin
+ * queue unable to resolve an author to suspend.
+ *
+ * Idempotent: closing twice keeps the first close, so a double tap or a retry
+ * never rewrites who left or when.
+ */
+export async function closeConversation(
+  conversationId: string,
+  closedBy: string,
+  reason: "unmatch" | "block"
+) {
+  return db.private_conversations.updateMany({
+    where: { id: conversationId, closed_at: null },
+    data: { closed_at: new Date(), closed_by: closedBy, closed_reason: reason },
+  })
+}
+
+/** Did these two leave each other? Checked in both directions, like a block. */
+export async function pairIsClosed(a: string, b: string): Promise<boolean> {
+  const [user1_id, user2_id] = conversationPair(a, b)
+  const row = await db.private_conversations.findUnique({
+    where: { user1_id_user2_id: { user1_id, user2_id } },
+    select: { closed_at: true },
+  })
+  return row?.closed_at != null
+}
+
+/** The other user in every closed pair involving this user. */
+export async function closedPairKeys(userId: string): Promise<Set<string>> {
+  const rows = await db.private_conversations.findMany({
+    where: {
+      closed_at: { not: null },
+      OR: [{ user1_id: userId }, { user2_id: userId }],
+    },
+    select: { user1_id: true, user2_id: true },
+  })
+  return new Set(rows.map((r) => (r.user1_id === userId ? r.user2_id : r.user1_id)))
 }
 
 /**
