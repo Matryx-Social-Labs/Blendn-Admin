@@ -14,7 +14,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
-import { displayNameInConversation } from "@/lib/conversation-identity"
+import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
 
@@ -104,7 +104,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       id: msg.id,
       conversationId: msg.conversation_id,
       senderId: msg.sender_id,
-      sender: msg.sender,
+      // The pseudonym holds on every message, not just the header.
+      sender: {
+        ...msg.sender,
+        name: displayNameInConversation(conversation, msg.sender.id, msg.sender.name),
+        image: mayShowRealName(conversation, msg.sender.id) ? msg.sender.image : null,
+      },
       text: msg.message_text,
       mediaUrl: msg.media_url,
       mediaType: msg.media_type,
@@ -221,7 +226,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       id: message.id,
       conversationId: message.conversation_id,
       senderId: message.sender_id,
-      sender: message.sender,
+      sender: {
+        ...message.sender,
+        name: displayNameInConversation(conversation, message.sender.id, message.sender.name),
+        image: mayShowRealName(conversation, message.sender.id) ? message.sender.image : null,
+      },
       text: message.message_text,
       mediaUrl: message.media_url,
       mediaType: message.media_type,

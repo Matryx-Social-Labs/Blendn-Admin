@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
+import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -84,13 +85,32 @@ export async function GET(request: NextRequest) {
       const otherUser = conv.user1_id === authUser.userId ? conv.user2 : conv.user1
       const lastMessage = conv.messages[0] || null
 
+      /*
+       * The other person's name and photo, gated on their reveal state.
+       *
+       * The inbox is the one surface where the pseudonym has to hold on its
+       * own: it renders before any conversation is opened, so shipping the
+       * gate only inside the thread would list every match by their real name.
+       * `image` follows the same rule as `name` -- a face identifies as surely.
+       */
+      const otherRevealed = mayShowRealName(conv, otherUser.id)
+
       return {
         id: conv.id,
         otherUser: {
           id: otherUser.id,
-          name: otherUser.name,
-          image: otherUser.image,
+          name: displayNameInConversation(conv, otherUser.id, otherUser.name),
+          image: otherRevealed ? otherUser.image : null,
         },
+        /** Your own state, for the header. Never a count of who else revealed. */
+        youRevealed: conv.user1_id === authUser.userId
+          ? conv.user1_revealed
+          : conv.user2_revealed,
+        theyRevealed: otherRevealed,
+        /** Whether they have asked you to reveal. There is no "declined". */
+        revealRequested: conv.user1_id === authUser.userId
+          ? conv.user1_reveal_requested
+          : conv.user2_reveal_requested,
         lastMessage: lastMessage
           ? {
               id: lastMessage.id,

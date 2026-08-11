@@ -122,6 +122,44 @@ registry.registerPath({
   },
 })
 
+// POST /api/mobile/conversations/{conversationId}/reveal
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/conversations/{conversationId}/reveal",
+  tags: ["Mobile Conversations"],
+  summary: "Show your name and photos, or ask the other person to",
+  description:
+    "Each side reveals independently -- it is a standing offer, not a trade, so going first does not expose the other person and waiting is not a refusal. It is NOT retractable: nothing can unsee a name and a face, and there is no path back to false.\n\n`{ ask: true }` asks the other person instead. That is one boolean on their side, which makes it un-naggable (asking twice writes the same value) and means there is deliberately NO decline -- a decline delivers a rejection, which is the thing this product exists to remove. Asking someone already revealed is a 400.\n\nRevealing without a name and a photo is refused with `reveal_incomplete`: the switch would otherwise turn on and show the other person nothing at all.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ conversationId: z.string().uuid() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ ask: z.boolean().optional() }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Revealed, or the request recorded",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              revealed: z.boolean().optional(),
+              mutual: z.boolean().optional(),
+              requested: z.boolean().optional(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // GET /api/mobile/conversations/{conversationId}/messages
 registry.registerPath({
   method: "get",

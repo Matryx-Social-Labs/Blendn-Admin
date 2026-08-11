@@ -367,6 +367,45 @@ accepted message request between the two people, or a conversation that already
 exists — otherwise `400`. A block in **either** direction makes both this and
 sending return as though the other person were not there.
 
+### Revealing
+
+A conversation opened by a mutual like carries **the same pseudonym the match
+card showed**. Real name and photos appear only when that side reveals.
+
+| Endpoint | Effect |
+|---|---|
+| `POST /conversations/:id/reveal` | Your side becomes visible to them |
+| `POST /conversations/:id/reveal` with `{ "ask": true }` | Ask them to reveal |
+
+Each side moves independently — revealing is a standing offer, not a trade, so
+going first does not expose the other person and waiting is not a refusal. It is
+**not retractable**: nothing can unsee a name and a face, and there is no path
+back to `false`.
+
+Revealing without a name and a photo is refused with `reveal_incomplete`.
+Otherwise the switch turns on and the other person's screen is unchanged, so
+they conclude the feature is broken rather than that the profile is empty.
+
+**Asking has no decline.** The request is one boolean on the side being asked,
+so asking twice writes the same value and cannot nag, and there is deliberately
+no refusal to deliver. Someone who does not want to reveal simply does not, and
+the asker sees "requested" rather than "refused". Asking somebody who has
+already revealed is a `400` — there is nothing left to ask for.
+
+**A side already public in the room starts revealed.** If you were visible on
+the match card, the person who saw it has nothing left to be shown, so your side
+is seeded `true` at match time and only theirs is pending. Revealing in the room
+later carries into DMs from that room; un-revealing there does **not** carry
+back.
+
+`GET /conversations` and `GET /conversations/:id` return `youRevealed`,
+`theyRevealed` and `revealRequested`, and gate the other person's `name` and
+`image` on their state — the inbox has to hold the pseudonym on its own, since
+it renders before anything is opened.
+
+Conversations from an accepted **message request** have no pseudonym and show
+real names throughout, as they always have.
+
 ### Blocking
 
 Blocking is `POST /users/:id/block`, and it now reaches every surface rather

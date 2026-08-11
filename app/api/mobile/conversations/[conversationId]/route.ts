@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { closeConversation } from "@/lib/conversations"
+import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { closeConversationRoom } from "@/lib/socket-server"
@@ -58,9 +59,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ? conversation.user2
         : conversation.user1
 
+    // Same gate as the inbox. A detail view that named someone the list had
+    // kept pseudonymous would make the rule one tap deep.
+    const theyRevealed = mayShowRealName(conversation, otherUser.id)
+    const isUser1 = conversation.user1_id === authUser.userId
+
     return successResponse({
       id: conversation.id,
-      otherUser,
+      otherUser: {
+        ...otherUser,
+        name: displayNameInConversation(conversation, otherUser.id, otherUser.name),
+        image: theyRevealed ? otherUser.image : null,
+      },
+      youRevealed: isUser1 ? conversation.user1_revealed : conversation.user2_revealed,
+      theyRevealed,
+      revealRequested: isUser1
+        ? conversation.user1_reveal_requested
+        : conversation.user2_reveal_requested,
       createdAt: conversation.created_at,
       lastMessageAt: conversation.last_message_at,
     })
