@@ -277,8 +277,35 @@ export async function likeAtEvent(
    * present and future caller to have checked. `mutual: false` is the honest
    * answer: the like is recorded, and there is no conversation to point at.
    */
+  /*
+   * The pseudonyms and room-reveal state, snapshotted at the moment of the
+   * match.
+   *
+   * Both come from this event: the pseudonym because a DM outlives its event
+   * and the chat lifecycle sweeper deletes old groups, so a lookup would go
+   * null exactly when the history matters; the reveal because somebody already
+   * public in this room has nothing left to reveal to a person who saw their
+   * card, and pretending otherwise would be theatre.
+   */
+  const [pseudonymRows, revealedRows] = await Promise.all([
+    db.chat_group_members.findMany({
+      where: { chat_group: { event_id: eventId }, user_id: { in: [likerId, likedId] } },
+      select: { user_id: true, anonymous_name: true },
+    }),
+    db.event_match_preferences.findMany({
+      where: { event_id: eventId, user_id: { in: [likerId, likedId] }, revealed: true },
+      select: { user_id: true },
+    }),
+  ])
+
   try {
-    const conversation = await openConversation(likerId, likedId)
+    const conversation = await openConversation(likerId, likedId, {
+      eventId,
+      pseudonyms: Object.fromEntries(
+        pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"])
+      ),
+      revealed: revealedRows.map((r) => r.user_id),
+    })
     return { mutual: true, conversationId: conversation.id }
   } catch (e) {
     if (e instanceof ConversationClosedError) return { mutual: false }

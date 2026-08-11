@@ -127,6 +127,42 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       select: { intent: true, revealed: true },
     })
 
+    /*
+     * Going public in the room carries into the DMs you already have from it.
+     *
+     * Somebody who reveals mid-event has shown their name and face on the match
+     * card to everyone there — including people they already matched with. A DM
+     * still calling them "Wandering Kestrel" after that is not protecting
+     * anything; it is just two screens disagreeing.
+     *
+     * Monotonic, and only in this direction. Un-revealing in the room does NOT
+     * re-anonymise a conversation: nothing can unsee a face, and a control that
+     * implied otherwise would be a lie. `revealed: false` in the filter is what
+     * makes it monotonic — an already-revealed side is left alone.
+     */
+    if (revealed === true) {
+      await Promise.all([
+        db.private_conversations.updateMany({
+          where: {
+            origin_event_id: eventId,
+            user1_id: authUser.userId,
+            user1_revealed: false,
+            closed_at: null,
+          },
+          data: { user1_revealed: true },
+        }),
+        db.private_conversations.updateMany({
+          where: {
+            origin_event_id: eventId,
+            user2_id: authUser.userId,
+            user2_revealed: false,
+            closed_at: null,
+          },
+          data: { user2_revealed: true },
+        }),
+      ])
+    }
+
     if (rememberIntent || rememberReveal) {
       await db.profiles.update({
         where: { id: authUser.userId },

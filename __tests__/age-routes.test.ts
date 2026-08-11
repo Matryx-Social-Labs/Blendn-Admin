@@ -14,6 +14,8 @@ const mockDb = {
   profiles: { findUnique: jest.fn(), update: jest.fn(), upsert: jest.fn() },
   event_check_ins: { findFirst: jest.fn(), update: jest.fn() },
   event_match_preferences: { upsert: jest.fn() },
+  // Revealing in the room carries into DMs opened from it.
+  private_conversations: { updateMany: jest.fn() },
   user: { update: jest.fn(), findUnique: jest.fn() },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -70,6 +72,7 @@ beforeEach(() => {
   })
   mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "ci1" })
   mockDb.event_match_preferences.upsert.mockResolvedValue({ intent: [], revealed: false })
+  mockDb.private_conversations.updateMany.mockResolvedValue({ count: 0 })
 })
 
 describe("PUT /profiles/:userId — dating intent", () => {
