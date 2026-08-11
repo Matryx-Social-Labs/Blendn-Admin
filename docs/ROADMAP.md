@@ -61,7 +61,7 @@ pass found a live exploit path rather than a gap.
 | T17 | `DELETE /conversations/:id` closes instead of destroying report evidence | **Done** (#197) |
 | T19 | `maySeeIdentity` stops surviving a close | **Done** (#197) |
 | T23 | The close reaches every door: REST, socket join, joined sockets, `openConversation`, the likes endpoint | **Done** (#197) |
-| T22 | The reveal gate must cover typing indicators and push titles — **blocks Stage 3a** | |
+| T22 | The reveal gate covers typing indicators and push titles | **Done** (#198) |
 | T24 | One atomic leave-and-report endpoint; gate the report route | |
 | T18 | Block reaches the event room (server-side, decision 23) | |
 | T20 | Block closes the conversation and cancels both request directions | |

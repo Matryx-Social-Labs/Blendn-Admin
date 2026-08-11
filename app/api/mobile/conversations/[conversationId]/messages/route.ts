@@ -14,6 +14,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
+import { displayNameInConversation } from "@/lib/conversation-identity"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
 
@@ -230,8 +231,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     emitPrivateMessage(conversationId, recipientId, messageData)
 
-    // Send push notification to recipient (async, don't await)
-    const senderName = message.sender.name || "Someone"
+    /*
+     * The push TITLE, resolved through the conversation.
+     *
+     * This was `message.sender.name`, so a lock screen would carry the real
+     * name of someone the recipient only knows by a pseudonym -- and a lock
+     * screen is not an authenticated surface. Unchanged for conversations that
+     * were never pseudonymous, which is all of them until the reveal work
+     * lands.
+     */
+    const senderName = displayNameInConversation(
+      conversation,
+      authUser.userId,
+      message.sender.name
+    )
     const messagePreview = text || (mediaType === "image" ? "📷 Photo" : "🎥 Video")
     notifyPrivateMessage(recipientId, senderName, messagePreview, conversationId).catch((err) =>
       logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) })

@@ -3,6 +3,7 @@ import { Server as HttpServer } from "http"
 import { Server, Socket } from "socket.io"
 import { verifyAccessToken } from "./mobile-auth"
 import { db } from "./db"
+import { displayNameInConversation } from "./conversation-identity"
 import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
@@ -420,16 +421,41 @@ export async function emitPrivateTyping(
   try {
     if (!(await canJoinConversation(socket.data.userId, conversationId))) return
 
-    const profile = await db.profiles.findUnique({
-      where: { id: socket.data.userId },
-      select: { name: true },
-    })
+    /*
+     * Resolved through the conversation, not read straight off the profile.
+     *
+     * This emitted `profiles.name` unconditionally, to the other participant,
+     * on every keystroke -- so a DM that shows a pseudonym everywhere else
+     * would announce the real name the moment somebody started typing. The
+     * pseudonym would have survived until the first character.
+     *
+     * `displayNameInConversation` returns the real name for conversations that
+     * were never pseudonymous (accepted message requests) and for anyone who
+     * has revealed, so nothing visible changes for existing conversations.
+     */
+    const [conversation, profile] = await Promise.all([
+      db.private_conversations.findUnique({
+        where: { id: conversationId },
+        select: {
+          user1_id: true,
+          user2_id: true,
+          user1_pseudonym: true,
+          user2_pseudonym: true,
+          user1_revealed: true,
+          user2_revealed: true,
+        },
+      }),
+      db.profiles.findUnique({
+        where: { id: socket.data.userId },
+        select: { name: true },
+      }),
+    ])
+    if (!conversation) return
 
     socket.to(`conversation:${conversationId}`).emit("private:typing", {
       conversationId,
       userId: socket.data.userId,
-      // Read the display name, never the email local part.
-      userName: profile?.name || "Someone",
+      userName: displayNameInConversation(conversation, socket.data.userId, profile?.name),
       isTyping,
     })
   } catch (error) {
