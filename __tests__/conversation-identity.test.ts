@@ -177,3 +177,40 @@ describe("no path names a participant without going through the resolver", () =>
     expect(src).not.toMatch(/senderName\s*=\s*message\.sender\.name/)
   })
 })
+
+describe("pseudonyms are never derived from identity", () => {
+  /*
+   * `scripts/seed-room.ts` built `${handle}-${id.slice(-4)}`, which produced
+   * "rohan-ohan" for Rohan Bhat — his actual first name inside the thing meant
+   * to hide it.
+   *
+   * The leak in the seed data was the lesser problem. The worse one: a gate
+   * that correctly returns the stored pseudonym instead of `profiles.name`
+   * looks *identical* to a broken one when the stored pseudonym IS the name.
+   * Every anonymity check run against that data was structurally incapable of
+   * failing, which is worse than having no check.
+   */
+  it("the seed uses the same generator as check-in and chat-join", () => {
+    const seed = readFileSync(join(process.cwd(), "scripts/seed-room.ts"), "utf8")
+    expect(seed).toContain("generateUniqueAnonymousName")
+  })
+
+  it("the seed does not build a name from the handle or the person's name", () => {
+    const seed = readFileSync(join(process.cwd(), "scripts/seed-room.ts"), "utf8")
+    const code = seed.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+
+    expect(code).not.toMatch(/anonymous_name:\s*`\$\{person\./)
+    expect(code).not.toMatch(/anonymous_name:\s*`\$\{[^}]*handle/)
+    expect(code).not.toMatch(/anonymous_name:\s*person\./)
+  })
+
+  it("a generated pseudonym cannot structurally contain a name", () => {
+    // "Adjective Noun" drawn from two fixed word lists — there is no input to
+    // leak. The guard is that the generator is used at all.
+    const gen = readFileSync(join(process.cwd(), "lib/anonymous-names.ts"), "utf8")
+    expect(gen).toMatch(/const ADJECTIVES = \[/)
+    expect(gen).toMatch(/const NOUNS = \[/)
+    // It takes a chat group, never a user or a name.
+    expect(gen).toMatch(/generateUniqueAnonymousName\(chatGroupId: string\)/)
+  })
+})

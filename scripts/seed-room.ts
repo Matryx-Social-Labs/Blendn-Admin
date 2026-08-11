@@ -55,6 +55,7 @@
  * Everything is namespaced `roomseed`. Re-running upserts rather than
  * duplicating, and `--clean` removes exactly what it added.
  */
+import { generateUniqueAnonymousName } from "../lib/anonymous-names"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
@@ -64,6 +65,18 @@ const db = new PrismaClient({
 })
 
 const TAG = "roomseed"
+
+/**
+ * What a *real* pseudonym looks like: "Cosmic Panda", or "Cosmic Panda 2" when
+ * the generator had to disambiguate.
+ *
+ * An allowlist, not a blocklist, and that is the point. The first attempt at
+ * this matched the old leaky shape `handle-xxxx` — and missed `friendB-endB`
+ * (uppercase) and `kid-_kid` (underscore), leaving two people's handles in the
+ * room. Enumerating the ways a name can be wrong is a losing game; there is
+ * exactly one way for it to be right.
+ */
+const GENERATED = /^[A-Z][a-z]+ [A-Z][a-z]+( \d+)?$/
 const EVENT_SLUG = `${TAG}-thirty-day-room`
 const DAYS = 30
 
@@ -405,14 +418,37 @@ async function main() {
      * Without a `chat_group_members` row there is no `anonymous_name`, and every
      * match card in the room reads "Attendee" — which looks like a bug in the
      * ranking rather than a gap in the seed.
+     *
+     * **The real generator, not a handle-derived string.** This built
+     * `${handle}-${id.slice(-4)}`, which produced "rohan-ohan" for Rohan Bhat —
+     * a pseudonym with his actual first name in it. Two things wrong with that,
+     * and the second is worse:
+     *
+     * 1. The seeded data leaked identity on every card and in every DM.
+     * 2. It made the seed useless for testing anonymity. A gate that correctly
+     *    returns the stored pseudonym instead of `profiles.name` looks identical
+     *    to a broken one when the stored pseudonym IS the name. Every anonymity
+     *    check run against this data was incapable of failing.
+     *
+     * `generateUniqueAnonymousName` is what check-in and chat-join call, so the
+     * seed now exercises the same path production does, and produces the same
+     * shape of name ("Cosmic Panda").
      */
+    const existingMember = await db.chat_group_members.findUnique({
+      where: { chat_group_id_user_id: { chat_group_id: chatGroup.id, user_id: id } },
+      select: { anonymous_name: true },
+    })
     await db.chat_group_members.upsert({
       where: { chat_group_id_user_id: { chat_group_id: chatGroup.id, user_id: id } },
-      update: {},
+      // Re-seeding keeps the name somebody may already be talking to, unless it
+      // is one of the old leaky ones.
+      update: GENERATED.test(existingMember?.anonymous_name ?? "")
+        ? {}
+        : { anonymous_name: await generateUniqueAnonymousName(chatGroup.id) },
       create: {
         chat_group_id: chatGroup.id,
         user_id: id,
-        anonymous_name: `${person.handle.replace(/\d/g, "")}-${id.slice(-4)}`,
+        anonymous_name: await generateUniqueAnonymousName(chatGroup.id),
       },
     })
 
