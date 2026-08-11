@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyGroupMessage } from "@/lib/push-notifications"
@@ -83,8 +84,19 @@ export async function GET(
 
     // Build query for messages — include moderation-hidden messages
     // so the sender can see "This message was removed" placeholders
+    /*
+     * A blocked person's messages do not appear in the room.
+     *
+     * `blocked_users` had never been consulted anywhere in group chat, so
+     * blocking someone removed your ability to DM them and nothing else --
+     * their messages still arrived in the history, over the socket and as a
+     * push notification.
+     */
+    const blockedIds = await blockCounterparties(user.userId)
+
     const whereClause: Record<string, unknown> = {
       chat_group_id: chatGroupId,
+      ...(blockedIds.length ? { user_id: { notIn: blockedIds } } : {}),
       OR: [
         { deleted_at: null },
         { moderation_status: "hidden", user_id: user.userId },
@@ -461,22 +473,41 @@ export async function POST(
     // Use anonymous name for socket emit and push
     const senderAnonName = membership.anonymous_name || "Attendee"
 
+    /*
+     * Everyone in a block relationship with the sender, in either direction.
+     *
+     * Fetched once and used for all three delivery paths below -- the live
+     * socket, and the push fan-out. The REST history above filters on the same
+     * set, so the three surfaces cannot disagree about who is in the room.
+     */
+    const senderBlocked = await blockCounterparties(user.userId)
+
     // Emit real-time message — only reaches here if moderation passed
-    emitChatMessage(chatGroupId, {
-      id: message.id,
-      content: message.content,
-      type: message.type,
-      userId: message.user_id,
-      userName: senderAnonName,
-      userImage: undefined,
-      createdAt: message.created_at.toISOString(),
-      parentId: message.parent_id || undefined,
-    })
+    emitChatMessage(
+      chatGroupId,
+      {
+        id: message.id,
+        content: message.content,
+        type: message.type,
+        userId: message.user_id,
+        userName: senderAnonName,
+        userImage: undefined,
+        createdAt: message.created_at.toISOString(),
+        parentId: message.parent_id || undefined,
+      },
+      senderBlocked
+    )
 
     // Send push notifications to group members (async, don't await)
     db.chat_group_members
       .findMany({
-        where: { chat_group_id: chatGroupId, status: "active" },
+        where: {
+          chat_group_id: chatGroupId,
+          status: "active",
+          // A lock screen is the loudest surface in the product. Somebody who
+          // blocked this sender must not get a notification from them.
+          ...(senderBlocked.length ? { user_id: { notIn: senderBlocked } } : {}),
+        },
         select: { user_id: true },
       })
       .then((members) => {

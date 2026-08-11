@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
-import { ConversationClosedError, openConversation } from "@/lib/conversations"
+import { ConversationClosedError, blockedEitherWay, openConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -12,6 +12,7 @@ import {
   validationErrorResponse,
   errorResponse,
   conflictResponse,
+  forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -111,6 +112,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // sorted — and `@@unique([user1_id, user2_id])` cannot tell that (a, b) and
     // (b, a) are the same two people, so one pair could end up with two rows.
     if (action === "accept") {
+      /*
+       * Re-check the block at accept time, not only at request time.
+       *
+       * A request can sit pending for days, and either party may have blocked
+       * the other in between. Without this, accepting an old request creates a
+       * conversation between two blocked people -- and once that row exists,
+       * `mayConverse` returns true for them forever.
+       */
+      if (await blockedEitherWay(messageRequest.sender_id, authUser.userId)) {
+        return forbiddenResponse("This request can no longer be accepted")
+      }
       try {
         const conversation = await openConversation(messageRequest.sender_id, authUser.userId)
         conversationId = conversation.id
