@@ -401,6 +401,18 @@ Two things it is worth being precise about:
   hard-deleted and cascaded the messages, which meant the subject of a report
   could erase the evidence against themselves.
 
+**Leaving and reporting in one call.** `POST /conversations/:id/leave` takes
+`{ action: "unmatch" | "block", report?: { reason, description?, messageId? } }`
+and does all of it in one transaction. That is why it exists alongside `DELETE`:
+composing close and report as two client calls can half-fail into a closed
+thread whose evidence is out of reach, which is the state this design exists to
+prevent. Omit `report.messageId` to report the person rather than a message.
+
+Reporting a message requires that you could see it — group membership, or being
+a participant in the DM. It deliberately does **not** require the conversation
+to still be open, so somebody who leaves and only later decides to report still
+can.
+
 Leaving also removes the identity you had shown: `GET /users/:id` returns a
 pseudonym afterwards, even though the mutual likes still exist. It does **not**
 un-reveal anything already seen — nothing can.

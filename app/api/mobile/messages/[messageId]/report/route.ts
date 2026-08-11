@@ -43,12 +43,39 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { messageType, reason, description } = validation.data
 
-    const messageExists =
+    /*
+     * You may only report a message you could actually see.
+     *
+     * This checked existence and nothing else, so any authenticated caller who
+     * knew (or guessed) a message id could file a report against it -- against
+     * a DM between two strangers, or a room they had never been in. Bundling
+     * report into the leaving action puts more weight on this route, so it gets
+     * the check that should always have been here.
+     *
+     * `notFound` for both "no such message" and "not yours to report": a
+     * distinct 403 would confirm that a given id exists, which is exactly the
+     * probe this is closing.
+     */
+    const visible =
       messageType === "group"
-        ? await db.chat_messages.findUnique({ where: { id: messageId }, select: { id: true } })
-        : await db.private_messages.findUnique({ where: { id: messageId }, select: { id: true } })
+        ? await db.chat_messages.findFirst({
+            where: {
+              id: messageId,
+              chat_group: { members: { some: { user_id: authUser.userId } } },
+            },
+            select: { id: true },
+          })
+        : await db.private_messages.findFirst({
+            where: {
+              id: messageId,
+              conversation: {
+                OR: [{ user1_id: authUser.userId }, { user2_id: authUser.userId }],
+              },
+            },
+            select: { id: true },
+          })
 
-    if (!messageExists) {
+    if (!visible) {
       return notFoundResponse("Message not found")
     }
 
