@@ -46,10 +46,10 @@ model User {
   password_resets        password_reset_tokens[]
   event_check_ins        event_check_ins[]
   match_preferences      event_match_preferences[]
-  likes_sent             event_likes[]        @relation("LikesSent")
-  likes_received         event_likes[]        @relation("LikesReceived")
-  ratings_given          peer_ratings[]       @relation("RatingsGiven")
-  ratings_received       peer_ratings[]       @relation("RatingsReceived")
+  likes_sent             event_likes[]                @relation("LikesSent")
+  likes_received         event_likes[]                @relation("LikesReceived")
+  ratings_given          peer_ratings[]               @relation("RatingsGiven")
+  ratings_received       peer_ratings[]               @relation("RatingsReceived")
   chat_messages          chat_messages[]
   chat_group_memberships chat_group_members[]
   message_reactions      message_reactions[]
@@ -190,16 +190,16 @@ model profiles {
   ///
   /// Default true because that is what the UI has been claiming, so nobody's
   /// apparent settings change on the day these start being honoured.
-  push_enabled      Boolean @default(true)
-  show_online       Boolean @default(true)
-  read_receipts     Boolean @default(true)
+  push_enabled   Boolean  @default(true)
+  show_online    Boolean  @default(true)
+  read_receipts  Boolean  @default(true)
   /// Distinct from the GPS permission. This governs whether other attendees see
   /// how far away you are; check-in still needs a fix regardless.
-  share_location    Boolean @default(true)
+  share_location Boolean  @default(true)
   // push_token and push_platform removed — use push_tokens table instead
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
-  user        User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime @default(now()) @db.Timestamptz(6)
+  user           User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
 model events {
@@ -387,7 +387,7 @@ model event_check_ins {
   /// which is what "per event" always meant. Kept for one release so a rollback
   /// has something to roll back to; drop them in the release after 0.65.0.
   intent   connection_intent[]
-  revealed Boolean            @default(false)
+  revealed Boolean             @default(false)
 
   /// Presence. See lib/presence.ts — `left_area_at` is both the state and the
   /// clock, and a ping back inside clears it, so there is no enum to drift out
@@ -723,6 +723,27 @@ model push_tokens {
 }
 
 // Private Messaging
+/// A private conversation, and the two things that can happen to it: identity
+/// arrives, or it ends.
+///
+/// `conversationPair()` sorts the two ids before every write, so `user1_` and
+/// `user2_` are canonical — the same person is always the same side, on every
+/// column below.
+///
+///   ┌── matched ────────────────────────────────────────────┐
+///   │  pseudonyms + blurred photos                          │
+///   │  user1_revealed = user2_revealed = false              │
+///   └───────────────┬───────────────────────────────────────┘
+///                   │ each side reveals independently, one way
+///   ┌───────────────▼───────────────────────────────────────┐
+///   │  that side shows their real name and photos           │
+///   └───────────────┬───────────────────────────────────────┘
+///                   │ unmatch / block — either party
+///   ┌───────────────▼───────────────────────────────────────┐
+///   │  closed_at set. Hidden from both inboxes and pools,   │
+///   │  refuses new messages, retained for moderation.       │
+///   └───────────────────────────────────────────────────────┘
+///                   no path back: unblock is not rematch
 model private_conversations {
   id              String    @id @default(uuid()) @db.Uuid
   user1_id        String
@@ -730,6 +751,56 @@ model private_conversations {
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
   updated_at      DateTime  @default(now()) @db.Timestamptz(6)
   last_message_at DateTime? @db.Timestamptz(6)
+
+  /// Whether each side has shown their real name and photos to the other.
+  /// Per side, not mutual: revealing is a standing offer, not a trade. Seeded
+  /// true at creation for anyone already revealed in the originating room —
+  /// they have nothing left to reveal to someone who saw their card. Monotonic;
+  /// nothing sets these back to false, because nothing can unsee a face.
+  user1_revealed Boolean @default(false)
+  user2_revealed Boolean @default(false)
+
+  /// The room pseudonym each side had when they matched, snapshotted.
+  ///
+  /// NOT a lookup into `chat_group_members.anonymous_name`: that is keyed to the
+  /// event's chat group, this row outlives the event, and the chat lifecycle
+  /// sweeper deletes old groups — so a join would go null exactly when the
+  /// history matters. A pair who match at two events would also have two
+  /// different pseudonyms for one conversation.
+  ///
+  /// Null means the conversation did not come from a match (an accepted message
+  /// request), and those keep real names throughout, as they always have.
+  user1_pseudonym String?
+  user2_pseudonym String?
+
+  /// Set when the other side has asked this side to reveal.
+  ///
+  /// A boolean rather than a table, and that shape is the feature: asking twice
+  /// writes the same `true`, so it cannot nag, and there is deliberately no
+  /// "declined" state — a decline would deliver a rejection, which is the one
+  /// thing this product exists to remove.
+  user1_reveal_requested Boolean @default(false)
+  user2_reveal_requested Boolean @default(false)
+
+  /// The event whose room this pair matched in. Nullable for message-request
+  /// conversations. FK-free on purpose: `events` outlives `chat_groups`, but a
+  /// hard FK would still cascade a deleted event into losing the conversation.
+  origin_event_id String? @db.Uuid
+
+  /// Null while the conversation is live.
+  ///
+  /// Closing is a soft mark, never a delete. The row and its messages are
+  /// retained because the person most motivated to erase a conversation is the
+  /// one being reported in it — `message_reports.message_id` has no foreign
+  /// key, so a hard delete leaves the report standing with its evidence gone
+  /// and the admin queue unable to resolve an author.
+  closed_at     DateTime? @db.Timestamptz(6)
+  closed_by     String?
+  /// 'unmatch' | 'block'. Metadata only — NOTHING branches on this. Room,
+  /// socket and push filtering read `blocked_users`, which is reversible;
+  /// this column is permanent, so keying a filter on it would leave someone
+  /// hidden forever after they were unblocked.
+  closed_reason String?
 
   user1    User               @relation("ConversationUser1", fields: [user1_id], references: [id], onDelete: Cascade)
   user2    User               @relation("ConversationUser2", fields: [user2_id], references: [id], onDelete: Cascade)
@@ -739,6 +810,10 @@ model private_conversations {
   @@index([user1_id])
   @@index([user2_id])
   @@index([last_message_at])
+  /// Every inbox read is "my live conversations", so both sides get the
+  /// partial index rather than scanning and filtering.
+  @@index([user1_id, closed_at])
+  @@index([user2_id, closed_at])
 }
 
 model private_messages {
@@ -1319,7 +1394,7 @@ model event_match_preferences {
 
   /// Empty falls back to `profiles.intent_default` — see `effectiveIntents`.
   intent   connection_intent[]
-  revealed Boolean            @default(false)
+  revealed Boolean             @default(false)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -1355,7 +1430,6 @@ model event_likes {
   @@index([liker_id])
   @@index([liked_id])
 }
-
 
 /// What went wrong, if anything.
 ///

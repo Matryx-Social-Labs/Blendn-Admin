@@ -10,7 +10,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
-import { blockedEitherWay } from "@/lib/conversations"
+import { blockedEitherWay, pairIsClosed } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { likeAtEvent } from "@/lib/matches"
@@ -88,6 +88,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!theirs) return notFoundResponse("User not found")
 
     if (await blockedEitherWay(authUser.userId, likedId)) {
+      return notFoundResponse("User not found")
+    }
+
+    /*
+     * Leaving is permanent, and the pool is not the gate.
+     *
+     * `lib/matches.ts` hides closed pairs from the ranked list, but that is
+     * only what the client renders -- this endpoint takes a user id directly.
+     * Without the check, someone who unmatched could like the same person
+     * again, hit the reciprocal like that was never deleted, and get
+     * `mutual: true` back pointing at a conversation that is closed.
+     *
+     * Same shape as the block response above, and deliberately the same words:
+     * a distinct error here would tell the caller "this specific person
+     * unmatched you", which is a rejection notice by another name.
+     */
+    if (await pairIsClosed(authUser.userId, likedId)) {
       return notFoundResponse("User not found")
     }
 

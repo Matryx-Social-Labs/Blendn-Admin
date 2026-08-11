@@ -360,11 +360,34 @@ Same moderation pipeline and error codes apply.
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
 | POST | `/conversations/:id/messages` | Send message |
+| DELETE | `/conversations/:id` | **Leave — closes it for both people, permanently** |
 
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
 exists — otherwise `400`. A block in **either** direction makes both this and
 sending return as though the other person were not there.
+
+### Leaving a conversation
+
+`DELETE /conversations/:id` **closes**, it does not delete. The conversation
+leaves **both** inboxes, refuses new messages, drops out of both people's socket
+rooms, and the pair never appears on each other's match cards again. There is no
+way back: a later mutual like returns `{ "mutual": false }` and an accepted
+message request returns `409`.
+
+Two things it is worth being precise about:
+
+- **It is mutual, not a personal hide.** A one-sided hide would leave the other
+  person writing into a conversation you had left. They would get no reply, but
+  they could keep sending.
+- **Nothing is destroyed.** The rows are retained so a report filed about the
+  conversation still resolves to readable content. This route previously
+  hard-deleted and cascaded the messages, which meant the subject of a report
+  could erase the evidence against themselves.
+
+Leaving also removes the identity you had shown: `GET /users/:id` returns a
+pseudonym afterwards, even though the mutual likes still exist. It does **not**
+un-reveal anything already seen — nothing can.
 
 ---
 

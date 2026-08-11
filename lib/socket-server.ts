@@ -779,6 +779,23 @@ export function emitEventInterestUpdate(
 }
 
 /**
+ * Evict everyone from a conversation room, because it has ended.
+ *
+ * `canJoinConversation` refuses closed conversations, but that gates *new*
+ * joins only. Anyone already subscribed to `conversation:${id}` keeps their
+ * socket in that room until they disconnect, so without this they would go on
+ * receiving typing indicators and read receipts from a conversation the other
+ * person has left — the exact live channel that leaving is meant to sever.
+ *
+ * `socketsLeave` is the server-side counterpart to `socket.leave()` and applies
+ * across the Redis adapter, so it reaches sockets held by other instances too.
+ */
+export function closeConversationRoom(conversationId: string): void {
+  if (!io) return
+  io.in(`conversation:${conversationId}`).socketsLeave(`conversation:${conversationId}`)
+}
+
+/**
  * Emit a new chat message
  */
 export function emitChatMessage(

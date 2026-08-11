@@ -49,7 +49,7 @@ import { db } from "@/lib/db"
 export async function maySeeIdentity(viewerId: string, targetId: string): Promise<boolean> {
   if (viewerId === targetId) return true
 
-  const [mutualLike, conversation, revealedToViewer] = await Promise.all([
+  const [mutualLike, conversation, revealedToViewer, closed] = await Promise.all([
     // A like in each direction, at the same event.
     db.event_likes
       .findFirst({
@@ -62,9 +62,19 @@ export async function maySeeIdentity(viewerId: string, targetId: string): Promis
       })
       .then(Boolean),
 
+    /*
+     * A **live** conversation. Closing has to reach this gate too.
+     *
+     * Both branches above and this one outlive a soft close — the row is
+     * retained for moderation and the mutual likes are never deleted — so
+     * without these filters, unmatching would leave the other person able to
+     * pull your real name, photos and profile from `GET /users/:id` forever.
+     * That is the one thing leaving is supposed to stop.
+     */
     db.private_conversations
       .findFirst({
         where: {
+          closed_at: null,
           OR: [
             { user1_id: viewerId, user2_id: targetId },
             { user1_id: targetId, user2_id: viewerId },
@@ -90,7 +100,31 @@ export async function maySeeIdentity(viewerId: string, targetId: string): Promis
         select: { id: true },
       })
       .then(Boolean),
+
+    /*
+     * Did this pair leave each other?
+     *
+     * Fetched separately rather than folded into the branches above because it
+     * **overrides all of them**. `event_likes` are never deleted, so a mutual
+     * like survives an unmatch and would keep the first branch true forever;
+     * and someone who was public in a shared room stays public there, so the
+     * third branch would too. Leaving has to beat both, or "they can no longer
+     * see who I am" is false in the two most common ways of having met.
+     */
+    db.private_conversations
+      .findFirst({
+        where: {
+          closed_at: { not: null },
+          OR: [
+            { user1_id: viewerId, user2_id: targetId },
+            { user1_id: targetId, user2_id: viewerId },
+          ],
+        },
+        select: { id: true },
+      })
+      .then(Boolean),
   ])
 
+  if (closed) return false
   return mutualLike || conversation || revealedToViewer
 }

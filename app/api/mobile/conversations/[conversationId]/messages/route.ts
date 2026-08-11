@@ -59,6 +59,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Not authorized to view this conversation")
     }
 
+    // Closed conversations are gone for both people. Retained for moderation,
+    // not readable by the participants -- see lib/conversations.ts.
+    if (conversation.closed_at) {
+      return notFoundResponse("Conversation not found")
+    }
+
     // Build query
     const whereClause: Record<string, unknown> = { conversation_id: conversationId }
     if (before) {
@@ -153,6 +159,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       conversation.user2_id !== authUser.userId
     ) {
       return forbiddenResponse("Not authorized to send messages to this conversation")
+    }
+
+    // Closed conversations are gone for both people. Retained for moderation,
+    // not readable by the participants -- see lib/conversations.ts.
+    if (conversation.closed_at) {
+      return notFoundResponse("Conversation not found")
     }
 
     // Group chat sends and check-ins are rate limited; DM sends were not, so a

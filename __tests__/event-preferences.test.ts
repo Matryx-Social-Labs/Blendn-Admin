@@ -23,7 +23,13 @@ const mockDb = {
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/conversations", () => ({ openConversation: jest.fn() }))
+jest.mock("@/lib/conversations", () => ({
+  openConversation: jest.fn(),
+  // `matchesForEvent` excludes pairs who left each other. Empty here: these
+  // fixtures are about multi-day check-ins, not about leaving.
+  closedPairKeys: jest.fn().mockResolvedValue(new Set<string>()),
+  ConversationClosedError: class ConversationClosedError extends Error {},
+}))
 
 import { matchesForEvent } from "@/lib/matches"
 

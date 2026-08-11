@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
-import { openConversation } from "@/lib/conversations"
+import { ConversationClosedError, openConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -11,6 +11,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
   errorResponse,
+  conflictResponse,
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -110,8 +111,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // sorted — and `@@unique([user1_id, user2_id])` cannot tell that (a, b) and
     // (b, a) are the same two people, so one pair could end up with two rows.
     if (action === "accept") {
-      const conversation = await openConversation(messageRequest.sender_id, authUser.userId)
-      conversationId = conversation.id
+      try {
+        const conversation = await openConversation(messageRequest.sender_id, authUser.userId)
+        conversationId = conversation.id
+      } catch (e) {
+        // These two left each other before. Accepting a request cannot undo
+        // that -- leaving is permanent -- and silently handing back the closed
+        // row would give both sides a thread that is invisible in their inbox
+        // and refuses every message.
+        if (e instanceof ConversationClosedError) {
+          return conflictResponse("This conversation was closed and cannot be reopened")
+        }
+        throw e
+      }
     }
 
     /*
