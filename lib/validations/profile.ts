@@ -6,6 +6,30 @@ import { isWorkField } from "@/lib/work-fields"
 /** Mirrors the `connection_intent` enum in prisma/schema.prisma. */
 export const CONNECTION_INTENTS = ["dating", "networking", "friendship", "just_here"] as const
 
+/**
+ * "Just here for the event" is exclusive — it cannot be combined.
+ *
+ * It means "I am not looking to connect", so pairing it with `dating` or
+ * `networking` is not a preference, it is a contradiction. The per-event screen
+ * enforced this and `about-you` did not, so a real account ended up holding all
+ * four at once — which `effectiveIntents` then had to interpret, and which the
+ * damping in `lib/matching.ts` reads as a signal it is not.
+ *
+ * Enforced here rather than on either screen. Two clients agreeing is not a
+ * rule; it is two clients that happen to agree until somebody writes a third,
+ * or calls the API directly.
+ */
+export function intentsAreCoherent(intents: readonly string[]): boolean {
+  return !(intents.includes("just_here") && intents.length > 1)
+}
+
+const intentArray = z
+  .array(z.enum(CONNECTION_INTENTS))
+  .max(4)
+  .refine(intentsAreCoherent, {
+    message: "\"Just here for the event\" cannot be combined with anything else",
+  })
+
 /** Mirrors the gender values the dating compatibility table understands. */
 export const GENDERS = ["woman", "man", "non_binary", "prefer_not_to_say"] as const
 
@@ -34,7 +58,7 @@ export const updateProfileSchema = z.object({
    * check-in for no better reason than that. Per-event override stays where it
    * is; this is the default underneath it.
    */
-  intent_default: z.array(z.enum(CONNECTION_INTENTS)).max(4).optional(),
+  intent_default: intentArray.optional(),
 
   /*
    * Dating inputs. Matching consults them; nobody else ever sees them — they
