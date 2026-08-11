@@ -81,9 +81,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { categoryIds } = parsed.data
 
-    // Verify all categories exist
+    /*
+     * Categories must exist, and they must be real leaves or parents -- not
+     * arbitrary uuids that happen to be in the table for another purpose.
+     *
+     * This checked existence and nothing else, which is fine today and is the
+     * hole Stage 2 walks into: once interests are meant to be the 13 parents,
+     * an older client keeps writing 67 leaves and the new contract is advisory.
+     * Recording what was written makes the eventual migration possible; letting
+     * anything through does not.
+     */
     const existingCategories = await db.categories.findMany({
       where: { id: { in: categoryIds } },
+      select: { id: true, parent_id: true },
     })
 
     if (existingCategories.length !== categoryIds.length) {
