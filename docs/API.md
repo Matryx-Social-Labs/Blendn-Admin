@@ -406,6 +406,25 @@ it renders before anything is opened.
 Conversations from an accepted **message request** have no pseudonym and show
 real names throughout, as they always have.
 
+### Notifications from a match
+
+Three, and **none of them carries a name — not even a pseudonym.**
+
+| Moment | Body |
+|---|---|
+| Mutual like | "Someone you liked has liked you back." |
+| Reveal requested | "Someone you matched with wants to see who you are." |
+| They revealed | "Someone you matched with showed you who they are." |
+
+A lock screen is not an authenticated surface, and a dating match visible to
+whoever picks the phone up is a safety problem rather than a UX one. A body that
+carried a name would also have to branch on reveal state to stay correct, and
+the branch that leaks is the one that ships. Each carries `conversationId` in
+`data` so the app can deep-link; identity lives in the app, behind auth.
+
+The match notification goes to the **earlier** liker only. The person who just
+tapped Like is holding the phone and gets the mutual in the response.
+
 ### Blocking
 
 Blocking is `POST /users/:id/block`, and it now reaches every surface rather
