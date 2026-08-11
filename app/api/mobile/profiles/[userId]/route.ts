@@ -1,6 +1,8 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { checkProfilePhoto } from "@/lib/photos"
+import { recordPhotoCheck } from "@/lib/photo-checks"
 import { datingAgeRefusal, stripDating } from "@/lib/age"
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { blockedEitherWay } from "@/lib/conversations"
@@ -12,6 +14,7 @@ import {
   validationErrorResponse,
   unauthorizedResponse,
   forbiddenResponse,
+  errorResponse,
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -173,11 +176,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      */
     const touchesAgeGate = intent_default !== undefined || age !== undefined
     const touchesDating = gender !== undefined || orientation !== undefined
+    // `photos` joins the reasons to fetch: the moderation pass below only
+    // checks URLs that are not already on the profile, so re-saving a profile
+    // does not re-fetch and re-moderate the same three photos every time.
     const existing =
-      touchesAgeGate || touchesDating
+      touchesAgeGate || touchesDating || photos !== undefined
         ? await db.profiles.findUnique({
             where: { id: userId },
-            select: { age: true, intent_default: true, gender: true, orientation: true },
+            select: {
+              age: true,
+              intent_default: true,
+              gender: true,
+              orientation: true,
+              photos: true,
+            },
           })
         : null
     const effectiveAge = age !== undefined ? age : (existing?.age ?? null)
@@ -227,10 +239,56 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
           )
         : null
 
+    /*
+     * Every new photo is checked before it is stored.
+     *
+     * Nothing had ever checked a profile photo. `checkImageContent` was wired
+     * to chat media and never to profiles, so the one image a stranger sees on
+     * a match card was the one image nobody screened.
+     *
+     * Only URLs that are not already on the profile are checked: re-saving a
+     * profile is the commonest write there is, and it must not re-fetch and
+     * re-moderate the same three photos every time. Concurrently, not in
+     * series -- six photos is one round trip, not six.
+     */
+    if (photos !== undefined && photos.length > 0) {
+      const alreadyOnProfile = new Set(existing?.photos ?? [])
+      const fresh = photos.filter((u: string) => !alreadyOnProfile.has(u))
+
+      if (fresh.length > 0) {
+        const verdicts = await Promise.all(
+          fresh.map((u: string) => checkProfilePhoto(u, userId))
+        )
+        const bad = verdicts.find((v) => !v.ok)
+        if (bad && !bad.ok) {
+          return errorResponse(bad.message, 400, bad.code)
+        }
+
+        await Promise.all(
+          fresh.map((u: string, i: number) =>
+            recordPhotoCheck(u, userId, verdicts[i].ok && verdicts[i].checked)
+          )
+        )
+      }
+    }
+
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
     if (name !== undefined) userUpdate.name = name
-    if (photos !== undefined && photos.length > 0) userUpdate.image = photos[0]
+    /*
+     * `User.image` is a MIRROR of the chosen primary photo, not a second
+     * opinion about it.
+     *
+     * Two columns held a face and the surfaces disagreed: the match card read
+     * `photos[0] ?? user.image`, conversations read `user.image` alone. A
+     * Google avatar therefore counted as a face in some places and not others,
+     * and it had never been through moderation anywhere.
+     *
+     * The clearing half is the part that was missing. This only ever SET the
+     * column, so deleting every photo left the old image rendering on DM
+     * avatars forever.
+     */
+    if (photos !== undefined) userUpdate.image = photos[0] ?? null
     if (Object.keys(userUpdate).length > 0) {
       await db.user.update({
         where: { id: userId },

@@ -542,7 +542,20 @@ export async function findOrCreateGoogleUser(
     data: {
       email: googlePayload.email,
       name: googlePayload.name || googlePayload.given_name || null,
-      image: googlePayload.picture || null,
+      /*
+       * The Google avatar is deliberately NOT taken.
+       *
+       * `User.image` is a mirror of the photo somebody chose on their profile,
+       * and a provider avatar is not a choice — it is whatever Google had. It
+       * also arrives having been through no moderation at all, while every
+       * other photo in the product now goes through `lib/photos.ts`, so
+       * accepting it would leave exactly one unscreened image per Google
+       * account sitting on match cards and DM avatars.
+       *
+       * The effect a user sees: sign up with Google and you have no photo until
+       * you pick one. That is the honest state, and the reveal gate says so at
+       * the moment it matters.
+       */
       emailVerified: new Date(), // Google email is verified
       profile: {
         create: {

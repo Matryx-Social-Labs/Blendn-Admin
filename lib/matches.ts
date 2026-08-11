@@ -187,7 +187,16 @@ export async function matchesForEvent(
     checkedInAt: c.check_in_time!,
     revealed: prefsOf.get(c.user_id)?.revealed ?? false,
     name: c.user.name,
-    photo: c.user.profile?.photos?.[0] ?? c.user.image,
+    /*
+     * `photos[0]`, full stop.
+     *
+     * This was `photos?.[0] ?? c.user.image`, which made the card and the DM
+     * disagree: conversations read `user.image` alone, so a Google avatar
+     * counted as a face here and not there. `User.image` is now a mirror of
+     * this same value, written only by `PUT /profiles`, so the fallback can
+     * only ever return stale data.
+     */
+    photo: c.user.profile?.photos?.[0] ?? null,
   }))
 
   const ranked = rankMatches(

@@ -64,6 +64,10 @@ pass found a live exploit path rather than a gap.
 | T22 | The reveal gate covers typing indicators and push titles | **Done** (#198) |
 | T16 | Reveal state: seeding, propagation, reveal + ask endpoints | **Done** (#201) |
 | T15 | Match / reveal-request / reveal notifications, with no names | **Done** (#202) |
+| T3 | SSRF guard — nothing fetches a photo URL that is not ours | **Done** (#204) |
+| T4 | The OAuth avatar is discarded; `User.image` mirrors the primary | **Done** (#204) |
+| T7 | `User.image` clears when the last photo goes | **Done** (#204) |
+| T10 | `photo_checks` + moderation on every new profile photo | **Done** (#204) |
 | T24 | One atomic leave-and-report endpoint; gate the report route | **Done** (#200) |
 | T18 | Block reaches the event room — history, socket, push, check-in ping | **Done** (#199) |
 | T20 | Block closes the conversation and cancels both request directions | **Done** (#199) |

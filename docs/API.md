@@ -367,6 +367,34 @@ accepted message request between the two people, or a conversation that already
 exists — otherwise `400`. A block in **either** direction makes both this and
 sending return as though the other person were not there.
 
+### Profile photos
+
+Every photo added through `PUT /profiles/:userId` is checked before it is
+stored. Three gates, cheapest first:
+
+1. **Ours, and yours.** The URL must point at an object in our bucket under
+   `profile/<your-id>/`. Anything else is refused with `not_ours` — upload
+   through `POST /uploads/presigned-url` and post back the `publicUrl` you were
+   handed. This gate exists because the other two *fetch* the URL, and a field
+   the server fetches is an SSRF primitive otherwise.
+2. **Not blank** (`too_small`). One metadata call, no download. A solid colour
+   or a lens cap compresses to a few KB where a photograph is hundreds.
+3. **Not harmful** (`unsafe`). OpenAI omni-moderation, which is free.
+
+Only URLs not already on your profile are checked, so re-saving is cheap, and
+the checks run concurrently.
+
+Moderation **degrades open**: if it cannot run, the upload succeeds and the row
+records `checked: false` for a later sweep. A vendor outage must not stop
+somebody having a profile picture.
+
+**It does not verify the photo is of you**, or of a person at all. Moderation
+scores harm, not subject matter — a photo of a dog passes.
+
+**`User.image` is a mirror of `photos[0]`**, nothing else. Provider avatars from
+Google are no longer taken at signup: an avatar is not a choice, and it had
+never been through the checks above. Clearing every photo clears it too.
+
 ### Revealing
 
 A conversation opened by a mutual like carries **the same pseudonym the match
