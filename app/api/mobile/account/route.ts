@@ -93,6 +93,9 @@ export async function DELETE(request: NextRequest) {
       db.event_match_preferences.deleteMany({ where: { user_id: authUser.userId } }),
       db.mobile_refresh_tokens.deleteMany({ where: { user_id: authUser.userId } }),
       db.push_tokens.deleteMany({ where: { user_id: authUser.userId } }),
+      // The keys carry the user id, and the profile they described has just
+      // been scrubbed.
+      db.photo_checks.deleteMany({ where: { user_id: authUser.userId } }),
       db.user_oauth_accounts.deleteMany({ where: { user_id: authUser.userId } }),
       db.account.deleteMany({ where: { userId: authUser.userId } }),
       db.session.deleteMany({ where: { userId: authUser.userId } }),

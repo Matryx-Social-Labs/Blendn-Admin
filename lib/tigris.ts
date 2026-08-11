@@ -1,5 +1,6 @@
 import { logger } from "./logger"
 import {
+  HeadObjectCommand,
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
@@ -153,6 +154,91 @@ export function extractKeyFromUrl(url: string): string | null {
   const index = cleanedUrl.indexOf(bucketPrefix)
   if (index === -1) return null
   return cleanedUrl.substring(index + bucketPrefix.length)
+}
+
+/**
+ * Is this URL a photo in our bucket, belonging to this user?
+ *
+ * ## Why `extractKeyFromUrl` is not enough
+ *
+ * That function finds the bucket prefix with `indexOf`, anywhere in the string.
+ * Fine for the cleanup it was written for; useless as a security check, because
+ * `https://evil.example/?x=blendn-media.fly.storage.tigris.dev/a` matches it.
+ *
+ * ## Why this exists at all
+ *
+ * `photos` is validated as `z.string().url()` and nothing more, and the client
+ * uploads straight to Tigris and then POSTs the resulting URL back. The moment
+ * the server *fetches* those URLs -- to moderate them, to size them, to make a
+ * thumbnail -- that field becomes an SSRF primitive: `http://169.254.169.254/`,
+ * an internal host, a five-gigabyte file. Every one of those is a URL.
+ *
+ * So nothing fetches a photo URL that has not been through here first.
+ *
+ * The key format is `profile/<userId>/<timestamp>-<random>-<name>` (see
+ * `generateKey`), which means ownership is provable from the URL alone: no
+ * database round trip, and no way to point at somebody else's object.
+ */
+const ALLOWED_PHOTO_HOSTS = new Set([
+  `${TIGRIS_BUCKET}.fly.storage.tigris.dev`,
+  `${TIGRIS_BUCKET}.t3.storage.dev`,
+])
+
+export function ownedPhotoKey(url: string, userId: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+
+  // https only. An http URL to our own bucket is still a downgrade we would be
+  // performing on the user's behalf.
+  if (parsed.protocol !== "https:") return null
+  // Exact hostname match, never a substring or a suffix: `notblendn-media...`
+  // and `...tigris.dev.evil.example` both fail here and would both pass a
+  // `includes()` or `endsWith()` check.
+  if (!ALLOWED_PHOTO_HOSTS.has(parsed.hostname)) return null
+
+  const key = decodeURIComponent(parsed.pathname.replace(/^\//, ""))
+
+  // `..` cannot escape an S3 key the way it escapes a filesystem path, but the
+  // key is used to build further requests, and a traversal-looking key is never
+  // something we generated.
+  if (key.includes("..")) return null
+
+  // The folder AND the owner. `profile/<userId>/` is the only shape this
+  // accepts, so somebody else's photo -- or a chat attachment, which is a
+  // different trust class -- is refused.
+  const prefix = `profile/${userId}/`
+  if (!key.startsWith(prefix) || key.length <= prefix.length) return null
+
+  return key
+}
+
+/**
+ * How large is this object, in bytes? `null` if it is not there.
+ *
+ * A metadata call, not a download: it never pulls the image, so it costs one
+ * round trip and no memory regardless of file size.
+ *
+ * This is also the whole blank-image check. A solid colour, a lens cap or a
+ * photo of a wall compresses to a few kilobytes where a real photograph is
+ * hundreds -- so a size floor catches the class without decoding anything.
+ * The alternative was `sharp` for per-channel standard deviation, which means
+ * a native dependency in the Railway image and a full download per photo, to
+ * separate "blank" from "nearly blank" more precisely than anyone needs.
+ */
+export async function getObjectSize(key: string): Promise<number | null> {
+  const client = getS3Client()
+  try {
+    const head = await client.send(
+      new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key })
+    )
+    return head.ContentLength ?? null
+  } catch {
+    return null
+  }
 }
 
 /**

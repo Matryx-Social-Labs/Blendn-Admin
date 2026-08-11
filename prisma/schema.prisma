@@ -89,6 +89,7 @@ model User {
   user_reports_filed    user_reports[]    @relation("UserReportReporter")
   user_reports_received user_reports[]    @relation("UserReportReported")
   message_reports       message_reports[]
+  photo_checks          photo_checks[]
   leads_assigned        leads[]
   lead_notes            lead_notes[]
 }
@@ -814,6 +815,33 @@ model private_conversations {
   /// partial index rather than scanning and filtering.
   @@index([user1_id, closed_at])
   @@index([user2_id, closed_at])
+}
+
+/// Every profile photo we have looked at, and what we concluded.
+///
+/// Without this, "verified by construction" is a claim rather than a fact:
+/// moderation degrades **open** (a vendor outage must not stop somebody having
+/// a profile photo, the same call `lib/email.ts` makes), so a URL sitting in
+/// `profiles.photos` might have been checked and passed, or might have arrived
+/// during an outage. Those are different, and only one of them is safe to leave
+/// alone.
+///
+/// Recording it makes failures retryable and the claim true. Keyed on the URL
+/// rather than the user, because the same object survives being removed from a
+/// profile and added back, and re-checking it would be work we already did.
+model photo_checks {
+  url        String   @id
+  user_id    String
+  /// false when the moderation call could not run — an outage, or no API key.
+  /// These are the rows a sweeper would revisit.
+  checked    Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  /// "what still needs looking at" — the sweeper's query.
+  @@index([checked, created_at])
 }
 
 model private_messages {
