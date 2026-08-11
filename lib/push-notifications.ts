@@ -42,11 +42,34 @@ interface SendBulkNotificationOptions {
 }
 
 /**
- * Get push tokens for a user from the database (supports multiple devices)
+ * Tokens belonging to people who have not turned notifications off.
+ *
+ * `profiles.push_enabled` is stored, returned by `GET /profiles/:userId`, and
+ * rendered as a switch in the app's settings — and **nothing had ever read it
+ * on the send path**. This function selected by `user_id` alone, so did its
+ * bulk sibling, and so did every caller. Turning notifications off changed
+ * exactly nothing: message notifications, message requests and check-in pings
+ * all kept arriving.
+ *
+ * The filter belongs here rather than at each call site so that every existing
+ * sender is covered by one change and no future one can forget.
+ *
+ * ## Why this excludes rather than includes
+ *
+ * The obvious spelling is `user: { profile: { push_enabled: true } }`, and it
+ * is wrong: `User.profile` is optional (`profiles?` in the schema) and
+ * `push_enabled` is `@default(true)`. An inclusive filter therefore drops
+ * everyone who has no `profiles` row at all, silently turning a bug fix into a
+ * wider outage. Excluding the explicit opt-out reproduces the column's own
+ * default — a null profile does not match `push_enabled: false`, so it stays.
  */
+const NOT_OPTED_OUT = {
+  NOT: { user: { profile: { is: { push_enabled: false } } } },
+} as const
+
 async function getUserPushTokens(userId: string): Promise<string[]> {
   const tokens = await db.push_tokens.findMany({
-    where: { user_id: userId },
+    where: { user_id: userId, ...NOT_OPTED_OUT },
     select: { token: true },
     orderBy: { updated_at: "desc" },
     take: 5, // Limit to 5 most recent tokens per user
@@ -62,6 +85,10 @@ async function getBulkUserPushTokens(userIds: string[]): Promise<Map<string, str
   const tokens = await db.push_tokens.findMany({
     where: {
       user_id: { in: userIds },
+      // Same opt-out rule as the single-user path. This one matters more:
+      // group-message fan-out is the loudest sender in the product, so a
+      // preference that works everywhere except here would look broken.
+      ...NOT_OPTED_OUT,
     },
     select: { user_id: true, token: true },
     orderBy: { updated_at: "desc" },
