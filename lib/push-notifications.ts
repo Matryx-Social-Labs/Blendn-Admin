@@ -12,7 +12,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -269,6 +269,73 @@ async function removeInvalidPushToken(token: string): Promise<void> {
 // ============================================
 // Convenience functions for specific notifications
 // ============================================
+
+/**
+ * The three moments in a match that happen while the app is closed.
+ *
+ * ## No name on any of them, not even a pseudonym
+ *
+ * A lock screen is not an authenticated surface. The design doc names Indian
+ * venues and women in the room as the sensitive case, and shared or borrowed
+ * phones are part of that same picture — a dating match visible to whoever
+ * picks the phone up is a real-world safety problem, not a UX preference.
+ *
+ * Two lesser reasons that point the same way. A body carrying a name would have
+ * to branch on reveal state to stay correct, pseudonym here and real name
+ * there, and the branch that leaks is the one that ships. And a body with no
+ * name cannot go stale: it is true before and after any reveal, so nothing has
+ * to be rewritten when identity changes underneath it.
+ *
+ * The app shows everything on open. `conversationId` in `data` is what gets
+ * them there in one tap.
+ *
+ * Existing senders are deliberately untouched. `notifyPrivateMessage` uses the
+ * *resolved* display name (see `lib/conversation-identity.ts`), which is a
+ * pseudonym until someone reveals; changing it to carry nothing at all is a
+ * separate call.
+ */
+
+/** A mutual like. Sent to the EARLIER liker only — see below. */
+export async function notifyMatch(
+  recipientId: string,
+  conversationId: string
+): Promise<boolean> {
+  return sendPushNotification({
+    userId: recipientId,
+    title: "You have a new match",
+    body: "Someone you liked has liked you back.",
+    data: { type: "match", conversationId },
+    channelId: "messages",
+  })
+}
+
+/** Somebody asked to see who you are. There is no decline to send back. */
+export async function notifyRevealRequest(
+  recipientId: string,
+  conversationId: string
+): Promise<boolean> {
+  return sendPushNotification({
+    userId: recipientId,
+    title: "A match wants to know you",
+    body: "Someone you matched with wants to see who you are.",
+    data: { type: "reveal_request", conversationId },
+    channelId: "messages",
+  })
+}
+
+/** The other person showed you their name and photos. */
+export async function notifyReveal(
+  recipientId: string,
+  conversationId: string
+): Promise<boolean> {
+  return sendPushNotification({
+    userId: recipientId,
+    title: "A match revealed",
+    body: "Someone you matched with showed you who they are.",
+    data: { type: "reveal", conversationId },
+    channelId: "messages",
+  })
+}
 
 /**
  * Send notification for a new private message

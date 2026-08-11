@@ -1,5 +1,6 @@
 import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { notifyMatch } from "@/lib/push-notifications"
 import {
   effectiveIntents,
   rankMatches,
@@ -306,6 +307,18 @@ export async function likeAtEvent(
       ),
       revealed: revealedRows.map((r) => r.user_id),
     })
+    /*
+     * Only the EARLIER liker gets the push.
+     *
+     * The person who just tapped Like is holding the phone and gets the mutual
+     * back in this response — notifying them is a notification for something
+     * they are already looking at. `likedId` is the one who liked first (that
+     * is what `back` proved) and does not know yet.
+     *
+     * Fire and forget: a push failure must never fail the like that caused it.
+     */
+    notifyMatch(likedId, conversation.id).catch(() => {})
+
     return { mutual: true, conversationId: conversation.id }
   } catch (e) {
     if (e instanceof ConversationClosedError) return { mutual: false }

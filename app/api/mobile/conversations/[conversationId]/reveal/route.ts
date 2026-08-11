@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { notifyReveal, notifyRevealRequest } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -121,6 +122,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         data: isUser1 ? { user2_reveal_requested: true } : { user1_reveal_requested: true },
       })
 
+      const themId = isUser1 ? conversation.user2_id : conversation.user1_id
+      notifyRevealRequest(themId, conversationId).catch(() => {})
+
       return successResponse({ requested: true })
     }
 
@@ -154,6 +158,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       where: { id: conversationId },
       data: isUser1 ? { user1_revealed: true } : { user2_revealed: true },
     })
+
+    const themId = isUser1 ? conversation.user2_id : conversation.user1_id
+    notifyReveal(themId, conversationId).catch(() => {})
 
     return successResponse({
       revealed: true,
