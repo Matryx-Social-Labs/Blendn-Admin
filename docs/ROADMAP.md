@@ -62,7 +62,7 @@ pass found a live exploit path rather than a gap.
 | T19 | `maySeeIdentity` stops surviving a close | **Done** (#197) |
 | T23 | The close reaches every door: REST, socket join, joined sockets, `openConversation`, the likes endpoint | **Done** (#197) |
 | T22 | The reveal gate covers typing indicators and push titles | **Done** (#198) |
-| T24 | One atomic leave-and-report endpoint; gate the report route | |
+| T24 | One atomic leave-and-report endpoint; gate the report route | **Done** (#200) |
 | T18 | Block reaches the event room — history, socket, push, check-in ping | **Done** (#199) |
 | T20 | Block closes the conversation and cancels both request directions | **Done** (#199) |
 
