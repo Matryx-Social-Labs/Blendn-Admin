@@ -1,3 +1,5 @@
+import { cityFrom, type NominatimAddress } from "./address"
+
 const coordinateCache = new Map<string, string | null>()
 
 function toNumber(value: string): number | null {
@@ -41,6 +43,10 @@ export async function reverseGeocodeCity(
       {
         headers: {
           "Accept": "application/json",
+          // Without this Nominatim answers in the local language, so the same
+          // venue is "München" here and "Munich" from a screen that does ask.
+          // Two spellings of one city split it in every list that groups by name.
+          "Accept-Language": "en",
           "User-Agent": "blendn-admin/1.0",
         },
         signal: controller.signal,
@@ -53,21 +59,9 @@ export async function reverseGeocodeCity(
       return null
     }
 
-    const data = (await response.json()) as {
-      address?: Record<string, string | undefined>
-    }
-    const address = data.address
-    const city =
-      address?.city ||
-      address?.town ||
-      address?.village ||
-      address?.municipality ||
-      address?.county ||
-      address?.state_district ||
-      address?.state ||
-      null
+    const data = (await response.json()) as { address?: NominatimAddress }
 
-    const normalized = city?.trim() || null
+    const normalized = cityFrom(data.address)
     coordinateCache.set(cacheKey, normalized)
     return normalized
   } catch {

@@ -10,15 +10,24 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { IconMapPin, IconSearch } from "@tabler/icons-react"
+import { extractAddress } from "@/lib/address"
 
+/**
+ * `null` rather than `""` for the parts the geocoder could not name.
+ *
+ * An empty string is a value: it groups, it sorts, and it compares equal to
+ * other empty strings, so a set of events "in ''" looks like a real cohort to
+ * anything counting cities. `null` is the honest answer and the one the column
+ * already allows (`city` and friends are `nullish` in `lib/validations/event.ts`).
+ */
 export interface LocationData {
   lat: number
   lng: number
   address: string
-  city: string
-  state: string
-  country: string
-  postal_code: string
+  city: string | null
+  state: string | null
+  country: string | null
+  postal_code: string | null
 }
 
 interface NominatimResult {
@@ -65,17 +74,24 @@ export function LocationPicker({
   const [showSuggestions, setShowSuggestions] = useState(false)
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
+  /**
+   * Reading the response is `lib/address.ts`'s job, not this component's.
+   *
+   * The chain used to live here, and a second one lived in the venue form with
+   * `village` and `municipality` missing — so a pin in a village came back as
+   * the village from this screen and as the surrounding district from that one.
+   */
   const extractLocationData = useCallback(
     (lat: number, lng: number, data?: NominatimResult): LocationData => {
-      const addr = data?.address || {}
+      const resolved = extractAddress(lat, lng, data)
       return {
         lat,
         lng,
-        address: data?.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
-        city: addr.city || addr.town || addr.village || addr.municipality || "",
-        state: addr.state || addr.region || "",
-        country: addr.country || "",
-        postal_code: addr.postcode || "",
+        address: resolved.address,
+        city: resolved.city,
+        state: resolved.state,
+        country: resolved.country,
+        postal_code: resolved.postalCode,
       }
     },
     []

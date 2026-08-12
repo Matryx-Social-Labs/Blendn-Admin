@@ -23,10 +23,14 @@ export const eventFormSchema = z.object({
   venue_id: z.string().nullable().optional(),
   venue_link_status: z.enum(["auto_linked", "confirmed", "disputed"]).nullable().optional(),
   address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  country: z.string().optional(),
-  postal_code: z.string().optional(),
+  // Nullable because the map fills these in and can fail to: a pin in open
+  // country resolves no city, and that has to reach the server as `null` to
+  // clear whatever was there before. `undefined` is dropped from the request
+  // body, so an event that moved out of a city would silently keep the old one.
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  postal_code: z.string().nullable().optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
   // 2000 matches GEOFENCE_LIMITS.MAX_RADIUS in lib/geofence.ts. It was 5000,

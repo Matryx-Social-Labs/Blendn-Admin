@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
-import type { Geofence } from "@/lib/geofence"
+import { fenceCentre, type Geofence } from "@/lib/geofence"
 import { LocationPicker, type LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
@@ -77,10 +77,10 @@ export function LocationSection({
         lat: picked.lat,
         lng: picked.lng,
         address: picked.address ?? form.getValues("address") ?? "",
-        city: picked.city ?? form.getValues("city") ?? "",
-        state: form.getValues("state") ?? "",
-        country: form.getValues("country") ?? "",
-        postal_code: form.getValues("postal_code") ?? "",
+        city: picked.city ?? form.getValues("city") ?? null,
+        state: form.getValues("state") ?? null,
+        country: form.getValues("country") ?? null,
+        postal_code: form.getValues("postal_code") ?? null,
       })
     }
     // Prefill only when empty. Overwriting a capacity the organiser already
@@ -169,59 +169,30 @@ export function LocationSection({
             </FormItem>
           )}
         />
-        <FormField
-          control={form.control}
-          name="city"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>City</FormLabel>
-              <FormControl>
-                <Input placeholder="City" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="state"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>State / Region</FormLabel>
-              <FormControl>
-                <Input placeholder="State" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="country"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Country</FormLabel>
-              <FormControl>
-                <Input placeholder="Country" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="postal_code"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Postal Code</FormLabel>
-              <FormControl>
-                <Input placeholder="Postal code" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        {/*
+          Derived from the map, not typed.
+
+          These four are what every city-scoped query groups by, so a typo here
+          does not just look wrong on this form — it splits a city in the
+          attendee app's browse list, where each spelling finds half the events
+          and neither looks like a mistake.
+
+          The escape hatch is deliberately the pin rather than the text. If the
+          resolved city is wrong the *pin* is wrong, and the pin is also what
+          the geofence and the distance sort use — so typing over the symptom
+          would leave check-in pointing at the wrong place while the form
+          finally read correctly. Moving the pin fixes both.
+        */}
+        <DerivedField form={form} name="city" label="City" />
+        <DerivedField form={form} name="state" label="State / Region" />
+        <DerivedField form={form} name="country" label="Country" />
+        <DerivedField form={form} name="postal_code" label="Postal Code" />
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        City, region, country and postal code come from the map. Move the pin or
+        redraw the area to change them.
+      </p>
 
       {/* Hidden lat/lng — set by map */}
       <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground">
@@ -266,6 +237,27 @@ export function LocationSection({
                   if (fence.type === "circle") {
                     form.setValue("check_in_radius", Math.round(fence.radius + fence.buffer))
                   }
+                  /*
+                    Drag the pin to the shape the organiser actually drew.
+
+                    Nothing did this before, so an organiser could drop the pin
+                    on their office, trace a stadium five kilometres away, and
+                    save both. The fence was right — check-in worked — while
+                    `latitude`/`longitude` still pointed at the office. Those
+                    columns are what the attendee app sorts "Nearby" by and what
+                    the map marker uses, so the event showed up at the wrong
+                    distance from everyone, and nothing about the form looked
+                    wrong.
+
+                    `fenceCentre` returns null for a ring that is still being
+                    drawn; leaving the pin alone until the shape exists is the
+                    right behaviour, not a missed case.
+                  */
+                  const centre = fenceCentre(fence)
+                  if (centre) {
+                    form.setValue("latitude", centre.lat)
+                    form.setValue("longitude", centre.lng)
+                  }
                 }}
                 fallbackCentre={
                   form.watch("latitude") && form.watch("longitude")
@@ -279,5 +271,50 @@ export function LocationSection({
         )}
       />
     </FormSection>
+  )
+}
+
+/**
+ * A field the map fills in and the organiser reads.
+ *
+ * Still a real form field rather than plain text: it stays in the form state,
+ * it submits, and it keeps its label — so screen readers and the existing
+ * layout both behave as before. Only typing is off.
+ *
+ * `readOnly` rather than `disabled` on purpose. A disabled input is skipped by
+ * keyboard navigation and, in most browsers, is not announced at all — so an
+ * organiser using a screen reader would simply never hear the city their event
+ * had been filed under.
+ */
+function DerivedField({
+  form,
+  name,
+  label,
+}: {
+  form: UseFormReturn<EventFormValues>
+  name: "city" | "state" | "country" | "postal_code"
+  label: string
+}) {
+  return (
+    <FormField
+      control={form.control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <FormControl>
+            <Input
+              {...field}
+              value={field.value ?? ""}
+              readOnly
+              tabIndex={-1}
+              placeholder="From the map"
+              className="bg-muted text-muted-foreground"
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
   )
 }

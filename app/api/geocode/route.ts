@@ -59,7 +59,13 @@ export async function GET(req: NextRequest) {
 
   try {
     const res = await fetch(upstream, {
-      headers: { "User-Agent": UA, Accept: "application/json" },
+      // `Accept-Language` is pinned here rather than passed through from the
+      // caller. The venue form omitted it and the event form sent it, so the
+      // same pin resolved to "München" from one screen and "Munich" from the
+      // other — and both spellings ended up in `events.city`, splitting one
+      // city across two entries in anything that groups by name. A header the
+      // caller can forget is a header that will be forgotten.
+      headers: { "User-Agent": UA, Accept: "application/json", "Accept-Language": "en" },
       signal: AbortSignal.timeout(10_000),
       next: { revalidate: CACHE_SECONDS },
     })

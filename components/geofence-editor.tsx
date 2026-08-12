@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import {
   DEFAULT_ACCURACY_POLICY,
   GEOFENCE_LIMITS,
+  fenceCentre,
   ringSelfIntersects,
   type Geofence,
 } from "@/lib/geofence"
@@ -582,12 +583,20 @@ function Legend({ colour, dash, label }: { colour: string; dash: string; label: 
 
 /* ------------------------------------------------------------- helpers --- */
 
+/**
+ * Ring centroid as the tuple Leaflet wants, with a default for an empty ring.
+ *
+ * The arithmetic moved to `lib/geofence.ts` — it was living here *and* inline
+ * in `boundingCircle`, and a third copy was about to be written for resolving
+ * an event's city. This is now only an adapter.
+ *
+ * The fallback stays here on purpose. `fenceCentre` returns null for a ring
+ * with no points, because a guessed coordinate is harmless when it decides
+ * where to point a camera and a lie when it lands in a database column.
+ */
 function centroid(ring: [number, number][]): [number, number] {
-  if (!ring.length) return [12.9716, 77.5946]
-  return [
-    ring.reduce((s, p) => s + p[0], 0) / ring.length,
-    ring.reduce((s, p) => s + p[1], 0) / ring.length,
-  ]
+  const centre = fenceCentre({ type: "polygon", ring, buffer: 0 })
+  return centre ? [centre.lat, centre.lng] : [12.9716, 77.5946]
 }
 
 const R = 6_371_000

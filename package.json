@@ -23,7 +23,8 @@
     "bench": "tsx scripts/bench.ts",
     "seed:volume": "tsx scripts/seed-volume.ts",
     "seed:review": "tsx scripts/seed-review-account.ts",
-    "seed:room": "tsx scripts/seed-room.ts"
+    "seed:room": "tsx scripts/seed-room.ts",
+    "backfill:cities": "tsx scripts/backfill-event-cities.ts"
   },
   "prisma": {
     "seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"

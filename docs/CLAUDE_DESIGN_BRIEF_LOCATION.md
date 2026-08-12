@@ -93,6 +93,45 @@ the organiser must not be surprised later that someone 60 m out got in.
 **Scale matters.** Design this for a 20 m café *and* a 200 m stadium. The
 controls that work at one zoom must work at the other.
 
+#### The address block below the map — derived, not typed
+
+Under the map sit **Address**, **City**, **State / Region**, **Country** and
+**Postal Code**. All five used to be ordinary text inputs the organiser could
+type into. Four of them no longer are.
+
+| Field | Behaviour |
+|---|---|
+| Address | **Editable.** The street line, and organisers legitimately refine it — *"Gate 3"*, a unit number, a landmark the geocoder does not know |
+| City, State / Region, Country, Postal Code | **Read-only.** Filled from the map, greyed, not focusable by typing |
+
+**Why the four are locked, because it is a user-facing restriction and someone
+will ask.** These are the fields the attendee app groups by. If one organiser
+types *"Bangalore"* and another *"Bengaluru"*, the app's city browser shows two
+cities and each finds half the events — and neither entry looks wrong on its
+own, so nobody reports it.
+
+**The escape hatch is the pin, deliberately.** If the resolved city is wrong,
+the pin is wrong — and the pin is also what the geofence centres on and what
+"Nearby" sorts by. Typing over the city would fix the label while leaving
+check-in and distance pointing at the wrong place, with nothing left on screen
+to reveal it. Moving the pin fixes all three.
+
+**What needs designing:** how a read-only-but-important field looks next to an
+editable one without reading as *broken* or *disabled*, and where the sentence
+*"City, region, country and postal code come from the map"* lives so it is found
+at the moment someone tries to type. Greyed boxes are the placeholder
+implementation, not the answer.
+
+**The failure case to design:** a pin in open country resolves **no city**. The
+fields are legitimately blank and the event will not appear under any city in
+the app. That is worth saying at authoring time, not discovering later.
+
+**One behaviour to know about:** drawing or redrawing a polygon **moves the pin**
+to the centre of the shape, and the address block re-resolves from there. This
+is new — the two used to drift apart silently — so the pin visibly jumping when
+a polygon closes is correct, and may deserve a beat of motion so it does not
+look like a glitch.
+
 ### B. The overlap warning
 
 Two events can legitimately share a geofence — a conference with three tracks in

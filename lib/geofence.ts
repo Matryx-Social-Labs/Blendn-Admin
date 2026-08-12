@@ -244,18 +244,94 @@ export function legacyGeofence(
 /* Overlap                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** Centre and a radius that encloses the whole fence including its buffer. */
-export function boundingCircle(fence: Geofence): { centre: LatLng; radius: number } {
+/**
+ * Where the fence *is* — the one point that stands for the whole shape.
+ *
+ * A circle has a centre. A polygon gets the average of its vertices, which is
+ * the centroid of the corners rather than of the enclosed area; for the convex,
+ * roughly-regular outlines an organiser traces around a venue the two differ by
+ * a few metres, and nothing downstream needs better than that.
+ *
+ * **Returns `null` for an empty ring rather than `0/0`.** A `NaN` latitude does
+ * not fail loudly — it propagates into distance sorting and quietly reorders
+ * results for *every* viewer, not just this event. Callers that need a point on
+ * screen supply their own fallback; callers writing to the database skip.
+ *
+ * This was the third copy of the same arithmetic: `boundingCircle` had it
+ * inline and `components/geofence-editor.tsx` had its own, with a hardcoded
+ * Bengaluru default that was right for centring a map and would have been a
+ * lie in a database column.
+ */
+export function fenceCentre(fence: Geofence): LatLng | null {
   if (fence.type === "circle") {
-    return { centre: { lat: fence.lat, lng: fence.lng }, radius: fence.radius + fence.buffer }
+    return Number.isFinite(fence.lat) && Number.isFinite(fence.lng)
+      ? { lat: fence.lat, lng: fence.lng }
+      : null
   }
 
   const ring = fence.ring
+  if (!ring.length) return null
+
   const centre = {
     lat: ring.reduce((sum, p) => sum + p[0], 0) / ring.length,
     lng: ring.reduce((sum, p) => sum + p[1], 0) / ring.length,
   }
-  const radius = ring.reduce(
+  return Number.isFinite(centre.lat) && Number.isFinite(centre.lng) ? centre : null
+}
+
+/**
+ * Where an *event* is: the fence when it has one, the pin otherwise.
+ *
+ * These are two different claims and the product had been treating them as one.
+ * `events.latitude/longitude` is a pin an organiser dropped once; the geofence
+ * is the shape they then drew and the thing check-in actually defends. Nothing
+ * keeps them in step — drawing a polygon never wrote back to the pin — so an
+ * organiser could pin their office and trace a stadium five kilometres away.
+ *
+ * The fence wins because it is the authored answer to "where does this happen",
+ * and because it is the one the door already enforces. The pin is the fallback
+ * for the events that predate fences entirely.
+ *
+ * `geofence` is `unknown` because it arrives from a `Json` column; it is
+ * validated here rather than trusted, so a hand-edited row cannot inject a
+ * `NaN` coordinate into the distance sort.
+ */
+export function eventCentre(
+  geofence: unknown,
+  latitude?: number | null,
+  longitude?: number | null
+): LatLng | null {
+  if (geofence != null) {
+    const parsed = validateGeofence(geofence)
+    if (parsed.ok) {
+      const centre = fenceCentre(parsed.fence)
+      if (centre) return centre
+    }
+  }
+
+  return typeof latitude === "number" &&
+    typeof longitude === "number" &&
+    isValidLatLng(latitude, longitude)
+    ? { lat: latitude, lng: longitude }
+    : null
+}
+
+/**
+ * Centre and a radius that encloses the whole fence including its buffer.
+ *
+ * `null` when the fence has no centre to speak of — see `fenceCentre`. A
+ * validated fence always has one (`validateGeofence` enforces `MIN_RING`), so
+ * in practice this is only reachable from half-drawn state in the editor.
+ */
+export function boundingCircle(fence: Geofence): { centre: LatLng; radius: number } | null {
+  const centre = fenceCentre(fence)
+  if (!centre) return null
+
+  if (fence.type === "circle") {
+    return { centre, radius: fence.radius + fence.buffer }
+  }
+
+  const radius = fence.ring.reduce(
     (max, p) => Math.max(max, haversineDistanceMeters(centre.lat, centre.lng, p[0], p[1])),
     0
   )
@@ -277,6 +353,10 @@ export function boundingCircle(fence: Geofence): { centre: LatLng; radius: numbe
 export function fencesOverlap(a: Geofence, b: Geofence): boolean {
   const ca = boundingCircle(a)
   const cb = boundingCircle(b)
+  // A shape with no centre is a half-drawn one. It encloses nothing, so it
+  // collides with nothing — and warning about it would fire while the organiser
+  // is still placing their first two points.
+  if (!ca || !cb) return false
   const between = haversineDistanceMeters(ca.centre.lat, ca.centre.lng, cb.centre.lat, cb.centre.lng)
   return between < ca.radius + cb.radius
 }

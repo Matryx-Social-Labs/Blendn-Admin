@@ -6,6 +6,8 @@ import {
   evaluateCheckIn,
   legacyGeofence,
   boundingCircle,
+  fenceCentre,
+  eventCentre,
   fencesOverlap,
   validateGeofence,
   ringSelfIntersects,
@@ -274,12 +276,92 @@ describe("overlap detection", () => {
 
 describe("boundingCircle", () => {
   it("encloses every vertex of a polygon", () => {
-    const { centre, radius } = boundingCircle({ type: "polygon", ring: SQUARE, buffer: 0 })
+    const circle = boundingCircle({ type: "polygon", ring: SQUARE, buffer: 0 })
+    expect(circle).not.toBeNull()
+    const { centre, radius } = circle!
     for (const [lat, lng] of SQUARE) {
       expect(distanceToGeofence({ lat, lng }, {
         type: "circle", lat: centre.lat, lng: centre.lng, radius, buffer: 0,
       })).toBe(0)
     }
+  })
+
+  it("is null for a ring with no points, rather than NaN", () => {
+    expect(boundingCircle({ type: "polygon", ring: [], buffer: 0 })).toBeNull()
+  })
+})
+
+/**
+ * Where an event is.
+ *
+ * `fenceCentre` existed three times before this — inline in `boundingCircle`,
+ * again in `components/geofence-editor.tsx`, and about to be written a fourth
+ * time for city resolution. The editor's copy defaulted an empty ring to
+ * Bengaluru, which is a reasonable place to centre a map and a falsehood in a
+ * database column.
+ *
+ * The null cases are the point. A `NaN` latitude does not throw; it sorts
+ * unpredictably and corrupts the *whole* result list, so every path that can
+ * produce one has to be closed at the source.
+ */
+describe("fenceCentre", () => {
+  it("returns a circle's own centre", () => {
+    expect(fenceCentre({ type: "circle", lat: 12.97, lng: 77.59, radius: 50, buffer: 10 }))
+      .toEqual({ lat: 12.97, lng: 77.59 })
+  })
+
+  it("averages a polygon's vertices", () => {
+    const centre = fenceCentre({ type: "polygon", ring: SQUARE, buffer: 0 })!
+    // The square spans 12.9700–12.9709 and 77.5900–77.5909.
+    expect(centre.lat).toBeCloseTo(12.97045, 4)
+    expect(centre.lng).toBeCloseTo(77.59045, 4)
+  })
+
+  it("survives a degenerate ring of identical points", () => {
+    const centre = fenceCentre({
+      type: "polygon",
+      ring: [[12.97, 77.59], [12.97, 77.59], [12.97, 77.59]],
+      buffer: 0,
+    })!
+    expect(centre.lat).toBeCloseTo(12.97, 6)
+    expect(Number.isNaN(centre.lat)).toBe(false)
+  })
+
+  it("is null for an empty ring — 0/0 would be NaN", () => {
+    expect(fenceCentre({ type: "polygon", ring: [], buffer: 0 })).toBeNull()
+  })
+
+  it("is null for a circle with non-finite coordinates", () => {
+    expect(fenceCentre({ type: "circle", lat: NaN, lng: 77.59, radius: 50, buffer: 0 })).toBeNull()
+  })
+})
+
+describe("eventCentre — the fence outranks the pin", () => {
+  const fence = { type: "circle" as const, lat: 12.97, lng: 77.59, radius: 50, buffer: 10 }
+
+  it("prefers the fence when both exist", () => {
+    // The drift this exists to correct: a pin left on the office while the
+    // fence was drawn around the venue. Sorting by the pin puts the event in
+    // the wrong place on every list that mentions distance.
+    expect(eventCentre(fence, 48.1351, 11.5820)).toEqual({ lat: 12.97, lng: 77.59 })
+  })
+
+  it("falls back to the pin when there is no fence", () => {
+    expect(eventCentre(null, 48.1351, 11.5820)).toEqual({ lat: 48.1351, lng: 11.5820 })
+  })
+
+  it("falls back to the pin when the stored fence is malformed", () => {
+    // A `Json` column can hold anything a hand-edit or an old migration left.
+    expect(eventCentre({ type: "trapezoid" }, 48.1351, 11.5820))
+      .toEqual({ lat: 48.1351, lng: 11.5820 })
+  })
+
+  it("is null when there is neither", () => {
+    expect(eventCentre(null, null, null)).toBeNull()
+  })
+
+  it("rejects an out-of-range pin rather than passing it through", () => {
+    expect(eventCentre(null, 91, 200)).toBeNull()
   })
 })
 
