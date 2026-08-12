@@ -32,6 +32,14 @@ export async function GET(request: NextRequest) {
             description: true,
             icon: true,
           },
+          /*
+           * Parents were ordered and children were not, which was invisible
+           * while the picker flattened everything into one alphabetical list.
+           * It stops being invisible now that children render grouped under
+           * their parent: Postgres has no default order, so the chips inside
+           * "Music" could rearrange between two loads of the same screen.
+           */
+          orderBy: { name: "asc" },
         },
         _count: {
           select: {

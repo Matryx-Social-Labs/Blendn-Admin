@@ -38,6 +38,21 @@ export const PAGINATION = {
   DEFAULT_CHAT_LIMIT: 50,
 } as const
 
+/**
+ * How many structured interests one person may hold.
+ *
+ * An abuse ceiling, not a UI preference. Ranking sums IDF weights over shared
+ * interests, and IDF damps *a category many people hold* — it does nothing
+ * about *one person holding many categories*. Without a cap, ticking all 67
+ * leaves shares an interest with everybody at full rarity weight and puts you
+ * top of every list in the room; the damping only arrives once enough people
+ * copy you, so the first one to try it is rewarded.
+ *
+ * The app shows the same number (`components/InterestPicker.tsx`), which until
+ * now was the only thing enforcing it.
+ */
+export const MAX_INTERESTS = 10
+
 // ── Check-in ──────────────────────────────────────────
 export const CHECKIN = {
   DEFAULT_RADIUS_METERS: 30,

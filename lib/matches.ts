@@ -151,16 +151,52 @@ export async function matchesForEvent(
   const eligible = [...latestPerUser.values()]
 
   /*
-   * Rarity is measured against *this room*, not the platform.
+   * Child → parent, for the whole taxonomy. Two levels, ~80 rows, one query.
    *
-   * "Techno" is unremarkable at a techno night and a strong signal at a
-   * conference. A global count would rank the same pair of people differently
-   * depending on events they have nothing to do with.
+   * Fetched here and handed to `rankMatches` as an option, exactly like
+   * `interestHolders` below: the database stays on this side of the seam and
+   * the scoring rule stays pure, so `collapseToMostSpecific` is testable with a
+   * literal map instead of a fixture.
+   */
+  const parentOf = new Map<string, string>()
+  for (const row of await db.categories.findMany({
+    where: { parent_id: { not: null } },
+    select: { id: true, parent_id: true },
+  })) {
+    parentOf.set(row.id, row.parent_id!)
+  }
+
+  /**
+   * A held set, plus the parents those holdings imply. Deduplicated.
+   *
+   * Used for **both** the holder counts and the interest lists handed to
+   * ranking, and it has to be both. Storage is leaf-only, so without expanding
+   * the lists too, someone into "IPL screening" and someone into "Running"
+   * would intersect on nothing — the shared "Sports" that this whole stage
+   * exists to find is not in either raw row.
+   */
+  const expand = (ids: readonly string[]): string[] => {
+    const held = new Set<string>()
+    for (const id of ids) {
+      held.add(id)
+      const parent = parentOf.get(id)
+      if (parent) held.add(parent)
+    }
+    return [...held]
+  }
+
+  /*
+   * Rarity counts each person once per category.
+   *
+   * The per-user `Set` inside `expand` is the part that is easy to get wrong:
+   * someone holding "Techno" *and* "Classical" must count **once** for "Music",
+   * not twice. Counting twice inflates the holder count with a single person's
+   * breadth and makes the parent look commoner than the room actually is.
    */
   const interestHolders = new Map<string, number>()
   for (const c of eligible) {
-    for (const { category_id } of c.user.user_interests) {
-      interestHolders.set(category_id, (interestHolders.get(category_id) ?? 0) + 1)
+    for (const id of expand(c.user.user_interests.map((i) => i.category_id))) {
+      interestHolders.set(id, (interestHolders.get(id) ?? 0) + 1)
     }
   }
 
@@ -173,7 +209,7 @@ export async function matchesForEvent(
   const candidates: MatchCandidate[] = eligible.map((c) => ({
     userId: c.user_id,
     pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
-    interestIds: c.user.user_interests.map((i) => i.category_id),
+    interestIds: expand(c.user.user_interests.map((i) => i.category_id)),
     intents: effectiveIntents(
       prefsOf.get(c.user_id)?.intent ?? [],
       c.user.profile?.intent_default ?? []
@@ -202,7 +238,7 @@ export async function matchesForEvent(
   const ranked = rankMatches(
     {
       userId: viewerId,
-      interestIds: viewerInterests.map((i) => i.category_id),
+      interestIds: expand(viewerInterests.map((i) => i.category_id)),
       intents: effectiveIntents(
         prefsOf.get(viewerId)?.intent ?? [],
         viewerProfile?.intent_default ?? []
@@ -214,7 +250,7 @@ export async function matchesForEvent(
       },
     },
     candidates,
-    { interestHolders, population: eligible.length, limit }
+    { interestHolders, parentOf, population: eligible.length, limit }
   )
 
   // Category names, resolved once for the whole page rather than per card.

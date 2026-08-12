@@ -1,4 +1,5 @@
 import {
+  collapseToMostSpecific,
   effectiveIntents,
   interestWeight,
   rankMatches,
@@ -302,5 +303,159 @@ describe("intent falls back to the profile default", () => {
 
   it("falls back when they did not choose for this event", () => {
     expect(effectiveIntents([], ["networking"])).toEqual(["networking"])
+  })
+})
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * Stage 2 — the taxonomy
+ *
+ *   music ──┬── techno
+ *           └── modular
+ *   sports ──┬── ipl
+ *            └── running
+ *
+ * Storage is leaf-only. `lib/matches.ts` expands each person's holdings upward
+ * before ranking, so two people into different leaves of the same parent meet
+ * at the parent. `collapseToMostSpecific` then drops the parent when a leaf
+ * under it is also shared, so one affinity scores once.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+const PARENTS = new Map([
+  ["techno", "music"],
+  ["modular", "music"],
+  ["ipl", "sports"],
+  ["running", "sports"],
+])
+
+describe("collapseToMostSpecific", () => {
+  it("keeps a shared leaf and drops the parent it implies", () => {
+    // What an expanded intersection actually looks like: both hold techno, so
+    // both hold music, so music is in the intersection carrying no information.
+    expect(collapseToMostSpecific(["techno", "music"], PARENTS)).toEqual(["techno"])
+  })
+
+  it("keeps a shared parent when no leaf under it is shared", () => {
+    // One is into IPL, the other into running. They meet at sports and nowhere
+    // else — this is the overlap the whole stage exists to find.
+    expect(collapseToMostSpecific(["sports"], PARENTS)).toEqual(["sports"])
+  })
+
+  it("keeps both siblings — two shared leaves are two affinities", () => {
+    expect(collapseToMostSpecific(["techno", "modular", "music"], PARENTS)).toEqual([
+      "techno",
+      "modular",
+    ])
+  })
+
+  it("does not drop a parent because some unrelated leaf is shared", () => {
+    // `sports` is only redundant if one of ITS children is shared. `techno`
+    // belongs to another branch and must not suppress it.
+    expect(collapseToMostSpecific(["techno", "sports"], PARENTS)).toEqual(["techno", "sports"])
+  })
+
+  it("keeps an id the taxonomy does not know, rather than dropping it", () => {
+    expect(collapseToMostSpecific(["chess"], PARENTS)).toEqual(["chess"])
+  })
+
+  it("returns an empty list for no overlap", () => {
+    expect(collapseToMostSpecific([], PARENTS)).toEqual([])
+  })
+
+  /*
+   * The hang guards. `categories.parent_id` is a plain self-relation, so a
+   * third level and a cycle are both insertable, and a `while
+   * (parentOf.has(id))` walk would spin the request thread forever on data
+   * nobody can see is wrong.
+   *
+   * There is no walk. Each id checks its own immediate parent once, which
+   * cannot loop by construction — and collapses a deep chain *correctly* as a
+   * side effect: `sub` implies `techno`, `techno` implies `music`, both drop,
+   * and only the most specific node survives.
+   */
+  it("collapses a three-level chain to the most specific, without walking", () => {
+    const deep = new Map([
+      ["sub", "techno"],
+      ["techno", "music"],
+    ])
+    expect(collapseToMostSpecific(["sub", "techno", "music"], deep)).toEqual(["sub"])
+  })
+
+  it("terminates on a cycle", () => {
+    const cyclic = new Map([
+      ["a", "b"],
+      ["b", "a"],
+    ])
+    expect(() => collapseToMostSpecific(["a", "b"], cyclic)).not.toThrow()
+  })
+})
+
+describe("parent-aware ranking", () => {
+  const rankWithTaxonomy = (candidates: MatchCandidate[], holders = HOLDERS, pop = POPULATION) =>
+    rankMatches(viewer, candidates, {
+      interestHolders: holders,
+      parentOf: PARENTS,
+      population: pop,
+    })
+
+  it("scores a shared leaf once, not twice with its parent", () => {
+    const [match] = rankWithTaxonomy([
+      candidate({ userId: "a", interestIds: ["techno", "music"] }),
+    ])
+    expect(match.sharedInterestIds).toEqual(["techno"])
+  })
+
+  it("ranks a shared leaf above a shared parent", () => {
+    // "music" is held by everyone (weight 0); "techno" by 12 of 100.
+    const [first, second] = rankWithTaxonomy([
+      candidate({ userId: "parent-only", interestIds: ["music"] }),
+      candidate({ userId: "leaf", interestIds: ["techno", "music"] }),
+    ])
+    expect(first.userId).toBe("leaf")
+    expect(second.userId).toBe("parent-only")
+  })
+
+  it("works with no taxonomy supplied — flat behaviour, not a crash", () => {
+    const [match] = rankMatches(viewer, [candidate({ userId: "a", interestIds: ["techno"] })], {
+      interestHolders: HOLDERS,
+      population: POPULATION,
+    })
+    expect(match.sharedInterestIds).toEqual(["techno"])
+  })
+})
+
+describe("the card names the most distinguishing overlaps", () => {
+  it("puts the rarest first", () => {
+    const [match] = rankMatches(viewer, [
+      candidate({ userId: "a", interestIds: ["music", "modular"] }),
+    ], { interestHolders: HOLDERS, parentOf: PARENTS, population: POPULATION })
+    expect(match.sharedInterestIds[0]).toBe("modular")
+  })
+
+  it("names at most two, so the card stays a reason rather than a profile", () => {
+    const [match] = rankMatches(viewer, [
+      candidate({ userId: "a", interestIds: ["music", "techno", "modular", "boardgames"] }),
+    ], { interestHolders: HOLDERS, parentOf: PARENTS, population: POPULATION })
+    expect(match.sharedInterestIds).toHaveLength(2)
+  })
+
+  /*
+   * The regression that reversed a review decision.
+   *
+   * The obvious rule — drop overlaps scoring zero so the card and the score
+   * agree — blanks the card entirely in a small room, because `population` is
+   * the candidate count and `log(2/2)` is 0 for *every* interest however rare.
+   * A brand-new event would show two people who share techno and tell them
+   * they have nothing in common.
+   */
+  it("still names an overlap in a room too small for any weight to be positive", () => {
+    const tiny = new Map([["techno", 1]])
+    const [match] = rankMatches(viewer, [candidate({ userId: "a", interestIds: ["techno"] })], {
+      interestHolders: tiny,
+      parentOf: PARENTS,
+      population: 1,
+    })
+    expect(interestWeight("techno", tiny, 1)).toBe(0)
+    expect(match.sharedInterestIds).toEqual(["techno"])
   })
 })
