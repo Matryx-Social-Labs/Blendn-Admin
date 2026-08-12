@@ -11,8 +11,34 @@
  * status-only check is blind to.
  *
  * Exits non-zero on any failure, so it can gate a promotion.
+ *
+ * The authenticated half needs an account and, for the photo guard, the bucket
+ * name for that environment:
+ *
+ *   BASE_URL=https://staging-api.blendn.app \
+ *   SMOKE_EMAIL=… SMOKE_PASSWORD=… SMOKE_BUCKET=blendn-media-staging \
+ *   npm run smoke
+ *
+ * Nothing here mutates anything a person would notice. The photo matrix is
+ * rejected in full before the profile is touched, and `intent_default` is set
+ * to a value the smoke account already holds.
+ *
+ * **Not covered here, deliberately, so the gap is visible rather than assumed:**
+ *
+ * - **Push delivery.** `push_enabled: false` suppressing a notification cannot
+ *   be observed over HTTP at all. Unit-tested in `push-notifications.test.ts`;
+ *   confirmed on a device in `docs/TESTING_CHECKLIST.md` §B.
+ * - **The reveal and close lifecycle.** Both are one-way — you cannot un-reveal
+ *   or re-open — so a suite that ran them would work once and then assert
+ *   against its own leftovers. Covered by `__tests__/integration/*.itest.ts`,
+ *   which run against a database that is rebuilt each time.
+ * - **Block reaching the event room.** Needs group-chat state and a live
+ *   socket; `block-reaches-the-room.test.ts` and the device checklist cover it.
+ *
+ * See `docs/VERIFICATION.md` for which tier owns which capability.
  */
 import { io } from "socket.io-client"
+import { assertDiscriminates } from "../lib/discriminates"
 
 const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")
 const TIMEOUT = 20_000
@@ -32,6 +58,17 @@ async function check(name: string, fn: () => Promise<string>) {
   } catch (e) {
     record(name, false, e instanceof Error ? e.message : String(e))
   }
+}
+
+/** The user id, from the access token, without a second round trip. */
+function userIdFromToken(token: string): string {
+  const seg = token.split(".")[1]
+  if (!seg) throw new Error("access token is not a JWT")
+  const json = Buffer.from(seg.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")
+  const payload = JSON.parse(json) as { userId?: string; sub?: string }
+  const id = payload.userId ?? payload.sub
+  if (!id) throw new Error("no userId in token payload")
+  return id
 }
 
 const fetchJson = async (path: string, init?: RequestInit) => {
@@ -170,6 +207,113 @@ async function main() {
         })
         setTimeout(() => done(() => reject(new Error("no connection in 12s"))), 12_000)
       })
+    })
+
+    const auth = () => ({
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.__SMOKE_TOKEN}`,
+    })
+
+    /*
+     * None of what follows mutates anything.
+     *
+     * `PUT /profiles/:id` rejects the whole request on the first bad photo, so
+     * a matrix of rejected URLs leaves the profile exactly as it was — which is
+     * what makes this safe to run against staging on every deploy.
+     */
+    await check("the photo guard discriminates, and says which half refused", async () => {
+      const bucket = process.env.SMOKE_BUCKET
+      if (!bucket) throw new Error("set SMOKE_BUCKET to the Tigris bucket for this environment")
+      const uid = userIdFromToken(process.env.__SMOKE_TOKEN!)
+      const host = `${bucket}.t3.storage.dev`
+
+      /*
+       * `not_ours` means the ownership check refused it. `too_small` means
+       * ownership *passed* and the size check refused it — an object that is
+       * not there reports `too_small`, which is precisely the acceptance
+       * signal we need without uploading anything.
+       */
+      const cases: Array<{ label: string; url: string }> = [
+        { label: "our bucket, our folder", url: `https://${host}/profile/${uid}/smoke-probe.jpg` },
+        { label: "someone else's folder", url: `https://${host}/profile/not-${uid}/x.jpg` },
+        { label: "chat folder (different trust class)", url: `https://${host}/chat/${uid}/x.jpg` },
+        { label: "host ending with our bucket name", url: `https://evil-${host}/profile/${uid}/x.jpg` },
+        { label: "http downgrade to our own bucket", url: `http://${host}/profile/${uid}/x.jpg` },
+        { label: "path traversal", url: `https://${host}/profile/${uid}/../../etc/passwd` },
+        { label: "cloud metadata endpoint", url: "http://169.254.169.254/latest/meta-data/" },
+      ]
+
+      const outcomes = await Promise.all(
+        cases.map(async (c) => {
+          const { body } = await fetchJson(`/api/mobile/profiles/${uid}`, {
+            method: "PUT",
+            headers: auth(),
+            body: JSON.stringify({ photos: [c.url] }),
+          })
+          const code = (body as { errorCode?: string })?.errorCode
+          // Accepted BY THE OWNERSHIP CHECK, which is the thing under test.
+          return { label: c.label, accepted: code === "too_small", code }
+        })
+      )
+
+      const detail = assertDiscriminates(outcomes)
+      const control = outcomes.find((o) => o.label === "our bucket, our folder")
+      if (!control?.accepted) {
+        throw new Error(
+          `the control failed (code=${control?.code}) — SMOKE_BUCKET is probably wrong ` +
+            `for this environment, and every other refusal below is meaningless`
+        )
+      }
+      return detail
+    })
+
+    await check("`just_here` is exclusive, server-side", async () => {
+      const uid = userIdFromToken(process.env.__SMOKE_TOKEN!)
+      const put = async (intent_default: string[]) => {
+        const { res } = await fetchJson(`/api/mobile/profiles/${uid}`, {
+          method: "PUT",
+          headers: auth(),
+          body: JSON.stringify({ intent_default }),
+        })
+        return res.status
+      }
+
+      // The positive control mutates one column to a value it very likely
+      // already holds. Without it, a route that rejected *everything* would
+      // read as a working rule.
+      const outcomes = [
+        { label: "networking alone", accepted: (await put(["networking"])) === 200 },
+        {
+          label: "all four intents at once",
+          accepted: (await put(["dating", "networking", "friendship", "just_here"])) === 200,
+        },
+        {
+          label: "just_here beside dating",
+          accepted: (await put(["just_here", "dating"])) === 200,
+        },
+      ]
+      return assertDiscriminates(outcomes)
+    })
+
+    await check("a conversation you are not in is invisible, not forbidden", async () => {
+      // 404 rather than 403 on purpose: 403 confirms the row exists, which
+      // tells an outsider that two specific people are talking.
+      const ghost = "00000000-0000-0000-0000-000000000000"
+      const outcomes: Array<{ label: string; accepted: boolean }> = []
+
+      const list = await fetchJson("/api/mobile/conversations", { headers: auth() })
+      outcomes.push({ label: "own conversation list", accepted: list.res.status === 200 })
+
+      for (const [label, path] of [
+        ["detail", `/api/mobile/conversations/${ghost}`],
+        ["messages", `/api/mobile/conversations/${ghost}/messages`],
+      ] as const) {
+        const { res } = await fetchJson(path, { headers: auth() })
+        if (res.status === 403) throw new Error(`${label} returned 403 — that confirms the row exists`)
+        outcomes.push({ label, accepted: res.status === 200 })
+      }
+
+      return assertDiscriminates(outcomes)
     })
   }
 
