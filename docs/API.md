@@ -285,10 +285,11 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 |-------|------|---------|-------------|
 | page | int | 1 | Page number |
 | limit | int | 20 | Items per page (max 100) |
-| search | string | - | Search title, description, venue, city |
-| lat | float | - | Latitude for nearby search |
-| lon | float | - | Longitude for nearby search |
-| radius | float | 10000 | Search radius in meters |
+| search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi |
+| city | string | - | **Scope the list to one city.** Exact, case-insensitive. Values come from `GET /events/cities` |
+| lat | float | - | Latitude — sorts and labels by distance, never excludes |
+| lon | float | - | Longitude |
+| radius | float | **none** | Hard limit in **km**. No default: sending coordinates alone no longer filters |
 | categoryId | uuid | - | Filter by category |
 | categorySlug | string | - | Filter by category slug |
 | startDate | ISO date | - | Events starting after |
@@ -297,6 +298,36 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 | sortBy | enum | start_time | `start_time`, `created_at`, `distance` |
 | sortOrder | enum | asc | `asc`, `desc` |
 | include | string | - | Comma-separated: `checkins,activeCheckins,profile,interestedPreview` |
+
+**`radius` lost its default, and that was the point.** It used to be `10` km, so
+any request carrying coordinates — which the home screen sends in order to sort
+by distance — was silently cut to a 10 km box. Every section of that screen
+reads from one such query, so a user outside the box saw an entirely blank page
+telling them to "explore with location enabled". Distance is a sort and a label
+now. Only `city` scopes a list, and only `check_in_radius` refuses anyone, at
+the door where refusing is the point.
+
+### GET /events/cities
+
+The city picker's list — every city with events, busiest first.
+
+```json
+{ "success": true, "data": { "cities": [
+  { "city": "Bengaluru", "eventCount": 12 },
+  { "city": "Mumbai", "eventCount": 3 }
+] } }
+```
+
+Pass `city` straight back to `GET /events` or `GET /events/search`.
+
+**A city listed with N events opens with N events.** The counts apply the same
+visibility, end-time and age rules as the browse query, so the two cannot drift
+— a picker that promises three events and opens empty gets blamed on the app,
+not the filter. Events with no city appear in neither, which is the same rule
+applied consistently; `npm run backfill:cities` gives older rows a city.
+
+Spellings differing only by case or whitespace are folded into one entry,
+labelled with whichever spelling is most common.
 
 ### Pagination Response
 ```json
