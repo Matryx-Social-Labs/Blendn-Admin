@@ -19,6 +19,7 @@
     "test:watch": "jest --watch",
     "test:integration": "jest --config jest.integration.config.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "smoke:staging": "BASE_URL=https://staging-api.blendn.app tsx scripts/smoke.ts",
     "bench": "tsx scripts/bench.ts",
     "seed:volume": "tsx scripts/seed-volume.ts",
     "seed:review": "tsx scripts/seed-review-account.ts",
@@ -107,6 +108,7 @@
     "tailwindcss": "^4",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.12",
     "tw-animate-css": "^1.2.8",
     "typescript": "^5.8.3"
   }
