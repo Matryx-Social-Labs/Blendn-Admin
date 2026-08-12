@@ -271,8 +271,11 @@ holes.
 
 ### 9. Smaller, known
 
-- **No client sends presence pings.** Endpoint and sweeper are live; the Expo app
-  has to call `…/presence` for the loop to close
+- ~~**No client sends presence pings.**~~ **Stale — corrected 2026-08-12.** The
+  app calls `usePresence(checkedInEventId)` from `app/(tabs)/events.tsx:278`, so
+  the loop closes. What is *not* verified is that pings survive backgrounding
+  and that the sweeper marks a departure from real pings rather than test ones —
+  a device row, not a missing feature
 - **`events.current_capacity`** is written by nothing and read by nothing. Drop
   the column once production logs confirm it
 - **`is_recurring`** is a dead flag still exposed to mobile as `isRecurring`
