@@ -376,20 +376,6 @@ model event_check_ins {
   longitude      Float?
   device_info    Json?
 
-  /// **Deprecated — read and written by nothing since 0.65.0.**
-  ///
-  /// These lived here because a check-in was once one row per event. When
-  /// occurrences arrived the key became `(occurrence_id, user_id)`, so a
-  /// five-day conference gave one person five rows — and both readers looked
-  /// the value up with `findFirst({ event_id, user_id })`, no ordering, so
-  /// which day's answer you got was whatever Postgres handed back first.
-  ///
-  /// `event_match_preferences` replaces them: one row per person per event,
-  /// which is what "per event" always meant. Kept for one release so a rollback
-  /// has something to roll back to; drop them in the release after 0.65.0.
-  intent   connection_intent[]
-  revealed Boolean             @default(false)
-
   /// Presence. See lib/presence.ts — `left_area_at` is both the state and the
   /// clock, and a ping back inside clears it, so there is no enum to drift out
   /// of sync with what the pings actually said.

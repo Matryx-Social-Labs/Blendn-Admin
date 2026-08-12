@@ -105,10 +105,13 @@ each PR's definition of done, not merging to `dev`.
 
 PRs 10–14 are app-side and tracked in `blendn/ROADMAP.md`.
 
-**One follow-up owed:** `event_check_ins.intent` and `.revealed` are dead from
-0.65.0 and must be dropped in the release after. Kept one release so a rollback
-has something to roll back to — dropping a column in the same deploy that stops
-using it means the previous build cannot run at all.
+**The follow-up owed is done (#207).** `event_check_ins.intent` and `.revealed`
+were dead from 0.65.0 and are dropped. They were kept one release so a rollback
+had somewhere to land — dropping a column in the same deploy that stops using it
+means the previous build cannot run at all — and we are four releases past that,
+so the rollback they protected no longer exists. Verified by removing them from
+the schema and typechecking: Prisma generates its types from the schema, so a
+surviving reader is a compile error rather than something grep might miss.
 
 **Two sequencing constraints, both learned the hard way.** `age` cannot become
 required until the app sends it — the first draft of this plan called PR 1 a
@@ -143,15 +146,25 @@ Needs: a `groups` model scoped per event, group check-in, group-level like and
 mutual handshake, and a ranking that scores group-to-group overlap rather than
 summing pairs.
 
-### 2. Interests reach the structured graph — blocks matchmaking entirely
+### 2. Interests reach the structured graph — ~~blocks matchmaking entirely~~ **wired, 2026-08-12**
 
-Onboarding writes interests to `profiles.interests` (free text, from a hardcoded
-emoji list). `lib/matching.ts` ranks on `user_interests → categories`, and the
-endpoints that populate it (`/profiles/:id/interests`) have **zero call sites**.
+**This item is closed, and the description below was already stale when read.**
+It claimed `/profiles/:id/interests` had *zero call sites*, so `user_interests`
+was empty and every match card returned no shared interests for everyone. That
+was true when written and stopped being true in app #64: `about-you.tsx:246`
+calls `addProfileInterests` at signup, and `edit-profile.tsx:268-269` calls both
+add and remove. The structured graph is populated on every new account.
 
-Every match card therefore returns **no shared interests, for everyone**. The
-ranking, the IDF weighting and the overlap-naming card are all correct and all
-fed by an empty table.
+Kept rather than deleted because the failure it describes is the most expensive
+kind this product has — ranking, IDF weighting and the overlap-naming card were
+all *correct* and all fed by an empty table, so every test passed and every card
+was blank. `app/api/health/route.ts:21` still carries a check for exactly that.
+
+**What is genuinely left** is the taxonomy reshape, not the plumbing: 67 leaves
+in a flat wall become 13 parents, optionally refined to leaves, with matching
+made parent-aware so "Sports" and "IPL screening" stop scoring as strangers.
+That is Stage 2 of the post-signup plan and it is app-led, with server-side
+validation owed so an old client cannot keep writing bare leaves.
 
 Mostly app-side, but ours to make easy: decide whether `/events/:id/checkins`
 should carry interests so the client need not fan out, and whether
