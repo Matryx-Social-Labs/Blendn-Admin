@@ -35,6 +35,27 @@ export const eventListSelect = {
           name: true,
           slug: true,
           icon: true,
+          /*
+           * The parent, because events are tagged to **leaves**.
+           *
+           * An event is "Classical and Carnatic", never "Music". Without the
+           * parent, a client that wants "everything musical" has to guess from
+           * the leaf's name — which is exactly what the app's "Best Parties"
+           * section was doing, matching the substrings `party|night|club|music`
+           * and therefore filing Classical and Carnatic as a party.
+           *
+           * One extra join on a select that was already loading the category.
+           * The alternative is the client fetching the whole taxonomy and
+           * building its own leaf→parent map, which is a second request and a
+           * second copy of the tree to keep in step.
+           */
+          parent: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
         },
       },
     },

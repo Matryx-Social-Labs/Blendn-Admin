@@ -124,6 +124,17 @@ const EventCategorySchema = z.object({
   name: z.string(),
   slug: z.string(),
   icon: z.string().nullable(),
+  parent: z
+    .object({
+      id: z.string().uuid(),
+      name: z.string(),
+      slug: z.string(),
+    })
+    .nullable()
+    .openapi({
+      description:
+        "The parent category, or null if this one is top level. Events are tagged to leaves — an event is 'Classical and Carnatic', never 'Music' — so group by this when you want a whole family rather than one leaf.",
+    }),
 })
 
 const EventStatsSchema = z.object({
