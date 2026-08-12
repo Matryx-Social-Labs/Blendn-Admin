@@ -15,6 +15,7 @@ import {
 
 import { GeofenceEditor } from "@/components/geofence-editor"
 import { VenueTypePicker } from "@/components/venue-type-picker"
+import { cityFrom } from "@/lib/address"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -148,12 +149,11 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
         lat: Number(hit.lat),
         lng: Number(hit.lon),
         address: d.address || hit.display_name,
-        city:
-          d.city ||
-          hit.address?.city ||
-          hit.address?.town ||
-          hit.address?.state_district ||
-          "",
+        // Was `city || town || state_district`, which skipped village and
+        // municipality entirely — so a venue in a village was filed under its
+        // district here and under the village name from the event form. Same
+        // pin, two cities, and neither screen looked wrong on its own.
+        city: d.city || cityFrom(hit.address) || "",
         geofence: null,
       }))
     } catch {

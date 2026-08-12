@@ -120,6 +120,39 @@ And `reveal_by_default` seeding could not stop before the app had somewhere to
 offer the name back — **resolved in 0.68.0** by sending `revealSuggestion` on
 the check-in response, so the default is offered rather than discarded.
 
+
+**The homepage nobody can see.** A device in Germany showed a full-screen *"No
+events nearby"*. Every section of the attendee home screen is built and wired —
+Nearby, "{City}'s Top", Upcoming, Interested, two heroes — and every one of them
+is a `useMemo` over **one** query filtered to a 10 km box around device GPS. One
+empty query blanks the whole page. Reviewed by `/plan-eng-review` and Codex; the
+plan is `~/.claude/plans/sprightly-questing-aho.md`.
+
+| PR | What | State |
+|---|---|---|
+| 0 | One city resolver: one fallback chain, language pinned in the proxy, `fenceCentre`/`eventCentre` in `lib/geofence.ts`, polygon centroid written back to the pin, address fields derived, backfill script | **Done** |
+| 1 | The browse contract: `city` param, `GET /events/cities`, radius removed from **both** code paths, selected city on the client, section-level empty states | Next |
+| 2 | The ambiguities: `bestPartiesItems` onto the real taxonomy, both "featured" heroes named honestly, `happeningNowItems` deleted, one distance helper | After 1 |
+
+**Why PR 0 came first.** The city picker is only as good as the strings behind
+it, and three screens were answering "which city is this pin in?" three
+different ways — one of them skipping `village` and `municipality` and returning
+the surrounding district instead, another not asking for English at all. Same
+pin, different city, depending on which form the organiser opened.
+
+**A live bug fell out of it.** Drawing a polygon never wrote back to
+`latitude`/`longitude`, so an organiser could pin their office, trace a stadium
+five kilometres away, and save both. Check-in was correct — it uses the fence —
+while every distance the attendee app shows was measured from the office. The
+fence now moves the pin, and `scripts/backfill-event-cities.ts` un-drifts the
+rows that already exist.
+
+**Still open, deliberately not in PR 0:** the events cache is not keyed by viewer
+age (`events/route.ts:43-80` vs `:147`), so an adult's cached list can be served
+to a minor inside the 30-second TTL — discovery only, the door still refuses.
+And `app/api/geocode/route.ts` restricts geocoding to `countrycodes=in`, which
+quietly makes the product India-only.
+
 ---
 
 ## Next
