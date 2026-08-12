@@ -96,6 +96,10 @@ export async function DELETE(request: NextRequest) {
       // The keys carry the user id, and the profile they described has just
       // been scrubbed.
       db.photo_checks.deleteMany({ where: { user_id: authUser.userId } }),
+      // Someone who leaves takes their demand signal with them. The row cascades
+      // on the foreign key too; this is explicit so the deletion path lists
+      // everything it removes rather than relying on a constraint to be read.
+      db.city_demand.deleteMany({ where: { user_id: authUser.userId } }),
       db.user_oauth_accounts.deleteMany({ where: { user_id: authUser.userId } }),
       db.account.deleteMany({ where: { userId: authUser.userId } }),
       db.session.deleteMany({ where: { userId: authUser.userId } }),

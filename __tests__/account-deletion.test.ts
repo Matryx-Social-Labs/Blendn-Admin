@@ -24,6 +24,7 @@ const mockDb = {
   mobile_refresh_tokens: { deleteMany: jest.fn() },
   push_tokens: { deleteMany: jest.fn() },
   photo_checks: { deleteMany: jest.fn() },
+  city_demand: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },
@@ -94,6 +95,10 @@ describe("deleting an account scrubs the matching inputs", () => {
     // purpose, so nothing removes them unless this does.
     await del()
     expect(mockDb.user_interests.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // Where they were waiting is theirs too. It cascades on the foreign key as
+    // well; asserted here so the deletion path stays a readable list of
+    // everything it removes rather than a set of constraints to go and check.
+    expect(mockDb.city_demand.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
   })
 
   it("removes their per-event choices but not their attendance", async () => {

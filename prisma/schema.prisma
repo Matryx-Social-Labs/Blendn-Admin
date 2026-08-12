@@ -90,6 +90,7 @@ model User {
   user_reports_received user_reports[]    @relation("UserReportReported")
   message_reports       message_reports[]
   photo_checks          photo_checks[]
+  city_demand           city_demand[]
   leads_assigned        leads[]
   lead_notes            lead_notes[]
 }
@@ -815,6 +816,48 @@ model private_conversations {
 /// Recording it makes failures retryable and the claim true. Keyed on the URL
 /// rather than the user, because the same object survives being removed from a
 /// profile and added back, and re-checking it would be work we already did.
+/// Where people opened the app and found nothing.
+///
+/// Every time someone stands in a city we have not launched in, that is them
+/// telling us where to go next — and until now the app noticed, said "nothing
+/// here yet", and threw the fact away.
+///
+/// ## One row per person per city, not per open
+///
+/// The question this answers is "how many *people* are waiting in Saarbrücken",
+/// and a log of opens cannot answer it: one enthusiast reopening the app fifty
+/// times would outrank fifty separate people. The unique constraint is the
+/// measurement, not an optimisation — `opens` is kept alongside because
+/// intensity is interesting, but `count(*)` is the number that means something.
+///
+/// ## What is deliberately not here
+///
+/// No coordinates. City and country are what a launch decision needs, and
+/// storing a per-open GPS trail of every user would be a far larger promise
+/// about their privacy than this feature is worth. `city_key` is the normalised
+/// form (`lib/address.ts`), so "Saarbrücken" and "saarbrucken " group as one.
+///
+/// Cascades on user deletion — someone who leaves takes their signal with them.
+model city_demand {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String
+  /// As shown to the user, so the dashboard can render a real place name.
+  city       String
+  /// Normalised for grouping. See `cityKey` in lib/address.ts.
+  city_key   String
+  country    String?
+  first_seen DateTime @default(now()) @db.Timestamptz(6)
+  last_seen  DateTime @default(now()) @db.Timestamptz(6)
+  opens      Int      @default(1)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  /// The measurement: one row per person per city.
+  @@unique([user_id, city_key])
+  /// "where are people waiting" — the only query this table exists for.
+  @@index([city_key])
+}
+
 model photo_checks {
   url        String   @id
   user_id    String

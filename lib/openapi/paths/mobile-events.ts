@@ -10,6 +10,7 @@ import {
   BatchEventIdsSchema,
   EventSearchQuerySchema,
   EventCitiesResponseSchema,
+  CityDemandRequestSchema,
   EventListResponseSchema,
   EventDetailSchema,
   CheckinResponseSchema,
@@ -51,6 +52,27 @@ registry.registerPath({
     200: {
       description: "Event list",
       content: { "application/json": { schema: wrap(EventListResponseSchema) } },
+    },
+    ...standardErrors,
+  },
+})
+
+// POST /api/mobile/events/demand
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/demand",
+  tags: ["Mobile Events"],
+  summary: "Record that a user is somewhere with no events",
+  description:
+    "Fire-and-forget. Call this when the device's city is not in GET /events/cities — the user is standing somewhere we have not launched, which is the only demand data the product gets before it has supply. One row per person per city: reopening the app is not a new signal, so send it at most once per session and never rely on the response.",
+  security: bearerAuth,
+  request: {
+    body: { content: { "application/json": { schema: CityDemandRequestSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Recorded",
+      content: { "application/json": { schema: wrap(z.object({ recorded: z.boolean() })) } },
     },
     ...standardErrors,
   },

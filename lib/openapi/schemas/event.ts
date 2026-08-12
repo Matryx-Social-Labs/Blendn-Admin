@@ -99,6 +99,16 @@ export const EventSearchQuerySchema = z
   })
   .openapi("EventSearchQuery")
 
+export const CityDemandRequestSchema = z
+  .object({
+    city: z.string().min(1).max(100).openapi({
+      description:
+        "The city the device is in, as the client resolved it. Stored normalised, so case and spacing do not matter.",
+    }),
+    country: z.string().min(1).max(100).optional(),
+  })
+  .openapi("CityDemandRequest")
+
 export const EventCitiesResponseSchema = z
   .object({
     cities: z.array(
