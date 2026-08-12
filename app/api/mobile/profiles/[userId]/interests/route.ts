@@ -10,9 +10,10 @@ import {
   forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
 import { addInterestsSchema, removeInterestsSchema } from "@/lib/validations/profile"
-import { PAGINATION } from "@/lib/constants"
+import { MAX_INTERESTS, PAGINATION } from "@/lib/constants"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -82,14 +83,55 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { categoryIds } = parsed.data
 
     /*
-     * Categories must exist, and they must be real leaves or parents -- not
-     * arbitrary uuids that happen to be in the table for another purpose.
+     * The cap, enforced here for the first time.
      *
-     * This checked existence and nothing else, which is fine today and is the
-     * hole Stage 2 walks into: once interests are meant to be the 13 parents,
-     * an older client keeps writing 67 leaves and the new contract is advisory.
-     * Recording what was written makes the eventual migration possible; letting
-     * anything through does not.
+     * `components/InterestPicker.tsx` has always told the user "the server
+     * rejects more than this per call". It did not — there was no cap anywhere
+     * in this route, and the only thing holding the line was a client constant
+     * anyone could edit out.
+     *
+     * It matters more now than it did. The ranking is a sum of IDF weights over
+     * shared interests, and IDF damps *a category many people hold* — it does
+     * nothing about *one person holding many categories*. Someone who ticks all
+     * 67 leaves barely moves any holder count, shares an interest with
+     * everybody, and surfaces at the top of every list in the room. The damping
+     * only arrives once enough people copy them, so the first person to do it is
+     * rewarded.
+     *
+     * Counted against what they will hold *afterwards*, not what this call
+     * sends: `createMany` is additive, so ten calls of one would otherwise walk
+     * straight past a per-call limit.
+     *
+     * And counted on the ids that are actually new. The write below is
+     * `skipDuplicates`, so re-sending something already held is a no-op — a
+     * naive `held + sent` would refuse a save that changes nothing, which is
+     * exactly what a client re-submitting an unchanged form does.
+     */
+    const heldIds = new Set(
+      (
+        await db.user_interests.findMany({
+          where: { user_id: userId },
+          select: { category_id: true },
+        })
+      ).map((r) => r.category_id)
+    )
+    const adding = [...new Set(categoryIds)].filter((id) => !heldIds.has(id))
+    if (heldIds.size + adding.length > MAX_INTERESTS) {
+      return errorResponse(
+        `You can pick up to ${MAX_INTERESTS} interests. Remove one to add another.`,
+        400,
+        "TOO_MANY_INTERESTS"
+      )
+    }
+
+    /*
+     * Existence, and deliberately nothing about which *level* was sent.
+     *
+     * An earlier draft of Stage 2 wanted this to reject leaves, on the reading
+     * that interests were becoming the 13 parents. That reading lost: parents
+     * group the picker, leaves are what gets stored, and the ranking expands
+     * leaf → parent at read time. So a leaf is the *correct* thing to write and
+     * there is no wrong level to reject — only a category that does not exist.
      */
     const existingCategories = await db.categories.findMany({
       where: { id: { in: categoryIds } },

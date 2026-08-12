@@ -66,6 +66,45 @@ export const PRESENCE_BONUS = 1.5
  */
 export const JUST_HERE_DAMPING = 0.45
 
+/** Callers without a taxonomy get flat behaviour, not a crash. */
+const EMPTY_PARENTS: ReadonlyMap<string, string> = new Map()
+
+/**
+ * How many overlaps a card names.
+ *
+ * Two, because the card is a reason to walk over, not a profile. Which two is
+ * decided by weight — see `orderLabels`.
+ */
+export const MAX_SHARED_LABELS = 2
+
+/**
+ * The overlaps worth printing, most distinguishing first.
+ *
+ * **Never returns empty when an overlap exists**, and that is the whole point.
+ * The obvious rule — drop anything scoring zero, so the card and the score
+ * agree — is wrong at the boundary: `population` is the *candidate* count, so
+ * a two-person room gives `log(2/2) = 0` for every shared interest however
+ * rare. A card that named nothing at a brand-new event would be arithmetic
+ * deciding that two people have nothing in common.
+ *
+ * Sorting by weight gets the property that rule was reaching for anyway. In a
+ * music-event room "Techno" outranks "Music", so the distinguishing overlap
+ * leads and the universal one only appears when it is genuinely all they share.
+ */
+function orderLabels(
+  sharedIds: readonly string[],
+  holders: ReadonlyMap<string, number>,
+  population: number
+): string[] {
+  if (sharedIds.length <= 1) return [...sharedIds]
+  return [...sharedIds]
+    .map((id) => ({ id, w: interestWeight(id, holders, population) }))
+    // Ties keep their original order, which is the viewer's own interest order.
+    .sort((a, b) => b.w - a.w)
+    .slice(0, MAX_SHARED_LABELS)
+    .map((x) => x.id)
+}
+
 export interface MatchCandidate {
   userId: string
   /** Their pseudonym in this event's room. */
@@ -143,6 +182,57 @@ function intersect(a: readonly string[], b: readonly string[]): string[] {
   return a.filter((x) => set.has(x))
 }
 
+/**
+ * Two people sharing "Techno" also share "Music". Score it once.
+ *
+ * The taxonomy is two levels — 13 parents, 67 leaves — and membership expands
+ * upward in `lib/matches.ts` so that holding a leaf makes you a holder of its
+ * parent. That expansion is what gives parents a *low* IDF weight: lots of
+ * people hold "Music", so `log(population / (1 + holders))` is small for it.
+ *
+ * But it also means the intersection of two expanded sets contains both the
+ * leaf and its parent whenever a leaf is shared. Scoring both would count one
+ * affinity twice, and the inflation is worst between the most similar people —
+ * exactly where the ranking needs its resolution.
+ *
+ * So: keep the most specific node per branch. Sharing Techno *implies* sharing
+ * Music, so the parent carries no information the leaf did not already carry.
+ *
+ *     shared {techno, music}          → {techno}      parent implied
+ *     shared {techno, classical, music} → {techno, classical}
+ *                                                     siblings both count
+ *     shared {music}                  → {music}       nobody shares a leaf
+ *     shared {techno, sports}         → {techno, sports}
+ *
+ * **There is no walk, which is the point.** `categories.parent_id` is a plain
+ * self-relation: a third level is insertable, and so is a cycle (A parents B,
+ * B parents A). A `while (parentOf.has(id))` ascent would hang the request
+ * thread on data nobody can see is wrong.
+ *
+ * Each id checks its own immediate parent, once. That cannot loop by
+ * construction, and it happens to collapse a deeper chain correctly anyway —
+ * given `sub → techno → music`, `sub` suppresses `techno`, `techno` suppresses
+ * `music`, and only the most specific node survives. Termination is structural
+ * rather than a depth cap someone has to remember to keep.
+ */
+export function collapseToMostSpecific(
+  sharedIds: readonly string[],
+  parentOf: ReadonlyMap<string, string>
+): string[] {
+  if (sharedIds.length < 2) return [...sharedIds]
+
+  const shared = new Set(sharedIds)
+  // A parent is redundant only when one of ITS OWN children is also shared —
+  // not merely because some other leaf happens to be shared.
+  const impliedParents = new Set<string>()
+  for (const id of sharedIds) {
+    const parent = parentOf.get(id)
+    if (parent && shared.has(parent)) impliedParents.add(parent)
+  }
+
+  return sharedIds.filter((id) => !impliedParents.has(id))
+}
+
 /** Their intents, or the profile default when they did not choose for this event. */
 export function effectiveIntents(perEvent: Intent[], profileDefault: Intent[]): Intent[] {
   return perEvent.length > 0 ? perEvent : profileDefault
@@ -154,6 +244,13 @@ export function rankMatches(
   opts: {
     /** How many people in this room hold each category. */
     interestHolders: ReadonlyMap<string, number>
+    /**
+     * Child category id → its parent. Built in `lib/matches.ts` alongside
+     * `interestHolders`, for the same reason: the ranking rule stays pure and
+     * testable with a literal map, and the database stays on the other side of
+     * the seam.
+     */
+    parentOf?: ReadonlyMap<string, string>
     /** People in the room — the denominator for rarity. */
     population: number
     limit?: number
@@ -162,7 +259,10 @@ export function rankMatches(
   const scored = candidates
     .filter((c) => c.userId !== viewer.userId)
     .map((candidate) => {
-      const sharedInterestIds = intersect(viewer.interestIds, candidate.interestIds)
+      const sharedInterestIds = collapseToMostSpecific(
+        intersect(viewer.interestIds, candidate.interestIds),
+        opts.parentOf ?? EMPTY_PARENTS
+      )
       /*
        * `dating` survives only if the two are plausibly a match.
        *
@@ -213,7 +313,14 @@ export function rankMatches(
       const onlyJustHere = candidate.intents.every((i) => i === "just_here")
       if (onlyJustHere) score *= JUST_HERE_DAMPING
 
-      return { candidate, sharedInterestIds, sharedIntents, score }
+      /*
+       * Scored on every overlap, labelled with the best two. The score uses the
+       * full collapsed set — truncating it would make the ranking depend on how
+       * much fits on a card.
+       */
+      const labelIds = orderLabels(sharedInterestIds, opts.interestHolders, opts.population)
+
+      return { candidate, sharedInterestIds: labelIds, sharedIntents, score }
     })
     .sort(
       (a, b) =>
