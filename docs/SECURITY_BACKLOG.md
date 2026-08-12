@@ -98,7 +98,54 @@ bug explained is worth more to the next engineer than it is to an attacker.
 
 ---
 
-Nothing else outstanding. Everything the 2026-08-08 sweep found is closed below.
+### MEDIUM — deleting a category silently deletes every user's interest in it
+
+**Found** 2026-08-12, by Codex during the Stage 2 plan review. Pre-existing;
+Stage 2 raises the cost of it.
+
+```prisma
+model user_interests {
+  category categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
+}
+```
+
+Deleting or merging a `categories` row cascades away every `user_interests` row
+pointing at it. No warning, no confirmation of scope, no `audit_logs` entry, and
+nothing that tells the affected people. An admin tidying the taxonomy — merging
+two near-duplicate leaves, removing one nobody uses — destroys profile data
+across every account that held it, and the only visible symptom is that those
+people quietly stop matching on something they chose.
+
+**Severity is honest, not inflated.** This ledger scores by *what an attacker
+gets*, and an attacker gets nothing: the path needs dashboard admin rights, and
+somebody with those can already do worse deliberately. It is here because it is
+**silent, irreversible and triggered by a routine maintenance action** — the
+combination that makes a bad afternoon into an unrecoverable one. Reading it as
+HIGH would devalue the rows that actually are.
+
+**Why Stage 2 makes it worse.** Interests used to be leaves only. Ranking now
+expands a leaf to its parent (`lib/matches.ts`), so parents carry weight for
+everyone under them — and deleting a *parent* nulls `parent_id` on its children
+(optional relation, `SetNull`) rather than cascading, which is worse in a
+different way: the leaves survive, the grouping vanishes, and the taxonomy
+silently flattens for every room.
+
+**The fix, when it is taken:**
+
+- Refuse the delete when `_count.user_interests > 0`, and make the caller move
+  them first — the same shape as refusing to delete an organisation with events.
+- Or add a real merge: repoint `user_interests` at the surviving category
+  (`skipDuplicates`, since a user may hold both), then delete.
+- Either way, write an `audit_logs` row with the count. `lib/audit-log.ts`
+  already exists for exactly this class of admin action.
+
+**Not fixed in the Stage 2 PR (#210) on purpose.** It is a category-admin
+concern rather than a matching one, and bundling a destructive-action guard into
+a ranking change would put two unrelated risks in one review.
+
+---
+
+Everything the 2026-08-08 sweep found is closed below.
 
 ---
 
