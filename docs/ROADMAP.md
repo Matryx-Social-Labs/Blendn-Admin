@@ -310,6 +310,41 @@ holes.
 - **Attendee demographics.** Deliberately thin for privacy. Decide explicitly
   rather than leave it implied.
 
+### 8b. The metrics an investor asks for, and we cannot currently answer
+
+**Nothing here is built. The capture for one of them now is.**
+
+The dashboard has charts about *events* — attendance, capacity, ratings. It has
+nothing about the **business**, so the questions a funding conversation opens
+with cannot be answered from the product at all today:
+
+| Metric | Why it is the one they ask | What it needs |
+|---|---|---|
+| **MAU / WAU / DAU** | The headline. Without it there is no denominator for anything else | An activity event per user per day. No table exists — `mobile_refresh_tokens` and `event_check_ins` are the closest proxies and both measure something narrower |
+| **DAU/MAU ratio** ("stickiness") | For a social product this is the number that separates a habit from a novelty | Falls out of the above |
+| **Retention curves** (D1 / D7 / D30) | Cohort survival is what tells you whether the thing works | Signup date, already have it, plus the activity table |
+| **Activation rate** | signup → completed profile → first check-in. Where the funnel leaks | Timestamps exist across `profiles`, `user_interests`, `event_check_ins`; nothing joins them |
+| **Check-ins per active user** | The core action. Blendn's equivalent of "orders per user" | Have the data, no rollup |
+| **Match → conversation → reveal** | The product's actual promise, as a funnel | `matches`, `private_conversations`, reveal state all exist separately |
+| **Organiser retention** | Do hosts run a second event? Supply-side health, and usually the harder side | `events.organizer_id` + dates |
+| **City demand** | Where people opened the app and found nothing | **Capture built** — `city_demand`. No dashboard view yet |
+
+**The one real dependency is an activity table.** Everything above except city
+demand needs "this user was active on this day", and there is no such record —
+so MAU today would have to be reverse-engineered from refresh-token rotations,
+which measures *token lifetime* and not *use*. One narrow append-only table
+(`user_id`, `day`, unique on the pair) answers MAU, WAU, DAU, stickiness and
+every retention curve, and is cheap because it is one upsert per user per day.
+
+**Do this before the numbers are needed, not when.** Retention is the metric you
+cannot backfill: a D30 curve for a cohort requires having recorded their day-30,
+and no amount of later work recovers a day that was never written down. The
+sooner the table exists, the sooner the first honest curve is possible.
+
+**City demand is the one to surface first** — it is already accumulating, it
+needs a query rather than new capture, and *"forty people in Saarbrücken opened
+this and found nothing"* is a slide on its own.
+
 ### 9. Smaller, known
 
 - ~~**No client sends presence pings.**~~ **Stale — corrected 2026-08-12.** The

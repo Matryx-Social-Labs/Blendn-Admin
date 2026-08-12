@@ -336,6 +336,25 @@ applied consistently; `npm run backfill:cities` gives older rows a city.
 Spellings differing only by case or whitespace are folded into one entry,
 labelled with whichever spelling is most common.
 
+### POST /events/demand
+
+Fire-and-forget. Call it when the device's city is **not** in `GET /events/cities`
+— the user is standing somewhere we have not launched.
+
+```json
+{ "city": "Saarbrücken", "country": "Germany" }
+```
+
+**One row per person per city.** Reopening the app is not a new signal, so send
+this at most once per session; a second write from the same user changes the
+count by nothing. That constraint is the measurement — *"forty people in
+Saarbrücken"* has to mean forty people, and a log of opens would let one
+enthusiast outrank a crowd.
+
+No coordinates are stored. City and country are what a launch decision needs;
+a per-open GPS trail would be a much larger promise about privacy than this
+feature is worth. Rows cascade on account deletion.
+
 ### Pagination Response
 ```json
 { "pagination": { "page": 1, "limit": 20, "totalCount": 100, "totalPages": 5, "hasMore": true } }
