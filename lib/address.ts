@@ -112,3 +112,48 @@ export function extractAddress(
 export function cityKey(city: string | null | undefined): string {
   return city?.trim().toLowerCase() ?? ""
 }
+
+export interface CityCount {
+  city: string
+  eventCount: number
+}
+
+/**
+ * Fold a column of city names into the list a picker can show.
+ *
+ * Lives here rather than in the route so it can be tested without a database —
+ * the grouping rules are where the bugs are, not the query.
+ *
+ * Two decisions worth stating:
+ *
+ * **The label is the spelling seen most often**, not the first one. "First"
+ * would rename a whole city in the picker the moment one event was deleted,
+ * which looks like data loss to anyone watching.
+ *
+ * **Busiest first, alphabetical within a tie.** The list is a menu, so the city
+ * most people want should be at the top; the tiebreak exists because Postgres
+ * returns rows in no particular order, and without it two loads of the same
+ * screen could show the same cities in different positions.
+ */
+export function groupCities(cities: readonly (string | null)[]): CityCount[] {
+  const buckets = new Map<string, { labels: Map<string, number>; count: number }>()
+
+  for (const raw of cities) {
+    const key = cityKey(raw)
+    if (!key) continue
+    const label = raw!.trim()
+    const bucket = buckets.get(key) ?? { labels: new Map<string, number>(), count: 0 }
+    bucket.count += 1
+    bucket.labels.set(label, (bucket.labels.get(label) ?? 0) + 1)
+    buckets.set(key, bucket)
+  }
+
+  return [...buckets.values()]
+    .map((bucket) => ({
+      city: [...bucket.labels.entries()].sort(
+        (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+      )[0][0],
+      eventCount: bucket.count,
+    }))
+    .sort((a, b) => b.eventCount - a.eventCount || a.city.localeCompare(b.city))
+}

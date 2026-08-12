@@ -13,6 +13,14 @@ import { PAGINATION } from "@/lib/constants"
 
 const searchSchema = z.object({
   q: z.string().min(1).max(200),
+  /**
+   * Scope search to the browsed city, the same way `GET /events` does.
+   *
+   * Optional so an explicit "search everywhere" stays possible, but the app
+   * sends it: a home screen scoped to Bengaluru whose search box silently
+   * returns Delhi results reads as a bug in the search, not as a feature.
+   */
+  city: z.string().min(1).max(100).optional(),
   page: z.coerce.number().int().min(1).default(PAGINATION.DEFAULT_PAGE),
   limit: z.coerce.number().int().min(1).max(PAGINATION.MAX_LIMIT).default(PAGINATION.DEFAULT_LIMIT),
 })
@@ -30,7 +38,7 @@ export async function GET(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { q, page, limit } = parsed.data
+    const { q, city, page, limit } = parsed.data
     const offset = (page - 1) * limit
 
     // Sanitize query for PostgreSQL - escape special characters
@@ -70,6 +78,19 @@ export async function GET(request: NextRequest) {
     const ageFilter = (n: number) =>
       `AND ($${n}::int IS NULL OR min_age IS NULL OR min_age <= $${n}::int)`
 
+    /*
+     * Same shape and the same reasoning as the age filter: bound, never
+     * interpolated, and written to pass everything when the parameter is null
+     * so an absent `city` widens the search instead of emptying it.
+     *
+     * `lower(...)` on both sides matches the case-insensitive filter in
+     * `../route.ts`. It costs a sequential scan on `city`, which is fine here —
+     * the tsquery predicate is what selects rows, and this only narrows them.
+     */
+    const cityFilter = (n: number) =>
+      `AND ($${n}::text IS NULL OR lower(city) = lower($${n}::text))`
+    const cityParam = city ?? null
+
     // Full-text search with ranking
     const events = await db.$queryRawUnsafe<Array<{
       id: string
@@ -95,6 +116,7 @@ export async function GET(request: NextRequest) {
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(4)}
+         ${cityFilter(5)}
          AND to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(venue_name, '') || ' ' || coalesce(city, ''))
              @@ to_tsquery('english', $1)
        ORDER BY rank DESC, start_time ASC
@@ -102,7 +124,8 @@ export async function GET(request: NextRequest) {
       tsquery,
       limit,
       offset,
-      viewerAge
+      viewerAge,
+      cityParam
     )
 
     const countResult = await db.$queryRawUnsafe<Array<{ count: bigint }>>(
@@ -112,10 +135,12 @@ export async function GET(request: NextRequest) {
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(2)}
+         ${cityFilter(3)}
          AND to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(venue_name, '') || ' ' || coalesce(city, ''))
              @@ to_tsquery('english', $1)`,
       tsquery,
-      viewerAge
+      viewerAge,
+      cityParam
     )
 
     const totalCount = Number(countResult[0]?.count ?? 0)

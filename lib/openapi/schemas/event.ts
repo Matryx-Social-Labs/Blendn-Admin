@@ -8,9 +8,26 @@ export const EventQuerySchema = z
     page: z.number().int().min(1).default(1),
     limit: z.number().int().min(1).max(100).default(20),
     search: z.string().optional(),
+    city: z
+      .string()
+      .min(1)
+      .max(100)
+      .optional()
+      .openapi({
+        description:
+          "Scope the list to one city, matched case-insensitively against the event's city. This is how a browse screen is scoped; `search` is a fuzzy match across four columns and is not a scope. Pick a value from GET /api/mobile/events/cities.",
+      }),
     lat: z.number().min(-90).max(90).optional(),
     lon: z.number().min(-180).max(180).optional(),
-    radius: z.number().min(0.1).max(100).default(10),
+    radius: z
+      .number()
+      .min(0.1)
+      .max(100)
+      .optional()
+      .openapi({
+        description:
+          "Hard-limit results to this many km from lat/lon. **No default** — sending coordinates alone sorts and labels by distance without excluding anything. Only pass this for a genuinely bounded search.",
+      }),
     categoryId: z.string().uuid().optional(),
     categorySlug: z.string().optional(),
     startDate: z.string().datetime().optional(),
@@ -68,10 +85,30 @@ export const BatchEventIdsSchema = z
 export const EventSearchQuerySchema = z
   .object({
     q: z.string().min(1).max(200),
+    city: z
+      .string()
+      .min(1)
+      .max(100)
+      .optional()
+      .openapi({
+        description:
+          "Scope results to one city, matching GET /api/mobile/events. Omit to search everywhere.",
+      }),
     page: z.number().int().min(1).default(1).optional(),
     limit: z.number().int().min(1).max(100).default(20).optional(),
   })
   .openapi("EventSearchQuery")
+
+export const EventCitiesResponseSchema = z
+  .object({
+    cities: z.array(
+      z.object({
+        city: z.string().openapi({ description: "Pass this back as the `city` query parameter." }),
+        eventCount: z.number().int(),
+      })
+    ),
+  })
+  .openapi("EventCitiesResponse")
 
 // Response schemas
 const OrganizerSchema = z.object({

@@ -9,6 +9,7 @@ import {
   AnnounceRequestSchema,
   BatchEventIdsSchema,
   EventSearchQuerySchema,
+  EventCitiesResponseSchema,
   EventListResponseSchema,
   EventDetailSchema,
   CheckinResponseSchema,
@@ -50,6 +51,24 @@ registry.registerPath({
     200: {
       description: "Event list",
       content: { "application/json": { schema: wrap(EventListResponseSchema) } },
+    },
+    ...standardErrors,
+  },
+})
+
+// GET /api/mobile/events/cities
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/cities",
+  tags: ["Mobile Events"],
+  summary: "Cities you can browse",
+  description:
+    "The cities that currently have events, busiest first, with counts. Feeds the city picker: the client shows this immediately rather than reverse-geocoding on first launch, so a cold install with no location still has somewhere to browse. A city listed with N events opens with N events — the counts apply the same visibility and age rules as GET /api/mobile/events.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "Cities with event counts",
+      content: { "application/json": { schema: wrap(EventCitiesResponseSchema) } },
     },
     ...standardErrors,
   },

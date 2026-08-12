@@ -1,4 +1,4 @@
-import { cityFrom, cityKey, extractAddress } from "@/lib/address"
+import { cityFrom, cityKey, extractAddress, groupCities } from "@/lib/address"
 
 /**
  * Reading a geocoder response.
@@ -102,5 +102,59 @@ describe("cityKey", () => {
   it("maps absent to empty rather than throwing", () => {
     expect(cityKey(null)).toBe("")
     expect(cityKey(undefined)).toBe("")
+  })
+})
+
+/**
+ * The city picker's list.
+ *
+ * The rule this has to keep is the one a user notices: **a city listed with N
+ * events must open with N events.** Everything here is in service of that —
+ * fold the spellings that are one place, drop the rows the filter cannot find,
+ * and never invent an entry.
+ */
+describe("groupCities", () => {
+  it("folds spellings that differ only by case or padding", () => {
+    expect(groupCities(["Bengaluru", "bengaluru", " Bengaluru "])).toEqual([
+      { city: "Bengaluru", eventCount: 3 },
+    ])
+  })
+
+  it("labels with the most common spelling, not the first seen", () => {
+    // "First" would rename the whole city in the picker the moment one event
+    // was deleted, which reads as data loss to anyone watching.
+    expect(groupCities(["bengaluru", "Bengaluru", "Bengaluru"])).toEqual([
+      { city: "Bengaluru", eventCount: 3 },
+    ])
+  })
+
+  it("keeps genuinely different cities apart", () => {
+    expect(groupCities(["Bengaluru", "Mumbai", "Bengaluru"])).toEqual([
+      { city: "Bengaluru", eventCount: 2 },
+      { city: "Mumbai", eventCount: 1 },
+    ])
+  })
+
+  it("orders busiest first, then alphabetically", () => {
+    // The tiebreak is not cosmetic: Postgres returns rows in no defined order,
+    // so without it the same screen could list cities differently twice.
+    expect(groupCities(["Delhi", "Chennai", "Mumbai", "Mumbai"])).toEqual([
+      { city: "Mumbai", eventCount: 2 },
+      { city: "Chennai", eventCount: 1 },
+      { city: "Delhi", eventCount: 1 },
+    ])
+  })
+
+  it("drops nulls and blanks rather than listing an unnamed city", () => {
+    // These events are also unreachable by the `city` filter, so listing them
+    // would promise a city that opens empty — the exact failure this endpoint
+    // exists to prevent.
+    expect(groupCities([null, "  ", "", "Mumbai"])).toEqual([
+      { city: "Mumbai", eventCount: 1 },
+    ])
+  })
+
+  it("is empty for no events at all", () => {
+    expect(groupCities([])).toEqual([])
   })
 })

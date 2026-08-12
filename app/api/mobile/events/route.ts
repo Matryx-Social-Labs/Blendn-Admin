@@ -17,6 +17,16 @@ import {
   transformEvents,
 } from "@/lib/services/events.service"
 import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
+import { buildEventsCacheKey } from "@/lib/events-cache-key"
+
+/**
+ * The most events a distance sort will pull into memory at once.
+ *
+ * Sized to be unreachable in practice and to fail loudly if it ever is not —
+ * see the fetch it guards. Not a page size: the page is taken from the sorted
+ * result, so this only bounds what gets sorted.
+ */
+const DISTANCE_SORT_CEILING = 5000
 
 // Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<
@@ -40,40 +50,6 @@ function setCache(key: string, value: { expiresAt: number; events: EventListItem
   eventsCache.set(key, value)
 }
 
-function buildEventsCacheKey(input: {
-  page: number
-  limit: number
-  search?: string
-  lat?: number
-  lon?: number
-  radius?: number
-  categoryId?: string
-  categorySlug?: string
-  startDate?: string
-  endDate?: string
-  includePast?: boolean
-  status?: string
-  sortBy: string
-  sortOrder: string
-}) {
-  return JSON.stringify({
-    page: input.page,
-    limit: input.limit,
-    search: input.search || null,
-    lat: input.lat ?? null,
-    lon: input.lon ?? null,
-    radius: input.radius ?? null,
-    categoryId: input.categoryId || null,
-    categorySlug: input.categorySlug || null,
-    startDate: input.startDate || null,
-    endDate: input.endDate || null,
-    includePast: input.includePast,
-    status: input.status || null,
-    sortBy: input.sortBy,
-    sortOrder: input.sortOrder,
-  })
-}
-
 export async function GET(request: NextRequest) {
   try {
     // Get authenticated user
@@ -93,6 +69,7 @@ export async function GET(request: NextRequest) {
       page,
       limit,
       search,
+      city,
       lat,
       lon,
       radius,
@@ -179,8 +156,36 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    // Nearby filter with bounding box
-    if (lat !== undefined && lon !== undefined) {
+    /*
+     * The browse scope.
+     *
+     * `equals` with `mode: "insensitive"` rather than `contains`: `search`
+     * above already matches loosely across four columns, and a scope that also
+     * matches substrings is not a scope. Case-insensitive because rows written
+     * before `lib/address.ts` existed may differ only in case, and "bengaluru"
+     * and "Bengaluru" are one place to everyone except a database.
+     *
+     * Events with no city are unreachable this way, which is deliberate and
+     * matches `/events/cities` — the picker lists exactly what the filter can
+     * find, so a city can never show a count and then open empty.
+     * `scripts/backfill-event-cities.ts` is what gives the older rows a city.
+     */
+    if (city) {
+      where.city = { equals: city, mode: "insensitive" }
+    }
+
+    /*
+     * A bounding box **only when the caller asked for one.**
+     *
+     * `radius` used to default to 10 km, so simply sending coordinates —
+     * which the home screen does, to sort by distance — silently filtered the
+     * result to a 10 km box. That is the bug that blanked the homepage for
+     * anyone standing outside one.
+     *
+     * Half-fixing this is easy and would look like it worked: there is a
+     * second radius filter further down, applied after the distance sort.
+     */
+    if (lat !== undefined && lon !== undefined && radius !== undefined) {
       const bbox = getBoundingBox(lat, lon, radius)
       where.latitude = { gte: bbox.minLat, lte: bbox.maxLat }
       where.longitude = { gte: bbox.minLon, lte: bbox.maxLon }
@@ -228,6 +233,8 @@ export async function GET(request: NextRequest) {
       page,
       limit,
       search,
+      city,
+      viewerAge: typeof viewer?.age === "number" ? viewer.age : null,
       lat,
       lon,
       radius,
@@ -436,12 +443,39 @@ export async function GET(request: NextRequest) {
 
 
     if (shouldSortByDistance) {
-      // Fetch only id + coordinates to sort by distance in-memory, avoiding loading
-      // full relations for all rows. Only the page's worth of events get the full select.
+      /*
+       * Fetch only id + coordinates to sort by distance in-memory, avoiding
+       * loading full relations for all rows. Only the page's worth of events
+       * get the full select.
+       *
+       * `take` is a backstop, not tuning. This used to be bounded in practice
+       * by the 10 km radius that was applied before it; with distance demoted
+       * to a sort, an unscoped `sortBy=distance` would pull every future public
+       * event on the platform into memory. Three columns per row is cheap, but
+       * cheap times unbounded is still unbounded.
+       *
+       * Ordered by `start_time` so the ceiling, if it is ever hit, drops the
+       * furthest-off events rather than an arbitrary slice — and the drop is
+       * logged rather than silent, because a discovery list that quietly stops
+       * being complete is the kind of bug nobody reports.
+       *
+       * Past this, the sort belongs in SQL. That is the seam `lib/geofence.ts`
+       * already names as the point where a real spatial index would earn its
+       * migration.
+       */
       const lightweight = await db.events.findMany({
         where,
         select: { id: true, latitude: true, longitude: true },
+        orderBy: { start_time: "asc" },
+        take: DISTANCE_SORT_CEILING,
       })
+
+      if (lightweight.length === DISTANCE_SORT_CEILING) {
+        logger.warn("Distance sort hit its ceiling; results are truncated", {
+          ceiling: DISTANCE_SORT_CEILING,
+          city: city ?? null,
+        })
+      }
 
       const withDistance = lightweight
         .map((e) => ({
@@ -451,7 +485,10 @@ export async function GET(request: NextRequest) {
               ? haversineDistance(lat, lon, e.latitude, e.longitude)
               : null,
         }))
-        .filter((e) => e.distance === null || e.distance <= radius)
+        // The second radius filter. Only bites when the caller asked for a
+        // bounded search — see the bounding box above, which is the other half
+        // of the same decision and was easy to fix alone and believe done.
+        .filter((e) => radius === undefined || e.distance === null || e.distance <= radius)
         .sort((a, b) => {
           if (a.distance === null) return 1
           if (b.distance === null) return -1

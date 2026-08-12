@@ -8,10 +8,32 @@ export const eventQuerySchema = z.object({
   // Search
   search: z.string().optional(),
 
+  /**
+   * Where to browse. The one thing that scopes a page of discovery.
+   *
+   * Matched case-insensitively against `events.city`, which the organiser no
+   * longer types — it is derived from the map pin via `lib/address.ts`. Exact
+   * rather than `contains`, because `search` already does fuzzy matching across
+   * four columns and scoping a whole screen on "Bengaluru also matches an event
+   * *titled* Bengaluru Meetup held in Delhi" is not a scope at all.
+   */
+  city: z.string().min(1).max(100).optional(),
+
   // Nearby filter
   lat: z.coerce.number().min(-90).max(90).optional(),
   lon: z.coerce.number().min(-180).max(180).optional(),
-  radius: z.coerce.number().min(0.1).max(100).default(10), // km
+  /**
+   * **No default, deliberately.** This used to be `.default(10)`, so every
+   * request that sent coordinates — which the home screen always did — was
+   * silently capped at a 10 km box around the device. Every section of that
+   * screen is a `useMemo` over one such query, so one empty result blanked the
+   * whole page, and the empty state told the user to "explore with location
+   * enabled" when location is exactly what had emptied it.
+   *
+   * Distance is a sort and a label now, not a filter. This parameter survives
+   * for callers that genuinely want a bounded search and must ask for it.
+   */
+  radius: z.coerce.number().min(0.1).max(100).optional(), // km
 
   // Category filter
   categoryId: z.string().uuid().optional(),

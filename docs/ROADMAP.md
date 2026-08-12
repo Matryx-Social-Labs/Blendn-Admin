@@ -131,7 +131,8 @@ plan is `~/.claude/plans/sprightly-questing-aho.md`.
 | PR | What | State |
 |---|---|---|
 | 0 | One city resolver: one fallback chain, language pinned in the proxy, `fenceCentre`/`eventCentre` in `lib/geofence.ts`, polygon centroid written back to the pin, address fields derived, backfill script | **Done** |
-| 1 | The browse contract: `city` param, `GET /events/cities`, radius removed from **both** code paths, selected city on the client, section-level empty states | Next |
+| 1 (API) | The browse contract: `city` param on `/events` and `/events/search`, `GET /events/cities`, radius removed from **both** code paths, distance-sort ceiling | **Done** |
+| 1 (app) | Selected city persisted, header picker, section-level empty states, personal sections decoupled, realtime banner off the homepage | Next |
 | 2 | The ambiguities: `bestPartiesItems` onto the real taxonomy, both "featured" heroes named honestly, `happeningNowItems` deleted, one distance helper | After 1 |
 
 **Why PR 0 came first.** The city picker is only as good as the strings behind
@@ -147,11 +148,18 @@ while every distance the attendee app shows was measured from the office. The
 fence now moves the pin, and `scripts/backfill-event-cities.ts` un-drifts the
 rows that already exist.
 
-**Still open, deliberately not in PR 0:** the events cache is not keyed by viewer
-age (`events/route.ts:43-80` vs `:147`), so an adult's cached list can be served
-to a minor inside the 30-second TTL — discovery only, the door still refuses.
-And `app/api/geocode/route.ts` restricts geocoding to `countrycodes=in`, which
-quietly makes the product India-only.
+**The age-cache hole is closed.** The plan had it as a separate follow-up, but
+PR 1 edits the cache key itself, and adding `city` to a key that was missing
+`viewerAge` would have papered over it. The list filters on
+`min_age <= viewer.age`; the key mentioned neither age nor user, so an adult's
+cached page could be served to a minor inside the 30-second TTL. Discovery only
+— check-in always refused — but not something to leave standing while editing
+that function. It is now `lib/events-cache-key.ts`, out of the route so it can
+be tested, and `__tests__/events-cache-key.test.ts` asserts the property
+directly: two requests that would compute different lists never share a key.
+
+**Still open:** `app/api/geocode/route.ts` restricts geocoding to
+`countrycodes=in`, which quietly makes the product India-only.
 
 ---
 
