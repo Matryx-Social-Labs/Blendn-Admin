@@ -105,10 +105,13 @@ each PR's definition of done, not merging to `dev`.
 
 PRs 10–14 are app-side and tracked in `blendn/ROADMAP.md`.
 
-**One follow-up owed:** `event_check_ins.intent` and `.revealed` are dead from
-0.65.0 and must be dropped in the release after. Kept one release so a rollback
-has something to roll back to — dropping a column in the same deploy that stops
-using it means the previous build cannot run at all.
+**The follow-up owed is done (#207).** `event_check_ins.intent` and `.revealed`
+were dead from 0.65.0 and are dropped. They were kept one release so a rollback
+had somewhere to land — dropping a column in the same deploy that stops using it
+means the previous build cannot run at all — and we are four releases past that,
+so the rollback they protected no longer exists. Verified by removing them from
+the schema and typechecking: Prisma generates its types from the schema, so a
+surviving reader is a compile error rather than something grep might miss.
 
 **Two sequencing constraints, both learned the hard way.** `age` cannot become
 required until the app sends it — the first draft of this plan called PR 1 a
