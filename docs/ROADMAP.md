@@ -146,15 +146,25 @@ Needs: a `groups` model scoped per event, group check-in, group-level like and
 mutual handshake, and a ranking that scores group-to-group overlap rather than
 summing pairs.
 
-### 2. Interests reach the structured graph — blocks matchmaking entirely
+### 2. Interests reach the structured graph — ~~blocks matchmaking entirely~~ **wired, 2026-08-12**
 
-Onboarding writes interests to `profiles.interests` (free text, from a hardcoded
-emoji list). `lib/matching.ts` ranks on `user_interests → categories`, and the
-endpoints that populate it (`/profiles/:id/interests`) have **zero call sites**.
+**This item is closed, and the description below was already stale when read.**
+It claimed `/profiles/:id/interests` had *zero call sites*, so `user_interests`
+was empty and every match card returned no shared interests for everyone. That
+was true when written and stopped being true in app #64: `about-you.tsx:246`
+calls `addProfileInterests` at signup, and `edit-profile.tsx:268-269` calls both
+add and remove. The structured graph is populated on every new account.
 
-Every match card therefore returns **no shared interests, for everyone**. The
-ranking, the IDF weighting and the overlap-naming card are all correct and all
-fed by an empty table.
+Kept rather than deleted because the failure it describes is the most expensive
+kind this product has — ranking, IDF weighting and the overlap-naming card were
+all *correct* and all fed by an empty table, so every test passed and every card
+was blank. `app/api/health/route.ts:21` still carries a check for exactly that.
+
+**What is genuinely left** is the taxonomy reshape, not the plumbing: 67 leaves
+in a flat wall become 13 parents, optionally refined to leaves, with matching
+made parent-aware so "Sports" and "IPL screening" stop scoring as strangers.
+That is Stage 2 of the post-signup plan and it is app-led, with server-side
+validation owed so an old client cannot keep writing bare leaves.
 
 Mostly app-side, but ours to make easy: decide whether `/events/:id/checkins`
 should carry interests so the client need not fan out, and whether
