@@ -290,8 +290,8 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 | lat | float | - | Latitude — sorts and labels by distance, never excludes |
 | lon | float | - | Longitude |
 | radius | float | **none** | Hard limit in **km**. No default: sending coordinates alone no longer filters |
-| categoryId | uuid | - | Filter by category |
-| categorySlug | string | - | Filter by category slug |
+| categoryId | uuid | - | Filter by category. Parent-inclusive — picking a parent sweeps in its children |
+| categorySlug | string | - | Same, by slug |
 | startDate | ISO date | - | Events starting after |
 | endDate | ISO date | - | Events ending before |
 | status | string | published | Event status filter |
@@ -306,6 +306,13 @@ reads from one such query, so a user outside the box saw an entirely blank page
 telling them to "explore with location enabled". Distance is a sort and a label
 now. Only `city` scopes a list, and only `check_in_radius` refuses anyone, at
 the door where refusing is the point.
+
+**Each category on an event now carries its `parent`** (or `null` at top level).
+Events are tagged to **leaves** — an event is "Classical and Carnatic", never
+"Music" — so a client wanting a whole family groups on the parent rather than
+guessing from the leaf's name. The app's "Best Parties" section used to guess,
+matching `party|night|club|music` as substrings, and therefore filed Classical
+and Carnatic as a party.
 
 ### GET /events/cities
 
