@@ -47,11 +47,38 @@ function Button({
   }) {
   const Comp = asChild ? Slot : "button"
 
+  /*
+   * `type="button"` unless the caller says otherwise.
+   *
+   * HTML defaults a `<button>` inside a `<form>` to `type="submit"`, so any
+   * `<Button onClick={…}>` in a form submitted it. That is not a theoretical
+   * footgun: the geofence editor's Map/Satellite toggle did exactly this, and
+   * clicking it threw the organiser to the top of the event form with five
+   * fields flagged red — a bug reported from a real session and reproduced on
+   * staging (scroll position 3018 → 0, `title`, `description`,
+   * `full_description`, `start_time`, `end_time` all `aria-invalid`).
+   *
+   * `components/venue-create-form.tsx` already carried six hand-added
+   * `type="button"` attributes, which is the same bug being patched one call
+   * site at a time.
+   *
+   * Safe to change: every `<form>` in this codebase gives its submit button an
+   * explicit `type="submit"` — seven forms, seven explicit, none relying on the
+   * implicit default. Swept before changing this, because the failure mode of
+   * getting it wrong is a form that silently cannot be submitted.
+   *
+   * `asChild` renders a Slot, which forwards to whatever element the caller
+   * passed — often an anchor, where a `type` attribute is meaningless. So the
+   * default is only applied when this actually renders a button.
+   */
+  const typeProps = Comp === "button" ? { type: props.type ?? ("button" as const) } : {}
+
   return (
     <Comp
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
+      {...typeProps}
     />
   )
 }
