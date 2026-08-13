@@ -457,6 +457,9 @@ export function GeofenceEditor({
           {(["map", "sat"] as const).map((k) => (
             <button
               key={k}
+              // Not the shared `Button`, so it does not inherit that default.
+              // Without this, changing the map layer submits the event form.
+              type="button"
               onClick={() => setLayer(k)}
               className={cn(
                 "rounded-md px-2.5 py-1 text-[0.71875rem]",
