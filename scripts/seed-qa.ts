@@ -346,8 +346,21 @@ async function main() {
   console.log(`\n${"=".repeat(78)}`)
   console.log("PASTE INTO THE JIRA ENVIRONMENT TICKET")
   console.log(`${"=".repeat(78)}\n`)
-  console.log(`Dashboard: https://dashboard.blendn.app   (staging)`)
-  console.log(`API:       https://staging-api.blendn.app\n`)
+  /*
+   * Staging hosts, spelled out.
+   *
+   * The production pair is `dashboard.blendn.app` / `api.blendn.app` — the same
+   * names without the prefix, which is one missing word away from pointing a
+   * whole QA team at production. That already happened once, from this script's
+   * output being pasted into a ticket.
+   *
+   * Not read from `DASHBOARD_HOST`: this runs with only `DATABASE_URL` set, so
+   * the env lookup would resolve to nothing and print a blank line, which is a
+   * worse failure than a wrong URL because nobody notices it.
+   */
+  console.log(`Dashboard: https://staging-dashboard.blendn.app`)
+  console.log(`API:       https://staging-api.blendn.app`)
+  console.log(`\n  NOT dashboard.blendn.app / api.blendn.app — those are production.\n`)
   for (const c of created) {
     console.log(`${c.role}`)
     console.log(`  email     ${c.email}`)
