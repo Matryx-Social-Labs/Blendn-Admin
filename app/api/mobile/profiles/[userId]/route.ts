@@ -109,6 +109,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ...(identified
         ? { bio: p.bio, occupation: p.occupation, education: p.education, photos: p.photos }
         : {}),
+      /*
+       * Orientation, and only when *both* are true: they turned it on, and you
+       * are someone who can already see who they are.
+       *
+       * Two gates rather than one because they answer different questions.
+       * `show_orientation` is consent to show it at all — special-category data
+       * under GDPR Article 9, so silence is not consent and the column defaults
+       * false. `identified` is who to. A switch alone would publish it to any
+       * caller holding a token, which is a wider audience than the person's own
+       * name and photograph get, and that ordering is backwards.
+       *
+       * `gender` and `interested_in` stay withheld from everyone regardless.
+       * They are matching inputs; the compatibility they compute surfaces as a
+       * tag on a card, never as the values behind it.
+       */
+      ...(identified && p.show_orientation ? { orientation: p.orientation } : {}),
     }
 
     /*

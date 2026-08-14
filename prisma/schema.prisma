@@ -206,6 +206,30 @@ model profiles {
   /// come from it.
   orientation   String?
 
+  /// Whether `orientation` is shown to people who can already see who you are.
+  ///
+  /// **Default false, and it stays false unless somebody deliberately turns it
+  /// on.** Sexual orientation is special-category data under GDPR Article 9; the
+  /// lawful basis for showing it is explicit consent, and a default-on switch is
+  /// not consent.
+  ///
+  /// What it does *not* do is make the field public. Even switched on, the value
+  /// only reaches callers who pass `maySeeIdentity` — a mutual match, an open
+  /// conversation, or a room where the person revealed themselves. The reason is
+  /// ordering: this app withholds someone's real *name and face* from any caller
+  /// who has not earned them, so a field more sensitive than a name cannot be
+  /// less protected than one. A public switch would make orientation more
+  /// exposed than a photograph.
+  ///
+  /// Until this existed there was no control at all: orientation was collected,
+  /// fed `deriveInterestedIn`, and was shown to nobody — which is safe but is
+  /// also why nobody could signal it. The allow-list in
+  /// `GET /profiles/:userId` that withholds it was written because a deny-list
+  /// once leaked this exact column along with `gender`, so the exposure it now
+  /// permits is deliberately the narrowest one that makes the switch mean
+  /// anything.
+  show_orientation Boolean @default(false)
+
   /// Settings the app has always shown and never stored.
   ///
   /// There were four switches on the settings screen and no columns behind them,

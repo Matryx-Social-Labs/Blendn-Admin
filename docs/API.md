@@ -754,6 +754,37 @@ Three consequences worth knowing about:
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.
 
+### Orientation is shown only when two things are true
+
+`profiles.show_orientation` defaults **false** and is settable on
+`PUT /profiles/:userId`. When it is true, `GET /profiles/:userId` returns
+`orientation` — **and only to callers who also pass `maySeeIdentity`**.
+
+Two gates, because they answer different questions:
+
+| Gate | Question |
+|---|---|
+| `show_orientation` | may this be shown at all? |
+| `maySeeIdentity` | shown to *whom*? |
+
+**Why the second one exists.** The design asked for a single "show on profile"
+switch, which would publish orientation to any caller holding a token. This API
+withholds someone's real name and photograph from anyone who has not matched,
+opened a conversation, or been revealed to — so a field more sensitive than a
+name cannot be less protected than one. Co-presence at an event is enough to
+send a message request; it is not enough to learn who someone is, and it is not
+enough for this.
+
+**Why the first one exists.** Orientation is special-category data under GDPR
+Article 9. The lawful basis for showing it is explicit consent, and a column
+that defaults on is not consent. It resets to false on account deletion.
+
+`gender` and `interested_in` stay withheld from everyone regardless. They are
+matching *inputs*; the compatibility they compute surfaces as a tag on a card —
+"Both open to dating" — never as the values behind it. That separation is not
+incidental: the allow-list this sits in was written because a deny-list once
+shipped `orientation` and `gender` together to any authenticated caller.
+
 ### Events can require a minimum age
 
 `events.min_age` is null for almost every event. When set:

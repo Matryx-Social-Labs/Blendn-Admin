@@ -62,9 +62,21 @@ export const UpdateProfileRequestSchema = z
       .max(4)
       .optional(),
 
+    /*
+     * Show `orientation` to people who can already see who you are — matches,
+     * open conversations, rooms you revealed yourself in. Not to everyone.
+     *
+     * Defaults false and stays false unless deliberately set: orientation is
+     * special-category data under GDPR Article 9, so silence is not consent.
+     * The second gate is `maySeeIdentity`, because a field more sensitive than
+     * a name cannot be less protected than one.
+     */
+    show_orientation: z.boolean().optional(),
+
     // The label they hold. `interested_in` is what matching reads; this is only
-    // *sometimes* enough to derive it, so both are stored. Owner-only, like the
-    // two above. Send `interested_in` explicitly and it wins over derivation.
+    // *sometimes* enough to derive it, so both are stored. Send `interested_in`
+    // explicitly and it wins over derivation. Returned to its owner always, and
+    // to others only under the two gates above.
     orientation: z
       .enum([
         "straight",
@@ -130,6 +142,15 @@ export const ProfileResponseSchema = z
       looking_for: z.array(z.string()),
       work_field: z.string().nullable(),
       onboarded: z.boolean(),
+
+      /*
+       * Present for the owner, so the settings switch can render in the state
+       * they left it. Present for others only when `show_orientation` is true
+       * *and* the caller passes `maySeeIdentity` — absent, not null, so a
+       * client cannot tell "withheld" from "not answered".
+       */
+      show_orientation: z.boolean().optional(),
+      orientation: z.string().nullable().optional(),
 
       // Read these back under `profile`, with these names. The client had been
       // looking for `shareReadReceipts` and falling back to `true`, so every

@@ -35,7 +35,8 @@ jest.mock("@/lib/location", () => ({
 }))
 
 jest.mock("@/lib/conversations", () => ({ blockedEitherWay: jest.fn().mockResolvedValue(false) }))
-jest.mock("@/lib/identity", () => ({ maySeeIdentity: jest.fn().mockResolvedValue(false) }))
+const maySeeIdentity = jest.fn().mockResolvedValue(false)
+jest.mock("@/lib/identity", () => ({ maySeeIdentity: (...a: unknown[]) => maySeeIdentity(...a) }))
 
 import { NextRequest } from "next/server"
 import { GET as getProfile, PUT as putProfile } from "@/app/api/mobile/profiles/[userId]/route"
@@ -496,5 +497,109 @@ describe("GET /profiles/:userId — the date never leaves the server", () => {
     const body = await res.json()
     expect(body.data.profile).not.toHaveProperty("date_of_birth")
     expect(body.data.profile.age).toBe(19)
+  })
+})
+
+/*
+ * Orientation is shown only when two independent things are true.
+ *
+ * `show_orientation` is consent to show it at all — special-category data under
+ * GDPR Article 9, so the column defaults false and silence is not consent.
+ * `maySeeIdentity` is *who to*. They are different questions and the design
+ * only asked one of them: the Figma frame is a single "Show on profile" switch,
+ * which would publish orientation to any caller holding a token.
+ *
+ * That ordering is what these pin. This app withholds someone's real name and
+ * photograph from anyone who has not matched, opened a conversation, or been
+ * revealed to. A field more sensitive than a name cannot be less protected than
+ * one, so all four combinations are worth stating rather than the happy path.
+ */
+describe("GET /profiles/:userId — orientation", () => {
+  const STRANGER = "99999999-9999-9999-9999-999999999999"
+
+  const rowWith = (show: boolean) => ({
+    id: USER,
+    age: 30,
+    date_of_birth: null,
+    orientation: "bisexual",
+    show_orientation: show,
+    gender: "woman",
+    interested_in: ["man", "woman"],
+    interests: [],
+    onboarded: true,
+    work_field: null,
+    bio: null,
+    occupation: null,
+    education: null,
+    photos: [],
+    location: null,
+  })
+
+  const asViewer = (viewerId: string, show: boolean) => {
+    mockAuth.mockResolvedValue({ userId: viewerId, email: "v@b.com" })
+    mockDb.user.findUnique.mockResolvedValue({
+      id: USER,
+      email: "a@b.com",
+      name: "A",
+      image: null,
+      createdAt: new Date(),
+      profile: rowWith(show),
+      user_interests: [],
+    })
+    return getProfile(profileGetReq(), { params: Promise.resolve({ userId: USER }) })
+  }
+
+  it("shows it when the switch is on and the viewer may see who they are", async () => {
+    maySeeIdentity.mockResolvedValue(true)
+    const body = await (await asViewer(STRANGER, true)).json()
+    expect(body.data.profile.orientation).toBe("bisexual")
+  })
+
+  it("withholds it when the switch is on but the viewer is a stranger", async () => {
+    /*
+     * The case the design's single switch would have got wrong. Co-presence at
+     * an event is enough to send someone a message request; it is deliberately
+     * not enough to learn their name, and it is not enough for this either.
+     */
+    maySeeIdentity.mockResolvedValue(false)
+    const body = await (await asViewer(STRANGER, true)).json()
+    expect(body.data.profile).not.toHaveProperty("orientation")
+  })
+
+  it("withholds it when the switch is off, even from a match", async () => {
+    // Consent is the other gate, and it is not implied by a relationship.
+    maySeeIdentity.mockResolvedValue(true)
+    const body = await (await asViewer(STRANGER, false)).json()
+    expect(body.data.profile).not.toHaveProperty("orientation")
+  })
+
+  it("withholds it from a stranger with the switch off", async () => {
+    maySeeIdentity.mockResolvedValue(false)
+    const body = await (await asViewer(STRANGER, false)).json()
+    expect(body.data.profile).not.toHaveProperty("orientation")
+  })
+
+  it("never shows gender or interested_in, whatever the switch says", async () => {
+    /*
+     * These are matching *inputs*. The compatibility they compute surfaces as a
+     * tag on a card — "Both open to dating" — never as the values behind it.
+     * The switch is about orientation and must not quietly widen its neighbours,
+     * which is exactly how the original leak happened: a deny-list that shipped
+     * this column and `gender` together to any authenticated caller.
+     */
+    maySeeIdentity.mockResolvedValue(true)
+    const body = await (await asViewer(STRANGER, true)).json()
+    expect(body.data.profile).not.toHaveProperty("gender")
+    expect(body.data.profile).not.toHaveProperty("interested_in")
+  })
+
+  it("still shows the owner their own, switch or no switch", async () => {
+    // `isSelf` short-circuits `maySeeIdentity`, and the whole row minus the
+    // birth date goes back — otherwise the settings screen could not render the
+    // switch in the state the person left it.
+    maySeeIdentity.mockResolvedValue(false)
+    const body = await (await asViewer(USER, false)).json()
+    expect(body.data.profile.orientation).toBe("bisexual")
+    expect(body.data.profile.show_orientation).toBe(false)
   })
 })
