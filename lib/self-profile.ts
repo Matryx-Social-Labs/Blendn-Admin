@@ -1,4 +1,5 @@
 import { ageFrom } from "@/lib/age"
+import { normalizeLocationToCity } from "@/lib/location"
 
 /**
  * The profile as an auth response should carry it.
@@ -30,4 +31,29 @@ export function profileForSelfResponse<
   // Derived, so the number is true today rather than on the day they signed up.
   // A stale `age` here would disagree with every other route in the API.
   return { ...rest, age: ageFrom(profile) }
+}
+
+/**
+ * The `include=profile` envelope: the caller's own user row with a shaped,
+ * location-normalised profile inside it.
+ *
+ * Written once because it was written twice — `GET /events` builds this in two
+ * branches, byte-identical but at different indent levels. Adding
+ * `profileForSelfResponse` to them caught one and missed the other, and the
+ * miss survived a clean typecheck, a green suite and a code review, because
+ * nothing about a duplicated block says it is duplicated.
+ *
+ * It was found by asking the deployed API for the response and looking at it.
+ */
+export async function selfProfileEnvelope<
+  T extends { profile?: { location: string | null; date_of_birth?: Date | null; age?: number | null } | null },
+>(user: T | null) {
+  if (!user?.profile) return user
+  return {
+    ...user,
+    profile: {
+      ...profileForSelfResponse(user.profile),
+      location: await normalizeLocationToCity(user.profile.location),
+    },
+  }
 }

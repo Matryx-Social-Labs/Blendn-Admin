@@ -4,7 +4,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
 import { ageFrom } from "@/lib/age"
-import { profileForSelfResponse } from "@/lib/self-profile"
+import { selfProfileEnvelope } from "@/lib/self-profile"
 import { normalizeLocationToCity, resolveEventCity } from "@/lib/location"
 import {
   successResponse,
@@ -391,15 +391,7 @@ export async function GET(request: NextRequest) {
         includeInterestedPreview: includeSet.has("interestedPreview"),
       })
 
-      const normalizedProfile = profile?.profile
-        ? {
-            ...profile,
-            profile: {
-              ...profileForSelfResponse(profile.profile),
-              location: await normalizeLocationToCity(profile.profile.location),
-            },
-          }
-        : profile
+      const normalizedProfile = await selfProfileEnvelope(profile)
 
       return successResponse({
         events: transformedEvents,
@@ -668,15 +660,7 @@ export async function GET(request: NextRequest) {
       includeInterestedPreview: includeSet.has("interestedPreview"),
     })
 
-    const normalizedProfile = profile?.profile
-      ? {
-          ...profile,
-          profile: {
-            ...profile.profile,
-            location: await normalizeLocationToCity(profile.profile.location),
-          },
-        }
-      : profile
+    const normalizedProfile = await selfProfileEnvelope(profile)
 
     return successResponse({
       events: transformedEvents,

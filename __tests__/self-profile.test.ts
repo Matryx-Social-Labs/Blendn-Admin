@@ -1,4 +1,8 @@
-import { profileForSelfResponse } from "@/lib/self-profile"
+jest.mock("@/lib/location", () => ({
+  normalizeLocationToCity: jest.fn(async (l: string | null) => l),
+}))
+
+import { profileForSelfResponse, selfProfileEnvelope } from "@/lib/self-profile"
 
 /*
  * The birth date does not leave the server, including in the responses that
@@ -80,3 +84,51 @@ function ageOf(dob: Date): number {
   if (months < 0 || (months === 0 && days < 0)) years -= 1
   return years
 }
+
+/*
+ * The envelope, not just the shaper.
+ *
+ * `profileForSelfResponse` was correct and tested, and the leak survived
+ * anyway: `GET /events?include=profile` builds this wrapper in two branches,
+ * byte-identical but at different indent levels, and the fix reached one of
+ * them. A clean typecheck, a green suite and the tests above all passed with
+ * the second branch still sending the birth date.
+ *
+ * It was caught by asking staging for the response. These tests are the version
+ * that does not need a deploy.
+ */
+describe("selfProfileEnvelope", () => {
+  const user = {
+    id: "u1",
+    name: "Julian",
+    profile: {
+      id: "p1",
+      location: "Bengaluru",
+      age: 17,
+      date_of_birth: new Date("2004-06-01T00:00:00.000Z"),
+    },
+  }
+
+  it("strips the birth date from inside the envelope", async () => {
+    const shaped = await selfProfileEnvelope(user)
+    expect(shaped?.profile).not.toHaveProperty("date_of_birth")
+  })
+
+  it("derives the age inside the envelope too", async () => {
+    // The whole reason the wrapper exists is that it is easy to shape the
+    // outside and forget the inside.
+    const shaped = await selfProfileEnvelope(user)
+    expect(shaped?.profile?.age).not.toBe(17)
+  })
+
+  it("still normalises the location", async () => {
+    const shaped = await selfProfileEnvelope(user)
+    expect(shaped?.profile?.location).toBe("Bengaluru")
+  })
+
+  it("passes an account with no profile through untouched", async () => {
+    const bare = { id: "u2", name: "No profile", profile: null }
+    expect(await selfProfileEnvelope(bare)).toBe(bare)
+    expect(await selfProfileEnvelope(null)).toBeNull()
+  })
+})
