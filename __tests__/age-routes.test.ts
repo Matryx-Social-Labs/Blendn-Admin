@@ -603,3 +603,49 @@ describe("GET /profiles/:userId — orientation", () => {
     expect(body.data.profile.show_orientation).toBe(false)
   })
 })
+
+/*
+ * `reveal_by_default` is settable, and it is still only a suggestion.
+ *
+ * It was deliberately unwritable, on the reasoning that "being named has to be
+ * something a person did in a room, not a profile setting they flipped once".
+ * The reasoning holds; the enforcement moved. Locking the field made someone
+ * who is happy to be seen re-answer at every door, and told someone who wanted
+ * to stay anonymous nothing at all about which state they were in.
+ *
+ * What replaces it is a warning before the first public check-in and a banner
+ * for as long as you are in the room. This pins the half that lives on the
+ * server: writing `true` must not, by itself, name anybody anywhere.
+ */
+describe("PUT /profiles/:userId — check-in visibility", () => {
+  it("stores the preference", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 30, date_of_birth: null, intent_default: [] })
+    const res = await putProfile(profileReq({ reveal_by_default: true }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(res.status).toBe(200)
+    expect(mockDb.profiles.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ reveal_by_default: true }) })
+    )
+  })
+
+  it("leaves it alone when the request does not mention it", async () => {
+    // Absent means unchanged. A profile save from any other screen must not
+    // quietly reset how someone enters rooms.
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 30, date_of_birth: null, intent_default: [] })
+    await putProfile(profileReq({ bio: "hello" }), { params: Promise.resolve({ userId: USER }) })
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update).not.toHaveProperty("reveal_by_default")
+  })
+
+  it("can be turned back off", async () => {
+    // `false` is a value, not an absence — the conditional spread has to let it
+    // through or the setting becomes one-way.
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 30, date_of_birth: null, intent_default: [] })
+    await putProfile(profileReq({ reveal_by_default: false }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update.reveal_by_default).toBe(false)
+  })
+})

@@ -201,7 +201,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const {
       name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos,
-      goals, looking_for, onboarded,
+      goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, orientation,
       push_enabled, show_online, read_receipts, share_location,
     } = parsed.data
@@ -381,6 +381,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         goals: goals || [],
         looking_for: looking_for || [],
         onboarded: onboarded ?? false,
+        ...(reveal_by_default !== undefined && { reveal_by_default }),
         // Conditional for the same reason as the four switches below: absent
         // must mean "unset", not "cleared". Writing `[]` here would look
         // identical to someone deliberately choosing nothing.
@@ -415,6 +416,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(goals !== undefined && { goals }),
         ...(looking_for !== undefined && { looking_for }),
         ...(onboarded !== undefined && { onboarded }),
+        // A suggestion the room re-asks by way of a tap — check-in still
+        // creates the row with `revealed: false` whatever this says.
+        ...(reveal_by_default !== undefined && { reveal_by_default }),
         ...(intent_default !== undefined && { intent_default }),
         // Only when an age change has invalidated a tag they already had.
         ...(stripsDating && { intent_default: demotedIntents! }),

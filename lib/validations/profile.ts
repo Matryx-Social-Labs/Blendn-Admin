@@ -94,11 +94,44 @@ export const updateProfileSchema = z.object({
    * `app/api/mobile/profiles/[userId]/route.ts`, which exists because a
    * deny-list once leaked exactly these two fields.
    *
-   * `reveal_by_default` is deliberately NOT here. Being named has to be
-   * something a person did in a room, not a profile setting they flipped once.
+   * `reveal_by_default` used to be excluded here, with the note "being named
+   * has to be something a person did in a room, not a profile setting they
+   * flipped once". That reasoning was right and the exclusion was the wrong
+   * way to enforce it — see the field below.
    */
   gender: z.enum(GENDERS).optional().nullable(),
   interested_in: z.array(z.enum(GENDERS)).max(4).optional(),
+
+  /**
+   * How you would *like* to enter a room: named, or as a pseudonym.
+   *
+   * ## Why this is settable now, when it deliberately was not
+   *
+   * The rule being protected is **revealing must be a deliberate act in the
+   * room**, and the old enforcement was to make this field unwritable — so the
+   * only way to be named was to tap it, per event, every time.
+   *
+   * That protected the rule and broke the product. Someone who is happy to be
+   * seen had to re-answer the same question at every door, and someone who
+   * wanted to stay anonymous was never told what state they were in.
+   *
+   * The rule is now enforced where it belongs, in three places that did not
+   * exist when the field was locked:
+   *
+   *  1. **This is a suggestion, not an application.** Check-in already returns
+   *     it as `revealSuggestion` and creates the row with `revealed: false`
+   *     regardless. Being named still takes a tap, every time.
+   *  2. **A warning the first time.** Entering a room publicly shows what that
+   *     means before it happens, once.
+   *  3. **A banner, always.** The room says which state you are in for as long
+   *     as you are in it, so "flipped it once and forgot" stops being possible.
+   *
+   * A setting nobody can see is worse than a setting with a warning on it. The
+   * old design had the first; this has the second.
+   *
+   * Still defaults false. Anonymous remains what happens when you do nothing.
+   */
+  reveal_by_default: z.boolean().optional(),
 
   /*
    * Show `orientation` to people who can already see who you are.
@@ -108,10 +141,11 @@ export const updateProfileSchema = z.object({
    * anyone who has not matched, opened a conversation, or been revealed to, so
    * a field more sensitive than a name cannot be less protected than one.
    *
-   * Settable, unlike `reveal_by_default` two doors down, because the two are
-   * different questions. Being *named* has to be something you did in a room.
-   * Whether an attribute already on your profile is visible to people you have
-   * matched with is exactly the kind of thing a profile setting is for.
+   * A different question from `reveal_by_default` above, and worth keeping
+   * apart: that one is a *suggestion* the room re-asks by way of a tap, while
+   * this one takes effect the moment it is saved. Whether an attribute already
+   * on your profile is visible to people you have matched with is exactly the
+   * kind of thing a profile setting is for; being named in a room is not.
    */
   show_orientation: z.boolean().optional(),
 

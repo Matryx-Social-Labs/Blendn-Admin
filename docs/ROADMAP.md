@@ -211,6 +211,47 @@ difference.
 
 ## Next
 
+### The bio is a hole in the pseudonym
+
+`profiles.bio` is free text and it renders **on the match card, beside the
+pseudonym**. Nothing stops someone writing:
+
+> "Hi I'm Sarah, IG @sarah_k, WhatsApp +91 98xxx"
+
+Two separate failures in one field:
+
+1. **It defeats the pseudonym.** The room withholds the name and the face, and
+   then prints a paragraph the person wrote about themselves underneath. A name
+   in the bio makes `maySeeIdentity` decorative.
+2. **It moves the conversation off-platform.** A handle or a number in the bio
+   routes people to WhatsApp or Instagram, where there is no moderation, no
+   block, no report, and no record if something goes wrong. That is the
+   failure mode that matters for safety, not just for engagement.
+
+**Not being fixed yet — deliberately deferred until the screens are built**, so
+the fix lands against the real surface rather than a guess at it. Noted here so
+it cannot be forgotten.
+
+When it is picked up, the pieces already exist:
+
+- `lib/moderation/` runs keyword matching plus the OpenAI moderation API for
+  chat. A bio is shorter than a chat backlog and can go through the same
+  pipeline on write.
+- A contact-detail detector is the second half: phone numbers, `@handles`,
+  emails, URLs, and the usual obfuscations ("nine one eight...", "sarah at
+  gmail dot com"). Deterministic, testable, and separate from the moderation
+  call so it works when the API is down.
+
+The open question is **reject or redact**. Rejecting on write teaches people
+the rule at the moment they break it; redacting at render keeps the bio intact
+for the people already allowed to see the person's identity. Probably both —
+reject the obvious, redact for pseudonymous viewers — but that is a decision for
+when the card is on screen.
+
+Same rule should reach `occupation` and `education`, which are also free text
+and also on the card.
+
+
 ### 1. Group-to-group matching — the mixing mechanic
 
 **The single most important unbuilt thing, and it does not exist in any form.**
