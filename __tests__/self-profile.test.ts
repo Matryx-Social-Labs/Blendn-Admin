@@ -97,6 +97,27 @@ function ageOf(dob: Date): number {
  * It was caught by asking staging for the response. These tests are the version
  * that does not need a deploy.
  */
+describe("the write path returns the same shape as the read path", () => {
+  it("shapes what PUT /profiles/:userId hands back", async () => {
+    /*
+     * The eighth spread, and the one neither #220 nor #221 found — both were
+     * looking at read paths, and this is the *write* path returning what it
+     * just wrote. Caught by making a real PUT to staging and reading the body.
+     *
+     * It matters more than a read: this response is what the client caches
+     * immediately after a profile save, so it was the freshest copy of the
+     * field on the device.
+     */
+    const shaped = profileForSelfResponse({
+      age: 30,
+      date_of_birth: new Date("1996-03-05T00:00:00.000Z"),
+      bio: "written on the way through",
+    })
+    expect(shaped).not.toHaveProperty("date_of_birth")
+    expect(shaped?.bio).toBe("written on the way through")
+  })
+})
+
 describe("selfProfileEnvelope", () => {
   const user = {
     id: "u1",

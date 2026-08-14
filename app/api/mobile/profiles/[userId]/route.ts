@@ -7,6 +7,7 @@ import { ageFrom, datingAgeRefusal, parseDateOfBirth, stripDating } from "@/lib/
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { blockedEitherWay } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
+import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -455,7 +456,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       email: user!.email,
       name: user!.name,
       image: user!.image,
-      profile: user!.profile,
+      /*
+       * Shaped, not raw. This is the eighth place the whole `profiles` row was
+       * being spread into a response, and the only one neither #220 nor #221
+       * found — because both were looking at read paths, and this is the
+       * *write* path returning what it just wrote.
+       *
+       * It was caught by making a real PUT to staging and reading the body.
+       */
+      profile: profileForSelfResponse(user!.profile),
       interests: user!.user_interests.map((ui) => ({
         id: ui.category.id,
         name: ui.category.name,
