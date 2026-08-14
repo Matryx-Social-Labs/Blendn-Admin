@@ -77,6 +77,9 @@ export async function DELETE(request: NextRequest) {
            */
           gender: null,
           orientation: null,
+          // Back to the default, so a deleted-then-restored row cannot come
+          // back consenting to something nobody re-consented to.
+          show_orientation: false,
           interested_in: [],
           intent_default: [],
           reveal_by_default: false,

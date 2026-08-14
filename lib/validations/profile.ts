@@ -101,6 +101,21 @@ export const updateProfileSchema = z.object({
   interested_in: z.array(z.enum(GENDERS)).max(4).optional(),
 
   /*
+   * Show `orientation` to people who can already see who you are.
+   *
+   * Not "make it public" — even on, the value only reaches callers who pass
+   * `maySeeIdentity`. This app withholds someone's real name and face from
+   * anyone who has not matched, opened a conversation, or been revealed to, so
+   * a field more sensitive than a name cannot be less protected than one.
+   *
+   * Settable, unlike `reveal_by_default` two doors down, because the two are
+   * different questions. Being *named* has to be something you did in a room.
+   * Whether an attribute already on your profile is visible to people you have
+   * matched with is exactly the kind of thing a profile setting is for.
+   */
+  show_orientation: z.boolean().optional(),
+
+  /*
    * The label they hold. `interested_in` is what matching reads, and the route
    * derives it from this pair *only when the request does not supply it* —
    * client-supplied always wins. Two writers to one column with no precedence
