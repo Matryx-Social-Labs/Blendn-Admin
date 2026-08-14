@@ -730,8 +730,11 @@ Three rules follow from that:
 - **Writing a date refreshes the number beside it**, so the fallback stays
   usable and the dashboard column stays true on the day it is set.
 - **Nothing returns it.** Not `GET /profiles/:userId` even to its owner, not
-  `GET /users/:userId`, not the check-in roster — all of which return the
-  *derived* `age` instead. A birth date is a standard security-question answer
+  `GET /users/:userId`, not the check-in roster, and not the five auth
+  responses or `GET /events?include=profile` — all of which return the
+  *derived* `age` instead. Those seven each spread the whole profile row, which
+  is a deny-list; they now go through `profileForSelfResponse` in
+  `lib/self-profile.ts`. A birth date is a standard security-question answer
   and half of an identity-theft pair; the age derived from it is not. It is also
   cleared on account deletion along with the rest of the profile.
 

@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
+import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
 import {
   accountBlockReason,
@@ -109,10 +110,7 @@ export async function POST(request: NextRequest) {
         email: user.email,
         name: user.name,
         profile: user.profile
-          ? {
-              ...user.profile,
-              location: normalizedLocation,
-            }
+          ? { ...profileForSelfResponse(user.profile), location: normalizedLocation }
           : null,
       },
       accessToken,
