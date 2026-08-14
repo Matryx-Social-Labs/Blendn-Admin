@@ -5,7 +5,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
 import { ageFrom } from "@/lib/age"
 import { selfProfileEnvelope } from "@/lib/self-profile"
-import { normalizeLocationToCity, resolveEventCity } from "@/lib/location"
+import { resolveEventCity } from "@/lib/location"
 import {
   successResponse,
   validationErrorResponse,
