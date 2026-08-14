@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { minAgeRefusal, stripDating } from "@/lib/age"
+import { ageFrom, minAgeRefusal, stripDating } from "@/lib/age"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
@@ -105,10 +105,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     const profile = await db.profiles.findUnique({
       where: { id: authUser.userId },
-      select: { age: true, intent_default: true, reveal_by_default: true },
+      select: {
+        age: true,
+        date_of_birth: true,
+        intent_default: true,
+        reveal_by_default: true,
+      },
     })
 
-    const ageRefusal = minAgeRefusal(profile?.age, event.min_age)
+    // The door is the gate, so this is the read that matters most. Derived, not
+    // taken off the row: a stored age was true on signup day, and someone who
+    // signed up at 17 would otherwise be refused an 18+ event a year later.
+    const profileAge = ageFrom(profile)
+
+    const ageRefusal = minAgeRefusal(profileAge, event.min_age)
     if (ageRefusal) {
       return errorResponse(ageRefusal, 403, ErrorCode.AGE_RESTRICTED)
     }
@@ -233,7 +243,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * would be a strange thing to do at a door they are standing at. The write
      * paths refuse; this one, which only copies, filters.
      */
-    const seededIntents = stripDating(profile?.intent_default ?? [], profile?.age)
+    const seededIntents = stripDating(profile?.intent_default ?? [], profileAge)
 
     // Create or update check-in record
     const checkIn = await db.event_check_ins.upsert({

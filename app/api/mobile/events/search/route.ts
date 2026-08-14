@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
+import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
@@ -69,9 +70,10 @@ export async function GET(request: NextRequest) {
      */
     const viewer = await db.profiles.findUnique({
       where: { id: authUser.userId },
-      select: { age: true },
+      select: { age: true, date_of_birth: true },
     })
-    const viewerAge = typeof viewer?.age === "number" ? viewer.age : null
+    // Derived, matching the browse filter. See `ageFrom` in lib/age.ts.
+    const viewerAge = ageFrom(viewer)
     // The two queries below bind a different number of parameters, so the
     // placeholder index is passed in rather than hardcoded — getting it wrong
     // is a runtime error on a rarely-exercised path.

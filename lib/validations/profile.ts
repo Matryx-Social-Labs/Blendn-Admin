@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { parseDateOfBirth } from "@/lib/age"
 import { isOrientation } from "@/lib/dating"
 import { isWorkField } from "@/lib/work-fields"
 
@@ -37,6 +38,33 @@ export const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   phone: z.string().max(20).optional().nullable(),
   age: z.number().int().min(13).max(120).optional().nullable(),
+
+  /*
+   * Birth date as `YYYY-MM-DD`. Write-only — no route returns it.
+   *
+   * Supersedes `age`, which is a snapshot that starts decaying the day it is
+   * taken: someone who signs up at 17 is refused every 18+ event a year later
+   * because the column still says 17. `lib/age.ts` explains the precedence.
+   *
+   * `age` stays accepted rather than being removed, because every row written
+   * before this column existed has one and a number cannot be turned back into
+   * a date. New clients should send this; old ones keep working.
+   *
+   * Refused rather than coerced when it does not parse. `parseDateOfBirth`
+   * returns `null` for a malformed string, a future date and anything implying
+   * an age outside 13–120 — and returning `null` from here would be
+   * indistinguishable from "not sent", so a typo would silently store nothing
+   * and the person would be told their profile saved.
+   *
+   * Not nullable: clearing a birth date has no use case, and the accepted way
+   * to change one is to send the right one.
+   */
+  dateOfBirth: z
+    .string()
+    .refine((value) => parseDateOfBirth(value) !== null, {
+      message: "Enter a real date of birth in YYYY-MM-DD form. You must be at least 13.",
+    })
+    .optional(),
   location: z.string().max(200).optional().nullable(),
   bio: z.string().max(500).optional().nullable(),
   occupation: z.string().max(100).optional().nullable(),

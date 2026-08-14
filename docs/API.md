@@ -45,7 +45,9 @@ Returns **201**: `{ accessToken, refreshToken, user: { id, email, name, profile 
 required once the mobile app ships the field — it is stored on the profile
 because there is nowhere else to collect it: Google and Apple create profiles
 without an age, and the onboarding screens that used to ask are being removed.
-The floor here is 13; **dating intent separately requires 18+**.
+The floor here is 13; **dating intent separately requires 18+**. Prefer
+`dateOfBirth` on `PUT /profiles/:userId` over this `age` — see *The age is
+derived, never remembered* below for why the number alone is not enough.
 
 `profile` is returned so the client can decide where to route without a second
 call — it carries `onboarded`, which is what that decision reads.
@@ -708,12 +710,43 @@ created without one, and in JavaScript `null < 18` is `true` — so the obvious
 check admits exactly the case it was written to stop. The rule lives in
 `lib/age.ts` and is tested there.
 
+### The age is derived, never remembered
+
+`PUT /profiles/:userId` accepts **`dateOfBirth`** as `"YYYY-MM-DD"`, and it is
+what every age rule reads wherever a profile has one. `age` stays accepted and
+is the fallback for rows written before the column existed — a number cannot be
+turned back into a date.
+
+Why it exists: **`profiles.age` was a snapshot that started decaying the day it
+was taken.** Nothing ever rewrote it, so someone who signed up at 17 was refused
+every 18+ event and the dating tag a year later, indefinitely, and the only way
+out was to lie about their age — the opposite of what the gate wants. A birth
+date does not go stale.
+
+Three rules follow from that:
+
+- **The date wins over the number, in both directions.** A stale 17 does not
+  keep an adult out, and a stale 30 does not let a 17-year-old in.
+- **Writing a date refreshes the number beside it**, so the fallback stays
+  usable and the dashboard column stays true on the day it is set.
+- **Nothing returns it.** Not `GET /profiles/:userId` even to its owner, not
+  `GET /users/:userId`, not the check-in roster — all of which return the
+  *derived* `age` instead. A birth date is a standard security-question answer
+  and half of an identity-theft pair; the age derived from it is not. It is also
+  cleared on account deletion along with the rest of the profile.
+
+Malformed input is **400, not a silent no-op**: a date that does not parse, is
+in the future, or implies an age outside 13–120 is refused, because storing
+nothing while telling the user their profile saved is the worse failure.
+
 Three consequences worth knowing about:
 
 - **Age and intent may be sent together.** The gate reads the age *after* the
-  request, so the about-you screen can save both in one call.
+  request, so the onboarding screens can save both in one call. Works with
+  `dateOfBirth` in place of `age`, with the same precedence as everywhere else.
 - **Lowering your age strips the tag.** Otherwise "set 25, tick dating, set 15"
-  is two individually legal requests that leave a 15-year-old in the pool.
+  is two individually legal requests that leave a 15-year-old in the pool. A
+  corrected `dateOfBirth` strips it the same way.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.

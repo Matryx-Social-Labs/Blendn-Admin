@@ -8,7 +8,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
-import { datingAgeRefusal } from "@/lib/age"
+import { ageFrom, datingAgeRefusal } from "@/lib/age"
 import { db } from "@/lib/db"
 import { intentsAreCoherent } from "@/lib/validations/profile"
 import { logger } from "@/lib/logger"
@@ -105,9 +105,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (intent !== undefined) {
       const profile = await db.profiles.findUnique({
         where: { id: authUser.userId },
-        select: { age: true },
+        select: { age: true, date_of_birth: true },
       })
-      const refusal = datingAgeRefusal(intent, profile?.age)
+      // Derived — see `ageFrom` in lib/age.ts. Dating is 18+, and a stored age
+      // means someone who joined at 17 stays locked out after they turn 18.
+      const refusal = datingAgeRefusal(intent, ageFrom(profile))
       if (refusal) return forbiddenResponse(refusal)
     }
 

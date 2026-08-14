@@ -140,7 +140,29 @@ model profiles {
   phone       String?
   // Canonical display name — always read from here, not from User.name
   name        String?
+  /// Captured at signup and wrong the next day.
+  ///
+  /// Kept as the fallback for every row written before `date_of_birth` existed
+  /// — a number cannot be turned back into a date, so those rows keep it until
+  /// the person re-enters their birthday. Read through `ageFrom` in
+  /// `lib/age.ts`, never directly.
   age         Int?
+  /// The fact behind the number.
+  ///
+  /// An 18+ gate comparing against a stored age decays silently: someone who
+  /// signs up at 17 stays 17 in this table forever, so the gate keeps refusing
+  /// them a year later, and someone who typed 18 at 17 stays 18 with nothing to
+  /// re-derive from. A date does not go stale.
+  ///
+  /// **Never returned by any route.** A birth date is materially more
+  /// identifying than an age — it is a standard security-question answer and
+  /// half of an identity-theft pair — so `lib/age.ts` is the only reader and
+  /// callers receive a number.
+  ///
+  /// `@db.Date` rather than a timestamp: there is no meaningful time of day
+  /// here, and storing one invites timezone drift across a birthday, which is
+  /// exactly the boundary the gate turns on.
+  date_of_birth DateTime? @db.Date
   location    String?
   bio         String?
   occupation  String?

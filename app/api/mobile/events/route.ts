@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
+import { ageFrom } from "@/lib/age"
 import { normalizeLocationToCity, resolveEventCity } from "@/lib/location"
 import {
   successResponse,
@@ -123,13 +124,16 @@ export async function GET(request: NextRequest) {
      */
     const viewer = await db.profiles.findUnique({
       where: { id: authUser.userId },
-      select: { age: true },
+      select: { age: true, date_of_birth: true },
     })
-    if (typeof viewer?.age === "number") {
+    // Derived, never read straight off the row: a stored age is the number that
+    // was true on the day they signed up. See `ageFrom` in lib/age.ts.
+    const viewerAge = ageFrom(viewer)
+    if (typeof viewerAge === "number") {
       // In `AND`, not `OR`: the search filter below assigns `where.OR` outright,
       // and an age restriction that a search term silently removes is worse
       // than no age restriction at all.
-      where.AND = [{ OR: [{ min_age: null }, { min_age: { lte: viewer.age } }] }]
+      where.AND = [{ OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }]
     }
 
     /*
@@ -234,7 +238,10 @@ export async function GET(request: NextRequest) {
       limit,
       search,
       city,
-      viewerAge: typeof viewer?.age === "number" ? viewer.age : null,
+      // The DERIVED age, matching the filter above. Keying on the stored number
+      // would let two viewers with the same signup-day age but different
+      // birthdays share an entry — and on a birthday, serve yesterday's list.
+      viewerAge,
       lat,
       lon,
       radius,

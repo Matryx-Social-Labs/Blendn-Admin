@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { checkProfilePhoto } from "@/lib/photos"
 import { recordPhotoCheck } from "@/lib/photo-checks"
-import { datingAgeRefusal, stripDating } from "@/lib/age"
+import { ageFrom, datingAgeRefusal, parseDateOfBirth, stripDating } from "@/lib/age"
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { blockedEitherWay } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
@@ -86,9 +86,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const identified = isSelf || (await maySeeIdentity(authUser.userId, userId))
 
     const p = user.profile
+    // Derived, so the number is true today rather than on the day they signed
+    // up. See `ageFrom` in lib/age.ts — this is a read of the derived value,
+    // never of `date_of_birth`, which is stripped from both branches below.
+    const profileAge = ageFrom(p)
     const publicProfileFields = p && {
       id: p.id,
-      age: p.age,
+      age: profileAge,
       interests: p.interests,
       onboarded: p.onboarded,
       /*
@@ -107,6 +111,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         : {}),
     }
 
+    /*
+     * Everything the owner may see about themselves: the whole row minus the
+     * birth date, plus the derived age in place of the stored one.
+     *
+     * Destructured rather than re-listed so a new column reaches its owner
+     * without a code change — the withholding is the deliberate part, and it
+     * is one name long.
+     */
+    const { date_of_birth: _dob, ...selfProfileFields } = { ...p, age: profileAge }
+
     return successResponse({
       id: user.id,
       email: isSelf ? user.email : undefined,
@@ -115,7 +129,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       createdAt: user.createdAt,
       profile: user.profile
         ? {
-            ...(isSelf ? user.profile : publicProfileFields),
+            /*
+             * `selfProfileFields` rather than `user.profile`: the spread is a
+             * deny-list, which is the exact pattern the comment above rejects
+             * for the public branch. `date_of_birth` is the column that made
+             * that concrete — added for the age gate, it would have started
+             * appearing in this response the moment it was written, purely
+             * because nothing here names its fields.
+             *
+             * Self still gets everything else, including the free text and the
+             * dating fields the public branch withholds.
+             */
+            ...(isSelf ? selfProfileFields : publicProfileFields),
             location: normalizedLocation,
           }
         : null,
@@ -159,7 +184,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const {
-      name, phone, age, location, bio, occupation, education, interests, photos,
+      name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos,
       goals, looking_for, onboarded,
       intent_default, gender, interested_in, work_field, orientation,
       push_enabled, show_online, read_receipts, share_location,
@@ -174,7 +199,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * about-you screen does — must not be refused for a null they are in the
      * act of filling in.
      */
-    const touchesAgeGate = intent_default !== undefined || age !== undefined
+    /*
+     * Validated in the schema, so a non-null string here always parses. Done
+     * once because it is needed three times below: the gate, the demotion, and
+     * the write.
+     */
+    const parsedDob = dateOfBirth !== undefined ? parseDateOfBirth(dateOfBirth) : null
+
+    const touchesAgeGate =
+      intent_default !== undefined || age !== undefined || dateOfBirth !== undefined
     const touchesDating = gender !== undefined || orientation !== undefined
     // `photos` joins the reasons to fetch: the moderation pass below only
     // checks URLs that are not already on the profile, so re-saving a profile
@@ -185,6 +218,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
             where: { id: userId },
             select: {
               age: true,
+              date_of_birth: true,
               intent_default: true,
               gender: true,
               orientation: true,
@@ -192,7 +226,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
             },
           })
         : null
-    const effectiveAge = age !== undefined ? age : (existing?.age ?? null)
+    /*
+     * The profile as it will be *after* this request, handed to `ageFrom` so
+     * the gate applies the same precedence the read paths do — birth date over
+     * stored number, whichever of the two this request happens to carry.
+     *
+     * Written as one source object rather than a chain of ternaries because
+     * the precedence is the part that has to match `ageFrom` exactly: a gate
+     * that reads the sent `age` while every reader derives from an existing
+     * `date_of_birth` is a gate on a number nothing else believes.
+     */
+    const effectiveAge = ageFrom({
+      date_of_birth: parsedDob ?? existing?.date_of_birth ?? null,
+      age: age !== undefined ? age : (existing?.age ?? null),
+    })
 
     const refusal = datingAgeRefusal(intent_default, effectiveAge)
     if (refusal) return forbiddenResponse(refusal)
@@ -207,7 +254,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * to be the true one, and refusing the correction is the wrong incentive.
      */
     const demotedIntents =
-      age !== undefined && intent_default === undefined && existing?.intent_default?.length
+      (age !== undefined || dateOfBirth !== undefined) &&
+      intent_default === undefined &&
+      existing?.intent_default?.length
         ? stripDating(existing.intent_default, effectiveAge)
         : null
     const stripsDating =
@@ -303,7 +352,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         id: userId,
         name,
         phone,
-        age,
+        // The derived number when a date came with the request, so the stored
+        // column stays a usable fallback and the dashboard keeps reading true.
+        age: parsedDob ? effectiveAge : age,
+        ...(parsedDob && { date_of_birth: parsedDob }),
         location: normalizedLocation,
         bio,
         occupation,
@@ -334,6 +386,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(name !== undefined && { name }),
         ...(phone !== undefined && { phone }),
         ...(age !== undefined && { age }),
+        // Same reasoning as the create branch: a date written here also
+        // refreshes the number beside it, so the two never disagree on the day
+        // they are set.
+        ...(parsedDob && { date_of_birth: parsedDob, age: effectiveAge }),
         ...(location !== undefined && { location: normalizedLocation }),
         ...(bio !== undefined && { bio }),
         ...(occupation !== undefined && { occupation }),
