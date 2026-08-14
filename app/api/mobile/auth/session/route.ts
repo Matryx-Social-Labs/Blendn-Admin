@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
+import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
 import { accountBlockReason, getAuthenticatedUser, SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
 import { normalizeLocationToCity } from "@/lib/location"
@@ -47,10 +48,7 @@ export async function GET(request: NextRequest) {
       image: user.image,
       createdAt: user.createdAt,
       profile: user.profile
-        ? {
-            ...user.profile,
-            location: normalizedLocation,
-          }
+        ? { ...profileForSelfResponse(user.profile), location: normalizedLocation }
         : null,
     })
   } catch (error) {

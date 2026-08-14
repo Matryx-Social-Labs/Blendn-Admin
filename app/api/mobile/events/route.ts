@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
 import { ageFrom } from "@/lib/age"
+import { profileForSelfResponse } from "@/lib/self-profile"
 import { normalizeLocationToCity, resolveEventCity } from "@/lib/location"
 import {
   successResponse,
@@ -394,7 +395,7 @@ export async function GET(request: NextRequest) {
         ? {
             ...profile,
             profile: {
-              ...profile.profile,
+              ...profileForSelfResponse(profile.profile),
               location: await normalizeLocationToCity(profile.profile.location),
             },
           }

@@ -10,6 +10,7 @@ import {
   storeRefreshToken,
   SUSPENDED_MESSAGE,
 } from "@/lib/mobile-auth"
+import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
 import {
   successResponse,
@@ -118,10 +119,7 @@ export async function POST(request: NextRequest) {
           emailVerified: user.emailVerified,
           createdAt: user.createdAt,
           profile: user.profile
-            ? {
-                ...user.profile,
-                location: normalizedLocation,
-              }
+            ? { ...profileForSelfResponse(user.profile), location: normalizedLocation }
             : null,
         },
         accessToken,
