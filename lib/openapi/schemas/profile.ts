@@ -47,6 +47,15 @@ export const UpdateProfileRequestSchema = z
     looking_for: z.array(z.string()).optional(),
     onboarded: z.boolean().optional(),
 
+    /*
+     * How you would like to enter a room: named, or as a pseudonym. Defaults
+     * false, and it is a *suggestion* — check-in returns it as
+     * `revealSuggestion` and still creates the row with `revealed: false`, so
+     * being named remains a tap in the room rather than a setting that acts at
+     * a distance.
+     */
+    reveal_by_default: z.boolean().optional(),
+
     // What this person is generally open to. The per-event override lives on
     // PUT /events/:eventId/matches/preferences; this is the default under it.
     intent_default: z
@@ -55,7 +64,7 @@ export const UpdateProfileRequestSchema = z
       .optional(),
 
     // Matching inputs, never card content: these are returned to the owner and
-    // to nobody else. `reveal_by_default` is deliberately not settable here.
+    // to nobody else.
     gender: z.enum(["woman", "man", "non_binary", "prefer_not_to_say"]).optional().nullable(),
     interested_in: z
       .array(z.enum(["woman", "man", "non_binary", "prefer_not_to_say"]))
