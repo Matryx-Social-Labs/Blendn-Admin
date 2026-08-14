@@ -170,10 +170,10 @@ that decays**.
 
 | PR | What | State |
 |---|---|---|
-| D2 (API) | `profiles.date_of_birth`, every age read derived through `ageFrom`, `dateOfBirth` accepted on profile PUT and returned by nothing | **Done** (#219) |
-| D1 (app) | Token layer — Liquid Ember palette, Plus Jakarta Sans + Manrope | Next |
-| D1 (app) | Nine onboarding screens, per-step save, resume on quit | After the token layer |
-| D3 (app) | Route on `onboarded`, not `isNewAccount` (`_layout.tsx:230`) | With the screens |
+| D2 (API) | `profiles.date_of_birth`, every age read derived through `ageFrom`, `dateOfBirth` accepted on profile PUT and returned by nothing | **Done** (#219, #220, #221) |
+| D1 (app) | Token layer — Liquid Ember palette, Plus Jakarta Sans + Manrope | **Done** (blendn #97) |
+| D1 (app) | Eight onboarding screens, per-step save, resume on quit | **Done** (blendn #98, #99) |
+| D3 (app) | Route on stored progress, not `isNewAccount` | **Done** (blendn #98) |
 
 **Why the birth date, and why now.** Nothing has ever rewritten `profiles.age`
 after signup, so someone who joined at 17 was refused every 18+ event and the
@@ -191,8 +191,21 @@ cost concrete. The dashboard keeps reading the stored `age` for the same reason
 — deriving there would mean shipping birth dates to a browser.
 
 **`onboarded` was already accepted and written by the API**; the missing writer
-is the app, which has never sent it. That is why the dashboard funnel reads
-zero, and it is a D1 line rather than a server change.
+was the app, which had never sent it. That is why the dashboard funnel read
+zero. The last onboarding screen now sends it (blendn #98).
+
+**Two follow-ups, both found by asking staging rather than by reading the
+diff.** #219 removed the birth date from `GET /profiles/:userId` and left it in
+six other responses — five auth routes and both `include=profile` branches of
+`GET /events` — because each spreads the whole profile row, and a spread is a
+deny-list. #220 fixed six of the seven; the seventh survived a clean typecheck,
+1178 passing tests and a test written for that exact leak, because `GET /events`
+builds the envelope twice, byte-identical at different indent levels. #221
+collapsed both onto one function and moved the tests up to the envelope.
+
+The lesson worth keeping: a helper being correct is not the same as every caller
+using it, and neither a typechecker nor a unit test on the helper can tell the
+difference.
 
 ---
 
