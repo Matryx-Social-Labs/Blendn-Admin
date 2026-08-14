@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
+import { ageFrom } from "@/lib/age"
 import { groupCities } from "@/lib/address"
 import {
   successResponse,
@@ -59,8 +60,11 @@ export async function GET(request: NextRequest) {
      */
     const viewer = await db.profiles.findUnique({
       where: { id: user.userId },
-      select: { age: true },
+      select: { age: true, date_of_birth: true },
     })
+    // Derived rather than read off the row — see `ageFrom` in lib/age.ts. The
+    // counts here must match the browse filter exactly, and that one derives.
+    const viewerAge = ageFrom(viewer)
 
     const rows = await db.events.findMany({
       where: {
@@ -69,8 +73,8 @@ export async function GET(request: NextRequest) {
         visibility: "public",
         end_time: { gte: new Date() },
         city: { not: null },
-        ...(typeof viewer?.age === "number"
-          ? { OR: [{ min_age: null }, { min_age: { lte: viewer.age } }] }
+        ...(typeof viewerAge === "number"
+          ? { OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }
           : {}),
       },
       select: { city: true },

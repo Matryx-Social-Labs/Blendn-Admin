@@ -38,7 +38,7 @@ jest.mock("@/lib/conversations", () => ({ blockedEitherWay: jest.fn().mockResolv
 jest.mock("@/lib/identity", () => ({ maySeeIdentity: jest.fn().mockResolvedValue(false) }))
 
 import { NextRequest } from "next/server"
-import { PUT as putProfile } from "@/app/api/mobile/profiles/[userId]/route"
+import { GET as getProfile, PUT as putProfile } from "@/app/api/mobile/profiles/[userId]/route"
 import { PUT as putPrefs } from "@/app/api/mobile/events/[eventId]/matches/preferences/route"
 
 const USER = "11111111-1111-1111-1111-111111111111"
@@ -322,5 +322,179 @@ describe("PUT /events/:eventId/matches/preferences — remember means one thing 
       params: Promise.resolve({ eventId: EVENT }),
     })
     expect(mockDb.profiles.update).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * A birth date is a fact; a stored age is a fact with an expiry date. These pin
+ * the difference at the routes, because the decay is silent — nothing throws,
+ * the gate simply keeps applying last year's answer to this year's person.
+ *
+ * Dates are built relative to today rather than hardcoded, so the suite does
+ * not start failing on a birthday. One day back from today's date puts the
+ * birthday just behind us, which makes the age exactly `years` and sidesteps
+ * both the leap-day roll and the boundary `ageFrom` is separately tested on.
+ */
+const dobForAge = (years: number) => {
+  const now = new Date()
+  const d = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate() - 1))
+  return d.toISOString().slice(0, 10)
+}
+
+const profileGetReq = () =>
+  new NextRequest(`https://api.blendn.app/api/mobile/profiles/${USER}`)
+
+describe("PUT /profiles/:userId — the age is derived, not remembered", () => {
+  it("lets someone who signed up at 17 choose dating once they are 19", async () => {
+    /*
+     * The whole reason the column exists. `profiles.age` still says 17 because
+     * that is what they typed two years ago and nothing has ever rewritten it,
+     * so the gate went on refusing an adult indefinitely — and the only way out
+     * was to lie about their age, which is the opposite of what the gate wants.
+     */
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 17,
+      date_of_birth: new Date(dobForAge(19)),
+      intent_default: [],
+    })
+    const res = await putProfile(profileReq({ intent_default: ["dating"] }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it("refuses a 17-year-old whose stored age says 30", async () => {
+    // The same precedence in the direction that matters for safety. A stale or
+    // invented number must not be able to outvote the date.
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      date_of_birth: new Date(dobForAge(17)),
+      intent_default: [],
+    })
+    const res = await putProfile(profileReq({ intent_default: ["dating"] }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(res.status).toBe(403)
+    expect(mockDb.profiles.upsert).not.toHaveBeenCalled()
+  })
+
+  it("accepts a birth date and a dating intent in one request", async () => {
+    // Onboarding sends both together, same as it does with `age`.
+    mockDb.profiles.findUnique.mockResolvedValue({ age: null, date_of_birth: null, intent_default: [] })
+    const res = await putProfile(
+      profileReq({ dateOfBirth: dobForAge(21), intent_default: ["dating"] }),
+      { params: Promise.resolve({ userId: USER }) }
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it("refuses the same request when the date makes them 17", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({ age: null, date_of_birth: null, intent_default: [] })
+    const res = await putProfile(
+      profileReq({ dateOfBirth: dobForAge(17), intent_default: ["dating"] }),
+      { params: Promise.resolve({ userId: USER }) }
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("writes the date and refreshes the number beside it", async () => {
+    // Both, so the fallback stays usable and the dashboard column stays true.
+    mockDb.profiles.findUnique.mockResolvedValue({ age: null, date_of_birth: null, intent_default: [] })
+    await putProfile(profileReq({ dateOfBirth: dobForAge(28) }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update.date_of_birth).toBeInstanceOf(Date)
+    expect(update.age).toBe(28)
+  })
+
+  it("strips dating when a corrected birth date puts them under 18", async () => {
+    // The two-request bypass again, this time walked through the new field.
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 25,
+      date_of_birth: null,
+      intent_default: ["dating", "networking"],
+    })
+    const res = await putProfile(profileReq({ dateOfBirth: dobForAge(16) }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(res.status).toBe(200)
+    expect(mockDb.profiles.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ intent_default: ["networking"] }),
+      })
+    )
+  })
+
+  it("rejects a malformed date instead of quietly storing nothing", async () => {
+    /*
+     * `parseDateOfBirth` returns null for junk, and null is indistinguishable
+     * from "not sent" at the write. Without the schema refusing it, a typo
+     * would save nothing and the person would be told their profile saved.
+     */
+    for (const bad of ["not-a-date", "2026-02-30", "3000-01-01", dobForAge(9)]) {
+      mockDb.profiles.upsert.mockClear()
+      const res = await putProfile(profileReq({ dateOfBirth: bad }), {
+        params: Promise.resolve({ userId: USER }),
+      })
+      expect(res.status).toBe(400)
+      expect(mockDb.profiles.upsert).not.toHaveBeenCalled()
+    }
+  })
+})
+
+describe("GET /profiles/:userId — the date never leaves the server", () => {
+  const profileRow = {
+    id: USER,
+    age: 17,
+    date_of_birth: new Date(dobForAge(19)),
+    interests: [],
+    onboarded: true,
+    work_field: null,
+    bio: null,
+    occupation: null,
+    education: null,
+    photos: [],
+    location: null,
+  }
+
+  it("withholds date_of_birth from the owner's own profile", async () => {
+    /*
+     * Self is the branch that spreads the row, so it is the one a new column
+     * leaks through by default. A birth date is materially more identifying
+     * than an age and the client has no use for it — it did not need to be
+     * echoed back to be stored.
+     */
+    mockDb.user.findUnique.mockResolvedValue({
+      id: USER,
+      email: "a@b.com",
+      name: "A",
+      image: null,
+      createdAt: new Date(),
+      profile: profileRow,
+      user_interests: [],
+    })
+    const res = await getProfile(profileGetReq(), { params: Promise.resolve({ userId: USER }) })
+    const body = await res.json()
+    expect(body.data.profile).not.toHaveProperty("date_of_birth")
+    // ...and the age it does return is the derived one, not the stale column.
+    expect(body.data.profile.age).toBe(19)
+  })
+
+  it("withholds it from a stranger too, and still derives the age", async () => {
+    mockAuth.mockResolvedValue({ userId: "99999999-9999-9999-9999-999999999999", email: "x@y.com" })
+    mockDb.user.findUnique.mockResolvedValue({
+      id: USER,
+      email: "a@b.com",
+      name: "A",
+      image: null,
+      createdAt: new Date(),
+      profile: profileRow,
+      user_interests: [],
+    })
+    const res = await getProfile(profileGetReq(), { params: Promise.resolve({ userId: USER }) })
+    const body = await res.json()
+    expect(body.data.profile).not.toHaveProperty("date_of_birth")
+    expect(body.data.profile.age).toBe(19)
   })
 })

@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
+import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { normalizeLocationToCity } from "@/lib/location"
@@ -124,6 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             profile: {
               select: {
                 age: true,
+                date_of_birth: true,
                 location: true,
               },
             },
@@ -145,7 +147,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           userId: c.user.id,
           name: pseudonyms.get(c.user.id) ?? "Attendee",
           // Deliberately absent: `image` and the real `name`. See the header.
-          age: c.user.profile?.age,
+          // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
+          // now, so the age it shows should be the one they are now.
+          age: ageFrom(c.user.profile),
           location: await normalizeLocationToCity(c.user.profile?.location),
           checkInTime: c.check_in_time,
         }))

@@ -132,7 +132,7 @@ plan is `~/.claude/plans/sprightly-questing-aho.md`.
 |---|---|---|
 | 0 | One city resolver: one fallback chain, language pinned in the proxy, `fenceCentre`/`eventCentre` in `lib/geofence.ts`, polygon centroid written back to the pin, address fields derived, backfill script | **Done** |
 | 1 (API) | The browse contract: `city` param on `/events` and `/events/search`, `GET /events/cities`, radius removed from **both** code paths, distance-sort ceiling | **Done** |
-| 1 (app) | Selected city persisted, header picker, section-level empty states, personal sections decoupled, realtime banner off the homepage | Next |
+| 1 (app) | Selected city persisted, header picker, section-level empty states, personal sections decoupled, realtime banner off the homepage | **Done** (blendn #90–#94) |
 | 2 | The ambiguities: `bestPartiesItems` onto the real taxonomy, both "featured" heroes named honestly, `happeningNowItems` deleted, one distance helper | After 1 |
 
 **Why PR 0 came first.** The city picker is only as good as the strings behind
@@ -160,6 +160,39 @@ directly: two requests that would compute different lists never share a key.
 
 **Still open:** `app/api/geocode/route.ts` restricts geocoding to
 `countrycodes=in`, which quietly makes the product India-only.
+
+
+**Onboarding, and the age that goes stale underneath it.** The app has one
+"about you" screen; the Figma *🕓 Updates* canvas has nine, with per-step save
+and resume-on-quit. Building it means deciding what the server stores, and the
+first thing that fell out was that **`profiles.age` has always been a snapshot
+that decays**.
+
+| PR | What | State |
+|---|---|---|
+| D2 (API) | `profiles.date_of_birth`, every age read derived through `ageFrom`, `dateOfBirth` accepted on profile PUT and returned by nothing | **Done** (#219) |
+| D1 (app) | Token layer — Liquid Ember palette, Plus Jakarta Sans + Manrope | Next |
+| D1 (app) | Nine onboarding screens, per-step save, resume on quit | After the token layer |
+| D3 (app) | Route on `onboarded`, not `isNewAccount` (`_layout.tsx:230`) | With the screens |
+
+**Why the birth date, and why now.** Nothing has ever rewritten `profiles.age`
+after signup, so someone who joined at 17 was refused every 18+ event and the
+dating tag a year later — permanently, with lying about their age as the only
+way out. Ten read sites each did `profile.age` directly; they now go through
+`ageFrom`, which prefers the date and falls back to the stored number for rows
+written before the column existed.
+
+**The date is write-only.** No route returns it, not even to its owner — it is a
+standard security-question answer and half of an identity-theft pair, while the
+age derived from it is neither. Closing that meant replacing the `isSelf` spread
+in `GET /profiles/:userId`, which was a deny-list in a file whose own comment
+rejects deny-lists; `date_of_birth` is simply the first column that made the
+cost concrete. The dashboard keeps reading the stored `age` for the same reason
+— deriving there would mean shipping birth dates to a browser.
+
+**`onboarded` was already accepted and written by the API**; the missing writer
+is the app, which has never sent it. That is why the dashboard funnel reads
+zero, and it is a D1 line rather than a server change.
 
 ---
 

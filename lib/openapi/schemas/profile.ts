@@ -24,6 +24,19 @@ export const UpdateProfileRequestSchema = z
     name: z.string().min(1).max(100).optional(),
     phone: z.string().max(20).optional().nullable(),
     age: z.number().int().min(13).max(120).optional().nullable(),
+
+    // Write-only, and it supersedes `age` above wherever both exist. A stored
+    // age is a snapshot that starts decaying the day it is taken; a birth date
+    // is not. No response carries this back — not even to its owner — because
+    // it is materially more identifying than the number derived from it.
+    // Rejected outright if it does not parse, is in the future, or implies an
+    // age outside 13–120.
+    dateOfBirth: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .openapi({ example: "1998-04-17", description: "YYYY-MM-DD. Write-only." }),
+
     location: z.string().max(200).optional().nullable(),
     bio: z.string().max(500).optional().nullable(),
     occupation: z.string().max(100).optional().nullable(),

@@ -44,6 +44,11 @@ export async function DELETE(request: NextRequest) {
           name: null,
           phone: null,
           age: null,
+          // The most identifying field on the row, so it cannot be the one
+          // that survives a deletion: a birth date is a standard security
+          // question and half of an identity-theft pair, and it is worth more
+          // to whoever gets the database than the age beside it.
+          date_of_birth: null,
           location: null,
           bio: null,
           occupation: null,

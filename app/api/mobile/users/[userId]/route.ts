@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
+import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
@@ -36,6 +37,7 @@ export async function GET(
           select: {
             name: true,
             age: true,
+            date_of_birth: true,
             location: true,
             bio: true,
             occupation: true,
@@ -131,7 +133,9 @@ export async function GET(
             education: user.profile?.education || null,
           }
         : {}),
-      age: user.profile?.age,
+      // Derived — see `ageFrom` in lib/age.ts. The date itself is read here and
+      // never returned; this response is an explicit field list, not a spread.
+      age: ageFrom(user.profile),
       location: await normalizeLocationToCity(user.profile?.location),
       interests: user.user_interests.map((ui) => ui.category),
       memberSince: user.createdAt,
