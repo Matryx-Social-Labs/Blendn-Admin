@@ -1,7 +1,7 @@
 import { getAccessibleMediaUrl } from "@/lib/tigris"
 
 const IMAGE_FIELD_KEYS = new Set(["image", "avatar"])
-const IMAGE_ARRAY_FIELD_KEYS = new Set(["photos", "interestedPreview"])
+const IMAGE_ARRAY_FIELD_KEYS = new Set(["photos"])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false

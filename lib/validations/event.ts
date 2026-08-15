@@ -63,7 +63,15 @@ export const eventQuerySchema = z.object({
   // Optional includes (comma-separated list)
   include: z.string().optional(),
 
-  // Interested preview limit (used when include contains interestedPreview)
+  /*
+   * Accepted and ignored.
+   *
+   * `interestedPreview` is gone — it returned real photographs of everyone who
+   * had favourited an event, to any authenticated caller, with no identity
+   * gate. Builds in the field still send this parameter, and rejecting it would
+   * turn a silent no-op into a 400 on the events list, which is the whole
+   * screen. Remove once no build sends it.
+   */
   interestedPreviewLimit: z.coerce.number().int().min(1).max(6).optional(),
 })
 

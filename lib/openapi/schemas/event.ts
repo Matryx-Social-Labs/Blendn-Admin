@@ -42,7 +42,8 @@ export const EventQuerySchema = z
     status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
     sortBy: z.enum(["start_time", "created_at", "distance"]).default("start_time"),
     sortOrder: z.enum(["asc", "desc"]).default("asc"),
-    include: z.string().optional().openapi({ description: "Comma-separated: checkins,interestedPreview,activeCheckins,profile" }),
+    include: z.string().optional().openapi({ description: "Comma-separated: checkins,activeCheckins,profile" }),
+    /** @deprecated Accepted and ignored — `interestedPreview` was removed. */
     interestedPreviewLimit: z.number().int().min(1).max(6).optional(),
   })
   .openapi("EventQuery")

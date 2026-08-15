@@ -9,7 +9,7 @@ import {
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
+import { parsePagination, paginationMeta } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -53,39 +53,32 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       where: { event_id: eventId },
     })
 
-    // Fetch interested users with user info
-    const favorites = await db.event_favorites.findMany({
-      where: { event_id: eventId },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-          },
-        },
-      },
-      orderBy: { created_at: "desc" },
-      skip: paginationSkip(page, limit),
-      take: limit,
-    })
-
     /*
-     * Social proof, not a directory.
+     * A count. Not a directory, and not faces either.
      *
-     * This returned `{ real id, real name, real photo }` for everyone who had
-     * favourited an event, to any authenticated caller, paginated with no cap
-     * on total enumeration. That made it a bulk source of `{userId -> real
-     * name}` pairs which key straight against the pseudonymous attendee list
-     * for anyone who both saved the event and turned up -- the ordinary path.
-     * Gating `users/:id` would have been decorative while this stood.
+     * This first returned `{ real id, real name, real photo }` for everyone who
+     * had favourited an event, to any authenticated caller, paginated with no
+     * cap on enumeration — a bulk source of `{userId -> real name}` pairs that
+     * key straight against the pseudonymous attendee list for anyone who both
+     * saved the event and turned up, which is the ordinary path.
      *
-     * The screen wants "some people are interested". A count and avatars carry
-     * that; names and ids are what made it a lookup table. `events/route.ts`
-     * already uses this avatar-only shape.
+     * The names and ids went then. **The photographs stayed**, on the reasoning
+     * that a face without a name is only social proof. It is not: a face *is*
+     * identity, and this was still harvestable by topic — favourite an event,
+     * page through, collect the faces of everybody interested in that category.
+     * A category plus a face is an inference about a person.
+     *
+     * Unlike the roster there is nothing here to gate on. Favouriting has no
+     * check-in, no pseudonym and no reveal; it is a private act nobody consented
+     * to publish. So the honest answer is the number, which is also what the
+     * design asks for — the frame leads with "124+".
+     *
+     * `users` stays as an empty array so a build in the field iterating it gets
+     * a length of zero rather than a crash on undefined.
      */
     return successResponse({
-      users: favorites.map((f) => ({ avatar: f.user.image })),
+      users: [],
+      interestedCount: totalCount,
       pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
