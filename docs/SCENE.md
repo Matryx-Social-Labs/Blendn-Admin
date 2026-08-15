@@ -118,13 +118,22 @@ inside the ScrollView, which buries the only action this screen has at the botto
 of a ~1900pt page. When a node name says Floating, check its parent before
 placing it in the scroll.
 
-### The map is texture, not orientation
+### The map keeps its legibility and takes the frame's pin
 
-Frame `1141:4911-4913`: 50% opacity, white `mix-blend-saturation` (fully
-desaturated), an `rgba(255,144,109,0.1)` wash, and a 48pt gradient pin. Full
-fidelity was chosen deliberately. **Consequence, accepted:** at that treatment
-street names are not readable, so the card says "roughly here, and it's ours"
-rather than letting anyone navigate by it.
+Frame `1141:4911-4913` treats the map as texture: 50% opacity, white
+`mix-blend-saturation` (fully desaturated), an `rgba(255,144,109,0.1)` wash, and
+a 48pt gradient pin. Copied exactly, street names stop being readable.
+
+**Decision: adopt the pin and a lighter wash, keep the map legible.** The pin is
+the element carrying the brand, and it is free to take. The greyscale is the only
+part that trades away the card's job, and that trade was not worth making — the
+slot exists to answer "roughly where is this", with panning reserved for
+Hotspots' Explore the Grid.
+
+So: dark-styled static map as built, POI and transit off, plus the accent overlay
+at reduced alpha and the 48pt gradient circle drawn as a React Native view over
+the image rather than as a Google marker parameter (the static API takes a flat
+colour or a hosted icon, neither of which can be a gradient).
 
 ### Contrast, measured
 
