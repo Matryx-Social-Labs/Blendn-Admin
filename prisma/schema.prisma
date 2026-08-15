@@ -780,6 +780,75 @@ model push_tokens {
   @@index([user_id])
 }
 
+/// What a notification is *about*. Mirrors `NotificationData["type"]` in
+/// `lib/push-notifications.ts` exactly — the union that already labels every
+/// push this product sends. `__tests__/notifications.test.ts` fails if the two
+/// lists ever stop agreeing, because a kind the sender emits and the enum does
+/// not accept is a write that throws inside a fire-and-forget `.catch(() => {})`
+/// and disappears.
+enum notification_kind {
+  private_message
+  group_message
+  event_checkin
+  event_update
+  announcement
+  message_request
+  message_request_response
+  waitlist_promoted
+  match
+  reveal_request
+  reveal
+}
+
+/// One line in the notifications centre — the bell in The Pulse's top bar.
+///
+/// ## Why this is written by the push sender rather than by each feature
+///
+/// Every per-user notification in this product already funnels through
+/// `sendPushNotification`, which is the one place that knows the title, the
+/// body and the deep link. Eleven `notify*` helpers sit on top of it. Writing
+/// the row there means the centre is complete by construction; writing it at
+/// each call site means the centre is complete until somebody adds a twelfth.
+///
+/// ## It is written even when no push goes out
+///
+/// The row is inserted **before** the token lookup, so it survives all three
+/// ways a push does not arrive: notifications turned off in settings, no device
+/// registered yet, and an expired token. That is the whole point of a centre —
+/// it is where you look for what you missed, and "you missed it because your
+/// phone was off" is exactly the case it has to cover.
+///
+/// ## No body-level identity
+///
+/// `title` and `body` are stored as sent. The reveal gate already applies to
+/// push titles (`maySeeIdentity` — see `lib/push-notifications.ts`), so a
+/// pseudonymous match is pseudonymous here too. This table must never be given
+/// a "richer" copy of the same event, because that would route around a gate
+/// that took three PRs to close.
+model notifications {
+  id      String            @id @default(uuid()) @db.Uuid
+  user_id String
+  kind    notification_kind
+  title   String
+  body    String
+  /// Where tapping it goes — the same `data` payload the push carries, so the
+  /// app has one deep-link switch rather than two that can disagree.
+  data    Json?
+
+  /// Null until it is read. A timestamp rather than a boolean because "when did
+  /// they see this" is the question the retention report will ask, and turning a
+  /// boolean back into a time is not possible.
+  read_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  // The feed: one person's notifications, newest first.
+  @@index([user_id, created_at])
+  // The unread count, which the bell asks for on every screen.
+  @@index([user_id, read_at])
+}
+
 // Private Messaging
 /// A private conversation, and the two things that can happen to it: identity
 /// arrives, or it ends.
