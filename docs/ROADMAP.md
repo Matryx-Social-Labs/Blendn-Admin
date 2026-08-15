@@ -554,6 +554,44 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.73.0
+
+- **A clip can finally be given a poster, and the form stops giving bad advice.**
+  Three things, all in the organiser event form.
+
+  `thumbnail_url` had been in the Zod schema, in the field-array default, on
+  both write paths and in the edit form's load-and-submit round trip the whole
+  time — with **no input anywhere to fill it**. So every clip an organiser added
+  fell back to the event's cover image. The app's `feedClip` chain is
+  `thumbnail_url` → `cover_image_url` → *drop the clip*, which means a video on
+  an event with no cover simply never appeared, and nothing in the dashboard
+  said so. There is a poster field now, and it states that consequence rather
+  than presenting itself as an optional extra.
+
+  Video also had no preview — the gate was `mediaType === "image"` — so the only
+  way to learn whether a pasted URL played was to publish and open the app.
+
+  And the cover field advised **"Recommended 1200×630 px"**, a landscape
+  OG-image ratio, against a `docs/MEDIA.md` that calls for a square master
+  because every card slot crops from one. A 1200×630 upload loses its left and
+  right edges on the feed and upscales on the hero card. The gallery's copy was
+  wrong in the other direction — "additional images shown on the event detail
+  page", when video has always been supported and the home feed cycles the whole
+  set once a card is active, so the first item is what most people actually see.
+
+  `__tests__/media-guidance.test.ts` now reads the numbers out of
+  `docs/MEDIA.md` and asserts the form quotes the same ones, which is the drift
+  that produced the 1200×630 copy in the first place. It strips comments before
+  matching, so the note explaining the old advice does not trip the check
+  forbidding it.
+
+  **Corrected while doing this:** the media editor was recorded as missing
+  entirely — "upload-only, image-only, no URL field". It was none of those. It
+  already had type selection, URL paste, upload, titles and drag-reorder, and
+  the cover field already had "Or enter URL". The real gap was narrower and
+  more damaging: one unreachable field that silently decided whether video
+  played at all.
+
 ### 0.72.0
 
 - **Staging stops looking like a test fixture** (#234). The world `seed:qa`

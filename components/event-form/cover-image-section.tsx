@@ -34,8 +34,17 @@ export function CoverImageSection({
 
   return (
     <FormSection title="Cover Image" defaultOpen={true}>
+      {/*
+        This said "Recommended 1200×630 px" — a landscape OG-image ratio, and
+        flatly wrong for this product. Every card slot crops from a square
+        master (see docs/MEDIA.md), so a 1200×630 upload loses its left and
+        right edges on the feed and is upscaled on the hero card, which is the
+        most visible quality failure we have.
+      */}
       <p className="text-sm text-muted-foreground">
-        Shown on event cards. Recommended 1200×630 px.
+        Shown on every event card, and used as the fallback poster for any clip
+        in the gallery. <strong>Square, 2048 × 2048 recommended</strong> (1600 ×
+        1600 minimum) — the cards crop to squares, so keep the subject centred.
       </p>
       <FormField
         control={form.control}
