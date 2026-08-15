@@ -554,6 +554,38 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.71.0
+
+- **The taxonomy gains the category this product is for** (#232). Blendn exists
+  so somebody can approach a stranger at an event without risking rejection —
+  and there was no way to tag an event **whose entire purpose is that**.
+
+  "Community" is volunteering and hobby groups. "Networking" is professional. A
+  singles night was neither, so an organiser running one filed it under
+  Nightlife > Parties, where it is indistinguishable from a club night somebody
+  attends with the friends they already have. That is the single most likely
+  search on this platform, and until now it had no answer.
+
+  New parent **Social**: singles nights, speed dating, board games, pub quizzes,
+  meet new people, group dining. Plus `Cocktails and mixology` and `Coffee` under
+  Food & Drink — both are things the Pulse frames feature by name, and a
+  cocktail masterclass had to be filed as a "Tasting".
+
+  Purely additive, as the script requires: slugs are what the mobile filter
+  matches and what every shared link carries, so nothing is renamed or removed.
+
+  **`__tests__/taxonomy.test.ts` guards the failure this script can hide.** It
+  upserts *on slug*, so two names slugifying the same are not a duplicate error
+  — the second upsert updates the first, reparenting a live category and taking
+  its events with it. Nothing throws and the counts print normally. It has
+  happened once already, when "&" was expanded to "and" and two phantom parents
+  appeared. The tests now check parent, child and cross-level collisions in CI,
+  which nobody has to remember to read.
+
+  `main()` is behind `require.main === module` so importing the tree no longer
+  opens a database connection and `process.exit(1)`s — without that, the guard
+  against a silent data bug could not itself be tested.
+
 ### 0.70.0
 
 - **`GET /venues` — the Hotspots feed** (#230). The venue-shaped twin of
