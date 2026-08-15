@@ -99,16 +99,37 @@ node. Fidelity went 7/10 → 9/10; the deltas below are the work outstanding.
 returns it with no children, which is what the earlier note recorded — but
 `get_design_context` returns the full tree with per-element geometry. Use that.
 
-| Node | Frame | Built | Δ |
+**All closed** (app #171, #172, #177). Kept as the record of what was wrong
+and why, because two of them had causes that will recur.
+
+| Node | Frame | Was | Now |
 |---|---|---|---|
-| `1141:4901` card inner | `pb-56` | 32 | −24 |
-| `1141:4904` venue name | `pt-16` | 8 | −8 |
-| `1141:4903`/`4905` | Plus Jakarta **Regular** | Bold | weight |
-| `1141:4899` right column | `gap-48` | 64 | +16 |
-| `1141:4919`/`4925` icons | 18 and 20 | 20 and 20 | +2 |
-| `1141:4917` tiles | `grid-rows-126px` | content-sized | height |
-| `1227:2912` CTA icon | 40 | 24 | −16 |
-| `1227:2903` CTA | inset 24 | inset 12 | −12 |
+| `1141:4901` card inner | `pb-56` | 32 | **56** |
+| `1141:4904` venue name | `pt-16` | 8 | **16** |
+| `1141:4903`/`4905` | Plus Jakarta **Regular** | Bold | **Regular** |
+| `1141:4899` right column | `gap-48` | 64 | **48** |
+| `1141:4919`/`4925` icons | 18 and 20 | 20 and 20 | **18 and 20** |
+| `1141:4917` tiles | `grid-rows-126px` | content-sized | **126** |
+| `1227:2912` CTA icon | 40 | 24 | **26**, a deviation — see below |
+| `1227:2903` CTA | inset 24 | inset 12 | **centred**, content-width |
+
+**The weight was wrong because the font was never loaded.** Plus Jakarta
+Regular was not in `EMBER_FONT_MODULES`, and a `fontFamily` naming an
+unloaded family does **not** throw and does not warn — it silently renders
+the system font, which on a dark screen reads as "a slightly different
+weight" rather than as a bug. `__tests__/fonts.test.ts` guards both
+directions now: every name resolves to a loaded module, and nothing is
+loaded that the type scale never asks for.
+
+**The two icon sizes are not a mistake in the design.** A tall narrow
+martini glass and a wide round camera at the same box size do not look the
+same size; 18 and 20 are optical sizing, and copying them is the whole
+point of measuring rather than eyeballing.
+
+**The 126pt tile height matters for a vocabulary that does not exist yet.**
+Content-sized, the pair agreed only while both subtitles fit one line —
+which today's two fixtures happen to do. The first longer amenity name
+would have made the row ragged.
 
 ### The CTA floats
 
@@ -221,7 +242,54 @@ and the full lockup draw the mark in it, byte-identical. It was
 
 Every pair passes WCAG AA on `#0F0E0E`: `#AEAAAA` 8.38:1, accent `#FF906D`
 8.69:1, white 19.28:1, amenity violet `#F79EFF` 10.36:1, amenity rose `#FF6D8D`
-7.18:1. Open: no cap on dynamic type at the 48pt title, and no VoiceOver pass.
+7.18:1.
+
+### Dynamic type and VoiceOver — closed (app #177)
+
+Both gaps this section used to record are fixed.
+
+**There was no `maxFontSizeMultiplier` anywhere in the app.** React Native
+**clips** a glyph to its `lineHeight` where CSS lets it overflow — the same
+difference that made the frame's 43.2 leading on a 48pt font unusable here.
+At Accessibility XXXL iOS scales by about 3.1×, which asks for a ~149pt
+glyph inside a 56pt line: two rows of sliced letterforms over a photograph.
+`numberOfLines` truncates and does not rescue the line box.
+
+Capped at **1.2** on the hero title and **1.5** on the amenity tiles, which
+live in a fixed 126pt box. Anything in a fixed-height container needs a cap;
+anything in a growing one does not.
+
+**VoiceOver.** Two fixes, both about announcements that were actively
+misleading rather than merely missing:
+
+- The hero caption was four separate fragments, two of them icon-plus-text
+  pairs with stops that announce nothing. It is one `header` node now, so
+  the rotor lands on it — "title, date, time, scarcity" in that order.
+- The avatar row announced **"butterfly, turtle, fox"**. That is worse than
+  silence: it is confidently wrong about what is on the screen. One image
+  node, labelled with the count.
+
+### The attendee discs carry a creature
+
+The stack drew `pseudonymAvatar(...).initial`, which is `seed[0]` — and the
+seed is the *event* id, so all three discs showed the same letter.
+
+A varied letter would have been worse. **A letter on a disc reads as
+somebody's initial**, and nobody's initial is what this is: the faces were
+removed here precisely because a face is identity (#229). Inventing
+initials re-adds a weaker version of that claim about people the payload
+does not describe.
+
+So: an animal, because the product already speaks in animals — the
+pseudonyms it hands out are adjective-plus-creature ("Cosmic Panda",
+"Velvet Heron"). **Deliberately not human characters**, which would carry
+skin tone, hair, gender and age; three of those under "124 interested" at
+an 18+ event is the demographic inference this stack exists to avoid.
+
+**For the designer:** the frame draws two photographs and "+121". What
+ships is three creature discs and "+121", at the frame's 56pt with its 4pt
+`#0F0E0E` ring (`1141:4897`). If the frames want to show this, that is the
+element to draw.
 
 ## Build order
 
