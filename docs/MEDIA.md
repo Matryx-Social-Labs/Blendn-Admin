@@ -119,10 +119,32 @@ that is mount/unmount rather than play/pause.
 
 | | |
 |---|---|
-| Organiser guidance | The upload control in the dashboard |
+| `components/event-form/cover-image-section.tsx` | Cover guidance. **Pinned by `__tests__/media-guidance.test.ts`** |
+| `components/event-form/media-section.tsx` | Gallery guidance, the poster field, and the file picker's `accept`. Same test |
 | `scripts/seed-*.ts` | Seeded events must carry assets at these sizes, or staging tests the wrong thing |
 | Dashboard device preview | Renders the real crops with the safe area drawn on |
 | `lib/feedMedia.ts` (app) | Chooses the asset; enforces the poster rule |
 
 If any of them disagrees with this file, this file is what the app actually
 does — check it against the frame before changing it.
+
+The first two are no longer on trust: `__tests__/media-guidance.test.ts` reads
+the Recommended and Minimum rows out of *this file* and fails if the form quotes
+different numbers. That test exists because the cover field advised
+`1200×630` — a landscape OG ratio — for however long it took someone to notice,
+which is the exact failure mode a spec nothing checks against is prone to.
+
+## For the designer
+
+Two things the frames should assume, because the code now enforces them:
+
+**A clip without a poster may not be shown at all.** `feedClip` resolves
+`thumbnail_url` → the event's `cover_image_url` → *nothing*, and "nothing" means
+no clip rather than a card that flashes black. So any frame showing video on a
+card is also, implicitly, a frame requiring a still behind it. The organiser
+form asks for the poster and says so.
+
+**Square masters, always.** Every slot crops from one square — the widest is
+2.6× the aspect of the narrowest, which is why there is no single rectangle that
+serves them. A landscape hero in a frame is a landscape hero that will lose its
+left and right edges on the feed. Compose inside the safe area.

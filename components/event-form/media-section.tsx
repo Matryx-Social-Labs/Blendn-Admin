@@ -40,6 +40,20 @@ import {
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
 
+/**
+ * What the file picker will offer, per media type.
+ *
+ * It offered everything before, so a `.mov` could be attached to an item typed
+ * `image` and the failure only showed up in the app. These mirror the formats
+ * `docs/MEDIA.md` commits to — narrower than what the storage bucket accepts,
+ * deliberately, because the constraint that matters is what the phone decodes.
+ */
+const ACCEPT: Record<string, string> = {
+  image: "image/jpeg,image/png,image/webp",
+  video: "video/mp4",
+  document: "application/pdf",
+}
+
 // ── Sortable media item ───────────────────────────────────────────────────────
 
 function SortableMediaItem({
@@ -134,6 +148,7 @@ function SortableMediaItem({
               <Input
                 type="file"
                 disabled={isUploading}
+                accept={mediaType ? ACCEPT[mediaType] : undefined}
                 onChange={async (e) => {
                   const file = e.target.files?.[0]
                   if (file) await onUpload(file, index)
@@ -158,11 +173,59 @@ function SortableMediaItem({
                   className="max-h-40 w-full rounded-md border object-cover"
                 />
               )}
+              {/*
+                Video got no preview at all, so the only way to find out whether
+                a pasted URL played was to publish the event and open the app.
+                `muted` because a form that makes noise when you paste into it is
+                hostile, and `preload="metadata"` so this costs a header rather
+                than the clip.
+              */}
+              {previewUrl && mediaType === "video" && (
+                <video
+                  src={previewUrl}
+                  controls
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="max-h-40 w-full rounded-md border bg-muted object-cover"
+                />
+              )}
             </div>
             <FormMessage />
           </FormItem>
         )}
       />
+
+      {/*
+        The poster, and only for video.
+        `thumbnail_url` has been in the schema and on the write path the whole
+        time with no input to fill it, so every clip an organiser added fell
+        back to the event's cover image. The app's `feedClip` chain is
+        thumbnail_url -> cover_image_url -> **drop the clip**, so a video on an
+        event with no cover simply never played, and nothing here said so.
+        Hence the warning below rather than a silent optional field.
+      */}
+      {mediaType === "video" && (
+        <FormField
+          control={form.control}
+          name={`media_items.${index}.thumbnail_url`}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Poster image</FormLabel>
+              <FormControl>
+                <Input placeholder="https://…" {...field} value={field.value || ""} />
+              </FormControl>
+              <p className="text-xs text-muted-foreground">
+                Shown while the clip loads, and wherever it cannot autoplay. If
+                you leave this empty the event&apos;s cover image is used —{" "}
+                <strong>and if the event has no cover image either, the clip is
+                not shown at all.</strong>
+              </p>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <FormField
@@ -209,9 +272,28 @@ export function MediaSection({
 
   return (
     <FormSection title="Gallery" defaultOpen={false}>
-      <p className="text-sm text-muted-foreground">
-        Additional images shown on the event detail page. Drag to reorder.
-      </p>
+      {/*
+        This said "additional images shown on the event detail page", which
+        undersold it twice: video has always been supported here, and the app
+        cycles this whole set on the home feed card once a card is active — so
+        the first item is what most people see, not a detail-page extra.
+      */}
+      <div className="space-y-2 text-sm text-muted-foreground">
+        <p>
+          Images and clips for this event. The card on the home feed cycles
+          through them while it is on screen, so <strong>order matters</strong> —
+          drag to reorder.
+        </p>
+        <p className="text-xs">
+          <strong>Images</strong> — square, 2048 × 2048 recommended (1600 × 1600
+          minimum), JPEG or PNG, up to 8 MB. The cards crop to squares, so
+          anything landscape loses its edges.
+          <br />
+          <strong>Video</strong> — square, 1080 × 1080, 15 seconds or less, MP4
+          (H.264 + AAC) with <strong>faststart</strong>, up to 12 MB. Without
+          faststart the clip will not begin until the whole file has downloaded.
+        </p>
+      </div>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
