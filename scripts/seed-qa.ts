@@ -24,8 +24,8 @@ import bcrypt from "bcryptjs"
  *
  * This seeds the orgs and the memberships, which is what actually grants access:
  *
- *     Blendn QA Events   ← organiser is a member.   Runs the events.
- *     Blendn QA Venues   ← venue owner is a member. Owns the buildings.
+ *     Nightshift Collective   ← organiser is a member.   Runs the events.
+ *     Indiranagar Hospitality Group   ← venue owner is a member. Owns the buildings.
  *
  * Those two being **separate** is the point. It is the only way to test the row
  * that is easiest to get wrong: a venue owner may *operate* an event in their
@@ -74,32 +74,32 @@ const CITY = {
 const ACCOUNTS = [
   {
     key: "admin",
-    email: "qa-admin@blendn.app",
-    name: "QA Admin",
+    email: "priya.menon@blendn.app",
+    name: "Priya Menon",
     role: "app_admin" as user_role,
     org: null,
     note: "Sees everything. eventPermissions short-circuits before org checks.",
   },
   {
     key: "organiser",
-    email: "qa-organiser@blendn.app",
-    name: "QA Organiser",
+    email: "arjun.rao@blendn.app",
+    name: "Arjun Rao",
     role: "organizer" as user_role,
     org: "events" as const,
     note: "Member of the org that RUNS the events. May edit and operate them.",
   },
   {
     key: "venue",
-    email: "qa-venue@blendn.app",
-    name: "QA Venue Owner",
+    email: "fatima.sheikh@blendn.app",
+    name: "Fatima Sheikh",
     role: "venue_owner" as user_role,
     org: "venues" as const,
     note: "Member of the org that OWNS the buildings. May operate, must NOT edit.",
   },
   {
     key: "outsider",
-    email: "qa-outsider@blendn.app",
-    name: "QA Outsider",
+    email: "daniel.weber@blendn.app",
+    name: "Daniel Weber",
     role: "organizer" as user_role,
     org: null,
     /**
@@ -121,48 +121,137 @@ const hoursFromNow = (h: number) => new Date(Date.now() + h * 3_600_000)
  * attendee, and there is no way to prove that without seeding them.
  */
 const EVENTS = [
-  { slug: "qa-baseline-blr", title: "QA Baseline — Bengaluru", city: "bengaluru", venue: "circle",
-    startsIn: 48, hours: 3, status: "published", visibility: "public", cover: true, minAge: null,
-    category: null, why: "The everything-works case. Circle geofence, cover image, future." },
-  { slug: "qa-polygon-stadium", title: "QA Stadium — polygon fence", city: "bengaluru", venue: "polygon",
-    startsIn: 72, hours: 4, status: "published", visibility: "public", cover: true, minAge: null,
-    category: null, why: "Polygon check-in, and the shortfall message for a non-circular venue." },
-  { slug: "qa-age-gated", title: "QA 18+ Night", city: "bengaluru", venue: "circle",
-    startsIn: 96, hours: 5, status: "published", visibility: "public", cover: true, minAge: 18,
+  { slug: "sunset-sessions-humming-tree", title: "Sunset Sessions at The Humming Tree",
+    city: "bengaluru", venue: "circle",
+    startsIn: 48, hours: 3, status: "published", visibility: "public", media: "rooftop", minAge: null,
+    category: "music-live-gigs", why: "The everything-works case. Circle geofence, cover image, future." },
+  { slug: "premier-league-chinnaswamy", title: "Premier League Screening — Chinnaswamy",
+    city: "bengaluru", venue: "polygon",
+    startsIn: 72, hours: 4, status: "published", visibility: "public", media: "stadium", minAge: null,
+    category: "sports-football-screening",
+    why: "Polygon check-in, and the shortfall message for a non-circular venue." },
+  { slug: "after-hours-neon-cathedral", title: "After Hours: Neon Cathedral",
+    city: "bengaluru", venue: "circle",
+    startsIn: 96, hours: 5, status: "published", visibility: "public", media: "neon", minAge: 18,
     category: "nightlife-parties", why: "Age gating. Must be hidden from an under-18 profile." },
-  { slug: "qa-nightlife", title: "QA DJ Set", city: "bengaluru", venue: "circle",
-    startsIn: 120, hours: 4, status: "published", visibility: "public", cover: true, minAge: null,
+  { slug: "basement-six-residents", title: "Basement Six — Resident DJs",
+    city: "bengaluru", venue: "circle",
+    startsIn: 120, hours: 4, status: "published", visibility: "public", media: "club", minAge: null,
     category: "nightlife-dj-sets", why: "The Nightlife section, which groups on the PARENT slug." },
-  { slug: "qa-classical", title: "QA Classical Recital", city: "bengaluru", venue: "circle",
-    startsIn: 130, hours: 2, status: "published", visibility: "public", cover: true, minAge: null,
+  { slug: "morning-ragas-chowdiah", title: "Morning Ragas at Chowdiah",
+    city: "bengaluru", venue: "circle",
+    startsIn: 130, hours: 2, status: "published", visibility: "public", media: "recital", minAge: null,
     category: "music-classical-and-carnatic",
     why: "Must NOT appear under Nightlife. The old substring match filed it as a party." },
-  { slug: "qa-no-cover", title: "QA Event Without A Cover Image", city: "bengaluru", venue: "circle",
-    startsIn: 60, hours: 2, status: "published", visibility: "public", cover: false, minAge: null,
-    category: null, why: "The coverless card. Used to render as an empty grey rectangle." },
-  { slug: "qa-live-now", title: "QA Happening Now", city: "bengaluru", venue: "circle",
-    startsIn: -0.5, hours: 3, status: "published", visibility: "public", cover: true, minAge: null,
-    category: null, why: "Check-in is only possible while an event is on." },
-  { slug: "qa-ended", title: "QA Finished Last Week", city: "bengaluru", venue: "circle",
-    startsIn: -200, hours: 3, status: "published", visibility: "public", cover: true, minAge: null,
-    category: null, why: "Must NOT appear in discovery. Only with includePast." },
-  { slug: "qa-draft", title: "QA Draft — should be invisible", city: "bengaluru", venue: "circle",
-    startsIn: 80, hours: 2, status: "draft", visibility: "public", cover: true, minAge: null,
+  { slug: "koramangala-open-mic", title: "Koramangala Open Mic",
+    city: "bengaluru", venue: "circle",
+    startsIn: 60, hours: 2, status: "published", visibility: "public", media: null, minAge: null,
+    category: "music-open-mic", why: "The coverless card. Used to render as an empty grey rectangle." },
+  { slug: "founders-filter-coffee", title: "Founders & Filter Coffee",
+    city: "bengaluru", venue: "circle",
+    startsIn: -0.5, hours: 3, status: "published", visibility: "public", media: "coffee", minAge: null,
+    category: "networking-founders", why: "Check-in is only possible while an event is on." },
+  { slug: "monsoon-flea-market", title: "Monsoon Flea Market",
+    city: "bengaluru", venue: "circle",
+    startsIn: -200, hours: 3, status: "published", visibility: "public", media: "market", minAge: null,
+    category: "markets-fairs-flea-markets",
+    why: "Must NOT appear in discovery. Only with includePast." },
+  { slug: "diwali-rooftop-unannounced", title: "Diwali Rooftop",
+    city: "bengaluru", venue: "circle",
+    startsIn: 80, hours: 2, status: "draft", visibility: "public", media: "rooftop", minAge: null,
     category: null, why: "NEGATIVE. A draft reaching an attendee is a leak, not a display bug." },
-  { slug: "qa-private", title: "QA Private — should be invisible", city: "bengaluru", venue: "circle",
-    startsIn: 85, hours: 2, status: "published", visibility: "private", cover: true, minAge: null,
+  { slug: "private-listening-session", title: "Private Listening Session",
+    city: "bengaluru", venue: "circle",
+    startsIn: 85, hours: 2, status: "published", visibility: "private", media: "club", minAge: null,
     category: null, why: "NEGATIVE. Same class as the draft." },
-  { slug: "qa-mumbai", title: "QA Mumbai Meetup", city: "mumbai", venue: null,
-    startsIn: 50, hours: 3, status: "published", visibility: "public", cover: true, minAge: null,
-    category: null, why: "A second city. Without one, the picker cannot be tested at all." },
-  { slug: "qa-saarbruecken", title: "QA Saarbrücken Social", city: "saarbruecken", venue: null,
-    startsIn: 55, hours: 3, status: "published", visibility: "public", cover: true, minAge: null,
-    category: null,
+  { slug: "bandra-supper-club", title: "Bandra Supper Club", city: "mumbai", venue: null,
+    startsIn: 50, hours: 3, status: "published", visibility: "public", media: "supper", minAge: null,
+    category: "food-drink-supper-clubs",
+    why: "A second city. Without one, the picker cannot be tested at all." },
+  { slug: "saarbruecken-language-exchange", title: "Saarbrücken Language Exchange",
+    city: "saarbruecken", venue: null,
+    startsIn: 55, hours: 3, status: "published", visibility: "public", media: "language", minAge: null,
+    category: "community-language-exchange",
     why: "Makes the switch banner and the resume policy testable from a device in Germany." },
+
+  /*
+   * The two the world was missing.
+   *
+   * A multi-day event is the only way to exercise occurrences — `findFirst` on
+   * a per-event key is nondeterministic across days, which is the bug that
+   * moved per-event preferences into their own table.
+   *
+   * And a Social event exercises the parent this product exists for. Without
+   * one, the category most likely to be filtered on has nothing behind it.
+   */
+  { slug: "design-week-bengaluru", title: "Design Week Bengaluru", city: "bengaluru", venue: "circle",
+    startsIn: 168, hours: 30, status: "published", visibility: "public", media: "design", minAge: null,
+    category: "arts-culture-exhibitions",
+    why: "Multi-day. Occurrences, and the per-day check-in key." },
+  { slug: "speed-dating-church-street", title: "Speed Dating on Church Street",
+    city: "bengaluru", venue: "circle",
+    startsIn: 90, hours: 2, status: "published", visibility: "public", media: "social", minAge: 18,
+    category: "social-speed-dating",
+    why: "The Social parent — the category this product is actually for." },
 ] as const
 
-const COVER = "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200"
+/**
+ * A distinct asset per event, at the size `docs/MEDIA.md` specifies.
+ *
+ * One shared cover across every row was the previous state, and it hid two
+ * whole classes of problem: you cannot see a crop going wrong when every card
+ * crops the same photograph, and you cannot tell a card that failed to load
+ * from one that loaded the same image as its neighbour.
+ *
+ * `picsum.photos` seeded by name — stable across runs, so a screenshot diff
+ * stays meaningful, and square at 2048 so it is the master shape organisers are
+ * asked for rather than a shape that happens to fit one slot.
+ */
+/**
+ * Rows this script created under its previous names, retired on sight.
+ *
+ * The upsert key is the slug, so renaming `qa-baseline-blr` to
+ * `sunset-sessions-humming-tree` did not rename anything — it created a second
+ * event and left the first one published. Staging ended up with both, and the
+ * feed showed "QA Baseline — Bengaluru" next to the event that replaced it.
+ *
+ * Soft-deleted rather than destroyed: `deleted_at` is what every read path
+ * already filters on, and a hard delete would cascade through check-ins and
+ * chat that a tester may be halfway through looking at.
+ *
+ * This list is disposable. Once no environment has these slugs it can go, and
+ * anything still here is an environment nobody has re-seeded.
+ */
+const RETIRED_SLUGS = [
+  "qa-baseline-blr",
+  "qa-polygon-stadium",
+  "qa-age-gated",
+  "qa-nightlife",
+  "qa-classical",
+  "qa-no-cover",
+  "qa-live-now",
+  "qa-ended",
+  "qa-draft",
+  "qa-private",
+  "qa-mumbai",
+  "qa-saarbruecken",
+]
 
+const cover = (seed: string) => `https://picsum.photos/seed/blendn-${seed}/2048/2048`
+
+/**
+ * Clips, on two events rather than all of them.
+ *
+ * A feed where every card plays is not the feed anybody will have, and it hides
+ * the case that actually needs testing: a still card next to a playing one,
+ * which is where a mismatched poster or a wrong aspect shows up.
+ */
+const CLIPS: Record<string, string> = {
+  "sunset-sessions-humming-tree":
+    "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4",
+  "basement-six-residents":
+    "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4",
+}
 /* -------------------------------------------------------------------------- */
 
 async function main() {
@@ -188,8 +277,8 @@ async function main() {
 
   // ── organisations ────────────────────────────────────────────────────────
   const orgs = {
-    events: await upsertOrg("Blendn QA Events"),
-    venues: await upsertOrg("Blendn QA Venues"),
+    events: await upsertOrg("Nightshift Collective"),
+    venues: await upsertOrg("Indiranagar Hospitality Group"),
   }
 
   // ── accounts ─────────────────────────────────────────────────────────────
@@ -247,7 +336,7 @@ async function main() {
   // ── venues ───────────────────────────────────────────────────────────────
   const blr = CITY.bengaluru
   const circle = await upsertVenue({
-    slugName: "QA Circle Venue",
+    slugName: "The Humming Tree",
     city: blr.name,
     lat: blr.lat,
     lng: blr.lng,
@@ -256,7 +345,7 @@ async function main() {
     geofence: { type: "circle", lat: blr.lat, lng: blr.lng, radius: 40, buffer: 20 },
   })
   const polygon = await upsertVenue({
-    slugName: "QA Stadium",
+    slugName: "M. Chinnaswamy Stadium",
     city: blr.name,
     lat: 12.9788,
     lng: 77.5996,
@@ -276,7 +365,7 @@ async function main() {
     },
   })
   const unclaimed = await upsertVenue({
-    slugName: "QA Unclaimed Venue",
+    slugName: "Church Street Social",
     city: blr.name,
     lat: 12.965,
     lng: 77.59,
@@ -312,7 +401,7 @@ async function main() {
         status: spec.status as never,
         visibility: spec.visibility as never,
         min_age: spec.minAge,
-        cover_image_url: spec.cover ? COVER : null,
+        cover_image_url: spec.media ? cover(spec.media) : null,
         city: city.name,
         latitude: venue?.latitude ?? city.lat,
         longitude: venue?.longitude ?? city.lng,
@@ -324,6 +413,34 @@ async function main() {
         organizer_org_id: orgs.events.id,
       },
     })
+
+    /*
+     * The clip, as an `event_media` row rather than a column.
+     *
+     * `event_media` has carried `type: image | video | document`, a `url`, a
+     * `thumbnail_url` and an `order` all along, and `GET /events` serves all
+     * five — so video needed no schema change. The app reads the first `video`
+     * row via `lib/feedMedia.ts`.
+     *
+     * `thumbnail_url` is the event's own cover, and it is **not optional**:
+     * `feedClip` refuses to play a clip it cannot poster, so a video row seeded
+     * without one would simply never appear and look like a broken player.
+     */
+    const clip = CLIPS[spec.slug]
+    if (clip && spec.media) {
+      const existing = await db.event_media.findFirst({
+        where: { event_id: event.id, type: "video" },
+      })
+      const data = {
+        event_id: event.id,
+        type: "video" as const,
+        url: clip,
+        thumbnail_url: cover(spec.media),
+        order: 0,
+      }
+      if (existing) await db.event_media.update({ where: { id: existing.id }, data })
+      else await db.event_media.create({ data })
+    }
 
     if (spec.category) {
       const category = await db.categories.findUnique({ where: { slug: spec.category } })
@@ -339,6 +456,15 @@ async function main() {
         console.log(`  !  category "${spec.category}" not found — run seed:categories`)
       }
     }
+  }
+
+  // ── retire the previous names ────────────────────────────────────────────
+  if (APPLY) {
+    const retired = await db.events.updateMany({
+      where: { slug: { in: RETIRED_SLUGS }, deleted_at: null },
+      data: { deleted_at: new Date() },
+    })
+    if (retired.count > 0) console.log(`Retired ${retired.count} event(s) under old QA names.`)
   }
 
   /* ---------------------------------------------------------------------- */
