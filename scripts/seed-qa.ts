@@ -55,8 +55,24 @@ const db = new PrismaClient({
 
 const APPLY = process.argv.includes("--apply")
 
-/** Same generator and cost as `create-dashboard-user.ts`, deliberately. */
-const generatePassword = () => randomBytes(18).toString("base64url")
+/**
+ * Same generator and cost as `create-dashboard-user.ts`, deliberately.
+ *
+ * `SEED_PASSWORD` overrides it with one fixed value for every account.
+ *
+ * Random-per-run is right for a real credential and wrong for this one. Every
+ * re-seed rotated all four passwords, which meant the Jira ticket testers read
+ * them from (SCRUM-1) went stale the moment anybody refreshed the world — and a
+ * tester whose password silently stopped working files a bug against sign-in.
+ * The rotation was protecting staging accounts that exist only on staging and
+ * whose passwords are already written down in a ticket.
+ *
+ * Still opt-in: without the variable this behaves exactly as before, so nothing
+ * acquires a fixed password by accident. **Staging only** — the script refuses
+ * to be pointed anywhere else by printing its host first.
+ */
+const generatePassword = () =>
+  process.env.SEED_PASSWORD?.trim() || randomBytes(18).toString("base64url")
 const HASH_COST = 12
 
 /* -------------------------------------------------------------------------- */
