@@ -51,6 +51,7 @@ export function generateOpenApiDocument() {
       { name: "Mobile Message Requests", description: "Message request flow" },
       { name: "Mobile Checkins", description: "Active check-in status" },
       { name: "Mobile Categories", description: "Event categories" },
+      { name: "Mobile Venues", description: "Venue discovery (the Hotspots feed)" },
       { name: "Dashboard Events", description: "Admin event management" },
       { name: "Dashboard Chat Moderation", description: "Chat message moderation and member management" },
       { name: "Dashboard Announcements", description: "Event announcements" },
