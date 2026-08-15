@@ -556,6 +556,33 @@ There is none, so there is no revenue to attribute.
 
 ### 0.69.0
 
+- **The interested list stopped handing out faces** (#229). Two doors, one leak.
+
+  `GET /events?include=interestedPreview` returned `user.image` — real
+  photographs — for everyone who had favourited an event, to **any**
+  authenticated caller, with no identity gate. The app rendered them:
+  `EventDetailScreen` drew an avatar row straight from the payload. This was
+  live.
+
+  `GET /events/:id/interested-users` was the same leak, half-fixed. Names and
+  ids had already been stripped on the reasoning that a face without a name is
+  only social proof. It is not — **a face is identity**, and both were
+  harvestable by topic: favourite an event, ask, and collect the faces of
+  everybody else interested in that category. A category plus a face is an
+  inference about a person, not a picture of one.
+
+  Unlike the roster there was nothing to gate on. Favouriting has no check-in,
+  no pseudonym and no reveal; it is a private act nobody consented to publish.
+  So both now return the **count**, which is the social proof the design
+  actually asks for — the frame leads with "124+" — and `favoriteCount` was on
+  the payload the whole time.
+
+  `interestedPreviewLimit` is accepted and ignored, and `users` stays an empty
+  array, so builds in the field neither 400 on the events list nor crash
+  iterating undefined.
+
+  Closes **SCRUM-25**.
+
 - **`show_orientation` was accepted and never written** (#228). The column, the
   validator, both read gates and the switch on the onboarding screen all
   shipped; the line writing it did not. Turning the switch on returned 200 and

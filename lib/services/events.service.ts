@@ -92,11 +92,9 @@ interface TransformContext {
     string,
     { status: string; checkInId?: string; checkInTime?: Date | null }
   >
-  interestedPreviewMap?: Record<string, string[]>
   userLat?: number
   userLon?: number
   includeCheckins?: boolean
-  includeInterestedPreview?: boolean
 }
 
 export async function transformEvent(
@@ -131,9 +129,18 @@ export async function transformEvent(
     userCheckin: ctx.includeCheckins
       ? ctx.userCheckinMap?.[event.id] || { status: "none" }
       : undefined,
-    interestedPreview: ctx.includeInterestedPreview
-      ? ctx.interestedPreviewMap?.[event.id] || []
-      : undefined,
+    /*
+     * `interestedPreview` is deliberately gone. It returned `user.image` — real
+     * photographs — for everyone who had favourited an event, to any
+     * authenticated caller who asked, with no identity gate of any kind.
+     *
+     * Favouriting is a private act. Unlike the roster it has no check-in, no
+     * pseudonym and no reveal, so nobody who used it ever consented to being
+     * shown. And it was harvestable by topic: favourite an event, ask for the
+     * preview, collect faces of everybody else interested in that category.
+     *
+     * `favoriteCount` above is the social proof the feature actually needed.
+     */
     distance:
       ctx.userLat !== undefined &&
       ctx.userLon !== undefined &&

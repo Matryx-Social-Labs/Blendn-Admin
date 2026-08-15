@@ -110,6 +110,16 @@ browser; there is no deep link into the app. Completing a reset revokes every
 
 Two names for one person, and which you get depends on where you are.
 
+**`interestedPreview` was removed.** It returned `user.image` — real
+photographs — for everyone who had favourited an event, to any authenticated
+caller, with no identity gate. Unlike the roster, favouriting has no check-in,
+no pseudonym and no reveal: it is a private act, and nobody who used it consented
+to being shown. It was also harvestable by topic — favourite an event, ask for
+the preview, collect faces of everyone else interested in that category.
+`favoriteCount` is the social proof, and it was always on the payload.
+`interestedPreviewLimit` is still accepted and ignored so builds in the field do
+not 400 on the events list.
+
 | Surface | You see |
 |---|---|
 | Event chat, participants, attendee list, sockets | **Pseudonym** — "Cosmic Panda" |
@@ -299,7 +309,7 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 | status | string | published | Event status filter |
 | sortBy | enum | start_time | `start_time`, `created_at`, `distance` |
 | sortOrder | enum | asc | `asc`, `desc` |
-| include | string | - | Comma-separated: `checkins,activeCheckins,profile,interestedPreview` |
+| include | string | - | Comma-separated: `checkins,activeCheckins,profile` |
 
 **`radius` lost its default, and that was the point.** It used to be `10` km, so
 any request carrying coordinates — which the home screen sends in order to sort

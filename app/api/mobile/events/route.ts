@@ -84,7 +84,6 @@ export async function GET(request: NextRequest) {
       sortBy,
       sortOrder,
       include,
-      interestedPreviewLimit,
     } = parsed.data
 
     const includeSet = new Set(
@@ -93,7 +92,6 @@ export async function GET(request: NextRequest) {
         .map((value) => value.trim())
         .filter(Boolean)
     )
-    const previewLimit = interestedPreviewLimit ?? 3
 
     /*
      * `status` used to be caller-supplied and the schema accepts "draft", with
@@ -352,43 +350,13 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const interestedPreviewMap: Record<string, string[]> = {}
-      if (includeSet.has("interestedPreview")) {
-        const favorites = await db.event_favorites.findMany({
-          where: {
-            event_id: { in: eventIds },
-          },
-          select: {
-            event_id: true,
-            user: {
-              select: { image: true },
-            },
-          },
-          orderBy: { created_at: "desc" },
-        })
-        const counts: Record<string, number> = {}
-        for (const fav of favorites) {
-          const img = fav.user?.image
-          if (!img) continue
-          if (!interestedPreviewMap[fav.event_id]) {
-            interestedPreviewMap[fav.event_id] = []
-          }
-          counts[fav.event_id] = counts[fav.event_id] || 0
-          if (counts[fav.event_id] < previewLimit) {
-            interestedPreviewMap[fav.event_id].push(img)
-            counts[fav.event_id] += 1
-          }
-        }
-      }
 
       const transformedEvents = await transformEvents(events, {
         favoriteEventIds,
         userCheckinMap,
-        interestedPreviewMap,
         userLat: lat,
         userLon: lon,
         includeCheckins: includeSet.has("checkins"),
-        includeInterestedPreview: includeSet.has("interestedPreview"),
       })
 
       const normalizedProfile = await selfProfileEnvelope(profile)
@@ -592,29 +560,12 @@ export async function GET(request: NextRequest) {
         })
       : Promise.resolve(null)
 
-    const interestedPreviewPromise = includeSet.has("interestedPreview")
-      ? db.event_favorites.findMany({
-          where: {
-            event_id: { in: eventIds },
-          },
-          select: {
-            event_id: true,
-            user: {
-              select: { image: true },
-            },
-          },
-          orderBy: { created_at: "desc" },
-        })
-      : Promise.resolve([])
-
-    const [userFavorites, userCheckins, activeCheckins, profile, interestedFavorites] =
-      await Promise.all([
-        userFavoritesPromise,
-        userCheckinsPromise,
-        activeCheckinsPromise,
-        profilePromise,
-        interestedPreviewPromise,
-      ])
+    const [userFavorites, userCheckins, activeCheckins, profile] = await Promise.all([
+      userFavoritesPromise,
+      userCheckinsPromise,
+      activeCheckinsPromise,
+      profilePromise,
+    ])
 
     const favoriteEventIds = new Set(userFavorites.map((f) => f.event_id))
 
@@ -632,32 +583,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const interestedPreviewMap: Record<string, string[]> = {}
-    if (includeSet.has("interestedPreview")) {
-      const counts: Record<string, number> = {}
-      for (const fav of interestedFavorites) {
-        const img = fav.user?.image
-        if (!img) continue
-        if (!interestedPreviewMap[fav.event_id]) {
-          interestedPreviewMap[fav.event_id] = []
-        }
-        counts[fav.event_id] = counts[fav.event_id] || 0
-        if (counts[fav.event_id] < previewLimit) {
-          interestedPreviewMap[fav.event_id].push(img)
-          counts[fav.event_id] += 1
-        }
-      }
-    }
 
     // Transform response
     const transformedEvents = await transformEvents(events, {
       favoriteEventIds,
       userCheckinMap,
-      interestedPreviewMap,
       userLat: lat,
       userLon: lon,
       includeCheckins: includeSet.has("checkins"),
-      includeInterestedPreview: includeSet.has("interestedPreview"),
     })
 
     const normalizedProfile = await selfProfileEnvelope(profile)
