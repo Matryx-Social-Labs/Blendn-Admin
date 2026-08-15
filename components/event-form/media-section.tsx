@@ -216,10 +216,16 @@ function SortableMediaItem({
                 <Input placeholder="https://…" {...field} value={field.value || ""} />
               </FormControl>
               <p className="text-xs text-muted-foreground">
-                Shown while the clip loads, and wherever it cannot autoplay. If
-                you leave this empty the event&apos;s cover image is used —{" "}
-                <strong>and if the event has no cover image either, the clip is
-                not shown at all.</strong>
+                Filled in automatically from the clip&apos;s first frame when you
+                upload a file — leave it alone and the clip will start without a
+                visible jump. Set it yourself only if you want a different
+                still, and prefer a frame from the clip: a poster that is a
+                different picture visibly swaps the moment the video starts.
+                <br />
+                For a clip added by URL we cannot read the frame, so paste a
+                poster here. If it is empty the event&apos;s cover image is used
+                — <strong>and if the event has no cover image either, the clip
+                is not shown at all.</strong>
               </p>
               <FormMessage />
             </FormItem>

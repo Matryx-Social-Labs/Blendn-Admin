@@ -16,6 +16,7 @@ import { CoverImageSection } from "@/components/event-form/cover-image-section"
 import { MediaSection } from "@/components/event-form/media-section"
 import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
+import { captureVideoPoster } from "@/lib/video-poster"
 
 export type { EventFormValues } from "@/components/event-form/schema"
 
@@ -92,6 +93,39 @@ export function EventForm({
       if (type === "image" && !form.getValues(`media_items.${index}.thumbnail_url`)) {
         form.setValue(`media_items.${index}.thumbnail_url`, url)
       }
+
+      /*
+       * A video's poster is its own opening frame, taken here.
+       *
+       * Every surface paints the poster and mounts the player over it. When the
+       * poster is a *different* picture — the event cover, which is the
+       * fallback — the instant the clip produces its first frame the image
+       * changes, and it reads as the screen settling and then re-settling.
+       * Making the poster the first frame means nothing about the picture
+       * changes at all, only which layer draws it.
+       *
+       * Done from the file the organiser has just picked, so it costs no
+       * network: the alternative is a server round trip, a worker and a queue
+       * for a frame the browser already has.
+       *
+       * Deliberately non-fatal. A codec the browser cannot decode, or a poster
+       * they have already chosen, must not fail an upload that otherwise
+       * worked — the manual field is still there and the cover still backs it.
+       */
+      if (type === "video" && !form.getValues(`media_items.${index}.thumbnail_url`)) {
+        try {
+          const poster = await captureVideoPoster(file)
+          const posterUrl = await uploadFile(
+            new File([poster], `${file.name.replace(/\.[^.]+$/, "")}-poster.jpg`, {
+              type: "image/jpeg",
+            })
+          )
+          form.setValue(`media_items.${index}.thumbnail_url`, posterUrl)
+        } catch {
+          toast.info("Add a poster image for this clip so it does not flash when it loads.")
+        }
+      }
+
       toast.success("Media uploaded")
     } catch {
       toast.error("Failed to upload media")

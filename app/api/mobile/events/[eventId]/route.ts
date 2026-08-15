@@ -225,6 +225,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // listing hides these events from anyone whose age is known and too low,
       // but a shared link reaches this screen either way.
       minAge: event.min_age,
+      // "GUEST LIST ONLY" and the like — the organiser's description of the
+      // door, not a gate this API keeps. `open` for almost every event, and
+      // the client draws nothing for it, falling back to remaining capacity.
+      doorPolicy: event.door_policy,
       // Counted, not stored. The field name stays so no client breaks.
       currentCapacity: occupancy.inside,
       checkInRadius: event.check_in_radius,
