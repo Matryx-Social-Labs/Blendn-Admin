@@ -554,6 +554,46 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.72.0
+
+- **Staging stops looking like a test fixture** (#234). The world `seed:qa`
+  builds is unchanged in what it *tests* — orgs and memberships, three cities
+  including one in Germany, age gating, polygon and circle fences, draft and
+  private negatives — and completely changed in what it looks like.
+
+  Every identifier was `QA`: accounts `qa-admin@blendn.app`, orgs "Blendn QA
+  Events", venues "QA Circle Venue", events "QA Baseline — Bengaluru". Staging
+  holds nothing but test data, so the prefix bought nothing and cost realism —
+  and a fixture called "QA Event Without A Cover Image" is not a card anybody
+  can judge a design against. They are people, venues and events with names now.
+
+  **Distinct media per event.** One shared cover across every row hid two whole
+  classes of problem: a crop cannot be seen going wrong when every card crops
+  the same photograph, and a card that failed to load is indistinguishable from
+  one that loaded its neighbour's image. Square 2048 masters per
+  `docs/MEDIA.md`, seeded by name so a screenshot diff stays meaningful.
+
+  **Two events carry clips**, not all of them — a feed where everything plays is
+  not the feed anybody will have, and a still card beside a playing one is where
+  a mismatched poster or a wrong aspect actually shows up. They are
+  `event_media` rows with `thumbnail_url` set, because `feedClip` refuses to
+  play a clip it cannot poster.
+
+  **Two cases the world was missing**: a multi-day event, which is the only way
+  to exercise occurrences and the per-day check-in key, and a Social event,
+  which is the parent this product exists for.
+
+  **Renaming a slug does not rename a row.** The upsert key is the slug, so the
+  first apply created fourteen new events and left twelve old ones published
+  beside them — the feed showed "QA Baseline" next to the event replacing it.
+  `RETIRED_SLUGS` soft-deletes them; `deleted_at` is what every read path
+  already filters on, and a hard delete would cascade through check-ins and chat
+  a tester may be halfway through.
+
+  Verified against the API rather than the script: `city=Bengaluru` returns 10,
+  `categorySlug=social` returns the speed-dating event, Mumbai and Saarbrücken
+  one each, and the draft, private and ended rows are correctly absent.
+
 ### 0.71.0
 
 - **The taxonomy gains the category this product is for** (#232). Blendn exists
