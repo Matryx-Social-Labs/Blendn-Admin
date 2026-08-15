@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
@@ -219,9 +220,8 @@ const EVENTS = [
  * crops the same photograph, and you cannot tell a card that failed to load
  * from one that loaded the same image as its neighbour.
  *
- * `picsum.photos` seeded by name — stable across runs, so a screenshot diff
- * stays meaningful, and square at 2048 so it is the master shape organisers are
- * asked for rather than a shape that happens to fit one slot.
+ * Square at 2048, so it is the master shape organisers are asked for rather
+ * than a shape that happens to fit one slot. Chosen by subject — see `cover`.
  */
 /**
  * Rows this script created under its previous names, retired on sight.
@@ -253,7 +253,119 @@ const RETIRED_SLUGS = [
   "qa-saarbruecken",
 ]
 
-const cover = (seed: string) => `https://picsum.photos/seed/blendn-${seed}/2048/2048`
+/**
+ * Which events serve their media from **our** bucket rather than someone else's.
+ *
+ * Both paths have to be testable because both will exist. An organiser
+ * uploading a file produces a Tigris URL; an organiser pasting a link (once the
+ * dashboard offers that — it does not yet, see the media editor task) produces
+ * a foreign one. They fail differently: a foreign URL can 404, rate-limit, go
+ * HTTP-only or vanish, and none of that can happen to a bucket we own.
+ *
+ * A world seeded entirely one way tests half the product. These slugs are
+ * mirrored into Tigris; everything else stays hotlinked.
+ */
+const TIGRIS_HOSTED = new Set([
+  "sunset-sessions-humming-tree",
+  "after-hours-neon-cathedral",
+  "morning-ragas-chowdiah",
+  "founders-filter-coffee",
+  "bandra-supper-club",
+  "design-week-bengaluru",
+])
+
+/**
+ * Copy a remote asset into our bucket and hand back the public URL.
+ *
+ * Returns the original URL unchanged when Tigris is not configured or the copy
+ * fails, and says so. A seed that dies because an object store was unreachable
+ * would leave the world half-built, which is worse than a world where six
+ * events are hotlinked and the log explains why.
+ */
+async function mirrorToTigris(
+  sourceUrl: string,
+  key: string,
+  contentType: string
+): Promise<string> {
+  const endpoint = process.env.TIGRIS_ENDPOINT
+  const accessKeyId = process.env.TIGRIS_ACCESS_KEY
+  const secretAccessKey = process.env.TIGRIS_SECRET_KEY
+  const bucket = process.env.TIGRIS_BUCKET || "blendn-media"
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    console.log(`  ~  Tigris not configured — ${key} stays hotlinked`)
+    return sourceUrl
+  }
+
+  try {
+    const res = await fetch(sourceUrl, { redirect: "follow" })
+    if (!res.ok) throw new Error(`source ${res.status}`)
+    const body = Buffer.from(await res.arrayBuffer())
+
+    const client = new S3Client({
+      endpoint,
+      region: process.env.TIGRIS_REGION || "auto",
+      credentials: { accessKeyId, secretAccessKey },
+      forcePathStyle: false,
+    })
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        // Long, because a seeded asset never changes under its key — the key
+        // carries the event slug, so a new asset is a new key.
+        CacheControl: "public, max-age=31536000, immutable",
+      })
+    )
+    return `https://${bucket}.fly.storage.tigris.dev/${key}`
+  } catch (error) {
+    console.log(`  ~  mirror failed for ${key} (${String(error)}) — staying hotlinked`)
+    return sourceUrl
+  }
+}
+
+/**
+ * A square 2048 master per `docs/MEDIA.md`, chosen **by subject**.
+ *
+ * This was `picsum.photos` seeded by name: unique per event and stable across
+ * runs, which caught a broken crop and nothing else — the photographs are
+ * arbitrary stock, so "Speed Dating on Church Street" showed a landscape and
+ * the cards could not be judged as design at all.
+ *
+ * `loremflickr` takes keywords, so a nightclub event gets a photograph of a
+ * nightclub. `lock` is derived from the subject, so the same event keeps the
+ * same photograph and a screenshot diff still means something.
+ *
+ * `source.unsplash.com` was the obvious choice and is retired — it 503s. Worth
+ * recording so nobody reaches for it again.
+ *
+ * **Staging only, and third-party.** These are Flickr photographs chosen by a
+ * keyword, so what comes back is not curated by us. Fine for a test environment
+ * that only internal testers see; production media is what an organiser
+ * uploads.
+ */
+const cover = (seed: string) =>
+  `https://loremflickr.com/2048/2048/${MEDIA_SUBJECT[seed] ?? "event"}?lock=${lockFor(seed)}`
+
+/** A stable number per subject, so the same slug gets the same photograph. */
+const lockFor = (seed: string) =>
+  [...seed].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 9973, 7)
+
+/** What each event's photograph should be *of*. */
+const MEDIA_SUBJECT: Record<string, string> = {
+  rooftop: "rooftop,party,sunset",
+  stadium: "stadium,football,crowd",
+  neon: "nightclub,neon,lights",
+  club: "dj,nightclub,dancing",
+  recital: "concert,classical,music",
+  coffee: "cafe,coffee,people",
+  market: "market,street,stalls",
+  supper: "dinner,restaurant,table",
+  language: "cafe,conversation,friends",
+  design: "exhibition,gallery,design",
+  social: "friends,bar,conversation",
+}
 
 /**
  * Clips, on two events rather than all of them.
@@ -392,6 +504,17 @@ async function main() {
 
   // ── events ───────────────────────────────────────────────────────────────
   for (const spec of EVENTS) {
+    /*
+     * Half the world serves its media from our bucket, half from someone
+     * else's — see `TIGRIS_HOSTED`. Both paths exist in the product and they
+     * fail differently, so a world seeded entirely one way tests half of it.
+     */
+    const coverUrl = spec.media
+      ? TIGRIS_HOSTED.has(spec.slug) && APPLY
+        ? await mirrorToTigris(cover(spec.media), `seed/${spec.slug}/cover.jpg`, "image/jpeg")
+        : cover(spec.media)
+      : null
+
     const city = CITY[spec.city as keyof typeof CITY]
     const venue = spec.venue === "circle" ? circle : spec.venue === "polygon" ? polygon : null
     const start = hoursFromNow(spec.startsIn)
@@ -405,6 +528,19 @@ async function main() {
         status: spec.status as never,
         visibility: spec.visibility as never,
         min_age: spec.minAge,
+        /*
+         * The media, on **update** as well as create.
+         *
+         * This clause used to carry only the times and the flags, so an event's
+         * cover was written once when the row was born and never again. Every
+         * later run refreshed the dates and left the picture — which is how a
+         * world "reseeded" three times still served the images from the first
+         * run, and why swapping the image source appeared to do nothing at all.
+         *
+         * The symptom is the worst kind: the script prints success, the dates
+         * really did move, and only the pictures are stale.
+         */
+        cover_image_url: coverUrl,
         deleted_at: null,
       },
       create: {
@@ -417,7 +553,7 @@ async function main() {
         status: spec.status as never,
         visibility: spec.visibility as never,
         min_age: spec.minAge,
-        cover_image_url: spec.media ? cover(spec.media) : null,
+        cover_image_url: coverUrl,
         city: city.name,
         latitude: venue?.latitude ?? city.lat,
         longitude: venue?.longitude ?? city.lng,
@@ -447,11 +583,18 @@ async function main() {
       const existing = await db.event_media.findFirst({
         where: { event_id: event.id, type: "video" },
       })
+      const clipUrl =
+        TIGRIS_HOSTED.has(spec.slug) && APPLY
+          ? await mirrorToTigris(clip, `seed/${spec.slug}/clip.mp4`, "video/mp4")
+          : clip
       const data = {
         event_id: event.id,
         type: "video" as const,
-        url: clip,
-        thumbnail_url: cover(spec.media),
+        url: clipUrl,
+        // The poster is the event's own cover, resolved the same way — a
+        // Tigris-hosted clip with a hotlinked poster would be a mixed case
+        // nobody asked for.
+        thumbnail_url: coverUrl,
         order: 0,
       }
       if (existing) await db.event_media.update({ where: { id: existing.id }, data })
