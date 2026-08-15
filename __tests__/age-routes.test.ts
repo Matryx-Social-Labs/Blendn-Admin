@@ -721,3 +721,113 @@ describe("PUT /profiles/:userId — check-in visibility", () => {
     expect(update.reveal_by_default).toBe(false)
   })
 })
+
+/*
+ * Every field this route accepts has to reach the database.
+ *
+ * `show_orientation` shipped with a column, a validator, two read gates and a
+ * switch on the onboarding screen — and no line writing it. Turning the switch
+ * on returned 200 and changed nothing, which is the exact state it was added to
+ * end: orientation collected, feeding `deriveInterestedIn`, shown to nobody.
+ *
+ * Nothing caught it because it failed in the safe direction. No data was
+ * over-exposed; the feature was simply inert, and every existing test asserted
+ * on fields that *were* wired. It was found by sending `show_orientation: true`
+ * to staging and reading `false` back — the same way three of the eight
+ * `date_of_birth` leaks were found.
+ *
+ * This is the version that does not need a deploy. It is deliberately a loop
+ * over the schema rather than one assertion per field, because the failure mode
+ * is *a field nobody remembered*, and a hand-written list forgets exactly the
+ * same ones the handler does.
+ */
+describe("PUT /profiles/:userId — accepted means written", () => {
+  // Sent by the client → written to the row. Only the renames need an entry;
+  // everything else maps to its own name.
+  const RENAMED: Record<string, string> = {
+    dateOfBirth: "date_of_birth",
+    // Deprecated singular, folded into the array. Covered by its own tests
+    // above, and it must not be expected as a column of its own.
+    orientation: "orientations",
+  }
+
+  // Not columns on `profiles`: these are handled elsewhere in the request.
+  const NOT_A_PROFILE_COLUMN = new Set(["name"])
+
+  const SAMPLE: Record<string, unknown> = {
+    phone: "+919000000000",
+    age: 30,
+    dateOfBirth: "1996-03-05",
+    location: "Bengaluru",
+    bio: "a bio",
+    occupation: "Designer",
+    education: "NID",
+    interests: ["design"],
+    photos: [],
+    goals: ["meet people"],
+    looking_for: ["dating"],
+    onboarded: true,
+    reveal_by_default: true,
+    intent_default: ["networking"],
+    gender: "woman",
+    interested_in: ["man"],
+    work_field: "design",
+    orientations: ["bisexual"],
+    show_orientation: true,
+    push_enabled: false,
+    show_online: false,
+    read_receipts: false,
+    share_location: false,
+  }
+
+  it("writes every field it accepts", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: null,
+      orientations: [],
+      photos: [],
+    })
+    await putProfile(profileReq(SAMPLE), { params: Promise.resolve({ userId: USER }) })
+
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    const dropped = Object.keys(SAMPLE)
+      .filter((k) => !NOT_A_PROFILE_COLUMN.has(k))
+      .map((k) => RENAMED[k] ?? k)
+      .filter((column) => !(column in update))
+
+    // Named rather than counted, so the failure says which field is inert.
+    expect(dropped).toEqual([])
+  })
+
+  it("stores the consent flag it was sent", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: null,
+      orientations: [],
+      photos: [],
+    })
+    await putProfile(profileReq({ orientations: ["bisexual"], show_orientation: true }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(mockDb.profiles.upsert.mock.calls[0][0].update.show_orientation).toBe(true)
+  })
+
+  it("lets it be turned back off", async () => {
+    // Withdrawing consent has to be at least as reliable as giving it. A
+    // conditional keyed on truthiness rather than on `undefined` would accept
+    // the `true` and quietly ignore every `false`.
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: null,
+      orientations: [],
+      photos: [],
+    })
+    await putProfile(profileReq({ show_orientation: false }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    expect(mockDb.profiles.upsert.mock.calls[0][0].update.show_orientation).toBe(false)
+  })
+})

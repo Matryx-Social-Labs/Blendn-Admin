@@ -556,6 +556,22 @@ There is none, so there is no revenue to attribute.
 
 ### 0.69.0
 
+- **`show_orientation` was accepted and never written** (#228). The column, the
+  validator, both read gates and the switch on the onboarding screen all
+  shipped; the line writing it did not. Turning the switch on returned 200 and
+  changed nothing — the exact state it was added to end, where orientation is
+  collected, feeds `deriveInterestedIn`, and is shown to nobody.
+
+  It failed in the safe direction, which is why nothing caught it: no data was
+  over-exposed, the feature was inert. Found by sending `show_orientation: true`
+  to staging and reading `false` back, the same way three of the eight
+  `date_of_birth` leaks were found.
+
+  The guard is a loop over the schema — every field `updateProfileSchema`
+  accepts must appear in the upsert payload — because the failure mode is *a
+  field nobody remembered*, and a hand-written list forgets the same ones the
+  handler does.
+
 - **`profiles.orientation` becomes `orientations`** (#227) — up to three
   distinct labels, `prefer_not_to_say` exclusive. People hold more than one
   ("queer" alongside "bisexual", "asexual" alongside a romantic orientation) and

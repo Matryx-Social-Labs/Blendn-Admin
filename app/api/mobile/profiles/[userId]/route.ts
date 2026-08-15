@@ -203,7 +203,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const {
       name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos,
       goals, looking_for, onboarded, reveal_by_default,
-      intent_default, gender, interested_in, work_field,
+      intent_default, gender, interested_in, work_field, show_orientation,
       push_enabled, show_online, read_receipts, share_location,
     } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
@@ -407,6 +407,21 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(interested_in !== undefined && { interested_in }),
         ...(derivedInterestedIn !== null && { interested_in: derivedInterestedIn }),
         ...(orientations !== undefined && { orientations }),
+        /*
+         * Consent to show the labels, and it had never been written.
+         *
+         * The column, the validator, the two read gates and the switch on the
+         * onboarding screen all shipped; this line did not. So turning the
+         * switch on returned 200 and changed nothing, and the field stayed
+         * false for everybody — which is the exact state the switch was added
+         * to end, where orientation is collected, feeds `deriveInterestedIn`,
+         * and is shown to nobody.
+         *
+         * It failed in the safe direction, which is why nothing caught it: no
+         * data was over-exposed, the feature was simply inert. Found by sending
+         * `show_orientation: true` to staging and reading `false` back.
+         */
+        ...(show_orientation !== undefined && { show_orientation }),
         ...(work_field !== undefined && { work_field }),
         // Omitted rather than defaulted: the column defaults to true, which is
         // what the settings screen has always claimed, so nobody's apparent
@@ -445,6 +460,21 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         // a null derivation leaves the column alone rather than clearing it.
         ...(derivedInterestedIn !== null && { interested_in: derivedInterestedIn }),
         ...(orientations !== undefined && { orientations }),
+        /*
+         * Consent to show the labels, and it had never been written.
+         *
+         * The column, the validator, the two read gates and the switch on the
+         * onboarding screen all shipped; this line did not. So turning the
+         * switch on returned 200 and changed nothing, and the field stayed
+         * false for everybody — which is the exact state the switch was added
+         * to end, where orientation is collected, feeds `deriveInterestedIn`,
+         * and is shown to nobody.
+         *
+         * It failed in the safe direction, which is why nothing caught it: no
+         * data was over-exposed, the feature was simply inert. Found by sending
+         * `show_orientation: true` to staging and reading `false` back.
+         */
+        ...(show_orientation !== undefined && { show_orientation }),
         ...(work_field !== undefined && { work_field }),
         ...(push_enabled !== undefined && { push_enabled }),
         ...(show_online !== undefined && { show_online }),
