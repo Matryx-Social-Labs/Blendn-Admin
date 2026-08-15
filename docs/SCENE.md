@@ -90,6 +90,48 @@ behaviour was proposed and dropped once the two halves were measured.
 
 ---
 
+## Design review — what was measured, 2026-08-16
+
+The screen is built. `/plan-design-review` measured it against the frame node by
+node. Fidelity went 7/10 → 9/10; the deltas below are the work outstanding.
+
+**Correction to this document:** the frame is **not** flattened. `get_metadata`
+returns it with no children, which is what the earlier note recorded — but
+`get_design_context` returns the full tree with per-element geometry. Use that.
+
+| Node | Frame | Built | Δ |
+|---|---|---|---|
+| `1141:4901` card inner | `pb-56` | 32 | −24 |
+| `1141:4904` venue name | `pt-16` | 8 | −8 |
+| `1141:4903`/`4905` | Plus Jakarta **Regular** | Bold | weight |
+| `1141:4899` right column | `gap-48` | 64 | +16 |
+| `1141:4919`/`4925` icons | 18 and 20 | 20 and 20 | +2 |
+| `1141:4917` tiles | `grid-rows-126px` | content-sized | height |
+| `1227:2912` CTA icon | 40 | 24 | −16 |
+| `1227:2903` CTA | inset 24 | inset 12 | −12 |
+
+### The CTA floats
+
+`1227:2903` is named **"Floating CTA"** and is a *sibling* of `Main`, not a child
+— it sits outside the scrolling content at 74pt. It was built as the last element
+inside the ScrollView, which buries the only action this screen has at the bottom
+of a ~1900pt page. When a node name says Floating, check its parent before
+placing it in the scroll.
+
+### The map is texture, not orientation
+
+Frame `1141:4911-4913`: 50% opacity, white `mix-blend-saturation` (fully
+desaturated), an `rgba(255,144,109,0.1)` wash, and a 48pt gradient pin. Full
+fidelity was chosen deliberately. **Consequence, accepted:** at that treatment
+street names are not readable, so the card says "roughly here, and it's ours"
+rather than letting anyone navigate by it.
+
+### Contrast, measured
+
+Every pair passes WCAG AA on `#0F0E0E`: `#AEAAAA` 8.38:1, accent `#FF906D`
+8.69:1, white 19.28:1, amenity violet `#F79EFF` 10.36:1, amenity rose `#FF6D8D`
+7.18:1. Open: no cap on dynamic type at the 48pt title, and no VoiceOver pass.
+
 ## Build order
 
 1. Measure with `get_design_context`, one section at a time.
