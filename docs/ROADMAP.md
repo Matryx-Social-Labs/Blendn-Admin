@@ -554,6 +554,43 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.70.0
+
+- **`GET /venues` — the Hotspots feed** (#230). The venue-shaped twin of
+  `GET /events`, and the data the app's Pulse ↔ Hotspots switch needs.
+
+  Hotspots was decided as a screen before anyone checked whether it could be
+  populated: `app/api/mobile/` had no `venues` route at all, so the switch would
+  have shipped pointing at nothing. This is the endpoint underneath it, and the
+  app work is blocked on it rather than the other way round.
+
+  Same query vocabulary as the events feed — `city`, `lat`/`lon`, `radius`,
+  pagination — because one screen switches between the two and two dialects for
+  one question is how a shared city picker grows a second code path. `radius`
+  keeps **no default** for the same reason it has none there: a 10km box applied
+  to anyone who merely sent coordinates is what blanked the events feed.
+
+  Three decisions worth naming:
+
+  - **The card image comes from the venue's next public event.** `venues` has no
+    image column, and the alternative was a wall of grey cards. `nextEvent` is
+    `null` when nothing is upcoming, so no card claims something is happening
+    when nothing is.
+  - **The age gate reaches `nextEvent`.** It is a real event shown to a real
+    person, so it passes the same `min_age` rule — otherwise the 18+ event the
+    feed correctly hides reappears, title and cover art intact, as the headline
+    of a venue card one screen over. Nothing goes red when that breaks; the card
+    just renders. It is the assertion that fails first in `venues-route.test.ts`.
+  - **`upcomingEventCount` and `nextEvent` share one filter object**, asserted by
+    identity, so a card cannot say "3 upcoming" and then headline an event that
+    is not one of them.
+
+  **Not shipped: the "most going on" sort**, which is the ordering Hotspots
+  actually wants. Absent rather than faked — Prisma's
+  `orderBy: { events: { _count } }` counts every related row, so it would rank by
+  an all-time total including cancelled drafts, a different number from the one
+  printed on the card. Needs raw SQL; see the note in `lib/validations/venue.ts`.
+
 ### 0.69.0
 
 - **The interested list stopped handing out faces** (#229). Two doors, one leak.

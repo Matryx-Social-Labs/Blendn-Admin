@@ -94,6 +94,19 @@ export const VENUE_TYPE_GROUPS: VenueTypeGroup[] = [
   },
 ]
 
+/**
+ * Every value in the vocabulary, flat, for the callers that want a list rather
+ * than a picker — the mobile `?venueType=` filter and its zod enum.
+ *
+ * Derived from the groups above rather than written out a second time. A
+ * hand-maintained copy is a list that silently stops agreeing with the picker
+ * the day someone adds a type to one and not the other, and the symptom is a
+ * filter value the client can send and the server rejects.
+ */
+export const VENUE_TYPES = VENUE_TYPE_GROUPS.flatMap((g) =>
+  g.types.map((t) => t.value)
+) as [venue_type, ...venue_type[]]
+
 const LABELS = new Map<venue_type, string>(
   VENUE_TYPE_GROUPS.flatMap((g) => g.types.map((t) => [t.value, t.label] as const))
 )

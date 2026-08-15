@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors } from "@/lib/openapi/schemas/common"
+import { PaginationMetaSchema, standardErrors } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -32,6 +32,90 @@ registry.registerPath({
   security: bearerAuth,
   responses: {
     200: { description: "Categories", content: { "application/json": { schema: wrap(z.array(CategorySchema)) } } },
+    ...standardErrors,
+  },
+})
+
+// === Venues (Hotspots) ===
+
+const VenueListItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    address: z.string().nullable(),
+    city: z.string().nullable(),
+    latitude: z.number().nullable(),
+    longitude: z.number().nullable(),
+    capacity: z.number().int().nullable(),
+    venueType: z.string().nullable(),
+    venueTypeLabel: z.string(),
+    distance: z
+      .number()
+      .nullable()
+      .describe("Kilometres from the supplied lat/lon, or null when either side has no fix."),
+    upcomingEventCount: z.number().int(),
+    nextEvent: z
+      .object({
+        id: z.string().uuid(),
+        title: z.string(),
+        slug: z.string().nullable(),
+        coverImageUrl: z.string().nullable(),
+        startTime: z.string().datetime(),
+        endTime: z.string().datetime(),
+      })
+      .nullable()
+      .describe(
+        "The soonest public event this venue is hosting, age-filtered for the caller. " +
+          "Supplies the card image — `venues` has no image column of its own. Null when " +
+          "nothing is coming up, so no card claims something is happening when nothing is."
+      ),
+  })
+  .openapi("VenueListItem")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/venues",
+  tags: ["Mobile Venues"],
+  summary: "List venues (the Hotspots feed)",
+  description:
+    "The venue-shaped twin of the events feed. Takes the same `city`, `lat`/`lon`, `radius` " +
+    "and pagination vocabulary as `GET /api/mobile/events`, because one screen switches " +
+    "between them.\n\n" +
+    "Returns active, non-deleted venues only. Each item carries `upcomingEventCount` and its " +
+    "`nextEvent`, both computed with the **same** filter — published, public, not yet ended, " +
+    "and within the caller's `min_age` where their age is known.\n\n" +
+    "`radius` has no default: sending coordinates means *sort by distance*, never *hide " +
+    "anything further than N km*. `sortBy` offers `name` and `distance` only — ranking by " +
+    "\"most going on\" would need a filtered relation count Prisma cannot order by.",
+  security: bearerAuth,
+  request: {
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      search: z.string().max(200).optional(),
+      city: z.string().min(1).max(100).optional(),
+      lat: z.coerce.number().min(-90).max(90).optional(),
+      lon: z.coerce.number().min(-180).max(180).optional(),
+      radius: z.coerce.number().min(0.1).max(100).optional(),
+      venueType: z.string().optional(),
+      sortBy: z.enum(["name", "distance"]).optional(),
+      sortOrder: z.enum(["asc", "desc"]).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Venues",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              venues: z.array(VenueListItemSchema),
+              pagination: PaginationMetaSchema,
+            })
+          ),
+        },
+      },
+    },
     ...standardErrors,
   },
 })

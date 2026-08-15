@@ -374,6 +374,69 @@ feature is worth. Rows cascade on account deletion.
 
 ---
 
+## Venues — the Hotspots feed
+
+### GET /venues
+
+The venue-shaped twin of `GET /events`. The Pulse answers *what is on*; Hotspots
+answers *where is worth going*, and one screen switches between them — so this
+takes the **same** `page`, `limit`, `search`, `city`, `lat`, `lon` and `radius`
+vocabulary, meaning exactly what it means there.
+
+```json
+{ "success": true, "data": { "venues": [{
+  "id": "…", "name": "The Humming Tree", "address": "12 Indiranagar",
+  "city": "Bengaluru", "latitude": 12.97, "longitude": 77.59,
+  "capacity": 300,
+  "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
+  "distance": 1.4,
+  "upcomingEventCount": 2,
+  "nextEvent": {
+    "id": "…", "title": "Friday session", "slug": "friday-session",
+    "coverImageUrl": "https://…", "startTime": "…", "endTime": "…"
+  }
+}], "pagination": { "…": "…" } } }
+```
+
+| Parameter | Notes |
+|---|---|
+| `city` | Exact, case-insensitive. Venues with no city are unreachable this way, as with events |
+| `lat` + `lon` | Enables `sortBy=distance` and populates `distance`. **Does not filter** |
+| `radius` | km. **No default.** Only bites when you send it |
+| `venueType` | One of the 35 slugs; anything else is a 400 |
+| `sortBy` | `name` (default) or `distance` |
+
+**Active venues only.** `archived` is how a venue is retired without deleting
+the events that happened in it, so it never appears in discovery.
+
+**The card image comes from the next event.** `venues` has no image column.
+Rather than a wall of grey cards or an invented placeholder, each venue carries
+the soonest public event it is hosting — which supplies the artwork and doubles
+as the reason to tap. Nothing upcoming returns `nextEvent: null` and
+`upcomingEventCount: 0`, so no card claims something is happening when nothing
+is; draw the type-based fallback.
+
+**`upcomingEventCount` and `nextEvent` are one question asked once.** Same
+filter object, so a card cannot say "3 upcoming" and then headline an event that
+is not one of them.
+
+**The age gate applies here too.** `nextEvent` is a real event shown to a real
+person, so it passes the same `min_age` rule as the browse query — otherwise the
+18+ event the feed correctly hides reappears, title and cover art intact, as the
+headline of a venue card. An **unknown** age hides nothing, matching `GET /events`.
+
+`distance` is kilometres, or `null` when either side has no fix — not `0`, which
+a client would render as "here".
+
+**No "most going on" sort, yet.** That is the ordering Hotspots actually wants,
+and it is absent rather than faked: Prisma's `orderBy: { events: { _count } }`
+counts *every* related row, so it would rank by an all-time total including
+cancelled drafts — a different number from the one on the card. Ranking the page
+you were handed is not ranking the set, and the difference shows the moment
+there is a second page. Needs raw SQL.
+
+---
+
 ## Batch Operations (30 req/min)
 
 | Method | Endpoint | Description |
