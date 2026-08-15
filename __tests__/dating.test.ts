@@ -3,6 +3,7 @@ import {
   deriveInterestedIn,
   isOrientation,
   matchCompatibleForDating,
+  orientationsAreCoherent,
   type Gender,
   type Orientation,
 } from "@/lib/dating"
@@ -31,14 +32,104 @@ describe("deriveInterestedIn — the pairs that mean something", () => {
   ]
 
   it.each(cases)("%s + %s → %s", (gender, orientation, expected) => {
-    expect(deriveInterestedIn(gender, orientation)).toEqual(expected)
+    expect(deriveInterestedIn(gender, [orientation])).toEqual(expected)
   })
 
   it("treats asexual as a complete answer, not a missing one", () => {
     // An empty set, not null. Someone asexual who ticked dating is looking for
     // something these tags do not model, and "no dating tag" is the honest
     // outcome rather than a prompt to answer a question again.
-    expect(deriveInterestedIn("woman", "asexual")).toEqual([])
+    expect(deriveInterestedIn("woman", ["asexual"])).toEqual([])
+  })
+})
+
+/*
+ * More than one label, because people hold more than one.
+ *
+ * The single column made someone pick which part of themselves to omit. What
+ * replaced it has two properties worth pinning, and they pull in opposite
+ * directions: a second label must never *narrow* the result, and a second label
+ * that means nothing definite must not be quietly dropped.
+ */
+describe("deriveInterestedIn — more than one label", () => {
+  it("unions rather than intersects", () => {
+    // The whole reason multi-select is safe. Intersecting would leave a lesbian
+    // bisexual woman with ["woman"] — narrower than either label alone implies,
+    // which is the opposite of what picking both says.
+    expect(deriveInterestedIn("woman", ["lesbian", "bisexual"])).toEqual([
+      "woman",
+      "man",
+      "non_binary",
+    ])
+  })
+
+  it("keeps a biromantic asexual person's romantic set", () => {
+    // The case that proves union is the right operator and not merely the
+    // generous one: `asexual` derives [] on its own, and an intersection would
+    // delete a real, common combination of labels down to nobody.
+    expect(deriveInterestedIn("man", ["asexual", "bisexual"])).toEqual([
+      "woman",
+      "man",
+      "non_binary",
+    ])
+  })
+
+  it("returns null when any single label is one it cannot read", () => {
+    /*
+     * Null has always meant *ask*, never *assume*, so one unknown makes the
+     * whole answer unknown.
+     *
+     * The alternative — union the ones that resolved, ignore the nulls — fails
+     * in the one direction that matters. This woman would derive from
+     * "straight" alone and be pinned to ["man"], having just told us in her
+     * second label that this is not the whole picture. An extra question is a
+     * screen; being narrowed on an assumption is the bug this file exists to
+     * avoid.
+     */
+    expect(deriveInterestedIn("woman", ["straight", "queer"])).toBeNull()
+    expect(deriveInterestedIn("man", ["bisexual", "pansexual"])).toBeNull()
+  })
+
+  it("reads an empty list as nothing declared", () => {
+    expect(deriveInterestedIn("woman", [])).toBeNull()
+  })
+
+  it("returns the same array whatever order the labels arrive in", () => {
+    // Stored, compared and asserted on, so insertion order cannot decide it.
+    expect(deriveInterestedIn("woman", ["lesbian", "bisexual"])).toEqual(
+      deriveInterestedIn("woman", ["bisexual", "lesbian"])
+    )
+  })
+})
+
+describe("orientationsAreCoherent", () => {
+  it("accepts up to three distinct recognised labels", () => {
+    expect(orientationsAreCoherent([])).toBe(true)
+    expect(orientationsAreCoherent(["queer"])).toBe(true)
+    expect(orientationsAreCoherent(["queer", "bisexual", "asexual"])).toBe(true)
+  })
+
+  it("refuses a fourth", () => {
+    expect(orientationsAreCoherent(["queer", "bisexual", "asexual", "pansexual"])).toBe(false)
+  })
+
+  it("refuses duplicates", () => {
+    // Otherwise the cap is three *slots*, not three answers, and ["gay","gay"]
+    // stores a set of one while looking like a set of two.
+    expect(orientationsAreCoherent(["gay", "gay"])).toBe(false)
+  })
+
+  it("refuses prefer_not_to_say beside anything else", () => {
+    // The same rule `intentsAreCoherent` applies to `just_here`: declining to
+    // answer is not a fourth thing you are, so this pair is two contradictory
+    // statements and the server should not have to pick one.
+    expect(orientationsAreCoherent(["prefer_not_to_say"])).toBe(true)
+    expect(orientationsAreCoherent(["prefer_not_to_say", "gay"])).toBe(false)
+  })
+
+  it("refuses a label it does not recognise", () => {
+    expect(orientationsAreCoherent(["demisexual"])).toBe(false)
+    expect(orientationsAreCoherent(["Bisexual"])).toBe(false)
   })
 })
 
@@ -46,24 +137,24 @@ describe("deriveInterestedIn — the pairs that do not", () => {
   it("refuses to guess for a non-binary person labelled straight or gay", () => {
     // "Straight" is defined relative to a binary they are not in. Every
     // implementation that answers this is inventing someone's dating life.
-    expect(deriveInterestedIn("non_binary", "straight")).toBeNull()
-    expect(deriveInterestedIn("non_binary", "gay")).toBeNull()
+    expect(deriveInterestedIn("non_binary", ["straight"])).toBeNull()
+    expect(deriveInterestedIn("non_binary", ["gay"])).toBeNull()
   })
 
   it("refuses to guess for identity labels that are not target sets", () => {
-    expect(deriveInterestedIn("woman", "pansexual")).toBeNull()
-    expect(deriveInterestedIn("man", "queer")).toBeNull()
+    expect(deriveInterestedIn("woman", ["pansexual"])).toBeNull()
+    expect(deriveInterestedIn("man", ["queer"])).toBeNull()
   })
 
   it("refuses to guess from prefer_not_to_say, in either position", () => {
     // Someone may want the label on their profile without it implying anything
     // about who they want to meet.
-    expect(deriveInterestedIn("woman", "prefer_not_to_say")).toBeNull()
-    expect(deriveInterestedIn("prefer_not_to_say", "straight")).toBeNull()
+    expect(deriveInterestedIn("woman", ["prefer_not_to_say"])).toBeNull()
+    expect(deriveInterestedIn("prefer_not_to_say", ["straight"])).toBeNull()
   })
 
   it("returns null when either half is missing", () => {
-    expect(deriveInterestedIn(null, "straight")).toBeNull()
+    expect(deriveInterestedIn(null, ["straight"])).toBeNull()
     expect(deriveInterestedIn("woman", null)).toBeNull()
     expect(deriveInterestedIn(null, null)).toBeNull()
   })
@@ -74,7 +165,7 @@ describe("deriveInterestedIn — the pairs that do not", () => {
     const genders: Gender[] = ["woman", "man", "non_binary", "prefer_not_to_say"]
     for (const g of genders) {
       for (const o of ORIENTATIONS) {
-        const result = deriveInterestedIn(g, o)
+        const result = deriveInterestedIn(g, [o])
         expect(result === null || Array.isArray(result)).toBe(true)
       }
     }

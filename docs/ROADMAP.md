@@ -554,6 +554,28 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.69.0
+
+- **`profiles.orientation` becomes `orientations`** (#227) — up to three
+  distinct labels, `prefer_not_to_say` exclusive. People hold more than one
+  ("queer" alongside "bisexual", "asexual" alongside a romantic orientation) and
+  one column made someone pick which part of themselves to omit.
+
+  `deriveInterestedIn` takes the set and returns the **union**, never the
+  intersection: adding a label must not narrow the pool. A biromantic asexual
+  person settles it — `asexual` alone derives `[]`, so intersecting would delete
+  a real combination down to nobody. One unrecognised label makes the whole
+  derivation `null` rather than unioning the rest, because null has always meant
+  *ask*; the alternative pins a woman who picked "straight" and "queer" to
+  `["man"]` on the strength of the label she qualified.
+
+  The singular `orientation` stays accepted and deprecated. Dropping it fails
+  silently — an installed build's save returns 200 and stores nothing.
+
+  Remaining: the app's chips are still single-select
+  (`blendn/app/onboarding/preferences.tsx`), and the caption goes back to the
+  frame's "Select all that apply to you" when they change.
+
 ### 0.68.0
 
 - **Check-in stops naming people implicitly** (#194) — `revealed` is always

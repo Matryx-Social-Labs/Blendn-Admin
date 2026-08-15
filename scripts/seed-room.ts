@@ -122,7 +122,7 @@ interface Person {
   name: string
   age: number
   gender: Gender | null
-  orientation: string | null
+  orientations: string[]
   interestedIn: Gender[]
   intents: Intent[]
   workField: string | null
@@ -145,43 +145,43 @@ interface Person {
  */
 const PEOPLE: Person[] = [
   // Dating cohort — straight, compatible both ways.
-  { handle: "aisha", name: "Aisha Menon", age: 27, gender: "woman", orientation: "straight", interestedIn: ["man"], intents: ["dating", "networking"], workField: "design", revealed: true, cluster: 0, interestCount: 4, arrivedAfterMin: 5, note: "straight woman, dating — matches rohan/vikram" },
-  { handle: "rohan", name: "Rohan Bhat", age: 29, gender: "man", orientation: "straight", interestedIn: ["woman"], intents: ["dating"], workField: "software", revealed: false, cluster: 0, interestCount: 4, arrivedAfterMin: 8, note: "straight man, dating — matches aisha/priya" },
-  { handle: "vikram", name: "Vikram Rao", age: 31, gender: "man", orientation: "straight", interestedIn: ["woman"], intents: ["dating", "friendship"], workField: "finance", revealed: false, cluster: 1, interestCount: 3, arrivedAfterMin: 12, note: "straight man — NOT a dating match for rohan, still shares interests" },
-  { handle: "priya", name: "Priya Raman", age: 26, gender: "woman", orientation: "straight", interestedIn: ["man"], intents: ["dating"], workField: "product", revealed: true, cluster: 1, interestCount: 3, arrivedAfterMin: 15, note: "straight woman, dating" },
+  { handle: "aisha", name: "Aisha Menon", age: 27, gender: "woman", orientations: ["straight"], interestedIn: ["man"], intents: ["dating", "networking"], workField: "design", revealed: true, cluster: 0, interestCount: 4, arrivedAfterMin: 5, note: "straight woman, dating — matches rohan/vikram" },
+  { handle: "rohan", name: "Rohan Bhat", age: 29, gender: "man", orientations: ["straight"], interestedIn: ["woman"], intents: ["dating"], workField: "software", revealed: false, cluster: 0, interestCount: 4, arrivedAfterMin: 8, note: "straight man, dating — matches aisha/priya" },
+  { handle: "vikram", name: "Vikram Rao", age: 31, gender: "man", orientations: ["straight"], interestedIn: ["woman"], intents: ["dating", "friendship"], workField: "finance", revealed: false, cluster: 1, interestCount: 3, arrivedAfterMin: 12, note: "straight man — NOT a dating match for rohan, still shares interests" },
+  { handle: "priya", name: "Priya Raman", age: 26, gender: "woman", orientations: ["straight"], interestedIn: ["man"], intents: ["dating"], workField: "product", revealed: true, cluster: 1, interestCount: 3, arrivedAfterMin: 15, note: "straight woman, dating" },
 
   // Dating cohort — gay, lesbian, bisexual, non-binary, undeclared.
-  { handle: "arjun", name: "Arjun Iyer", age: 30, gender: "man", orientation: "gay", interestedIn: ["man"], intents: ["dating", "friendship"], workField: "media", revealed: false, cluster: 2, interestCount: 4, arrivedAfterMin: 20, note: "gay man — matches nikhil, not rohan" },
-  { handle: "nikhil", name: "Nikhil Shetty", age: 28, gender: "man", orientation: "gay", interestedIn: ["man"], intents: ["dating"], workField: "software", revealed: false, cluster: 2, interestCount: 4, arrivedAfterMin: 22, note: "gay man — mutual with arjun" },
-  { handle: "leela", name: "Leela Fernandes", age: 32, gender: "woman", orientation: "lesbian", interestedIn: ["woman"], intents: ["dating"], workField: "healthcare", revealed: true, cluster: 3, interestCount: 3, arrivedAfterMin: 25, note: "lesbian — matches meera, not aisha (aisha is straight)" },
-  { handle: "meera", name: "Meera Kulkarni", age: 29, gender: "woman", orientation: "bisexual", interestedIn: ["woman", "man", "non_binary"], intents: ["dating", "networking"], workField: "arts", revealed: false, cluster: 3, interestCount: 3, arrivedAfterMin: 28, note: "bisexual — mutual with leela; one-way toward straight women" },
-  { handle: "sam", name: "Sam Dcruz", age: 27, gender: "non_binary", orientation: "queer", interestedIn: ["woman", "non_binary"], intents: ["dating", "friendship"], workField: "design", revealed: false, cluster: 4, interestCount: 2, arrivedAfterMin: 33, note: "non-binary + queer — derivation returns null, interested_in set DIRECTLY" },
-  { handle: "dev", name: "Dev Anand", age: 34, gender: null, orientation: null, interestedIn: [], intents: ["dating"], workField: "consulting", revealed: false, cluster: 4, interestCount: 2, arrivedAfterMin: 36, note: "ticked dating, declared nothing — fails closed, no tag anywhere" },
+  { handle: "arjun", name: "Arjun Iyer", age: 30, gender: "man", orientations: ["gay"], interestedIn: ["man"], intents: ["dating", "friendship"], workField: "media", revealed: false, cluster: 2, interestCount: 4, arrivedAfterMin: 20, note: "gay man — matches nikhil, not rohan" },
+  { handle: "nikhil", name: "Nikhil Shetty", age: 28, gender: "man", orientations: ["gay"], interestedIn: ["man"], intents: ["dating"], workField: "software", revealed: false, cluster: 2, interestCount: 4, arrivedAfterMin: 22, note: "gay man — mutual with arjun" },
+  { handle: "leela", name: "Leela Fernandes", age: 32, gender: "woman", orientations: ["lesbian"], interestedIn: ["woman"], intents: ["dating"], workField: "healthcare", revealed: true, cluster: 3, interestCount: 3, arrivedAfterMin: 25, note: "lesbian — matches meera, not aisha (aisha is straight)" },
+  { handle: "meera", name: "Meera Kulkarni", age: 29, gender: "woman", orientations: ["bisexual"], interestedIn: ["woman", "man", "non_binary"], intents: ["dating", "networking"], workField: "arts", revealed: false, cluster: 3, interestCount: 3, arrivedAfterMin: 28, note: "bisexual — mutual with leela; one-way toward straight women" },
+  { handle: "sam", name: "Sam Dcruz", age: 27, gender: "non_binary", orientations: ["queer"], interestedIn: ["woman", "non_binary"], intents: ["dating", "friendship"], workField: "design", revealed: false, cluster: 4, interestCount: 2, arrivedAfterMin: 33, note: "non-binary + queer — derivation returns null, interested_in set DIRECTLY" },
+  { handle: "dev", name: "Dev Anand", age: 34, gender: null, orientations: [], interestedIn: [], intents: ["dating"], workField: "consulting", revealed: false, cluster: 4, interestCount: 2, arrivedAfterMin: 36, note: "ticked dating, declared nothing — fails closed, no tag anywhere" },
 
   // The age gate.
-  { handle: "kid", name: "Ravi Junior", age: 17, gender: "man", orientation: "straight", interestedIn: ["woman"], intents: ["friendship"], workField: "student", revealed: false, cluster: 5, interestCount: 3, arrivedAfterMin: 40, note: "17 — the server must refuse dating intent for this account" },
+  { handle: "kid", name: "Ravi Junior", age: 17, gender: "man", orientations: ["straight"], interestedIn: ["woman"], intents: ["friendship"], workField: "student", revealed: false, cluster: 5, interestCount: 3, arrivedAfterMin: 40, note: "17 — the server must refuse dating intent for this account" },
 
   // Networking-heavy, shared work fields, to exercise the tiebreak.
-  { handle: "ananya", name: "Ananya Gupta", age: 33, gender: "woman", orientation: null, interestedIn: [], intents: ["networking"], workField: "software", revealed: true, cluster: 5, interestCount: 3, arrivedAfterMin: 44, note: "networking only — shares work_field with rohan/nikhil/karthik" },
-  { handle: "karthik", name: "Karthik Subramanian", age: 36, gender: "man", orientation: null, interestedIn: [], intents: ["networking"], workField: "software", revealed: false, cluster: 6, interestCount: 4, arrivedAfterMin: 47, note: "networking, software" },
-  { handle: "fatima", name: "Fatima Sheikh", age: 30, gender: "woman", orientation: null, interestedIn: [], intents: ["networking", "friendship"], workField: "data_ai", revealed: true, cluster: 6, interestCount: 4, arrivedAfterMin: 51, note: "networking + friendship" },
-  { handle: "joseph", name: "Joseph Mathew", age: 41, gender: "man", orientation: null, interestedIn: [], intents: ["networking"], workField: "finance", revealed: false, cluster: 7, interestCount: 3, arrivedAfterMin: 55, note: "networking, finance — shares field with vikram" },
+  { handle: "ananya", name: "Ananya Gupta", age: 33, gender: "woman", orientations: [], interestedIn: [], intents: ["networking"], workField: "software", revealed: true, cluster: 5, interestCount: 3, arrivedAfterMin: 44, note: "networking only — shares work_field with rohan/nikhil/karthik" },
+  { handle: "karthik", name: "Karthik Subramanian", age: 36, gender: "man", orientations: [], interestedIn: [], intents: ["networking"], workField: "software", revealed: false, cluster: 6, interestCount: 4, arrivedAfterMin: 47, note: "networking, software" },
+  { handle: "fatima", name: "Fatima Sheikh", age: 30, gender: "woman", orientations: [], interestedIn: [], intents: ["networking", "friendship"], workField: "data_ai", revealed: true, cluster: 6, interestCount: 4, arrivedAfterMin: 51, note: "networking + friendship" },
+  { handle: "joseph", name: "Joseph Mathew", age: 41, gender: "man", orientations: [], interestedIn: [], intents: ["networking"], workField: "finance", revealed: false, cluster: 7, interestCount: 3, arrivedAfterMin: 55, note: "networking, finance — shares field with vikram" },
 
   // Silence and just_here — these two score alike, which is the point of #183.
-  { handle: "quiet1", name: "Nandini Rao", age: 25, gender: null, orientation: null, interestedIn: [], intents: [], workField: null, revealed: false, cluster: 7, interestCount: 3, arrivedAfterMin: 60, note: "no intent at all — must rank level with the just_here group" },
-  { handle: "quiet2", name: "Sanjay Pillai", age: 38, gender: null, orientation: null, interestedIn: [], intents: [], workField: "operations", revealed: false, cluster: 8, interestCount: 2, arrivedAfterMin: 64, note: "no intent, has a work field" },
-  { handle: "justhere1", name: "Tara Bose", age: 24, gender: null, orientation: null, interestedIn: [], intents: ["just_here"], workField: null, revealed: false, cluster: 8, interestCount: 2, arrivedAfterMin: 68, note: "just_here — damped exactly like silence" },
-  { handle: "justhere2", name: "Imran Qureshi", age: 35, gender: null, orientation: null, interestedIn: [], intents: ["just_here"], workField: "hospitality", revealed: false, cluster: 9, interestCount: 1, arrivedAfterMin: 72, note: "just_here, one interest" },
-  { handle: "justhere3", name: "Kavya Nair", age: 28, gender: null, orientation: null, interestedIn: [], intents: ["just_here", "networking"], workField: "marketing", revealed: true, cluster: 9, interestCount: 1, arrivedAfterMin: 76, note: "just_here PLUS networking — must NOT be damped" },
+  { handle: "quiet1", name: "Nandini Rao", age: 25, gender: null, orientations: [], interestedIn: [], intents: [], workField: null, revealed: false, cluster: 7, interestCount: 3, arrivedAfterMin: 60, note: "no intent at all — must rank level with the just_here group" },
+  { handle: "quiet2", name: "Sanjay Pillai", age: 38, gender: null, orientations: [], interestedIn: [], intents: [], workField: "operations", revealed: false, cluster: 8, interestCount: 2, arrivedAfterMin: 64, note: "no intent, has a work field" },
+  { handle: "justhere1", name: "Tara Bose", age: 24, gender: null, orientations: [], interestedIn: [], intents: ["just_here"], workField: null, revealed: false, cluster: 8, interestCount: 2, arrivedAfterMin: 68, note: "just_here — damped exactly like silence" },
+  { handle: "justhere2", name: "Imran Qureshi", age: 35, gender: null, orientations: [], interestedIn: [], intents: ["just_here"], workField: "hospitality", revealed: false, cluster: 9, interestCount: 1, arrivedAfterMin: 72, note: "just_here, one interest" },
+  { handle: "justhere3", name: "Kavya Nair", age: 28, gender: null, orientations: [], interestedIn: [], intents: ["just_here", "networking"], workField: "marketing", revealed: true, cluster: 9, interestCount: 1, arrivedAfterMin: 76, note: "just_here PLUS networking — must NOT be damped" },
 
   // Sparse and empty interests.
-  { handle: "sparse1", name: "Yusuf Ali", age: 31, gender: null, orientation: null, interestedIn: [], intents: ["friendship"], workField: "education", revealed: false, cluster: 10, interestCount: 1, arrivedAfterMin: 80, note: "exactly one interest" },
-  { handle: "empty1", name: "Divya Prasad", age: 27, gender: null, orientation: null, interestedIn: [], intents: ["friendship"], workField: null, revealed: false, cluster: 0, interestCount: 0, arrivedAfterMin: 84, note: "NO interests — the production default; card must still render" },
-  { handle: "empty2", name: "Manoj Kumar", age: 45, gender: null, orientation: null, interestedIn: [], intents: ["networking"], workField: "government_ngo", revealed: false, cluster: 0, interestCount: 0, arrivedAfterMin: 88, note: "no interests, has intent and a work field" },
+  { handle: "sparse1", name: "Yusuf Ali", age: 31, gender: null, orientations: [], interestedIn: [], intents: ["friendship"], workField: "education", revealed: false, cluster: 10, interestCount: 1, arrivedAfterMin: 80, note: "exactly one interest" },
+  { handle: "empty1", name: "Divya Prasad", age: 27, gender: null, orientations: [], interestedIn: [], intents: ["friendship"], workField: null, revealed: false, cluster: 0, interestCount: 0, arrivedAfterMin: 84, note: "NO interests — the production default; card must still render" },
+  { handle: "empty2", name: "Manoj Kumar", age: 45, gender: null, orientations: [], interestedIn: [], intents: ["networking"], workField: "government_ngo", revealed: false, cluster: 0, interestCount: 0, arrivedAfterMin: 88, note: "no interests, has intent and a work field" },
 
   // Friend cluster three — near-identical interests, arriving together.
-  { handle: "friendA", name: "Neha Joshi", age: 26, gender: "woman", orientation: "straight", interestedIn: ["man"], intents: ["friendship"], workField: "design", revealed: true, cluster: 11, interestCount: 4, arrivedAfterMin: 90, note: "arrives with friendB/friendC — group-matcher data shape only" },
-  { handle: "friendB", name: "Pooja Desai", age: 25, gender: "woman", orientation: "straight", interestedIn: ["man"], intents: ["friendship"], workField: "marketing", revealed: false, cluster: 11, interestCount: 4, arrivedAfterMin: 90, note: "arrives with friendA/friendC" },
+  { handle: "friendA", name: "Neha Joshi", age: 26, gender: "woman", orientations: ["straight"], interestedIn: ["man"], intents: ["friendship"], workField: "design", revealed: true, cluster: 11, interestCount: 4, arrivedAfterMin: 90, note: "arrives with friendB/friendC — group-matcher data shape only" },
+  { handle: "friendB", name: "Pooja Desai", age: 25, gender: "woman", orientations: ["straight"], interestedIn: ["man"], intents: ["friendship"], workField: "marketing", revealed: false, cluster: 11, interestCount: 4, arrivedAfterMin: 90, note: "arrives with friendA/friendC" },
 ]
 
 /** Interest pool, grouped so clusters overlap heavily and across clusters little. */
@@ -440,7 +440,7 @@ async function main() {
       intent_default: intents,
       reveal_by_default: person.revealed,
       gender: person.gender,
-      orientation: person.orientation,
+      orientations: person.orientations,
       interested_in: person.interestedIn,
       work_field: person.workField,
       photos: person.revealed ? [`https://i.pravatar.cc/300?u=${id}`] : [],

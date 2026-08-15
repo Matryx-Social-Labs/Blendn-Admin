@@ -82,7 +82,7 @@ export function isOrientation(value: unknown): value is Orientation {
  * that is the point. The cases below are the ones where the label has a settled
  * meaning; everything else goes to a direct picker.
  */
-export function deriveInterestedIn(
+function deriveOne(
   gender: Gender | null | undefined,
   orientation: Orientation | null | undefined
 ): Gender[] | null {
@@ -114,6 +114,69 @@ export function deriveInterestedIn(
     case "bisexual":
       return ["woman", "man", "non_binary"]
   }
+}
+
+/**
+ * The target set implied by a gender and **every** label the person holds.
+ *
+ * People hold more than one — "queer" alongside "bisexual", or "asexual"
+ * alongside a romantic orientation — and forcing a single choice made someone
+ * pick which part of themselves to omit. So this takes a set.
+ *
+ * ## Union, not intersection
+ *
+ * Someone who is both bisexual and queer is open to the union of what those
+ * imply. Intersecting would silently *narrow* their pool, which is the opposite
+ * of what adding a second label means — nobody picks another word for
+ * themselves in order to be shown fewer people.
+ *
+ * Asexual is why the union is the right operator and not just the generous one.
+ * `asexual` alone derives `[]` — a complete answer, nobody. Paired with
+ * `bisexual` it is a biromantic asexual person, and the union gives exactly the
+ * bisexual set. An intersection would give the empty set and quietly delete a
+ * real combination of labels.
+ *
+ * ## One unknown makes the whole answer unknown
+ *
+ * `deriveOne` returns `null` for every pair with no settled meaning, and null
+ * here has always meant *ask*, never *assume*. So if any single label derives
+ * null, this returns null too rather than unioning the ones that did resolve.
+ *
+ * The alternative is worse in the one direction that matters: a woman who
+ * picked "straight" and "queer" would derive from "straight" alone and be
+ * pinned to `["man"]`, having just told us in the second label that this is not
+ * the whole picture. Being asked one extra question is a screen; being narrowed
+ * on an assumption is the failure this file exists to avoid.
+ */
+export function deriveInterestedIn(
+  gender: Gender | null | undefined,
+  orientations: readonly Orientation[] | null | undefined
+): Gender[] | null {
+  if (!gender || !orientations?.length) return null
+
+  const derived = orientations.map((o) => deriveOne(gender, o))
+  if (derived.some((set) => set === null)) return null
+
+  const union = new Set(derived.flat() as Gender[])
+  // Filtered against a fixed order rather than returned as insertion order, so
+  // the same set of labels always produces the same array — this value is
+  // stored, compared and asserted on.
+  return (["woman", "man", "non_binary"] as const).filter((g) => union.has(g))
+}
+
+/**
+ * At most three labels, no duplicates, and "prefer not to say" alone.
+ *
+ * The exclusivity mirrors `intentsAreCoherent` and `just_here`: declining to
+ * answer is not a fourth thing you are, so "prefer not to say" beside "gay" is
+ * two contradictory statements and the server should not have to guess which
+ * one the person meant.
+ */
+export function orientationsAreCoherent(orientations: readonly string[]): boolean {
+  if (orientations.length > 3) return false
+  if (new Set(orientations).size !== orientations.length) return false
+  if (orientations.includes("prefer_not_to_say") && orientations.length > 1) return false
+  return orientations.every(isOrientation)
 }
 
 export interface DatingProfile {

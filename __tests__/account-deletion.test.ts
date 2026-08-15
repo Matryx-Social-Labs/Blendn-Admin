@@ -70,7 +70,7 @@ describe("deleting an account scrubs the matching inputs", () => {
     // keeps its owner's orientation after deletion is an audit finding.
     const data = await scrubPayload()
     expect(data.gender).toBeNull()
-    expect(data.orientation).toBeNull()
+    expect(data.orientations).toEqual([])
     expect(data.interested_in).toEqual([])
   })
 

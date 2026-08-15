@@ -203,14 +203,14 @@ describe("PUT /profiles/:userId — orientation and interested_in", () => {
       age: 30,
       intent_default: [],
       gender: null,
-      orientation: null,
+      orientations: [],
     })
-    await putProfile(profileReq({ gender: "woman", orientation: "straight" }), {
+    await putProfile(profileReq({ gender: "woman", orientations: ["straight"] }), {
       params: Promise.resolve({ userId: USER }),
     })
     expect(mockDb.profiles.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({ orientation: "straight", interested_in: ["man"] }),
+        update: expect.objectContaining({ orientations: ["straight"], interested_in: ["man"] }),
       })
     )
   })
@@ -225,10 +225,10 @@ describe("PUT /profiles/:userId — orientation and interested_in", () => {
       age: 30,
       intent_default: [],
       gender: null,
-      orientation: null,
+      orientations: [],
     })
     await putProfile(
-      profileReq({ gender: "woman", orientation: "straight", interested_in: ["woman", "man"] }),
+      profileReq({ gender: "woman", orientations: ["straight"], interested_in: ["woman", "man"] }),
       { params: Promise.resolve({ userId: USER }) }
     )
     const update = mockDb.profiles.upsert.mock.calls[0][0].update
@@ -242,14 +242,14 @@ describe("PUT /profiles/:userId — orientation and interested_in", () => {
       age: 30,
       intent_default: [],
       gender: null,
-      orientation: null,
+      orientations: [],
     })
-    await putProfile(profileReq({ gender: "non_binary", orientation: "straight" }), {
+    await putProfile(profileReq({ gender: "non_binary", orientations: ["straight"] }), {
       params: Promise.resolve({ userId: USER }),
     })
     const update = mockDb.profiles.upsert.mock.calls[0][0].update
     expect(update).not.toHaveProperty("interested_in")
-    expect(update.orientation).toBe("straight")
+    expect(update.orientations).toEqual(["straight"])
   })
 
   it("re-derives against the stored half when only one is sent", async () => {
@@ -259,9 +259,9 @@ describe("PUT /profiles/:userId — orientation and interested_in", () => {
       age: 30,
       intent_default: [],
       gender: "man",
-      orientation: null,
+      orientations: [],
     })
-    await putProfile(profileReq({ orientation: "gay" }), {
+    await putProfile(profileReq({ orientations: ["gay"] }), {
       params: Promise.resolve({ userId: USER }),
     })
     const update = mockDb.profiles.upsert.mock.calls[0][0].update
@@ -269,10 +269,82 @@ describe("PUT /profiles/:userId — orientation and interested_in", () => {
   })
 
   it("refuses an orientation that is not on the list", async () => {
-    const res = await putProfile(profileReq({ orientation: "heterosexual" }), {
+    const res = await putProfile(profileReq({ orientations: ["heterosexual"] }), {
       params: Promise.resolve({ userId: USER }),
     })
     expect(res.status).toBe(400)
+  })
+
+  it("refuses prefer_not_to_say combined with another label", async () => {
+    const res = await putProfile(
+      profileReq({ orientations: ["prefer_not_to_say", "gay"] }),
+      { params: Promise.resolve({ userId: USER }) }
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it("refuses a fourth label", async () => {
+    const res = await putProfile(
+      profileReq({ orientations: ["gay", "queer", "bisexual", "pansexual"] }),
+      { params: Promise.resolve({ userId: USER }) }
+    )
+    expect(res.status).toBe(400)
+  })
+
+  /*
+   * The deprecated singular, which is the shape every installed build sends.
+   *
+   * Worth a test rather than a comment because its failure mode is invisible:
+   * drop the key from the schema and zod strips it, the request still returns
+   * 200, and the field silently stops being stored. Nothing in the response
+   * says so.
+   */
+  it("still accepts the singular `orientation` and stores it as one label", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: "man",
+      orientations: [],
+    })
+    await putProfile(profileReq({ orientation: "gay" }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update.orientations).toEqual(["gay"])
+    // And it still reaches derivation, so an old client's save is not a
+    // second-class one.
+    expect(update.interested_in).toEqual(["man"])
+  })
+
+  it("reads a singular null as clearing the labels", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: "man",
+      orientations: ["gay"],
+    })
+    await putProfile(profileReq({ orientation: null }), {
+      params: Promise.resolve({ userId: USER }),
+    })
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update.orientations).toEqual([])
+  })
+
+  it("lets the array win when a request carries both shapes", async () => {
+    // A client that knows about `orientations` is the one whose intent to
+    // follow; the singular is what a stale layer underneath it might add.
+    mockDb.profiles.findUnique.mockResolvedValue({
+      age: 30,
+      intent_default: [],
+      gender: "man",
+      orientations: [],
+    })
+    await putProfile(
+      profileReq({ orientation: "gay", orientations: ["bisexual", "queer"] }),
+      { params: Promise.resolve({ userId: USER }) }
+    )
+    const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    expect(update.orientations).toEqual(["bisexual", "queer"])
   })
 })
 
@@ -521,7 +593,7 @@ describe("GET /profiles/:userId — orientation", () => {
     id: USER,
     age: 30,
     date_of_birth: null,
-    orientation: "bisexual",
+    orientations: ["bisexual"],
     show_orientation: show,
     gender: "woman",
     interested_in: ["man", "woman"],
@@ -552,7 +624,7 @@ describe("GET /profiles/:userId — orientation", () => {
   it("shows it when the switch is on and the viewer may see who they are", async () => {
     maySeeIdentity.mockResolvedValue(true)
     const body = await (await asViewer(STRANGER, true)).json()
-    expect(body.data.profile.orientation).toBe("bisexual")
+    expect(body.data.profile.orientations).toEqual(["bisexual"])
   })
 
   it("withholds it when the switch is on but the viewer is a stranger", async () => {
@@ -563,20 +635,20 @@ describe("GET /profiles/:userId — orientation", () => {
      */
     maySeeIdentity.mockResolvedValue(false)
     const body = await (await asViewer(STRANGER, true)).json()
-    expect(body.data.profile).not.toHaveProperty("orientation")
+    expect(body.data.profile).not.toHaveProperty("orientations")
   })
 
   it("withholds it when the switch is off, even from a match", async () => {
     // Consent is the other gate, and it is not implied by a relationship.
     maySeeIdentity.mockResolvedValue(true)
     const body = await (await asViewer(STRANGER, false)).json()
-    expect(body.data.profile).not.toHaveProperty("orientation")
+    expect(body.data.profile).not.toHaveProperty("orientations")
   })
 
   it("withholds it from a stranger with the switch off", async () => {
     maySeeIdentity.mockResolvedValue(false)
     const body = await (await asViewer(STRANGER, false)).json()
-    expect(body.data.profile).not.toHaveProperty("orientation")
+    expect(body.data.profile).not.toHaveProperty("orientations")
   })
 
   it("never shows gender or interested_in, whatever the switch says", async () => {
@@ -599,7 +671,7 @@ describe("GET /profiles/:userId — orientation", () => {
     // switch in the state the person left it.
     maySeeIdentity.mockResolvedValue(false)
     const body = await (await asViewer(USER, false)).json()
-    expect(body.data.profile.orientation).toBe("bisexual")
+    expect(body.data.profile.orientations).toEqual(["bisexual"])
     expect(body.data.profile.show_orientation).toBe(false)
   })
 })

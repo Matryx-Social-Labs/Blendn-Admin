@@ -125,7 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * They are matching inputs; the compatibility they compute surfaces as a
        * tag on a card, never as the values behind it.
        */
-      ...(identified && p.show_orientation ? { orientation: p.orientation } : {}),
+      ...(identified && p.show_orientation ? { orientations: p.orientations } : {}),
     }
 
     /*
@@ -203,10 +203,26 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const {
       name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos,
       goals, looking_for, onboarded, reveal_by_default,
-      intent_default, gender, interested_in, work_field, orientation,
+      intent_default, gender, interested_in, work_field,
       push_enabled, show_online, read_receipts, share_location,
     } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
+
+    /*
+     * One name for the labels, whichever key the request used.
+     *
+     * The singular is the deprecated shape (see `updateProfileSchema`) and it
+     * loses to the array when a request somehow carries both — a client that
+     * knows about `orientations` is the one whose intent we should follow. A
+     * singular `null` means *clear it*, which is the empty array here.
+     */
+    const orientations =
+      parsed.data.orientations ??
+      (parsed.data.orientation !== undefined
+        ? parsed.data.orientation
+          ? [parsed.data.orientation]
+          : []
+        : undefined)
 
     /*
      * Dating is 18+, and this is one of the two places it can be written.
@@ -225,7 +241,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const touchesAgeGate =
       intent_default !== undefined || age !== undefined || dateOfBirth !== undefined
-    const touchesDating = gender !== undefined || orientation !== undefined
+    const touchesDating = gender !== undefined || orientations !== undefined
     // `photos` joins the reasons to fetch: the moderation pass below only
     // checks URLs that are not already on the profile, so re-saving a profile
     // does not re-fetch and re-moderate the same three photos every time.
@@ -238,7 +254,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               date_of_birth: true,
               intent_default: true,
               gender: true,
-              orientation: true,
+              orientations: true,
               photos: true,
             },
           })
@@ -298,8 +314,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
             // The values *after* this request, so changing one of the pair
             // re-derives against the other rather than against nothing.
             (gender !== undefined ? gender : existing?.gender) as Gender | null | undefined,
-            (orientation !== undefined ? orientation : existing?.orientation) as
-              | Orientation
+            (orientations !== undefined ? orientations : existing?.orientations) as
+              | Orientation[]
               | null
               | undefined
           )
@@ -390,7 +406,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(gender !== undefined && { gender }),
         ...(interested_in !== undefined && { interested_in }),
         ...(derivedInterestedIn !== null && { interested_in: derivedInterestedIn }),
-        ...(orientation !== undefined && { orientation }),
+        ...(orientations !== undefined && { orientations }),
         ...(work_field !== undefined && { work_field }),
         // Omitted rather than defaulted: the column defaults to true, which is
         // what the settings screen has always claimed, so nobody's apparent
@@ -428,7 +444,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         // Only when the request did not supply it — client-supplied wins, and
         // a null derivation leaves the column alone rather than clearing it.
         ...(derivedInterestedIn !== null && { interested_in: derivedInterestedIn }),
-        ...(orientation !== undefined && { orientation }),
+        ...(orientations !== undefined && { orientations }),
         ...(work_field !== undefined && { work_field }),
         ...(push_enabled !== undefined && { push_enabled }),
         ...(show_online !== undefined && { show_online }),
