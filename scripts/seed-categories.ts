@@ -34,7 +34,7 @@ const db = new PrismaClient({
  * expanded to "and". The first version of this script expanded it, created two
  * phantom parents, and only the orphan check at the end caught it.
  */
-const slugify = (name: string) =>
+export const slugify = (name: string) =>
   name
     .toLowerCase()
     .replace(/&/g, "")
@@ -60,7 +60,7 @@ const slugify = (name: string) =>
  * different nights, and that granularity is the India-specific discovery the
  * product wants.
  */
-const TAXONOMY: Record<string, string[]> = {
+export const TAXONOMY: Record<string, string[]> = {
   Music: [
     "Live gigs",
     "Club nights",
@@ -85,7 +85,18 @@ const TAXONOMY: Record<string, string[]> = {
     "Marathons and races",
     "Tournaments",
   ],
-  "Food & Drink": ["Tastings", "Supper clubs", "Brunch", "Pop-ups", "Food festivals"],
+  "Food & Drink": [
+    "Tastings",
+    "Supper clubs",
+    "Brunch",
+    "Pop-ups",
+    "Food festivals",
+    // Both are things the Pulse frames feature by name and the taxonomy could
+    // not express: a cocktail masterclass had to be filed as a "Tasting", and a
+    // cafe meet-up as a "Pop-up".
+    "Cocktails and mixology",
+    "Coffee",
+  ],
   Nightlife: ["Parties", "DJ sets", "Comedy", "Karaoke"],
   "Arts & Culture": [
     "Theatre",
@@ -111,6 +122,30 @@ const TAXONOMY: Record<string, string[]> = {
   Networking: ["Professional", "Founders", "Industry mixers", "Career"],
   Outdoor: ["Hikes", "Cycling", "Adventure", "Camping"],
   Wellness: ["Yoga", "Fitness", "Meditation", "Mental health"],
+  /*
+   * The category this product is *for*, and the one it did not have.
+   *
+   * Blendn exists so that somebody can approach a stranger at an event without
+   * risking rejection. Every mechanism — GPS check-in, mutual like,
+   * pseudonymity, the room chat — serves that. And there was no way to tag an
+   * event **whose entire purpose is meeting people**.
+   *
+   * "Community" is volunteering and hobby groups; "Networking" is professional.
+   * A singles night is neither, and an organiser running one had to file it
+   * under Nightlife > Parties, where it is indistinguishable from a club night
+   * somebody is attending with friends they already have.
+   *
+   * That is the one search a Blendn user is most likely to make, and until now
+   * the answer was a category that did not exist.
+   */
+  Social: [
+    "Singles nights",
+    "Speed dating",
+    "Board games",
+    "Pub quizzes",
+    "Meet new people",
+    "Group dining",
+  ],
   Community: [
     "Volunteering",
     "Language exchange",
@@ -164,9 +199,19 @@ async function main() {
   }
 }
 
-main()
-  .catch((error) => {
-    console.error("FAILED:", error instanceof Error ? error.message : String(error))
-    process.exit(1)
-  })
-  .finally(() => db.$disconnect())
+/*
+ * Only when run as a script, never on import.
+ *
+ * `__tests__/taxonomy.test.ts` imports `TAXONOMY` to check it for slug
+ * collisions, and an unguarded `main()` meant importing the tree also tried to
+ * open a database connection and then called `process.exit(1)` when it could
+ * not — so the guard against a silent data bug could not itself be tested.
+ */
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error("FAILED:", error instanceof Error ? error.message : String(error))
+      process.exit(1)
+    })
+    .finally(() => db.$disconnect())
+}
