@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { parseDateOfBirth } from "@/lib/age"
-import { isOrientation } from "@/lib/dating"
+import { isOrientation, orientationsAreCoherent } from "@/lib/dating"
 import { isWorkField } from "@/lib/work-fields"
 
 /** Mirrors the `connection_intent` enum in prisma/schema.prisma. */
@@ -150,10 +150,33 @@ export const updateProfileSchema = z.object({
   show_orientation: z.boolean().optional(),
 
   /*
-   * The label they hold. `interested_in` is what matching reads, and the route
+   * The labels they hold. `interested_in` is what matching reads, and the route
    * derives it from this pair *only when the request does not supply it* —
    * client-supplied always wins. Two writers to one column with no precedence
    * is how a hand-picked preference gets replaced by a derived empty set.
+   *
+   * Coherence is one refine rather than three chained ones so the message names
+   * the actual rule. `.max(3)` alone would answer "prefer not to say plus gay"
+   * with "at most 3", which is true and unhelpful.
+   */
+  orientations: z
+    .array(z.string())
+    .refine(orientationsAreCoherent, {
+      message:
+        "Up to three distinct recognised orientations, and 'prefer not to say' cannot be combined with others",
+    })
+    .optional(),
+
+  /*
+   * The singular, still accepted, writing into the array above.
+   *
+   * `orientations` replaced it and every client should send the array. This
+   * stays because the failure mode of removing it is silent: an installed build
+   * would keep sending `orientation`, zod would drop the unknown key, and the
+   * save would succeed while storing nothing. A rejected request is visible; a
+   * successful one that discards a field is not.
+   *
+   * Remove once no build in the field sends it.
    */
   orientation: z
     .string()

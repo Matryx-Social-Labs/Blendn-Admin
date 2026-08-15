@@ -198,15 +198,23 @@ model profiles {
   /// held about people who had no reason to give it.
   gender        String?
   interested_in String[]
-  /// The label they hold, from `lib/dating.ts`. `interested_in` is what
-  /// matching actually reads; this is what the person calls themselves, and it
-  /// is only *sometimes* enough to derive the other. "Straight" plus
+  /// The labels they hold, from `lib/dating.ts`. `interested_in` is what
+  /// matching actually reads; these are what the person calls themselves, and
+  /// they are only *sometimes* enough to derive the other. "Straight" plus
   /// "non-binary" has no defined target set, so those combinations are asked
   /// directly and this column is stored beside an `interested_in` that did not
   /// come from it.
-  orientation   String?
+  ///
+  /// **Plural, capped at three.** People hold more than one — "queer" alongside
+  /// "bisexual", "asexual" alongside a romantic orientation — and a single
+  /// column made someone pick which part of themselves to omit. `interested_in`
+  /// derives from the **union**: adding a label must never narrow the pool,
+  /// because nobody picks a second word for themselves in order to be shown
+  /// fewer people. "Prefer not to say" is exclusive, the same rule
+  /// `intentsAreCoherent` applies to `just_here`.
+  orientations  String[]
 
-  /// Whether `orientation` is shown to people who can already see who you are.
+  /// Whether `orientations` is shown to people who can already see who you are.
   ///
   /// **Default false, and it stays false unless somebody deliberately turns it
   /// on.** Sexual orientation is special-category data under GDPR Article 9; the

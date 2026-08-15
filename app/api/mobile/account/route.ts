@@ -64,7 +64,7 @@ export async function DELETE(request: NextRequest) {
           /*
            * The matching inputs, which are the most sensitive fields on the row.
            *
-           * `gender`, `orientation` and `interested_in` are collected only from
+           * `gender`, `orientations` and `interested_in` are collected only from
            * people who ticked dating, and are returned to nobody but their
            * owner. A deleted account that keeps its owner's sexual orientation
            * is the kind of thing found in an audit rather than in a review —
@@ -76,7 +76,7 @@ export async function DELETE(request: NextRequest) {
            * below.
            */
           gender: null,
-          orientation: null,
+          orientations: [],
           // Back to the default, so a deleted-then-restored row cannot come
           // back consenting to something nobody re-consented to.
           show_orientation: false,

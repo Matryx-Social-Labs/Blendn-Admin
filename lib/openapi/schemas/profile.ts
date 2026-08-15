@@ -82,10 +82,36 @@ export const UpdateProfileRequestSchema = z
      */
     show_orientation: z.boolean().optional(),
 
-    // The label they hold. `interested_in` is what matching reads; this is only
-    // *sometimes* enough to derive it, so both are stored. Send `interested_in`
-    // explicitly and it wins over derivation. Returned to its owner always, and
-    // to others only under the two gates above.
+    /*
+     * The labels they hold. `interested_in` is what matching reads; these are
+     * only *sometimes* enough to derive it, so both are stored. Send
+     * `interested_in` explicitly and it wins over derivation. Returned to its
+     * owner always, and to others only under the two gates above.
+     *
+     * Up to three, distinct, and "prefer not to say" cannot be combined with
+     * anything — declining to answer is not a fourth thing you are.
+     * `interested_in` derives from the **union**, so adding a label never
+     * narrows who you are shown.
+     */
+    orientations: z
+      .array(
+        z.enum([
+          "straight",
+          "gay",
+          "lesbian",
+          "bisexual",
+          "pansexual",
+          "queer",
+          "asexual",
+          "prefer_not_to_say",
+        ])
+      )
+      .max(3)
+      .optional(),
+
+    // Deprecated, still accepted: writes a single label into `orientations`.
+    // Kept because dropping it would make an old client's save succeed while
+    // silently storing nothing. Send `orientations`.
     orientation: z
       .enum([
         "straight",
@@ -159,7 +185,7 @@ export const ProfileResponseSchema = z
        * client cannot tell "withheld" from "not answered".
        */
       show_orientation: z.boolean().optional(),
-      orientation: z.string().nullable().optional(),
+      orientations: z.array(z.string()).optional(),
 
       // Read these back under `profile`, with these names. The client had been
       // looking for `shareReadReceipts` and falling back to `true`, so every

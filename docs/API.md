@@ -591,7 +591,7 @@ request status.
 | `intent_default` | `dating` · `networking` · `friendship` · `just_here` | the shared subset only, via `sharedIntents` on a match card |
 | `gender` | `woman` · `man` · `non_binary` · `prefer_not_to_say` | **nobody but the owner** |
 | `interested_in` | array of the same values | **nobody but the owner** |
-| `orientation` | `straight` · `gay` · `lesbian` · `bisexual` · `pansexual` · `queer` · `asexual` · `prefer_not_to_say` | **nobody but the owner** |
+| `orientations` | array of `straight` · `gay` · `lesbian` · `bisexual` · `pansexual` · `queer` · `asexual` · `prefer_not_to_say` — **up to three**, distinct, and `prefer_not_to_say` alone | **nobody but the owner**, unless `show_orientation` *and* `maySeeIdentity` |
 | `work_field` | a slug from `GET /work-fields` | anyone who can see the profile |
 
 `intent_default` is the person-level default; the per-event override lives in
@@ -649,21 +649,44 @@ Compatibility is **mutual**: `A.gender ∈ B.interested_in && B.gender ∈
 A.interested_in`. Anything undeclared **fails closed** — no tag, person still
 listed.
 
-**`interested_in` is what matching reads; `orientation` is what someone calls
-themselves.** Both are stored, because the label only *sometimes* implies the
+**`interested_in` is what matching reads; `orientations` is what someone calls
+themselves.** Both are stored, because the labels only *sometimes* imply the
 set:
 
 | Sent | Result |
 |---|---|
 | `interested_in` explicitly | stored as given — **client always wins** |
-| `gender` + `orientation`, unambiguous pair | derived and stored |
-| `gender` + `orientation`, ambiguous pair | **column untouched** — the app asks directly |
+| `gender` + `orientations`, every label unambiguous | derived and stored |
+| `gender` + `orientations`, any label ambiguous | **column untouched** — the app asks directly |
 
 Ambiguous means what it says: "straight" plus "non-binary" has no defined target
 set, and neither do `pansexual` or `queer`, which are identities rather than
 tables. `asexual` derives to an **empty** set — a complete answer, not a missing
 one. Sending only one of the pair re-derives against the stored other, so saving
 gender and orientation in two steps ends up where sending both would.
+
+**More than one label unions.** People hold more than one — "queer" alongside
+"bisexual", "asexual" alongside a romantic orientation — so `orientations` takes
+up to three and `interested_in` is the union of what they imply. Never the
+intersection: adding a label must not narrow the pool, because nobody picks a
+second word for themselves in order to be shown fewer people. A biromantic
+asexual person is the case that settles it — `asexual` alone derives `[]`, and
+an intersection would delete a real combination down to nobody.
+
+**One unrecognised label makes the whole derivation unknown.** If any single
+label returns "ask", so does the set, rather than unioning the ones that
+resolved. A woman who picked `straight` and `queer` would otherwise derive from
+`straight` alone and be pinned to `["man"]`, having just said in her second
+label that this is not the whole picture.
+
+`prefer_not_to_say` cannot be combined with anything — the same rule
+`intentsAreCoherent` applies to `just_here`. Declining to answer is not a fourth
+thing you are.
+
+**The singular `orientation` is deprecated and still accepted**, writing one
+label into `orientations`; a singular `null` clears them. It is kept because
+dropping it fails silently — an old client's save would return 200 and store
+nothing. Send `orientations`.
 
 The precedence is the load-bearing part. Two writers to one column with no
 ordering is how a hand-picked preference gets silently replaced by a derived
@@ -758,7 +781,7 @@ Three consequences worth knowing about:
 
 `profiles.show_orientation` defaults **false** and is settable on
 `PUT /profiles/:userId`. When it is true, `GET /profiles/:userId` returns
-`orientation` — **and only to callers who also pass `maySeeIdentity`**.
+`orientations` — **and only to callers who also pass `maySeeIdentity`**.
 
 Two gates, because they answer different questions:
 
@@ -951,7 +974,7 @@ scrubbed. `goals` and `looking_for` already survived a release that way.
 is neither scrubbed nor listed as deliberately kept.
 
 Scrubbed: name, phone, age, location, bio, occupation, education, interests,
-photos, goals, looking_for, **gender, orientation, interested_in,
+photos, goals, looking_for, **gender, orientations, interested_in,
 intent_default, reveal_by_default, work_field**, plus the structured
 `user_interests` rows and every `event_match_preferences` row.
 
