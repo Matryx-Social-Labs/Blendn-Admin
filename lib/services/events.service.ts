@@ -19,6 +19,11 @@ export const eventListSelect = {
   latitude: true,
   longitude: true,
   status: true,
+  // Capacity and the door, so a card can say how full a night is and what the
+  // door expects. Neither identifies anybody; both are the organiser's own.
+  max_capacity: true,
+  current_capacity: true,
+  door_policy: true,
   is_featured: true,
   organizer: {
     select: {
@@ -118,6 +123,23 @@ export async function transformEvent(
     latitude: event.latitude,
     longitude: event.longitude,
     status: event.status,
+    /*
+     * Capacity, so a card can say how full an event is.
+     *
+     * The list payload carried neither number, so the feed could not tell a
+     * nearly-full event from an empty one — and the design's scarcity pill had
+     * to be faked from something else or dropped. Both are the organiser's own
+     * figures and neither identifies anybody.
+     */
+    maxCapacity: event.max_capacity,
+    currentCapacity: event.current_capacity,
+    /*
+     * The organiser's description of the door — "GUEST LIST ONLY" and the
+     * like. Informational: nothing here gates an RSVP, exactly as with
+     * `min_age`, and the client must not imply otherwise. `open` for almost
+     * every event, and the client draws remaining capacity instead.
+     */
+    doorPolicy: event.door_policy,
     isFeatured: event.is_featured,
     organizer: event.organizer,
     categories: event.categories.map((c) => c.category),

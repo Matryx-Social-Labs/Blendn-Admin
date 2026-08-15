@@ -81,6 +81,39 @@ export function CapacitySettingsSection({
 
         <FormField
           control={form.control}
+          name="door_policy"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Door policy</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value ?? "open"}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Anyone can turn up" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="open">Anyone can turn up</SelectItem>
+                  <SelectItem value="guest_list">Guest list only</SelectItem>
+                  <SelectItem value="members_only">Members only</SelectItem>
+                  <SelectItem value="invite_only">Invite only</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Shown on your event as a badge, so people know what to expect at
+                the door. <strong>Blendn does not enforce this</strong> — it
+                does not stop anyone joining or checking in, exactly like the
+                minimum age. Your door does.
+                <br />
+                Leave it as &ldquo;anyone can turn up&rdquo; and we show how many
+                places are left instead, once the event is nearly full.
+              </p>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
           name="max_capacity"
           render={({ field }) => (
             <FormItem>

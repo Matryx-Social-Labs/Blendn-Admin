@@ -97,6 +97,33 @@ so the same square master and the same safe area apply.
 | Container | MP4 with **faststart** |
 | Max file size | 12 MB |
 
+### The poster must be the clip's own first frame
+
+Not merely *a* still. Every surface paints the poster and mounts the player over
+it, so when the poster is a different picture the instant the clip produces its
+first frame the image changes — the screen settles and then visibly re-settles.
+Preloading removes the *wait* and does nothing about the *jump*.
+
+The dashboard takes care of this: uploading a video decodes its opening frame in
+the browser and stores it as `thumbnail_url` (`lib/video-poster.ts`). It samples
+at 0.1s rather than 0, because seeking to exactly zero returns a pre-keyframe
+frame on some encoders — black, or a smear of macroblocks.
+
+A clip added by **URL** cannot be read this way: the canvas is tainted
+cross-origin and `toBlob` throws. Those need a poster pasted by hand, and the
+form says so.
+
+### What the clients do, and why
+
+| | |
+|---|---|
+| Poster underneath, always | A buffering clip shows a photograph, never a black rectangle. It is also the floor a failed load falls back to |
+| One player at a time | A *paused* player still holds a decoder. The feed mounts only the active card; the lightbox only the visible page |
+| The hero preloads one page either side | Mounting on arrival meant open, buffer and first-frame all began after the swipe landed. Bounded to one extra decoder — a hero has one playlist, unlike a feed |
+| Posters carry `recyclingKey` | Without it `expo-image` can hand a page a recycled view still holding the previous picture |
+| No cross-fade in a pager | The slide is the transition. A fade on top of it shows two pictures at once |
+| Muted in feed and hero, sound in the lightbox | Opening the lightbox is a deliberate act; scrolling past a card is not |
+
 **Faststart is not optional.** Without the moov atom at the front the player
 must fetch the end of the file before it can show a frame, which on a feed means
 the card sits on its poster for an extra round trip on every scroll past.

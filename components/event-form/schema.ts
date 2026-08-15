@@ -47,6 +47,7 @@ export const eventFormSchema = z.object({
   status: z.enum(["draft", "published", "cancelled", "completed"]),
   visibility: z.enum(["public", "private", "unlisted"]),
   max_capacity: z.number().optional(),
+  door_policy: z.enum(["open", "guest_list", "members_only", "invite_only"]).optional(),
   /** Blank for almost every event; 13–25 when it matters. See `lib/age.ts`. */
   min_age: z.number().int().min(13).max(25).optional(),
   cover_image_url: z.string().url().optional().or(z.literal("")),

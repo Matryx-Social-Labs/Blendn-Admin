@@ -136,17 +136,17 @@ model VerificationToken {
 
 // Application models
 model profiles {
-  id          String   @id
-  phone       String?
+  id            String    @id
+  phone         String?
   // Canonical display name — always read from here, not from User.name
-  name        String?
+  name          String?
   /// Captured at signup and wrong the next day.
   ///
   /// Kept as the fallback for every row written before `date_of_birth` existed
   /// — a number cannot be turned back into a date, so those rows keep it until
   /// the person re-enters their birthday. Read through `ageFrom` in
   /// `lib/age.ts`, never directly.
-  age         Int?
+  age           Int?
   /// The fact behind the number.
   ///
   /// An 18+ gate comparing against a stored age decays silently: someone who
@@ -163,9 +163,9 @@ model profiles {
   /// here, and storing one invites timezone drift across a birthday, which is
   /// exactly the boundary the gate turns on.
   date_of_birth DateTime? @db.Date
-  location    String?
-  bio         String?
-  occupation  String?
+  location      String?
+  bio           String?
+  occupation    String?
   /// Coarse field of work — a slug from `lib/work-fields.ts`, never free text.
   ///
   /// `occupation` is "Senior Backend Engineer at Razorpay": an identity, and it
@@ -173,13 +173,13 @@ model profiles {
   /// stranger in a pseudonymous room — no employer, no seniority, eighteen
   /// buckets. Suppressed in rooms below eight people, where four attributes
   /// name one person.
-  work_field  String?
-  education   String?
-  interests   String[]
-  photos      String[]
-  goals       String[]
-  looking_for String[]
-  onboarded   Boolean  @default(false)
+  work_field    String?
+  education     String?
+  interests     String[]
+  photos        String[]
+  goals         String[]
+  looking_for   String[]
+  onboarded     Boolean   @default(false)
 
   /// What this person is generally open to. Overridable per event — people
   /// differ on a Tuesday and a Saturday — so this is the default, not the truth.
@@ -289,6 +289,22 @@ model events {
   /// which is the real door, and used to hide events from people whose stated
   /// age is below it. See `lib/age.ts`.
   min_age           Int?
+  /// How the door works, as the organiser describes it.
+  ///
+  /// **Informational, not enforced by us.** The same reasoning as `min_age`:
+  /// the organiser is the one who knows the night is guest-list, and the door
+  /// that acts on it is the venue's. Nothing here blocks an RSVP, and the app
+  /// must not imply that it does — a pill reading "GUEST LIST ONLY" is us
+  /// relaying a fact about the night, not a gate we are keeping.
+  ///
+  /// App-level gating — an approval queue, an invite list — is a genuinely
+  /// different feature with a write path, a reviewer and a notification, and
+  /// conflating the two would leave the interface asserting an enforcement
+  /// that does not exist.
+  ///
+  /// `open` is the default and draws nothing; the client falls back to a
+  /// computed "N SPOTS LEFT" from real remaining capacity.
+  door_policy       door_policy        @default(open)
   current_capacity  Int                @default(0)
   created_at        DateTime           @default(now()) @db.Timestamptz(6)
   updated_at        DateTime           @default(now()) @db.Timestamptz(6)
@@ -1455,6 +1471,15 @@ enum visibility_type {
   public
   private
   unlisted
+}
+
+/// What an attendee has to satisfy at the door. See `events.door_policy`.
+enum door_policy {
+  /// Anyone may turn up. The overwhelming majority, and draws no pill.
+  open
+  guest_list
+  members_only
+  invite_only
 }
 
 enum media_type {

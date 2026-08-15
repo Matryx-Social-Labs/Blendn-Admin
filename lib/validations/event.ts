@@ -164,6 +164,7 @@ export const eventWriteSchema = z
     status: z.enum(["draft", "published", "cancelled", "completed"]).nullish(),
     visibility: z.enum(["public", "private", "unlisted"]).nullish(),
     max_capacity: z.number().int().nullish(),
+    door_policy: z.enum(["open", "guest_list", "members_only", "invite_only"]).nullish(),
     /**
      * Minimum age to check in. Null is the normal case.
      *
