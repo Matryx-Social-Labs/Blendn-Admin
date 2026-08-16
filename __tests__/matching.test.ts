@@ -5,6 +5,7 @@ import {
   rankMatches,
   type Intent,
   type MatchCandidate,
+  type MatchViewer,
 } from "@/lib/matching"
 
 /**
@@ -189,6 +190,67 @@ describe("anonymity is enforced in the ranking, not by the caller", () => {
     const [m] = rank([candidate({ userId: "x", interestIds: ["techno"] })])
     expect(Object.keys(m)).not.toContain("score")
     expect(JSON.stringify(m)).not.toMatch(/score|rank|percent/i)
+  })
+})
+
+describe("sharedWorkField cannot become a second door onto workField", () => {
+  const designer = { ...viewer, workField: "design" }
+  const rankAs = (v: MatchViewer, candidates: MatchCandidate[], population: number) =>
+    rankMatches(v, candidates, { interestHolders: HOLDERS, population })
+
+  /* One other person in the room: far below MIN_ROOM_FOR_WORK_FIELD (8). */
+  const tiny = [candidate({ userId: "them", workField: "design" })]
+
+  it("says so in a room big enough to say it", () => {
+    const [m] = rankAs(designer, tiny, 100)
+    expect(m.workField).toBe("design")
+    expect(m.sharedWorkField).toBe(true)
+  })
+
+  it("is false below the floor, where workField is already withheld", () => {
+    /*
+     * The whole point. `workField` is suppressed here — but the viewer knows
+     * their OWN field, so a `true` would name the candidate's exactly. It would
+     * hand back the suppressed attribute through a different field name.
+     */
+    const [m] = rankAs(designer, tiny, 2)
+    expect(m.workField).toBeNull()
+    expect(m.sharedWorkField).toBe(false)
+  })
+
+  it("is false below the floor even when the fields differ", () => {
+    /*
+     * Not merely "do not confirm a match" — do not answer at all. A `false` that
+     * meant "definitely a different field" would eliminate one of nineteen per
+     * card, which in a room of eight is a real cut. Below the floor every card
+     * reads the same, which is what makes it uninformative.
+     */
+    const [m] = rankAs(designer, [candidate({ userId: "them", workField: "finance" })], 2)
+    expect(m.sharedWorkField).toBe(false)
+  })
+
+  it("is false when the viewer has not said what they do", () => {
+    // Nothing to share with. The old expression was truthy-on-null-equals-null,
+    // which would have claimed a match between two people who both said nothing.
+    const [m] = rankAs(viewer, [candidate({ userId: "them", workField: null })], 100)
+    expect(m.sharedWorkField).toBe(false)
+  })
+
+  it("is false when they have not said, and the viewer has", () => {
+    const [m] = rankAs(designer, [candidate({ userId: "them", workField: null })], 100)
+    expect(m.sharedWorkField).toBe(false)
+  })
+
+  it("uses the same floor as workField, not one of its own", () => {
+    /*
+     * Walks the boundary. Two constants that must move together are two
+     * constants that will eventually not, so this asserts the transition
+     * happens at the same population for both fields.
+     */
+    for (const population of [6, 7, 8, 9]) {
+      const [m] = rankAs(designer, tiny, population)
+      expect(m.sharedWorkField).toBe(m.workField !== null)
+    }
   })
 })
 

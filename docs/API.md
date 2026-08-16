@@ -900,6 +900,21 @@ Bengaluru, works in fintech, into techno and board games" is one specific person
 in a room of eight. Ranking still uses it there — the score never leaves the
 server, so suppressing the *attribute* costs nothing in ordering.
 
+**`sharedWorkField` is suppressed by the same floor, and must be.** The card also
+carries a boolean for "they work in your field", which the ranking has always
+computed for `WORK_FIELD_BONUS`. It is not a convenience copy of `workField` — it
+is a *stronger* statement, because the caller knows their own field, so `true`
+names the other person's exactly. Returning it below the floor while `workField`
+is null would hand the suppressed attribute back through a second door. `false`
+is weaker and not free either: it eliminates one field of nineteen per card, which
+in a room of eight is a real cut. So below the floor every card gets `false` —
+the same answer a caller with no field of their own receives, which is what makes
+it uninformative.
+
+This is the same failure shape as a `?workField=` query parameter, which is why
+the client filters the payload it already holds instead: a feature meant to *use*
+the data must not become the thing that leaks it.
+
 ### Dating is 18+
 
 Enforced on **both** write paths — `PUT /profiles/:userId` and

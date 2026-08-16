@@ -162,6 +162,28 @@ export interface Match {
    */
   workField: string | null
   /**
+   * Whether they work in the **viewer's** field.
+   *
+   * The ranking has always computed this — `WORK_FIELD_BONUS` below — and never
+   * returned it, so the card's "You both work in Design" line had no server
+   * field behind it and could not fire.
+   *
+   * ## Suppressed by the same floor as `workField`, and it must be
+   *
+   * This is not a convenience copy of the line above; it is a *stronger*
+   * statement. The viewer knows their own field, so `true` names the
+   * candidate's field exactly. Returning it in a small room while `workField`
+   * is null would hand back the attribute the floor exists to withhold, through
+   * a second door — the same shape as the `?workField=` filter the client-side
+   * filtering exists to avoid.
+   *
+   * `false` is weaker but not free either: it eliminates one field of nineteen
+   * for every card, and in a room of eight that is a real cut. So the honest
+   * answer below the floor is `false` for everyone — the same thing a viewer
+   * with no field of their own gets, which is what makes it uninformative.
+   */
+  sharedWorkField: boolean
+  /**
    * Whole years.
    *
    * Unlike `workField` this is **not** suppressed in a small room. It is
@@ -375,6 +397,13 @@ export function rankMatches(
     // Suppressed, not scrubbed from the ranking: it still moved the order
     // above, because the *score* is never shown and the attribute is.
     workField: roomIsBigEnough ? candidate.workField : null,
+    /*
+     * Same floor, and see the field's own note for why that is not caution.
+     * The viewer knows their own field, so `true` names the candidate's — this
+     * would be a second door onto the attribute the line above just closed.
+     */
+    sharedWorkField:
+      roomIsBigEnough && !!viewer.workField && candidate.workField === viewer.workField,
     age: candidate.age ?? null,
     insideNow: candidate.insideNow,
   }))
