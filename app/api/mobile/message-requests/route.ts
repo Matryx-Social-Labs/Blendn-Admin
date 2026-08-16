@@ -19,7 +19,22 @@ import {
 const createRequestSchema = z.object({
   // User ids are cuid, not uuid — do not tighten this to z.string().uuid().
   recipientId: z.string().min(1),
-  message: z.string().trim().min(1).max(500).optional(),
+  /*
+   * Required, not optional.
+   *
+   * A request with no message is indistinguishable from a like with a reveal
+   * stapled to it -- and the two are now separate actions with separate
+   * meanings. A like says "I would talk to you", privately and symmetrically. A
+   * request says "here is who I am and why", which is worth the asymmetry only
+   * if the "why" is actually there.
+   *
+   * It also makes the recipient's decision possible. "Someone wants to connect"
+   * is a coin flip; "we both work in design and I liked your take on X" is
+   * something you can answer.
+   *
+   * Trimmed before the length check, so whitespace is not a message.
+   */
+  message: z.string().trim().min(1).max(500),
 })
 
 // POST: Create a message request
