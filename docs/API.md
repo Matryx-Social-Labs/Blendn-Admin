@@ -893,6 +893,54 @@ was collected as free text: "Software" and "software engineering" were two
 buckets that could never match, and the fix cost two PRs. A validator that only
 checked `z.string()` would repeat it exactly.
 
+### Broadcasting into an event's room
+
+`POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`:
+
+| kind | who | media |
+|---|---|---|
+| `announcement` | anyone with `canOperate` — the organising org, **or the venue owner** | no |
+| `sponsored` | `canOperate` **and** an organisation with `may_sponsor` | **yes** |
+| `system` | `app_admin` only — it speaks as Blend'n | no |
+
+**This route used to compare two user ids.** `event.organizer_id !== caller.id`,
+which is exactly the mistake `lib/rbac.ts` exists to end, and it failed in three
+directions at once: an `app_admin` could not announce, a venue owner could not
+announce for an event in their own building, and a colleague at the organising
+org was refused for not being the row's creator. `organizer_id` still records who
+*created* an event — a different question, still useful for audit.
+
+**Why `sponsored` needs its own flag.** It is a claim that somebody *paid*. If
+everyone who can announce can also mark a message sponsored, the label stops
+meaning anything and becomes a styling choice — an organiser could dress an
+advertisement as an announcement or the reverse, and a reader has no way to tell
+which they are looking at. `organisations.may_sponsor` is off for every row and
+granted by an admin, because the word is only worth having if it is scarce.
+
+It is an **organisation** flag rather than a role: the permission belongs to the
+company with the commercial agreement, not to whichever of its staff is logged
+in.
+
+**Why `system` is admin-only.** It renders as Blend'n. An organiser who could
+send one could issue a safety notice, or a "verified by Blend'n" claim, in the
+platform's voice.
+
+**Media rides on `sponsored` alone, and that is a safety rule.** The event room
+is pseudonymous, and a photograph is an identity — of whoever is *in* it, who is
+not always the person posting. Attendee media is not built at all. An
+announcement is a host addressing that same room, so it inherits the rule.
+Sponsored artwork depicts nobody in the room, which is what makes it the
+exception.
+
+**One refusal message for all three.** "Your organisation is not approved for
+sponsored messages" tells an attacker probing the API which flag to go after, and
+tells an organiser about a capability they cannot self-serve anyway.
+
+**The role is read from the database, not the token.** The mobile JWT carries
+`{ userId, email }` and no role, which is the right call: with a 30-day refresh
+cycle a role baked into a token outlives the decision that changed it, so an
+organiser demoted this morning would keep broadcasting until it expired.
+
 ### Expertise — the specialism inside the field
 
 `GET /api/mobile/work-fields` also returns `expertiseByField`, keyed by the same

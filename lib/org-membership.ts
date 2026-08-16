@@ -29,3 +29,28 @@ export async function actorFor(user: {
 
   return { id: user.id, role: user.role, orgIds: memberships.map((m) => m.org_id) }
 }
+
+/**
+ * Whether any organisation this actor belongs to may sell placement.
+ *
+ * A separate query rather than a field on `PermissionActor`, because the flag
+ * is only ever needed on the one route that writes a sponsored message —
+ * loading it for every permission check would put a join on the hot path of
+ * every event read to answer a question almost nobody asks.
+ *
+ * `app_admin` short-circuits to true and never queries: `actorFor` gives them
+ * an empty `orgIds`, so the `some` below would be vacuously false and an admin
+ * would be refused their own platform's placement.
+ */
+export async function maySponsorFor(actor: {
+  role: user_role
+  orgIds: string[]
+}): Promise<boolean> {
+  if (actor.role === "app_admin") return true
+  if (actor.orgIds.length === 0) return false
+
+  const count = await db.organisations.count({
+    where: { id: { in: actor.orgIds }, may_sponsor: true },
+  })
+  return count > 0
+}
