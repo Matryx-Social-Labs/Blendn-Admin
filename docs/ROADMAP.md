@@ -556,6 +556,39 @@ There is none, so there is no revenue to attribute.
 
 ### 0.75.0
 
+- **The roster says whether you share a field, behind the same floor** (#255).
+  `rankMatches` has computed "do these two work in the same field" since
+  `WORK_FIELD_BONUS` shipped and never returned it, so the app's SAME FIELD card
+  box — *"You both work in Design"* — had nothing behind it and could not fire.
+
+  **The suppression is the whole review.** `workField` is already null below
+  `MIN_ROOM_FOR_WORK_FIELD` (8). `sharedWorkField` is not a convenience copy of
+  it — it is a *stronger* statement, because the caller knows their own field, so
+  `true` names the other person's exactly. Returning it below the floor while
+  `workField` is null would hand the suppressed attribute back through a second
+  door.
+
+  `false` is not free either: it eliminates one field of nineteen per card, which
+  in a room of eight is a real cut. So below the floor **every card reads
+  `false`** — the same answer a caller with no field of their own receives, which
+  is what makes it uninformative rather than merely unconfirmed.
+
+  Same failure shape as a `?workField=` query parameter, which is why the client
+  filters the payload it already holds: a feature meant to *use* the data must
+  not become the thing that leaks it.
+
+  Six tests, one of which walks population 6→9 and asserts the two fields flip at
+  the same number — two constants that must move together are two constants that
+  will eventually not.
+
+  **The client half found a live bug** (Blendn#203). `age` and `sharedWorkField`
+  were declared on the app's `AttendeeProfile`, forwarded to the card, branched
+  on by `gridCardBox` and rendered in the title — and never read off the payload,
+  so the card could never say *"Priya, 29"* and the box could never fire. The
+  load-more path was worse: it mapped five of nine fields and *replaces* the
+  list, so asking to see more of the room stripped the occupation line off every
+  card that had one.
+
 - **A chat group says whether you are standing in it** (#248). The app's Banter
   screen lifts the rooms you are checked into out of the inbox and into a rail
   of their own — they are a different object from the rest: temporary,
