@@ -119,6 +119,14 @@ export interface MatchCandidate {
    * and no card has ever stated anyone's gender.
    */
   dating: DatingProfile
+  /**
+   * Whole years, already derived. Never a birth date.
+   *
+   * Optional on the way in because a profile may carry neither a birth date nor
+   * a stored age, and required on the way out as `number | null` — so every
+   * caller handles "not known" explicitly rather than by forgetting the field.
+   */
+  age?: number | null
   /** Currently checked in, as opposed to having attended earlier. */
   insideNow: boolean
   checkedInAt: Date
@@ -153,6 +161,15 @@ export interface Match {
    * only needs theirs.
    */
   workField: string | null
+  /**
+   * Whole years.
+   *
+   * Unlike `workField` this is **not** suppressed in a small room. It is
+   * already public — `publicProfileFields` returns it to any authenticated
+   * caller — so withholding it here would only make the card disagree with the
+   * profile one tap away, without withholding anything.
+   */
+  age: number | null
   insideNow: boolean
 }
 
@@ -358,6 +375,7 @@ export function rankMatches(
     // Suppressed, not scrubbed from the ranking: it still moved the order
     // above, because the *score* is never shown and the attribute is.
     workField: roomIsBigEnough ? candidate.workField : null,
+    age: candidate.age ?? null,
     insideNow: candidate.insideNow,
   }))
 }

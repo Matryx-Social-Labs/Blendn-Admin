@@ -8,6 +8,7 @@ import {
   type MatchCandidate,
 } from "@/lib/matching"
 import type { Gender } from "@/lib/dating"
+import { ageFrom } from "@/lib/age"
 import { workFieldLabel } from "@/lib/work-fields"
 
 /**
@@ -34,6 +35,16 @@ export interface MatchCard {
    * person, and null for anyone who has not said.
    */
   workField: string | null
+  /**
+   * Whole years, derived. Never a birth date.
+   *
+   * Already public: `publicProfileFields` on `/profiles/[userId]` returns it to
+   * any authenticated caller, outside the identity gate. The roster simply did
+   * not carry it, so a card could not say what the profile one tap away said
+   * anyway -- and on a roster where most people share no interests, one more
+   * true fact is the difference between a card you can act on and a name.
+   */
+  age: number | null
   insideNow: boolean
   /** Whether *you* have liked them. Never whether they have liked you. */
   youLiked: boolean
@@ -89,6 +100,16 @@ export async function matchesForEvent(
                 intent_default: true,
                 photos: true,
                 work_field: true,
+                /*
+                 * For the derived age on the card.
+                 *
+                 * `date_of_birth` and `age` both, because `ageFrom` prefers the
+                 * birth date and falls back to the stored number -- and neither
+                 * is returned. Only the derived years reach a client, so the
+                 * card can say "29" without anybody learning a birthday.
+                 */
+                date_of_birth: true,
+                age: true,
                 // Read to decide whether `dating` may appear as a shared
                 // intent, and returned to nobody: `MatchCard` has no field for
                 // either, and a card has never stated anyone's gender.
@@ -215,6 +236,7 @@ export async function matchesForEvent(
       c.user.profile?.intent_default ?? []
     ),
     workField: c.user.profile?.work_field ?? null,
+    age: ageFrom(c.user.profile),
     dating: {
       gender: (c.user.profile?.gender ?? null) as Gender | null,
       interestedIn: (c.user.profile?.interested_in ?? []) as Gender[],
@@ -272,6 +294,7 @@ export async function matchesForEvent(
     // `rankMatches` has already applied the small-room floor; this only turns
     // the surviving slug into something a person can read.
     workField: workFieldLabel(m.workField),
+    age: m.age,
     insideNow: m.insideNow,
     youLiked: liked.has(m.userId),
   }))
