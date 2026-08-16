@@ -1029,7 +1029,40 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | GET | `/checkins/active` | Get user's active check-ins |
 | POST | `/notifications/token` | Register push token |
 | DELETE | `/notifications/token` | Remove push token |
+| GET | `/notifications` | The notifications centre, newest first |
+| POST | `/notifications/read` | Mark notifications read |
+| DELETE | `/notifications` | Clear the notifications centre |
 | DELETE | `/account` | Delete your own account |
+
+### The notifications centre
+
+The bell in The Pulse's top bar. `GET /notifications` returns the caller's own
+rows, newest first, with the unread count alongside so the bell costs one
+request rather than two.
+
+**Cursor, not page.** The list grows at the head — rows arrive while somebody is
+reading it — and offset pagination on a list like that silently repeats items,
+because page 2 shifts by however many landed since page 1. Same reason chat
+messages use a cursor.
+
+**Every row is written by `sendPushNotification`, before the token lookup.** A
+push fails to arrive for three reasons that have nothing to do with the
+notification being real: notifications turned off in settings, no device
+registered yet, and an expired token. All three return early from the sender, so
+recording after that point would make this a log of successful *deliveries* —
+the opposite of somewhere you look for what you **missed**. Bulk sends record
+every recipient, not only the ones with a registered device.
+
+**Bodies are stored as sent, and must stay that way.** The reveal gate already
+applies to push titles (`maySeeIdentity`), so a pseudonymous match is
+pseudonymous here too. This table must never be given a richer copy of the same
+event — that would route around a gate it took three PRs to close.
+
+`POST /notifications/read` with no `ids` marks all of the caller's. The caller's
+`user_id` stays in the filter even when ids are named, so a uuid alone cannot
+reach somebody else's row; already-read rows are skipped rather than re-stamped,
+because `read_at` answers "when did they see this" and a bell tapped twice must
+not move the answer.
 
 ### DELETE /account
 

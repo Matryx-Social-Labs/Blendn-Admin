@@ -110,8 +110,69 @@ async function getBulkUserPushTokens(userIds: string[]): Promise<Map<string, str
 /**
  * Send a push notification to a single user (all their devices)
  */
+/**
+ * Record one line in the notifications centre.
+ *
+ * ## Before the token lookup, deliberately
+ *
+ * A push does not arrive for three reasons that have nothing to do with the
+ * notification being real: the person turned notifications off in settings,
+ * they have not registered a device yet, and their token expired. All three
+ * return early from `sendPushNotification`. Writing the row after that point
+ * would mean the centre only holds what already reached the phone — which is
+ * the exact opposite of what a centre is for. It is where you look for what you
+ * **missed**, and "my phone was off" is the case it has to cover.
+ *
+ * ## Never throws
+ *
+ * Callers are eleven `notify*` helpers, and every one of them is
+ * fire-and-forget: the send is not allowed to fail the request that triggered
+ * it. A failed insert is logged and swallowed for the same reason — nobody
+ * should lose a check-in because the notifications table was busy.
+ *
+ * The `kind` cast is safe by construction and guarded by a test:
+ * `NotificationData["type"]` and the `notification_kind` enum are the same
+ * eleven strings, and `__tests__/notifications.test.ts` fails if they diverge.
+ */
+async function recordNotification(
+  userId: string,
+  title: string,
+  body: string,
+  data?: NotificationData
+): Promise<void> {
+  /*
+   * No `data.type` means no row, rather than a row under a guessed kind.
+   *
+   * Everything routed through the `notify*` helpers sets it. A caller that does
+   * not is sending something the centre has no category for, and inventing one
+   * would put a mislabelled line in somebody's feed forever.
+   */
+  if (!data?.type) {
+    logger.debug("Notification not recorded: no type on payload", { userId })
+    return
+  }
+
+  try {
+    await db.notifications.create({
+      data: {
+        user_id: userId,
+        kind: data.type as never,
+        title,
+        body,
+        data: data as object,
+      },
+    })
+  } catch (error) {
+    logger.warn("Failed to record notification", { userId, error: String(error) })
+  }
+}
+
 export async function sendPushNotification(options: SendNotificationOptions): Promise<boolean> {
   const { userId, title, body, data, badge, sound = "default" } = options
+
+  // First, and outside the try: the centre records what was *sent*, not what
+  // was successfully delivered. See `recordNotification`.
+  await recordNotification(userId, title, body, data)
 
   try {
     const pushTokens = await getUserPushTokens(userId)
@@ -194,6 +255,39 @@ export async function sendBulkPushNotifications(
   options: SendBulkNotificationOptions
 ): Promise<{ sent: number; failed: number }> {
   const { userIds, title, body, data, badge, sound = "default", channelId = "default" } = options
+
+  /*
+   * Every recipient gets a row, not just the ones with a device.
+   *
+   * `getBulkUserPushTokens` returns a map keyed only by users who have a token
+   * *and* have not turned notifications off — so recording inside the loop
+   * below would silently drop everybody else. An organiser's announcement is
+   * precisely the thing somebody opens the bell to find, and "I had no device
+   * registered that evening" is not a reason to have never been told.
+   *
+   * `createMany` rather than a create per user: an announcement to a full event
+   * is one statement instead of several hundred round trips. Swallowed for the
+   * same reason the single sender's is — a failed insert must not fail the
+   * announcement.
+   */
+  if (data?.type && userIds.length > 0) {
+    await db.notifications
+      .createMany({
+        data: userIds.map((userId) => ({
+          user_id: userId,
+          kind: data.type as never,
+          title,
+          body,
+          data: data as object,
+        })),
+      })
+      .catch((error) => {
+        logger.warn("Failed to record bulk notifications", {
+          count: userIds.length,
+          error: String(error),
+        })
+      })
+  }
 
   const tokenMap = await getBulkUserPushTokens(userIds)
   const messages: ExpoPushMessage[] = []
