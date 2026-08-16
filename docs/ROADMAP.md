@@ -554,6 +554,38 @@ There is none, so there is no revenue to attribute.
 
 ## Done
 
+### 0.75.0
+
+- **An event can say what it offers** (#244). The Scene's frame draws two
+  amenity tiles and nothing populated them. Vocabulary, join table, organiser's
+  picker, detail payload — fourteen amenities seeded in the migration itself.
+
+  **The venue layer is deliberately not built, and that was the plan's one open
+  question.** An *unowned* venue has no list to suggest from, gating is on
+  ownership rather than confirmation (D8), and almost no venue is owned today —
+  so it would have been a permission system and a picker returning an empty
+  list for essentially every venue in the database. Nothing is foreclosed: the
+  event stores its own rows either way, so suggestions land later as defaults
+  without changing what any past event claimed.
+
+  **The backfill is not built either, which closes the plan's own critical
+  gap.** It had no schedule, no retry and no monitoring, and the plan said it
+  "should not ship as one". The reverse-geocode stays best-effort and a null
+  renders the city, exactly as today; an unmonitored job would have *added* the
+  one silent failure path.
+
+  `RESTRICT` on the amenity foreign key, because deleting an amenity that
+  events reference would rewrite what those events said they offered — for
+  events that already happened. Withdrawal is `is_active = false`.
+
+  Detail endpoint only (D11) — the cards draw none, and `/events` is the
+  hottest endpoint in the product. Ordered by `sort_order`, or "Accessible
+  Entrance" leads every picker in the app. Nothing ticked by default, because
+  people turn up expecting these.
+
+  Verified on staging: the migration ran and all fourteen come back from
+  `GET /amenities`.
+
 ### 0.74.0
 
 - **The notifications centre has a backend.** A `notifications` table, a row
