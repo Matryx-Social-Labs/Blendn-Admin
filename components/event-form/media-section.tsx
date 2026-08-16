@@ -37,6 +37,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react"
+import { DevicePreview } from "@/components/event-form/device-preview"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
 
@@ -164,14 +165,23 @@ function SortableMediaItem({
                 </div>
               )}
               {previewUrl && mediaType === "image" && (
-                <Image
-                  src={previewUrl}
-                  alt={`Media ${index + 1}`}
-                  width={800}
-                  height={160}
-                  unoptimized
-                  className="max-h-40 w-full rounded-md border object-cover"
-                />
+                <>
+                  <Image
+                    src={previewUrl}
+                    alt={`Media ${index + 1}`}
+                    width={800}
+                    height={160}
+                    unoptimized
+                    className="max-h-40 w-full rounded-md border object-cover"
+                  />
+                  {/*
+                    The same crops as the cover, because the feed cycles this
+                    whole set on an active card — a gallery image is not a
+                    detail-page extra, it is another thing that has to survive
+                    the featured slot.
+                  */}
+                  <DevicePreview src={previewUrl} />
+                </>
               )}
               {/*
                 Video got no preview at all, so the only way to find out whether
