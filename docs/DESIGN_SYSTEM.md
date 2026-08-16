@@ -190,3 +190,52 @@ Chatrooms from `venue_owner` while `canModerateChat` granted venue owners
 moderation over their own events and the messaging page's `canManageEvent` gate
 agreed. A whole role was locked out of a screen the authorization layer had
 always been willing to serve. `__tests__/dashboard-view.test.ts` guards this.
+
+## The brand gradient and the interface gradient are different, on purpose
+
+Two gradients exist and they are not a drift. Decided 2026-08-16 (app #181,
+#182).
+
+| | | |
+|---|---|---|
+| **The mark** | `#F04C16` → `#8F55A6` | orange to purple |
+| **The interface** | `#FF906D` → `#FF6D8D` | coral to pink — `EMBER_GRADIENT` |
+
+**The mark's gradient cannot carry text.** Measured, dark text and white text
+against each end:
+
+| | dark text | white text |
+|---|---|---|
+| mark `#F04C16` → `#8F55A6` | 3.69 → **2.58** | 3.65 → 5.23 |
+| UI `#FF906D` → `#FF6D8D` | **6.07 → 5.02** | 2.22 → 2.68 |
+
+WCAG AA wants 4.5:1. The mark's gradient starts bright and ends dark, so dark
+text drowns at one end and white text drowns at the other — **no single label
+colour is readable across its whole sweep**. The interface gradient holds dark
+text above the floor the entire way, which is why every gradient button in this
+product uses it.
+
+So: **the mark is the mark, the interface is the interface.** The logo keeps its
+own gradient wherever the logo is drawn as artwork. Anything with words on it
+uses `EMBER_GRADIENT`. Neither is "wrong", and neither should be changed to
+match the other.
+
+## The monogram has two cuts
+
+`monogram-white.png` is the drawing. `monogram-white-bold.png` is the same
+artwork with its strokes dilated from 4.86% to 6.40% of the mark's width, and
+exists for **small sizes only** — at 32pt in the tab bar the thin cut draws a
+1.35pt line against roughly 2pt for every other glyph in the row. The splash
+and the intro keep the original; at 118pt the thin cut is the better drawing.
+
+A genuinely **filled** variant was attempted mechanically, by flood-filling the
+regions the strokes enclose. It destroys the mark — the B becomes a blob and
+stops being a letterform. A filled cut is still worth having and still needs a
+designer to draw it.
+
+**The mark is optically centred, not box centred.** Its bounding box is exact,
+8pt of padding on all four sides, and it still reads as sitting left: the ink is
+stacked solid bars on the left and tapers to a point on the right, so its centre
+of mass is 9.2% left of the canvas centre. Box-centred and mass-centred disagree
+by 9%; the tab bar uses the midpoint, a 5% shift. Anything that draws this mark
+inside a circle needs the same correction.
