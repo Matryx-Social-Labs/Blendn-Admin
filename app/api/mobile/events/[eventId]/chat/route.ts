@@ -15,7 +15,7 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
-import { chatWindowState, chatClosedMessage } from "@/lib/chat-window"
+import { chatWindowState, chatClosedMessage, mayWriteToRoom } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
@@ -128,16 +128,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })
     }
 
-    const membershipFresh = membership
-      ? membership
-      : await db.chat_group_members.findUnique({
-          where: {
-            chat_group_id_user_id: {
-              chat_group_id: chatGroup.id,
-              user_id: authUser.userId,
-            },
-          },
-        })
+    /*
+     * The membership re-read that used to sit here is gone with the history
+     * clamp that was its only consumer — one fewer round trip on the hottest
+     * read in the room.
+     */
 
     // Build anonymous name map from chat_group_members
     const allMembers = await db.chat_group_members.findMany({
@@ -169,9 +164,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ],
     }
 
-    if (membershipFresh?.last_allowed_at) {
-      where.created_at = { lte: membershipFresh.last_allowed_at }
-    }
+    /*
+     * History is NOT truncated at check-out.
+     *
+     * This used to clamp `created_at <= last_allowed_at`, so once you checked
+     * out you could only read up to the moment you left. Combined with the write
+     * gate it made the 24-hour window doubly dead: the room reopened after the
+     * event, people talked, and everybody it was built for saw an empty room and
+     * could not have answered anyway.
+     *
+     * Same rule as writing, and the same reason — see `mayWriteToRoom`.
+     * Membership is an attendance record. You were in that room; the
+     * conversation is the room's, not a souvenir of your visit.
+     */
 
     if (before) {
       where.created_at = { ...(where.created_at || {}), lt: new Date(before) }
@@ -424,12 +429,40 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           },
         })
 
-    if (membershipFresh?.last_allowed_at) {
-      return errorResponse(
-        "You must be checked in to send messages",
-        403,
-        ErrorCode.NOT_CHECKED_IN
-      )
+    /*
+     * The same rule as the other write path — see `mayWriteToRoom`.
+     *
+     * What was here denied on `last_allowed_at` being set *at all*, not merely
+     * being in the past, so one check-out silenced a member permanently even
+     * inside the 24-hour feedback window the room exists for.
+     *
+     * Joining still requires presence (the auto-join above refuses anyone not
+     * currently `checked_in` — you have to be there to get in). Continuing to
+     * write does not: leaving does not unsee what you saw.
+     */
+    if (membershipFresh) {
+      const denial = mayWriteToRoom(membershipFresh, chatGroup.event, chatGroup)
+      if (denial) {
+        if (denial.reason === "banned") {
+          return errorResponse(
+            "You have been banned from this chat.",
+            403,
+            ErrorCode.USER_BANNED
+          )
+        }
+        if (denial.reason === "muted") {
+          return errorResponse(
+            "You are muted in this chat.",
+            403,
+            ErrorCode.USER_MUTED
+          )
+        }
+        return errorResponse(
+          chatClosedMessage(denial.reason),
+          403,
+          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+        )
+      }
     }
 
     // If replying, verify parent message exists
