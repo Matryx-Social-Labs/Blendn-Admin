@@ -180,6 +180,22 @@ model profiles {
   education     String?
   interests     String[]
   photos        String[]
+  /// A deliberately tiny copy of `photos[0]`, for viewers who have not earned
+  /// the real one.
+  ///
+  /// The matched-but-unrevealed state is "pseudonyms + blurred photos" — see the
+  /// diagram on `private_conversations`. This is the blurred half.
+  ///
+  /// **A derivative, never a filter.** Sending the real URL and blurring it in
+  /// the app is undone by a proxy, a cache dump or devtools in one step; this
+  /// repo shipped exactly that bug before, and `MatchScreen.tsx` still carries
+  /// the comment "the anonymity was one tap deep". `createBlurDerivative` makes
+  /// a 40px copy client-side and uploads it as its own object, so the detail is
+  /// not there to recover.
+  ///
+  /// One, not an array. An unrevealed profile shows a single still — the main
+  /// photo they chose — and nothing else.
+  blur_photo    String?
   goals         String[]
   looking_for   String[]
   onboarded     Boolean   @default(false)

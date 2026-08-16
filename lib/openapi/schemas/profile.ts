@@ -43,6 +43,15 @@ export const UpdateProfileRequestSchema = z
     education: z.string().max(100).optional().nullable(),
     interests: z.array(z.string()).optional(),
     photos: z.array(z.string().url()).max(6).optional(),
+    blur_photo: z
+      .string()
+      .url()
+      .optional()
+      .nullable()
+      .openapi({
+        description:
+          "A 40px derivative of the primary photo, generated client-side by `createBlurDerivative`. Served ONLY to viewers who have not earned the real photos — the matched-but-unrevealed state. Never send the real URL with a blur applied in the app: the original then sits in the payload and the device cache, where the blur is undone in one step.",
+      }),
     goals: z.array(z.string()).optional(),
     looking_for: z.array(z.string()).optional(),
     onboarded: z.boolean().optional(),
