@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import { format } from "date-fns"
 import { toZonedTime, fromZonedTime } from "date-fns-tz"
+import type { AmenityOption } from "@/components/event-form/amenities-section"
 import { EventForm, type EventFormValues } from "@/components/event-form"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -43,6 +44,7 @@ interface EventEditorData {
   check_in_radius?: number | null
   geofence?: unknown
   category_ids?: string[]
+  amenity_ids?: string[]
   primary_category_id?: string | null
   house_rules?: string | null
   cancellation_policy?: string | null
@@ -61,6 +63,7 @@ interface EventEditorData {
 
 interface EventEditorProps {
   categories: CategoryOption[]
+  amenities?: AmenityOption[]
   initialEvent?: EventEditorData
 }
 
@@ -106,7 +109,7 @@ const parseToFaqArray = (value: unknown): Array<{ question: string; answer: stri
   return []
 }
 
-export function EventEditor({ categories, initialEvent }: EventEditorProps) {
+export function EventEditor({ categories, amenities = [], initialEvent }: EventEditorProps) {
   const router = useRouter()
   const [isSaving, setIsSaving] = useState(false)
   const isEditing = Boolean(initialEvent?.id)
@@ -141,6 +144,7 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
       check_in_radius: initialEvent.check_in_radius ?? 100,
       geofence: initialEvent.geofence ?? undefined,
       category_ids: initialEvent.category_ids ?? [],
+      amenity_ids: initialEvent.amenity_ids ?? [],
       primary_category_id: initialEvent.primary_category_id ?? undefined,
       house_rules: initialEvent.house_rules ?? undefined,
       cancellation_policy: initialEvent.cancellation_policy ?? undefined,
@@ -262,6 +266,7 @@ export function EventEditor({ categories, initialEvent }: EventEditorProps) {
         isSubmitting={isSaving}
         isEditing={isEditing}
         categories={categories}
+        amenities={amenities}
       />
     </div>
   )

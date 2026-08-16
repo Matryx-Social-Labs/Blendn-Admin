@@ -193,6 +193,14 @@ export const eventWriteSchema = z
     covid_guidelines: z.string().max(5000).nullish(),
     category_ids: z.array(z.string().uuid()).max(20).nullish(),
     primary_category_id: z.string().uuid().nullish(),
+    /*
+     * `uuid()` matters here beyond tidiness: these ids go straight into a
+     * `connect`, and a non-uuid would surface as a Prisma error rather than a
+     * 400 with a field name on it. Capped at 20 for the same reason the
+     * category list is — the picker is a curated vocabulary of about a dozen,
+     * so anything near the cap is a client bug, not a thorough organiser.
+     */
+    amenity_ids: z.array(z.string().uuid()).max(20).nullish(),
     media_items: z.array(z.record(z.string(), z.unknown())).max(50).nullish(),
     geofence: z.unknown().nullish(),
   })

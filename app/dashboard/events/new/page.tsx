@@ -25,5 +25,16 @@ export default async function NewEventPage() {
     },
   })
 
-  return <EventEditor categories={categories} />
+  /*
+   * Active only, in the vocabulary's own order. A retired amenity still
+   * resolves on events that already reference it — the foreign key is
+   * `Restrict` — but it is no longer offered for new ones.
+   */
+  const amenities = await db.amenities.findMany({
+    where: { is_active: true },
+    select: { id: true, name: true, subtitle: true },
+    orderBy: { sort_order: "asc" },
+  })
+
+  return <EventEditor categories={categories} amenities={amenities} />
 }

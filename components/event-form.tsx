@@ -11,6 +11,7 @@ import { eventFormSchema, type EventFormValues } from "@/components/event-form/s
 import { BasicInfoSection } from "@/components/event-form/basic-info-section"
 import { LocationSection } from "@/components/event-form/location-section"
 import { ScheduleSection } from "@/components/event-form/schedule-section"
+import { AmenitiesSection, type AmenityOption } from "@/components/event-form/amenities-section"
 import { CapacitySettingsSection } from "@/components/event-form/capacity-settings-section"
 import { CoverImageSection } from "@/components/event-form/cover-image-section"
 import { MediaSection } from "@/components/event-form/media-section"
@@ -29,6 +30,8 @@ interface EventFormProps {
   isSubmitting?: boolean
   isEditing?: boolean
   categories?: Array<{ id: string; name: string }>
+  /** The seeded amenity vocabulary. Empty is a valid state: no picker drawn. */
+  amenities?: AmenityOption[]
 }
 
 export function EventForm({
@@ -38,6 +41,7 @@ export function EventForm({
   isSubmitting = false,
   isEditing = false,
   categories = [],
+  amenities = [],
 }: EventFormProps) {
   const resolvedDefaultValues = useMemo(
     () => ({
@@ -47,6 +51,7 @@ export function EventForm({
       is_featured: false,
       check_in_radius: 100,
       category_ids: [],
+      amenity_ids: [],
       primary_category_id: undefined,
       media_items: [],
       faq: [],
@@ -162,6 +167,8 @@ export function EventForm({
         <ScheduleSection form={form} />
 
         <CapacitySettingsSection form={form} isEditing={isEditing} />
+
+        <AmenitiesSection form={form} amenities={amenities} />
 
         <CoverImageSection
           form={form}

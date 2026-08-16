@@ -133,6 +133,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       accessibility_info,
       covid_guidelines,
       category_ids,
+      amenity_ids,
       primary_category_id,
       media_items,
       geofence,
@@ -262,6 +263,23 @@ export async function PATCH(req: Request, { params }: RouteContext) {
                       },
                       primary: categoryId === primary_category_id,
                       created_at: new Date(Date.now() + index),
+                    }))
+                  : [],
+            }
+          : undefined,
+        /*
+         * `deleteMany` then recreate, exactly as categories do: the payload is
+         * the full set the organiser ticked, so a diff would have to
+         * distinguish "unticked" from "not sent" — and `undefined` already
+         * means "not sent", which is what leaves an event's amenities alone.
+         */
+        amenities: Array.isArray(amenity_ids)
+          ? {
+              deleteMany: {},
+              create:
+                amenity_ids.length > 0
+                  ? amenity_ids.map((amenityId: string) => ({
+                      amenity: { connect: { id: amenityId } },
                     }))
                   : [],
             }

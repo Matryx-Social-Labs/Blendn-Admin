@@ -446,6 +446,45 @@ registry.registerPath({
   },
 })
 
+/*
+ * The amenity vocabulary — what an event can say it offers.
+ *
+ * Public, like `/categories`: a fixed vocabulary carrying nothing about any
+ * person or event. Requiring a token would only mean the organiser's picker
+ * cannot be drawn until after sign-in, for no gain.
+ */
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/amenities",
+  tags: ["Mobile Events"],
+  summary: "List the amenity vocabulary",
+  description:
+    "Active amenities only, in the vocabulary's own `sort_order` — alphabetical would put \"Accessible Entrance\" at the top of every picker and card. A retired amenity (`is_active = false`) still resolves on events that reference it; it simply stops being offered for new ones, because deleting one would rewrite what past events said they offered.",
+  responses: {
+    200: {
+      description: "Amenities",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              amenities: z.array(
+                z.object({
+                  id: z.string().uuid(),
+                  name: z.string(),
+                  slug: z.string(),
+                  subtitle: z.string().nullable(),
+                  icon: z.string().nullable(),
+                })
+              ),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // === Active Checkins ===
 
 registry.registerPath({

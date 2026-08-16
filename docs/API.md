@@ -1025,6 +1025,7 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/categories` | List all categories |
+| GET | `/amenities` | The amenity vocabulary — what an event can say it offers |
 | GET | `/work-fields` | The eighteen coarse fields of work, as `{ slug, label }` |
 | GET | `/checkins/active` | Get user's active check-ins |
 | POST | `/notifications/token` | Register push token |
@@ -1033,6 +1034,31 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | POST | `/notifications/read` | Mark notifications read |
 | DELETE | `/notifications` | Clear the notifications centre |
 | DELETE | `/account` | Delete your own account |
+
+### Amenities
+
+`GET /amenities` returns the seeded vocabulary; `GET /events/:id` returns what
+the organiser ticked for that event. **The list endpoint does not carry them** —
+the cards draw none, and `/events` is the hottest endpoint in the product.
+
+**A vocabulary, not free text.** `events.house_rules` already exists and is a
+different thing: "open bar (from 9)" typed by one organiser and "Free drinks!!"
+by another are two facts nothing can group, give an icon, or translate.
+
+**Retired, never deleted.** The foreign key from `event_amenities` is
+`RESTRICT`, so an amenity that events reference cannot be removed — deleting one
+would rewrite what past events said they offered. `is_active = false` withdraws
+it from every picker and leaves history intact.
+
+**Ordering is `sort_order`, not alphabetical**, or "Accessible Entrance" leads
+every picker and every event card in the app.
+
+**The organiser asserts; nothing is inherited.** The event stores its own rows
+and never reads through to the venue, so a venue editing its list next month
+cannot change what last month's event claimed. The venue layer that would
+*pre-tick* these is deliberately not built — see `docs/AMENITIES.md`: an unowned
+venue has no list to suggest from, and almost no venue is owned yet, so it would
+be a permission system and a picker that did nothing.
 
 ### The notifications centre
 
