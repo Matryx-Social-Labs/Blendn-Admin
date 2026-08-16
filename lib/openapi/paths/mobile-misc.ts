@@ -330,6 +330,122 @@ registry.registerPath({
   },
 })
 
+/*
+ * The notifications centre — the bell in The Pulse's top bar.
+ *
+ * Every row is written by `sendPushNotification`, *before* the token lookup, so
+ * the feed holds what was sent rather than what was delivered. The three ways a
+ * push does not arrive — notifications off, no device registered, expired token
+ * — are all reasons to look at the bell, not reasons for it to be empty.
+ */
+const NotificationSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum([
+    "private_message",
+    "group_message",
+    "event_checkin",
+    "event_update",
+    "announcement",
+    "message_request",
+    "message_request_response",
+    "waitlist_promoted",
+    "match",
+    "reveal_request",
+    "reveal",
+  ]),
+  title: z.string(),
+  body: z.string(),
+  /** The same payload the push carried, so the app has one deep-link switch. */
+  data: z.record(z.string(), z.unknown()).nullable(),
+  readAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/notifications",
+  tags: ["Mobile Notifications"],
+  summary: "List the caller's notifications, newest first",
+  description:
+    "Cursor-paginated because the list grows at the head — offset pages would repeat rows as new ones arrive. Returns only the caller's own; `user_id` comes from the token and is never a parameter. `unreadCount` ships with the feed so the bell needs one request rather than two.",
+  security: bearerAuth,
+  request: {
+    query: z.object({
+      cursor: z.string().uuid().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      unread: z.enum(["true", "false"]).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Notifications",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              notifications: z.array(NotificationSchema),
+              unreadCount: z.number().int(),
+              pagination: z.object({
+                limit: z.number().int(),
+                hasMore: z.boolean(),
+                nextCursor: z.string().uuid().optional(),
+              }),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/notifications",
+  tags: ["Mobile Notifications"],
+  summary: "Clear the caller's notifications",
+  description:
+    "Deletes rather than marks read — a 'clear all' that leaves every row in place is a lie the retention query trips over.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "Cleared",
+      content: { "application/json": { schema: wrap(z.object({ deleted: z.number().int() })) } },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/notifications/read",
+  tags: ["Mobile Notifications"],
+  summary: "Mark notifications read",
+  description:
+    "Omit `ids` to mark all of the caller's. The caller's `user_id` stays in the filter even when ids are named, so a uuid alone cannot reach somebody else's row. Already-read rows are skipped rather than re-stamped — `read_at` answers 'when did they see this', and a bell tapped twice must not move the answer.",
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ ids: z.array(z.string().uuid()).max(200).optional() }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Marked",
+      content: {
+        "application/json": {
+          schema: wrap(z.object({ marked: z.number().int(), unreadCount: z.number().int() })),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // === Active Checkins ===
 
 registry.registerPath({
