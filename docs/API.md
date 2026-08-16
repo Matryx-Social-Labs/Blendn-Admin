@@ -893,6 +893,44 @@ was collected as free text: "Software" and "software engineering" were two
 buckets that could never match, and the fix cost two PRs. A validator that only
 checked `z.string()` would repeat it exactly.
 
+### Contact details in the room — flagged, never blocked
+
+`lib/moderation/contact-info.ts` looks for phone numbers, social handles and
+direct-message links in group chat. It **always returns `flag`** and can never
+hide a message.
+
+That is the design, not a first pass. Every deterministic detector has a next
+bypass — `9876543210` → `nine eight seven` → `n1ne e1ght` → "the number of
+fingers on two hands minus one" — and a filter that blocks teaches the boundary
+in one message, after which you have the evasion **and** an empty flag stream.
+A warning costs one tap when it is wrong.
+
+**What it decodes:** stretched words (`Nineeee onEe`), leetspeak inside words
+(`n1ne`), digit words (`nine one eight`), and any mix. Un-leeting is per token
+and never global — applied to the whole string it would rewrite `9876543210` as
+`987654321o` and destroy the thing being looked for.
+
+**A run must reach 7 digits.** E.164's minimum, so it is the shortest thing that
+can be a real number anywhere. A token that is neither a number nor a
+number-word breaks the run, which is why *"I have 2 tickets and 3 friends"* does
+not fire.
+
+**Handles are keyed on the platform name**, not on `@word`. `@priya you coming?`
+is a room working as intended; a rule that fired on it would fire constantly.
+
+**Addresses are deliberately not detected.** *"Meet at the Blue Door on MG
+Road"* is an address and is also exactly what an event chat is for.
+
+**Known limits, and they are recorded rather than papered over:** it cannot tell
+whose number it is — doxxing and self-disclosure are the same string, and the
+report button is the remedy for the first — and a fully spelled date like
+`16 08 2026` fires. Both are acceptable *because* the response is a warning.
+
+**None of this touches profanity.** The keyword filter is a **slur** list and
+contains no plain profanity, so *"fuck the party was good"* passes every layer.
+Profanity is a property of a word; harassment is a property of a relationship,
+and only the second is worth blocking.
+
 ### Broadcasting into an event's room
 
 `POST /events/:eventId/announce` takes a `kind`, defaulting to `announcement`:
