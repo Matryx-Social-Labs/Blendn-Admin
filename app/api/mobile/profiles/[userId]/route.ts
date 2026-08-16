@@ -109,7 +109,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // their photographs single them out as surely as a name does.
       ...(identified
         ? { bio: p.bio, occupation: p.occupation, education: p.education, photos: p.photos }
-        : {}),
+        : {
+            /*
+             * The blurred half of "pseudonyms + blurred photos" — the state the
+             * diagram on `private_conversations` describes.
+             *
+             * A stored derivative, never the real URL with a filter on it: a
+             * blur applied in the app is undone by anyone who reads the payload,
+             * and `photos` above is deliberately absent from this branch so
+             * there is nothing to undo.
+             *
+             * One still. The app shows the main photo they chose and does not
+             * cycle it — you cannot tell blurred frames apart, so motion there
+             * reads as a rendering fault rather than a gallery.
+             */
+            blurPhoto: p.blur_photo,
+          }),
       /*
        * Orientation, and only when *both* are true: they turned it on, and you
        * are someone who can already see who they are.

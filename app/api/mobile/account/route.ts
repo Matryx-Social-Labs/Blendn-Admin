@@ -55,6 +55,13 @@ export async function DELETE(request: NextRequest) {
           education: null,
           interests: [],
           photos: [],
+          /*
+           * The blurred derivative goes with the photographs it was made from.
+           * It is a picture of the person's face -- 40 pixels of it, but a
+           * deleted account should leave no image of them anywhere, and a
+           * surviving blur is still a surviving photograph.
+           */
+          blur_photo: null,
           // Scrubbed like everything else. These were left populated on a
           // deleted account — quietly the most sensitive pair on the profile,
           // since "what are you looking for" is exactly what someone deleting

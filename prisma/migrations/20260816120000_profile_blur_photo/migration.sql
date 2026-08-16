@@ -1,0 +1,13 @@
+-- A tiny copy of the primary photo, for viewers who have not earned the real one.
+--
+-- The matched-but-unrevealed state is "pseudonyms + blurred photos" (see the
+-- diagram on private_conversations). This column is the blurred half.
+--
+-- A stored derivative, never the real URL with a filter on it: a blur applied
+-- in the app is undone by anyone who reads the payload or the device cache.
+-- `createBlurDerivative` uploads a 40px object, so the detail is not there.
+--
+-- Nullable, and null for every existing row: nobody has generated one yet, and
+-- an unrevealed profile with no derivative falls back to the generated mark
+-- rather than to a real photograph.
+ALTER TABLE "profiles" ADD COLUMN "blur_photo" TEXT;

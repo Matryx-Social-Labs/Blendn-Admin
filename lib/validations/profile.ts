@@ -71,6 +71,16 @@ export const updateProfileSchema = z.object({
   education: z.string().max(100).optional().nullable(),
   interests: z.array(z.string()).optional(),
   photos: z.array(z.string().url()).max(6).optional(),
+  /*
+   * The tiny copy of `photos[0]` shown to viewers who have not earned the real
+   * one. `createBlurDerivative` makes it client-side at 40px; the server stores
+   * the URL and serves it only in the unrevealed branch.
+   *
+   * Nullable so removing your last photo can clear it. Someone could upload
+   * something sharp as their own "blur" -- that exposes only their own face and
+   * nobody else's, which is self-harm rather than an attack.
+   */
+  blur_photo: z.string().url().nullish(),
   goals: z.array(z.string()).optional(),
   looking_for: z.array(z.string()).optional(),
   onboarded: z.boolean().optional(),
