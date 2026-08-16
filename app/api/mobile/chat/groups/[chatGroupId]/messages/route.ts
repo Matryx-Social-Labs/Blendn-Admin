@@ -21,7 +21,7 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
-import { chatWindowState, chatClosedMessage } from "@/lib/chat-window"
+import { chatClosedMessage, mayWriteToRoom } from "@/lib/chat-window"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
@@ -261,9 +261,11 @@ export async function POST(
     }
 
     // Check if user is muted or banned
+    let effectiveStatus: string = membership.status
     if (membership.status === "muted") {
       // Check if the auto-mute window has expired (1 hour)
       const wasUnmuted = await checkAndAutoUnmute(user.userId, chatGroupId)
+      if (wasUnmuted) effectiveStatus = "active"
       if (!wasUnmuted) {
         return errorResponse(
           "You are muted in this chat group. Your messages have been flagged for policy violations.",
@@ -273,35 +275,44 @@ export async function POST(
       }
       // User was auto-unmuted, proceed with sending
     }
-    if (membership.status === "banned") {
-      return errorResponse(
-        "You have been banned from this chat group due to repeated policy violations.",
-        403,
-        ErrorCode.USER_BANNED
-      )
-    }
-
-    // Enforce chat access cutoff — users lose write access when they check out
-    if (membership.last_allowed_at && membership.last_allowed_at < new Date()) {
-      return errorResponse(
-        "You must be checked in to send messages in this event chat",
-        403,
-        ErrorCode.NOT_CHECKED_IN
-      )
-    }
-
     /*
-     * One rule for whether this room accepts writes — shared with the other
-     * write path, which rejected anything not `active` while this one rejected
-     * only `locked`. An archived room was therefore still writable from here,
-     * so a membership row from an event months ago never expired.
+     * One rule for whether this member may write — shared with the other write
+     * path. See `mayWriteToRoom`.
+     *
+     * The check-out cutoff that used to sit here is gone. It read
+     * `last_allowed_at`, which check-out sets to `now`, so leaving the venue
+     * revoked exactly the access the 24-hour window exists to grant. Membership
+     * is an attendance record; attendance does not expire when you walk out of
+     * the building.
+     *
+     * The mute is resolved first because auto-unmute is a side-effecting
+     * recovery, not a predicate — `mayWriteToRoom` sees the status it leaves
+     * behind.
      */
-    const window = chatWindowState(chatGroup.event, chatGroup)
-    if (!window.open) {
+    const denial = mayWriteToRoom(
+      { status: effectiveStatus },
+      chatGroup.event,
+      chatGroup
+    )
+    if (denial) {
+      if (denial.reason === "banned") {
+        return errorResponse(
+          "You have been banned from this chat group due to repeated policy violations.",
+          403,
+          ErrorCode.USER_BANNED
+        )
+      }
+      if (denial.reason === "muted") {
+        return errorResponse(
+          "You are muted in this chat group. Your messages have been flagged for policy violations.",
+          403,
+          ErrorCode.USER_MUTED
+        )
+      }
       return errorResponse(
-        chatClosedMessage(window.reason),
+        chatClosedMessage(denial.reason),
         403,
-        window.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
       )
     }
 
