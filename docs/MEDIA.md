@@ -149,7 +149,7 @@ that is mount/unmount rather than play/pause.
 | `components/event-form/cover-image-section.tsx` | Cover guidance. **Pinned by `__tests__/media-guidance.test.ts`** |
 | `components/event-form/media-section.tsx` | Gallery guidance, the poster field, and the file picker's `accept`. Same test |
 | `scripts/seed-*.ts` | Seeded events must carry assets at these sizes, or staging tests the wrong thing |
-| Dashboard device preview | Renders the real crops with the safe area drawn on |
+| `components/event-form/device-preview.tsx` | Renders the real crops with the safe area drawn on. **Pinned by `__tests__/device-preview.test.ts`** — a preview drawing the wrong safe area is worse than none, because an organiser trusts it and composes to it |
 | `lib/feedMedia.ts` (app) | Chooses the asset; enforces the poster rule |
 
 If any of them disagrees with this file, this file is what the app actually

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { DevicePreview } from "@/components/event-form/device-preview"
 import { FormSection } from "@/components/event-form/form-section"
 import { uploadFile } from "@/components/event-form/upload"
 import type { EventFormValues } from "@/components/event-form/schema"
@@ -123,6 +124,7 @@ export function CoverImageSection({
                 </FormControl>
               </div>
             </div>
+            {coverPreviewUrl && <DevicePreview src={coverPreviewUrl} />}
             <FormMessage />
           </FormItem>
         )}
