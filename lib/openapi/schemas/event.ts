@@ -414,6 +414,13 @@ export const MatchListResponseSchema = z
          * age, a city and a field of work name one person.
          */
         workField: z.string().nullable(),
+        age: z
+          .number()
+          .int()
+          .nullable()
+          .describe(
+            "Whole years, derived server-side from the birth date. Never a birth date. Already public via `publicProfileFields` on /profiles/{userId}, so this carries no new exposure — and unlike `workField` it is NOT suppressed in a small room, since withholding it would only make the roster disagree with the profile one tap away."
+          ),
         insideNow: z.boolean(),
         /** Whether you liked them. Never whether they liked you. */
         youLiked: z.boolean(),
