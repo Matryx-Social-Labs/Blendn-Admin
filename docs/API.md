@@ -893,6 +893,48 @@ was collected as free text: "Software" and "software engineering" were two
 buckets that could never match, and the fix cost two PRs. A validator that only
 checked `z.string()` would repeat it exactly.
 
+### Pre-event chat — who is in the room, and when it opens
+
+The room used to have **one** way in: `event_check_ins.status === "checked_in"`,
+a tap *at the venue with GPS agreeing*. It now has three, ranked:
+
+| entitlement | how | good when |
+|---|---|---|
+| `checked_in` | at the venue, GPS validated | **always** |
+| `rsvp` | `event_rsvps.status === "going"` | inside the window |
+| `interested` | the event is favourited | inside the window |
+
+**The window gained a floor.** `chatWindowState` was open from the moment the
+group existed until `end_time + 24h`. That had no lower bound because it did not
+need one — you cannot check in to an event that has not started, so the floor was
+implicit in the only way in. Pre-event chat removes that, so the room now opens
+`PRE_EVENT_CHAT_HOURS` (24) before `start_time`, mirroring the window on the
+other side.
+
+Without a floor, favouriting a festival three months out would be a licence to
+sit in its chatroom for three months — and a room with no event around it is a
+public channel that happens to be named after a date.
+
+**The bound is also the mitigation for a weaker filter.** An RSVP is a tap from
+anywhere; a check-in is a tap at the venue. The pre-event room therefore admits a
+much broader group than the live one, and a day is what keeps that group small.
+
+**Being checked in ignores the clock**, deliberately: it is proof you are there,
+and somebody standing inside an event that started early must not be refused
+their own room.
+
+**`waitlisted` and `maybe` do not count.** Neither is a commitment, and
+`waitlisted` specifically means the event is full — putting somebody in the room
+for a thing they may never get into is worse than telling them no.
+
+**Two refusals, not one.** *"RSVP to this event to join the chat"* and *"This
+chat opens 24 hours before the event starts"* have different remedies, and a
+single message would tell somebody who already RSVP'd that they are not welcome.
+
+**A missing `start_time` means no floor.** Several callers select only
+`end_time`; treating an absent start as "closed" would silently shut rooms that
+used to open, which reads as the chat being broken rather than as a rule.
+
 ### Contact details in the room — flagged, never blocked
 
 `lib/moderation/contact-info.ts` looks for phone numbers, social handles and

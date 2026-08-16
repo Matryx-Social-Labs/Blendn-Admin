@@ -211,6 +211,31 @@ difference.
 
 ## Next
 
+### Sponsors have no surface at all — backlog, after the app
+
+`organisations.may_sponsor` shipped in #259 and has **one reader and zero
+writers**. Nothing is broken — it fails closed, which is correct — but the flag
+is currently ungrantable except by a direct database write, so `sponsored`
+messages cannot be sent by anybody except an `app_admin`.
+
+What is missing, and none of it is designed:
+
+- **An admin control to grant `may_sponsor`** per organisation. The smallest
+  useful thing, and the only one blocking the feature from working at all.
+- **A sponsor surface**: which events an org may place into, what ran, when, and
+  how it performed. Today a sponsored message is fire-and-forget with no record
+  beyond the `chat_messages` row.
+- **Placement as an object.** A sponsored message is currently a message. If
+  placements are ever sold, they need a lifecycle — drafted, approved, scheduled,
+  run, reported — and that is a different model, not a flag.
+- **Who approves the creative.** Media rides on `sponsored` alone (#259), so a
+  sponsor can put an image in a pseudonymous room. Nothing reviews it.
+
+Deliberately not designed yet: the app side comes first, and the shape of this
+depends on whether placement is sold per-event, per-venue or per-city — a
+commercial decision, not an engineering one.
+
+
 ### The bio is a hole in the pseudonym
 
 `profiles.bio` is free text and it renders **on the match card, beside the

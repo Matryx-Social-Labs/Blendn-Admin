@@ -10,9 +10,30 @@ import type { chat_group_status } from "@prisma/client"
  */
 export const CHAT_WINDOW_HOURS = 24
 
+/**
+ * How long *before* an event starts its room opens.
+ *
+ * The room used to have no lower bound at all: it was open from the moment the
+ * group existed, which did not matter while the only way in was checking in —
+ * you cannot check in to an event that has not started, so the floor was
+ * implicit.
+ *
+ * Pre-event chat for people who RSVP'd removes that floor, and something has to
+ * replace it. Without one, somebody who RSVPs to a festival three months out
+ * sits in its chatroom for three months, and a room with no event around it is
+ * just a public channel that happens to be named after a date.
+ *
+ * Twenty-four, mirroring the window on the other side. It is also the mitigation
+ * for the weaker filter: an RSVP is a tap, where a check-in is a tap *at the
+ * venue with GPS agreeing*, so the pre-event room admits a much broader group
+ * than the live one. Bounding it to a day keeps that group small and keeps the
+ * room about the event.
+ */
+export const PRE_EVENT_CHAT_HOURS = 24
+
 export type ChatWindowState =
   | { open: true }
-  | { open: false; reason: "archived" | "locked" | "window_closed" }
+  | { open: false; reason: "archived" | "locked" | "window_closed" | "not_open_yet" }
 
 /**
  * The one rule for whether an event chatroom accepts writes.
@@ -37,7 +58,7 @@ export type ChatWindowState =
  * of its own end time whether or not anything got round to flagging it.
  */
 export function chatWindowState(
-  event: { end_time: Date },
+  event: { start_time?: Date | null; end_time: Date },
   group: { status: chat_group_status },
   now: Date = new Date()
 ): ChatWindowState {
@@ -47,12 +68,33 @@ export function chatWindowState(
   const closesAt = new Date(event.end_time.getTime() + CHAT_WINDOW_HOURS * 60 * 60 * 1000)
   if (now >= closesAt) return { open: false, reason: "window_closed" }
 
+  /*
+   * The floor, and it is optional on purpose.
+   *
+   * `start_time` is newly read here, and several call sites select only
+   * `end_time`. Treating a missing start as "no floor" keeps those callers
+   * behaving exactly as they did rather than closing rooms they used to open --
+   * a silent tightening is the worse failure, because it looks like the chat is
+   * broken rather than like a rule.
+   */
+  if (event.start_time) {
+    const opensAt = new Date(
+      event.start_time.getTime() - PRE_EVENT_CHAT_HOURS * 60 * 60 * 1000
+    )
+    if (now < opensAt) return { open: false, reason: "not_open_yet" }
+  }
+
   return { open: true }
 }
 
 /** Message shown to a client that tried to post into a closed room. */
-export function chatClosedMessage(reason: "archived" | "locked" | "window_closed"): string {
+export function chatClosedMessage(
+  reason: "archived" | "locked" | "window_closed" | "not_open_yet"
+): string {
   if (reason === "locked") return "This chat has been locked by the organiser"
+  // Says when, not just no. "Closed" for a room that has never opened reads as
+  // a fault, and the person asking is someone who RSVP'd and is keen.
+  if (reason === "not_open_yet") return "This chat opens 24 hours before the event starts."
   return "This chat has closed. Event chats stay open for 24 hours after the event ends."
 }
 
@@ -63,7 +105,7 @@ export function chatClosesAt(event: { end_time: Date }): Date {
 
 /** Why a member cannot write. `null` from `mayWriteToRoom` means they can. */
 export type WriteDenial =
-  | { reason: "archived" | "locked" | "window_closed" }
+  | { reason: "archived" | "locked" | "window_closed" | "not_open_yet" }
   | { reason: "muted" | "banned" }
 
 /**
@@ -119,7 +161,7 @@ export type WriteDenial =
  */
 export function mayWriteToRoom(
   membership: { status: string },
-  event: { end_time: Date },
+  event: { start_time?: Date | null; end_time: Date },
   group: { status: chat_group_status },
   now: Date = new Date()
 ): WriteDenial | null {
@@ -130,4 +172,58 @@ export function mayWriteToRoom(
   if (!window.open) return { reason: window.reason }
 
   return null
+}
+
+/* -------------------------------------------------------------------------- */
+/* Who may be in the room at all                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The two ways into an event's chatroom.
+ *
+ * `checked_in` is the strong one and was the only one: a tap **at the venue,
+ * with GPS agreeing**. `rsvp` and `interested` are taps from anywhere, which is
+ * the whole reason `PRE_EVENT_CHAT_HOURS` exists — see its note.
+ */
+export type RoomEntitlement = "checked_in" | "rsvp" | "interested" | null
+
+/**
+ * May this person join, and on what grounds?
+ *
+ * Split from the window check because they answer different questions and fail
+ * differently. *"You have to be going to this"* and *"this opens tomorrow"* are
+ * not the same refusal, and a room that gave one message for both would tell
+ * somebody who RSVP'd that they are not welcome.
+ *
+ * Being checked in wins when both apply, so the roster and the audit trail
+ * record the strongest claim rather than whichever was queried first.
+ */
+export function roomEntitlement(input: {
+  checkedIn: boolean
+  rsvpGoing: boolean
+  interested: boolean
+}): RoomEntitlement {
+  if (input.checkedIn) return "checked_in"
+  if (input.rsvpGoing) return "rsvp"
+  if (input.interested) return "interested"
+  return null
+}
+
+/**
+ * Whether an entitlement is enough *right now*.
+ *
+ * Checking in is proof you are there, so it needs no calendar argument — and it
+ * must not get one, or somebody standing in the venue of an event that started
+ * early would be refused their own room.
+ *
+ * The weaker two are only good inside the pre-event window, which is what stops
+ * an RSVP from being a permanent licence to a channel.
+ */
+export function entitlementAdmits(
+  entitlement: RoomEntitlement,
+  window: ChatWindowState
+): boolean {
+  if (!entitlement) return false
+  if (entitlement === "checked_in") return true
+  return window.open
 }
