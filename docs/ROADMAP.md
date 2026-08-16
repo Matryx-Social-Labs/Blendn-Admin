@@ -328,7 +328,7 @@ they are cheap, not before the three items above.
 |---|---|---|
 | **Search / Filter** | `/events/search` exists and is **never called**; `/events` filters on category, date, distance | Verify the surface covers the design — then it is app-only |
 | **Map** | Events carry lat/lng; `/events` sorts by distance from a point | A viewport/bounding-box query — a map pans rather than searching a radius |
-| **Notifications centre** | Push tokens exist; no record of what was sent | The largest — a table, a write on every push, list/read endpoints |
+| ~~**Notifications centre**~~ | ~~Push tokens exist; no record of what was sent~~ | **Done, API side** (#242) — see 0.74.0. The bell's UI in The Pulse's top bar is the remaining half, and it is app-only |
 
 ### 5. A coarse match band
 
@@ -553,6 +553,46 @@ There is none, so there is no revenue to attribute.
 ---
 
 ## Done
+
+### 0.74.0
+
+- **The notifications centre has a backend.** A `notifications` table, a row
+  written on every push, and list / mark-read / clear endpoints (#242).
+
+  **Written by `sendPushNotification`, not by each feature.** That function is
+  the one place that knows the title, the body and the deep link, and eleven
+  `notify*` helpers sit on it — so the centre is complete by construction
+  rather than complete until somebody adds a twelfth.
+
+  **Written *before* the token lookup**, which is the whole design. A push fails
+  to arrive for three reasons that have nothing to do with the notification
+  being real: notifications turned off in settings, no device registered yet,
+  and an expired token. All three return early. Recording after them would make
+  this a log of successful *deliveries* — the opposite of somewhere you look for
+  what you **missed**. The bulk sender had the same hole and got the same fix:
+  `getBulkUserPushTokens` is keyed only by reachable users, so recording inside
+  the send loop would have dropped everybody else from an organiser's
+  announcement.
+
+  **Every invariant here fails silently.** A kind the sender emits and the enum
+  rejects is a write that throws inside a swallowed catch — the push arrives,
+  the bell is quietly missing a line, and nothing louder than a `logger.warn`
+  says so. `__tests__/notifications.test.ts` guards eleven of them; three were
+  mutation-checked by reverting the change and watching exactly those three
+  fail.
+
+  One of those tests is about deployment rather than behaviour: the migration
+  references `"User"`, capitalised and singular, because the NextAuth model has
+  no `@@map`. `"users"` typechecks, passes review and dies at `prisma migrate
+  deploy`, which on Railway means the container fails its next boot.
+
+  **The WIP schema on the branch did not validate** — `notifications.user` had
+  no opposite relation on `User` — so it was never runnable as landed.
+
+  Live on staging: all three routes answer 401 unauthenticated, health reports
+  `database: connected`.
+
+  **Open:** the bell itself, in The Pulse's top bar. App-only.
 
 ### 0.73.0
 
