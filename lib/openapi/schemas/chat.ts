@@ -96,6 +96,11 @@ export const ChatGroupSchema = z
       role: z.string(),
       joinedAt: z.string().datetime(),
     }),
+    isCheckedIn: z
+      .boolean()
+      .describe(
+        "The caller is checked in to this room's event and has not checked out — the room is live. Not derivable client-side: an event being underway is not the same as the caller being there."
+      ),
   })
   .openapi("ChatGroup")
 

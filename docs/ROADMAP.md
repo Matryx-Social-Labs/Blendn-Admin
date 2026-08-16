@@ -556,6 +556,20 @@ There is none, so there is no revenue to attribute.
 
 ### 0.75.0
 
+- **A chat group says whether you are standing in it** (#248). The app's Banter
+  screen lifts the rooms you are checked into out of the inbox and into a rail
+  of their own — they are a different object from the rest: temporary,
+  anonymous, useful only while you are there.
+
+  It has to be a server field. The client has the room and the event's times,
+  but "the event is underway" is not "I am there": someone who never turned up,
+  or who left an hour ago, has a room mid-flight. `isCheckedIn` is `checked_in`
+  **and** `check_out_time IS NULL` — the status alone is not enough, because
+  check-out writes the timestamp and the presence sweeper can lag behind it.
+
+  One batched query over every room, not one per membership; the rest of this
+  route was deliberately taken from N*3 queries to 3 and it stays there. 7 tests.
+
 - **An event can say what it offers** (#244). The Scene's frame draws two
   amenity tiles and nothing populated them. Vocabulary, join table, organiser's
   picker, detail payload — fourteen amenities seeded in the migration itself.
