@@ -36,6 +36,16 @@ export interface MatchCard {
    */
   workField: string | null
   /**
+   * Whether they work in *your* field.
+   *
+   * Already computed for the ranking (`WORK_FIELD_BONUS`) and never returned,
+   * so the card's "You both work in Design" box had nothing behind it.
+   *
+   * Suppressed by the same floor as `workField`, and that is not caution: you
+   * know your own field, so `true` names theirs exactly. See `lib/matching.ts`.
+   */
+  sharedWorkField: boolean
+  /**
    * Whole years, derived. Never a birth date.
    *
    * Already public: `publicProfileFields` on `/profiles/[userId]` returns it to
@@ -294,6 +304,7 @@ export async function matchesForEvent(
     // `rankMatches` has already applied the small-room floor; this only turns
     // the surviving slug into something a person can read.
     workField: workFieldLabel(m.workField),
+    sharedWorkField: m.sharedWorkField,
     age: m.age,
     insideNow: m.insideNow,
     youLiked: liked.has(m.userId),

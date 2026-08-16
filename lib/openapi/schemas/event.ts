@@ -414,6 +414,11 @@ export const MatchListResponseSchema = z
          * age, a city and a field of work name one person.
          */
         workField: z.string().nullable(),
+        sharedWorkField: z
+          .boolean()
+          .describe(
+            "Whether they work in the caller's own field. Suppressed by the SAME floor as `workField` — always false in rooms below eight people — because the caller knows their own field, so `true` would name theirs exactly and hand back through a second door the attribute the floor withholds."
+          ),
         age: z
           .number()
           .int()
