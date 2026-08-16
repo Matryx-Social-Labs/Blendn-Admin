@@ -454,6 +454,16 @@ Body: `{ "eventIds": ["uuid", ...] }` (max 50)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/chat/groups` | List user's chat groups |
+
+### GET /chat/groups
+Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
+no `check_out_time`, so the room is live for them right now. The app lifts those
+rooms into The Banter's "Live now" rail and leaves them out of Recent.
+
+It is a server field because the client cannot derive it: it has the room and the
+event's times, but "the event is underway" is not "I am there". Someone who never
+turned up, or who left an hour ago, has a room whose event is mid-flight.
+
 | GET | `/chat/groups/:chatGroupId/messages` | Get messages (cursor-based) |
 | POST | `/chat/groups/:chatGroupId/messages` | Send message (30/min rate limit) |
 | GET | `/chat/groups/:chatGroupId/participants` | List participants |

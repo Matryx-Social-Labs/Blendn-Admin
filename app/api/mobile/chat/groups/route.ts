@@ -172,6 +172,36 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    /*
+     * 4. Which of these rooms is the user standing in *right now*.
+     *
+     * An event room is a different thing depending on this. Checked in, it is
+     * the live, anonymous room for the event happening around you — the whole
+     * point of the product. Checked out, it is a room you were once in, and it
+     * belongs in the list with everything else.
+     *
+     * The client cannot work this out: it has the rooms and it has the event
+     * times, but "the event is on now" is not the same as "I am there". Someone
+     * who never turned up, or who left an hour ago, has a room whose event is
+     * mid-flight and no business in a live section.
+     *
+     * `checked_in` **and** no `check_out_time` — the status alone is not
+     * enough, because check-out writes the timestamp and the sweeper can lag.
+     */
+    const eventIds = memberships.map((m) => m.chat_group.event.id)
+    const activeCheckIns = eventIds.length > 0
+      ? await db.event_check_ins.findMany({
+          where: {
+            user_id: authUser.userId,
+            event_id: { in: eventIds },
+            status: "checked_in",
+            check_out_time: null,
+          },
+          select: { event_id: true },
+        })
+      : []
+    const checkedInEventIds = new Set(activeCheckIns.map((c) => c.event_id))
+
     // Build final response
     const groupsWithUnread = memberships.map((membership) => {
       const lastReadAt = membership.last_read_message_id
@@ -223,6 +253,8 @@ export async function GET(request: NextRequest) {
           role: membership.role,
           joinedAt: membership.joined_at,
         },
+        /** The user is checked in and has not checked out — this room is live. */
+        isCheckedIn: checkedInEventIds.has(membership.chat_group.event.id),
       }
     })
 
