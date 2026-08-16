@@ -15,7 +15,15 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
-import { chatClosesAt, chatClosedMessage, chatWindowState, mayWriteToRoom } from "@/lib/chat-window"
+import {
+  chatClosesAt,
+  chatClosedMessage,
+  chatWindowState,
+  entitlementAdmits,
+  mayWriteToRoom,
+  roomEntitlement,
+  type RoomEntitlement,
+} from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
@@ -25,6 +33,43 @@ import { checkTextContent } from "@/lib/moderation/openai-moderation"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
+}
+
+/**
+ * The three claims somebody can have on an event's room, in one query each.
+ *
+ * `findFirst` on check-ins is event-level rather than per-day on purpose:
+ * attending any day of a multi-day run gets you the room for the whole run.
+ *
+ * RSVP counts only as `going`. `maybe`, `waitlisted` and `not_going` are not a
+ * commitment, and `waitlisted` in particular means the event is full — putting
+ * somebody in the room for a thing they may never get into is worse than
+ * telling them no.
+ */
+async function resolveEntitlement(
+  eventId: string,
+  userId: string
+): Promise<RoomEntitlement> {
+  const [checkIn, rsvp, favourite] = await Promise.all([
+    db.event_check_ins.findFirst({
+      where: { event_id: eventId, user_id: userId },
+      select: { status: true },
+    }),
+    db.event_rsvps.findUnique({
+      where: { event_id_user_id: { event_id: eventId, user_id: userId } },
+      select: { status: true },
+    }),
+    db.event_favorites.findUnique({
+      where: { event_id_user_id: { event_id: eventId, user_id: userId } },
+      select: { id: true },
+    }),
+  ])
+
+  return roomEntitlement({
+    checkedIn: checkIn?.status === "checked_in",
+    rsvpGoing: rsvp?.status === "going",
+    interested: !!favourite,
+  })
 }
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -52,17 +97,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // rejected after the user has typed.
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
-      include: { event: { select: { end_time: true } } },
+      include: { event: { select: { start_time: true, end_time: true } } },
     })
 
     if (!chatGroup) {
-      const checkIn = await db.event_check_ins.findFirst({
-      // Event-level, not per-day: attending any day of a run gets you the room.
-      where: { event_id: eventId, user_id: authUser.userId },
-        select: { status: true },
-      })
-
-      if (checkIn?.status !== "checked_in") {
+      /*
+       * The room is created lazily, and only by somebody entitled to be in it.
+       * Creating it for a passer-by would leave an empty room attached to every
+       * event anybody ever opened.
+       */
+      const entitlement = await resolveEntitlement(eventId, authUser.userId)
+      if (!entitlement) {
         return notFoundResponse("Chat not available for this event")
       }
 
@@ -79,7 +124,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           status: "active",
           member_count: 0,
         },
-        include: { event: { select: { end_time: true } } },
+        include: { event: { select: { start_time: true, end_time: true } } },
       })
     }
 
@@ -112,14 +157,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       !membership || (membership.status !== "active" && membership.status !== "banned" && membership.status !== "muted")
 
     if (needsJoin) {
-      const checkIn = await db.event_check_ins.findFirst({
-      // Event-level, not per-day: attending any day of a run gets you the room.
-      where: { event_id: eventId, user_id: authUser.userId },
-        select: { status: true },
-      })
+      /*
+       * Two ways in now, and they are not equivalent.
+       *
+       * Checking in is a tap *at the venue with GPS agreeing*. An RSVP or a
+       * saved event is a tap from anywhere, so it admits a much broader group —
+       * which is exactly why it is only good inside `PRE_EVENT_CHAT_HOURS`.
+       * Without that bound, tapping a heart on a festival three months out
+       * would be a licence to a public channel for three months.
+       */
+      const entitlement = await resolveEntitlement(eventId, authUser.userId)
+      const window = chatWindowState(chatGroup.event, chatGroup)
 
-      if (checkIn?.status !== "checked_in") {
-        return forbiddenResponse("You must check in to the event to access chat")
+      if (!entitlementAdmits(entitlement, window)) {
+        // Says which of the two things is missing, because they have different
+        // remedies: turn up, or come back tomorrow.
+        return forbiddenResponse(
+          entitlement
+            ? chatClosedMessage(window.open ? "window_closed" : window.reason)
+            : "RSVP to this event to join the chat"
+        )
       }
 
       const anonName = await generateUniqueAnonymousName(chatGroup.id)

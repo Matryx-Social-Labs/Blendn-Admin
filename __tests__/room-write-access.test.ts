@@ -1,6 +1,13 @@
 import { readFileSync } from "fs"
 import { join } from "path"
-import { chatClosesAt, mayWriteToRoom } from "@/lib/chat-window"
+import {
+  chatClosedMessage,
+  chatClosesAt,
+  chatWindowState,
+  entitlementAdmits,
+  mayWriteToRoom,
+  roomEntitlement,
+} from "@/lib/chat-window"
 
 /**
  * Who may write in an event's anonymous room.
@@ -42,10 +49,37 @@ describe("the assertion that would have caught the bug", () => {
      * merely true today.
      */
     const src = read("lib", "chat-window.ts")
-    const fn = src.slice(src.indexOf("export function mayWriteToRoom"))
+    /*
+     * Bounded to the function, where it used to run to the end of the file.
+     *
+     * That was fine while `mayWriteToRoom` was last in the module and became
+     * wrong the moment `roomEntitlement` was added below it — which legitimately
+     * *does* mention `checked_in`, because who may **join** a room and whether a
+     * member may **write** right now are different questions with different
+     * answers. Presence decides the first and must never decide the second.
+     *
+     * The rule this protects is unchanged; only the slice is honest about which
+     * function it is reading.
+     */
+    const start = src.indexOf("export function mayWriteToRoom")
+    const fn = src.slice(start, src.indexOf("\n}", start) + 2)
+    expect(fn).toContain("membership.status")
     expect(fn).not.toContain("last_allowed_at")
     expect(fn).not.toContain("check_out_time")
     expect(fn).not.toContain("checked_in")
+  })
+
+  it("keeps joining and writing as separate questions", () => {
+    /*
+     * The distinction the bug above was a violation of. `roomEntitlement` is
+     * allowed to read presence — being at the venue is the strongest claim on a
+     * room — and `mayWriteToRoom` is not, because a claim on the room is not the
+     * same as permission to speak in it *now*.
+     */
+    const src = read("lib", "chat-window.ts")
+    expect(src.indexOf("export function roomEntitlement")).toBeGreaterThan(
+      src.indexOf("export function mayWriteToRoom")
+    )
   })
 })
 
@@ -149,5 +183,92 @@ describe("one rule, and it cannot fork again", () => {
      */
     const src = read("app", "api", "mobile", "events", "[eventId]", "chat", "route.ts")
     expect(src).not.toContain("where.created_at = { lte: membershipFresh.last_allowed_at }")
+  })
+})
+
+describe("the room has a floor now, not only a ceiling", () => {
+  const STARTS = new Date("2026-08-16T18:00:00Z")
+  const TIMED = { start_time: STARTS, end_time: ENDS }
+  const before = (hours: number) =>
+    new Date(STARTS.getTime() - hours * 60 * 60 * 1000)
+
+  it("is shut two days before the event", () => {
+    /*
+     * The point of the floor. Without it, RSVPing to a festival three months
+     * out is a licence to sit in its chatroom for three months — and a room
+     * with no event around it is a public channel that happens to be named
+     * after a date.
+     */
+    expect(chatWindowState(TIMED, OPEN_GROUP, before(48)).open).toBe(false)
+  })
+
+  it("says when rather than just no", () => {
+    const state = chatWindowState(TIMED, OPEN_GROUP, before(48))
+    expect(state.open).toBe(false)
+    if (!state.open) {
+      expect(state.reason).toBe("not_open_yet")
+      // "Closed" for a room that has never opened reads as a fault, and the
+      // person asking is somebody who RSVP'd and is keen.
+      expect(chatClosedMessage(state.reason)).toContain("opens")
+    }
+  })
+
+  it("opens 24 hours before the start", () => {
+    expect(chatWindowState(TIMED, OPEN_GROUP, before(23)).open).toBe(true)
+  })
+
+  it("is open during the event, as it always was", () => {
+    expect(chatWindowState(TIMED, OPEN_GROUP, at(-1)).open).toBe(true)
+  })
+
+  it("still closes 24 hours after the end", () => {
+    expect(chatWindowState(TIMED, OPEN_GROUP, at(25)).open).toBe(false)
+  })
+
+  it("treats a missing start as no floor at all", () => {
+    /*
+     * Several callers select only `end_time`. A silent tightening there would
+     * close rooms that used to open, and read as the chat being broken rather
+     * than as a rule — so the absence of a start means the absence of a floor.
+     */
+    expect(chatWindowState({ end_time: ENDS }, OPEN_GROUP, before(48)).open).toBe(true)
+  })
+})
+
+describe("who has a claim on the room", () => {
+  const OPEN = { open: true } as const
+  const SHUT = { open: false, reason: "not_open_yet" } as const
+
+  it("ranks being there above having said you would be", () => {
+    // The roster and the audit trail should record the strongest claim, not
+    // whichever query happened to run first.
+    expect(roomEntitlement({ checkedIn: true, rsvpGoing: true, interested: true }))
+      .toBe("checked_in")
+    expect(roomEntitlement({ checkedIn: false, rsvpGoing: true, interested: true }))
+      .toBe("rsvp")
+    expect(roomEntitlement({ checkedIn: false, rsvpGoing: false, interested: true }))
+      .toBe("interested")
+    expect(roomEntitlement({ checkedIn: false, rsvpGoing: false, interested: false }))
+      .toBeNull()
+  })
+
+  it("admits somebody standing in the venue whatever the clock says", () => {
+    /*
+     * Checking in is proof you are there, so it needs no calendar argument —
+     * and it must not get one, or somebody inside an event that started early
+     * would be refused their own room.
+     */
+    expect(entitlementAdmits("checked_in", SHUT)).toBe(true)
+  })
+
+  it("makes the weaker claims good only inside the window", () => {
+    expect(entitlementAdmits("rsvp", OPEN)).toBe(true)
+    expect(entitlementAdmits("rsvp", SHUT)).toBe(false)
+    expect(entitlementAdmits("interested", OPEN)).toBe(true)
+    expect(entitlementAdmits("interested", SHUT)).toBe(false)
+  })
+
+  it("admits nobody with no claim, even inside the window", () => {
+    expect(entitlementAdmits(null, OPEN)).toBe(false)
   })
 })
