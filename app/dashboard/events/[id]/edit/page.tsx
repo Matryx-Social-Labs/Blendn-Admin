@@ -32,6 +32,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
       },
       include: {
         details: true,
+        amenities: { select: { amenity_id: true } },
         categories: {
           include: {
             category: {
@@ -88,11 +89,23 @@ export default async function EditEventPage({ params }: EventPageProps) {
   }
 
   const categoryIds = event.categories.map((entry) => entry.category.id)
+  const amenityIds = event.amenities.map((entry) => entry.amenity_id)
+  /*
+   * Active only, so a retired amenity is not offered again on an edit — but
+   * one already on this event still ticks, because `amenityIds` comes from the
+   * event's own rows rather than from this list.
+   */
+  const amenities = await db.amenities.findMany({
+    where: { is_active: true },
+    select: { id: true, name: true, subtitle: true },
+    orderBy: { sort_order: "asc" },
+  })
   const primaryCategory = event.categories.find((entry) => entry.primary)?.category?.id
 
   return (
     <EventEditor
       categories={categories}
+      amenities={amenities}
       initialEvent={{
         id: event.id,
         title: event.title,
@@ -121,6 +134,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
         check_in_radius: event.check_in_radius,
         geofence: event.geofence ?? undefined,
         category_ids: categoryIds,
+        amenity_ids: amenityIds,
         primary_category_id: primaryCategory,
         house_rules: event.details?.house_rules,
         cancellation_policy: event.details?.cancellation_policy,

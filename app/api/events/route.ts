@@ -146,6 +146,7 @@ export async function POST(req: Request) {
       accessibility_info,
       covid_guidelines,
       category_ids,
+      amenity_ids,
       primary_category_id,
       media_items,
       geofence,
@@ -235,6 +236,19 @@ export async function POST(req: Request) {
                 },
                 primary: categoryId === primary_category_id,
                 created_at: new Date(Date.now() + index),
+              })),
+            }
+          : undefined,
+        /*
+         * Ticked by the organiser, not inherited from the venue. The venue
+         * layer that would pre-tick these is deliberately unbuilt — an unowned
+         * venue has no list to suggest from, and almost no venue is owned.
+         * See `docs/AMENITIES.md`.
+         */
+        amenities: Array.isArray(amenity_ids) && amenity_ids.length > 0
+          ? {
+              create: amenity_ids.map((amenityId: string) => ({
+                amenity: { connect: { id: amenityId } },
               })),
             }
           : undefined,

@@ -80,6 +80,32 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         media: {
           orderBy: { order: "asc" },
         },
+        /*
+         * Detail endpoint only, deliberately.
+         *
+         * The cards on the Pulse draw no amenity, and `/events` is the hottest
+         * endpoint in the product — adding a join to it would cost every list
+         * request for something nothing renders. `docs/AMENITIES.md` D11.
+         *
+         * Ordered by the vocabulary's own `sort_order` so two events with the
+         * same amenities list them the same way; alphabetical would put
+         * "Accessible Entrance" first on every event in the app.
+         */
+        amenities: {
+          include: {
+            amenity: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                subtitle: true,
+                icon: true,
+                sort_order: true,
+              },
+            },
+          },
+          orderBy: { amenity: { sort_order: "asc" } },
+        },
         chat_group: {
           select: {
             id: true,
@@ -249,6 +275,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           }
         : null,
       categories: event.categories.map((c) => c.category),
+      /*
+       * Flattened to the amenity itself — the join row carries only a
+       * timestamp, and a client that has to reach through `{ amenity: {...} }`
+       * for every tile is a client shaped by our schema rather than by what it
+       * draws. `sort_order` is dropped: the array is already in it.
+       */
+      amenities: event.amenities.map((a) => ({
+        id: a.amenity.id,
+        name: a.amenity.name,
+        slug: a.amenity.slug,
+        subtitle: a.amenity.subtitle,
+        icon: a.amenity.icon,
+      })),
       media: event.media.map((m) => ({
         id: m.id,
         type: m.type,

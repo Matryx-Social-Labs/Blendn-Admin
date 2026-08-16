@@ -195,6 +195,24 @@ Launch **A, B, C in parallel**. S4 waits on both A and B. S5 waits on A. S7 last
 | D11 | Detail endpoint only | The cards render no amenity |
 | D12 | Precedence chain + organiser override | Derived is a default; the human wins |
 
-**Open:** whether the venue layer should ship at all before venue ownership is
-dense enough to populate suggestions. Raised by the outside voice, not resolved.
-Full scope was chosen deliberately; this is the risk that choice carries.
+**Resolved — the event layer ships alone** (#244). The open question was
+whether the venue layer should ship before venue ownership is dense enough to
+populate suggestions. It should not, and the reasoning is short: an **unowned**
+venue has no list to suggest from, gating is on ownership rather than
+confirmation (D8), and almost no venue is owned today. Building S2 and S4 now
+would ship `venuePermissions` and a venue picker that, for essentially every
+venue in the database, produced an empty list.
+
+So the delivered scope is **S1 + S5 + S7**: the vocabulary, the event join
+table, the organiser's picker and the detail payload. S2 and S4 stay written up
+here and unbuilt. Nothing about them is foreclosed — the event stores its own
+rows either way, so suggestions land later as *defaults* without changing what
+any past event claimed.
+
+**The backfill is also not built, which closes the critical gap above.** The
+reverse-geocode is best-effort on write and a null renders the city, which is
+exactly what happens today. Shipping an unscheduled, unmonitored job to fill
+those nulls would add the one silent failure path this plan had. When there is a
+measured number of nulls worth fixing, that is the moment to schedule a job —
+with a schedule, a retry and a monitor, as a piece of work rather than a
+footnote.

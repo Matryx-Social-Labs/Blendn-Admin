@@ -60,6 +60,16 @@ export const eventFormSchema = z.object({
   accessibility_info: z.array(kvItemSchema).optional(),
   category_ids: z.array(z.string()).optional(),
   primary_category_id: z.string().optional(),
+  /*
+   * What the **organiser** asserts this event offers.
+   *
+   * The event stores its own rows and never reads through to the venue, so a
+   * venue editing its list next month cannot change what last month's event
+   * claimed. Optional and empty by default: an event with no amenities draws
+   * no tiles, which is right — the alternative is every event claiming things
+   * nobody entered.
+   */
+  amenity_ids: z.array(z.string()).optional(),
   media_items: z
     .array(
       z.object({
