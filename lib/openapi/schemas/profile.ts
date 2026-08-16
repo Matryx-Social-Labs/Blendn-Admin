@@ -140,6 +140,12 @@ export const UpdateProfileRequestSchema = z
     // Unlike the fields above this one is public: a coarse bucket is an
     // attribute, an employer is an address.
     work_field: z.string().optional().nullable(),
+    expertise: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Up to three specialism SLUGS from `expertiseByField[work_field]` on GET /work-fields. Silently pruned to the ones the resulting work_field owns — including when this request changes only the field, which is how a Design → Finance move drops 'UX Psychology' rather than leaving it under a contradicting heading."
+      ),
 
     // Top level, snake_case, no `preferences` wrapper and no camelCase alias.
     // The app was sending twelve variants of these four and matching none.
@@ -185,6 +191,11 @@ export const ProfileResponseSchema = z
       goals: z.array(z.string()),
       looking_for: z.array(z.string()),
       work_field: z.string().nullable(),
+      expertise: z
+        .array(z.string())
+        .describe(
+          "LABELS, not slugs — 'UX Research'. Outside the identity gate for the same reason work_field is: a subject, not a person. Empty for anyone who has not picked."
+        ),
       onboarded: z.boolean(),
 
       /*

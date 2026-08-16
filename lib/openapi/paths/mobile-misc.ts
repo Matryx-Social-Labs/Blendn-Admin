@@ -131,7 +131,11 @@ registry.registerPath({
     "The eighteen buckets `profiles.work_field` accepts, as `{ slug, label }`. Served rather " +
     "than hardcoded in the client: a hardcoded copy cannot show a bucket added after the build " +
     "shipped, and free text is the mistake `profiles.interests` made — 'Software' and 'software " +
-    "engineering' never match. Identical for every caller and safe to cache for an hour.",
+    "engineering' never match. Identical for every caller and safe to cache for an hour. " +
+    "Also carries `expertiseByField` — the specialisms inside each bucket, keyed by the same " +
+    "slugs — because the picker is one question in two steps and a client with only the first " +
+    "would have to fetch between two taps of the same screen. `other` is present with an empty " +
+    "array on purpose: a missing key and a knowingly empty one must not look the same.",
   security: bearerAuth,
   responses: {
     200: {
@@ -141,6 +145,11 @@ registry.registerPath({
           schema: wrap(
             z.object({
               workFields: z.array(z.object({ slug: z.string(), label: z.string() })),
+              expertiseByField: z.record(
+                z.string(),
+                z.array(z.object({ slug: z.string(), label: z.string() }))
+              ),
+              maxExpertise: z.number().int(),
             })
           ),
         },

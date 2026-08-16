@@ -177,6 +177,18 @@ model profiles {
   /// buckets. Suppressed in rooms below eight people, where four attributes
   /// name one person.
   work_field    String?
+  /// What they do *within* that field — up to three curated slugs, scoped to
+  /// `work_field` and prefixed with it (`design_ux_research`).
+  ///
+  /// Curated for the same reason `work_field` is: a free-text box here is where
+  /// somebody types their employer or their exact title, which is the leak the
+  /// coarse bucket above exists to prevent, reintroduced one level down.
+  ///
+  /// The prefix is load-bearing. `pruneExpertise` runs on every profile write
+  /// and drops anything whose field no longer matches — otherwise somebody who
+  /// moves from Design to Finance keeps "UX Psychology" on their card forever,
+  /// under a heading that contradicts it.
+  expertise     String[]
   education     String?
   interests     String[]
   photos        String[]

@@ -1,0 +1,12 @@
+-- What someone does *within* their field of work.
+--
+-- Up to three curated slugs, scoped to `work_field` and prefixed with it
+-- (`design_ux_research`). Curated rather than free text for the same reason
+-- `work_field` is coarse: a text box here is where somebody types their
+-- employer, which is the leak the bucket above exists to prevent.
+--
+-- Defaults to empty rather than null. Every existing row gets `{}`, the app
+-- hides the tag row when the array is empty, and "has not picked" and "picked
+-- nothing" are the same thing here -- so a nullable array would be a third
+-- state with no meaning.
+ALTER TABLE "profiles" ADD COLUMN "expertise" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

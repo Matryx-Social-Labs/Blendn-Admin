@@ -893,6 +893,43 @@ was collected as free text: "Software" and "software engineering" were two
 buckets that could never match, and the fix cost two PRs. A validator that only
 checked `z.string()` would repeat it exactly.
 
+### Expertise — the specialism inside the field
+
+`GET /api/mobile/work-fields` also returns `expertiseByField`, keyed by the same
+slugs, plus `maxExpertise` (3). One request, because the picker is one question
+in two steps — field, then what you do within it — and a client holding only the
+first would have to fetch between two taps of the same screen.
+
+Slugs are **prefixed with the field that owns them**: `design_ux_research`, not
+`ux_research`. Two reasons, and the second is the load-bearing one:
+
+1. Nothing collides. "Research" is a real specialism in six of these fields and
+   means six different things.
+2. A stored value can be validated against the field without a second column —
+   which is what makes the pruning below possible at all.
+
+**Writes are pruned, not rejected.** `PUT /profiles/:userId` silently drops any
+slug the resulting `work_field` does not own, and *the resulting field is the one
+after this request*. So a body carrying only `work_field: "finance"` clears a
+Design specialism that is already stored. Without that, somebody who changes
+career keeps "UX Psychology" on their card indefinitely, under a heading that
+contradicts it — a fossil of an attribute they have changed.
+
+Rejecting instead would be worse: a work-field change is a legitimate edit, and
+refusing it with *"your expertise is invalid"* asks the user to clear a field
+they cannot see in order to change one they can.
+
+**Reads return labels, never slugs.** `expertise: ["UX Research"]`, outside the
+identity gate for the same reason `work_field` is — a subject, not a person.
+That is only true because the vocabulary is curated: it carries no seniority and
+no employer, so there is nothing in it to gate. A free-text version would have
+belonged below the gate with `occupation`.
+
+**"Something else" has an empty list, on purpose.** It is the bucket for people
+the taxonomy failed; sub-dividing it would invent a structure they have already
+told us they are outside of. The key is present rather than missing, so a client
+can tell "no specialisms here" from "this field is unknown to me".
+
 **Suppressed in small rooms.** A match card omits `workField` when the room has
 fewer than 8 other attendees. The roster already gives an unrevealed person an
 age and a city; adding a field of work makes four attributes, and "29,
