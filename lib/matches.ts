@@ -281,6 +281,20 @@ export interface LikeOutcome {
   mutual: boolean
   /** Present only on a mutual like — the conversation it just opened. */
   conversationId?: string
+  /**
+   * Both pseudonyms, on a mutual like only.
+   *
+   * The app's Connection Success sheet draws a generated mark for each person,
+   * and `pseudonymAvatar` is seeded on the pseudonym. Without these it would
+   * have to fetch the conversation before it could paint — a round trip in the
+   * middle of the one moment in the product that should feel instant.
+   *
+   * Free to send: `likeAtEvent` already loads both rows to snapshot them onto
+   * the conversation. This returns what it just computed.
+   *
+   * Pseudonyms, never names. `you` is the caller's own, which they already know.
+   */
+  pseudonyms?: { you: string; them: string }
 }
 
 /**
@@ -364,7 +378,15 @@ export async function likeAtEvent(
      */
     notifyMatch(likedId, conversation.id).catch(() => {})
 
-    return { mutual: true, conversationId: conversation.id }
+    const byUser = new Map(pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
+    return {
+      mutual: true,
+      conversationId: conversation.id,
+      pseudonyms: {
+        you: byUser.get(likerId) || "Attendee",
+        them: byUser.get(likedId) || "Attendee",
+      },
+    }
   } catch (e) {
     if (e instanceof ConversationClosedError) return { mutual: false }
     throw e
