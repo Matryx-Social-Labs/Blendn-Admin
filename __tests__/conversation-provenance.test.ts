@@ -11,6 +11,14 @@ import { cameFromMatch } from "@/lib/conversation-identity"
  */
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 
+/*
+ * Strip comments before slicing. Three times now an assertion has matched its
+ * own explanatory prose -- the comment above the code said the same words the
+ * test looked for, so it kept passing after the code was gone.
+ */
+const codeOnly = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+
 describe("fromMatch — the app cannot derive this", () => {
   it("is true when either pseudonym was snapshotted", () => {
     expect(cameFromMatch({ user1_pseudonym: "Cosmic Panda", user2_pseudonym: "Wry Otter" })).toBe(true)
@@ -131,5 +139,49 @@ describe("opening the chat must not un-ban you", () => {
     const src = read("app", "api", "mobile", "events", "[eventId]", "chat", "route.ts")
     const guard = src.slice(src.indexOf("const needsJoin ="))
     expect(guard.slice(0, guard.indexOf("if (needsJoin)"))).not.toContain('!== "left"')
+  })
+})
+
+describe("a mutual like hands back what the moment needs to paint", () => {
+  const MATCHES = () => read("lib", "matches.ts")
+
+  it("returns both pseudonyms, not a second round trip", () => {
+    /*
+     * The Connection Success sheet draws a generated mark per person, seeded on
+     * the pseudonym. Without these the app would have to fetch the conversation
+     * before it could paint — a round trip in the one moment in the product that
+     * should feel instant.
+     *
+     * Free: `likeAtEvent` already loads both rows to snapshot them onto the
+     * conversation. This returns what it just computed.
+     */
+    const src = MATCHES()
+    expect(src).toContain("pseudonyms?: { you: string; them: string }")
+    const ret = src.slice(src.indexOf("return {\n      mutual: true,"))
+    expect(ret.slice(0, ret.indexOf("\n    }"))).toContain("byUser.get(likerId)")
+  })
+
+  it("sends them only on a mutual, never on a one-sided like", () => {
+    /*
+     * A one-sided like must reveal nothing about the other person — not even
+     * their pseudonym for that event, which is a handle you could watch the room
+     * for. The early return carries the bare `mutual: false`.
+     */
+    const src = MATCHES()
+    expect(src).toContain("if (!back) return { mutual: false }")
+    const code = codeOnly(src)
+    const early = code.slice(
+      code.indexOf("if (!back) return"),
+      code.indexOf("const [pseudonymRows")
+    )
+    expect(early).not.toContain("pseudonyms")
+  })
+
+  it("falls back rather than sending a real name", () => {
+    // If the sweeper archived the group, `anonymous_name` is gone. "Attendee"
+    // is the right answer; `user.name` would be a leak dressed as a fallback.
+    const src = MATCHES()
+    const block = src.slice(src.indexOf("const byUser = new Map"))
+    expect(block.slice(0, block.indexOf("\n    }"))).toContain('|| "Attendee"')
   })
 })
