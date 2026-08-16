@@ -455,6 +455,36 @@ Body: `{ "eventIds": ["uuid", ...] }` (max 50)
 |--------|----------|-------------|
 | GET | `/chat/groups` | List user's chat groups |
 
+### GET /conversations
+Each conversation carries **`fromMatch`** — it opened from a mutual like rather
+than from an accepted message request.
+
+It has to be a server field. The payload carries the *resolved* name and
+`theyRevealed`, and `mayShowRealName` returns `true` for **both** a
+never-pseudonymous conversation and a revealed match, so `theyRevealed` cannot
+tell them apart. Anything built on it would greet every accepted message request
+as a new match. Derived from `user1_pseudonym`/`user2_pseudonym`; the pseudonyms
+themselves are never sent.
+
+### GET /events/:eventId/chat
+The response carries a **`write`** block:
+
+```json
+{ "allowed": false, "reason": "window_closed",
+  "message": "This chat has closed. Event chats stay open for 24 hours after the event ends.",
+  "closesAt": "2026-08-17T22:00:00Z", "eventEndedAt": "2026-08-16T22:00:00Z" }
+```
+
+`reason` is one of `locked | archived | window_closed | muted | banned`, or
+`null` when writing is allowed. The composer used to guess: every refusal came
+back as a single `NOT_CHECKED_IN` covering several unrelated situations, so the
+app either showed the wrong reason or let someone type a paragraph and then threw
+it away. `closesAt` lets the room show an honest countdown.
+
+**Write access is attendance, not presence.** A `chat_group_members` row means
+you were physically at the event; checking out does not revoke it. See
+`mayWriteToRoom` in `lib/chat-window.ts`.
+
 ### GET /chat/groups
 Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
 no `check_out_time`, so the room is live for them right now. The app lifts those
@@ -467,6 +497,36 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 | GET | `/chat/groups/:chatGroupId/messages` | Get messages (cursor-based) |
 | POST | `/chat/groups/:chatGroupId/messages` | Send message (30/min rate limit) |
 | GET | `/chat/groups/:chatGroupId/participants` | List participants |
+
+### GET /conversations
+Each conversation carries **`fromMatch`** — it opened from a mutual like rather
+than from an accepted message request.
+
+It has to be a server field. The payload carries the *resolved* name and
+`theyRevealed`, and `mayShowRealName` returns `true` for **both** a
+never-pseudonymous conversation and a revealed match, so `theyRevealed` cannot
+tell them apart. Anything built on it would greet every accepted message request
+as a new match. Derived from `user1_pseudonym`/`user2_pseudonym`; the pseudonyms
+themselves are never sent.
+
+### GET /events/:eventId/chat
+The response carries a **`write`** block:
+
+```json
+{ "allowed": false, "reason": "window_closed",
+  "message": "This chat has closed. Event chats stay open for 24 hours after the event ends.",
+  "closesAt": "2026-08-17T22:00:00Z", "eventEndedAt": "2026-08-16T22:00:00Z" }
+```
+
+`reason` is one of `locked | archived | window_closed | muted | banned`, or
+`null` when writing is allowed. The composer used to guess: every refusal came
+back as a single `NOT_CHECKED_IN` covering several unrelated situations, so the
+app either showed the wrong reason or let someone type a paragraph and then threw
+it away. `closesAt` lets the room show an honest countdown.
+
+**Write access is attendance, not presence.** A `chat_group_members` row means
+you were physically at the event; checking out does not revoke it. See
+`mayWriteToRoom` in `lib/chat-window.ts`.
 
 ### GET /chat/groups/:chatGroupId/messages
 | Param | Type | Description |

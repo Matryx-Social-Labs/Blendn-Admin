@@ -114,3 +114,30 @@ export function mayShowRealName(
 
   return isUser1 ? conversation.user1_revealed : conversation.user2_revealed
 }
+
+/**
+ * Did this conversation open from a mutual like?
+ *
+ * The app needs this and cannot derive it. The inbox payload carries the
+ * *resolved* name and `theyRevealed`, and `mayShowRealName` returns `true` for
+ * **both** a never-pseudonymous conversation and a revealed match — so
+ * `theyRevealed: true` is ambiguous, and any opener built on it would greet
+ * every accepted message request as a new match.
+ *
+ * The discriminator is the one this file already documents: a pseudonym was
+ * snapshotted at match time, so a conversation with either pseudonym set came
+ * from a match, and one with neither did not. Returning the boolean rather than
+ * the pseudonyms keeps the names server-side where the rest of this file keeps
+ * them.
+ *
+ * Deliberately `||` and not `&&`: `openConversation` writes both from the same
+ * snapshot, but a room whose group was archived before the match can leave one
+ * side `"Attendee"` and, in older rows, null. One pseudonym is still proof the
+ * conversation was born of a match.
+ */
+export function cameFromMatch(conversation: {
+  user1_pseudonym: string | null
+  user2_pseudonym: string | null
+}): boolean {
+  return conversation.user1_pseudonym !== null || conversation.user2_pseudonym !== null
+}

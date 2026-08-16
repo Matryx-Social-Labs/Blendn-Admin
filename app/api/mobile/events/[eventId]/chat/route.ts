@@ -15,7 +15,7 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
-import { chatWindowState, chatClosedMessage, mayWriteToRoom } from "@/lib/chat-window"
+import { chatClosesAt, chatClosedMessage, chatWindowState, mayWriteToRoom } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
@@ -46,9 +46,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { page, limit, before, after } = parsed.data
 
-    // Get chat group for event (create on demand if user is checked in)
+    // Get chat group for event (create on demand if user is checked in).
+    // `end_time` comes along so the response can say whether -- and until when
+    // -- this room accepts writes, rather than the app finding out by being
+    // rejected after the user has typed.
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
+      include: { event: { select: { end_time: true } } },
     })
 
     if (!chatGroup) {
@@ -75,6 +79,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           status: "active",
           member_count: 0,
         },
+        include: { event: { select: { end_time: true } } },
       })
     }
 
@@ -88,7 +93,25 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    if (!membership || membership.status !== "active") {
+    /*
+     * Auto-join, but never a resurrection.
+     *
+     * This read `membership.status !== "active"`, and its `update` set
+     * `status: "active"` — so a **banned** member who was still checked in got
+     * un-banned simply by opening the chat. A moderator's decision lasted until
+     * the next pull-to-refresh, and it silently defeated the `banned` branch of
+     * `mayWriteToRoom` below, because by the time that ran the row said active.
+     *
+     * `muted` is excluded for the same reason; it expires on its own timer
+     * (`checkAndAutoUnmute`), not by revisiting the screen.
+     *
+     * `left` is the one status that SHOULD rejoin: it means the window closed
+     * and the room was archived, and the row is kept only to hold the pseudonym.
+     */
+    const needsJoin =
+      !membership || (membership.status !== "active" && membership.status !== "banned" && membership.status !== "muted")
+
+    if (needsJoin) {
       const checkIn = await db.event_check_ins.findFirst({
       // Event-level, not per-day: attending any day of a run gets you the room.
       where: { event_id: eventId, user_id: authUser.userId },
@@ -236,9 +259,38 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    /*
+     * Whether this room takes writes, and why not.
+     *
+     * The composer used to guess. Every refusal came back as one
+     * `NOT_CHECKED_IN` covering several unrelated situations, so the app either
+     * showed the wrong reason or let someone type a paragraph and then threw it
+     * away. `closesAt` lets the room say "6 hours left" honestly instead of
+     * counting down to a number it inferred.
+     */
+    const denial = mayWriteToRoom(
+      // Null only when the auto-join above just created the row, which creates
+      // it `active`. A banned or muted row is never replaced, so it arrives here
+      // intact and `mayWriteToRoom` sees the truth.
+      membership ?? { status: "active" },
+      chatGroup.event,
+      chatGroup
+    )
+
     return successResponse({
       chatGroupId: chatGroup.id,
       chatGroupName: chatGroup.name,
+      write: {
+        allowed: denial === null,
+        reason: denial?.reason ?? null,
+        message: denial && denial.reason !== "muted" && denial.reason !== "banned"
+          ? chatClosedMessage(denial.reason)
+          : null,
+        /** When the 24-hour window shuts. Independent of the archive job. */
+        closesAt: chatClosesAt(chatGroup.event),
+        /** Past this, the room is a read-only record of the night. */
+        eventEndedAt: chatGroup.event.end_time,
+      },
       messages: messages.reverse().map((m) => {
         const isHidden = m.moderation_status === "hidden"
         return {

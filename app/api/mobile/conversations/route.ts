@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
-import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
+import { cameFromMatch, displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -102,6 +102,11 @@ export async function GET(request: NextRequest) {
           name: displayNameInConversation(conv, otherUser.id, otherUser.name),
           image: otherRevealed ? otherUser.image : null,
         },
+        /**
+         * Opened from a mutual like, rather than from an accepted message
+         * request. The app draws the match opener on these and only these.
+         */
+        fromMatch: cameFromMatch(conv),
         /** Your own state, for the header. Never a count of who else revealed. */
         youRevealed: conv.user1_id === authUser.userId
           ? conv.user1_revealed
