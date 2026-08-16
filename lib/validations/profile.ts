@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { parseDateOfBirth } from "@/lib/age"
 import { isOrientation, orientationsAreCoherent } from "@/lib/dating"
+import { isExpertise, MAX_EXPERTISE } from "@/lib/expertise"
 import { isWorkField } from "@/lib/work-fields"
 
 /** Mirrors the `connection_intent` enum in prisma/schema.prisma. */
@@ -211,6 +212,24 @@ export const updateProfileSchema = z.object({
     .refine(isWorkField, { message: "Not a recognised field of work" })
     .optional()
     .nullable(),
+
+  /**
+   * What they do within that field — curated slugs, never free text.
+   *
+   * Validated for *existence* here and for *ownership* at the route, because
+   * ownership depends on the `work_field` this same request may be changing:
+   * `pruneExpertise` is the only place that knows what the profile will look
+   * like afterwards. A schema-level cross-field refine would have to duplicate
+   * that and would still be blind to the stored value when only the field moves.
+   *
+   * Capped here as well as in `pruneExpertise` — the cap is cheap and a
+   * thousand-element array should be refused at the edge, not silently
+   * truncated in the middle.
+   */
+  expertise: z
+    .array(z.string().refine(isExpertise, { message: "Not a recognised specialism" }))
+    .max(MAX_EXPERTISE, `Pick at most ${MAX_EXPERTISE}`)
+    .optional(),
 
   // Settings the app has always shown and never stored. Four switches with no
   // columns behind them meant every toggle read ON regardless of what anyone

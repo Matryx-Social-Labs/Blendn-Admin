@@ -5,6 +5,7 @@ import { checkProfilePhoto } from "@/lib/photos"
 import { recordPhotoCheck } from "@/lib/photo-checks"
 import { ageFrom, datingAgeRefusal, parseDateOfBirth, stripDating } from "@/lib/age"
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
+import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
 import { profileForSelfResponse } from "@/lib/self-profile"
@@ -105,6 +106,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * the free text below stays behind the gate with the name and the photos.
        */
       work_field: p.work_field,
+      /*
+       * Outside the gate too, and for the same reason the line above is.
+       *
+       * "UX Research" is narrower than "Design" and still an attribute — it
+       * describes a subject, not a person. That is exactly why the vocabulary
+       * is curated and carries no seniority and no employer: had it been a text
+       * box it would belong below, with the occupation.
+       *
+       * Labels, never slugs — a card must not render `design_ux_research`.
+       */
+      expertise: expertiseLabels(p.expertise),
       // Identifying free text, same rule as the name. Someone's employer and
       // their photographs single them out as surely as a name does.
       ...(identified
@@ -218,7 +230,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const {
       name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos,
       goals, looking_for, onboarded, reveal_by_default,
-      intent_default, gender, interested_in, work_field, show_orientation,
+      intent_default, gender, interested_in, work_field, expertise, show_orientation,
       push_enabled, show_online, read_receipts, share_location,
     } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
@@ -260,8 +272,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     // `photos` joins the reasons to fetch: the moderation pass below only
     // checks URLs that are not already on the profile, so re-saving a profile
     // does not re-fetch and re-moderate the same three photos every time.
+    /*
+     * `work_field` and `expertise` join the reasons to fetch, and the condition
+     * is `||` on BOTH: pruning needs the profile as it will be *after* this
+     * request, and either half can arrive without the other. A request that
+     * changes only the field must still drop specialisms the new field does not
+     * own -- that is the whole case `pruneExpertise` exists for.
+     */
+    const touchesExpertise = work_field !== undefined || expertise !== undefined
     const existing =
-      touchesAgeGate || touchesDating || photos !== undefined
+      touchesAgeGate || touchesDating || touchesExpertise || photos !== undefined
         ? await db.profiles.findUnique({
             where: { id: userId },
             select: {
@@ -271,9 +291,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               gender: true,
               orientations: true,
               photos: true,
+              work_field: true,
+              expertise: true,
             },
           })
         : null
+
+    /*
+     * Specialisms, against the field they will sit under.
+     *
+     * Both sides resolve to "what this request leaves behind", not "what it
+     * sent": someone switching Design -> Finance sends no expertise at all, and
+     * the stored slugs still have to go. Without this the card reads
+     * "Finance & Banking - UX Psychology" indefinitely.
+     */
+    const effectiveWorkField = work_field !== undefined ? work_field : existing?.work_field
+    const prunedExpertise = touchesExpertise
+      ? pruneExpertise(
+          expertise !== undefined ? expertise : existing?.expertise,
+          effectiveWorkField
+        )
+      : undefined
     /*
      * The profile as it will be *after* this request, handed to `ageFrom` so
      * the gate applies the same precedence the read paths do — birth date over
@@ -438,6 +476,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
          */
         ...(show_orientation !== undefined && { show_orientation }),
         ...(work_field !== undefined && { work_field }),
+        ...(prunedExpertise !== undefined && { expertise: prunedExpertise }),
         // Omitted rather than defaulted: the column defaults to true, which is
         // what the settings screen has always claimed, so nobody's apparent
         // settings change on the day these start being honoured.
@@ -491,6 +530,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
          */
         ...(show_orientation !== undefined && { show_orientation }),
         ...(work_field !== undefined && { work_field }),
+        // Also when only the FIELD moved -- see `prunedExpertise` above.
+        ...(prunedExpertise !== undefined && { expertise: prunedExpertise }),
         ...(push_enabled !== undefined && { push_enabled }),
         ...(show_online !== undefined && { show_online }),
         ...(read_receipts !== undefined && { read_receipts }),

@@ -91,6 +91,9 @@ export async function DELETE(request: NextRequest) {
           intent_default: [],
           reveal_by_default: false,
           work_field: null,
+          // Three slugs narrow a person further than the bucket above them, so
+          // they go for the same reason it does.
+          expertise: [],
           onboarded: false,
         },
       }),
