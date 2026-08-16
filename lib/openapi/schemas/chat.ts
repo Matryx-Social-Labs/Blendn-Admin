@@ -75,6 +75,11 @@ export const ChatGroupSchema = z
     memberCount: z.number(),
     unreadCount: z.number(),
     lastMessageAt: z.string().datetime().nullable(),
+    fromMatch: z
+      .boolean()
+      .describe(
+        "Opened from a mutual like rather than an accepted message request. Not derivable client-side: `theyRevealed` is true for BOTH a never-pseudonymous conversation and a revealed match, so it cannot tell them apart."
+      ),
     lastMessage: z
       .object({
         id: z.string().uuid(),
