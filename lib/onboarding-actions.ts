@@ -39,7 +39,7 @@ async function requireAdmin() {
 export interface OnboardingRow {
   id: string
   kind: "individual" | "company"
-  requested_role: "organizer" | "venue_owner"
+  requested_role: "organizer" | "venue_owner" | "sponsor"
   display_name: string
   legal_name: string | null
   gstin: string | null
@@ -160,6 +160,20 @@ export async function approveOnboardingRequest(
         status: "verified",
         verified_at: new Date(),
         verified_by: admin.id,
+        /*
+         * A sponsor is granted placement in the same act that approves them.
+         *
+         * Approving a sponsor application and then requiring a separate
+         * `may_sponsor` grant produces an account that is approved and still
+         * cannot sponsor — the admin thinks they are done, the sponsor cannot
+         * do the one thing they applied for, and nothing anywhere says why.
+         *
+         * An admin who wants to approve the account WITHOUT the commercial
+         * capability revokes it afterwards on the organisations screen, which
+         * records a reason. That is the rarer case and it is the one that
+         * should take the extra step.
+         */
+        may_sponsor: request.requested_role === "sponsor",
       },
       select: { id: true },
     })

@@ -28,7 +28,7 @@ import { sendEmail, onboardingVerifyEmail, applyUrl, emailConfigured } from "@/l
 
 const applySchema = z.object({
   kind: z.enum(["individual", "company"]).default("company"),
-  requested_role: z.enum(["organizer", "venue_owner"]).default("organizer"),
+  requested_role: z.enum(["organizer", "venue_owner", "sponsor"]).default("organizer"),
   display_name: z.string().trim().min(2).max(120),
   legal_name: z.string().trim().max(200).optional(),
   gstin: z.string().trim().max(20).optional(),
