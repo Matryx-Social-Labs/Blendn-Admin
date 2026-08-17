@@ -45,7 +45,7 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Platform health: what needs attention, growth vs vanity, and supply.",
     url: "/dashboard",
     icon: IconDashboard,
-    allowedRoles: ["app_admin", "organizer", "venue_owner"],
+    allowedRoles: ["app_admin", "organizer", "venue_owner", "sponsor"],
   },
   {
     // Platform-wide, and new: moderation was previously reachable only by
@@ -82,6 +82,22 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/venues",
     icon: IconBuildingStore,
     allowedRoles: ["venue_owner"],
+  },
+  {
+    // Sponsor-side. A sponsor sees their own placements and campaigns and
+    // nothing else — not attendees, not moderation, not other people's events.
+    title: "Placements",
+    description: "Where your brand appears, and what is waiting on you.",
+    url: "/dashboard/placements",
+    icon: IconMicrophone2,
+    allowedRoles: ["sponsor"],
+  },
+  {
+    title: "Brand",
+    description: "Your name, logo and website, as attendees see them.",
+    url: "/dashboard/brand",
+    icon: IconBuildingStore,
+    allowedRoles: ["sponsor"],
   },
   {
     title: "Chatrooms",
@@ -156,7 +172,7 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Your colleagues, invites, and domain verification.",
     url: "/dashboard/organisation",
     icon: IconBuilding,
-    allowedRoles: ["organizer", "venue_owner"],
+    allowedRoles: ["organizer", "venue_owner", "sponsor"],
   },
   {
     // Categories were seeded by a script and by nothing else — an admin could

@@ -77,3 +77,42 @@ export const BATCH = {
   MAX_EVENT_IDS: 50,
   DEFAULT_INTERESTED_PREVIEW_LIMIT: 3,
 } as const
+
+// ── Sponsorship ───────────────────────────────────────────
+/**
+ * The policy numbers for sponsored placement.
+ *
+ * Grouped here rather than written into the sentence that needs them, matching
+ * how every other tunable in this file is handled. `MIN_REPORTABLE` in
+ * particular is a privacy control with two readers — the poll results and the
+ * sponsor report — and they must never disagree.
+ */
+export const SPONSORSHIP = {
+  /**
+   * Below this, a per-option breakdown or a sponsor-facing figure identifies
+   * people rather than describing them.
+   *
+   * `docs/DESIGN_HANDOFF.md` guarantees small rooms are normal: check-in never
+   * refuses, so capacity is a signal and not a door. In a room of six, "1 vote
+   * · Leaving early" names that person to everyone still there.
+   *
+   * Suppression is not per-cell. Hiding one option while publishing the total
+   * leaks it by subtraction, and hiding all but one leaves the survivor
+   * recoverable — see `lib/room-audience.ts` for the full rule.
+   */
+  MIN_REPORTABLE: 5,
+  /** A room people joined to talk to strangers is not an ad break. */
+  MAX_PLACEMENTS_PER_EVENT: 3,
+  /**
+   * Across ALL sponsors combined, not per campaign. Three advertisers each
+   * individually well-behaved at 30 minutes still fire something every ten, and
+   * the attendee does not care that each one behaved.
+   */
+  ROOM_MIN_GAP_MINUTES: 20,
+  /** The floor a single campaign may be set to. */
+  MIN_INTERVAL_MINUTES: 20,
+  MAX_IMAGE_BYTES: 5 * 1024 * 1024,
+  MAX_VIDEO_BYTES: 100 * 1024 * 1024,
+  /** Consecutive send failures before a campaign deactivates itself. */
+  FAILURE_LIMIT: 3,
+} as const

@@ -110,6 +110,33 @@ describe("visibleNavFor", () => {
     ])
   })
 
+  it("gives a sponsor their own two screens and nothing else", () => {
+    /*
+     * A sponsor is not a small organiser. They see where their brand appears
+     * and what is waiting on them — not attendees, not moderation, not
+     * Chatrooms, not other people's events.
+     *
+     * "My organisation" is included because a sponsor's team IS an
+     * organisation: they invite colleagues through the same
+     * `organisation_invites` flow as every other company on the platform.
+     */
+    expect(titles("sponsor")).toEqual([
+      "Overview",
+      "Placements",
+      "Brand",
+      "My organisation",
+    ])
+  })
+
+  it("shows nothing to an attendee or an unknown role", () => {
+    // Fails closed. `visibleNavFor` returning [] for a role it does not know is
+    // what makes adding a role to the enum a visible change rather than a
+    // silent one — the sidebar is empty until somebody wires it.
+    expect(titles("attendee")).toEqual([])
+    expect(titles("something_new")).toEqual([])
+    expect(titles(undefined)).toEqual([])
+  })
+
   it("keeps the two organisation screens apart", () => {
     // A host manages their own company; an admin manages every company. Giving
     // an admin the host screen would record support actions as though the org's

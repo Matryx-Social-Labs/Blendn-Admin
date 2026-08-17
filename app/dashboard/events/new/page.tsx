@@ -2,16 +2,26 @@ import { redirect } from "next/navigation"
 import { EventEditor } from "@/components/event-editor"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
+import { canCreateEvents } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 
 export default async function NewEventPage() {
   const session = await getAuth()
-  // venue_owner was redirected away from here, but `eventPermissions` grants
-  // them both buckets on an event their own org runs — a venue owner hosting
-  // their own night is a case the model explicitly supports and the UI
-  // forbade. Attendees are the only role with no business on this screen.
-  if (!session?.user || session.user.role === "attendee") {
+  /*
+   * An allowlist, via `lib/rbac.ts`, not a denylist on `attendee`.
+   *
+   * `venue_owner` belongs here: `eventPermissions` grants them both buckets on
+   * an event their own org runs, and a venue owner hosting their own night is a
+   * case the model supports and the UI used to forbid.
+   *
+   * The shape is the point. This read `role === "attendee"` — so the moment
+   * `sponsor` joined the enum, every sponsor could publish events, with no
+   * error and nothing in a log. `canCreateEvents` names who may, and
+   * `__tests__/authz-scoping-boundary.test.ts` fails the build on a new
+   * denylist.
+   */
+  if (!session?.user || !canCreateEvents(session.user.role)) {
     redirect("/dashboard/events")
   }
 

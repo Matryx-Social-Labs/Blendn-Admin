@@ -1,4 +1,15 @@
-export type DashboardRole = "app_admin" | "organizer" | "venue_owner"
+/**
+ * Roles that get a dashboard shell.
+ *
+ * Kept in step with `user_role` by `__tests__/dashboard-view.test.ts`, which
+ * exists because the nav gate drifted from `lib/rbac.ts` once already and a
+ * whole role was locked out of a screen the authorization layer had always been
+ * willing to serve.
+ *
+ * `attendee` is deliberately absent: attendees are mobile-only and
+ * `middleware.ts` redirects them away.
+ */
+export type DashboardRole = "app_admin" | "organizer" | "venue_owner" | "sponsor"
 
 /* -------------------------------------------------------------------------- */
 /* Shared                                                                      */

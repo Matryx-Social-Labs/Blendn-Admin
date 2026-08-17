@@ -63,9 +63,17 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 const EVENT_SELECT_BLOCK = /event:\s*\{\s*select:\s*\{[^{}]*\}/g
 
 describe("chat-window callers select what the predicate reads", () => {
+  /*
+   * Files that CALL the predicate, not files that mention it.
+   *
+   * `chatWindowState` appears in prose in several comments — `lib/placement-phase.ts`
+   * explains that the scheduler consults it — and those files issue no Prisma
+   * query at all, so the "found at least one select" guard below fired on them.
+   * Matching the call parenthesis is what distinguishes a caller from a mention.
+   */
   const callers = SEARCH_DIRS.flatMap((d) => sourceFiles(join(ROOT, d))).filter((f) => {
     const src = readFileSync(f, "utf8")
-    return src.includes("chatWindowState") && !f.endsWith("lib/chat-window.ts")
+    return /chatWindowState\s*\(/.test(src) && !f.endsWith("lib/chat-window.ts")
   })
 
   it("finds the call sites at all, so a rename cannot silently empty this test", () => {
