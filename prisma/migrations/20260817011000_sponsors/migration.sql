@@ -19,6 +19,7 @@ ALTER TABLE "event_sponsored_messages" ADD COLUMN     "claim_token" UUID,
 ADD COLUMN     "claimed_at" TIMESTAMPTZ(6),
 ADD COLUMN     "consecutive_failures" INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN     "deactivated_reason" TEXT,
+ADD COLUMN     "moderation_status" "moderation_status_type" NOT NULL DEFAULT 'pending',
 ADD COLUMN     "next_send_at" TIMESTAMPTZ(6),
 ADD COLUMN     "sponsor_id" UUID;
 

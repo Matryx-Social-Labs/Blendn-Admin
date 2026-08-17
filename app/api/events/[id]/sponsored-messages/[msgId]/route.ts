@@ -6,6 +6,7 @@ import { canBroadcast, eventPermissions } from "@/lib/rbac"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { sponsoredMessageScheduler } from "@/lib/socket-server"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
+import { canActivate, creativeEditPatch, touchesCreative } from "@/lib/sponsored-moderation"
 
 interface RouteContext {
   params: Promise<{ id: string; msgId: string }>
@@ -49,12 +50,57 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     })
     if (!existing) return new NextResponse("Not found", { status: 404 })
 
+    /*
+     * An edit to the creative is a NEW creative, and cannot inherit approval.
+     *
+     * This route re-armed the scheduler on any PATCH where `is_active` was
+     * true, reading the content it had just written. So "create clean, get
+     * approved, activate, then edit the words" put unreviewed text into the
+     * room within one interval with the approval still attached — the gate was
+     * decorative for anyone who could edit.
+     *
+     * Changing only the interval is deliberately NOT an edit: nobody has
+     * changed a word of what runs, and sending them back through review for a
+     * schedule change teaches people to route around review.
+     */
+    const editsCreative = touchesCreative({ content }, existing)
+
+    /*
+     * Refuse the activation rather than silently ignoring it.
+     *
+     * Previously, activating with no chat group wrote `is_active: true`,
+     * returned 200, and scheduled nothing — the switch said on, the toast said
+     * "Started sending", and no message ever went out. An impossible state
+     * should be unreachable, not reported as success.
+     */
+    if (is_active === true && !editsCreative) {
+      const placement = existing.sponsor_id
+        ? await db.event_sponsors.findFirst({
+            where: { event_id: eventId, sponsor_id: existing.sponsor_id },
+            select: { status: true },
+          })
+        : null
+
+      const decision = canActivate({
+        moderation_status: existing.moderation_status,
+        sponsor_id: existing.sponsor_id,
+        hasChatGroup: Boolean(event.chat_group),
+        placementApproved: placement?.status === "approved",
+      })
+      if (!decision.allowed) {
+        return NextResponse.json({ error: decision.reason }, { status: 409 })
+      }
+    }
+
     const updated = await db.event_sponsored_messages.update({
       where: { id: msgId },
       data: {
         ...(content !== undefined && { content }),
         ...(interval_minutes !== undefined && { interval_minutes }),
         ...(is_active !== undefined && { is_active }),
+        // One write, not two. Applying the reset separately would leave a
+        // window where the content is new and the approval is old.
+        ...(editsCreative ? creativeEditPatch() : {}),
         updated_at: new Date(),
       },
     })

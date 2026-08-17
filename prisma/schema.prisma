@@ -2131,21 +2131,32 @@ model event_sponsored_messages {
   /// ACTIVE campaign must have one: the due-select joins through it, so a null
   /// here means the campaign silently never sends. Enforced by a CHECK in the
   /// migration, not by hope.
-  sponsor_id           String?   @db.Uuid
+  sponsor_id           String?                @db.Uuid
   /// The schedule, persisted.
   ///
   /// `setInterval` state died on every deploy: `start()` has no leading edge and
   /// `loadAll()` re-armed from zero on boot, so deploying twice in an evening
   /// meant a 30-minute campaign sent nothing. `last_sent_at` was written and
   /// never read.
-  next_send_at         DateTime? @db.Timestamptz(6)
+  next_send_at         DateTime?              @db.Timestamptz(6)
   /// Set while a worker holds this row. Cleared on finalize. A row still
   /// claimed after the lease expires is retried, and the outbox unique on
   /// `sponsored_message_sends` makes that retry harmless.
-  claim_token          String?   @db.Uuid
-  claimed_at           DateTime? @db.Timestamptz(6)
-  consecutive_failures Int       @default(0)
+  claim_token          String?                @db.Uuid
+  claimed_at           DateTime?              @db.Timestamptz(6)
+  consecutive_failures Int                    @default(0)
   deactivated_reason   String?
+  /// The CURRENT creative's review state, denormalised onto the campaign.
+  ///
+  /// `sponsored_creatives` holds the history — every revision with its own
+  /// verdict — but "may this run right now" is asked on every activation and
+  /// every scheduler tick, and joining to find the latest revision to answer it
+  /// would put a subquery on the hot path.
+  ///
+  /// Kept in step by `creativeEditPatch()`: an edit writes `pending` here in the
+  /// SAME update that writes the new content, so there is no window where the
+  /// words are new and the verdict is old.
+  moderation_status    moderation_status_type @default(pending)
 
   event     events                    @relation(fields: [event_id], references: [id], onDelete: Cascade)
   sponsor   sponsors?                 @relation(fields: [sponsor_id], references: [id], onDelete: SetNull)
