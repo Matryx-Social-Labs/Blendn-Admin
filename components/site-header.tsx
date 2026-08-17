@@ -39,6 +39,8 @@ const TIMELESS = new Set([
   // A brand is four fields about a company. A date-range control over it would
   // be a filter with nothing to filter.
   "/dashboard/brand",
+  "/dashboard/sponsors",
+  "/dashboard/sponsor-claims",
 ])
 
 /** Reports read the range, so the control stays. */
@@ -76,6 +78,14 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Venue claims",
     description:
       "Ownership requests. Approving one hands over the events other organisers hold there.",
+  },
+  "/dashboard/sponsors": {
+    title: "Brands",
+    description: "Every brand — who owns each, which are unclaimed, and possible duplicates.",
+  },
+  "/dashboard/sponsor-claims": {
+    title: "Brand claims",
+    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
   },
   "/dashboard/placements": {
     title: "Placements",

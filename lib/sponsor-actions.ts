@@ -806,3 +806,92 @@ export async function removePlacement(placementId: string) {
 
   revalidatePath(`/dashboard/events/${placement.event_id}/messaging`)
 }
+
+/* -------------------------------------------------------------------------- */
+/* Admin: the brand register                                                  */
+/* -------------------------------------------------------------------------- */
+
+export interface AdminSponsorRow {
+  id: string
+  name: string
+  name_key: string
+  website: string | null
+  ownerName: string | null
+  claimed: boolean
+  placements: number
+  campaigns: number
+  pendingClaims: number
+  createdAt: Date
+}
+
+export interface SponsorRegister {
+  /** Rows sharing a `name_key`, which is the whole reason this screen exists. */
+  duplicates: AdminSponsorRow[][]
+  rest: AdminSponsorRow[]
+}
+
+/**
+ * Every brand, with the duplicate clusters pulled to the top.
+ *
+ * `name_key` is a search key and never an identity — "AT&T" and "ATT" collapse
+ * together, and so would two unrelated brands. So this groups by it and asks a
+ * person, rather than merging anything on its own.
+ */
+export async function getSponsorRegister(): Promise<SponsorRegister> {
+  const session = await getAuth()
+  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+
+  const rows = await db.sponsors.findMany({
+    where: { deleted_at: null, merged_into: null },
+    select: {
+      id: true,
+      name: true,
+      name_key: true,
+      website: true,
+      claimed_at: true,
+      created_at: true,
+      org: { select: { display_name: true } },
+      _count: { select: { placements: true, campaigns: true } },
+      claims: { where: { status: "pending" }, select: { id: true } },
+    },
+    orderBy: [{ name_key: "asc" }, { created_at: "asc" }],
+  })
+
+  const mapped: AdminSponsorRow[] = rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    name_key: r.name_key,
+    website: r.website,
+    ownerName: r.org?.display_name ?? null,
+    claimed: r.claimed_at !== null,
+    placements: r._count.placements,
+    campaigns: r._count.campaigns,
+    pendingClaims: r.claims.length,
+    createdAt: r.created_at,
+  }))
+
+  const byKey = new Map<string, AdminSponsorRow[]>()
+  for (const row of mapped) {
+    const bucket = byKey.get(row.name_key)
+    if (bucket) bucket.push(row)
+    else byKey.set(row.name_key, [row])
+  }
+
+  const duplicates: AdminSponsorRow[][] = []
+  const rest: AdminSponsorRow[] = []
+  for (const bucket of byKey.values()) {
+    if (bucket.length > 1) duplicates.push(bucket)
+    else rest.push(bucket[0])
+  }
+
+  // Most-used first: a cluster where both sides carry history is the one worth
+  // an admin's attention, because merging it loses the least.
+  duplicates.sort((a, b) => clusterWeight(b) - clusterWeight(a))
+  rest.sort((a, b) => a.name.localeCompare(b.name))
+
+  return { duplicates, rest }
+}
+
+function clusterWeight(bucket: AdminSponsorRow[]): number {
+  return bucket.reduce((n, r) => n + r.placements + r.campaigns, 0)
+}

@@ -149,6 +149,20 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["app_admin"],
   },
   {
+    title: "Brands",
+    description: "Every brand — who owns each, which are unclaimed, and possible duplicates.",
+    url: "/dashboard/sponsors",
+    icon: IconBuildingStore,
+    allowedRoles: ["app_admin"],
+  },
+  {
+    title: "Brand claims",
+    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
+    url: "/dashboard/sponsor-claims",
+    icon: IconFileCheck,
+    allowedRoles: ["app_admin"],
+  },
+  {
     title: "Applications",
     description: "Host applications awaiting review. Every one is read by a person.",
     url: "/dashboard/onboarding",
