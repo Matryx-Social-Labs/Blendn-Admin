@@ -11,6 +11,16 @@ enum user_role {
   organizer
   venue_owner
   attendee
+  /// A brand that buys placement. A separate value rather than reusing
+  /// `organizer`, because that would hand every sponsor the ability to create
+  /// events — a capability leak, not a cosmetic difference. `venue_owner`
+  /// exists for the same reason.
+  ///
+  /// Authorization does NOT read this: grants are org-anchored via
+  /// `SponsorGrant`, so a person who is staff at both an organiser and a
+  /// sponsor is still authorized correctly. What this value decides is which
+  /// dashboard shell they see.
+  sponsor
 }
 
 // NextAuth.js models
@@ -62,6 +72,9 @@ model User {
   user_interests        user_interests[]
   oauth_accounts        user_oauth_accounts[]
   push_tokens           push_tokens[]
+  upload_grants         upload_grants[]
+  poll_votes            chat_poll_votes[]
+  priced_charges        placement_charges[]     @relation("ChargePricer")
   /// The notifications centre. `onDelete: Cascade` on the far side, so account
   /// deletion takes the history with it — see `docs/API.md` on erasure.
   notifications         notifications[]
@@ -371,6 +384,7 @@ model events {
   occurrences        event_occurrences[]
   sponsored_messages event_sponsored_messages[]
   announcements      event_announcements[]
+  sponsors           event_sponsors[]
   rsvps              event_rsvps[]
   feedback           event_feedback[]
   venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
@@ -455,22 +469,22 @@ model event_categories {
 /// `event_amenities` is `Restrict` for the same reason: deleting an amenity
 /// that events reference would rewrite history rather than end a listing.
 model amenities {
-  id          String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
   /// The label as drawn — "Open Bar".
-  name        String
-  slug        String   @unique
+  name       String
+  slug       String   @unique
   /// The second line on the tile — "Premium Spirits". Optional: not every
   /// amenity has a useful qualifier, and an invented one is worse than none.
-  subtitle    String?
+  subtitle   String?
   /// A Material Symbols name, so the client does not carry its own mapping
   /// from slug to glyph and drift from the seed.
-  icon        String?
+  icon       String?
   /// Ordering in the picker and on the card. Explicit, because alphabetical
   /// puts "Accessible Entrance" above "Open Bar" on every event in the app.
-  sort_order  Int      @default(0)
-  is_active   Boolean  @default(true)
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  sort_order Int      @default(0)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   events event_amenities[]
 
@@ -614,13 +628,15 @@ model chat_messages {
   moderation_status String? // "clean" | "flagged" | "hidden"
 
   // Relations
-  chat_group       chat_groups         @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
-  user             User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  parent_message   chat_messages?      @relation("MessageReplies", fields: [parent_id], references: [id])
-  replies          chat_messages[]     @relation("MessageReplies")
+  chat_group       chat_groups               @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)
+  user             User                      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  parent_message   chat_messages?            @relation("MessageReplies", fields: [parent_id], references: [id])
+  replies          chat_messages[]           @relation("MessageReplies")
   reactions        message_reactions[]
   moderation_flags moderation_flags[]
   feedback         event_feedback?
+  poll             chat_polls?
+  sponsored_sends  sponsored_message_sends[]
 
   @@index([chat_group_id, created_at])
   @@index([chat_group_id, deleted_at])
@@ -1221,14 +1237,17 @@ model organisations {
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
   updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
 
-  members       organisation_members[]
-  events        events[]
-  venues        venues[]
-  domains       organisation_domains[]
-  invites       organisation_invites[]
-  join_requests organisation_join_requests[]
-  onboarding    organiser_onboarding_requests[]
-  venue_claims  venue_claims[]
+  members        organisation_members[]
+  events         events[]
+  venues         venues[]
+  domains        organisation_domains[]
+  invites        organisation_invites[]
+  join_requests  organisation_join_requests[]
+  onboarding     organiser_onboarding_requests[]
+  venue_claims   venue_claims[]
+  sponsors       sponsors[]
+  sponsor_claims sponsor_claims[]
+  upload_grants  upload_grants[]
 
   @@index([status])
 }
@@ -1496,6 +1515,188 @@ model venue_claims {
   @@index([status])
   @@index([venue_id])
   @@index([org_id])
+}
+
+/// A brand that appears at an event.
+///
+/// Deliberately `venues`-shaped, because it is the same problem: an organiser
+/// may type a sponsor that has no account, exactly as they may type a venue not
+/// on the platform. The real company claims it later and every placement
+/// already attached comes with it, with no re-entry.
+model sponsors {
+  id          String         @id @default(uuid()) @db.Uuid
+  name        String
+  /// Lowercased, non-alphanumerics stripped. "Red Bull", "RedBull" and
+  /// "red-bull" all collapse to `redbull`, which is the duplicate case the
+  /// picker exists to catch. Written only by `normaliseSponsorName()`.
+  ///
+  /// A SEARCH key, never an identity: "AT&T" and "ATT" collapse together, and
+  /// so would an unrelated three-letter brand. It drives the picker's "did you
+  /// mean" and the per-org uniqueness index. It never auto-merges anything.
+  name_key    String
+  /// Null until claimed. SetNull, never Cascade — removing an owner must orphan
+  /// the brand, not delete every placement it ever ran.
+  org_id      String?        @db.Uuid
+  logo_url    String?
+  website     String?
+  claimed_at  DateTime?      @db.Timestamptz(6)
+  status      sponsor_status @default(active)
+  /// Set when this row lost a merge. Reads exclude it; placements, campaigns
+  /// and claims are repointed before it is set.
+  merged_into String?        @db.Uuid
+  created_by  String?
+  created_at  DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime       @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at  DateTime?      @db.Timestamptz(6)
+
+  org        organisations?             @relation(fields: [org_id], references: [id], onDelete: SetNull)
+  claims     sponsor_claims[]
+  placements event_sponsors[]
+  campaigns  event_sponsored_messages[]
+
+  @@index([org_id])
+  @@index([status])
+  @@index([name_key])
+}
+
+/// One brand at one event. The placement object.
+///
+/// It has to exist to answer "may this sponsor post here", so hanging money on
+/// it later is free rather than speculative.
+///
+///     organiser adds an UNCLAIMED brand      organiser adds a CLAIMED brand,
+///     (nobody to ask)                        or a sponsor proposes
+///            │                                        │
+///            ▼                                        ▼
+///        [ draft ] ──host publishes──> [ approved ]  [ proposed ] ──accept──> [ approved ]
+///            │                              ▲             │
+///            └──────────────────────────────┘             └──decline──> [ cancelled ]
+///
+/// An unclaimed brand has nobody to accept, and requiring one made the
+/// organiser path decorative: the placement could never reach `approved`, so it
+/// could never carry a message, so typing a sponsor name achieved nothing.
+///
+/// `live` and `ended` are NOT stored. They are derived from the event's own
+/// timestamps by `placementPhase()`, so no sweeper can make the database
+/// disagree with the clock.
+model event_sponsors {
+  id         String           @id @default(uuid()) @db.Uuid
+  event_id   String           @db.Uuid
+  sponsor_id String           @db.Uuid
+  status     placement_status @default(draft)
+  /// An organiser adding a brand and a sponsor buying in are the same row from
+  /// opposite directions; audit needs to tell them apart.
+  created_by String
+  decided_by String?
+  decided_at DateTime?        @db.Timestamptz(6)
+  created_at DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at DateTime         @default(now()) @updatedAt @db.Timestamptz(6)
+
+  event   events              @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  sponsor sponsors            @relation(fields: [sponsor_id], references: [id], onDelete: Cascade)
+  /// Money lives on `placement_charges`, not here. A pricing correction must
+  /// not rewrite the row that decides whether an ad may run.
+  ///
+  /// One-to-MANY on purpose. A placement has at most one LIVE charge, but a
+  /// voided one stays for the record and a corrected one is raised beside it.
+  /// Prisma cannot express "unique where status <> 'void'", so the constraint
+  /// is a partial index in the migration and this side stays a list.
+  charges placement_charges[]
+
+  @@unique([event_id, sponsor_id])
+  @@index([event_id])
+  @@index([sponsor_id])
+  @@index([status])
+}
+
+/// Mirrors `venue_claims`. Same reviewer, same evidence shape.
+model sponsor_claims {
+  id            String               @id @default(uuid()) @db.Uuid
+  sponsor_id    String               @db.Uuid
+  org_id        String               @db.Uuid
+  filed_by      String
+  status        sponsor_claim_status @default(pending)
+  is_dispute    Boolean              @default(false)
+  gstin         String?
+  evidence      Json?
+  reviewed_by   String?
+  reviewed_at   DateTime?            @db.Timestamptz(6)
+  decision_note String?
+  created_at    DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime             @default(now()) @updatedAt @db.Timestamptz(6)
+
+  sponsor sponsors      @relation(fields: [sponsor_id], references: [id], onDelete: Cascade)
+  /// Related, not a bare uuid. `venue_claims` relates its org and this must
+  /// too, or an approved claim can reference an organisation that no longer
+  /// exists.
+  org     organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  /// One live claim per org per sponsor, matching the venue precedent. The
+  /// stronger rule — one APPROVED claim per sponsor, whoever files it — is a
+  /// partial unique index in the migration, because Prisma cannot express it.
+  @@unique([sponsor_id, org_id])
+  @@index([sponsor_id])
+  @@index([org_id])
+  @@index([status])
+}
+
+/// What a placement costs and whether the money arrived.
+///
+/// Deliberately NOT called an invoice. Calling it one in India drags in
+/// sequential numbering, GSTIN on both parties, place-of-supply, a tax
+/// breakdown and fiscal-year uniqueness — none of which are built, and all of
+/// which become quietly wrong the moment someone treats the record as
+/// authoritative. `organisations.gstin` already exists, which is exactly what
+/// would make that gap plausible enough to be dangerous.
+///
+/// Separate from `event_sponsors` because a placement is an authorization fact
+/// and a charge is a financial one. Merging them means a pricing correction
+/// rewrites the row that decides whether an ad may run.
+///
+///     [draft] ──agree──> [agreed] ──settle──> [settled]
+///        │                   │                    │
+///        └───────────────────┴──void──> [void] <──┘
+///
+/// `amount_minor` and `currency` are IMMUTABLE once status leaves `draft`, and
+/// no transition returns to draft. Enforced in `lib/sponsor-actions.ts` with a
+/// test per illegal pair.
+model placement_charges {
+  id           String        @id @default(uuid()) @db.Uuid
+  /// NOT @unique — see the partial index in the migration. A voided charge must
+  /// not permanently prevent raising a correct one, which is the whole point of
+  /// having `void` in the enum.
+  placement_id String        @db.Uuid
+  /// Minor units, integer. Never a float for money.
+  amount_minor Int
+  /// Constrained to the supported set, not free text: `VarChar(3)` alone
+  /// accepts "XYZ". Totals are ALWAYS grouped by this column — summing minor
+  /// units across currencies yields a number in no currency at all.
+  currency     currency_code
+  /// The same amount in the reporting currency, at `fx_rate` on `fx_date`.
+  /// Lets one comparable total exist without pretending the original was in it.
+  amount_base  Int?
+  fx_rate      Decimal?      @db.Decimal(18, 8)
+  fx_date      DateTime?     @db.Date
+  status       charge_status @default(draft)
+  priced_by    String
+  agreed_at    DateTime?     @db.Timestamptz(6)
+  settled_at   DateTime?     @db.Timestamptz(6)
+  /// External reference. No payment provider is integrated.
+  external_ref String?
+  created_at   DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict, not SetNull: an orphan charge pointing at nothing is worse than
+  /// a delete that refuses. Hard-deleting an event with a charged placement is
+  /// therefore refused, deliberately — see the 409 in the admin delete route.
+  placement event_sponsors @relation(fields: [placement_id], references: [id], onDelete: Restrict)
+  /// "Who priced this" must stay answerable. A bare String id pointing at a
+  /// deleted user is an audit trail that cannot be resolved.
+  pricer    User           @relation("ChargePricer", fields: [priced_by], references: [id], onDelete: Restrict)
+
+  @@index([placement_id])
+  @@index([status])
+  @@index([priced_by])
 }
 
 enum venue_claim_status {
@@ -1845,6 +2046,42 @@ enum message_type {
   system
   sponsored
   announcement
+  poll
+}
+
+enum sponsor_status {
+  active
+  suspended
+}
+
+enum sponsor_claim_status {
+  pending
+  approved
+  rejected
+}
+
+/// `live` and `ended` are deliberately absent. They are derived from the
+/// event's timestamps by `placementPhase()`; storing them would need a sweeper,
+/// and a late sweeper makes the database disagree with the clock.
+enum placement_status {
+  draft
+  proposed
+  approved
+  cancelled
+}
+
+/// `agreed`, not `issued` — nothing is issued to anyone. See `placement_charges`.
+enum charge_status {
+  draft
+  agreed
+  settled
+  void
+}
+
+/// One market today. An enum rather than `VarChar(3)` so an unsupported code is
+/// a schema error instead of a row nobody can total.
+enum currency_code {
+  INR
 }
 
 enum member_role {
@@ -1888,10 +2125,225 @@ model event_sponsored_messages {
   created_at       DateTime  @default(now()) @db.Timestamptz(6)
   updated_at       DateTime  @default(now()) @db.Timestamptz(6)
 
-  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  /// Which brand this campaign is for.
+  ///
+  /// Nullable only so rows predating #259 (which have no brand) can exist. An
+  /// ACTIVE campaign must have one: the due-select joins through it, so a null
+  /// here means the campaign silently never sends. Enforced by a CHECK in the
+  /// migration, not by hope.
+  sponsor_id           String?   @db.Uuid
+  /// The schedule, persisted.
+  ///
+  /// `setInterval` state died on every deploy: `start()` has no leading edge and
+  /// `loadAll()` re-armed from zero on boot, so deploying twice in an evening
+  /// meant a 30-minute campaign sent nothing. `last_sent_at` was written and
+  /// never read.
+  next_send_at         DateTime? @db.Timestamptz(6)
+  /// Set while a worker holds this row. Cleared on finalize. A row still
+  /// claimed after the lease expires is retried, and the outbox unique on
+  /// `sponsored_message_sends` makes that retry harmless.
+  claim_token          String?   @db.Uuid
+  claimed_at           DateTime? @db.Timestamptz(6)
+  consecutive_failures Int       @default(0)
+  deactivated_reason   String?
+
+  event     events                    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  sponsor   sponsors?                 @relation(fields: [sponsor_id], references: [id], onDelete: SetNull)
+  creatives sponsored_creatives[]
+  sends     sponsored_message_sends[]
 
   @@index([event_id])
   @@index([is_active])
+  @@index([sponsor_id])
+}
+
+/// One immutable revision of a campaign's copy and media.
+///
+/// The revision boundary already exists whether or not it is named: any edit
+/// forces moderation back to `pending` and deactivates the campaign, so
+/// "approved creative" is a distinct object. Naming it makes historical
+/// reporting truthful — without it, editing the copy rewrites what every past
+/// send is recorded as having shown, in a report a sponsor is billed against.
+model sponsored_creatives {
+  id                String                 @id @default(uuid()) @db.Uuid
+  message_id        String                 @db.Uuid
+  content           String
+  media_url         String?
+  media_type        String?
+  /// SHA-256 from the storage layer plus the object version pinned at
+  /// approval. NOT an ETag: an S3-compatible ETag is an MD5 only for
+  /// single-part uploads and a hash-of-hashes for multipart, so it changes
+  /// meaning with the upload strategy and is not a content identity.
+  media_checksum    String?
+  media_version_id  String?
+  moderation_status moderation_status_type @default(pending)
+  approved_by       String?
+  approved_at       DateTime?              @db.Timestamptz(6)
+  created_at        DateTime               @default(now()) @db.Timestamptz(6)
+
+  message event_sponsored_messages  @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  sends   sponsored_message_sends[]
+
+  @@index([message_id, created_at])
+}
+
+/// One fan-out. What the sponsor's report reads.
+///
+/// Relations are declared, not implied by a bare uuid: without them the table
+/// accumulates orphans when a campaign is deleted and the report silently
+/// counts sends whose campaign no longer exists.
+model sponsored_message_sends {
+  id                   String   @id @default(uuid()) @db.Uuid
+  sponsored_message_id String   @db.Uuid
+  /// Which revision actually ran. Editing the copy must not rewrite history.
+  creative_id          String   @db.Uuid
+  chat_message_id      String?  @db.Uuid
+  /// Which tick this belongs to. Unique with the campaign, so a retry after a
+  /// crash cannot produce a second row for the same window — the outbox insert
+  /// is `ON CONFLICT DO NOTHING`.
+  scheduled_for        DateTime @db.Timestamptz(6)
+  sent_at              DateTime @default(now()) @db.Timestamptz(6)
+  /// Active room members at send time. Summed across sends this is CUMULATIVE
+  /// EXPOSURES, never "reach" — the same person recurs once per interval.
+  members              Int
+  /// Sockets in the room at send time. Labelled "live connected", not
+  /// "delivered": push recipients, later reconnects and people scrolling back
+  /// are all excluded.
+  live_connected       Int
+  /// Who was in the room, as a per-campaign HMAC — NEVER raw user ids.
+  ///
+  /// Raw ids would be a durable, per-timestamp attendance roster joined to a
+  /// commercial entity. Two sends thirty minutes apart yield arrival and
+  /// departure per person, and intersecting arrays across a campaign spanning
+  /// several of one organiser's events identifies whoever attends everything —
+  /// exactly the cross-event correlation `lib/pseudonym.ts:11-12` says a
+  /// pseudonym exists to prevent. That file solved this once already, for
+  /// exports; this reuses its shape.
+  ///
+  /// Salted per CAMPAIGN, which keeps `count(distinct)` exact — the only thing
+  /// the report needs — while making the array useless for cross-campaign
+  /// intersection and non-reversible without `NEXTAUTH_SECRET`.
+  ///
+  /// Emptied at event end, once reach is materialised onto the campaign. A
+  /// campaign that ended has a number and no roster.
+  ///
+  /// **Never serialised to any client, export or CSV.**
+  recipient_hashes     String[]
+
+  message      event_sponsored_messages @relation(fields: [sponsored_message_id], references: [id], onDelete: Cascade)
+  creative     sponsored_creatives      @relation(fields: [creative_id], references: [id], onDelete: Restrict)
+  chat_message chat_messages?           @relation(fields: [chat_message_id], references: [id], onDelete: SetNull)
+
+  @@unique([sponsored_message_id, scheduled_for])
+  @@index([sponsored_message_id, sent_at])
+  @@index([creative_id])
+}
+
+/// Every object we issued an upload for.
+///
+/// `isOurMediaUrl()` proves only that a hostname is ours, which says nothing
+/// about who uploaded the bytes or what they are. This row is the difference
+/// between "on our bucket" and "we issued this, to this org, with these limits".
+model upload_grants {
+  id           String    @id @default(uuid()) @db.Uuid
+  user_id      String
+  org_id       String    @db.Uuid
+  /// The object key. Unique because one grant per object is the invariant, and
+  /// stating it as a constraint beats implying it.
+  key          String
+  content_type String
+  max_bytes    Int
+  /// SHA-256, captured at validation and re-verified before every send. A
+  /// content-addressed KEY is impossible with a presigned PUT — the key is
+  /// chosen before the bytes exist — so immutability comes from the checksum
+  /// and the pinned object version, not from the name.
+  checksum     String?
+  version_id   String?
+  expires_at   DateTime  @db.Timestamptz(6)
+  /// Set when a message actually references this object. Null AND expired is
+  /// what the sweeper reclaims.
+  consumed_at  DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  org  organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@unique([key])
+  /// The sweeper's predicate.
+  @@index([expires_at])
+  @@index([org_id])
+}
+
+/// A poll carried by one chat message.
+///
+/// A poll is a message, not a sponsor feature — organisers get it too. Options
+/// are rows rather than a JSON blob because votes reference them by id, and a
+/// blob cannot be a foreign key.
+model chat_polls {
+  id              String    @id @default(uuid()) @db.Uuid
+  message_id      String    @unique @db.Uuid
+  question        String
+  /// Defaults to the END OF THE EVENT, not the end of the room. The room opens
+  /// before the event and closes after a feedback window, so "closes with the
+  /// room" would leave a pre-event poll running for days.
+  closes_at       DateTime? @db.Timestamptz(6)
+  /// Hidden is the default: visible running totals bias later voters.
+  ///
+  /// Note this alone does NOT make a poll safe. Streaming counts while it is
+  /// open is a timing oracle — everyone watching a room of four sees
+  /// "0 → 1" the instant somebody votes, which is the same shape as the
+  /// typing-indicator leak. With this false, counts emit only on close; with it
+  /// true, they emit batched, never per-vote.
+  results_visible Boolean   @default(false)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+
+  message chat_messages       @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  options chat_poll_options[]
+  votes   chat_poll_votes[]
+}
+
+model chat_poll_options {
+  id       String @id @default(uuid()) @db.Uuid
+  poll_id  String @db.Uuid
+  label    String
+  position Int
+
+  poll  chat_polls        @relation(fields: [poll_id], references: [id], onDelete: Cascade)
+  votes chat_poll_votes[]
+
+  @@unique([poll_id, position])
+  /// Exists solely so `chat_poll_votes` can carry a COMPOSITE foreign key.
+  /// Redundant with the primary key on its own; load-bearing as a target.
+  @@unique([poll_id, id])
+}
+
+/// One vote per person per poll, enforced by the database.
+///
+/// `poll_id` is denormalised so `@@unique([poll_id, user_id])` can exist —
+/// `(option_id, user_id)` would permit voting for every option in the same poll.
+///
+/// The composite foreign key is what makes that denormalisation safe. Without
+/// it `poll_id` is an unvalidated free field: a row could claim poll A while its
+/// `option_id` belongs to poll B, so the unique would guard a fiction — the user
+/// has "voted in A" while their vote counts toward B, and can still vote in B
+/// properly. Postgres refuses that row now rather than trusting every caller.
+model chat_poll_votes {
+  id         String   @id @default(uuid()) @db.Uuid
+  poll_id    String   @db.Uuid
+  option_id  String   @db.Uuid
+  /// Exists SOLELY to enforce one vote per person. Never serialised to any
+  /// client, socket payload, export or push notification. The room is
+  /// pseudonymous and a vote is an opinion attached to a person.
+  user_id    String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  poll   chat_polls        @relation(fields: [poll_id], references: [id], onDelete: Cascade)
+  option chat_poll_options @relation(fields: [poll_id, option_id], references: [poll_id, id], onDelete: Cascade)
+  user   User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([poll_id, user_id])
+  @@index([option_id])
+  @@index([user_id])
 }
 
 // Announcement messages (instant, sent by organiser)
