@@ -31,6 +31,9 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     select: {
       id: true,
       start_time: true,
+      // Bounds the arrival histogram. Without it the series extended past the
+      // event forever, appending empty buckets and dragging the median down.
+      end_time: true,
       max_capacity: true,
       chat_group: { select: { id: true } },
     },
@@ -41,11 +44,61 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
   const thirtyMinutesAgo = new Date(now.getTime() - 30 * MINUTE)
   const chatGroupId = event.chat_group?.id
 
-  const [checkIns, recentMessages, activeChatters, openFlags, feedback] = await Promise.all([
-    db.event_check_ins.findMany({
-      where: { event_id: eventId },
-      select: { check_in_time: true, check_out_time: true, status: true, kind: true },
+  /*
+   * Counts, not rows.
+   *
+   * This used to be an unbounded `findMany` over every check-in for the event,
+   * followed by five JS `.filter()` passes and a histogram loop. It runs on a
+   * 5-second interval (`lib/socket-server.ts` ops broadcast) on the same event
+   * loop as Socket.io, so on day three of a three-day, three-thousand-person
+   * festival it pulled 3,000 rows off the wire twelve times a minute and did
+   * over a million date comparisons per minute — degrading precisely at the
+   * largest events, with chat delivery queued behind it.
+   *
+   * The database answers all of it. Same pattern as `lib/occupancy.ts:121-127`.
+   */
+  const [
+    checkedInTotal,
+    checkedOutTotal,
+    staffInside,
+    checkInRate10m,
+    arrivalBuckets,
+    recentMessages,
+    activeChatters,
+    openFlags,
+    feedback,
+  ] = await Promise.all([
+    db.event_check_ins.count({
+      where: { event_id: eventId, status: { in: ["checked_in", "checked_out"] } },
     }),
+    db.event_check_ins.count({
+      where: { event_id: eventId, check_out_time: { not: null } },
+    }),
+    db.event_check_ins.count({
+      where: { event_id: eventId, status: "checked_in", kind: "staff" },
+    }),
+    db.event_check_ins.count({
+      where: { event_id: eventId, check_in_time: { gte: tenMinutesAgo } },
+    }),
+    /*
+     * The arrival histogram, bucketed by Postgres rather than by a loop.
+     *
+     * Bounded by `min(now, end_time)`: the loop was bounded by `now` alone, so
+     * after an event ended it kept extending the window and appending empty
+     * buckets forever, dragging the median toward zero and making the
+     * arrival-rate alert progressively less able to fire.
+     */
+    db.$queryRaw<Array<{ bucket: Date; n: bigint }>>`
+      SELECT to_timestamp(floor(extract(epoch FROM check_in_time) / 600) * 600) AS bucket,
+             count(*) AS n
+        FROM event_check_ins
+       WHERE event_id = ${eventId}::uuid
+         AND check_in_time IS NOT NULL
+         AND check_in_time >= ${event.start_time}
+         AND check_in_time < ${new Date(Math.min(now.getTime(), event.end_time.getTime()))}
+    GROUP BY 1
+    ORDER BY 1
+    `,
     chatGroupId
       ? db.chat_messages.count({
           where: {
@@ -77,10 +130,6 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     }),
   ])
 
-  const checkedInTotal = checkIns.filter(
-    (c) => c.status === "checked_in" || c.status === "checked_out"
-  ).length
-  const checkedOutTotal = checkIns.filter((c) => c.check_out_time !== null).length
   const inside = Math.max(0, checkedInTotal - checkedOutTotal)
 
   /*
@@ -92,30 +141,40 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
    */
   const occupancy = occupancyFrom({
     inside,
-    staffInside: checkIns.filter((c) => c.status === "checked_in" && c.kind === "staff").length,
+    staffInside,
     // Not surfaced on the live tab — attendance is the Overview's question.
     uniqueAttendance: 0,
     capacity: event.max_capacity,
   })
-
-  const checkInRate10m = checkIns.filter(
-    (c) => c.check_in_time && c.check_in_time >= tenMinutesAgo
-  ).length
 
   /*
    * Median of every completed 10-minute bucket since doors. The rate alone says
    * nothing — 31 arrivals is a stampede for a book club and a slow night for a
    * festival — so the alert compares against this event's own baseline.
    */
+  /*
+   * Empty buckets are counted, and that is not incidental.
+   *
+   * The `GROUP BY` returns only slots that had an arrival, but the median has
+   * to be taken over EVERY completed slot since doors — a quiet hour is
+   * baseline information, and dropping its zeros would raise the median and
+   * make the arrival-rate alert progressively harder to fire. So the sparse
+   * result is expanded back into a dense series here.
+   *
+   * The end bound is `min(now, end_time)`, where the old loop used `now`
+   * alone: after an event finished it kept appending empty buckets forever,
+   * dragging the median to zero.
+   */
+  const arrivalsByBucket = new Map(
+    arrivalBuckets.map((row) => [row.bucket.getTime(), Number(row.n)])
+  )
   const buckets: number[] = []
   const doors = event.start_time
-  for (let t = doors.getTime(); t + 10 * MINUTE <= now.getTime(); t += 10 * MINUTE) {
-    const from = new Date(t)
-    const to = new Date(t + 10 * MINUTE)
-    buckets.push(
-      checkIns.filter((c) => c.check_in_time && c.check_in_time >= from && c.check_in_time < to)
-        .length
-    )
+  const lastTick = Math.min(now.getTime(), event.end_time.getTime())
+  for (let t = doors.getTime(); t + 10 * MINUTE <= lastTick; t += 10 * MINUTE) {
+    // Align to the same 600-second floor the query bucketed on.
+    const slot = Math.floor(t / (10 * MINUTE)) * (10 * MINUTE)
+    buckets.push(arrivalsByBucket.get(slot) ?? 0)
   }
 
   const sentiment = { positive: 0, neutral: 0, negative: 0 }
