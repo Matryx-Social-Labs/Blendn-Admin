@@ -8,6 +8,7 @@ import { getOrganisations } from "@/lib/onboarding-actions"
 import { formatDay } from "@/lib/dashboard-format"
 
 import { OrgStatusControl } from "./status-control"
+import { OrgSponsorControl } from "./sponsor-control"
 
 export const dynamic = "force-dynamic"
 
@@ -94,7 +95,15 @@ export default async function OrganisationsPage() {
             </div>
           ) : null}
 
-          <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
+          <div className="flex flex-col gap-3">
+            <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
+            <OrgSponsorControl
+              orgId={org.id}
+              maySponsor={org.may_sponsor}
+              status={org.status}
+              name={org.display_name}
+            />
+          </div>
         </section>
       ))}
     </div>
