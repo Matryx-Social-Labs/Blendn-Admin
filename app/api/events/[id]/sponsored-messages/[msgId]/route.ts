@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canBroadcast, eventPermissions } from "@/lib/rbac"
-import { actorFor, maySponsorFor } from "@/lib/org-membership"
+import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { sponsoredMessageScheduler } from "@/lib/socket-server"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
 
@@ -31,7 +31,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
      * note on the POST handler in ../route.ts.
      */
     const actor = await actorFor(session.user)
-    if (!canBroadcast(actor, event, "sponsored", await maySponsorFor(actor))) {
+    if (!canBroadcast(actor, event, "sponsored", (await resolveSponsorGrant(actor, eventId)) ?? undefined)) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 

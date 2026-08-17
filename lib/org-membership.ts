@@ -2,7 +2,7 @@ import type { user_role } from "@prisma/client"
 
 // Relative: reachable from server.ts via socket-ops-auth. See v0.12.1.
 import { db } from "./db"
-import type { PermissionActor } from "./rbac"
+import type { PermissionActor, SponsorGrant } from "./rbac"
 
 /**
  * Load an actor with the organisations they belong to.
@@ -53,4 +53,80 @@ export async function maySponsorFor(actor: {
     where: { id: { in: actor.orgIds }, may_sponsor: true },
   })
   return count > 0
+}
+
+/**
+ * Resolve the ONE organisation acting, with both of its entitlements together.
+ *
+ * ## The bug this exists to make unrepresentable
+ *
+ * `maySponsorFor` above answers "does **any** org you belong to hold the flag".
+ * A `placesAtEvent` written the same way answers "does **any** org you belong to
+ * have a placement". Pass both to `canBroadcast` as separate booleans and a
+ * person who is staff at Org A (flag, no placement) and Org B (placement, no
+ * flag) satisfies the check while neither organisation is entitled to send.
+ *
+ * One query, one row, both fields. There is no arrangement of the result that
+ * mixes two organisations.
+ *
+ * Returns `null` when no org of this actor's both holds the flag and has an
+ * approved placement here — which `canBroadcast` treats as a refusal.
+ *
+ * `app_admin` deliberately gets no grant: `canBroadcast` short-circuits them
+ * before this is consulted, and manufacturing a synthetic org id for them would
+ * put a lie in the audit trail.
+ */
+export async function resolveSponsorGrant(
+  actor: { role: user_role; orgIds: string[] },
+  eventId: string
+): Promise<SponsorGrant | null> {
+  if (actor.role === "app_admin") return null
+  if (actor.orgIds.length === 0) return null
+
+  const org = await db.organisations.findFirst({
+    where: {
+      id: { in: actor.orgIds },
+      may_sponsor: true,
+      // The SAME organisation must also hold the placement. Expressed as a
+      // relation filter rather than a second query precisely so the two facts
+      // cannot come from two different rows.
+      sponsors: {
+        some: {
+          deleted_at: null,
+          merged_into: null,
+          placements: { some: { event_id: eventId, status: "approved" } },
+        },
+      },
+    },
+    select: { id: true },
+  })
+
+  if (!org) return null
+  return { orgId: org.id, maySponsor: true, placesAtEvent: true }
+}
+
+/**
+ * Which of these events this actor's orgs place at, in one query.
+ *
+ * `resolveSponsorGrant` is correct for one event and wrong in a loop — a
+ * sponsor dashboard listing forty placements would issue forty queries. This is
+ * the list-context answer; it deliberately does NOT return a grant, because a
+ * grant is an authorization decision about one event and this is a filter.
+ */
+export async function placesAtEventBulk(
+  actor: { role: user_role; orgIds: string[] },
+  eventIds: string[]
+): Promise<Set<string>> {
+  if (actor.orgIds.length === 0 || eventIds.length === 0) return new Set()
+
+  const rows = await db.event_sponsors.findMany({
+    where: {
+      event_id: { in: eventIds },
+      status: "approved",
+      sponsor: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
+    },
+    select: { event_id: true },
+    distinct: ["event_id"],
+  })
+  return new Set(rows.map((r) => r.event_id))
 }

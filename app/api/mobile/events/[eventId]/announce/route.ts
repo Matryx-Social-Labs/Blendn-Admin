@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { actorFor, maySponsorFor } from "@/lib/org-membership"
+import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import {
   broadcastMayCarryMedia,
   canBroadcast,
@@ -100,9 +100,9 @@ export async function POST(
     if (!sender) return forbiddenResponse("You cannot broadcast to this event")
 
     const actor = await actorFor({ id: sender.id, role: sender.role })
-    const maySponsor = kind === "sponsored" ? await maySponsorFor(actor) : false
+    const grant = kind === "sponsored" ? await resolveSponsorGrant(actor, eventId) : null
 
-    if (!canBroadcast(actor, event, kind, maySponsor)) {
+    if (!canBroadcast(actor, event, kind, grant ?? undefined)) {
       /*
        * One message for all three refusals, deliberately.
        *

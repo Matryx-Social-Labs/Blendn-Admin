@@ -1,17 +1,17 @@
 /*
- * The dashboard route that actually creates sponsored messages must enforce
- * `may_sponsor`.
+ * The dashboard route that actually creates sponsored messages must enforce the
+ * grant.
  *
- * This test exists because `__tests__/broadcast-permissions.test.ts` pins all
- * twenty rows of the `canBroadcast` truth table — including "sponsored requires
- * the org flag" — and passed green the entire time the dashboard route ignored
- * it. The route checked `eventPermissions(...).canEdit` and never called the
- * resolver at all.
+ * This test exists because `__tests__/broadcast-permissions.test.ts` pins every
+ * row of the `canBroadcast` truth table — including "sponsored requires the org
+ * flag" — and passed green the entire time the dashboard route ignored it. The
+ * route checked `eventPermissions(...).canEdit` and never called the resolver
+ * at all.
  *
- * So the scarcity rule was enforced on the mobile announce path, which nothing
- * calls with `kind: "sponsored"`, and not on the path the product uses. Any
- * organiser could label their own content as paid placement and have
- * `sponsoredMessageScheduler` fan it into the room on a timer.
+ * So the rule was enforced on the mobile announce path, which nothing calls
+ * with `kind: "sponsored"`, and not on the path the product uses. Any organiser
+ * could label their own content as paid placement and have the scheduler fan it
+ * into the room on a timer.
  *
  * A unit test on the resolver cannot catch that. Only a test that invokes the
  * handler can, which is what this is. It asserts the refusal AND that nothing
@@ -21,7 +21,7 @@
 
 const mockDb = {
   events: { findUnique: jest.fn() },
-  organisations: { count: jest.fn() },
+  organisations: { findFirst: jest.fn() },
   organisation_members: { findMany: jest.fn() },
   event_sponsored_messages: { create: jest.fn(), findMany: jest.fn() },
 }
@@ -52,29 +52,25 @@ const req = () =>
 
 beforeEach(() => {
   jest.clearAllMocks()
-  // An organiser who genuinely operates this event: canEdit would say yes.
+  // An organiser who genuinely operates this event: `canEdit` would say yes.
   mockAuth.mockResolvedValue({ user: { id: USER, role: "organizer" } })
-  mockDb.events.findUnique.mockResolvedValue({
-    organizer_org_id: ORG,
-    venue: null,
-  })
+  mockDb.events.findUnique.mockResolvedValue({ organizer_org_id: ORG, venue: null })
   mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG }])
   mockDb.event_sponsored_messages.create.mockResolvedValue({ id: "new" })
+  // Default: no organisation satisfies BOTH conditions.
+  mockDb.organisations.findFirst.mockResolvedValue(null)
 })
 
-describe("POST sponsored-messages enforces may_sponsor", () => {
-  it("refuses an organiser whose org may not sell placement, and writes nothing", async () => {
-    // No organisation of theirs carries the flag.
-    mockDb.organisations.count.mockResolvedValue(0)
-
+describe("POST sponsored-messages enforces the sponsor grant", () => {
+  it("refuses when no org holds both the flag and a placement, and writes nothing", async () => {
     const res = await POST(req(), { params })
 
     expect(res.status).toBe(403)
     expect(mockDb.event_sponsored_messages.create).not.toHaveBeenCalled()
   })
 
-  it("allows the same organiser once their org is approved", async () => {
-    mockDb.organisations.count.mockResolvedValue(1)
+  it("allows it once one org holds both", async () => {
+    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
 
     const res = await POST(req(), { params })
 
@@ -82,23 +78,53 @@ describe("POST sponsored-messages enforces may_sponsor", () => {
     expect(mockDb.event_sponsored_messages.create).toHaveBeenCalledTimes(1)
   })
 
-  it("refuses an organiser from an unrelated org even with the flag", async () => {
-    // Flag yes, but they operate a different event.
-    mockDb.organisations.count.mockResolvedValue(1)
-    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "other-org" }])
+  it("asks for the flag and the placement in ONE query, on ONE org", async () => {
+    /*
+     * The confused deputy this redesign exists to make unrepresentable.
+     *
+     * When these were two independent booleans, a person who is staff at Org A
+     * (holds `may_sponsor`, no placement) and Org B (holds a placement, no
+     * flag) satisfied both checks — and posted a sponsored message neither
+     * organisation was entitled to send.
+     *
+     * Asserting the SHAPE of the query is the only way to catch a regression
+     * back to two lookups: a test that mocks two booleans would happily pass
+     * with the bug restored.
+     */
+    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
+    await POST(req(), { params })
 
-    const res = await POST(req(), { params })
+    expect(mockDb.organisations.findFirst).toHaveBeenCalledTimes(1)
+    const where = mockDb.organisations.findFirst.mock.calls[0][0].where
 
-    expect(res.status).toBe(403)
-    expect(mockDb.event_sponsored_messages.create).not.toHaveBeenCalled()
+    // Both conditions, on the same row.
+    expect(where.may_sponsor).toBe(true)
+    expect(where.sponsors.some.placements.some).toMatchObject({
+      event_id: EVENT,
+      status: "approved",
+    })
+    // And scoped to organisations this actor actually belongs to.
+    expect(where.id.in).toContain(ORG)
   })
 
-  it("lets an app_admin place one without the flag — they are the platform", async () => {
+  it("excludes merged-away and deleted brands from the grant", async () => {
+    // A brand that lost a merge keeps its rows until they are repointed. It
+    // must not grant anybody anything in the meantime.
+    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
+    await POST(req(), { params })
+
+    const some = mockDb.organisations.findFirst.mock.calls[0][0].where.sponsors.some
+    expect(some.deleted_at).toBeNull()
+    expect(some.merged_into).toBeNull()
+  })
+
+  it("lets an app_admin place one without any grant", async () => {
     mockAuth.mockResolvedValue({ user: { id: USER, role: "app_admin" } })
-    mockDb.organisations.count.mockResolvedValue(0)
 
     const res = await POST(req(), { params })
 
     expect(res.status).toBe(201)
+    // An admin short-circuits before the resolver, so no query is issued.
+    expect(mockDb.organisations.findFirst).not.toHaveBeenCalled()
   })
 })

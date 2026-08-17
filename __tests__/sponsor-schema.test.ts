@@ -51,17 +51,17 @@ describe("constraints Prisma cannot express", () => {
     // The model's @@unique([sponsor_id, org_id]) stops ONE org filing twice. It
     // does not stop two DIFFERENT orgs both reaching approved on the same
     // brand, which is ownership decided by whichever transaction commits last.
-    expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]*"sponsor_claims"[^;]*WHERE "status" = 'approved'/s)
+    expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]*"sponsor_claims"[^;]*WHERE "status" = 'approved'/)
   })
 
   it("allows only one LIVE charge per placement, so voiding stays recoverable", () => {
     // A plain unique would make `void` terminal: no corrected charge could ever
     // be raised, which is the entire point of having the state.
-    expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]*"placement_charges"[^;]*WHERE "status" <> 'void'/s)
+    expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]*"placement_charges"[^;]*WHERE "status" <> 'void'/)
   })
 
   it("allows only one live brand per normalised name per owning org", () => {
-    expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]*"sponsors"[^;]*"org_id", "name_key"/s)
+    expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]*"sponsors"[^;]*"org_id", "name_key"/)
   })
 
   it("refuses an active campaign with no sponsor", () => {
@@ -71,7 +71,7 @@ describe("constraints Prisma cannot express", () => {
   })
 
   it("indexes the sweeper's real predicate, not an idealised one", () => {
-    expect(sql).toMatch(/CREATE INDEX[^;]*"sponsored_due_idx"[^;]*WHERE "is_active"/s)
+    expect(sql).toMatch(/CREATE INDEX[^;]*"sponsored_due_idx"[^;]*WHERE "is_active"/)
   })
 })
 
