@@ -36,6 +36,9 @@ const TIMELESS = new Set([
   "/dashboard/onboarding",
   "/dashboard/categories",
   "/dashboard/events/new",
+  // A brand is four fields about a company. A date-range control over it would
+  // be a filter with nothing to filter.
+  "/dashboard/brand",
 ])
 
 /** Reports read the range, so the control stays. */
@@ -60,6 +63,27 @@ const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard/venues": {
     title: "My venues",
     description: "Utilisation, ratings and bookings — one section per venue.",
+  },
+  // Pre-existing gaps, found by __tests__/nav-routes-exist.test.ts: both had
+  // nav entries and no title, so both rendered with the document's only h1
+  // reading "Overview". Copy taken verbatim from lib/dashboard-nav.ts so the
+  // sidebar and the heading cannot describe the same screen differently.
+  "/dashboard/leads": {
+    title: "Leads",
+    description: "Demo requests from the organiser landing page. Oldest untouched first.",
+  },
+  "/dashboard/venue-claims": {
+    title: "Venue claims",
+    description:
+      "Ownership requests. Approving one hands over the events other organisers hold there.",
+  },
+  "/dashboard/placements": {
+    title: "Placements",
+    description: "Where your brand appears, and what is waiting on you.",
+  },
+  "/dashboard/brand": {
+    title: "Brand",
+    description: "Your name, logo and website, as attendees see them.",
   },
   "/dashboard/chatrooms": {
     title: "Chatrooms",

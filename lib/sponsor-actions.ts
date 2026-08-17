@@ -10,6 +10,8 @@ import { actorFor } from "@/lib/org-membership"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
 import { isSameSponsorName, normaliseSponsorName } from "@/lib/sponsor-name"
 import { SPONSORSHIP } from "@/lib/constants"
+import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
+import type { placement_status } from "@prisma/client"
 
 /**
  * Brands, claims, placements and merges.
@@ -346,3 +348,355 @@ export const MERGE_REPOINTS = [
 ] as const
 
 export { isSameSponsorName }
+
+/* -------------------------------------------------------------------------- */
+/* The sponsor's own screens                                                  */
+/* -------------------------------------------------------------------------- */
+
+export interface SponsorPlacementRow {
+  id: string
+  eventId: string
+  eventTitle: string
+  startTime: Date
+  endTime: Date
+  status: placement_status
+  phase: PlacementPhase
+  /** Null until at least one send has happened. */
+  sends: number | null
+  /** Withheld below the disclosure floor; null means "not reportable". */
+  reach: number | null
+  reachSuppressed: boolean
+  /** What is stopping this from running, if anything. */
+  blocker: string | null
+}
+
+export interface SponsorOverview {
+  brandName: string | null
+  /** The hero: what is going live next, and whether it is ready. */
+  next: {
+    eventTitle: string
+    startTime: Date
+    ready: boolean
+    blocker: string | null
+  } | null
+  liveNow: number
+  awaitingYou: number
+  reach30d: number | null
+  reach30dSuppressed: boolean
+  placements: SponsorPlacementRow[]
+}
+
+/**
+ * Everything the sponsor overview renders, in one call.
+ *
+ * ## Why the hero is readiness and not reach
+ *
+ * `docs/DESIGN_SYSTEM.md` says each role leads with its forward-looking
+ * question. A sponsor's question at 8pm is not "how did last month go" — it is
+ * *"is my ad going to run tonight, and is anything blocking it."* Reach answers
+ * a Monday question and sits in a tile.
+ *
+ * Both outside reviewers reached that independently, against an earlier draft
+ * that led with a reach number.
+ *
+ * ## Scoped by organisation, never by user id
+ *
+ * A colleague at the sponsor org sees the same placements as whoever created
+ * them. That is the whole point of `actorFor` and the reason
+ * `app/dashboard/actions.ts:eventScope` was wrong for venue owners.
+ */
+export async function getSponsorOverview(): Promise<SponsorOverview> {
+  const session = await getAuth()
+  if (!session?.user) throw new Error("Unauthorized")
+
+  const actor = await actorFor(session.user)
+  if (actor.orgIds.length === 0) {
+    return {
+      brandName: null,
+      next: null,
+      liveNow: 0,
+      awaitingYou: 0,
+      reach30d: null,
+      reach30dSuppressed: false,
+      placements: [],
+    }
+  }
+
+  const brand = await db.sponsors.findFirst({
+    where: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
+    select: { id: true, name: true },
+  })
+  if (!brand) {
+    // No brand yet. Everything else is blocked on it, so the screen shows one
+    // empty state rather than four.
+    return {
+      brandName: null,
+      next: null,
+      liveNow: 0,
+      awaitingYou: 0,
+      reach30d: null,
+      reach30dSuppressed: false,
+      placements: [],
+    }
+  }
+
+  const rows = await db.event_sponsors.findMany({
+    where: { sponsor_id: brand.id },
+    select: {
+      id: true,
+      status: true,
+      event: {
+        select: {
+          id: true,
+          title: true,
+          start_time: true,
+          end_time: true,
+          chat_group: { select: { id: true } },
+          sponsored_messages: {
+            where: { sponsor_id: brand.id },
+            select: {
+              is_active: true,
+              moderation_status: true,
+              _count: { select: { sends: true } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { event: { start_time: "asc" } },
+  })
+
+  const now = new Date()
+
+  const placements: SponsorPlacementRow[] = rows.map((r) => {
+    const phase = placementPhase({ status: r.status }, r.event, now)
+    const campaigns = r.event.sponsored_messages
+    const sends = campaigns.reduce((n, c) => n + c._count.sends, 0)
+
+    /*
+     * The blocker, in the order the sponsor can act on it. Naming the first
+     * thing that is wrong beats listing everything: they fix one, reload, and
+     * see the next.
+     */
+    let blocker: string | null = null
+    if (r.status === "proposed") blocker = "Waiting for you to accept"
+    else if (r.status === "draft") blocker = "The organiser has not published this yet"
+    else if (r.status === "cancelled") blocker = null
+    else if (!r.event.chat_group) blocker = "The event has no chatroom yet"
+    else if (campaigns.length === 0) blocker = "No creative yet"
+    else if (campaigns.every((c) => c.moderation_status === "pending"))
+      blocker = "Creative is in review"
+    else if (campaigns.every((c) => c.moderation_status === "rejected"))
+      blocker = "Creative was not approved"
+    else if (campaigns.every((c) => !c.is_active)) blocker = "Not switched on"
+
+    return {
+      id: r.id,
+      eventId: r.event.id,
+      eventTitle: r.event.title,
+      startTime: r.event.start_time,
+      endTime: r.event.end_time,
+      status: r.status,
+      phase,
+      // `null`, not `0`: an ad that has not run yet has no reach, and rendering
+      // zero reads as failure. `MetricTile` already distinguishes the two.
+      sends: sends > 0 ? sends : null,
+      reach: null,
+      reachSuppressed: false,
+      blocker,
+    }
+  })
+
+  const upcoming = placements.filter(
+    (p) => p.status === "approved" && (p.phase === "upcoming" || p.phase === "live")
+  )
+  const next = upcoming[0]
+    ? {
+        eventTitle: upcoming[0].eventTitle,
+        startTime: upcoming[0].startTime,
+        ready: upcoming[0].blocker === null,
+        blocker: upcoming[0].blocker,
+      }
+    : null
+
+  return {
+    brandName: brand.name,
+    next,
+    liveNow: placements.filter((p) => p.phase === "live").length,
+    awaitingYou: placements.filter((p) => p.status === "proposed").length,
+    // Reach is materialised at event end (see the plan); until the scheduler
+    // writes sends there is nothing to report, and a fabricated 0 would be
+    // worse than an em dash.
+    reach30d: null,
+    reach30dSuppressed: false,
+    placements,
+  }
+}
+
+/** Accept or decline a placement somebody proposed to this sponsor. */
+export async function decidePlacement(placementId: string, accept: boolean) {
+  const session = await getAuth()
+  if (!session?.user) throw new Error("Unauthorized")
+
+  const actor = await actorFor(session.user)
+  if (actor.orgIds.length === 0) throw new Error("Forbidden")
+
+  /*
+   * Scoped in the WHERE, not checked after the read.
+   *
+   * `findFirst` by id then compare would work, but folding the ownership into
+   * the query means there is no version of this function that reads a row it is
+   * not allowed to touch.
+   */
+  const placement = await db.event_sponsors.findFirst({
+    where: {
+      id: placementId,
+      status: "proposed",
+      sponsor: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
+    },
+    select: { id: true, event_id: true, sponsor_id: true },
+  })
+  if (!placement) throw new Error("Placement not found")
+
+  await db.event_sponsors.update({
+    where: { id: placement.id },
+    data: {
+      status: accept ? "approved" : "cancelled",
+      decided_by: session.user.id,
+      decided_at: new Date(),
+    },
+  })
+
+  auditLog({
+    userId: session.user.id,
+    action: accept ? "placement.accept" : "placement.decline",
+    resource: "event_sponsors",
+    resourceId: placement.id,
+    details: { eventId: placement.event_id, sponsorId: placement.sponsor_id },
+  })
+
+  revalidatePath("/dashboard/placements")
+}
+
+export interface MyBrand {
+  id: string
+  name: string
+  website: string | null
+  logo_url: string | null
+  claimed_at: Date | null
+  placementCount: number
+}
+
+/** This organisation's brand, if it has one. */
+export async function getMyBrand(): Promise<MyBrand | null> {
+  const session = await getAuth()
+  if (!session?.user) throw new Error("Unauthorized")
+
+  const actor = await actorFor(session.user)
+  if (actor.orgIds.length === 0) return null
+
+  const brand = await db.sponsors.findFirst({
+    where: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
+    select: {
+      id: true,
+      name: true,
+      website: true,
+      logo_url: true,
+      claimed_at: true,
+      _count: { select: { placements: true } },
+    },
+  })
+  if (!brand) return null
+
+  return {
+    id: brand.id,
+    name: brand.name,
+    website: brand.website,
+    logo_url: brand.logo_url,
+    claimed_at: brand.claimed_at,
+    placementCount: brand._count.placements,
+  }
+}
+
+/**
+ * Create or update this organisation's brand.
+ *
+ * `name_key` is recomputed on every write, because it is derived and a stale key
+ * silently stops the duplicate check working — the picker would offer to create
+ * a second "Red Bull" beside an existing one whose key no longer matches its
+ * name.
+ *
+ * A rename is checked against the per-org uniqueness rule the same way a
+ * creation is. Two brands in one org that normalise identically is the duplicate
+ * the constraint exists to prevent, and arriving there by rename is no better
+ * than arriving by creation.
+ */
+export async function saveMyBrand(input: unknown) {
+  const session = await getAuth()
+  if (!session?.user) throw new Error("Unauthorized")
+
+  const parsed = brandSchema.safeParse(input)
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid brand")
+
+  const actor = await actorFor(session.user)
+  const orgId = actor.orgIds[0]
+  if (!orgId) throw new Error("You are not a member of an organisation")
+
+  const { name, website, logo_url } = parsed.data
+  const name_key = normaliseSponsorName(name)
+  if (!name_key) throw new Error("That name has no letters or digits in it")
+
+  const existing = await db.sponsors.findFirst({
+    where: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
+    select: { id: true },
+  })
+
+  const clash = await db.sponsors.findFirst({
+    where: {
+      name_key,
+      org_id: orgId,
+      deleted_at: null,
+      merged_into: null,
+      ...(existing ? { id: { not: existing.id } } : {}),
+    },
+    select: { id: true },
+  })
+  if (clash) throw new Error("Your organisation already has a brand with that name")
+
+  const data = {
+    name,
+    name_key,
+    website: website || null,
+    logo_url: logo_url || null,
+  }
+
+  const brand = existing
+    ? await db.sponsors.update({
+        where: { id: existing.id },
+        data,
+        select: { id: true, name: true },
+      })
+    : await db.sponsors.create({
+        data: {
+          ...data,
+          org_id: orgId,
+          // Created BY its owner, so it is claimed from the start — there is
+          // nobody to file a claim against.
+          claimed_at: new Date(),
+          created_by: session.user.id,
+        },
+        select: { id: true, name: true },
+      })
+
+  auditLog({
+    userId: session.user.id,
+    action: existing ? "sponsor.update" : "sponsor.create_owned",
+    resource: "sponsors",
+    resourceId: brand.id,
+    details: { name: brand.name, orgId },
+  })
+
+  revalidatePath("/dashboard/brand")
+  revalidatePath("/dashboard/placements")
+  return brand
+}
