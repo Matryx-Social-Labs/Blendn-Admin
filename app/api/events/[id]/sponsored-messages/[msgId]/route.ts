@@ -4,7 +4,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canBroadcast, eventPermissions } from "@/lib/rbac"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
-import { sponsoredMessageScheduler } from "@/lib/socket-server"
+import { firstWindow } from "@/lib/sponsored-scheduler"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
 import { canActivate, creativeEditPatch, touchesCreative } from "@/lib/sponsored-moderation"
 
@@ -28,7 +28,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     /*
      * `canBroadcast`, not `canEdit` — and this is the handler where it matters
      * most, because setting `is_active` here is what arms
-     * `sponsoredMessageScheduler` and starts the fan-out into the room. See the
+     * the schedule and starts the fan-out into the room. See the
      * note on the POST handler in ../route.ts.
      */
     const actor = await actorFor(session.user)
@@ -92,34 +92,63 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       }
     }
 
-    const updated = await db.event_sponsored_messages.update({
-      where: { id: msgId },
-      data: {
-        ...(content !== undefined && { content }),
-        ...(interval_minutes !== undefined && { interval_minutes }),
-        ...(is_active !== undefined && { is_active }),
-        // One write, not two. Applying the reset separately would leave a
-        // window where the content is new and the approval is old.
-        ...(editsCreative ? creativeEditPatch() : {}),
-        updated_at: new Date(),
-      },
-    })
+    /*
+     * `next_send_at` IS the schedule now — there is no timer to arm.
+     *
+     * Switching on sets it to `firstWindow()`, which is *now*: the old
+     * `setInterval` had no leading edge, so flipping the switch bought an
+     * interval of silence and read as a broken control. Switching off clears it,
+     * along with any claim a worker holds, so a pass already in flight finds
+     * nothing to finalize.
+     *
+     * `deactivated_reason` is cleared on activation. It records why the
+     * SCHEDULER gave up, and leaving a stale one on a live campaign shows the
+     * organiser a reason for a state it is no longer in.
+     */
+    const schedule =
+      is_active === true && !editsCreative
+        ? {
+            next_send_at: firstWindow(),
+            consecutive_failures: 0,
+            deactivated_reason: null,
+            claim_token: null,
+            claimed_at: null,
+          }
+        : is_active === false || editsCreative
+          ? { next_send_at: null, claim_token: null, claimed_at: null }
+          : {}
 
-    // Sync scheduler
-    if (updated.is_active) {
-      if (event.chat_group) {
-        sponsoredMessageScheduler.start({
-          id: updated.id,
-          event_id: eventId,
-          content: updated.content,
-          interval_minutes: updated.interval_minutes,
-          organizer_id: event.organizer_id,
-          chat_group_id: event.chat_group.id,
+    const updated = await db.$transaction(async (tx) => {
+      const row = await tx.event_sponsored_messages.update({
+        where: { id: msgId },
+        data: {
+          ...(content !== undefined && { content }),
+          ...(interval_minutes !== undefined && { interval_minutes }),
+          ...(is_active !== undefined && { is_active }),
+          // One write, not two. Applying the reset separately would leave a
+          // window where the content is new and the approval is old.
+          ...(editsCreative ? creativeEditPatch() : {}),
+          ...schedule,
+          updated_at: new Date(),
+        },
+      })
+
+      /*
+       * A new revision, not an edit in place.
+       *
+       * `sponsored_message_sends.creative_id` is `onDelete: Restrict` precisely
+       * so history survives: a send from last night must keep pointing at the
+       * words it actually delivered. Rewriting the existing creative row would
+       * retroactively change what a past send says it sent.
+       */
+      if (editsCreative) {
+        await tx.sponsored_creatives.create({
+          data: { message_id: msgId, content: row.content },
         })
       }
-    } else {
-      sponsoredMessageScheduler.stop(msgId)
-    }
+
+      return row
+    })
 
     return NextResponse.json(updated)
   } catch (err) {
@@ -149,7 +178,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     })
     if (!existing) return new NextResponse("Not found", { status: 404 })
 
-    sponsoredMessageScheduler.stop(msgId)
+    // No timer to stop — deleting the row deletes the schedule with it.
     await db.event_sponsored_messages.delete({ where: { id: msgId } })
 
     return new NextResponse(null, { status: 204 })

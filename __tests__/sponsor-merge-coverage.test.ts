@@ -1,6 +1,8 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 
+import { MERGE_REPOINTS } from "@/lib/sponsor-merge"
+
 /**
  * A merge must repoint EVERY relation to `sponsors`, not just placements.
  *
@@ -29,12 +31,11 @@ const SCHEMA = readFileSync(
 )
 
 /**
- * Read from source rather than imported.
- *
  * `lib/sponsor-actions.ts` carries `"use server"` and pulls in `next/cache` and
- * the Prisma client, neither of which the unit environment transforms. Reading
- * the text also means this test verifies the file as it will be reviewed, which
- * is the point of a coverage guard.
+ * the Prisma client, neither of which the unit environment transforms — so the
+ * body of `mergeSponsors` is read as text below. The list itself is imported: it
+ * lives in a plain module precisely because a `"use server"` file may only
+ * export async functions, and holding it there broke `next build`.
  */
 const ACTIONS = readFileSync(
   join(__dirname, "..", "lib", "sponsor-actions.ts"),
@@ -43,11 +44,7 @@ const ACTIONS = readFileSync(
 
 /** The tables `mergeSponsors` declares it repoints. */
 function mergeRepoints(): string[] {
-  const block = ACTIONS.slice(
-    ACTIONS.indexOf("export const MERGE_REPOINTS"),
-    ACTIONS.indexOf("] as const", ACTIONS.indexOf("export const MERGE_REPOINTS"))
-  )
-  return [...block.matchAll(/"(\w+)"/g)].map((m) => m[1])
+  return [...MERGE_REPOINTS]
 }
 
 /** The `model sponsors { … }` body. */

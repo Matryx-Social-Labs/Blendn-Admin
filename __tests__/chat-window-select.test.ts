@@ -57,10 +57,16 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 }
 
 /**
- * `event: { select: { ... } }` — the nested-relation shape `chatWindowState`
- * is fed from. Matched across newlines, since these are written inline.
+ * Any innermost `select: { ... }`, matched across newlines.
+ *
+ * This began as `event: { select: { ... } }`, which only sees the nested-relation
+ * shape. `lib/sponsored-scheduler.ts` reads the event directly —
+ * `db.events.findUnique({ select: { ... } })` — so the narrower pattern found no
+ * blocks at all in the one new caller and the "found a select" guard was what
+ * caught it. In a file that calls `chatWindowState`, selecting `end_time`
+ * without `start_time` is worth flagging whatever the query shape.
  */
-const EVENT_SELECT_BLOCK = /event:\s*\{\s*select:\s*\{[^{}]*\}/g
+const EVENT_SELECT_BLOCK = /select:\s*\{[^{}]*\}/g
 
 describe("chat-window callers select what the predicate reads", () => {
   /*

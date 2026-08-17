@@ -3,7 +3,7 @@ import { Server as HttpServer } from "http"
 import { Server, Socket } from "socket.io"
 import { verifyAccessToken } from "./mobile-auth"
 import { db } from "./db"
-import { CHAT_WINDOW_HOURS, chatWindowState } from "./chat-window"
+import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
 import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
@@ -163,178 +163,13 @@ export type AuthenticatedSocket = Socket<
   SocketData
 >
 
-// ── Sponsored Message Scheduler ───────────────────────────────────────────────
+/*
+ * The sponsored-message scheduler used to live here, as `setInterval` handles in
+ * a `Map`. It is now `lib/sponsored-scheduler.ts`, which keeps the schedule in
+ * the database — a timer in process memory lost every campaign on deploy and
+ * duplicated every one of them the moment a second container existed.
+ */
 
-interface SponsoredMessageRecord {
-  id: string
-  event_id: string
-  content: string
-  interval_minutes: number
-  organizer_id: string
-  chat_group_id: string
-}
-
-class SponsoredMessageScheduler {
-  private timers = new Map<string, ReturnType<typeof setInterval>>()
-
-  /** Send one sponsored message into the chatroom and update last_sent_at */
-  private async send(msg: SponsoredMessageRecord): Promise<void> {
-    try {
-      /*
-       * The room has to still be open. This was the THIRD write path into
-       * `chat_messages` that did not consult `chatWindowState`, and the only
-       * one with no human behind it: a `setInterval` armed once, never checked
-       * `chat_groups.status` or `events.end_time`, and `loadAll()` re-armed
-       * every `is_active` row on every boot with no end-time filter.
-       *
-       * So an archived room that no human could post to still received a
-       * sponsored message every `interval_minutes`, forever, re-armed by each
-       * deploy — 96 a day at the 15-minute setting.
-       *
-       * Stop the timer rather than just skipping the send: a closed room never
-       * reopens, so there is nothing left for this timer to do.
-       */
-      const group = await db.chat_groups.findUnique({
-        where: { id: msg.chat_group_id },
-        select: {
-          status: true,
-          event: { select: { start_time: true, end_time: true } },
-        },
-      })
-
-      if (!group?.event) {
-        this.stop(msg.id)
-        return
-      }
-
-      const window = chatWindowState(group.event, group)
-      if (!window.open) {
-        logger.info("Stopping sponsored message: room closed", {
-          messageId: msg.id,
-          chatGroupId: msg.chat_group_id,
-          reason: window.reason,
-        })
-        this.stop(msg.id)
-        await db.event_sponsored_messages.update({
-          where: { id: msg.id },
-          data: { is_active: false },
-        })
-        return
-      }
-
-      const chatContent = `📣 [Sponsored]\n${msg.content}`
-
-      const created = await db.chat_messages.create({
-        data: {
-          chat_group_id: msg.chat_group_id,
-          user_id: msg.organizer_id,
-          type: "text",
-          content: chatContent,
-          metadata: { sponsored_message_id: msg.id },
-        },
-      })
-
-      await db.chat_groups.update({
-        where: { id: msg.chat_group_id },
-        data: { last_message_at: created.created_at },
-      })
-
-      await db.event_sponsored_messages.update({
-        where: { id: msg.id },
-        data: { last_sent_at: created.created_at },
-      })
-
-      emitChatMessage(msg.chat_group_id, {
-        id: created.id,
-        content: created.content,
-        type: "text",
-        userId: msg.organizer_id,
-        userName: "Sponsored",
-        createdAt: created.created_at.toISOString(),
-      })
-    } catch (err) {
-      logger.error("Failed to send sponsored message", { messageId: msg.id, error: err instanceof Error ? err.message : String(err) })
-    }
-  }
-
-  /** Start periodic sending for a message */
-  start(msg: SponsoredMessageRecord): void {
-    this.stop(msg.id) // clear any existing timer
-    const ms = msg.interval_minutes * 60 * 1000
-    const timer = setInterval(() => void this.send(msg), ms)
-    this.timers.set(msg.id, timer)
-    logger.info("Started sponsored message schedule", { messageId: msg.id, intervalMinutes: msg.interval_minutes })
-  }
-
-  /** Stop a specific timer */
-  stop(messageId: string): void {
-    const timer = this.timers.get(messageId)
-    if (timer) {
-      clearInterval(timer)
-      this.timers.delete(messageId)
-      logger.info("Stopped sponsored message schedule", { messageId })
-    }
-  }
-
-  /** Clear every timer. Called from the server's shutdown handler. */
-  stopAll(): void {
-    const count = this.timers.size
-    for (const timer of this.timers.values()) {
-      clearInterval(timer)
-    }
-    this.timers.clear()
-    if (count > 0) {
-      logger.info("Stopped all sponsored message schedules", { count })
-    }
-  }
-
-  /** Load all active sponsored messages from DB and start their timers */
-  async loadAll(): Promise<void> {
-    try {
-      /*
-       * Only events whose room could still be open.
-       *
-       * Without the end-time bound this re-armed a timer on every boot for
-       * every `is_active` row ever created, including events that finished
-       * months ago — so a deploy resurrected campaigns into archived rooms.
-       * `send()` now stops those on their first tick, but not arming them at
-       * all is cheaper and means a deploy does not briefly recreate the bug.
-       */
-      const windowOpensAfter = new Date(Date.now() - CHAT_WINDOW_HOURS * 60 * 60 * 1000)
-      const messages = await db.event_sponsored_messages.findMany({
-        where: {
-          is_active: true,
-          event: { end_time: { gte: windowOpensAfter } },
-        },
-        include: {
-          event: {
-            select: {
-              organizer_id: true,
-              chat_group: { select: { id: true } },
-            },
-          },
-        },
-      })
-
-      for (const msg of messages) {
-        if (!msg.event.chat_group) continue
-        this.start({
-          id: msg.id,
-          event_id: msg.event_id,
-          content: msg.content,
-          interval_minutes: msg.interval_minutes,
-          organizer_id: msg.event.organizer_id,
-          chat_group_id: msg.event.chat_group.id,
-        })
-      }
-      logger.info("Loaded active sponsored messages", { count: messages.length })
-    } catch (err) {
-      logger.error("[Scheduler] Failed to load sponsored messages", { error: err instanceof Error ? err.message : String(err) })
-    }
-  }
-}
-
-export const sponsoredMessageScheduler = new SponsoredMessageScheduler()
 
 /**
  * Join `room` only if `check` authorizes it, otherwise tell the client.
@@ -807,7 +642,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
   })
 
   // Load and start all active sponsored message timers
-  void sponsoredMessageScheduler.loadAll()
+  startSponsoredScheduler()
 
   // Chat rooms close themselves. No external cron to configure — and the
   // immediate pass on boot is the important one, since deploys restart this

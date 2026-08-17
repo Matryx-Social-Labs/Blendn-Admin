@@ -156,6 +156,17 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["app_admin"],
   },
   {
+    // Sponsored copy is the only content on the platform reviewed BEFORE it is
+    // published rather than after it is reported. It is paid third-party
+    // messaging in a pseudonymous room, so the flag queue is the wrong shape:
+    // by the time a flag exists an attendee has already read it.
+    title: "Creative review",
+    description: "Sponsored copy waiting to be read by a person. Oldest first.",
+    url: "/dashboard/creative-review",
+    icon: IconFlag,
+    allowedRoles: ["app_admin"],
+  },
+  {
     title: "Brand claims",
     description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
     url: "/dashboard/sponsor-claims",

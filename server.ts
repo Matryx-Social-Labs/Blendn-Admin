@@ -1,6 +1,7 @@
 import { createServer } from "http"
 import next from "next"
-import { initSocketServer, sponsoredMessageScheduler, stopAllOpsBroadcasts } from "./lib/socket-server"
+import { initSocketServer, stopAllOpsBroadcasts } from "./lib/socket-server"
+import { stopSponsoredScheduler } from "./lib/sponsored-scheduler"
 import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
 import { stopPresenceSweeper } from "./lib/presence-sweeper"
 import { stopSentimentSweeper } from "./lib/sentiment-sweeper"
@@ -77,9 +78,9 @@ app.prepare().then(() => {
   // Graceful shutdown
   const shutdown = () => {
     console.log(`\n[${new Date().toISOString()}] > Shutting down gracefully...`)
-    // Clear the sponsored-message setInterval handles; without this they keep
-    // the event loop alive and the process waits for the forced-exit timeout.
-    sponsoredMessageScheduler.stopAll()
+    // Without this the sweeper's pending timeout keeps the event loop alive and
+    // the process waits out the forced-exit timeout.
+    stopSponsoredScheduler()
     stopChatLifecycleSweeper()
     stopPresenceSweeper()
     stopSentimentSweeper()

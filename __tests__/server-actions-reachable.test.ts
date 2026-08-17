@@ -104,3 +104,32 @@ describe("the unreachable list is current", () => {
     expect(callersOf(action as Action)).toEqual([])
   })
 })
+
+/**
+ * A `"use server"` file may only export async functions.
+ *
+ * `next build` enforces this — "can only export async functions, found object" —
+ * and nothing else does. `lib/sponsor-actions.ts` carried a `const` array and a
+ * re-exported sync function for several commits while `tsc`, `jest` and `eslint`
+ * all passed; the branch simply could not be deployed, and the only way to find
+ * out was a 40-second production build.
+ *
+ * Types are exempt: `export interface` and `export type` are erased before the
+ * directive means anything.
+ */
+describe("use-server modules export only async functions", () => {
+  const EXPORT = /^export\s+(?!async function|interface|type\s|\{[^}]*\}\s+from|default\s+async)(.+)$/gm
+
+  it.each(actionModules.map(([f, src]) => [f.slice(ROOT.length + 1), src]))(
+    "%s",
+    (_label, src) => {
+      const offenders = [...(src as string).matchAll(EXPORT)]
+        .map((m) => m[0].split("\n")[0].trim())
+        // A bare `export { x }` re-export is only safe if x is an async
+        // function, which this cannot see — but it is also the shape that broke
+        // the build, so it is not exempt.
+        .filter((line) => !line.startsWith("export type") && !line.startsWith("export interface"))
+      expect(offenders).toEqual([])
+    }
+  )
+})

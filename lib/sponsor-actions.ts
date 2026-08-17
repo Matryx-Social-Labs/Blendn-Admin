@@ -8,7 +8,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
-import { isSameSponsorName, normaliseSponsorName } from "@/lib/sponsor-name"
+import { normaliseSponsorName } from "@/lib/sponsor-name"
 import { SPONSORSHIP } from "@/lib/constants"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
 import type { placement_status } from "@prisma/client"
@@ -340,14 +340,6 @@ export async function mergePreview(loserId: string) {
   return { placements, campaigns, claims }
 }
 
-/** Exported for the test that pins merge coverage against the schema. */
-export const MERGE_REPOINTS = [
-  "event_sponsors",
-  "event_sponsored_messages",
-  "sponsor_claims",
-] as const
-
-export { isSameSponsorName }
 
 /* -------------------------------------------------------------------------- */
 /* The sponsor's own screens                                                  */

@@ -99,9 +99,24 @@ export const ratingSchema = z.object({
 // Organiser broadcast messaging. Both of these fan out to every attendee of an
 // event, so the bounds here are the only thing between a typo and a push
 // notification to the whole room.
-export const SPONSORED_MESSAGE_INTERVALS = [10, 15, 30, 60] as const
+/*
+ * The floor is `SPONSORSHIP.MIN_INTERVAL_MINUTES`, and 10 and 15 used to be on
+ * this list below it. Nothing broke visibly: the room-wide gap defers anything
+ * faster than 20 minutes anyway, so the option was accepted, saved, and then
+ * quietly overruled by the scheduler. An organiser choosing "every 10 minutes"
+ * and getting one every 20 has been lied to by a dropdown.
+ */
+export const SPONSORED_MESSAGE_INTERVALS = [20, 30, 60] as const
 
 export const sponsoredMessageCreateSchema = z.object({
+  /*
+   * Required, not optional. `sponsored_active_needs_sponsor` is a CHECK on
+   * `is_active`, so a campaign created with no brand saves fine and then cannot
+   * ever be switched on — an organiser filling in the copy and discovering that
+   * at the switch has wasted the work. The scheduler joins through this column,
+   * so a null here means the campaign silently never sends.
+   */
+  sponsor_id: z.string().uuid("Pick a brand for this campaign"),
   content: z.string().trim().min(1, "content is required").max(2000),
   interval_minutes: z
     .number()
@@ -116,6 +131,7 @@ export const sponsoredMessageCreateSchema = z.object({
 // right type when present. Previously `content.trim()` was called on whatever
 // arrived, so PATCH {"content": 123} returned a 500.
 export const sponsoredMessageUpdateSchema = sponsoredMessageCreateSchema
+  .omit({ sponsor_id: true })
   .partial()
   .extend({ is_active: z.boolean().optional() })
 

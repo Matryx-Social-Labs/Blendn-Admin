@@ -15,6 +15,8 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SPONSORED_MESSAGE_INTERVALS } from "@/lib/validations/event"
+import { getEventSponsors, type EventSponsorRow } from "@/lib/sponsor-actions"
 import {
   IconBell,
   IconBrandSpeedtest,
@@ -34,6 +36,11 @@ interface SponsoredMessage {
   is_active: boolean
   last_sent_at: string | null
   created_at: string
+  sponsor_id: string | null
+  moderation_status: "pending" | "approved" | "rejected"
+  /** Why the scheduler gave up. Null while it is running or has never run. */
+  deactivated_reason: string | null
+  next_send_at: string | null
 }
 
 interface Announcement {
@@ -54,6 +61,23 @@ const QUICK_TEMPLATES = [
   "Event wrapping up in 15 minutes. Thank you for joining us!",
 ]
 
+/**
+ * The server's own words for a refusal.
+ *
+ * These handlers answer with `{ error }` for anything a person can act on, and
+ * plain text for the rest. Falling back to a generic string loses the seven
+ * distinct reasons `canActivate` distinguishes, each with a different fix.
+ */
+async function refusal(res: Response): Promise<string> {
+  try {
+    const body = await res.json()
+    if (typeof body?.error === "string") return body.error
+  } catch {
+    // Not JSON — a bare 401/403/500.
+  }
+  return ""
+}
+
 // ── Sponsored Messages Panel ──────────────────────────────────────────────────
 
 function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
@@ -63,9 +87,22 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
 
   // New / edit form state
   const [formContent, setFormContent] = useState("")
-  const [formInterval, setFormInterval] = useState("30")
+  const [formInterval, setFormInterval] = useState(String(SPONSORED_MESSAGE_INTERVALS[0]))
+  const [formSponsor, setFormSponsor] = useState("")
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  /*
+   * The brands that may carry a campaign here. Approved placements only: an
+   * invited sponsor has not accepted yet, and a cancelled one is how an
+   * organiser stops sends.
+   */
+  const [sponsors, setSponsors] = useState<EventSponsorRow[]>([])
+  useEffect(() => {
+    getEventSponsors(eventId)
+      .then((rows) => setSponsors(rows.filter((r) => r.status === "approved")))
+      .catch(() => setSponsors([]))
+  }, [eventId])
 
   const fetchMessages = useCallback(async () => {
     try {
@@ -81,7 +118,8 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
   const openAdd = () => {
     setEditingId(null)
     setFormContent("")
-    setFormInterval("30")
+    setFormInterval(String(SPONSORED_MESSAGE_INTERVALS[0]))
+    setFormSponsor(sponsors.length === 1 ? sponsors[0].sponsorId : "")
     setShowForm(true)
   }
 
@@ -89,6 +127,9 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
     setEditingId(msg.id)
     setFormContent(msg.content)
     setFormInterval(String(msg.interval_minutes))
+    // Not editable: repointing a campaign would re-attribute sends already
+    // recorded under it, so the API omits the field entirely.
+    setFormSponsor(msg.sponsor_id ?? "")
     setShowForm(true)
   }
 
@@ -100,6 +141,7 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
 
   const save = async () => {
     if (!formContent.trim()) return toast.error("Message content is required")
+    if (!editingId && !formSponsor) return toast.error("Pick the brand this is for")
     try {
       setSaving(true)
       const url = editingId
@@ -108,14 +150,22 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
       const res = await fetch(url, {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: formContent, interval_minutes: Number(formInterval) }),
+        body: JSON.stringify({
+          content: formContent,
+          interval_minutes: Number(formInterval),
+          ...(editingId ? {} : { sponsor_id: formSponsor }),
+        }),
       })
-      if (!res.ok) throw new Error()
-      toast.success(editingId ? "Message updated" : "Sponsored message created")
+      if (!res.ok) throw new Error(await refusal(res))
+      toast.success(
+        editingId
+          ? "Edited — it goes back for review before it can run again"
+          : "Created. It runs once the copy has been reviewed."
+      )
       cancelForm()
       await fetchMessages()
-    } catch {
-      toast.error("Failed to save message")
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to save message")
     } finally {
       setSaving(false)
     }
@@ -128,13 +178,19 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active: !msg.is_active }),
       })
-      if (!res.ok) throw new Error()
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msg.id ? { ...m, is_active: !m.is_active } : m))
-      )
+      /*
+       * The refusal, verbatim. `canActivate` returns seven distinct sentences —
+       * no brand, placement not approved, no chatroom, in review, not approved —
+       * and every one of them was previously flattened to "Failed to update",
+       * which names none of the seven fixes.
+       */
+      if (!res.ok) throw new Error(await refusal(res))
+      // Re-read rather than assuming the flip landed: the server may have
+      // written other fields with it.
+      await fetchMessages()
       toast.success(msg.is_active ? "Stopped" : "Started sending")
-    } catch {
-      toast.error("Failed to update")
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update")
     }
   }
 
@@ -182,18 +238,47 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
             value={formContent}
             onChange={(e) => setFormContent(e.target.value)}
           />
+          {editingId ? null : (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Brand</p>
+              {sponsors.length === 0 ? (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  No approved sponsor on this event yet. A sponsored message is a
+                  claim that somebody paid, so it needs a brand behind it — add
+                  one above first.
+                </p>
+              ) : (
+                <Select value={formSponsor} onValueChange={setFormSponsor}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Which brand is this for?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sponsors.map((s) => (
+                      <SelectItem key={s.sponsorId} value={s.sponsorId}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <div className="flex-1">
               <p className="text-xs text-muted-foreground mb-1">Send every</p>
+              {/* One list, shared with the validator. The dropdown used to offer
+                  10 and 15 minutes under a 20-minute room-wide gap that silently
+                  overruled both. */}
               <Select value={formInterval} onValueChange={setFormInterval}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="10">10 minutes</SelectItem>
-                  <SelectItem value="15">15 minutes</SelectItem>
-                  <SelectItem value="30">30 minutes</SelectItem>
-                  <SelectItem value="60">60 minutes</SelectItem>
+                  {SPONSORED_MESSAGE_INTERVALS.map((minutes) => (
+                    <SelectItem key={minutes} value={String(minutes)}>
+                      {minutes} minutes
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -230,10 +315,35 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
                     <IconClock className="size-3" />
                     Every {msg.interval_minutes} min
                   </Badge>
+                  <Badge
+                    variant={
+                      msg.moderation_status === "approved"
+                        ? "outline"
+                        : msg.moderation_status === "rejected"
+                          ? "destructive"
+                          : "secondary"
+                    }
+                    className="text-xs"
+                  >
+                    {msg.moderation_status === "approved"
+                      ? "Reviewed"
+                      : msg.moderation_status === "rejected"
+                        ? "Not approved"
+                        : "In review"}
+                  </Badge>
                   {msg.last_sent_at && (
                     <span className="text-xs text-muted-foreground">
                       Last sent {new Date(msg.last_sent_at).toLocaleTimeString()}
                     </span>
+                  )}
+                  {/*
+                    Why it stopped, if it did. The scheduler switches a campaign
+                    off for five different reasons — archived room, no creative,
+                    repeated failures — and without this the organiser sees a
+                    switch that turned itself off overnight and no explanation.
+                  */}
+                  {!msg.is_active && msg.deactivated_reason && (
+                    <span className="text-xs text-destructive">{msg.deactivated_reason}</span>
                   )}
                 </div>
               </div>

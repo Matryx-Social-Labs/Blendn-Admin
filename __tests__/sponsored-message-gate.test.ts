@@ -23,8 +23,21 @@ const mockDb = {
   events: { findUnique: jest.fn() },
   organisations: { findFirst: jest.fn() },
   organisation_members: { findMany: jest.fn() },
+  event_sponsors: { findFirst: jest.fn() },
   event_sponsored_messages: { create: jest.fn(), findMany: jest.fn() },
+  sponsored_creatives: { create: jest.fn() },
+  $transaction: jest.fn(),
 }
+
+/*
+ * Runs the callback against the same mocks: the route creates the campaign and
+ * its first creative together, and a test that stubbed the transaction away
+ * would not notice if one of the two stopped happening.
+ *
+ * Wired after the literal rather than inside it — referencing `mockDb` in its
+ * own initializer makes the whole object implicitly `any`.
+ */
+mockDb.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(mockDb))
 
 const mockAuth = jest.fn()
 
@@ -41,13 +54,18 @@ import { POST } from "@/app/api/events/[id]/sponsored-messages/route"
 const EVENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const ORG = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const USER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+const SPONSOR = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
 const params = Promise.resolve({ id: EVENT })
 
 const req = () =>
   new Request(`https://admin.blendn.app/api/events/${EVENT}/sponsored-messages`, {
     method: "POST",
-    body: JSON.stringify({ content: "Stay hydrated", interval_minutes: 30 }),
+    body: JSON.stringify({
+      sponsor_id: SPONSOR,
+      content: "Stay hydrated",
+      interval_minutes: 30,
+    }),
   })
 
 beforeEach(() => {
@@ -57,6 +75,10 @@ beforeEach(() => {
   mockDb.events.findUnique.mockResolvedValue({ organizer_org_id: ORG, venue: null })
   mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: ORG }])
   mockDb.event_sponsored_messages.create.mockResolvedValue({ id: "new" })
+  mockDb.sponsored_creatives.create.mockResolvedValue({ id: "creative" })
+  // The brand named in the body does place at this event, and belongs to the
+  // granted org. The gate tests below vary the grant, not this.
+  mockDb.event_sponsors.findFirst.mockResolvedValue({ id: "placement" })
   // Default: no organisation satisfies BOTH conditions.
   mockDb.organisations.findFirst.mockResolvedValue(null)
 })
@@ -118,6 +140,52 @@ describe("POST sponsored-messages enforces the sponsor grant", () => {
     expect(some.merged_into).toBeNull()
   })
 
+  it("refuses a brand the granted org does not own", async () => {
+    /*
+     * The second half of the same confused-deputy problem.
+     *
+     * `resolveSponsorGrant` proves *an* organisation of this actor's has
+     * `may_sponsor` and an approved placement here. It says nothing about which
+     * brand `sponsor_id` names. Without the ownership filter, one legitimate
+     * placement is a licence to file campaigns under any brand on the platform —
+     * including a competitor's, in a room where the brand is the only named
+     * participant.
+     */
+    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
+    mockDb.event_sponsors.findFirst.mockResolvedValue(null)
+
+    const res = await POST(req(), { params })
+
+    expect(res.status).toBe(403)
+    expect(mockDb.event_sponsored_messages.create).not.toHaveBeenCalled()
+  })
+
+  it("scopes the placement lookup to the granted org, not just the event", async () => {
+    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
+    await POST(req(), { params })
+
+    const where = mockDb.event_sponsors.findFirst.mock.calls[0][0].where
+    expect(where).toMatchObject({ event_id: EVENT, sponsor_id: SPONSOR, status: "approved" })
+    expect(where.sponsor.org_id).toBe(ORG)
+  })
+
+  it("creates the campaign and its first creative together", async () => {
+    /*
+     * A campaign with no creative row is one the scheduler skips: a send records
+     * against `creative_id`, so there is nothing to record and nothing goes out.
+     * The switch would say on and the room would stay quiet.
+     */
+    mockDb.organisations.findFirst.mockResolvedValue({ id: ORG })
+    await POST(req(), { params })
+
+    expect(mockDb.$transaction).toHaveBeenCalledTimes(1)
+    expect(mockDb.sponsored_creatives.create).toHaveBeenCalledTimes(1)
+    expect(mockDb.sponsored_creatives.create.mock.calls[0][0].data).toMatchObject({
+      message_id: "new",
+      content: "Stay hydrated",
+    })
+  })
+
   it("lets an app_admin place one without any grant", async () => {
     mockAuth.mockResolvedValue({ user: { id: USER, role: "app_admin" } })
 
@@ -126,5 +194,9 @@ describe("POST sponsored-messages enforces the sponsor grant", () => {
     expect(res.status).toBe(201)
     // An admin short-circuits before the resolver, so no query is issued.
     expect(mockDb.organisations.findFirst).not.toHaveBeenCalled()
+    // And with no grant to scope by, the placement alone is the check —
+    // `org_id: undefined` would silently match every brand.
+    const sponsor = mockDb.event_sponsors.findFirst.mock.calls[0][0].where.sponsor
+    expect("org_id" in sponsor).toBe(false)
   })
 })

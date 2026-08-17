@@ -436,7 +436,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
       const event = await db.events.findUnique({
         where: { id: eventId, deleted_at: null },
-        select: { title: true, end_time: true },
+        // `start_time` is unused here — this select only names the room. It is
+        // pulled anyway because `chatWindowState` treats a missing start as "no
+        // floor" rather than erroring, so an event object in this file that
+        // lacks it is one edit away from silently opening a room early.
+        select: { title: true, start_time: true, end_time: true },
       })
       if (!event) {
         return notFoundResponse("Chat not available for this event")
