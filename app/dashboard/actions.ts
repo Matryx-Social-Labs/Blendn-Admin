@@ -301,6 +301,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     onboarded,
     rsvpUsers,
     checkedInUsers,
+    signupsBeforeWindow,
     signupBuckets,
     activeBuckets,
     supplyRows,
@@ -329,7 +330,22 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
       })
       .then((rows) => rows.length),
     db.events.count({ where: { ...eventScope(), status: "published" } }),
-    db.event_check_ins.count({ where: { status: { in: ATTENDED }, event: eventScope() } }),
+    /*
+     * Window-scoped, matching its own delta.
+     *
+     * The comment further down already states the design: `users` and
+     * `publishedEvents` are cumulative totals compared against their value at
+     * `range.from`, while `checkIns` "is naturally window-scoped, so it
+     * compares this window's count against the previous window's".
+     *
+     * The delta did exactly that. This value did not — it had no date filter,
+     * so the tile paired an ALL-TIME count with a period-over-period change.
+     * Six months in, that reads as "48,000 check-ins, -12%", where the number
+     * and the arrow describe different questions.
+     */
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inRange },
+    }),
     db.user.count({ where: { role: { in: ["organizer", "venue_owner"] } } }),
     db.events
       .findMany({
@@ -360,7 +376,27 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
         event_check_ins: { some: { status: { in: ATTENDED } } },
       },
     }),
-    db.user.findMany({ select: { createdAt: true }, orderBy: { createdAt: "asc" } }),
+    /*
+     * A baseline count, not every user row.
+     *
+     * The `signups` line is CUMULATIVE — each of the eight points is "every
+     * user created up to this bucket" — so the old query loaded the entire
+     * `user` table to compute it, ordered, for eight numbers. It is invisible
+     * under ~20k users and then it is not, and the sibling
+     * `mobile_refresh_tokens` query on the next line already shows the bounded
+     * pattern.
+     *
+     * Split in two: one count for everything before the window, and only the
+     * rows inside it. Cumulative semantics are preserved exactly —
+     * `baseline + (rows up to bucketEnd)` — while transfer is bounded by
+     * signups in the last eight weeks rather than by all history.
+     */
+    db.user.count({ where: { createdAt: { lt: new Date(now.getTime() - 8 * 7 * DAY_MS) } } }),
+    db.user.findMany({
+      where: { createdAt: { gte: new Date(now.getTime() - 8 * 7 * DAY_MS) } },
+      select: { createdAt: true },
+      orderBy: { createdAt: "asc" },
+    }),
     db.mobile_refresh_tokens.findMany({
       where: { created_at: { gte: new Date(now.getTime() - 8 * 7 * DAY_MS) } },
       select: { created_at: true, user_id: true },
@@ -388,7 +424,10 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     const bucketStart = new Date(bucketEnd.getTime() - 7 * DAY_MS)
     growth.push({
       label: week === 0 ? "now" : `−${week}w`,
-      signups: signupBuckets.filter((u) => u.createdAt <= bucketEnd).length,
+      // Cumulative: everything before the window, plus what landed inside it
+      // up to this bucket. Identical to the old all-rows filter.
+      signups:
+        signupsBeforeWindow + signupBuckets.filter((u) => u.createdAt <= bucketEnd).length,
       active: new Set(
         activeBuckets
           .filter((t) => t.created_at > bucketStart && t.created_at <= bucketEnd)

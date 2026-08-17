@@ -39,6 +39,70 @@ Scope: `blendn-admin/` only (Next.js 15 admin dashboard + REST/mobile API + Sock
 - **Do not enable the flag alone.** It typechecks and tests green while being
   broken in production, which is the worst possible signature.
 
+### 1.1a-2 Discovery feed may fan out up to 100 concurrent Nominatim geocodes
+
+**Blocked on one query I cannot run from here.** Before scheduling any work:
+
+```sql
+SELECT count(*) FROM events WHERE city IS NULL;
+```
+
+**If that is 0, close this unread.** `lib/services/events.service.ts:180` calls
+`resolveEventCity` per event, and `lib/location.ts:94-106` geocodes when `city`
+is null — so the blast radius is exactly the number of null-city rows in a feed
+page, up to the page size of 100. With no null cities there is no fan-out.
+
+If it is non-zero: `scripts/backfill-event-cities.ts` already exists. Run it,
+then resolve city at write time so the read path never geocodes.
+
+Rated CONFIRMED conf 7 by the audit precisely because the severity depends on
+this count and nobody has checked it.
+
+### 1.1b Onboarding client screens — server and design both complete, client unbuilt
+
+**Deferred by decision 2026-08-17.** Held here rather than lost; nothing about it
+is undecided.
+
+- **What**: build the onboarding screens in the Expo client so the data the
+  matching engine ranks on is actually collected and sent.
+- **Why it matters**: `lib/matching.ts` ranks with `INTENT_BONUS`,
+  `WORK_FIELD_BONUS` and shared-interest weighting. The client sends none of
+  those inputs, so the ranking engine has almost nothing to rank on. This is the
+  substantive version of "matching is broken" — not a bug, an unbuilt input.
+- **Three-way state**: the server is built and tested, the design is drawn, only
+  the client is missing. No design decision is outstanding.
+
+| Figma screen (file `HO0UnAEV5djzo0h4q7Y2vi`, canvas `666:6130`) | Server field | Client |
+|---|---|---|
+| Preferences → Orientation, multi-select of 8 | `orientation` as a set (#227) | never sent |
+| Preferences → "Show on profile" toggle | `show_orientation` consent (#228) | never sent |
+| Preferences → Looking For (Dating/Friendship/Networking/Travel/Open) | `intent`, drives `INTENT_BONUS` | never sent |
+| Professional Info → Occupation, job title + employment chips | `work_field`, drives `WORK_FIELD_BONUS` | never sent |
+| Professional Info → Education, school/degree/year | `expertise` (#257) | never sent |
+| Basic Information | `dateOfBirth` (#254) | never sent |
+
+- **Full flow designed**: Phone Number → Basic Information → OTP → Notifications
+  → Location Access → Preferences → Professional Info → Interests & Bio →
+  Media Upload → Ready to Blend. Skippable, resumable ("Save as Draft"),
+  progress bar.
+- **Styling**: use `EMBER` from `lib/theme.ts`, which is derived from this exact
+  canvas. Do **not** use the dashboard brand tokens — see
+  `.context/plans/figma-vs-code-findings.md`.
+- **Depends on**: nothing technical. Two open product decisions touch it only at
+  the edges — which brand direction is canonical, and the bottom-nav divergence
+  (Figma draws Explore; the 2026-08-15 decision defers it).
+- **Effort**: human ~1-2 weeks / CC ~2-3 days.
+- **Detail**: `.context/plans/figma-vs-code-findings.md` §3.
+
+### 1.1c Client dead-code sweep (audit A6-A8)
+
+Deferred with 1.1b, same reason. `lib/unread.ts` is a write-only cache with no
+unread badge anywhere; 11 `apiClient` methods, `LazyWrapper.tsx` and
+`subscriptionManager.ts` have zero callers; `NotificationHelpers` all route to a
+documented no-op stub. Mostly deletion, ~0.5d. One piece worth doing with 1.1b:
+wire `getOrCreateConversation` into `app/user/[id].tsx` and delete the
+list-and-scan workaround around it.
+
 ### 1.2 Sponsored-message scheduler has no graceful shutdown
 - **Priority**: Low
 - **Category**: Missing Features / Broken Logic
