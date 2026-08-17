@@ -1,11 +1,13 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { Prisma, event_status } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { cancelEventCheckIns, isCancellingEvent } from "@/lib/event-cancellation"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { mobileEventPatchSchema } from "@/lib/validations/event"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { getOccupancy } from "@/lib/occupancy"
@@ -16,6 +18,7 @@ import {
   forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
+  validationErrorResponse,
 } from "@/lib/api-response"
 
 interface RouteParams {
@@ -354,7 +357,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // as "no organiser, no venue".
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, ...eventPermissionSelect },
+      select: { id: true, status: true, ...eventPermissionSelect },
     })
 
     if (!event) {
@@ -387,13 +390,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("You cannot manage this event")
     }
 
-    const body = await request.json()
-    const { title, description, shortDescription, status } = body as {
-      title?: string
-      description?: string
-      shortDescription?: string
-      status?: string
+    /*
+     * A schema, not a cast. `body as { … }` asserted a shape nothing checked,
+     * so `{"status":"canceled"}` reached Prisma as an invalid enum value and
+     * returned a 500 where a 400 belongs.
+     */
+    const parsed = mobileEventPatchSchema.safeParse(await request.json())
+    if (!parsed.success) {
+      return validationErrorResponse(parsed.error)
     }
+    const { title, description, shortDescription, status } = parsed.data
+
+    const isCancelling = isCancellingEvent(status, event.status)
 
     const updated = await db.events.update({
       where: { id: eventId },
@@ -403,10 +411,21 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         ...(shortDescription !== undefined && {
           short_description: shortDescription,
         }),
-        ...(status !== undefined && { status: status as event_status }),
+        ...(status !== undefined && { status }),
         updated_at: new Date(),
       },
     })
+
+    /*
+     * The same cascade the dashboard route runs (Fix #35). Cancelling here used
+     * to leave every pending and checked_in row live, so a cancelled event
+     * still showed attendees inside and kept counting toward occupancy — the
+     * exact state Fix #35 was written to prevent, reached through the other
+     * door. Both routes now call one implementation.
+     */
+    if (isCancelling) {
+      await cancelEventCheckIns(eventId)
+    }
 
     return successResponse({
       id: updated.id,
@@ -445,7 +464,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     // as "no organiser, no venue".
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, ...eventPermissionSelect },
+      select: { id: true, status: true, ...eventPermissionSelect },
     })
 
     if (!event) {

@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
 import { validateLocationInput } from "@/lib/geofence-input"
 import { db } from "@/lib/db"
+import { cancelEventCheckIns } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
@@ -314,15 +315,10 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       )
     }
 
-    // Fix #35: Cancel all pending/checked_in check-ins when event is cancelled
+    // Fix #35, now shared with the mobile PATCH route, which cancelled events
+    // without cascading. See lib/event-cancellation.ts.
     if (isCancelling) {
-      await db.event_check_ins.updateMany({
-        where: {
-          event_id: resolvedParams.id,
-          status: { in: ["pending", "checked_in"] },
-        },
-        data: { status: "cancelled", updated_at: new Date() },
-      })
+      await cancelEventCheckIns(resolvedParams.id)
     }
 
     return NextResponse.json(updatedEvent)
