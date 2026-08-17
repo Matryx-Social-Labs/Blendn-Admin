@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
+import { actorFor } from "@/lib/org-membership"
 import {
   IconArrowRight,
   IconCalendarEvent,
@@ -66,6 +67,21 @@ export default async function ChatroomsPage() {
    */
   const feedbackWindowStart = new Date(now.getTime() - FEEDBACK_WINDOW_HOURS * 60 * 60 * 1000)
   const isPlatformAdmin = session.user.role === "app_admin"
+
+  /*
+   * Organisation-scoped, matching `app/api/events/route.ts:41-56`.
+   *
+   * This used to be `{ venue: { owner_id: session.user.id } }`. `venues.owner_id`
+   * has NO writer anywhere in the codebase -- `lib/venue-actions.ts` only ever
+   * sets `owner_org_id` -- so that branch matched zero rows for every venue
+   * owner who ever existed. During a live event the triage screen was empty for
+   * the one person who most needed it, and it looked like a legitimate empty
+   * state, so nobody filed it.
+   *
+   * The `organizer_id` clause stays as a floor for events created before
+   * organisations existed, or by someone whose org link is missing.
+   */
+  const actor = isPlatformAdmin ? null : await actorFor(session.user)
   const liveEvents = await db.events.findMany({
     where: {
       deleted_at: null,
@@ -73,14 +89,21 @@ export default async function ChatroomsPage() {
       start_time: { lte: now },
       // Ended less than the feedback window ago, or still running.
       end_time: { gte: feedbackWindowStart },
-      ...(isPlatformAdmin
-        ? {}
-        : {
+      ...(actor
+        ? {
             OR: [
+              ...(actor.orgIds.length
+                ? [
+                    { organizer_org_id: { in: actor.orgIds } },
+                    ...(session.user.role === "venue_owner"
+                      ? [{ venue: { owner_org_id: { in: actor.orgIds } } }]
+                      : []),
+                  ]
+                : []),
               { organizer_id: session.user.id },
-              { venue: { owner_id: session.user.id } },
             ],
-          }),
+          }
+        : {}),
     },
     select: {
       id: true,

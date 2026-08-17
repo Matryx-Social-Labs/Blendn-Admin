@@ -50,7 +50,27 @@ Dashboard auth: `lib/auth.ts` (NextAuth). Mobile auth: `lib/mobile-auth.ts` — 
 
 ### RBAC
 
-Authorization logic is centralized in `lib/rbac.ts` as plain functions over a `user_role` enum (`app_admin`, `organizer`, `venue_owner`, `attendee`), not middleware-based: `canAccessDashboard`, `canManageEvent`, `canModerateChat`, `canSendSystemMessages`, `canSendPushNotifications`. `app_admin` always passes; `organizer`/`venue_owner` checks are scoped to resources they own (matched by `organizerId`). Apply these checks inside route handlers, not just at the middleware layer.
+Authorization logic is centralized in `lib/rbac.ts` as plain functions, not middleware-based. Apply these checks inside route handlers, not just at the middleware layer.
+
+**Authorization is organisation-shaped, not identity-shaped.** Scope on organisation membership (`organizer_org_id`, `venue.owner_org_id`), never on `events.organizer_id`. `organizer_id` records who *created* the row, which is a different question and is useful only for audit: a colleague at the same org must get the same access, and a member who left must lose it. `venues.owner_id` has no writer at all — always use `owner_org_id`.
+
+The API:
+
+| Function | Answers |
+|---|---|
+| `eventPermissions(actor, event)` | `{ canEdit, canOperate }` for one event. The main resolver. `canEdit` = edit/publish/cancel. `canOperate` = chat, moderation, the attendee list. |
+| `eventPermissionSelect` | The `select` fragment `eventPermissions` needs. Spread it rather than hand-picking columns; a select missing `venue` reads as "no venue" and silently denies a venue owner. |
+| `canBroadcast(actor, event, kind, maySponsor)` | Who may put a non-user message in a room. |
+| `broadcastMayCarryMedia(kind)` | Whether a broadcast kind may carry an image. |
+| `canAccessDashboard(role)` | Dashboard entry. Read by `middleware.ts`. |
+
+Build the actor with `actorFor(user)` from `lib/org-membership.ts` — it loads memberships, and `PermissionActor.orgIds` is required precisely so a bare session user cannot typecheck into the resolver and silently deny everyone.
+
+Mobile routes must read the role from the database, not the JWT: the token carries no role, and a 30-day refresh cycle would outlive any role change baked into it.
+
+`__tests__/authz-scoping-boundary.test.ts` fails the build on a hand-rolled `organizer_id !==` or `owner_id:` outside the resolver. If it fires, you want `eventPermissions`.
+
+Historical note, because this paragraph used to say otherwise: `canManageEvent` and `canModerateChat` were **deleted** and replaced by `eventPermissions`. `canSendSystemMessages` and `canSendPushNotifications` still exist and currently have no callers.
 
 ### Moderation pipeline
 

@@ -3,6 +3,8 @@ import { NextRequest } from "next/server"
 import { Prisma, event_status } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { actorFor } from "@/lib/org-membership"
+import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
@@ -347,18 +349,42 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Invalid event ID format", 400)
     }
 
-    // Fetch event to verify ownership
+    // The resolver's shape, not a hand-picked one. `eventPermissionSelect`
+    // exists so a call site cannot fetch a shape the resolver silently reads
+    // as "no organiser, no venue".
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, organizer_id: true },
+      select: { id: true, ...eventPermissionSelect },
     })
 
     if (!event) {
       return notFoundResponse("Event not found")
     }
 
-    if (event.organizer_id !== authUser.userId) {
-      return forbiddenResponse("You are not the organizer of this event")
+    /*
+     * The resolver, not a comparison of two user ids.
+     *
+     * `organizer_id !== authUser.userId` was wrong in both directions at once.
+     * Over-permissive: it is the row's CREATOR, so an ex-member of the
+     * organising org whose dashboard access was correctly revoked could still
+     * edit and delete the event from her phone. Under-permissive: an app_admin
+     * was refused, and so was a colleague at the same org who did not happen to
+     * create the row — which is exactly what moving authorization to
+     * organisation membership was meant to end.
+     *
+     * The role comes from the database because the mobile JWT carries none:
+     * a 30-day refresh cycle means a role baked into a token outlives the
+     * decision that changed it.
+     */
+    const requester = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { id: true, role: true },
+    })
+    if (!requester) return forbiddenResponse("You cannot manage this event")
+
+    const actor = await actorFor({ id: requester.id, role: requester.role })
+    if (!eventPermissions(actor, event).canEdit) {
+      return forbiddenResponse("You cannot manage this event")
     }
 
     const body = await request.json()
@@ -414,18 +440,42 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Invalid event ID format", 400)
     }
 
-    // Fetch event to verify ownership
+    // The resolver's shape, not a hand-picked one. `eventPermissionSelect`
+    // exists so a call site cannot fetch a shape the resolver silently reads
+    // as "no organiser, no venue".
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, organizer_id: true },
+      select: { id: true, ...eventPermissionSelect },
     })
 
     if (!event) {
       return notFoundResponse("Event not found")
     }
 
-    if (event.organizer_id !== authUser.userId) {
-      return forbiddenResponse("You are not the organizer of this event")
+    /*
+     * The resolver, not a comparison of two user ids.
+     *
+     * `organizer_id !== authUser.userId` was wrong in both directions at once.
+     * Over-permissive: it is the row's CREATOR, so an ex-member of the
+     * organising org whose dashboard access was correctly revoked could still
+     * edit and delete the event from her phone. Under-permissive: an app_admin
+     * was refused, and so was a colleague at the same org who did not happen to
+     * create the row — which is exactly what moving authorization to
+     * organisation membership was meant to end.
+     *
+     * The role comes from the database because the mobile JWT carries none:
+     * a 30-day refresh cycle means a role baked into a token outlives the
+     * decision that changed it.
+     */
+    const requester = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { id: true, role: true },
+    })
+    if (!requester) return forbiddenResponse("You cannot manage this event")
+
+    const actor = await actorFor({ id: requester.id, role: requester.role })
+    if (!eventPermissions(actor, event).canEdit) {
+      return forbiddenResponse("You cannot manage this event")
     }
 
     // Soft delete

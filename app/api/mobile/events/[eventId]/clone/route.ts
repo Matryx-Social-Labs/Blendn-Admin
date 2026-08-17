@@ -2,6 +2,8 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { actorFor } from "@/lib/org-membership"
+import { eventPermissions } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -33,6 +35,9 @@ export async function POST(
         details: true,
         categories: { select: { category_id: true, primary: true } },
         media: { select: { type: true, url: true, thumbnail_url: true, title: true, description: true, order: true } },
+        // `include` returns every scalar, so `organizer_org_id` is already
+        // here — but `venue` is a relation and the resolver reads it.
+        venue: { select: { owner_org_id: true } },
       },
     })
 
@@ -40,15 +45,27 @@ export async function POST(
       return notFoundResponse("Event not found")
     }
 
-    // Only organiser or admin can clone
-    if (event.organizer_id !== authUser.userId) {
-      const user = await db.user.findUnique({
-        where: { id: authUser.userId },
-        select: { role: true },
-      })
-      if (user?.role !== "app_admin") {
-        return forbiddenResponse("Only the event organiser can clone this event")
-      }
+    /*
+     * `canEdit`, not `canOperate`.
+     *
+     * The audit register proposed `canOperate` for this route alongside
+     * analytics and the attendee export. That is wrong for clone specifically:
+     * cloning copies the title, description, details, categories and media into
+     * a NEW event owned by the caller. `canOperate` is "what happens in your
+     * building" and it includes venue owners — a venue owner being able to
+     * duplicate an organiser's event as their own is not the same permission as
+     * moderating that event's room. Taking someone's content is an `canEdit`
+     * act even though it writes a different row.
+     */
+    const requester = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { id: true, role: true },
+    })
+    if (!requester) return forbiddenResponse("You cannot clone this event")
+
+    const actor = await actorFor({ id: requester.id, role: requester.role })
+    if (!eventPermissions(actor, event).canEdit) {
+      return forbiddenResponse("You cannot clone this event")
     }
 
     const newSlug = `${event.slug}-copy-${Date.now()}`
