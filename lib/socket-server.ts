@@ -390,6 +390,28 @@ export function stopOpsBroadcast(eventId: string): void {
 }
 
 /** Used by tests and by shutdown so a process can exit cleanly. */
+/**
+ * How many sockets are currently in a chat room.
+ *
+ * `undefined` when the server has not booted or the adapter cannot answer —
+ * never `0`. An empty room and an unanswerable question are different facts,
+ * and `lib/room-audience.ts` renders the second by hiding the number rather
+ * than showing a zero that reads as "nobody is here".
+ */
+export async function socketsInChatRoom(chatGroupId: string): Promise<number | undefined> {
+  if (!io) return undefined
+  try {
+    const sockets = await io.in(`chat:${chatGroupId}`).fetchSockets()
+    return sockets.length
+  } catch (error) {
+    logger.warn("Could not count sockets in room", {
+      chatGroupId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return undefined
+  }
+}
+
 export function stopAllOpsBroadcasts(): void {
   for (const eventId of Array.from(opsTimers.keys())) stopOpsBroadcast(eventId)
 }

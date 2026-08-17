@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { roomAudience } from "@/lib/room-audience"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
@@ -49,26 +50,23 @@ export async function GET(_: Request, { params }: RouteContext) {
       where: { event_id: eventId },
       select: { id: true },
     })
-    const members = chatGroup
-      ? await db.chat_group_members.count({
-          where: { chat_group_id: chatGroup.id, status: { not: "banned" } },
-        })
-      : 0
-    // Distinct users, not tokens: one person with a phone and a tablet is one
-    // recipient, and counting tokens would overstate the reach.
-    const reachable = chatGroup
-      ? (
-          await db.push_tokens.findMany({
-            where: {
-              user: { chat_group_memberships: { some: { chat_group_id: chatGroup.id } } },
-            },
-            select: { user_id: true },
-            distinct: ["user_id"],
-          })
-        ).length
-      : 0
 
-    return NextResponse.json({ announcements, audience: { members, reachable } })
+    /*
+     * One definition of "the audience", shared with the sponsor report.
+     *
+     * This used to count members with `status: { not: "banned" }`. `left` is a
+     * member_status, and the row is deliberately KEPT when somebody leaves
+     * because `anonymous_name` lives on it — so the blast radius counted
+     * everyone who had ever joined and grew all night as people left.
+     *
+     * `reachable` also fetched every push_token row into Node to call `.length`
+     * on the array; `lib/room-audience.ts` groups in the database instead.
+     */
+    const audience = chatGroup
+      ? await roomAudience(chatGroup.id)
+      : { members: 0, reachable: 0 }
+
+    return NextResponse.json({ announcements, audience })
   } catch (err) {
     logger.error("Error fetching announcements", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
