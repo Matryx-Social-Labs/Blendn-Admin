@@ -1,6 +1,6 @@
 import { createServer } from "http"
 import next from "next"
-import { initSocketServer, sponsoredMessageScheduler } from "./lib/socket-server"
+import { initSocketServer, sponsoredMessageScheduler, stopAllOpsBroadcasts } from "./lib/socket-server"
 import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
 import { stopPresenceSweeper } from "./lib/presence-sweeper"
 import { stopSentimentSweeper } from "./lib/sentiment-sweeper"
@@ -83,6 +83,11 @@ app.prepare().then(() => {
     stopChatLifecycleSweeper()
     stopPresenceSweeper()
     stopSentimentSweeper()
+    // The fifth timer. `startOpsBroadcast` arms a 5s interval per event any
+    // time someone opens a live ops screen, and this was the one loop the
+    // shutdown handler never stopped -- so a deploy during a live event held
+    // the event loop open for the full 10s forced-exit timeout and exited 1.
+    stopAllOpsBroadcasts()
     io?.close(() => {
       console.log(`[${new Date().toISOString()}] > Socket.io closed`)
     })

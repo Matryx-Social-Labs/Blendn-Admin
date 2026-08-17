@@ -237,24 +237,25 @@ export async function updateUserRole(id: string, role: user_role) {
   return { success: true }
 }
 
-export async function deleteUser(id: string) {
-  try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Error("Forbidden")
-    }
-
-    await db.user.delete({
-      where: { id },
-    })
-
-    revalidatePath("/dashboard/users")
-    return { success: true }
-  } catch (error) {
-    logger.error("Error deleting user", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to delete user")
-  }
-}
+/*
+ * `deleteUser` is deliberately absent.
+ *
+ * It used to be `db.user.delete({ where: { id } })`, one click behind a
+ * dropdown. The schema forbids that in writing (`prisma/schema.prisma:28-32`):
+ * deleting a host cascades their events, every check-in and every chat message,
+ * destroying other people's history to punish one person. It also orphaned the
+ * `message_reports` rows *about* that person, which carry no foreign key.
+ *
+ * The two supported paths, both of which keep the row:
+ *
+ *   suspension  reversible, writes audit_logs, `suspended_at`/`suspended_by`
+ *               — app/dashboard/moderation/reports/actions.ts
+ *   erasure     the scrub-and-keep transaction the mobile account route uses,
+ *               which nulls PII and sets `deletedAt` while preserving FKs
+ *
+ * If a GDPR erasure request arrives, use the second. Do not reintroduce a hard
+ * delete: there is no undo and it takes other users' data with it.
+ */
 
 export async function toggleUserOnboarded(id: string, onboarded: boolean) {
   try {

@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuth } from "@/lib/auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   getPresignedUploadUrl,
   validateContentType,
@@ -40,6 +41,20 @@ export async function POST(request: NextRequest) {
     if (role !== "app_admin" && role !== "organizer" && role !== "venue_owner") {
       return errorResponse("Not authorized to upload", 403)
     }
+
+    /*
+     * Same ceiling as the mobile twin, which has always had one.
+     *
+     * Each call mints a 900-second Tigris PUT URL. Unlimited, one dashboard
+     * session could mint them faster than any bucket policy could care, and
+     * every issued URL stays valid for fifteen minutes after the session that
+     * asked for it is gone.
+     */
+    const limited = await rateLimit(
+      request,
+      userLimit("upload", "dashboard-upload-url", session.user.id)
+    )
+    if (limited) return limited
 
     const body = await request.json()
     const validation = presignedUrlSchema.safeParse(body)
