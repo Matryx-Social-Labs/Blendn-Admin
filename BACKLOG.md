@@ -14,6 +14,31 @@ Scope: `blendn-admin/` only (Next.js 15 admin dashboard + REST/mobile API + Sock
 - **Suggested Fix**: Add `OPENAI_API_KEY` (and `OPENAI_ORG_ID` if used) to `.env.example` with a comment on the degraded fallback behavior.
 - **Estimated Effort**: XS
 
+### 1.1a Prisma `strictUndefinedChecks` — blocked on 11 files, worth doing
+
+- **Why it matters**: Prisma silently STRIPS `undefined` keys from a
+  where-clause rather than matching nothing. That turned
+  `chat_group_id: event.chat_group?.id` into an unscoped `{ id: flagId }`
+  lookup and reopened a cross-org moderation hole that had already been fixed
+  once (see the comment in `app/api/events/[id]/chat/moderation/[flagId]/route.ts`).
+  The preview flag converts that whole class from silent widening into a loud
+  error, and is worth more than any individual fix in this class.
+- **Measured, not assumed**: enabling it on `@prisma/client` 7.9.1 produced
+  **zero** typecheck errors and 1424 green tests — because it is a **runtime**
+  check, not a type-level one. Reverting a known-bad `?.` produced no tsc error.
+  The unit suite cannot see it either, since every DB-touching test mocks
+  `@/lib/db`.
+- **The actual blocker**: 11 files pass explicit `undefined` into query payloads
+  as the idiomatic "leave this field alone" pattern — `app/api/events/[id]/route.ts:195,205,206,254,269,286`
+  and `lib/services/events.service.ts:153` among them. Every one of those would
+  throw at runtime on the event PATCH path.
+- **Suggested fix**: convert each `field: cond ? value : undefined` to a
+  conditional spread `...(cond && { field: value })`, then enable the flag, then
+  run `npm run test:integration` against a live Postgres — which is the only
+  suite that can actually verify it.
+- **Do not enable the flag alone.** It typechecks and tests green while being
+  broken in production, which is the worst possible signature.
+
 ### 1.2 Sponsored-message scheduler has no graceful shutdown
 - **Priority**: Low
 - **Category**: Missing Features / Broken Logic

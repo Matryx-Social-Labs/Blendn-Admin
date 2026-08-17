@@ -61,8 +61,25 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * exploitable; the sibling message-delete route already carries this
      * predicate and there is no reason for this one not to.
      */
+    /*
+     * The `?.` above reopened the hole this comment describes.
+     *
+     * When an event has no chat group, `event.chat_group?.id` is `undefined`,
+     * and Prisma STRIPS undefined keys from a where-clause rather than matching
+     * nothing — `strictUndefinedChecks` is not on the generator. So the
+     * predicate collapsed back to `{ id: flagId }`, which is exactly the
+     * id-alone lookup the scoping was added to prevent: an organiser with a
+     * chat-less event of their own could pass another organisation's flagId.
+     *
+     * Guard explicitly, the way the sibling message-delete route does. An
+     * event with no room has no flags in it, so 404 is the honest answer.
+     */
+    if (!event.chat_group) {
+      return NextResponse.json({ error: "Flag not found" }, { status: 404 })
+    }
+
     const flag = await db.moderation_flags.findFirst({
-      where: { id: flagId, chat_group_id: event.chat_group?.id },
+      where: { id: flagId, chat_group_id: event.chat_group.id },
       select: { id: true, message_id: true, status: true },
     })
 
