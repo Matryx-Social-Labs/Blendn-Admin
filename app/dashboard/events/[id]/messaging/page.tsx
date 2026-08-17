@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { EventMessaging } from "@/components/event-messaging"
+import { EventSponsors } from "@/components/event-sponsors"
 import { ChatFeed } from "@/components/chat-feed"
 import { ModerationQueue } from "@/components/moderation-queue"
 import { Button } from "@/components/ui/button"
@@ -51,7 +52,12 @@ export default async function EventMessagingPage({ params }: Props) {
       {/* Two-column layout */}
       <div className="flex flex-1 min-h-0 divide-x">
         {/* Left: Messaging controls */}
-        <div className="w-[420px] shrink-0 overflow-y-auto p-6">
+        <div className="w-[420px] shrink-0 overflow-y-auto p-6 flex flex-col gap-6 divide-y">
+          {/*
+            Sponsors first. A sponsored campaign below is refused without a
+            placement, and the fix for that refusal lives here.
+          */}
+          <EventSponsors eventId={event.id} />
           <EventMessaging eventId={event.id} eventTitle={event.title} />
         </div>
 

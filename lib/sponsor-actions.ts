@@ -700,3 +700,109 @@ export async function saveMyBrand(input: unknown) {
   revalidatePath("/dashboard/placements")
   return brand
 }
+
+export interface EventSponsorRow {
+  id: string
+  sponsorId: string
+  name: string
+  logo_url: string | null
+  ownerName: string | null
+  status: placement_status
+  phase: PlacementPhase
+}
+
+/** Brands attached to one event, for the organiser's panel. */
+export async function getEventSponsors(eventId: string): Promise<EventSponsorRow[]> {
+  const session = await getAuth()
+  if (!session?.user) throw new Error("Unauthorized")
+
+  const event = await db.events.findUnique({
+    where: { id: eventId, deleted_at: null },
+    select: { start_time: true, end_time: true, ...eventPermissionSelect },
+  })
+  if (!event) throw new Error("Event not found")
+
+  const actor = await actorFor(session.user)
+  if (!eventPermissions(actor, event).canOperate) throw new Error("Forbidden")
+
+  const rows = await db.event_sponsors.findMany({
+    where: { event_id: eventId },
+    select: {
+      id: true,
+      status: true,
+      sponsor: {
+        select: {
+          id: true,
+          name: true,
+          logo_url: true,
+          org: { select: { display_name: true } },
+        },
+      },
+    },
+    orderBy: { created_at: "asc" },
+  })
+
+  const now = new Date()
+  return rows.map((r) => ({
+    id: r.id,
+    sponsorId: r.sponsor.id,
+    name: r.sponsor.name,
+    logo_url: r.sponsor.logo_url,
+    ownerName: r.sponsor.org?.display_name ?? null,
+    status: r.status,
+    phase: placementPhase({ status: r.status }, event, now),
+  }))
+}
+
+/**
+ * Remove a placement from an event.
+ *
+ * Cancels rather than deletes when anything has run under it: a deleted
+ * placement takes its send history with it via cascade, and a sponsor's report
+ * for last week should not disappear because an organiser tidied up.
+ *
+ * A placement with no campaigns and no sends has no history to protect, so that
+ * one is a real delete — leaving `cancelled` rows nobody ever used just clutters
+ * the list and eats one of the three slots.
+ */
+export async function removePlacement(placementId: string) {
+  const session = await getAuth()
+  if (!session?.user) throw new Error("Unauthorized")
+
+  const placement = await db.event_sponsors.findUnique({
+    where: { id: placementId },
+    select: {
+      id: true,
+      event_id: true,
+      sponsor_id: true,
+      event: { select: { ...eventPermissionSelect } },
+    },
+  })
+  if (!placement) throw new Error("Placement not found")
+
+  const actor = await actorFor(session.user)
+  if (!eventPermissions(actor, placement.event).canEdit) throw new Error("Forbidden")
+
+  const campaigns = await db.event_sponsored_messages.count({
+    where: { event_id: placement.event_id, sponsor_id: placement.sponsor_id },
+  })
+
+  if (campaigns > 0) {
+    await db.event_sponsors.update({
+      where: { id: placementId },
+      data: { status: "cancelled", decided_by: session.user.id, decided_at: new Date() },
+    })
+  } else {
+    await db.event_sponsors.delete({ where: { id: placementId } })
+  }
+
+  auditLog({
+    userId: session.user.id,
+    action: campaigns > 0 ? "placement.cancel" : "placement.delete",
+    resource: "event_sponsors",
+    resourceId: placementId,
+    details: { eventId: placement.event_id, sponsorId: placement.sponsor_id, campaigns },
+  })
+
+  revalidatePath(`/dashboard/events/${placement.event_id}/messaging`)
+}
