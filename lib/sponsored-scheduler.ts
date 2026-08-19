@@ -10,6 +10,7 @@ import { chatWindowState } from "./chat-window"
 import { SPONSORSHIP } from "./constants"
 import { db } from "./db"
 import { logger } from "./logger"
+import { placementIsRunnable } from "./placement-phase"
 import { attendeeLabel } from "./pseudonym"
 
 /**
@@ -276,6 +277,21 @@ async function sendOne(
 
   if (!event?.chat_group) {
     await deactivate(campaign.id, token, "The event has no chatroom.")
+    return "deactivated"
+  }
+
+  /*
+   * Is the commercial agreement still current — a different question from
+   * whether the room is open, and the reason both are asked.
+   *
+   * The room stays open for `CHAT_WINDOW_HOURS` after the event ends so people
+   * can give feedback on the way home. `chatWindowState` alone would therefore
+   * keep a campaign sending for a full day after the placement finished, into a
+   * room whose purpose has changed. The SQL cannot ask this — it is derived from
+   * the event's clock, not stored — so it is asked here.
+   */
+  if (!placementIsRunnable({ status: "approved" }, event, now)) {
+    await deactivate(campaign.id, token, "The event has ended.")
     return "deactivated"
   }
 

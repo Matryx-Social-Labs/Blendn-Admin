@@ -245,6 +245,30 @@ describe("things that stop a campaign", () => {
     expect(mockDb.chat_messages.create).not.toHaveBeenCalled()
   })
 
+  it("stops once the event has ended, not once the room closes", async () => {
+    mockDb.events.findUnique.mockResolvedValue({
+      start_time: new Date("2026-08-16T19:00:00.000Z"),
+      // Ended two hours ago. The room is still open — it stays open for a day
+      // so people can give feedback on the way home — but the placement is over.
+      end_time: new Date("2026-08-17T18:00:00.000Z"),
+      organizer_id: "organiser-1",
+      chat_group: { id: GROUP, status: "active" },
+    })
+
+    const result = await sweepSponsored(NOW)
+
+    /*
+     * Without this the campaign keeps sending for the whole 24-hour feedback
+     * window, into a room whose purpose has changed — and bills the sponsor for
+     * exposures after the event they bought.
+     */
+    expect(result.deactivated).toBe(1)
+    expect(mockDb.chat_messages.create).not.toHaveBeenCalled()
+    expect(
+      mockDb.event_sponsored_messages.updateMany.mock.calls[0][0].data.deactivated_reason
+    ).toMatch(/ended/)
+  })
+
   it("stops when there is no approved creative", async () => {
     mockDb.sponsored_creatives.findFirst.mockResolvedValue(null)
 
