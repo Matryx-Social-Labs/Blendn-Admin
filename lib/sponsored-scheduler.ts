@@ -12,6 +12,7 @@ import { db } from "./db"
 import { logger } from "./logger"
 import { placementIsRunnable } from "./placement-phase"
 import { attendeeLabel } from "./pseudonym"
+import { sweepExpiredGrants } from "./upload-grants"
 
 /**
  * When a sponsored campaign actually sends.
@@ -240,6 +241,24 @@ export async function sweepSponsored(now: Date = new Date()): Promise<SponsoredS
     failed: 0,
   }
 
+  /*
+   * Reclaim upload grants nobody redeemed, in the same pass.
+   *
+   * One indexed delete against the `expires_at` index the schema calls "the
+   * sweeper's predicate" — not worth its own timer, and a fifth interval in the
+   * shutdown handler is a fifth thing to forget to stop. Consumed grants are
+   * kept: they are the record of where a live creative's bytes came from.
+   */
+  try {
+    const reclaimed = await sweepExpiredGrants(now)
+    if (reclaimed > 0) logger.info("Reclaimed upload grants", { count: reclaimed })
+  } catch (error) {
+    // Housekeeping must never stop the sends.
+    logger.warn("Could not reclaim upload grants", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
   const claimed = await claimDue(now, token)
   result.claimed = claimed.length
   if (claimed.length === 0) return result
@@ -343,7 +362,7 @@ async function sendOne(
    */
   const creative = await db.sponsored_creatives.findFirst({
     where: { message_id: campaign.id, moderation_status: "approved" },
-    select: { id: true, content: true, media_url: true },
+    select: { id: true, content: true, media_url: true, media_type: true },
     orderBy: { created_at: "desc" },
   })
   if (!creative) {
@@ -380,16 +399,35 @@ async function sendOne(
     return "duplicate"
   }
 
+  /*
+   * `image` and `video` are separate message types, not text with a url in the
+   * metadata. A client renders a video as a poster with a tap-to-play control
+   * and an image inline; a text message with a link is a third thing that
+   * autoplays nothing and looks like spam.
+   *
+   * The URL is the one recorded on the creative, which is pinned to the object
+   * VERSION that was reviewed. Overwriting the key after approval therefore
+   * changes nothing about what goes out.
+   */
+  const type = creative.media_url
+    ? creative.media_type?.startsWith("video/")
+      ? ("video" as const)
+      : ("image" as const)
+    : ("text" as const)
+
   const created = await db.chat_messages.create({
     data: {
       chat_group_id: groupId,
       user_id: event.organizer_id,
-      type: "text",
+      type,
       content: `📣 [Sponsored]\n${creative.content}`,
       metadata: {
         sponsored_message_id: campaign.id,
         creative_id: creative.id,
         sponsor_id: campaign.sponsor_id,
+        ...(creative.media_url
+          ? { media_url: creative.media_url, media_type: creative.media_type }
+          : {}),
       },
     },
   })
@@ -413,6 +451,7 @@ async function sendOne(
   await emit(groupId, {
     id: created.id,
     content: created.content,
+    type,
     createdAt: created.created_at.toISOString(),
     userId: event.organizer_id,
   })
@@ -467,14 +506,17 @@ async function connected(groupId: string): Promise<number> {
 
 async function emit(
   groupId: string,
-  message: { id: string; content: string; createdAt: string; userId: string }
+  message: { id: string; content: string; type: string; createdAt: string; userId: string }
 ): Promise<void> {
   try {
     const { emitChatMessage } = await import("./socket-server")
     emitChatMessage(groupId, {
       id: message.id,
       content: message.content,
-      type: "text",
+      // The persisted type, not a hardcoded "text". A socket listener that is
+      // told "text" renders a caption and drops the artwork the sponsor paid
+      // for, and only a page refresh reveals the difference.
+      type: message.type,
       userId: message.userId,
       userName: "Sponsored",
       createdAt: message.createdAt,

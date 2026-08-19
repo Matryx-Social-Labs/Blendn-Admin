@@ -15,6 +15,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { CreativeMedia } from "@/components/creative-media"
 import { PollComposer } from "@/components/poll-composer"
 import { SPONSORED_MESSAGE_INTERVALS } from "@/lib/validations/event"
 import { getEventSponsors, type EventSponsorRow } from "@/lib/sponsor-actions"
@@ -38,6 +39,7 @@ interface SponsoredMessage {
   last_sent_at: string | null
   created_at: string
   sponsor_id: string | null
+  media_url: string | null
   moderation_status: "pending" | "approved" | "rejected"
   /** Why the scheduler gave up. Null while it is running or has never run. */
   deactivated_reason: string | null
@@ -346,6 +348,19 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
                   {!msg.is_active && msg.deactivated_reason && (
                     <span className="text-xs text-destructive">{msg.deactivated_reason}</span>
                   )}
+                </div>
+                {/*
+                  Attached to a SAVED campaign, never to the new-campaign form:
+                  a grant is validated against a campaign id, which does not
+                  exist until the campaign does.
+                */}
+                <div className="mt-2">
+                  <CreativeMedia
+                    eventId={eventId}
+                    campaignId={msg.id}
+                    currentUrl={msg.media_url}
+                    onAttached={fetchMessages}
+                  />
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">

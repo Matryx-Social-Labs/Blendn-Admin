@@ -27,9 +27,25 @@ export async function GET(_: Request, { params }: RouteContext) {
       where: { event_id: eventId },
       orderBy: { created_at: "asc" },
       take: PAGINATION.MAX_LIMIT,
+      include: {
+        // The artwork lives on the creative, not the campaign — revisions are
+        // the whole point, so a send from last night keeps pointing at the
+        // image it actually delivered. The list needs the CURRENT one.
+        creatives: {
+          select: { media_url: true, media_type: true },
+          orderBy: { created_at: "desc" },
+          take: 1,
+        },
+      },
     })
 
-    return NextResponse.json(messages)
+    return NextResponse.json(
+      messages.map(({ creatives, ...m }) => ({
+        ...m,
+        media_url: creatives[0]?.media_url ?? null,
+        media_type: creatives[0]?.media_type ?? null,
+      }))
+    )
   } catch (err) {
     logger.error("Error fetching sponsored messages", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
