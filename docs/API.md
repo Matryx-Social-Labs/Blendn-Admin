@@ -1021,6 +1021,65 @@ tells an organiser about a capability they cannot self-serve anyway.
 cycle a role baked into a token outlives the decision that changed it, so an
 organiser demoted this morning would keep broadcasting until it expired.
 
+### Polls in an event room
+
+```
+GET  /events/:eventId/polls/:pollId          results, disclosed
+POST /events/:eventId/polls/:pollId/vote     { optionId }
+```
+
+A poll is a `chat_messages` row of type `poll` with a `chat_polls` row hanging
+off it, so it scrolls in the transcript, can be moderated, and is deleted with
+the room. The question doubles as the message `content`, which means a client
+that does not yet know the `poll` type still renders something meaningful rather
+than an empty bubble.
+
+Who may post one is the same table as above: an `announcement` poll needs
+`canOperate`, a `sponsored` poll needs the same grant a sponsored message needs.
+A poll from a brand carries that brand's name into the room and takes the same
+attention, so it does not get a weaker gate because the payload is a question.
+
+**Every count is disclosed before it leaves the server.** `null` means WITHHELD.
+It never means zero, and rendering it as zero turns "we are not telling you" into
+a false claim about the room.
+
+The rule is four parts and each one is load-bearing:
+
+1. any option under 5 votes is hidden
+2. if *anything* is hidden, `total` is hidden too — otherwise you subtract
+   `98 + 41` from `142` and recover the 3
+3. if suppression would leave exactly one option visible, hide that one as well;
+   a lone survivor *is* the complement
+4. suppression is sticky — a figure hidden once is not republished because the
+   number later grew
+
+Rule 3 is the one that gets forgotten, and rule 2 is what makes rule 1 worth
+anything. `lib/disclosure.ts` owns all four, and the poll module is not able to
+return raw counts to anybody.
+
+**Results are hidden until the poll closes** unless it was created with
+`resultsVisible`. Two reasons, and the second is the stronger one: a running
+total pushes later voters toward whatever is already winning, and streaming
+counts is a timing oracle — in a room of four, everyone watching sees `0 → 1` the
+instant somebody votes, which is the same leak shape as the typing indicator.
+There is no per-vote emission to leak from; counts are computed on read.
+
+**Closing time defaults to the end of the event, not the end of the room.** The
+room opens before doors and stays open for a feedback window after, so "closes
+with the room" would leave a poll posted during setup collecting votes for days
+from people who have gone home.
+
+**One vote per person, and it can be changed.** The unique on
+`(poll_id, user_id)` makes that a database fact rather than an application
+convention. Changing a vote is allowed while the poll is open — a misclick that
+cannot be corrected is worse than a changed mind, and the count is recomputed on
+read either way.
+
+Voting requires being *in* the room (`active` or `muted` — a muted member still
+reads it, and a poll is not speech). Anything the voter can act on comes back
+**409** with the reason: poll closed, room closed, not a member, or an option
+belonging to another poll.
+
 ### Expertise — the specialism inside the field
 
 `GET /api/mobile/work-fields` also returns `expertiseByField`, keyed by the same

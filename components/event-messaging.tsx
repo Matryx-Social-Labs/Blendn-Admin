@@ -15,6 +15,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { PollComposer } from "@/components/poll-composer"
 import { SPONSORED_MESSAGE_INTERVALS } from "@/lib/validations/event"
 import { getEventSponsors, type EventSponsorRow } from "@/lib/sponsor-actions"
 import {
@@ -379,6 +380,8 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
   )
 }
 
+type MessagingTab = "announcements" | "polls" | "sponsored"
+
 // ── Announcements Panel ───────────────────────────────────────────────────────
 
 function AnnouncementsPanel({ eventId }: { eventId: string }) {
@@ -554,7 +557,7 @@ interface EventMessagingProps {
 }
 
 export function EventMessaging({ eventId, eventTitle }: EventMessagingProps) {
-  const [tab, setTab] = useState<"announcements" | "sponsored">("announcements")
+  const [tab, setTab] = useState<MessagingTab>("announcements")
 
   return (
     <div className="space-y-6">
@@ -568,14 +571,23 @@ export function EventMessaging({ eventId, eventTitle }: EventMessagingProps) {
 
       <Tabs
         value={tab}
-        onValueChange={(value) => setTab(value as "announcements" | "sponsored")}
+        onValueChange={(value) => setTab(value as MessagingTab)}
       >
         <TabsList className="w-fit">
           <TabsTrigger value="announcements">Announcements</TabsTrigger>
+          <TabsTrigger value="polls">Polls</TabsTrigger>
           <TabsTrigger value="sponsored">Sponsored</TabsTrigger>
         </TabsList>
         <TabsContent value="announcements">
           <AnnouncementsPanel eventId={eventId} />
+        </TabsContent>
+        <TabsContent value="polls" className="flex flex-col gap-3 pt-2">
+          <p className="text-xs leading-5 text-muted-foreground">
+            A poll lands in the room like any other message. Counts stay hidden
+            until enough people have voted — in a room of six, one vote against a
+            named option identifies that person to everyone still in it.
+          </p>
+          <PollComposer eventId={eventId} />
         </TabsContent>
         <TabsContent value="sponsored">
           <SponsoredMessagesPanel eventId={eventId} />
