@@ -4,6 +4,8 @@ import { getConnectionMetrics } from "@/lib/connection-metrics"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getOccupancy } from "@/lib/occupancy"
+import { actorFor } from "@/lib/org-membership"
+import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import {
   successResponse,
   unauthorizedResponse,
@@ -28,7 +30,7 @@ export async function GET(
       where: { id: eventId, deleted_at: null },
       select: {
         id: true,
-        organizer_id: true,
+        ...eventPermissionSelect,
         max_capacity: true,
         start_time: true,
         end_time: true,
@@ -41,15 +43,22 @@ export async function GET(
       return notFoundResponse("Event not found")
     }
 
-    // Only organiser or admin can view analytics
-    if (event.organizer_id !== authUser.userId) {
-      const user = await db.user.findUnique({
-        where: { id: authUser.userId },
-        select: { role: true },
-      })
-      if (user?.role !== "app_admin") {
-        return forbiddenResponse("Only the event organiser can view analytics")
-      }
+    /*
+     * `canOperate`, which is the bucket analytics belongs to: what happens at
+     * your event, in your building. The hand-rolled admin fallback this
+     * replaces was a symptom — `organizer_id` denied the admin, so a second
+     * check had to be bolted on to let them back in, and the venue owner whose
+     * building the event is in was still refused with no fallback at all.
+     */
+    const requester = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { id: true, role: true },
+    })
+    if (!requester) return forbiddenResponse("You cannot view analytics for this event")
+
+    const actor = await actorFor({ id: requester.id, role: requester.role })
+    if (!eventPermissions(actor, event).canOperate) {
+      return forbiddenResponse("You cannot view analytics for this event")
     }
 
     // Run all analytics queries in parallel

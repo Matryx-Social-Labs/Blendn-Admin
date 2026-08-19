@@ -113,15 +113,30 @@ export async function POST(
       return forbiddenResponse("You cannot broadcast to this event")
     }
 
-    if ((mediaUrl || mediaType) && !broadcastMayCarryMedia(kind)) {
+    if (mediaUrl || mediaType) {
       /*
        * The event room is pseudonymous and a photograph is an identity -- of
        * whoever is in it, who is not always the person posting. Attendee media
        * is not built at all; an announcement is a host addressing that same
        * room, so it inherits the rule. Only sponsored artwork depicts nobody in
-       * the room.
+       * the room, which is what `broadcastMayCarryMedia` encodes.
+       *
+       * But nothing can PERSIST it. Neither `event_announcements` nor
+       * `chat_messages` has a media column, so a URL accepted here would reach
+       * only the sockets connected at that instant, vanish on reload, and be
+       * invisible to moderation -- an image no moderator can review or delete.
+       * Refusing is better than accepting and silently dropping.
+       *
+       * Sponsored media persists properly in the sponsor plan, on the creative
+       * revision with checksum and version pinning. When that lands, restore
+       * the `broadcastMayCarryMedia(kind)` branch here.
        */
-      return errorResponse("Only sponsored messages may carry media", 400)
+      return errorResponse(
+        broadcastMayCarryMedia(kind)
+          ? "Media on sponsored messages is not available yet"
+          : "Only sponsored messages may carry media",
+        400
+      )
     }
 
     if (!content || typeof content !== "string" || content.trim().length === 0) {
@@ -140,11 +155,49 @@ export async function POST(
       },
     })
 
+    /*
+     * The broadcast has to enter chat history, not just the wire.
+     *
+     * This route wrote `event_announcements` and emitted over the socket, and
+     * stopped. The read path for a room is `chat_messages` only, so "Doors
+     * close at 11" was visible exactly to whoever happened to be connected at
+     * that second — anyone who backgrounded the app lost it, and it was gone on
+     * reload. The dashboard twin has always written both.
+     *
+     * It also emitted the `event_announcements` id, which is a different row in
+     * a different table from anything the client can act on: replies, reports
+     * and moderator deletes against that id all missed their target. The
+     * `chat_messages` id is emitted now.
+     */
+    const chatContent =
+      kind === "announcement"
+        ? `📢 [Announcement from ${sender.name ?? "Organiser"}]\n${content.trim()}`
+        : content.trim()
+
+    const chatMsg = event.chat_group?.id
+      ? await db.chat_messages.create({
+          data: {
+            chat_group_id: event.chat_group.id,
+            user_id: authUser.userId,
+            type: "text",
+            content: chatContent,
+            metadata: { announcement_id: announcement.id },
+          },
+        })
+      : null
+
+    if (event.chat_group?.id && chatMsg) {
+      await db.chat_groups.update({
+        where: { id: event.chat_group.id },
+        data: { last_message_at: chatMsg.created_at },
+      })
+    }
+
     // Emit announcement to event chat group via socket if one exists
-    if (event.chat_group?.id) {
+    if (event.chat_group?.id && chatMsg) {
       emitChatMessage(event.chat_group.id, {
-        id: announcement.id,
-        content: content.trim(),
+        id: chatMsg.id,
+        content: chatContent,
         type: kind,
         userId: authUser.userId,
         /*
@@ -158,12 +211,29 @@ export async function POST(
          */
         userName: kind === "system" ? "Blend'n" : (sender.name ?? "Organiser"),
         userImage: kind === "system" ? undefined : (sender.image ?? undefined),
-        ...(mediaUrl && broadcastMayCarryMedia(kind) ? { mediaUrl, mediaType } : {}),
-        createdAt: announcement.created_at.toISOString(),
+        /*
+         * Not emitted, deliberately.
+         *
+         * `broadcastMayCarryMedia` permits media on `sponsored`, but there is
+         * no column anywhere to persist it: `event_announcements` has none and
+         * `chat_messages` has none. So a media URL could only ever reach the
+         * clients connected at that instant and would vanish on reload, which
+         * is the same defect this commit fixes for text — and worse, because a
+         * moderator could never review or delete an image that was never
+         * stored.
+         *
+         * Sponsored media persists properly in the sponsor plan (media_url on
+         * the creative revision, with checksum and version pinning). Until that
+         * lands, accepting the field and dropping it is the honest behaviour;
+         * pretending to broadcast it is not.
+         */
+        createdAt: chatMsg.created_at.toISOString(),
       })
     }
 
-    return successResponse({ id: announcement.id })
+    // The chat_messages id, so replies, reports and moderator deletes address
+    // a row that exists in the table the client actually reads.
+    return successResponse({ id: chatMsg?.id ?? announcement.id })
   } catch (error) {
     logger.error("Send announcement error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to send announcement")

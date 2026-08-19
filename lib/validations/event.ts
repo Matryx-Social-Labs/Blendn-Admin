@@ -205,3 +205,24 @@ export const eventWriteSchema = z
     geofence: z.unknown().nullish(),
   })
   .partial()
+
+/**
+ * The mobile PATCH body for an event.
+ *
+ * Deliberately narrower than `eventWriteSchema`: the app edits four fields, and
+ * a schema that accepts everything the dashboard does would be a licence the
+ * app never asked for.
+ *
+ * This existed as `body as { title?: string; ... }` — a cast, not a check. So
+ * `{"status":"canceled"}` (one letter off) reached Prisma as an invalid enum
+ * value and came back a 500 instead of a 400, and any type could be sent for
+ * any field.
+ */
+export const mobileEventPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    description: z.string().trim().max(5000),
+    shortDescription: z.string().trim().max(500),
+    status: z.enum(["draft", "published", "cancelled", "completed"]),
+  })
+  .partial()

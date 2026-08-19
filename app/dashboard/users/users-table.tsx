@@ -25,7 +25,6 @@ import {
   IconMapPin,
   IconPhone,
   IconSearch,
-  IconTrash,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 
@@ -46,7 +45,6 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -68,7 +66,7 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 
-import { UserWithProfile, deleteUser, updateUser, updateUserRole } from "./actions"
+import { UserWithProfile, updateUser, updateUserRole } from "./actions"
 import type { user_role } from "@prisma/client"
 
 interface UsersTableProps {
@@ -111,22 +109,6 @@ function ActionsCell({
   const user = row.original
   const currentUserRole = table.options.meta?.currentUserRole
   const [isEditOpen, setIsEditOpen] = React.useState(false)
-  const [isDeleteOpen, setIsDeleteOpen] = React.useState(false)
-  const [isLoading, setIsLoading] = React.useState(false)
-
-  const handleDelete = async () => {
-    setIsLoading(true)
-    try {
-      await deleteUser(user.id)
-      toast.success("User deleted successfully")
-      setIsDeleteOpen(false)
-      table.options.meta?.onRefresh?.()
-    } catch {
-      toast.error("Failed to delete user")
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   return (
     <>
@@ -146,14 +128,11 @@ function ActionsCell({
             <IconEdit className="mr-2 size-4" />
             Edit
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => setIsDeleteOpen(true)}
-          >
-            <IconTrash className="mr-2 size-4" />
-            Delete
-          </DropdownMenuItem>
+          {/*
+            No Delete. Suspension is the reversible control and it lives on the
+            moderation screens; a hard delete here cascaded other users' events,
+            check-ins and chat history. See the note in ./actions.ts.
+          */}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -165,29 +144,6 @@ function ActionsCell({
         currentUserRole={currentUserRole}
       />
 
-      <Sheet open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>Delete User</SheetTitle>
-            <SheetDescription>
-              Are you sure you want to delete {user.name || user.email}? This action
-              cannot be undone.
-            </SheetDescription>
-          </SheetHeader>
-          <SheetFooter>
-            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={isLoading}
-            >
-              {isLoading ? "Deleting..." : "Delete"}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
     </>
   )
 }

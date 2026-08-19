@@ -4,6 +4,8 @@ import { db } from "@/lib/db"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
 import { csvResponse, toCsv } from "@/lib/csv"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { actorFor } from "@/lib/org-membership"
+import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import {
   unauthorizedResponse,
   notFoundResponse,
@@ -25,22 +27,27 @@ export async function GET(
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, title: true, organizer_id: true },
+      select: { id: true, title: true, ...eventPermissionSelect },
     })
 
     if (!event) {
       return notFoundResponse("Event not found")
     }
 
-    // Only organiser or admin can export
-    if (event.organizer_id !== authUser.userId) {
-      const user = await db.user.findUnique({
-        where: { id: authUser.userId },
-        select: { role: true },
-      })
-      if (user?.role !== "app_admin") {
-        return forbiddenResponse("Only the event organiser can export attendees")
-      }
+    /*
+     * An attendee export is `canOperate` — the same bucket as the attendee
+     * list on the dashboard. The hand-rolled admin fallback below it existed
+     * only because `organizer_id` denied the admin in the first place.
+     */
+    const requester = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { id: true, role: true },
+    })
+    if (!requester) return forbiddenResponse("You cannot export attendees for this event")
+
+    const actor = await actorFor({ id: requester.id, role: requester.role })
+    if (!eventPermissions(actor, event).canOperate) {
+      return forbiddenResponse("You cannot export attendees for this event")
     }
 
     /*

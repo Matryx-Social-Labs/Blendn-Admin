@@ -2,8 +2,8 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { eventPermissions } from "@/lib/rbac"
-import { actorFor } from "@/lib/org-membership"
+import { canBroadcast, eventPermissions } from "@/lib/rbac"
+import { actorFor, maySponsorFor } from "@/lib/org-membership"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { sponsoredMessageCreateSchema } from "@/lib/validations/event"
 import { PAGINATION } from "@/lib/constants"
@@ -45,7 +45,25 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } } })
     if (!event) return new NextResponse("Not found", { status: 404 })
-    if (!eventPermissions(await actorFor(session.user), event).canEdit) {
+
+    /*
+     * `canBroadcast`, not `canEdit`.
+     *
+     * "Sponsored" is a claim that somebody paid. `lib/rbac.ts:191` gates it
+     * behind `organisations.may_sponsor` for exactly that reason, and
+     * `__tests__/broadcast-permissions.test.ts` pins all twenty rows of that
+     * table — but this route, the one the dashboard actually uses, checked
+     * `canEdit` and never called the resolver at all. So the scarcity rule was
+     * enforced on the mobile announce path and nowhere else, and any organiser
+     * could label their own content as paid placement and have the scheduler
+     * fan it into the room on a timer.
+     *
+     * One error for both refusals, deliberately: naming the flag tells an
+     * attacker which one to go after, and tells an organiser about a capability
+     * they cannot self-serve.
+     */
+    const actor = await actorFor(session.user)
+    if (!canBroadcast(actor, event, "sponsored", await maySponsorFor(actor))) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 

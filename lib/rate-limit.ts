@@ -3,6 +3,7 @@ import {
   RATE_LIMIT_WINDOW,
   RATE_LIMIT_MAX_REQUESTS,
 } from "@/lib/constants"
+import { ErrorCode } from "@/lib/api-response"
 import { hit } from "@/lib/rate-limit-store"
 
 interface RateLimitConfig {
@@ -37,7 +38,14 @@ export async function rateLimit(
 
   const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
   return NextResponse.json(
-    { success: false, error: "Too many requests", retryAfter },
+    /*
+     * `errorCode` is not decoration. It is declared in the OpenAPI spec and in
+     * `lib/api-response.ts` and was emitted by nothing, so every generated
+     * client failed to decode a 429 across ~60 routes and fell through to a
+     * generic error. The string body was already correct; only the machine
+     * -readable half was missing.
+     */
+    { success: false, error: "Too many requests", errorCode: ErrorCode.RATE_LIMITED, retryAfter },
     {
       status: 429,
       headers: {

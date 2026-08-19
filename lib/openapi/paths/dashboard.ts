@@ -337,8 +337,11 @@ registry.registerPath({
     body: {
       content: {
         "application/json": {
+          // Four actions, not two. The route has always accepted mute and
+          // unmute (`.../chat/members/[userId]/route.ts:21`); the spec listed
+          // half of them, so a generated client could not express a mute at all.
           schema: z.object({
-            action: z.enum(["ban", "unban"]),
+            action: z.enum(["ban", "unban", "mute", "unmute"]),
           }),
         },
       },
@@ -346,8 +349,20 @@ registry.registerPath({
   },
   responses: {
     200: {
-      description: "Ban status updated",
-      content: { "application/json": { schema: z.object({ success: z.literal(true), banned: z.boolean() }) } },
+      description: "Member status updated",
+      content: {
+        "application/json": {
+          // The route returns `{ success, action, status }`. The spec declared
+          // a `banned: boolean` that no code path has ever produced, so a
+          // client generated from it would read `undefined` and treat every
+          // successful mute as an unban.
+          schema: z.object({
+            success: z.literal(true),
+            action: z.enum(["ban", "unban", "mute", "unmute"]),
+            status: z.enum(["active", "banned", "muted"]),
+          }),
+        },
+      },
     },
     ...standardErrors,
   },
