@@ -113,5 +113,16 @@
     "tsx": "^4.23.12",
     "tw-animate-css": "^1.2.8",
     "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "swagger-ui-react": {
+      "js-yaml": "^4.3.1"
+    },
+    "postcss": {
+      "nanoid": "^3.3.18"
+    },
+    "@prisma/config": {
+      "deepmerge-ts": "^8.0.0"
+    }
   }
 }
