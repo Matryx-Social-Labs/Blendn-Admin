@@ -82,6 +82,7 @@ describe("visibleNavFor", () => {
       "Brands",
       "Creative review",
       "Brand claims",
+      "Charges",
       "Applications",
       "Organisations",
       "Categories",

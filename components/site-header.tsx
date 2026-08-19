@@ -42,6 +42,7 @@ const TIMELESS = new Set([
   "/dashboard/sponsors",
   "/dashboard/sponsor-claims",
   "/dashboard/creative-review",
+  "/dashboard/charges",
 ])
 
 /** Reports read the range, so the control stays. */
@@ -79,6 +80,10 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Venue claims",
     description:
       "Ownership requests. Approving one hands over the events other organisers hold there.",
+  },
+  "/dashboard/charges": {
+    title: "Charges",
+    description: "What each placement costs, what has been agreed, and what has been paid.",
   },
   "/dashboard/creative-review": {
     title: "Creative review",

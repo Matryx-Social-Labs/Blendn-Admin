@@ -11,6 +11,7 @@ import {
   IconListDetails,
   IconMessage2,
   IconMicrophone2,
+  IconReceipt,
   IconUsers,
 } from "@tabler/icons-react"
 
@@ -171,6 +172,15 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
     url: "/dashboard/sponsor-claims",
     icon: IconFileCheck,
+    allowedRoles: ["app_admin"],
+  },
+  {
+    // A ledger, not a checkout. It lists PLACEMENTS rather than charges, because
+    // the row that matters is the one that ran and was never priced.
+    title: "Charges",
+    description: "What each placement costs, what has been agreed, and what has been paid.",
+    url: "/dashboard/charges",
+    icon: IconReceipt,
     allowedRoles: ["app_admin"],
   },
   {
