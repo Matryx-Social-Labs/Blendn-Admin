@@ -2248,6 +2248,13 @@ model sponsored_message_sends {
   @@unique([sponsored_message_id, scheduled_for])
   @@index([sponsored_message_id, sent_at])
   @@index([creative_id])
+  /// Postgres indexes the REFERENCED side of a foreign key, never the
+  /// referencing one. Without this, deleting a chat message — which the
+  /// moderation path does — sequentially scans this whole table to find the
+  /// SetNull targets, exactly as `chat_messages.parent_id` did before it was
+  /// indexed. Caught by __tests__/integration/fk-indexes.itest.ts, which needs
+  /// a real database and therefore only runs in CI.
+  @@index([chat_message_id])
 }
 
 /// Every object we issued an upload for.
@@ -2283,6 +2290,9 @@ model upload_grants {
   /// The sweeper's predicate.
   @@index([expires_at])
   @@index([org_id])
+  /// Same reason as `sponsored_message_sends.chat_message_id`: this cascades,
+  /// so deleting a user scans every grant row to find theirs.
+  @@index([user_id])
 }
 
 /// A poll carried by one chat message.
