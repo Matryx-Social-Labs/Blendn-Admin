@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "R16: every structural guard ships with a documented mutation proving it",
+    "fails against broken code. A grep guard that passes against a broken",
+    "codebase converts an unknown into a false assurance, which is worse than",
+    "having no guard — and this project has already shipped one `sed` control",
+    "that silently never matched.",
+    "",
+    "`verified` entries record a mutation that was applied, observed to fail,",
+    "and reverted. `grandfathered` is the ratchet: guards that predate this",
+    "registry and have no recorded control. That list may shrink and must never",
+    "grow — `negative-controls.test.ts` fails on a new structural guard with no",
+    "entry.",
+    "",
+    "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
+    "the guard fails, revert, and move it into `verified` with what you saw.",
+    "Never `git checkout` the file to revert if you have uncommitted work in it;",
+    "copy it aside first. That mistake has already cost this project a block of",
+    "unsaved analysis."
+  ],
+  "verified": {
+    "event-notifications-reachable.test.ts": {
+      "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers, comments excluded",
+      "mutation": "Delete the `await notifyEventCancelled(...)` call in app/api/events/[id]/route.ts",
+      "observed": "1 failing: 'notifyEventCancelled is called from both cancellation paths'",
+      "date": "2026-08-20"
+    },
+    "notification-content-retention.test.ts": {
+      "guards": "notifications.body is redacted for content-bearing kinds, on both the single and bulk insert",
+      "mutation": "Replace both `body: storedBodyFor(data.type, body)` with `body,`",
+      "observed": "2 failing: 'both the single and the bulk insert redact' and 'neither insert passes the raw body through'. NOTE: before these two assertions existed the control passed green, which is what prompted adding them.",
+      "date": "2026-08-20"
+    },
+    "hot-path-indexes.test.ts": {
+      "guards": "the five hot-path indexes are declared in schema.prisma and created by a migration",
+      "mutation": "Remove `@@index([event_id, check_in_time])` from the event_check_ins model",
+      "observed": "1 failing: 'event_check_ins has @@index([event_id, check_in_time])'",
+      "date": "2026-08-20"
+    }
+  },
+  "grandfathered": [
+    "account-deletion.test.ts",
+    "amenities.test.ts",
+    "apply-theme.test.ts",
+    "authz-scoping-boundary.test.ts",
+    "block-reaches-the-room.test.ts",
+    "blur-derivative.test.ts",
+    "changelog.test.ts",
+    "chat-groups-live.test.ts",
+    "chat-window-select.test.ts",
+    "connect-request.test.ts",
+    "container-queries.test.ts",
+    "conversation-identity.test.ts",
+    "conversation-provenance.test.ts",
+    "device-preview.test.ts",
+    "leave-and-report.test.ts",
+    "match-notifications.test.ts",
+    "media-guidance.test.ts",
+    "notifications.test.ts",
+    "reveal-state.test.ts",
+    "room-write-access.test.ts",
+    "roster-age.test.ts",
+    "rsc-boundary.test.ts",
+    "server-action-authz.test.ts",
+    "server-import-boundary.test.ts",
+    "socket-handler-registration.test.ts",
+    "trust-not-exposed.test.ts"
+  ]
+}
