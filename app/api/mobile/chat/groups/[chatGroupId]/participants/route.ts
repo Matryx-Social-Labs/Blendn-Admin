@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { blockCounterparties } from "@/lib/conversations"
 import {
   successResponse,
   unauthorizedResponse,
@@ -59,20 +60,35 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return errorResponse("You are not a member of this chat group", 403)
     }
 
+    /*
+     * A block is a safety promise, not a mute.
+     *
+     * The room-message work applied that to history, to the socket and to the
+     * push fan-out, and stopped short of the member list — which is the one
+     * screen that answers "is he in this room". Somebody who blocked their
+     * harasser could still be handed a roster containing them, and could still
+     * count them.
+     *
+     * Both directions, so it holds whichever way the block runs, and applied to
+     * the count as well as the page: a filtered list under an unfiltered total
+     * says "50 members" over 49 rows, which is its own quiet tell.
+     */
+    const hidden = await blockCounterparties(authUser.userId)
+
+    const visibleMembers = {
+      chat_group_id: chatGroupId,
+      status: "active" as const,
+      ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
+    }
+
     // Get total count
     const totalCount = await db.chat_group_members.count({
-      where: {
-        chat_group_id: chatGroupId,
-        status: "active",
-      },
+      where: visibleMembers,
     })
 
     // Fetch participants with user info
     const members = await db.chat_group_members.findMany({
-      where: {
-        chat_group_id: chatGroupId,
-        status: "active",
-      },
+      where: visibleMembers,
       include: {
         user: {
           select: {

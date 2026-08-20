@@ -90,9 +90,40 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     if (issue === "harassment") {
-      // Loud on purpose. This is the one path where a human should be looking
-      // before any aggregate is consulted.
+      /*
+       * This used to be the log line above and nothing else.
+       *
+       * The schema says harassment "escalates immediately, never aggregated
+       * away into a score" — and it escalated to stderr. `getTrustSignal`,
+       * which computes `hasHarassmentReport`, has no callers, so the signal was
+       * written, never read, and never seen by a human unless somebody happened
+       * to grep the logs. The safety feature was sealed off from safety.
+       *
+       * A `user_reports` row puts it in the queue a moderator already opens,
+       * with no new surface to build. The rating itself stays where it is and
+       * stays invisible to the person rated — the report is a separate object
+       * about the same event.
+       *
+       * Never throws. A failed insert must not cost somebody their rating, and
+       * the log line stays as the backstop for exactly that case.
+       */
       logger.error("Harassment reported via peer rating", { eventId, ratedId })
+      await db.user_reports
+        .create({
+          data: {
+            reporter_id: authUser.userId,
+            reported_id: ratedId,
+            reason: "harassment",
+            description: `Reported via peer rating after event ${eventId}.`,
+          },
+        })
+        .catch((error) => {
+          logger.error("Failed to escalate peer-rating harassment to the queue", {
+            eventId,
+            ratedId,
+            error: String(error),
+          })
+        })
     }
 
     // Deliberately returns nothing about the person rated — not their trust
