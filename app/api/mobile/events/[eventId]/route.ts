@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { cancelEventCheckIns, isCancellingEvent } from "@/lib/event-cancellation"
+import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -425,6 +426,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      */
     if (isCancelling) {
       await cancelEventCheckIns(eventId)
+      // And tell them. `notifyEventCancelled` never throws — the cancellation
+      // has already committed and must not be undone by a failed push.
+      //
+      // No `notifyEventDetailsChanged` here: this route only accepts title,
+      // description and status, and none of those is a fact anybody leaves the
+      // house for. Time and venue are dashboard-only edits.
+      await notifyEventCancelled(updated.id, updated.title)
     }
 
     return successResponse({
