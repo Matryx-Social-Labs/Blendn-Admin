@@ -2,6 +2,7 @@ import { createServer } from "http"
 import next from "next"
 import { initSocketServer, sponsoredMessageScheduler, stopAllOpsBroadcasts } from "./lib/socket-server"
 import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
+import { stopNotificationRetentionSweeper } from "./lib/notification-retention"
 import { stopPresenceSweeper } from "./lib/presence-sweeper"
 import { stopSentimentSweeper } from "./lib/sentiment-sweeper"
 import { ensureBucketExists } from "./lib/tigris"
@@ -81,6 +82,7 @@ app.prepare().then(() => {
     // the event loop alive and the process waits for the forced-exit timeout.
     sponsoredMessageScheduler.stopAll()
     stopChatLifecycleSweeper()
+    stopNotificationRetentionSweeper()
     stopPresenceSweeper()
     stopSentimentSweeper()
     // The fifth timer. `startOpsBroadcast` arms a 5s interval per event any
