@@ -1,6 +1,7 @@
 import { createServer } from "http"
 import next from "next"
 import { initSocketServer, sponsoredMessageScheduler, stopAllOpsBroadcasts } from "./lib/socket-server"
+import { db } from "./lib/db"
 import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
 import { stopNotificationRetentionSweeper } from "./lib/notification-retention"
 import { stopPresenceSweeper } from "./lib/presence-sweeper"
@@ -90,6 +91,11 @@ app.prepare().then(() => {
     // shutdown handler never stopped -- so a deploy during a live event held
     // the event loop open for the full 10s forced-exit timeout and exited 1.
     stopAllOpsBroadcasts()
+
+    // Drain the connection pool. Without this, in-flight queries are abandoned
+    // at the forced-exit timeout rather than finished or cleanly cancelled.
+    void db.$disconnect().catch(() => {})
+
     io?.close(() => {
       console.log(`[${new Date().toISOString()}] > Socket.io closed`)
     })

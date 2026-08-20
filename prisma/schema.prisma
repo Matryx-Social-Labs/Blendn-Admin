@@ -96,6 +96,14 @@ model User {
   city_demand           city_demand[]
   leads_assigned        leads[]
   lead_notes            lead_notes[]
+
+  /// This model had no index at all.
+  ///
+  /// The admin overview scans it five times per page load -- total users, the
+  /// host count by role, three nested funnel counts, and the eight-week signup
+  /// series -- on a `force-dynamic` page.
+  @@index([createdAt])
+  @@index([role])
 }
 
 model Account {
@@ -287,6 +295,10 @@ model profiles {
   created_at     DateTime @default(now()) @db.Timestamptz(6)
   updated_at     DateTime @default(now()) @db.Timestamptz(6)
   user           User     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  /// Also unindexed. The admin funnel semi-joins into this table three times
+  /// per load on `profile: { onboarded: true }`, which scanned it each time.
+  @@index([onboarded])
 }
 
 model events {
@@ -455,22 +467,22 @@ model event_categories {
 /// `event_amenities` is `Restrict` for the same reason: deleting an amenity
 /// that events reference would rewrite history rather than end a listing.
 model amenities {
-  id          String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
   /// The label as drawn — "Open Bar".
-  name        String
-  slug        String   @unique
+  name       String
+  slug       String   @unique
   /// The second line on the tile — "Premium Spirits". Optional: not every
   /// amenity has a useful qualifier, and an invented one is worse than none.
-  subtitle    String?
+  subtitle   String?
   /// A Material Symbols name, so the client does not carry its own mapping
   /// from slug to glyph and drift from the seed.
-  icon        String?
+  icon       String?
   /// Ordering in the picker and on the card. Explicit, because alphabetical
   /// puts "Accessible Entrance" above "Open Bar" on every event in the app.
-  sort_order  Int      @default(0)
-  is_active   Boolean  @default(true)
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  sort_order Int      @default(0)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   events event_amenities[]
 
@@ -567,6 +579,12 @@ model event_check_ins {
   @@unique([occurrence_id, user_id])
   @@index([event_id, status])
   @@index([event_id, kind])
+  /// The 5-second live-ops tick asks two questions this serves: how many
+  /// arrived in the last ten minutes, and the arrival histogram. Both scanned
+  /// every check-in for the event, twelve times a minute, per watched event.
+  /// `lib/live-snapshot.ts` claimed "the queries are all indexed"; these two
+  /// were not.
+  @@index([event_id, check_in_time])
   /// Drives the sweeper: everyone still inside with a departure pending.
   @@index([status, left_area_at])
   @@index([occurrence_id, status])
@@ -1187,6 +1205,10 @@ model venues {
   @@index([owner_org_id])
   @@index([city])
   @@index([status])
+  /// The Hotspots feed bounding-boxes on these. `events` has had the matching
+  /// index since it shipped; this table did not, so the venue-proximity query
+  /// was the one geo lookup in the product doing a scan.
+  @@index([latitude, longitude])
 }
 
 /// A host: a company, or an individual operating as one.
