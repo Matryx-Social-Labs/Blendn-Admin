@@ -31,6 +31,14 @@ export interface CategoryRow {
   parentId: string | null
   parentName: string | null
   eventCount: number
+  /**
+   * How many people have declared this interest.
+   *
+   * Surfaced because merging repoints these, and an admin choosing what to
+   * retire was previously shown the event count alone — so the number that
+   * matters most to matching was the one number they could not see.
+   */
+  interestCount: number
 }
 
 export async function getCategories(): Promise<CategoryRow[]> {
@@ -44,7 +52,7 @@ export async function getCategories(): Promise<CategoryRow[]> {
       slug: true,
       parent_id: true,
       parent: { select: { name: true } },
-      _count: { select: { events: true } },
+      _count: { select: { events: true, user_interests: true } },
     },
   })
 
@@ -57,6 +65,7 @@ export async function getCategories(): Promise<CategoryRow[]> {
     // The number that makes a dead category visible. Without it, retiring one
     // is a guess about whether anything is using it.
     eventCount: r._count.events,
+    interestCount: r._count.user_interests,
   }))
 }
 
@@ -91,7 +100,10 @@ export async function renameCategory(id: string, name: string): Promise<void> {
  * Deleting a category with events attached would silently drop those events out
  * of every category filter, so a merge is the only safe way to retire one.
  */
-export async function mergeCategory(fromId: string, intoId: string): Promise<number> {
+export async function mergeCategory(
+  fromId: string,
+  intoId: string
+): Promise<{ events: number; interests: number }> {
   const admin = await requireAdmin()
   if (fromId === intoId) throw new Error("Pick two different categories.")
 
@@ -138,10 +150,51 @@ export async function mergeCategory(fromId: string, intoId: string): Promise<num
       })
     }
 
+    /*
+     * Repoint the people, not just the events.
+     *
+     * `user_interests.category` is `onDelete: Cascade`, so the delete below
+     * used to destroy every user's interest in the merged-away category —
+     * silently, with no warning and no undo. `lib/matching.ts` ranks on exactly
+     * that table, so one admin click quietly degraded matching for everybody
+     * who had picked it, and the only visible effect was worse match cards
+     * weeks later.
+     *
+     * Same duplicate handling as the event links above, and for the same
+     * reason: `@@unique([user_id, category_id])` means a user who already holds
+     * the target would collide and take the whole merge down with them.
+     */
+    const interests = await tx.user_interests.findMany({
+      where: { category_id: fromId },
+      select: { user_id: true },
+    })
+
+    const alreadyHeld = new Set(
+      (
+        await tx.user_interests.findMany({
+          where: { category_id: intoId, user_id: { in: interests.map((i) => i.user_id) } },
+          select: { user_id: true },
+        })
+      ).map((i) => i.user_id)
+    )
+
+    const interestsToCreate = interests.filter((i) => !alreadyHeld.has(i.user_id))
+    if (interestsToCreate.length > 0) {
+      await tx.user_interests.createMany({
+        data: interestsToCreate.map((i) => ({ user_id: i.user_id, category_id: intoId })),
+      })
+    }
+
     await tx.event_categories.deleteMany({ where: { category_id: fromId } })
+    /*
+     * Explicit, before the category goes. The cascade would remove these rows
+     * anyway — the point is that by now they have been copied to the target, so
+     * what the cascade would have destroyed no longer exists only here.
+     */
+    await tx.user_interests.deleteMany({ where: { category_id: fromId } })
     await tx.categories.delete({ where: { id: fromId } })
 
-    return links.length
+    return { events: links.length, interests: interests.length }
   })
 
   auditLog({
@@ -149,7 +202,13 @@ export async function mergeCategory(fromId: string, intoId: string): Promise<num
     action: "category.merged",
     resource: "category",
     resourceId: fromId,
-    details: { from: from.name, into: into.name, eventsMoved: moved },
+    details: {
+      from: from.name,
+      into: into.name,
+      eventsMoved: moved.events,
+      // Recorded because this is the number that used to go to zero.
+      interestsMoved: moved.interests,
+    },
   })
   revalidatePath("/dashboard/categories")
   return moved
