@@ -32,8 +32,12 @@ import { join } from "path"
  * lands on the person adding a guard, while they still have the mutation in
  * their head, rather than on whoever inherits it.
  *
- * Same shape as `server-actions-reachable.test.ts`'s `KNOWN_UNREACHABLE`, which
- * is the pattern this repo already trusts.
+ * (An earlier draft of this comment cited
+ * `server-actions-reachable.test.ts`'s `KNOWN_UNREACHABLE` as prior art for the
+ * shape. That file is not on `dev` — it was written in an earlier session and
+ * never landed. Citing it here was the seventeenth instance of the thing this
+ * codebase keeps doing: a comment describing something that is not there.
+ * `fix/reachability-ratchet` is bringing a version of it in.)
  */
 const TESTS_DIR = __dirname
 const REGISTRY = JSON.parse(
