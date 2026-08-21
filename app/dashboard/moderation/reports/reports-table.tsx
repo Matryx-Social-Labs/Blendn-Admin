@@ -216,7 +216,7 @@ export function ReportsTable({
           title={status === "pending" ? "No reports waiting" : `Nothing ${status}`}
           description={
             status === "pending"
-              ? "Reports arrive when someone uses Report on a person or a message in the app. Dismissing records that a human looked; suspending blocks the account everywhere and signs it out."
+              ? "Reports arrive when someone uses Report on a person or a message in the app. Dismissing records that a human looked; suspending blocks sign-in, ends the current session, revokes app tokens, stops notifications, and removes them from every room."
               : "Reports land here once an admin has ruled on them. Reviewed means looked at, resolved means acted on."
           }
         />

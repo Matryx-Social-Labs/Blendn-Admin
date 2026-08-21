@@ -17,6 +17,24 @@ Scope: `blendn-admin/` findings from an end-to-end flow audit (backend authoriza
 
 ### Medium priority
 
+- [ ] **Google Maps key ships in the client with no quota cap and no app restriction**
+  - **File(s)**: `blendn/lib/staticMap.ts`, `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`
+  - **Issue**: `EXPO_PUBLIC_*` means the key is in the JS bundle and readable by
+    anyone with the app. Today it is a single unrestricted key: no HTTP referrer
+    or bundle-id restriction, no per-day quota, and no split between platforms.
+    Someone extracting it can bill Maps usage to the project, and the first
+    signal would be the invoice.
+  - **Decision (2026-08-20)**: two keys, each scoped in the Google Cloud console
+    to one app — one restricted to the iOS bundle id, one to the Android package
+    name and signing certificate — plus a daily quota cap on each so an
+    extracted key is bounded rather than open-ended. Two keys rather than one
+    because a single key cannot carry both platform restrictions at once.
+  - **Deferred deliberately**, not forgotten: it needs Google Cloud console
+    access rather than a code change, and it is bounded by a quota rather than
+    being a data-exposure risk. Do it once the current work lands.
+  - **Blocked on**: console access. No code change is required beyond reading a
+    second key per platform.
+
 - [ ] **Push notification previews leak DM content to the lock screen**
   - **File**: `app/api/mobile/message-requests/route.ts:129-137`
   - **Issue**: Push `body` is set to `"${senderName}: ${message.slice(0,80)}"` — renders on a locked device.

@@ -1,7 +1,7 @@
 import { logger } from "./logger"
 import { Server as HttpServer } from "http"
 import { Server, Socket } from "socket.io"
-import { verifyAccessToken } from "./mobile-auth"
+import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { CHAT_WINDOW_HOURS, chatWindowState } from "./chat-window"
 import { displayNameInConversation } from "./conversation-identity"
@@ -625,6 +625,29 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const decoded = verifyAccessToken(token)
         if (!decoded) {
           return next(new Error("Invalid or expired token"))
+        }
+
+        /*
+         * A valid token is not enough: it has to still belong to a live
+         * account.
+         *
+         * Suspending revokes refresh tokens, but an access token already in a
+         * pocket stays valid for its full fifteen minutes -- and a socket
+         * opened with it outlives the token entirely, because nothing
+         * re-checks after the handshake. So a suspended person could hold a
+         * live realtime connection well past the moment they were stopped.
+         *
+         * `authenticateDashboardSocket` has re-read this per connection since
+         * it shipped; the attendee path was the one left on the claim alone.
+         * One primary-key lookup per connection, which is what the dashboard
+         * path has been paying all along.
+         */
+        const account = await db.user.findUnique({
+          where: { id: decoded.userId },
+          select: { deletedAt: true, suspended_at: true },
+        })
+        if (accountBlockReason(account)) {
+          return next(new Error("Authentication required"))
         }
 
         // Attach user data to socket
