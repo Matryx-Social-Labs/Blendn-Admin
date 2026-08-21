@@ -5,6 +5,7 @@
 // paths.
 import { db } from "./db"
 import { occupancyFrom } from "./occupancy"
+import { escalates } from "./sentiment/taxonomy"
 
 import type { LiveSnapshot } from "./live-metrics"
 
@@ -182,8 +183,11 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
   for (const row of feedback) {
     sentiment[row.sentiment] += 1
     // Only what needs attention: positives by category are noise on a live
-    // screen whose job is surfacing problems.
-    if (row.sentiment === "negative" || row.category === "safety_conduct") {
+    // screen whose job is surfacing problems. The escalating set is asked for
+    // by name rather than spelled `=== "safety_conduct"` inline: the literal
+    // was copied into four files, so the day a second category escalates,
+    // three of them keep the old answer and nobody finds out.
+    if (row.sentiment === "negative" || escalates(row.category)) {
       categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
     }
   }

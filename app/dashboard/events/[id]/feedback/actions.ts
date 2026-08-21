@@ -9,6 +9,7 @@ import { db } from "@/lib/db"
 import { chatClosesAt } from "@/lib/chat-window"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
+import { escalates } from "@/lib/sentiment/taxonomy"
 
 export interface FeedbackMessage {
   id: string
@@ -97,8 +98,9 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
   for (const row of feedback) {
     counts[row.sentiment] += 1
     // Only what needs attention — a breakdown of the compliments is not a
-    // to-do list.
-    if (row.sentiment === "negative" || row.category === "safety_conduct") {
+    // to-do list. Same escalating set as the live screen, asked for by name so
+    // the two cannot drift apart.
+    if (row.sentiment === "negative" || escalates(row.category)) {
       categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
     }
   }

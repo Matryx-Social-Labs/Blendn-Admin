@@ -83,36 +83,3 @@ export function getBoundingBox(
     maxLon: lon + lonDelta,
   }
 }
-
-/**
- * Check if a point is within a given radius of another point
- *
- * @param lat1 - Latitude of center point
- * @param lon1 - Longitude of center point
- * @param lat2 - Latitude of point to check
- * @param lon2 - Longitude of point to check
- * @param radiusKm - Radius in kilometers
- * @returns True if point is within radius
- */
-export function isWithinRadius(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-  radiusKm: number
-): boolean {
-  return haversineDistance(lat1, lon1, lat2, lon2) <= radiusKm
-}
-
-/**
- * Check if a point is within a given radius in meters
- */
-export function isWithinRadiusMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-  radiusMeters: number
-): boolean {
-  return haversineDistanceMeters(lat1, lon1, lat2, lon2) <= radiusMeters
-}

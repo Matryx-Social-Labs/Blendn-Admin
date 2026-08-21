@@ -802,13 +802,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
 }
 
 /**
- * Get the Socket.io server instance
- */
-export function getIO(): Server | null {
-  return io
-}
-
-/**
  * Emit an event check-in update to all users in the event room
  */
 export function emitEventCheckIn(
@@ -981,19 +974,6 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
 export function emitChatMemberMuted(chatGroupId: string, userId: string, muted: boolean, reason?: string): void {
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:memberMuted", { chatGroupId, userId, muted, reason })
-}
-
-/**
- * Send a message to a specific user
- */
-export function emitToUser(
-  userId: string,
-  event: keyof ServerToClientEvents,
-  data: unknown
-): void {
-  if (!io) return
-
-  io.to(`user:${userId}`).emit(event, data)
 }
 
 /**

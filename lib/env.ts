@@ -81,14 +81,6 @@ export function validateEnv(): Env {
 }
 
 /**
- * Get validated environment variables
- * Use this instead of process.env directly
- */
-export function getEnv(): Env {
-  return envSchema.parse(process.env)
-}
-
-/**
  * Why Google sign-in is about to fail, or null if the config is coherent.
  *
  * This exists because it already happened. Production ran with only
@@ -128,18 +120,4 @@ export function googleSignInConfigWarning(
     return "GOOGLE_WEB_CLIENT_ID unset while a native client id is set — the mobile SDK audiences its id token to the *web* client, so every Google sign-in will fail on `aud`"
   }
   return null
-}
-
-/**
- * Check if running in production
- */
-export function isProduction(): boolean {
-  return process.env.NODE_ENV === "production"
-}
-
-/**
- * Check if running in development
- */
-export function isDevelopment(): boolean {
-  return process.env.NODE_ENV === "development"
 }

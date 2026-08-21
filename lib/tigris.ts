@@ -3,7 +3,6 @@ import {
   HeadObjectCommand,
   S3Client,
   PutObjectCommand,
-  GetObjectCommand,
   DeleteObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
@@ -239,22 +238,6 @@ export async function getObjectSize(key: string): Promise<number | null> {
   } catch {
     return null
   }
-}
-
-/**
- * Generate a presigned download URL for a stored object
- */
-export async function getPresignedDownloadUrl(
-  key: string,
-  expiresIn: number = 604800
-): Promise<string> {
-  const client = getS3Client()
-  const command = new GetObjectCommand({
-    Bucket: TIGRIS_BUCKET,
-    Key: key,
-  })
-
-  return getSignedUrl(client, command, { expiresIn })
 }
 
 /**
