@@ -2,10 +2,10 @@ import { logger } from "@/lib/logger"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
-import { validateLocationInput } from "@/lib/geofence-input"
+import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
-import slugify from "slugify"
+import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
@@ -160,6 +160,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: location.error }, { status: 400 })
     }
 
+    /*
+     * The editor only ever posts `draft`, but the route accepts whatever the
+     * body says — so an event could be created already published with no
+     * coordinates at all. Check-in is GPS-gated, so that event 400s every
+     * attendee at the door with OUT_OF_RANGE, and the app looks broken rather
+     * than the event looking unfinished.
+     *
+     * `canPublish` has existed for exactly this and had no caller outside its
+     * own test; the Overview's blocker badge was advisory only.
+     */
+    if ((status ?? "draft") === "published") {
+      const gate = canPublish({
+        latitude: latitude ?? null,
+        longitude: longitude ?? null,
+        geofence: location.values.geofence ?? null,
+      })
+      if (!gate.ok) {
+        return NextResponse.json({ error: gate.reason }, { status: 400 })
+      }
+    }
+
     // Debug: Log cover_image_url
     logger.info("Creating event - cover_image_url", { coverImageUrl: cover_image_url ?? null })
 
@@ -189,7 +210,9 @@ export async function POST(req: Request) {
       data: {
         ...venueLink,
         title,
-        slug: slugify(title, { lower: true, strict: true }),
+        // Suffixed when taken. `slugify(title)` alone turned a second "Summer
+        // Sessions" into a P2002 the organiser saw as an internal error.
+        slug: await uniqueEventSlug(title),
         description,
         short_description,
         venue_name,

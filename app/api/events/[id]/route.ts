@@ -1,9 +1,9 @@
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
-import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
-import { validateLocationInput } from "@/lib/geofence-input"
+import { canPublish, validateLocationInput } from "@/lib/geofence-input"
+import { uniqueEventSlug } from "@/lib/event-slug"
 import { db } from "@/lib/db"
 import { cancelEventCheckIns } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
@@ -176,6 +176,31 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       }
     }
 
+    /*
+     * Gated on the transition INTO published, not on the published state.
+     *
+     * The Overview already renders "Place it on the map" as a blocking
+     * publish blocker, but that badge was advisory: this route accepted
+     * `status: "published"` with no location whatsoever. Check-in is GPS-gated,
+     * so the published event then refused every attendee at the door with
+     * OUT_OF_RANGE — a broken-looking app rather than an unfinished event.
+     *
+     * The check reads the values this request is about to write, so an
+     * organiser may drop the pin and publish in one PATCH. It deliberately
+     * does not run for an event that is already published: adding a gate to
+     * every edit would strand any event that predates it.
+     */
+    if (status === "published" && event.status !== "published") {
+      const gate = canPublish({
+        latitude: latitude ?? event.latitude,
+        longitude: longitude ?? event.longitude,
+        geofence: location.values.geofence ?? event.geofence,
+      })
+      if (!gate.ok) {
+        return NextResponse.json({ error: gate.reason }, { status: 400 })
+      }
+    }
+
     // Fix #35: When cancelling an event, cascade to active check-ins
     const isCancelling = status === "cancelled" && event.status !== "cancelled"
 
@@ -193,7 +218,9 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       where: { id: resolvedParams.id },
       data: {
         title: title ?? undefined,
-        slug: title ? slugify(title, { lower: true, strict: true }) : undefined,
+        // Excludes this event, so re-saving a title the event already holds
+        // keeps its slug instead of colliding with itself and drifting to -2.
+        slug: title ? await uniqueEventSlug(title, resolvedParams.id) : undefined,
         description: description ?? undefined,
         short_description: short_description ?? undefined,
         venue_name: venue_name ?? undefined,
