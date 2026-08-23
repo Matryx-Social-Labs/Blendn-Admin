@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { discloseFigure } from "@/lib/disclosure"
 
 /**
  * Did anyone actually meet anyone?
@@ -30,9 +31,17 @@ import { db } from "@/lib/db"
  */
 
 /**
- * The floor. Chosen so a single connection cannot be attributed: at eight
- * attendees, "3 connections" is 28 possible pairs and tells you nothing about
- * which.
+ * The floor, **declared** rather than hand-rolled. See ER5.
+ *
+ * Higher than `MIN_CELL` on purpose, and the reason is specific to this figure:
+ * it is about *pairs*, and a pair is more identifying than an individual. At
+ * eight attendees, "3 connections" is 28 possible pairs and tells you nothing
+ * about which; at five it is 10, and a room that small remembers who was
+ * talking to whom.
+ *
+ * Passed to `discloseFigure` as a parameter instead of being a second
+ * suppression rule living in its own file — which is what it was, and why the
+ * codebase had two floors that had never been reconciled.
  */
 export const MIN_ATTENDEES = 8
 
@@ -69,7 +78,23 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
 
   const attendees = attendeeRows.length
 
-  if (attendees < MIN_ATTENDEES) {
+  /*
+   * The same rule the digest uses, with this figure's own floor.
+   *
+   * `population: attendees` and `contributors: attendees` because every
+   * attendee is a possible participant in a pair -- so only the minimum-cell
+   * part of the rule can fire here, which is the part this file always had.
+   * Routing through the module anyway is the point: a second implementation is
+   * how the two floors drifted apart in the first place.
+   */
+  const gate = discloseFigure({
+    count: attendees,
+    contributors: attendees,
+    population: attendees,
+    floor: MIN_ATTENDEES,
+  })
+
+  if (gate.suppressed && gate.reason === "min_cell") {
     return {
       attendees,
       connections: 0,
