@@ -5,7 +5,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
 import { ageFrom } from "@/lib/age"
 import { selfProfileEnvelope } from "@/lib/self-profile"
-import { resolveEventCity } from "@/lib/location"
+import { resolveEventCity, geocodeBudget } from "@/lib/location"
 import {
   successResponse,
   validationErrorResponse,
@@ -351,12 +351,20 @@ export async function GET(request: NextRequest) {
       }
 
 
+      /*
+       * One budget for the whole response, shared by the event list and the
+       * activeCheckins block below it -- otherwise each gets its own and the
+       * page can still fan out twice the cap. See lib/location.ts.
+       */
+      const geocodes = geocodeBudget()
+
       const transformedEvents = await transformEvents(events, {
         favoriteEventIds,
         userCheckinMap,
         userLat: lat,
         userLon: lon,
         includeCheckins: includeSet.has("checkins"),
+        geocodes,
       })
 
       const normalizedProfile = await selfProfileEnvelope(profile)
@@ -385,11 +393,7 @@ export async function GET(request: NextRequest) {
                 endTime: c.event.end_time,
                 venueName: c.event.venue_name,
                 address: c.event.address,
-                city: await resolveEventCity(
-                  c.event.city,
-                  null,
-                  null
-                ),
+                city: await resolveEventCity(c.event.city, null, null, geocodes),
                 status: c.event.status,
               },
             }))
@@ -585,12 +589,16 @@ export async function GET(request: NextRequest) {
 
 
     // Transform response
+    // One budget for the whole response. See lib/location.ts.
+    const geocodes = geocodeBudget()
+
     const transformedEvents = await transformEvents(events, {
       favoriteEventIds,
       userCheckinMap,
       userLat: lat,
       userLon: lon,
       includeCheckins: includeSet.has("checkins"),
+      geocodes,
     })
 
     const normalizedProfile = await selfProfileEnvelope(profile)
@@ -619,7 +627,7 @@ export async function GET(request: NextRequest) {
               endTime: c.event.end_time,
               venueName: c.event.venue_name,
               address: c.event.address,
-              city: await resolveEventCity(c.event.city, null, null),
+              city: await resolveEventCity(c.event.city, null, null, geocodes),
               status: c.event.status,
             },
           }))

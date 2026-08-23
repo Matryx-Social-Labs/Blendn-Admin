@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
-import { resolveEventCity } from "@/lib/location"
+import { resolveEventCity, geocodeBudget, type GeocodeBudget } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
 
 export const eventListSelect = {
@@ -98,6 +98,16 @@ interface TransformContext {
   userLat?: number
   userLon?: number
   includeCheckins?: boolean
+  /**
+   * How many reverse-geocodes this request may still make.
+   *
+   * Owned by `transformEvents`, not by the caller: a page of null-city rows used
+   * to fan out one Nominatim request per event, concurrently, on a user-facing
+   * read. City is resolved at write time now, so this only ever covers rows
+   * created before that -- and past the budget a card renders without a city
+   * rather than the page waiting on a public API.
+   */
+  geocodes?: GeocodeBudget
 }
 
 /*
@@ -121,7 +131,7 @@ async function transformEvent(
     timezone: event.timezone,
     venueName: event.venue_name,
     address: event.address,
-    city: await resolveEventCity(event.city, event.latitude, event.longitude),
+    city: await resolveEventCity(event.city, event.latitude, event.longitude, ctx.geocodes),
     state: event.state,
     country: event.country,
     latitude: event.latitude,
@@ -190,5 +200,7 @@ export async function transformEvents(
    * while the event was at its busiest.
    */
   const attended = await distinctAttendeeCounts(events.map((e) => e.id))
-  return Promise.all(events.map((event) => transformEvent(event, ctx, attended)))
+  // One budget for the page, made here so it cannot be shared between requests.
+  const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
+  return Promise.all(events.map((event) => transformEvent(event, withBudget, attended)))
 }

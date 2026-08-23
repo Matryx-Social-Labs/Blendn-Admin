@@ -2,6 +2,9 @@ import { transformEvents } from "@/lib/services/events.service"
 
 jest.mock("@/lib/location", () => ({
   resolveEventCity: jest.fn(async (city: string | null) => city),
+  // A whole-module mock has to carry every export the module under test uses,
+  // or the first new one is a runtime error in a test that looks unrelated.
+  geocodeBudget: () => ({ take: () => true, exhausted: false, spent: 0 }),
 }))
 
 // `transformEvent` is private now — the plural owns the attendee query, so a

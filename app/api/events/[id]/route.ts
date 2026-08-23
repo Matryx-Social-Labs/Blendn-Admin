@@ -4,6 +4,7 @@ import slugify from "slugify"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
 import { validateLocationInput } from "@/lib/geofence-input"
+import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
 import { cancelEventCheckIns } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
@@ -189,6 +190,23 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             venue_link_status: event.venue_link_status,
           })
 
+    /*
+     * Re-resolve the city when the pin moves.
+     *
+     * `city` is derived from the coordinates at write time (see the create
+     * route), so an edit that moves the pin and does not supply a city would
+     * otherwise leave the old one -- an event that moved across town keeping
+     * the wrong label, on the field the discovery feed filters by.
+     *
+     * Only when coordinates were actually submitted: a PATCH that touches the
+     * title must not spend a geocode, and must not overwrite a city an
+     * organiser typed deliberately.
+     */
+    const movedPin = latitude !== undefined && longitude !== undefined
+    const resolvedCity = movedPin
+      ? await resolveEventCity(city, latitude, longitude)
+      : (city ?? undefined)
+
     const updatedEvent = await db.events.update({
       where: { id: resolvedParams.id },
       data: {
@@ -199,7 +217,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         venue_name: venue_name ?? undefined,
         ...venueLink,
         address: address ?? undefined,
-        city: city ?? undefined,
+        city: resolvedCity ?? undefined,
         state: state ?? undefined,
         country: country ?? undefined,
         postal_code: postal_code ?? undefined,
