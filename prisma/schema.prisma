@@ -646,6 +646,15 @@ model chat_group_members {
   updated_at               DateTime      @default(now()) @db.Timestamptz(6)
   banned_at                DateTime?     @db.Timestamptz(6)
   banned_by                String?
+  /// When the current mute was applied. Null when not muted.
+  muted_at                 DateTime?     @db.Timestamptz(6)
+  /// Who muted them. **Null means the mute was automatic**, and that is the
+  /// whole point of the column: `checkAndAutoUnmute` cleared any `muted` status
+  /// from anyone with fewer than three recent auto-hide flags, and an
+  /// organiser-applied mute has zero — so `0 < 3` was true and the mute
+  /// evaporated on the muted person's next message. The identical bug was found
+  /// and fixed for bans, which is why `banned_by` above already exists.
+  muted_by                 String?
 
   // Relations
   chat_group chat_groups @relation(fields: [chat_group_id], references: [id], onDelete: Cascade)

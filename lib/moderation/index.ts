@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent } from "./openai-moderation"
-import { hideMessage, flagForReview, checkAndAutoMute, markClean } from "./actions"
+import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
 
 /**
  * Main moderation orchestrator.
@@ -34,7 +34,8 @@ export async function moderateMessage(
     }
 
     // 2. OpenAI text moderation (async)
-    const textResult = await checkTextContent(content)
+    const textCheck = await checkTextContent(content)
+    const textResult = textCheck.checked ? textCheck.result : null
     if (textResult && textResult.action === "hide") {
       await hideMessage(messageId, chatGroupId, userId, textResult)
       await flagForReview(messageId, chatGroupId, userId, textResult)
@@ -43,8 +44,11 @@ export async function moderateMessage(
     }
 
     // 3. Image moderation if applicable
+    let imageExamined = true
     if ((type === "image" || type === "gif") && mediaUrl) {
-      const imageResult = await checkImageContent(mediaUrl)
+      const imageCheck = await checkImageContent(mediaUrl)
+      imageExamined = imageCheck.checked
+      const imageResult = imageCheck.checked ? imageCheck.result : null
       if (imageResult && imageResult.action === "hide") {
         await hideMessage(messageId, chatGroupId, userId, imageResult)
         await flagForReview(messageId, chatGroupId, userId, imageResult)
@@ -65,8 +69,18 @@ export async function moderateMessage(
       return
     }
 
-    // 5. Message is clean
-    await markClean(messageId)
+    /*
+     * 5. Nothing was caught. Whether that means "clean" depends on whether
+     *    anybody actually looked.
+     *
+     * This wrote `clean` unconditionally, so with `OPENAI_API_KEY` unset -- the
+     * ordinary deployment, since `lib/env.ts` marks it optional and
+     * `DEPLOYMENT.md` lists it as not required -- every message in the database
+     * was recorded as examined and clean by a moderator that was never called.
+     * The keyword filter's 130 hard-coded strings were the whole pipeline, and
+     * nothing said so.
+     */
+    await recordExamined(messageId, textCheck.checked && imageExamined)
   } catch (error) {
     // Never let moderation errors propagate — log and move on
     logger.error("Moderation pipeline error", {

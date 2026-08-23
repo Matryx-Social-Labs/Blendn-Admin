@@ -1,4 +1,5 @@
 import type { ModerationResult } from "./types"
+import { hit, forget } from "@/lib/rate-limit-store"
 import {
   SPAM_BURST_LIMIT,
   SPAM_BURST_WINDOW_MS,
@@ -18,7 +19,28 @@ interface UserHistory {
   lastCleanup: number
 }
 
-// In-memory store keyed by "userId:chatGroupId"
+/**
+ * Recent message *content*, keyed by "userId:chatGroupId". In process, per
+ * replica.
+ *
+ * ## Why the burst counter left and this did not
+ *
+ * Both halves used to live here, and the rate limiter was moved to Redis for
+ * exactly the reason that made that wrong: a limit enforced per replica gets
+ * weaker with every instance you add. Burst detection is a counter, so it now
+ * goes through `lib/rate-limit-store.ts` -- the same fixed-window primitive,
+ * shared, with the same degrade-to-memory behaviour when Redis is absent.
+ *
+ * Near-duplicate detection needs the previous messages themselves, to run a
+ * trigram similarity against them. That is a message store with a TTL, not a
+ * counter, and it is more machinery than the problem currently justifies:
+ * Socket.io needs sticky sessions, so one person's messages mostly land on one
+ * replica, and the case this misses is somebody deliberately reconnecting
+ * between each repeat. Burst catches that anyway.
+ *
+ * Recorded rather than fixed, deliberately. It is a real per-replica gap and it
+ * should be named as one instead of looking like an oversight.
+ */
 const historyMap = new Map<string, UserHistory>()
 
 /** Evict stale entries to bound memory usage */
@@ -60,15 +82,17 @@ function countLinks(content: string): number {
 
 /**
  * Check if a message is spam based on:
- * 1. Burst rate (too many messages in a short window)
- * 2. Duplicate/near-duplicate content
- * 3. Excessive links
+ * 1. Excessive links
+ * 2. Burst rate (too many messages in a short window) -- shared across replicas
+ * 3. Duplicate/near-duplicate content -- per replica, see `historyMap`
+ *
+ * Async because the burst counter lives in Redis when one is configured.
  */
-export function checkSpam(
+export async function checkSpam(
   userId: string,
   chatGroupId: string,
   content: string
-): ModerationResult | null {
+): Promise<ModerationResult | null> {
   const key = `${userId}:${chatGroupId}`
   const now = Date.now()
   const normalizedContent = content.toLowerCase().trim()
@@ -100,15 +124,23 @@ export function checkSpam(
     }
   }
 
-  // --- Check 2: Burst rate ---
-  if (history.messages.length >= SPAM_BURST_LIMIT) {
+  /*
+   * --- Check 2: Burst rate ---
+   *
+   * Counted in the shared store rather than off `history.messages`, so the
+   * limit is one bucket for the account instead of one per replica. Somebody
+   * flooding a room across four instances was previously allowed four times the
+   * burst.
+   */
+  const { count } = await hit(`spam:burst:${key}`, SPAM_BURST_WINDOW_MS)
+  if (count > SPAM_BURST_LIMIT) {
     history.messages.push({ content: normalizedContent, timestamp: now })
     return {
       action: "hide",
       source: "spam",
       categories: { spam: 0.95 },
       confidence: 0.95,
-      reason: `Burst rate exceeded (${history.messages.length} messages in ${SPAM_BURST_WINDOW_MS / 1000}s)`,
+      reason: `Burst rate exceeded (${count} messages in ${SPAM_BURST_WINDOW_MS / 1000}s)`,
     }
   }
 
@@ -135,12 +167,24 @@ export function checkSpam(
   return null
 }
 
-/** Reset history for a user in a chat group (useful for testing) */
-export function resetSpamHistory(userId: string, chatGroupId: string): void {
-  historyMap.delete(`${userId}:${chatGroupId}`)
+/**
+ * Reset everything this module remembers about a user in a chat group.
+ *
+ * Both halves. The burst counter lives in the shared store now, and a reset
+ * that cleared only the local Map would leave the window running -- which is
+ * not a test-only problem: it would mean the counter and the history could
+ * disagree about whether this person has said anything recently.
+ */
+export async function resetSpamHistory(userId: string, chatGroupId: string): Promise<void> {
+  const key = `${userId}:${chatGroupId}`
+  historyMap.delete(key)
+  await forget(`spam:burst:${key}`)
 }
 
 /** Clear all spam history (useful for testing) */
-export function clearAllSpamHistory(): void {
+export async function clearAllSpamHistory(): Promise<void> {
+  // Both halves, for the same reason `resetSpamHistory` does: clearing the Map
+  // alone leaves every burst window running, and the next caller inherits it.
+  await Promise.all([...historyMap.keys()].map((key) => forget(`spam:burst:${key}`)))
   historyMap.clear()
 }

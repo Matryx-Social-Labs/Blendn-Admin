@@ -29,7 +29,7 @@ import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
 import { checkKeywords } from "@/lib/moderation/keyword-filter"
-import { checkTextContent } from "@/lib/moderation/openai-moderation"
+import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -589,7 +589,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Spam check (sync — block before saving)
-    const spamResult = checkSpam(authUser.userId, chatGroup.id, content)
+    const spamResult = await checkSpam(authUser.userId, chatGroup.id, content)
     if (spamResult && spamResult.action === "hide") {
       return errorResponse(
         spamResult.reason || "Message blocked as spam. Please slow down.",
@@ -639,6 +639,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
+    /*
+     * Did anybody actually look at this message?
+     *
+     * Only the inline text check can answer yes. Media goes to the async
+     * pipeline, which records its own outcome, and so does anything the inline
+     * check failed to examine -- so `clean` is written here only when this
+     * request examined the content itself and found nothing.
+     */
+    let examinedInline = false
+
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     if (type === "text") {
       try {
@@ -650,12 +660,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
          * thing that stops being harmless under load.
          */
         let timeoutHandle: NodeJS.Timeout | undefined
-        const openaiResult = await Promise.race([
+        /*
+         * The timeout is a *reason*, not a verdict.
+         *
+         * This resolved to `null`, which was the same value the check returns
+         * for clean content -- and for a missing API key, and for an API error.
+         * Four facts in one value, and the code below then wrote
+         * `moderation_status: "clean"` for all of them.
+         */
+        const openaiCheck = await Promise.race([
           checkTextContent(content),
-          new Promise<null>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve(null), 1000)
+          new Promise<ModerationCheck>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
           }),
         ]).finally(() => clearTimeout(timeoutHandle))
+        examinedInline = openaiCheck.checked
+        const openaiResult = openaiCheck.checked ? openaiCheck.result : null
         if (openaiResult && openaiResult.action === "hide") {
           await hideMessage(message.id, chatGroup.id, authUser.userId, openaiResult)
           await flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
@@ -673,8 +693,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         if (openaiResult && openaiResult.action === "flag") {
           void flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
         }
-        // Timeout fallback — run full async pipeline
-        if (!openaiResult && content.length > 5) {
+        /*
+         * Anything the inline check did not examine goes to the full pipeline,
+         * which owns the verdict and will record `unchecked` if it cannot get
+         * one either.
+         *
+         * The `content.length > 5` guard is gone. It meant a short message that
+         * timed out was examined by nobody and then recorded as clean, and short
+         * messages are not a category that needs less moderation -- a slur is
+         * five characters.
+         */
+        if (!openaiCheck.checked) {
           void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
         }
       } catch {
@@ -692,18 +721,35 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Mark clean if passed all checks
-    if (!message.moderation_status || message.moderation_status === "pending") {
-      void db.chat_messages.update({
-        where: { id: message.id },
-        data: { moderation_status: "clean" },
-      }).catch((err: unknown) =>
-      // Push is best-effort and must not fail the request, but swallowing the
-      // error entirely means a broken push pipeline is invisible.
-      logger.warn("Push notification failed", {
-        context: "event chat message",
-        error: err instanceof Error ? err.message : String(err),
-      })
-    )
+    /*
+     * Clean means somebody looked and found nothing.
+     *
+     * This wrote `clean` unconditionally -- including when the block above had
+     * just handed the message to the async pipeline because the model was
+     * unreachable or timed out. So the inline write RACED the pipeline's
+     * verdict, and being the later write it could overwrite a `flagged` with a
+     * `clean`.
+     *
+     * Now it only claims the verdict it actually has. Everything else is the
+     * pipeline's to record, including `unchecked`.
+     */
+    if (
+      examinedInline &&
+      (!message.moderation_status || message.moderation_status === "pending")
+    ) {
+      void db.chat_messages
+        .update({
+          where: { id: message.id },
+          data: { moderation_status: "clean" },
+        })
+        .catch((err: unknown) =>
+          // Best-effort: a failure here leaves the message pending for the
+          // sweeper rather than failing the send.
+          logger.warn("Failed to record moderation outcome", {
+            context: "event chat message",
+            error: err instanceof Error ? err.message : String(err),
+          })
+        )
     }
 
     // Get anonymous name for response
