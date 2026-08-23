@@ -9,12 +9,13 @@ import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { turnUpPct } from "@/lib/counting"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
 
 export const dynamic = "force-dynamic"
 
-const ATTENDED = ["checked_in", "checked_out"] as const
 
 /**
  * One venue.
@@ -85,7 +86,6 @@ export default async function VenueDetailPage({
         _count: {
           select: {
             rsvps: { where: { status: "going" } },
-            check_ins: { where: { status: { in: [...ATTENDED] } } },
           },
         },
       },
@@ -107,6 +107,14 @@ export default async function VenueDetailPage({
       ? null
       : Math.round((ratings.reduce((sum, n, i) => sum + n * (i + 1), 0) / ratingTotal) * 10) / 10
 
+  /*
+   * Attendance is a grouped query, not a `_count`: the table holds one row per
+   * person **per day**, so a venue hosting one three-day conference reported
+   * three times the people who came through its doors — on the page a venue
+   * owner reads for licensing and staffing.
+   */
+  const attended = await distinctAttendeeCounts(events.map((e) => e.id))
+
   const rows: VenueEventRow[] = events.map((e) => ({
     id: e.id,
     title: e.title,
@@ -116,15 +124,15 @@ export default async function VenueDetailPage({
     // predating organisations has no org.
     organiser: e.organizer_org?.display_name ?? e.organizer?.name ?? "—",
     going: e._count.rsvps,
-    attended: e._count.check_ins,
+    attended: attended.get(e.id) ?? 0,
     fillPct: e.max_capacity ? Math.round((e._count.rsvps / e.max_capacity) * 100) : null,
   }))
 
   const totalAttended = rows.reduce((sum, r) => sum + r.attended, 0)
   const totalGoing = rows.reduce((sum, r) => sum + r.going, 0)
-  // Capped at 100: walk-ins check in without an RSVP, so attendance can exceed
-  // commitments and a raw ratio would read over 100%.
-  const turnUp = totalGoing === 0 ? null : Math.min(100, (totalAttended / totalGoing) * 100)
+  // Uncapped, now that attendance counts people. The cap was framed as absorbing
+  // walk-ins and in practice absorbed the row inflation, which hid them.
+  const turnUp = turnUpPct(totalAttended, totalGoing)
 
   const repeatOrganisers = new Map<string, number>()
   for (const r of rows) repeatOrganisers.set(r.organiser, (repeatOrganisers.get(r.organiser) ?? 0) + 1)

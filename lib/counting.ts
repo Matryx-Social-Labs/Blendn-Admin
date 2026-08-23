@@ -52,8 +52,10 @@ export const ATTENDED: check_in_status[] = ["checked_in", "checked_out"]
  * attendees" into a headcount of the crew. Occupancy counts them, because fire
  * safety counts bodies; attendance does not, because they are not attendees.
  *
- * A null `kind` is treated as an attendee: the column was added after rows
- * already existed, and the backfill left history null.
+ * The column itself is `@default(attendee)` and NOT NULL, so null never comes
+ * out of the database. It is tolerated here only because `CheckInRow` is the
+ * minimum shape a caller can hand this fold, and a caller assembling one by
+ * hand should not have to invent a kind to be counted.
  */
 export function isAttendee(row: CheckInRow): boolean {
   return row.kind !== "staff"

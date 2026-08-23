@@ -3,6 +3,7 @@ import type { DateRange } from "./date-range"
 import type { user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
+import { distinctAttendeeCounts } from "./attendee-counts"
 
 /**
  * Report definitions.
@@ -159,11 +160,17 @@ export async function buildReport(
           _count: {
             select: {
               rsvps: { where: { status: "going" } },
-              check_ins: { where: { status: { in: ["checked_in", "checked_out"] } } },
             },
           },
         },
       })
+      /*
+       * Attendance is a second query rather than a `_count`, because `_count`
+       * has no DISTINCT and `event_check_ins` holds one row per person **per
+       * day**. The Attended column read three times high on a three-day
+       * conference, in the file that also promises the export is pseudonymous.
+       */
+      const attended = await distinctAttendeeCounts(rows.map((r) => r.id))
       const columns: CsvColumn<(typeof rows)[number]>[] = [
         { key: "id", label: "Event ID" },
         { key: "title", label: "Title" },
@@ -174,7 +181,7 @@ export async function buildReport(
         { key: "venue_name", label: "Venue" },
         { key: "max_capacity", label: "Capacity" },
         { key: "going", label: "Going", value: (r) => r._count.rsvps },
-        { key: "attended", label: "Attended", value: (r) => r._count.check_ins },
+        { key: "attended", label: "Attended", value: (r) => attended.get(r.id) ?? 0 },
         {
           key: "fill",
           label: "Fill %",

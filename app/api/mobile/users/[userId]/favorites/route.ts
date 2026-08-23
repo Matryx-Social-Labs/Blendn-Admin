@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -106,9 +107,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
             _count: {
               select: {
-                check_ins: {
-                  where: { status: "checked_in" },
-                },
                 favorites: true,
                 ratings: true,
               },
@@ -120,6 +118,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       skip: (page - 1) * limit,
       take: limit,
     })
+
+    /*
+     * `checkInCount` was `_count.check_ins` filtered to `checked_in`: rows on a
+     * table holding one per person **per day**, minus everyone who had already
+     * left. One grouped query answers it for the whole page instead.
+     */
+    const attended = await distinctAttendeeCounts(favorites.map((f) => f.event.id))
 
     // Transform response
     const events = await Promise.all(favorites.map(async (f) => {
@@ -161,7 +166,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         organizer: event.organizer,
         categories: event.categories.map((c) => c.category),
         coverImage: event.media[0] || null,
-        checkInCount: event._count.check_ins,
+        checkInCount: attended.get(event.id) ?? 0,
         favoriteCount: event._count.favorites,
         ratingCount: event._count.ratings,
         favoritedAt: f.created_at,
