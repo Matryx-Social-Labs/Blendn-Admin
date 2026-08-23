@@ -19,8 +19,7 @@ import { evaluateCheckIn, type Geofence, type LatLng } from "./geofence"
  *   ping inside          ─────────────────────────▶  stay
  *   ping inside, was out ─────────────────────────▶  clear_departure
  *   ping outside, first  ─────────────────────────▶  record_departure
- *   ping outside, > grace, not asked ─────────────▶  prompt
- *   ping outside, > grace + timeout, asked ───────▶  auto_checkout
+ *   ping outside, > departure allowance ──────────▶  auto_checkout
  *   no ping, never left  ─────────────────────────▶  stay   (silence is ambiguous)
  *   no ping, was outside ─────────────────────────▶  the departure clock keeps running
  *   occurrence ended     ─────────────────────────▶  auto_checkout
@@ -33,8 +32,31 @@ export const PING_INTERVAL_MINUTES = 5
 /** A cigarette, a phone call, an ATM. Not a departure. */
 export const DEPARTURE_GRACE_MINUTES = 10
 
-/** After we ask "are you still here?", before we act on the silence. */
-export const PROMPT_TIMEOUT_MINUTES = 10
+/**
+ * How long somebody may be outside the fence before the room stops counting them.
+ *
+ * ## There used to be a prompt here, and it asked nobody anything
+ *
+ * The flow was: grace expires, emit a `prompt` action, wait
+ * `PROMPT_TIMEOUT_MINUTES`, then auto-checkout with `reason: "no_response"`.
+ * The `prompt` action's only effect was writing `departure_prompted_at` -- **no
+ * push, no socket event, nothing reached the phone**. So the sweeper recorded
+ * "no response" to a question it had never asked, and the ten minutes it waited
+ * for that answer were ten minutes of a stale occupancy number.
+ *
+ * The prompt is gone rather than built. Delivering it would mean a notification
+ * kind, a response endpoint and a screen, to ask a question whose answer is
+ * already being measured -- if they are back inside, the next ping says so and
+ * clears the departure by itself.
+ *
+ * **The total tolerance is unchanged at 20 minutes**, deliberately. Removing the
+ * prompt and keeping only the grace would have halved how long somebody can be
+ * out before being closed out, and the 2026-08-08 thesis names indoor GPS on
+ * cheap Android in dense venues as an execution risk against the core mechanic.
+ * Removing a fiction should not also tighten a threshold; that is a separate
+ * decision with its own evidence.
+ */
+export const DEPARTURE_ALLOWANCE_MINUTES = 20
 
 /**
  * How far past an occurrence's end someone can still be counted as inside.
@@ -47,7 +69,8 @@ export const OCCURRENCE_GRACE_MINUTES = 60
 export type PresenceAction =
   | "stay"
   | "record_departure"
-  | "prompt"
+  // `prompt` is gone. It wrote a timestamp and notified nobody; see
+  // DEPARTURE_ALLOWANCE_MINUTES.
   | "auto_checkout"
   | "clear_departure"
 
@@ -59,7 +82,6 @@ export interface PresenceDecision {
     | "returned"
     | "left_area"
     | "grace_expired"
-    | "no_response"
     | "occurrence_ended"
     | "staff_exempt"
     | "no_signal"
@@ -70,7 +92,6 @@ export interface PresenceDecision {
 export interface PresenceState {
   kind: "attendee" | "staff"
   leftAreaAt: Date | null
-  departurePromptedAt: Date | null
   lastSeenAt: Date | null
 }
 
@@ -158,18 +179,12 @@ export function evaluatePresence(
     return { action: "stay", reason: "left_area", shortfall }
   }
 
-  if (state.departurePromptedAt === null) {
-    // Grace is up. Ask once — never repeatedly for the same departure, which
-    // `departurePromptedAt` is what guards.
-    return { action: "prompt", reason: "grace_expired", shortfall }
-  }
-
-  const sincePrompt = now.getTime() - state.departurePromptedAt.getTime()
-  if (sincePrompt < minutes(PROMPT_TIMEOUT_MINUTES)) {
+  if (outFor < minutes(DEPARTURE_ALLOWANCE_MINUTES)) {
     return { action: "stay", reason: "grace_expired", shortfall }
   }
 
-  return { action: "auto_checkout", reason: "no_response", shortfall }
+  // `left_area`, not `no_response`: nobody was asked anything.
+  return { action: "auto_checkout", reason: "left_area", shortfall }
 }
 
 /**

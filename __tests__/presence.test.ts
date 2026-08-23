@@ -2,7 +2,7 @@ import {
   evaluatePresence,
   shouldPersistPing,
   DEPARTURE_GRACE_MINUTES,
-  PROMPT_TIMEOUT_MINUTES,
+  DEPARTURE_ALLOWANCE_MINUTES,
   OCCURRENCE_GRACE_MINUTES,
   PING_INTERVAL_MINUTES,
   type PresenceState,
@@ -33,7 +33,6 @@ const ago = (mins: number) => new Date(NOW.getTime() - mins * 60_000)
 const state = (over: Partial<PresenceState> = {}): PresenceState => ({
   kind: "attendee",
   leftAreaAt: null,
-  departurePromptedAt: null,
   lastSeenAt: ago(5),
   ...over,
 })
@@ -64,10 +63,9 @@ describe("still inside", () => {
     expect(d.reason).toBe("returned")
   })
 
-  it("clears a departure even after we already prompted", () => {
-    // They answered by walking back in.
+  it("clears a departure when they walk back in", () => {
     const d = evaluatePresence(
-      state({ leftAreaAt: ago(40), departurePromptedAt: ago(20) }),
+      state({ leftAreaAt: ago(40) }),
       ping(INSIDE),
       FENCE,
       ENDS,
@@ -119,7 +117,12 @@ describe("leaving", () => {
     expect(d.action).toBe("stay")
   })
 
-  it("prompts once the grace period expires", () => {
+  it("waits out the rest of the allowance once the grace expires", () => {
+    /*
+     * This used to be a `prompt`, whose only effect was writing a timestamp --
+     * no push, no socket event, nothing reached the phone. The sweeper then
+     * recorded `no_response` to a question it had never asked.
+     */
     const d = evaluatePresence(
       state({ leftAreaAt: ago(DEPARTURE_GRACE_MINUTES + 1) }),
       ping(OUTSIDE),
@@ -127,36 +130,48 @@ describe("leaving", () => {
       ENDS,
       NOW
     )
-    expect(d.action).toBe("prompt")
+    expect(d.action).toBe("stay")
     expect(d.reason).toBe("grace_expired")
   })
 
-  it("does not prompt twice for the same departure", () => {
-    // Being asked "are you still here?" every five minutes while dancing is its
-    // own kind of broken.
-    const d = evaluatePresence(
-      state({ leftAreaAt: ago(30), departurePromptedAt: ago(1) }),
+  it("keeps the total tolerance at twenty minutes", () => {
+    /*
+     * Removing the prompt must not also halve how long somebody may be outside.
+     * The 2026-08-08 thesis names indoor GPS on cheap Android in dense venues
+     * as an execution risk against the core mechanic, so tightening this is a
+     * separate decision with its own evidence.
+     */
+    const justInside = evaluatePresence(
+      state({ leftAreaAt: ago(DEPARTURE_ALLOWANCE_MINUTES - 1) }),
       ping(OUTSIDE),
       FENCE,
       ENDS,
       NOW
     )
-    expect(d.action).toBe("stay")
+    expect(justInside.action).toBe("stay")
+
+    const justPast = evaluatePresence(
+      state({ leftAreaAt: ago(DEPARTURE_ALLOWANCE_MINUTES + 1) }),
+      ping(OUTSIDE),
+      FENCE,
+      ENDS,
+      NOW
+    )
+    expect(justPast.action).toBe("auto_checkout")
+    // Not `no_response`: nobody was asked anything.
+    expect(justPast.reason).toBe("left_area")
   })
 
-  it("checks out when the prompt goes unanswered", () => {
+  it("checks out when the allowance runs out", () => {
     const d = evaluatePresence(
-      state({
-        leftAreaAt: ago(60),
-        departurePromptedAt: ago(PROMPT_TIMEOUT_MINUTES + 1),
-      }),
+      state({ leftAreaAt: ago(60) }),
       ping(OUTSIDE),
       FENCE,
       ENDS,
       NOW
     )
     expect(d.action).toBe("auto_checkout")
-    expect(d.reason).toBe("no_response")
+    expect(d.reason).toBe("left_area")
   })
 })
 
@@ -181,14 +196,14 @@ describe("silence is not departure", () => {
     // silence short-circuits here, the grace and prompt clocks are unreachable
     // and nobody is ever checked out.
     const d = evaluatePresence(
-      state({ leftAreaAt: ago(120), departurePromptedAt: ago(90) }),
+      state({ leftAreaAt: ago(120) }),
       null,
       FENCE,
       ENDS,
       NOW
     )
     expect(d.action).toBe("auto_checkout")
-    expect(d.reason).toBe("no_response")
+    expect(d.reason).toBe("left_area")
   })
 
   it("still waits out the grace when silent after stepping out", () => {
@@ -202,7 +217,9 @@ describe("silence is not departure", () => {
     expect(d.action).toBe("stay")
   })
 
-  it("prompts on silence once the grace has expired", () => {
+  it("keeps the departure clock running on silence", () => {
+    // Silence does not clear a departure already in progress, and it no longer
+    // produces a prompt nobody receives.
     const d = evaluatePresence(
       state({ leftAreaAt: ago(DEPARTURE_GRACE_MINUTES + 5) }),
       null,
@@ -210,7 +227,8 @@ describe("silence is not departure", () => {
       ENDS,
       NOW
     )
-    expect(d.action).toBe("prompt")
+    expect(d.action).toBe("stay")
+    expect(d.reason).toBe("grace_expired")
   })
 })
 
@@ -244,7 +262,7 @@ describe("staff", () => {
     // organiser from the chatroom they are moderating is worse than a stale
     // staff count.
     const d = evaluatePresence(
-      state({ kind: "staff", leftAreaAt: ago(120), departurePromptedAt: ago(90) }),
+      state({ kind: "staff", leftAreaAt: ago(120) }),
       ping(OUTSIDE),
       FENCE,
       ENDS,
@@ -268,7 +286,7 @@ describe("staff", () => {
 
 describe("shouldPersistPing", () => {
   it("always writes when something changed", () => {
-    for (const action of ["record_departure", "prompt", "auto_checkout", "clear_departure"] as const) {
+    for (const action of ["record_departure", "auto_checkout", "clear_departure"] as const) {
       expect(shouldPersistPing({ action, reason: "left_area" }, state(), NOW)).toBe(true)
     }
   })

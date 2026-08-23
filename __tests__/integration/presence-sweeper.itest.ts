@@ -6,7 +6,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 import { sweepPresence, MASS_CHECKOUT_THRESHOLD } from "@/lib/presence-sweeper"
 import { getOccupancy } from "@/lib/occupancy"
-import { DEPARTURE_GRACE_MINUTES, PROMPT_TIMEOUT_MINUTES } from "@/lib/presence"
+import { DEPARTURE_GRACE_MINUTES, DEPARTURE_ALLOWANCE_MINUTES } from "@/lib/presence"
 
 import { db, closeDb, makeUser, testId } from "./helpers"
 
@@ -97,7 +97,12 @@ async function present(
 }
 
 describe("the sweeper acts on time passing", () => {
-  it("prompts someone whose grace has expired", async () => {
+  it("leaves someone alone while the allowance is still running", async () => {
+    /*
+     * This used to assert a prompt. The prompt wrote a timestamp and notified
+     * nobody, so the sweeper recorded `no_response` to a question never asked;
+     * it is gone, and the twenty-minute total tolerance is unchanged.
+     */
     const { eventId, occurrenceId } = await liveEvent()
     // Four inside; only one has been out long enough. One in four is exactly at
     // the guard threshold, not over it.
@@ -108,12 +113,10 @@ describe("the sweeper acts on time passing", () => {
     await present(eventId, occurrenceId, "p3")
     await present(eventId, occurrenceId, "p4")
 
-    const result = await sweepPresence()
-    expect(result.prompted).toBeGreaterThanOrEqual(1)
+    await sweepPresence()
 
     const row = await db.event_check_ins.findUniqueOrThrow({ where: { id: out.id } })
-    expect(row.departure_prompted_at).not.toBeNull()
-    // Prompted, not ejected.
+    // Past the grace, inside the allowance: still counted.
     expect(row.status).toBe("checked_in")
   })
 
@@ -121,7 +124,7 @@ describe("the sweeper acts on time passing", () => {
     const { eventId, occurrenceId } = await liveEvent()
     const gone = await present(eventId, occurrenceId, "g1", {
       left_area_at: ago(120),
-      departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
+      departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 5),
     })
     for (const l of ["g2", "g3", "g4", "g5"]) await present(eventId, occurrenceId, l)
 
@@ -138,7 +141,7 @@ describe("the sweeper acts on time passing", () => {
     const { eventId, occurrenceId } = await liveEvent()
     await present(eventId, occurrenceId, "i1", {
       left_area_at: ago(120),
-      departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
+      departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 5),
     })
     for (const l of ["i2", "i3", "i4", "i5"]) await present(eventId, occurrenceId, l)
 
@@ -169,7 +172,7 @@ describe("the mass-checkout guard", () => {
     for (const l of ["m1", "m2", "m3"]) {
       await present(eventId, occurrenceId, l, {
         left_area_at: ago(120),
-        departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
+        departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 5),
       })
     }
     await present(eventId, occurrenceId, "m4")
@@ -185,7 +188,7 @@ describe("the mass-checkout guard", () => {
     const { eventId, occurrenceId } = await liveEvent()
     await present(eventId, occurrenceId, "t1", {
       left_area_at: ago(120),
-      departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
+      departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 5),
     })
     for (const l of ["t2", "t3", "t4", "t5", "t6"]) await present(eventId, occurrenceId, l)
 
