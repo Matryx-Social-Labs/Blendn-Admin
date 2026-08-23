@@ -1,9 +1,7 @@
 import { createServer } from "http"
 import next from "next"
 import { initSocketServer, sponsoredMessageScheduler, stopAllOpsBroadcasts } from "./lib/socket-server"
-import { stopChatLifecycleSweeper } from "./lib/chat-lifecycle"
-import { stopPresenceSweeper } from "./lib/presence-sweeper"
-import { stopSentimentSweeper } from "./lib/sentiment-sweeper"
+import { startBackgroundWork, stopBackgroundWork } from "./lib/background"
 import { ensureBucketExists } from "./lib/tigris"
 import { validateEnv, googleSignInConfigWarning } from "./lib/env"
 
@@ -74,15 +72,28 @@ app.prepare().then(() => {
   const io = initSocketServer(httpServer)
   console.log(`[${new Date().toISOString()}] > Socket.io initialized`)
 
+  /*
+   * A deliberate step, not a side effect of the line above.
+   *
+   * These three sweepers used to start inside `initSocketServer`, so serving
+   * the app any way that did not attach a websocket server stopped all of them
+   * with no log line -- which renders as occupancy climbing for ever and "the
+   * event was quiet". None of them emits over a socket.
+   *
+   * After Socket.io, because the sponsored scheduler that `initSocketServer`
+   * arms does need `io`, and starting these first would only widen the window
+   * where the two disagree about whether the process is up.
+   */
+  startBackgroundWork()
+  console.log(`[${new Date().toISOString()}] > Background work started`)
+
   // Graceful shutdown
   const shutdown = () => {
     console.log(`\n[${new Date().toISOString()}] > Shutting down gracefully...`)
     // Clear the sponsored-message setInterval handles; without this they keep
     // the event loop alive and the process waits for the forced-exit timeout.
     sponsoredMessageScheduler.stopAll()
-    stopChatLifecycleSweeper()
-    stopPresenceSweeper()
-    stopSentimentSweeper()
+    stopBackgroundWork()
     // The fifth timer. `startOpsBroadcast` arms a 5s interval per event any
     // time someone opens a live ops screen, and this was the one loop the
     // shutdown handler never stopped -- so a deploy during a live event held

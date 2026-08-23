@@ -49,9 +49,19 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
 
   const ids = expired.map((group) => group.id)
 
-  const [, released] = await db.$transaction([
+  const [archived, released] = await db.$transaction([
     db.chat_groups.updateMany({
-      where: { id: { in: ids } },
+      /*
+       * `status: "active"` is the half the docstring above already claims.
+       *
+       * It said "both writes are `updateMany` filtered on the state they are
+       * leaving", and this one was filtered on the id alone. Two replicas
+       * selecting the same batch would both write it and both report having
+       * archived it, so the count was rooms *selected* rather than rooms
+       * *changed* -- and the idempotence the comment rests on was true of the
+       * members write and asserted of this one.
+       */
+      where: { id: { in: ids }, status: "active" },
       data: { status: "archived" },
     }),
     /*
@@ -70,7 +80,8 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
   ])
 
   return {
-    archived: ids.length,
+    // What changed, not what was selected.
+    archived: archived.count,
     released: released.count,
     hasMore: expired.length === SWEEP_BATCH,
   }
