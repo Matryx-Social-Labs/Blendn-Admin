@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { actorFor, maySponsorFor } from "@/lib/org-membership"
+import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
 import {
   broadcastMayCarryMedia,
   canBroadcast,
@@ -48,6 +49,7 @@ export async function POST(
         id: true,
         organizer_id: true,
         ...eventPermissionSelect,
+        ...broadcastAuthorSelect,
         chat_group: {
           select: { id: true },
         },
@@ -169,9 +171,18 @@ export async function POST(
      * and moderator deletes against that id all missed their target. The
      * `chat_messages` id is emitted now.
      */
+    /*
+     * The organisation, not the person. See `lib/broadcast-author.ts`.
+     *
+     * This named the individual who typed it -- persisted into
+     * `chat_messages.content`, in a room where every attendee is a pseudonym.
+     * The dashboard twin was worse (it fell back to the email address), but
+     * both put a real person's name into the pseudonymous room.
+     */
+    const author = broadcastAuthorName(event)
     const chatContent =
       kind === "announcement"
-        ? `📢 [Announcement from ${sender.name ?? "Organiser"}]\n${content.trim()}`
+        ? `📢 [Announcement from ${author}]\n${content.trim()}`
         : content.trim()
 
     const chatMsg = event.chat_group?.id
@@ -209,8 +220,14 @@ export async function POST(
          * a user message can never occupy that shape, so the label cannot be
          * forged by somebody choosing a convincing pseudonym.
          */
-        userName: kind === "system" ? "Blend'n" : (sender.name ?? "Organiser"),
-        userImage: kind === "system" ? undefined : (sender.image ?? undefined),
+        userName: kind === "system" ? "Blend'n" : author,
+        /*
+         * No photograph either. A broadcast is the organisation speaking, and
+         * this shipped the individual's avatar into the pseudonymous room
+         * beside their name -- a face identifies as surely, which is the
+         * argument this route already makes about attendee media forty lines up.
+         */
+        userImage: undefined,
         /*
          * Not emitted, deliberately.
          *

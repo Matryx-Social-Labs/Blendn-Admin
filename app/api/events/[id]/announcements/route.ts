@@ -2,7 +2,8 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { eventPermissions } from "@/lib/rbac"
+import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
+import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
 import { actorFor } from "@/lib/org-membership"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { announcementSchema } from "@/lib/validations/event"
@@ -100,7 +101,8 @@ export async function POST(req: Request, { params }: RouteContext) {
     const event = await db.events.findUnique({
       where: { id: eventId },
       select: {
-        organizer_org_id: true, venue: { select: { owner_org_id: true } },
+        ...eventPermissionSelect,
+        ...broadcastAuthorSelect,
         chat_group: { select: { id: true } },
       },
     })
@@ -122,10 +124,18 @@ export async function POST(req: Request, { params }: RouteContext) {
         content,
         sent_by: session.user.id,
       },
-      include: { sender: { select: { name: true, email: true } } },
+      include: { sender: { select: { name: true } } },
     })
 
-    const senderName = session.user.name ?? session.user.email ?? "Organiser"
+    /*
+     * The organisation, not the person. See `lib/broadcast-author.ts`.
+     *
+     * This was `session.user.name ?? session.user.email ?? "Organiser"`, so an
+     * organiser with no display name **persisted their email address** into a
+     * room where everybody else is a pseudonym. `sender.email` was being
+     * selected and returned in the response too.
+     */
+    const senderName = broadcastAuthorName(event)
     const chatContent = `📢 [Announcement from ${senderName}]\n${content}`
 
     // Persist as a chat message
@@ -150,7 +160,9 @@ export async function POST(req: Request, { params }: RouteContext) {
       content: chatMsg.content,
       type: "text",
       userId: session.user.id,
-      userName: session.user.name ?? "Organiser",
+      // The wire says the same thing the persisted content does. It said the
+      // organiser's real name, so the socket disagreed with the history.
+      userName: senderName,
       createdAt: chatMsg.created_at.toISOString(),
     })
 

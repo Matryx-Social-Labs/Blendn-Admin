@@ -203,9 +203,35 @@ export async function POST(request: NextRequest) {
         ? conversation.user2
         : conversation.user1
 
+    /*
+     * The same gate the GET six lines up applies, and this handler did not.
+     *
+     * It spread the row straight out -- `{ id, name, image }` -- so opening a
+     * conversation from a match returned the other person's real name and face
+     * at the moment of opening, before either side had revealed. Every other
+     * surface that names a participant resolves through
+     * `lib/conversation-identity.ts`; this one imported it at the top of the
+     * file for the GET and then answered the question itself.
+     *
+     * That is the whole shape of this audit in one file: the module is right,
+     * it is in scope, and using it is optional.
+     */
+    const otherRevealed = mayShowRealName(conversation, conversationOtherUser.id)
+
     return successResponse({
       id: conversation.id,
-      otherUser: conversationOtherUser,
+      otherUser: {
+        id: conversationOtherUser.id,
+        name: displayNameInConversation(
+          conversation,
+          conversationOtherUser.id,
+          conversationOtherUser.name
+        ),
+        // A face identifies as surely as a name.
+        image: otherRevealed ? conversationOtherUser.image : null,
+      },
+      fromMatch: cameFromMatch(conversation),
+      theyRevealed: otherRevealed,
       createdAt: conversation.created_at,
       isNew: !conversation.last_message_at,
     })
