@@ -151,3 +151,51 @@ describe("the fixed call sites do not count rows", () => {
     expect(src).not.toMatch(/Math\.min\(everCheckedIn/)
   })
 })
+
+describe("occupancy asks which day it is", () => {
+  /*
+   * `capacityForNow` resolved an occurrence for the capacity and the counts did
+   * not, so capacity was per-occurrence while occupancy spanned the whole run.
+   * On day three of a conference a day-one attendee whose row was still
+   * `checked_in` counted as inside, against day three's capacity.
+   *
+   * Rows go stale exactly that way: the sweeper closes people on a timer and
+   * anyone it misses stays `checked_in` forever, so the number an organiser
+   * watches live — and the one a fire officer is quoted — drifted upward across
+   * a multi-day event and never came back down.
+   */
+  const code = (rel: string) =>
+    readFileSync(join(__dirname, "..", rel), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+
+  it("scopes the inside counts to the resolved occurrence", () => {
+    const src = code("lib/occupancy.ts")
+    expect(src).toMatch(/const today = slot\.occurrence \? \{ occurrence_id: slot\.occurrence\.id \} : \{\}/)
+    // Both the total and the staff count carry it.
+    expect((src.match(/\.\.\.today/g) ?? []).length).toBe(2)
+  })
+
+  it("resolves the occurrence once and shares it with the capacity", () => {
+    /*
+     * The comment on `capacityForNow` warns that two implementations of "which
+     * day is it" would eventually disagree. There were two: one asked, one did
+     * not. Now there is one call and both read it.
+     */
+    const src = code("lib/occupancy.ts")
+    expect((src.match(/await resolveOccurrence\(/g) ?? []).length).toBe(1)
+    expect(src).toMatch(/capacityForNow\(slot,/)
+  })
+
+  it("still counts unique attendance across the whole run", () => {
+    /*
+     * "Inside" is about right now; "how many people has this drawn" is about
+     * the run. Scoping this one would make a three-day event forget its first
+     * two days every morning.
+     */
+    const src = code("lib/occupancy.ts")
+    const uniqueQuery = /kind: "attendee", check_in_time: \{ not: null \} \}/.exec(src)
+    expect(uniqueQuery).not.toBeNull()
+    expect(uniqueQuery![0]).not.toContain("today")
+  })
+})
