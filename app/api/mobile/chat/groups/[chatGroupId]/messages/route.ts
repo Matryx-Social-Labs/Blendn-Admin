@@ -4,8 +4,7 @@ import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { emitChatMessage } from "@/lib/socket-server"
-import { notifyGroupMessage } from "@/lib/push-notifications"
+import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
@@ -559,50 +558,24 @@ export async function POST(
     const senderAnonName = membership.anonymous_name || "Attendee"
 
     /*
-     * Everyone in a block relationship with the sender, in either direction.
+     * Socket then push, block-filtered, in `lib/room-delivery.ts`.
      *
-     * Fetched once and used for all three delivery paths below -- the live
-     * socket, and the push fan-out. The REST history above filters on the same
-     * set, so the three surfaces cannot disagree about who is in the room.
+     * Shared with the event-chat POST, which persisted a message and stopped --
+     * no emit, no push -- so a message sent from that screen was invisible to
+     * anyone who already had the room open. Two write paths into one table, and
+     * only one of them delivered.
+     *
+     * Awaited rather than fire-and-forget: it never throws, and awaiting means
+     * the sender's 200 is not ahead of the room's copy.
      */
-    const senderBlocked = await blockCounterparties(user.userId)
-
-    // Emit real-time message — only reaches here if moderation passed
-    emitChatMessage(
+    await deliverToRoom({
       chatGroupId,
-      {
-        id: message.id,
-        content: message.content,
-        type: message.type,
-        userId: message.user_id,
-        userName: senderAnonName,
-        userImage: undefined,
-        createdAt: message.created_at.toISOString(),
-        parentId: message.parent_id || undefined,
-      },
-      senderBlocked
-    )
-
-    // Send push notifications to group members (async, don't await)
-    db.chat_group_members
-      .findMany({
-        where: {
-          chat_group_id: chatGroupId,
-          status: "active",
-          // A lock screen is the loudest surface in the product. Somebody who
-          // blocked this sender must not get a notification from them.
-          ...(senderBlocked.length ? { user_id: { notIn: senderBlocked } } : {}),
-        },
-        select: { user_id: true },
-      })
-      .then((members) => {
-        const memberIds = members.map((m) => m.user_id)
-        const groupName = chatGroup.name || "Group Chat"
-        const messagePreview = type === "text" ? content : type === "image" ? "📷 Photo" : "🎥 Video"
-
-        return notifyGroupMessage(memberIds, senderAnonName, groupName, messagePreview, chatGroupId, user.userId)
-      })
-      .catch((err) => logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) }))
+      groupName: chatGroup.name,
+      senderId: user.userId,
+      senderAnonName,
+      message,
+      preview: previewFor(type, content),
+    })
 
     // Return anonymized response
     return successResponse({
