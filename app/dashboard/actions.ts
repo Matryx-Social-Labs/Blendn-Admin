@@ -11,6 +11,7 @@ import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
 import { normaliseVenueName } from "@/lib/venue-name"
+import { repeatAttendees } from "@/lib/counting"
 import type {
   AdminOverview,
   CityRow,
@@ -170,10 +171,18 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     db.event_check_ins.count({
       where: { status: { in: ATTENDED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
     }),
-    db.event_check_ins.groupBy({
-      by: ["user_id"],
+    /*
+     * Rows, not a grouped row-count.
+     *
+     * This grouped by user and asked `_count._all > 1`, which counts *rows*.
+     * `event_check_ins` holds one row per person per day, so somebody who
+     * attended both days of one conference was two rows and read as a
+     * returning attendee — on the tile titled "came back for a 2nd event".
+     * `repeatAttendees` folds on distinct `event_id` instead.
+     */
+    db.event_check_ins.findMany({
       where: { status: { in: ATTENDED }, event: eventScope(userId) },
-      _count: { _all: true },
+      select: { user_id: true, event_id: true, kind: true },
     }),
   ])
 
@@ -242,7 +251,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     noShowRatePct: round1(noShowNow),
     noShowDelta:
       noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
-    repeatAttendees: repeatRows.filter((r) => r._count._all > 1).length,
+    repeatAttendees: repeatAttendees(repeatRows),
     averageRating: round1(ratingAggregate._avg.rating),
     ratingCount: ratingAggregate._count.rating,
     chatToday,
