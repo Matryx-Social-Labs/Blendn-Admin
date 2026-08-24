@@ -176,3 +176,59 @@ describe("curation health separates a wrong pin from a dead listing", () => {
     expect(code("app/dashboard/events/curate/queue-actions.ts")).toMatch(/throw new Error\("Not authorised"\)/)
   })
 })
+
+describe("the read surface offers the write", () => {
+  const src = code(CURATE)
+
+  it("puts the form on the page, not behind a button", () => {
+    /*
+     * This screen is reached from a city row on the admin overview saying
+     * people are waiting there — so the reason somebody is here is to add one.
+     * A screen answering "how is curation going" without offering "add another"
+     * is the read surface and the write surface on different pages again, which
+     * is exactly how `city_demand` came to be written for months and read never.
+     */
+    expect(src).toMatch(/<CurateForm defaultCity=\{city\} \/>/)
+  })
+
+  it("carries the city through from the demand row", () => {
+    // The link is `?city=…` from the overview. Losing it would make somebody
+    // retype the one fact the previous screen already knew.
+    expect(src).toMatch(/searchParams: Promise<\{ city\?: string \}>/)
+  })
+
+  it("asks for no image and no description", () => {
+    /*
+     * Decision 2. There is no field to fill in wrongly, which is a stronger
+     * guarantee than a rule somebody has to remember — the description is
+     * generated server-side from the facts entered here.
+     */
+    const form = code("app/dashboard/events/curate/curate-form.tsx")
+    expect(form).not.toMatch(/cover_image|description:/)
+  })
+
+  it("reuses the one map, rather than adding a third", () => {
+    /*
+     * K1.1 found two maps in one section disagreeing about where an event was.
+     * A third would be a third answer to "where is this".
+     */
+    const form = code("app/dashboard/events/curate/curate-form.tsx")
+    expect(form).toMatch(/from "@\/components\/location-picker"/)
+  })
+
+  it("prefers the geocoder's city over the typed one", () => {
+    /*
+     * The geocoded name is what the feed filters on. A typed "bangalore"
+     * against a geocoded "Bengaluru" makes the event invisible in its own city.
+     */
+    const form = code("app/dashboard/events/curate/curate-form.tsx")
+    expect(form).toMatch(/city: location\.city \?\? form\.city/)
+  })
+
+  it("refuses to submit without a pin", () => {
+    // `canPublish` would refuse it server-side; saying so before the round trip
+    // is the difference between a form and a rejection.
+    const form = code("app/dashboard/events/curate/curate-form.tsx")
+    expect(form).toMatch(/if \(!location\)/)
+  })
+})

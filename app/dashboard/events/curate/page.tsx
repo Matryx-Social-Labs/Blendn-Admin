@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { getAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
+import { CurateForm } from "./curate-form"
 import { getCurationQueue } from "./queue-actions"
 
 export const dynamic = "force-dynamic"
@@ -79,6 +80,18 @@ export default async function CuratePage({
         />
         <MetricTile label="Claimed" value={claimed} hint="handed to a real organiser" />
       </div>
+
+      {/*
+        * The form sits above the queue, not behind a button.
+        *
+        * This screen is reached from a city row on the admin overview that says
+        * people are waiting there — so the reason somebody is here is to add
+        * one, and a screen that answers "how is curation going" without
+        * offering "add another" is the read surface and the write surface on
+        * different pages again. That is exactly how `city_demand` came to be
+        * written for months and read never.
+        */}
+      <CurateForm defaultCity={city} />
 
       {rows.length === 0 ? (
         <EmptyState
