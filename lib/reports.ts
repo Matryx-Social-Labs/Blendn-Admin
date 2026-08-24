@@ -132,6 +132,20 @@ export async function eventScopeFor(role: user_role, userId: string) {
   }
 }
 
+/**
+ * The row ceiling every export shares.
+ *
+ * Three of the six had one and three did not -- `events`, `attendees` and
+ * `organisations` were unbounded `findMany`s pulled into Node and folded in
+ * memory. That is a request an admin can make from a browser that returns the
+ * whole table, and the attendees one groups the whole thing into a Map first.
+ *
+ * A shared constant rather than three more literals, so a fourth export cannot
+ * be written without a number to reach for -- which is how three of them came
+ * to be missing it.
+ */
+export const REPORT_ROW_LIMIT = 10_000
+
 /** A report's rows and its header, ready for `toCsv`. */
 export async function buildReport(
   key: ReportKey,
@@ -148,6 +162,7 @@ export async function buildReport(
       const rows = await db.events.findMany({
         where: { ...scope, start_time: inWindow },
         orderBy: { start_time: "desc" },
+        take: REPORT_ROW_LIMIT,
         select: {
           id: true,
           title: true,
@@ -202,6 +217,16 @@ export async function buildReport(
           created_at: inWindow,
         },
         select: { user_id: true, event_id: true, created_at: true },
+        /*
+         * Bounded, and ordered so the bound is meaningful.
+         *
+         * This was unbounded AND folded into a Map in memory, so the cost grew
+         * with attendance-days rather than with people. Newest first, because a
+         * truncated export of the most recent window is a usable answer and a
+         * truncated export of an arbitrary slice is not.
+         */
+        orderBy: { created_at: "desc" },
+        take: REPORT_ROW_LIMIT,
       })
       const byUser = new Map<string, { events: Set<string>; last: Date }>()
       for (const ci of checkIns) {
@@ -234,7 +259,7 @@ export async function buildReport(
       const rows = await db.event_check_ins.findMany({
         where: { event: scope, created_at: inWindow },
         orderBy: { created_at: "desc" },
-        take: 10_000,
+        take: REPORT_ROW_LIMIT,
         select: {
           created_at: true,
           status: true,
@@ -259,7 +284,7 @@ export async function buildReport(
       const rows = await db.event_ratings.findMany({
         where: { event: scope, created_at: inWindow },
         orderBy: { created_at: "desc" },
-        take: 10_000,
+        take: REPORT_ROW_LIMIT,
         select: {
           created_at: true,
           rating: true,
@@ -280,6 +305,7 @@ export async function buildReport(
     case "organisations": {
       const rows = await db.organisations.findMany({
         orderBy: { created_at: "desc" },
+        take: REPORT_ROW_LIMIT,
         include: {
           domains: { select: { domain: true, verified_at: true } },
           _count: { select: { members: true, events: true, venues: true } },
@@ -315,7 +341,7 @@ export async function buildReport(
       const rows = await db.moderation_flags.findMany({
         where: { created_at: inWindow },
         orderBy: { created_at: "desc" },
-        take: 10_000,
+        take: REPORT_ROW_LIMIT,
         select: {
           created_at: true,
           status: true,
