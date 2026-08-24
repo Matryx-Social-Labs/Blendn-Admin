@@ -38,7 +38,8 @@ export default async function LeadsPage({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[length:var(--text-h1)] font-bold">Leads</h1>
+        {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
+        <h2 className="text-[length:var(--text-h1)] font-bold">Leads</h2>
         <p className="text-[0.8125rem] text-muted-foreground">
           Demo requests from the organiser landing page. Separate from applications — someone
           asking for a walkthrough has not asked for an account.

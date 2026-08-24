@@ -147,7 +147,17 @@ export default async function CuratePage({
               >
                 <Link
                   href={`/dashboard/events/${row.id}`}
-                  className="min-w-0 flex-1 text-sm font-medium hover:underline"
+                  /*
+                   * `min-w-0` let the title shrink to nothing instead of
+                   * wrapping the row. With `flex-wrap`, a sibling only moves to
+                   * the next line when it cannot fit -- and a `flex-1` item that
+                   * may shrink to zero always "fits", so at 375px the metadata
+                   * held its width and a long title rendered one word per line
+                   * down nine rows. A floor is what makes `flex-wrap` do its
+                   * job; no breakpoint, because the trigger is the title's
+                   * length, not the viewport's.
+                   */
+                  className="min-w-[14rem] flex-1 text-sm font-medium hover:underline"
                 >
                   {row.title}
                 </Link>

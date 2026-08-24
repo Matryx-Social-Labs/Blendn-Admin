@@ -23,7 +23,8 @@ export default async function NewVenuePage() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[length:var(--text-h1)] font-bold">Add a venue</h1>
+        {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
+        <h2 className="text-[length:var(--text-h1)] font-bold">Add a venue</h2>
         <p className="text-[0.8125rem] text-muted-foreground">
           {canOwn
             ? "It joins your venues straight away — you are describing your own place, so there is nothing to claim."

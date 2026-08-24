@@ -177,7 +177,16 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
                 onChange={(e) => setNotes((n) => ({ ...n, [row.id]: e.target.value }))}
                 placeholder="Reason — sent to the claimant, required to decline"
                 aria-label={`Decision note for ${row.eventTitle}`}
-                className="min-w-0 flex-1 rounded border border-border bg-background px-2.5 py-1.5 text-[0.8125rem]"
+                /*
+                 * A floor, not `min-w-0` -- same bug as the curation row. A
+                 * `flex-1` item that may shrink to zero always "fits", so
+                 * `flex-wrap` never moved the buttons down and at 375px the
+                 * field squeezed until its placeholder read "Reason -- sent to
+                 * the claimant, requi". The placeholder states the one rule
+                 * that governs this control (required to decline), so truncating
+                 * it hides the rule.
+                 */
+                className="min-w-[15rem] flex-1 rounded border border-border bg-background px-2.5 py-1.5 text-[0.8125rem]"
               />
               <Button
                 size="sm"

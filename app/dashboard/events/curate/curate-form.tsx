@@ -290,7 +290,9 @@ export function CurateForm({ defaultCity }: { defaultCity?: string }) {
           ) : null}
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* flex-wrap: at 375px the helper text wrapped to three lines beside
+            the button rather than dropping below it. */}
+        <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" disabled={pending}>
             {pending ? "Adding…" : "Add and publish"}
           </Button>
