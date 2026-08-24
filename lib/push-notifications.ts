@@ -134,6 +134,48 @@ async function getBulkUserPushTokens(userIds: string[]): Promise<Map<string, str
  * `NotificationData["type"]` and the `notification_kind` enum are the same
  * eleven strings, and `__tests__/notifications.test.ts` fails if they diverge.
  */
+/**
+ * Kinds whose push body is a copy of something a person wrote.
+ *
+ * These three are the only ones that carry user content. Every other kind has a
+ * fixed string for a body — "Someone you liked has liked you back." — and can be
+ * stored verbatim without keeping anybody's words.
+ */
+const CONTENT_BEARING: ReadonlySet<string> = new Set([
+  "private_message",
+  "group_message",
+  "announcement",
+])
+
+/**
+ * What the notifications table stores, as opposed to what the push carries.
+ *
+ * The push body is a preview, and it should be: it renders on a lock screen for
+ * a few seconds and then it is gone. `notifications.body` is a different thing
+ * — a permanent, unencrypted, unpruned row — and it was being handed the same
+ * string. That made this table a durable second copy of every DM in the
+ * product, sitting outside every access control that guards `private_messages`,
+ * with no retention policy at all.
+ *
+ * The row does not need the words. Tapping it deep-links to the conversation,
+ * where the real message lives behind the real gate. So the stored body says
+ * what happened and the message stays in one place.
+ *
+ * Deliberately not applied to the push itself: changing what renders on a lock
+ * screen is a product decision, and this is a storage bug.
+ */
+export function storedBodyFor(kind: string, body: string): string {
+  if (!CONTENT_BEARING.has(kind)) return body
+  switch (kind) {
+    case "private_message":
+      return "Sent you a message"
+    case "group_message":
+      return "New message in the room"
+    default:
+      return "Posted an announcement"
+  }
+}
+
 async function recordNotification(
   userId: string,
   title: string,
@@ -158,7 +200,7 @@ async function recordNotification(
         user_id: userId,
         kind: data.type as never,
         title,
-        body,
+        body: storedBodyFor(data.type, body),
         data: data as object,
       },
     })
@@ -277,7 +319,7 @@ export async function sendBulkPushNotifications(
           user_id: userId,
           kind: data.type as never,
           title,
-          body,
+          body: storedBodyFor(data.type, body),
           data: data as object,
         })),
       })

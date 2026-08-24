@@ -4,6 +4,7 @@ import { pseudonymsForEvent } from "@/lib/anonymous-names"
 import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { blockCounterparties } from "@/lib/conversations"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
@@ -106,18 +107,28 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * someone who has checked out stays matchable and stops being listed as
      * present. That is the intended difference between "was here" and "is here".
      */
+    /*
+     * Blocks reach the roster too.
+     *
+     * `/matches` has filtered on blocks since it shipped; this endpoint never
+     * did, so the one screen that names who is physically in the room with you
+     * would still list somebody you blocked. Both directions, and applied to the
+     * count as well, so a filtered page never sits under an unfiltered total.
+     */
+    const hidden = await blockCounterparties(authUser.userId)
+
+    const visibleCheckIns = {
+      event_id: eventId,
+      status: "checked_in" as const,
+      ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
+    }
+
     const totalCount = await db.event_check_ins.count({
-      where: {
-        event_id: eventId,
-        status: "checked_in",
-      },
+      where: visibleCheckIns,
     })
 
     const checkIns = await db.event_check_ins.findMany({
-      where: {
-        event_id: eventId,
-        status: "checked_in",
-      },
+      where: visibleCheckIns,
       include: {
         user: {
           select: {

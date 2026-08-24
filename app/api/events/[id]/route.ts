@@ -11,6 +11,11 @@ import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
 import { resolveVenueLink } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
+import {
+  notifyEventCancelled,
+  notifyEventDetailsChanged,
+  materialEventChanges,
+} from "@/lib/services/event-notifications.service"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -319,6 +324,23 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     // without cascading. See lib/event-cancellation.ts.
     if (isCancelling) {
       await cancelEventCheckIns(resolvedParams.id)
+    }
+
+    // Tell the people who were going.
+    //
+    // Both of these were written, correct, and called by nobody — an event could
+    // be cancelled or moved to a different venue and the only people who found
+    // out were the ones who happened to reopen the app. Awaited but never thrown:
+    // the write above has already committed, so a push failure must not turn a
+    // successful edit into a 500.
+    if (isCancelling) {
+      await notifyEventCancelled(updatedEvent.id, updatedEvent.title)
+    } else {
+      await notifyEventDetailsChanged(
+        updatedEvent.id,
+        updatedEvent.title,
+        materialEventChanges(event, updatedEvent)
+      )
     }
 
     return NextResponse.json(updatedEvent)

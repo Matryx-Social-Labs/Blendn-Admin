@@ -113,9 +113,17 @@ export async function openConversation(
 export async function closeConversation(
   conversationId: string,
   closedBy: string,
-  reason: "unmatch" | "block"
+  reason: "unmatch" | "block",
+  /*
+   * Optional transaction client, so a caller that has to close a conversation
+   * alongside other writes can do it atomically without reimplementing this.
+   * The block route needs that — a block row written with the conversation
+   * left open is a "block" that only stops sending — and inlining the update
+   * there would put the closing rule in two places.
+   */
+  client: Pick<typeof db, "private_conversations"> = db
 ) {
-  return db.private_conversations.updateMany({
+  return client.private_conversations.updateMany({
     where: { id: conversationId, closed_at: null },
     data: { closed_at: new Date(), closed_by: closedBy, closed_reason: reason },
   })

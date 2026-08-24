@@ -55,8 +55,24 @@ export function buildEventsCacheKey(input: EventsCacheKeyInput): string {
     // "bengaluru" share an entry instead of caching the same list twice.
     city: cityKey(input.city) || null,
     viewerAge: input.viewerAge,
-    lat: input.lat ?? null,
-    lon: input.lon ?? null,
+    /*
+     * Coordinates only enter the key when they change the query.
+     *
+     * They used to always. The client sends a raw GPS fix on every feed
+     * request, and a fix jitters in the sixth decimal place between readings —
+     * so every request from every device produced a unique key, missed, and
+     * then FIFO-evicted one of the hundred slots, including the coordinate-free
+     * entries that would otherwise have hit. The cache did close to no work
+     * while costing a `JSON.stringify` of a seventeen-field object per request.
+     *
+     * `lat`/`lon` only change the `where` clause when `radius` is set, and only
+     * change the ordering when sorting by distance. Everywhere else they are
+     * used *after* the cache, to label each row with a distance — so two
+     * callers standing ten metres apart genuinely want the same cached list.
+     */
+    ...(input.radius !== undefined || input.sortBy === "distance"
+      ? { lat: input.lat ?? null, lon: input.lon ?? null }
+      : { lat: null, lon: null }),
     radius: input.radius ?? null,
     categoryId: input.categoryId || null,
     categorySlug: input.categorySlug || null,
