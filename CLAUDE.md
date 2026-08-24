@@ -100,7 +100,13 @@ When changing the schema: run `npm run db:generate` after editing `schema.prisma
 
 ## Environment Variables
 
-Required: `DATABASE_URL`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET` (32+ chars), `MOBILE_JWT_SECRET` (32+ chars). Optional: AWS/Tigris S3 vars (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_S3_BUCKET`), Google OAuth client IDs (`GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`). `lib/env.ts` centralizes env var access — prefer it over raw `process.env` reads in new code.
+Required: `DATABASE_URL`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET` (32+ chars), `MOBILE_JWT_SECRET` (32+ chars).
+
+Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS_SECRET_KEY`, `TIGRIS_BUCKET`, `TIGRIS_REGION`), Google OAuth client IDs (`GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`), `OPENAI_API_KEY`, `REDIS_URL`, `NEXT_PUBLIC_SENTRY_DSN`.
+
+**The storage vars are `TIGRIS_*`, not `AWS_*`.** This file said `AWS_ACCESS_KEY_ID` / `AWS_S3_BUCKET`, and `lib/tigris.ts` has only ever read `TIGRIS_*` — so a deployment configured from these instructions got uploads silently switched off, with no error anywhere. `DEPLOYMENT.md` and `lib/env.ts` were corrected; this file was not, and it is the one an agent reads first.
+
+`lib/env.ts` centralizes env var access — prefer it over raw `process.env` reads in new code, and it is the authority on names when a doc disagrees.
 
 ## Deployment
 
