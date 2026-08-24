@@ -162,7 +162,7 @@ describe("curation health separates a wrong pin from a dead listing", () => {
 
   it("is bounded on both queries", () => {
     const reader = code("app/dashboard/events/curate/queue-actions.ts")
-    expect(reader).toMatch(/take: 100/)
+    expect(reader).toMatch(/take: CURATION_PAGE/)
     expect(reader).toMatch(/take: 5_000/)
   })
 
@@ -216,13 +216,13 @@ describe("the read surface offers the write", () => {
     expect(form).toMatch(/from "@\/components\/location-picker"/)
   })
 
-  it("prefers the geocoder's city over the typed one", () => {
+  it("prefers the geocoder's city over anything typed", () => {
     /*
      * The geocoded name is what the feed filters on. A typed "bangalore"
      * against a geocoded "Bengaluru" makes the event invisible in its own city.
      */
     const form = code("app/dashboard/events/curate/curate-form.tsx")
-    expect(form).toMatch(/city: location\.city \?\? form\.city/)
+    expect(form).toMatch(/city: location\.city \?\? defaultCity \?\? ""/)
   })
 
   it("refuses to submit without a pin", () => {
@@ -230,5 +230,127 @@ describe("the read surface offers the write", () => {
     // is the difference between a form and a rejection.
     const form = code("app/dashboard/events/curate/curate-form.tsx")
     expect(form).toMatch(/if \(!location\)/)
+  })
+})
+
+describe("what the design review found", () => {
+  const form = code("app/dashboard/events/curate/curate-form.tsx")
+
+  it("asks for the EVENT's timezone, not the browser's", () => {
+    /*
+     * The bug the review found. Curation's premise is somebody adding events in
+     * cities they are not in, so an admin in London curating a Bengaluru event
+     * stored `Europe/London` — and `events.timezone` goes to the mobile client
+     * on the detail payload, so attendees saw the wrong local time. It would
+     * then surface on the curation-health screen as "nobody came",
+     * misattributed to a dead listing by the very screen built to catch it.
+     *
+     * The browser value seeds the field. It is not the answer.
+     */
+    expect(form).toMatch(/<TimezoneSelect value=\{field\.value\}/)
+    // What is SUBMITTED comes from the field.
+    expect(form).toMatch(/timezone: values\.timezone/)
+    /*
+     * The browser value survives, and should: it seeds `defaultValues` so the
+     * common case needs no typing. What matters is that it appears ONLY there —
+     * inside the submit path it would be the bug again.
+     */
+    const submitBody = /const submit = \(values: FormValues\)[\s\S]*?\n  \}/.exec(form)
+    expect(submitBody).not.toBeNull()
+    expect(submitBody![0]).not.toMatch(/Intl\.DateTimeFormat/)
+  })
+
+  it("uses the repo's form primitives, so labels bind to inputs", () => {
+    /*
+     * The first draft hand-rolled a `Field` wrapper: no htmlFor, no id, so a
+     * screen reader saw six unlabelled inputs — and no `FormMessage`, so a
+     * short title produced zod's "String must contain at least 3 character(s)"
+     * in a toast after a round trip.
+     *
+     * One swap fixes association, per-field errors and aria-invalid together.
+     */
+    expect(form).toMatch(/from "@\/components\/ui\/form"/)
+    expect((form.match(/<FormField/g) ?? []).length).toBe(6)
+    expect((form.match(/<FormMessage \/>/g) ?? []).length).toBe(6)
+    expect(form).not.toMatch(/^function Field\(/m)
+  })
+
+  it("validates that it ends after it starts, client-side", () => {
+    expect(form).toMatch(/It has to end after it starts/)
+  })
+
+  it("reports a missing pin where the pin is, not as a toast", () => {
+    expect(form).toMatch(/role="alert"/)
+    expect(form).toMatch(/setPinError\(/)
+  })
+
+  it("stays on the screen after adding, because the city still needs events", () => {
+    /*
+     * Redirecting to the event page ends the loop — but the demand row that
+     * sent you here said twenty-five people are waiting, and one event does not
+     * fix that.
+     */
+    expect(form).toMatch(/Add another for this city/)
+    expect(form).not.toMatch(/router\.push\(`\/dashboard\/events\//)
+  })
+
+  it("has a loading and an error state on both routes", () => {
+    /*
+     * Both screens are force-dynamic with three or four round trips, so without
+     * a loading state the previous page sits frozen. Five other dashboard
+     * sections already had one.
+     */
+    for (const dir of ["app/dashboard/claims", "app/dashboard/events/curate"]) {
+      expect(existsSync(join(ROOT, dir, "loading.tsx"))).toBe(true)
+      expect(existsSync(join(ROOT, dir, "error.tsx"))).toBe(true)
+    }
+  })
+
+  it("admits when a list is capped", () => {
+    /*
+     * `take: 100` with nothing saying so reads as "this is all of them", and an
+     * admin who believes that concludes curation is healthier than it is. The
+     * same no-silent-caps rule this codebase applies to bounded backend
+     * queries, applied to the screen that renders one.
+     */
+    expect(code(CURATE)).toMatch(/Showing the \{CURATION_PAGE\} most recent of \{total\}/)
+    expect(code(CLAIMS)).toMatch(/Showing the \{CLAIM_PAGE\} longest-waiting of \{total\}/)
+    expect(code("app/dashboard/events/curate/queue-actions.ts")).toMatch(/db\.events\.count\(\{ where \}\)/)
+  })
+
+  it("leads with the number that prompts an action", () => {
+    /*
+     * It led with "Curated", a count that only goes up. DESIGN_SYSTEM.md's
+     * central correction is that the forward-looking question comes before any
+     * trailing report.
+     */
+    const src = code(CURATE)
+    expect(src.indexOf("Likely a wrong pin")).toBeLessThan(src.indexOf('label="Curated"'))
+  })
+})
+
+describe('"use server" files export only async functions', () => {
+  it("keeps the page-size constants out of them", () => {
+    /*
+     * A `"use server"` module may only export async functions. An
+     * `export const` there is a build error that NEITHER tsc NOR the unit suite
+     * sees — only `next build` does, which is why this guard exists.
+     *
+     * Found by running the real build after the design-review fixes, having
+     * put `CURATION_PAGE` and `CLAIM_PAGE` beside their queries.
+     */
+    for (const rel of [
+      "app/dashboard/events/curate/queue-actions.ts",
+      "app/dashboard/events/curate/actions.ts",
+      "lib/event-claim-actions.ts",
+    ]) {
+      const src = code(rel)
+      expect(src).toMatch(/"use server"/)
+      // No exported value bindings — only `export async function` and types.
+      expect(src).not.toMatch(/^export (const|let|var|class) /m)
+      for (const m of src.matchAll(/^export (?!async function|interface|type )(\w+)/gm)) {
+        throw new Error(`${rel} exports a non-async binding: ${m[0]}`)
+      }
+    }
   })
 })

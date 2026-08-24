@@ -3,7 +3,7 @@
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
-import { claimRefusal, curationSelect } from "@/lib/curation"
+import { CLAIM_PAGE, claimRefusal, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 
@@ -257,7 +257,7 @@ export interface EventClaimRow {
  * platform is worth their time, and newest-first would bury exactly the ones
  * who have been waiting longest.
  */
-export async function getEventClaimQueue(): Promise<EventClaimRow[]> {
+export async function getEventClaimQueue(): Promise<{ rows: EventClaimRow[]; total: number }> {
   const session = await getAuth()
   /*
    * The read half is gated too, not only the decide half.
@@ -269,10 +269,13 @@ export async function getEventClaimQueue(): Promise<EventClaimRow[]> {
    */
   if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
 
+  // The total alongside the page, so a capped queue can say it is capped.
+  const total = await db.event_claims.count({ where: { status: "pending" } })
+
   const claims = await db.event_claims.findMany({
     where: { status: "pending" },
     orderBy: { created_at: "asc" },
-    take: 200,
+    take: CLAIM_PAGE,
     select: {
       id: true,
       contact_email: true,
@@ -303,7 +306,7 @@ export async function getEventClaimQueue(): Promise<EventClaimRow[]> {
   const claimsPerEvent = new Map(counts.map((c) => [c.event_id, c._count._all]))
 
   const now = Date.now()
-  return claims.map((c) => {
+  const rows = claims.map((c) => {
     const refusal = claimRefusal(c.event)
     return {
       id: c.id,
@@ -329,4 +332,6 @@ export async function getEventClaimQueue(): Promise<EventClaimRow[]> {
       blocked: refusal === "not_curated" ? null : refusal,
     }
   })
+
+  return { rows, total }
 }

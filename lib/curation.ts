@@ -183,3 +183,17 @@ export function curatedFence(
     buffer: CURATED_BUFFER_METRES,
   }
 }
+
+/**
+ * How many rows the admin queues show at once.
+ *
+ * Here rather than beside their queries because those files are `"use server"`,
+ * and a `"use server"` module may only export async functions — an exported
+ * const is a build error that neither `tsc` nor the unit suite sees. Caught by
+ * running the real `next build`.
+ *
+ * The screens render "showing N of TOTAL" from these, so a capped list says it
+ * is capped rather than reading as "this is all of them".
+ */
+export const CURATION_PAGE = 100
+export const CLAIM_PAGE = 200

@@ -1,7 +1,7 @@
 "use server"
 
 import { getAuth } from "@/lib/auth"
-import { curationSelect } from "@/lib/curation"
+import { CURATION_PAGE, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
 
 export interface CuratedEventRow {
@@ -39,21 +39,40 @@ export interface CuratedEventRow {
  * None of that was observable before `check_in_refusals`, because a refused
  * check-in produced a 400 and no record.
  */
-export async function getCurationQueue(city?: string): Promise<CuratedEventRow[]> {
+/** Rows plus the total, so a capped screen can say it is capped. */
+export interface CurationQueue {
+  rows: CuratedEventRow[]
+  /** Every curated event matching the filter, including the ones not returned. */
+  total: number
+}
+
+export async function getCurationQueue(city?: string): Promise<CurationQueue> {
   const session = await getAuth()
   if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
 
+  const where = {
+    curated_at: { not: null },
+    deleted_at: null,
+    ...(city ? { city: { equals: city, mode: "insensitive" as const } } : {}),
+  }
+
+  /*
+   * The total, alongside the page.
+   *
+   * `take: 100` with nothing saying so is a silent cap, and an admin reading a
+   * hundred rows and believing that is all of them concludes curation is
+   * healthier than it is. The same "no silent caps" rule this codebase applies
+   * to every bounded backend query, applied to the screen that shows the result.
+   */
+  const total = await db.events.count({ where })
+
   const events = await db.events.findMany({
-    where: {
-      curated_at: { not: null },
-      deleted_at: null,
-      ...(city ? { city: { equals: city, mode: "insensitive" } } : {}),
-    },
+    where,
     orderBy: { start_time: "desc" },
-    take: 100,
+    take: CURATION_PAGE,
     select: { id: true, title: true, city: true, source_url: true, ...curationSelect },
   })
-  if (events.length === 0) return []
+  if (events.length === 0) return { rows: [], total }
 
   const ids = events.map((e) => e.id)
 
@@ -103,7 +122,7 @@ export async function getCurationQueue(city?: string): Promise<CuratedEventRow[]
   const claimCount = new Map(claims.map((c) => [c.event_id, c._count._all]))
   const now = Date.now()
 
-  return events.map((e) => {
+  const rows = events.map((e) => {
     const s = (shortfalls.get(e.id) ?? []).sort((a, b) => a - b)
     return {
       id: e.id,
@@ -119,4 +138,6 @@ export async function getCurationQueue(city?: string): Promise<CuratedEventRow[]
       claimed: e.claimed_at !== null,
     }
   })
+
+  return { rows, total }
 }

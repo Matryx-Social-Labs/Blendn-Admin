@@ -8,6 +8,7 @@ import { getAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
 import { CurateForm } from "./curate-form"
+import { CURATION_PAGE } from "@/lib/curation"
 import { getCurationQueue } from "./queue-actions"
 
 export const dynamic = "force-dynamic"
@@ -44,7 +45,7 @@ export default async function CuratePage({
   if (session.user.role !== "app_admin") redirect("/dashboard")
 
   const { city } = await searchParams
-  const rows = await getCurationQueue(city)
+  const { rows, total } = await getCurationQueue(city)
 
   const ended = rows.filter((r) => r.ended)
   const dead = ended.filter((r) => r.checkedIn === 0)
@@ -66,19 +67,27 @@ export default async function CuratePage({
 
       {/* Container queries, per DESIGN_SYSTEM.md: the sidebar is collapsible, so
           viewport breakpoints reflow out of step with the rest of the grid. */}
+      {/*
+        * Actionable first, vanity last.
+        *
+        * This led with "Curated", a count that only goes up and prompts nothing.
+        * DESIGN_SYSTEM.md's central correction is that the forward-looking
+        * question comes before any trailing report, and the forward-looking
+        * question here is "which pin do I have to move today".
+        */}
       <div className="grid grid-cols-2 gap-4 @2xl/main:grid-cols-4">
-        <MetricTile label="Curated" value={rows.length} />
-        <MetricTile
-          label="Ended with nobody in"
-          value={dead.length}
-          hint={ended.length > 0 ? `of ${ended.length} finished` : "none finished yet"}
-        />
         <MetricTile
           label="Likely a wrong pin"
           value={misPinned.length}
           hint={misPinned.length > 0 ? "people tried and were refused" : "no refusals recorded"}
         />
+        <MetricTile
+          label="Ended with nobody in"
+          value={dead.length}
+          hint={ended.length > 0 ? `of ${ended.length} finished` : "none finished yet"}
+        />
         <MetricTile label="Claimed" value={claimed} hint="handed to a real organiser" />
+        <MetricTile label="Curated" value={total} />
       </div>
 
       {/*
@@ -104,6 +113,19 @@ export default async function CuratePage({
           }
         />
       ) : (
+        <>
+          {total > rows.length ? (
+            /*
+             * A capped list that does not say so reads as "this is all of
+             * them". Newest first, so the cap drops the oldest -- which for
+             * curation health is the ones most likely to have finished and
+             * failed.
+             */
+            <p className="text-[0.75rem] text-muted-foreground">
+              Showing the {CURATION_PAGE} most recent of {total}. Filter by city
+              to narrow it.
+            </p>
+          ) : null}
         <ul className="flex flex-col gap-2">
           {rows.map((row) => {
             /*
@@ -183,6 +205,7 @@ export default async function CuratePage({
             )
           })}
         </ul>
+        </>
       )}
     </div>
   )
