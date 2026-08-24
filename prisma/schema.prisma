@@ -341,6 +341,31 @@ model events {
   updated_at        DateTime           @default(now()) @db.Timestamptz(6)
   deleted_at        DateTime?          @db.Timestamptz(6)
   organizer_id      String
+  /// When the platform added this event from a public listing, rather than its
+  /// own organiser creating it. Null for everything an organiser made.
+  ///
+  /// This is the discriminator, and it has to be, because `organizer_org_id` is
+  /// null for three different reasons: a legacy row, an event created before
+  /// anything wrote the column, and a curated event awaiting a claim. Only
+  /// `curated_at IS NOT NULL` separates the last from the first two — which is
+  /// why "unclaimed" is not modelled as an absence.
+  curated_at        DateTime?          @db.Timestamptz(6)
+  /// The public listing this was taken from, kept for attribution and for the
+  /// domain check when somebody claims it.
+  ///
+  /// Deliberately absent from `eventWriteSchema`, and that is the whole reason
+  /// it is a separate column from `external_link`: an owner may edit the link
+  /// they show attendees, and nobody may edit the URL their claim is verified
+  /// against. A claimant who could repoint this at their own domain would be
+  /// verifying themselves.
+  source_url        String?
+  /// When an organiser proved this curated event was theirs and took it over.
+  ///
+  /// `organizer_org_id` is the authority on who owns it; this records when that
+  /// changed hands, which is a different question and the one a reviewer asks.
+  /// Keeping it separate also means "claimed" survives an ownership transfer
+  /// between organisations later.
+  claimed_at        DateTime?          @db.Timestamptz(6)
   /// Which company is accountable. `organizer_id` still records who created
   /// it — a different question, kept for audit and for "my events".
   organizer_org_id  String?            @db.Uuid
@@ -375,6 +400,7 @@ model events {
   feedback           event_feedback[]
   venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
   organizer_org      organisations?             @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
+  eventClaims        event_claims[]
 
   @@index([latitude, longitude])
   @@index([status, start_time])
@@ -455,22 +481,22 @@ model event_categories {
 /// `event_amenities` is `Restrict` for the same reason: deleting an amenity
 /// that events reference would rewrite history rather than end a listing.
 model amenities {
-  id          String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
   /// The label as drawn — "Open Bar".
-  name        String
-  slug        String   @unique
+  name       String
+  slug       String   @unique
   /// The second line on the tile — "Premium Spirits". Optional: not every
   /// amenity has a useful qualifier, and an invented one is worse than none.
-  subtitle    String?
+  subtitle   String?
   /// A Material Symbols name, so the client does not carry its own mapping
   /// from slug to glyph and drift from the seed.
-  icon        String?
+  icon       String?
   /// Ordering in the picker and on the card. Explicit, because alphabetical
   /// puts "Accessible Entrance" above "Open Bar" on every event in the app.
-  sort_order  Int      @default(0)
-  is_active   Boolean  @default(true)
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  sort_order Int      @default(0)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   events event_amenities[]
 
@@ -1229,6 +1255,7 @@ model organisations {
   join_requests organisation_join_requests[]
   onboarding    organiser_onboarding_requests[]
   venue_claims  venue_claims[]
+  eventClaims   event_claims[]
 
   @@index([status])
 }
@@ -1502,6 +1529,75 @@ enum venue_claim_status {
   pending
   approved
   declined
+}
+
+/// Somebody saying "this event is mine".
+///
+/// The second instance of the venue-claim pattern, with two deliberate
+/// differences, both forced by who files these.
+///
+/// **`org_id` is nullable.** A curated event's real organiser typically has no
+/// account at all — that is the point of curating it — so a large share of
+/// claims arrive from outside the platform. Those carry `onboarding_id`
+/// instead, reusing `organiser_onboarding_requests` to create the organisation
+/// the claim then needs. Exactly one of the two is set.
+///
+/// **Re-filing creates a new row.** `venue_claims` is `@@unique([venue_id,
+/// org_id])` and updates in place, which keeps the queue tidy and hides how
+/// many times somebody has asked. Here the count is the signal: a third claim
+/// on one event is a reviewer's most useful fact, and it is exactly what an
+/// upsert would erase.
+model event_claims {
+  id       String @id @default(uuid()) @db.Uuid
+  event_id String @db.Uuid
+
+  /// The organisation that would own the event. Null when the claimant has no
+  /// account yet; `onboarding_id` carries the request that will create one.
+  org_id        String? @db.Uuid
+  /// The onboarding request this claim is waiting on. Null once `org_id` is set.
+  onboarding_id String? @db.Uuid
+  /// Null when filed by somebody with no account.
+  filed_by      String?
+
+  /// What the claimant filed from. The domain check reads this, so it is
+  /// recorded even when an account exists and could have supplied one — the
+  /// address that was used to claim is the fact a reviewer needs.
+  contact_email String
+  /// Free text from the claimant. Read by a human, never parsed.
+  note          String?
+
+  status event_claim_status @default(pending)
+
+  /// What the automatic checks noticed, as a list of strings.
+  ///
+  /// Flags, never a decision. Nothing here auto-approves: approving hands a
+  /// stranger the attendee list for an event, and `unclaimEvent` cannot un-see
+  /// one. The venue queue's "does not have to be bulletproof, because auto-link
+  /// is reversible" argument does not transfer.
+  flags Json?
+
+  reviewed_by   String?
+  reviewed_at   DateTime? @db.Timestamptz(6)
+  decision_note String?
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  event events         @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  org   organisations? @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([event_id])
+  @@index([org_id])
+}
+
+enum event_claim_status {
+  pending
+  approved
+  declined
+  /// Filed against an event that stopped being claimable — usually because
+  /// somebody else's claim was approved first. Distinct from `declined`, which
+  /// is a judgement about the claimant.
+  superseded
 }
 
 enum venue_type {
