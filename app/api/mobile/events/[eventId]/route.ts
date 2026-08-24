@@ -9,6 +9,7 @@ import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mobileEventPatchSchema } from "@/lib/validations/event"
+import { canPublish } from "@/lib/geofence-input"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { getOccupancy } from "@/lib/occupancy"
@@ -358,7 +359,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // as "no organiser, no venue".
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, status: true, ...eventPermissionSelect },
+      // The location columns are here for the publish gate below, not for the
+      // response: this route can flip an event to published too.
+      select: {
+        id: true,
+        status: true,
+        latitude: true,
+        longitude: true,
+        geofence: true,
+        ...eventPermissionSelect,
+      },
     })
 
     if (!event) {
@@ -401,6 +411,20 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
     const { title, description, shortDescription, status } = parsed.data
+
+    /*
+     * The same gate the dashboard PATCH runs, for the same reason and through
+     * the other door: this route accepts `status: "published"` as well, and an
+     * event published with no coordinates refuses every attendee at check-in
+     * with OUT_OF_RANGE. The mobile body carries no location fields, so there
+     * is nothing to merge — the event has a pin or it does not.
+     */
+    if (status === "published" && event.status !== "published") {
+      const gate = canPublish(event)
+      if (!gate.ok) {
+        return errorResponse(gate.reason ?? "This event cannot be published yet", 400)
+      }
+    }
 
     const isCancelling = isCancellingEvent(status, event.status)
 
