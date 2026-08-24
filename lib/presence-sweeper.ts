@@ -35,6 +35,29 @@ export const SWEEP_INTERVAL_MS = 5 * 60 * 1000
  */
 export const MASS_CHECKOUT_THRESHOLD = 0.25
 
+/**
+ * How many events one pass may sweep.
+ *
+ * The query was `findMany({ where: { status: "checked_in" } })` -- **every open
+ * check-in on the platform**, with no `take` and no scope, each row dragging the
+ * event's geofence JSON and the venue's, every five minutes, on the Socket.io
+ * event loop. It cost nothing at one event and grows without limit.
+ *
+ * The bound is on **events**, not rows, and that is not arbitrary: the
+ * mass-checkout guard reasons about the share of a room that is leaving, so a
+ * half-fetched event would compute that share against a partial denominator and
+ * either trip on nothing or fail to trip on everything. A room is swept whole or
+ * not at all.
+ *
+ * Oldest open check-in first, so the backlog drains in order rather than the
+ * same rooms being swept forever while others are never reached. A swept room
+ * closes its rows and drops out of the ordering by itself.
+ *
+ * 200 events every five minutes is far above any real night and far below
+ * unbounded, which is the only property that matters here.
+ */
+export const MAX_EVENTS_PER_SWEEP = 200
+
 export interface SweepResult {
   examined: number
   prompted: number
@@ -53,8 +76,33 @@ function fenceFor(raw: unknown): Geofence | null {
 export async function sweepPresence(now: Date = new Date()): Promise<SweepResult> {
   const result: SweepResult = { examined: 0, prompted: 0, checkedOut: 0, guarded: [] }
 
-  const open = await db.event_check_ins.findMany({
+  /*
+   * Which rooms, before which rows. See MAX_EVENTS_PER_SWEEP.
+   *
+   * `groupBy` on an indexed predicate returns one row per event rather than one
+   * per attendee, so choosing the batch costs a fraction of fetching it.
+   */
+  const busiest = await db.event_check_ins.groupBy({
+    by: ["event_id"],
     where: { status: "checked_in" },
+    _min: { created_at: true },
+    orderBy: { _min: { created_at: "asc" } },
+    take: MAX_EVENTS_PER_SWEEP,
+  })
+  if (busiest.length === 0) return result
+
+  if (busiest.length === MAX_EVENTS_PER_SWEEP) {
+    // Not an error: the next pass picks up where this one stopped. Worth saying
+    // out loud, because a permanently full batch means the sweeper is behind
+    // and somebody is staying checked in longer than they should.
+    logger.warn("Presence sweep hit its event cap", { cap: MAX_EVENTS_PER_SWEEP })
+  }
+
+  const open = await db.event_check_ins.findMany({
+    where: {
+      status: "checked_in",
+      event_id: { in: busiest.map((b) => b.event_id) },
+    },
     select: {
       id: true,
       event_id: true,

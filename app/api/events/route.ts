@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
+import { resolveEventCity } from "@/lib/location"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
@@ -222,6 +223,26 @@ export async function POST(req: Request) {
       )
     }
 
+    /*
+     * The city is resolved here, once, rather than on every read.
+     *
+     * The discovery feed called `resolveEventCity` per event, and that
+     * reverse-geocodes through Nominatim whenever `city` is null -- so a page of
+     * twenty null-city rows fanned out twenty concurrent requests to a public
+     * API, on a user-facing path, bypassing the `/api/geocode` proxy that exists
+     * to stop exactly that.
+     *
+     * It was never a read-path question. An event's city is a fact about the
+     * event, decided when it is created, and it changes only when the
+     * coordinates do. Resolving it here means the read path has a value to
+     * serve and no reason to call anybody.
+     *
+     * Failure is not fatal: a null city costs a missing label on a card, and
+     * refusing to create an event because a geocoder is down is a much worse
+     * trade.
+     */
+    const resolvedCity = await resolveEventCity(city, latitude, longitude)
+
     const event = await db.events.create({
       data: {
         ...venueLink,
@@ -233,7 +254,7 @@ export async function POST(req: Request) {
         short_description,
         venue_name,
         address,
-        city,
+        city: resolvedCity,
         state,
         country,
         postal_code,
