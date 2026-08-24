@@ -89,13 +89,14 @@ model User {
   moderation_flags moderation_flags[]
 
   // Reporting (users/messages)
-  user_reports_filed    user_reports[]    @relation("UserReportReporter")
-  user_reports_received user_reports[]    @relation("UserReportReported")
+  user_reports_filed    user_reports[]      @relation("UserReportReporter")
+  user_reports_received user_reports[]      @relation("UserReportReported")
   message_reports       message_reports[]
   photo_checks          photo_checks[]
   city_demand           city_demand[]
   leads_assigned        leads[]
   lead_notes            lead_notes[]
+  checkInRefusals       check_in_refusals[]
 }
 
 model Account {
@@ -401,6 +402,7 @@ model events {
   venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
   organizer_org      organisations?             @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
   eventClaims        event_claims[]
+  checkInRefusals    check_in_refusals[]
 
   @@index([latitude, longitude])
   @@index([status, start_time])
@@ -1588,6 +1590,69 @@ model event_claims {
   @@index([status])
   @@index([event_id])
   @@index([org_id])
+}
+
+/// Somebody stood at the door and was turned away.
+///
+/// ## Why this exists
+///
+/// A refused check-in used to produce a 400 and no record, which made a wrong
+/// pin invisible until somebody complained -- and most people do not complain,
+/// they leave. That matters most for curated events, where the pin was placed
+/// by an admin who has never stood there, but it is the same blindness for an
+/// organiser who drew their fence around the wrong building.
+///
+/// One small table answers three questions: is a pin wrong, is a fence too
+/// tight, and how many people tried to get in and could not. The third is a
+/// genuine product signal and nothing else measures it.
+///
+/// ## What it deliberately does not store
+///
+/// **No coordinates.** `shortfall_metres` is how far outside they were, which
+/// is everything the diagnosis needs and cannot locate anybody. G11 found GPS
+/// surviving account deletion on `event_check_ins`; adding a second table with
+/// the same problem to fix the first would be absurd.
+///
+/// ## Retention (ER13)
+///
+/// Delete with the user. Rows are diagnostic, not evidence, and the aggregate a
+/// curation reviewer reads -- counts per event -- survives the individual rows
+/// going. Swept on the same 90-day window as the rest of the presence data.
+model check_in_refusals {
+  id            String  @id @default(uuid()) @db.Uuid
+  event_id      String  @db.Uuid
+  /// Which day, when the event has more than one. Null when none resolved.
+  occurrence_id String? @db.Uuid
+  user_id       String
+
+  reason           refusal_reason
+  /// Metres beyond the fence, buffer and accuracy allowance. Null unless the
+  /// refusal was about distance -- an age refusal has no shortfall.
+  shortfall_metres Int?
+  /// What the device claimed. A cluster of refusals at poor accuracy is a
+  /// different problem from a cluster at good accuracy, and only one of them is
+  /// the pin's fault.
+  accuracy_metres  Int?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  /// The curation-health read: refusals per event, newest first.
+  @@index([event_id, created_at])
+  @@index([user_id])
+}
+
+enum refusal_reason {
+  /// Outside the fence. The one that means the pin might be wrong.
+  out_of_range
+  /// No fence and no coordinates, so there was nothing to check against.
+  no_geofence
+  too_early
+  too_late
+  day_cancelled
+  under_age
 }
 
 enum event_claim_status {
