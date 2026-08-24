@@ -27,6 +27,7 @@ import {
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
+import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
 import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
@@ -424,13 +425,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!chatGroup) {
-      const checkIn = await db.event_check_ins.findFirst({
-      // Event-level, not per-day: attending any day of a run gets you the room.
-      where: { event_id: eventId, user_id: authUser.userId },
-        select: { status: true },
-      })
-
-      if (checkIn?.status !== "checked_in") {
+      /*
+       * The same entitlement the GET twin uses to create the room lazily.
+       *
+       * This asked for a check-in, so an RSVP'd user who opened the chat (which
+       * creates the room) and then sent the first message got 404 on the send
+       * -- the room they were looking at "not available". Two endpoints
+       * creating one room on two different conditions.
+       */
+      const entitlement = await resolveEntitlement(eventId, authUser.userId)
+      if (!entitlement) {
         return notFoundResponse("Chat not available for this event")
       }
 
@@ -501,17 +505,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Auto-join: if not a member yet, check if user is checked in
+    /*
+     * Auto-join, through the same resolver the GET uses.
+     *
+     * This hand-rolled its own gate -- `checkIn?.status !== "checked_in"` --
+     * while the GER above resolves an entitlement that also admits an RSVP or a
+     * saved event inside the pre-event window. So the two handlers on one
+     * resource disagreed about one person: the GET told an RSVP'd user
+     * `write.allowed: true`, the composer opened, and the POST answered
+     * NOT_CHECKED_IN after they had typed.
+     *
+     * Fixing only the write path would have left half the bug, because the lie
+     * is on the read: the user was told they could write. One resolver, both
+     * handlers, is the only version of this that stays fixed.
+     */
     if (!membership) {
-      const checkIn = await db.event_check_ins.findFirst({
-      // Event-level, not per-day: attending any day of a run gets you the room.
-      where: { event_id: eventId, user_id: authUser.userId },
-        select: { status: true },
-      })
+      const entitlement = await resolveEntitlement(eventId, authUser.userId)
+      const window = chatWindowState(chatGroup.event, chatGroup)
 
-      if (checkIn?.status !== "checked_in") {
+      if (!entitlementAdmits(entitlement, window)) {
+        // Which of the two things is missing, because the remedies differ:
+        // turn up, or come back tomorrow.
         return errorResponse(
-          "You must check in to the event to send messages",
+          entitlement
+            ? chatClosedMessage(window.open ? "window_closed" : window.reason)
+            : "RSVP to this event to join the chat",
           403,
           ErrorCode.NOT_CHECKED_IN
         )
@@ -774,6 +792,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         last_message_at: new Date(),
         updated_at: new Date(),
       },
+    })
+
+    /*
+     * Deliver it. This handler persisted the message and stopped.
+     *
+     * No socket emit and no push, so a message sent from the event chat screen
+     * was **invisible to everyone else until they re-polled** -- and for anyone
+     * who already had the room open, that is never. The sibling endpoint,
+     * writing to the same `chat_messages` table for the same group, has always
+     * done both.
+     *
+     * After moderation, never before. Emitting first and moderating after
+     * creates a window where flagged content is briefly visible to the room,
+     * which was a real bug here once already.
+     */
+    await deliverToRoom({
+      chatGroupId: chatGroup.id,
+      groupName: chatGroup.name,
+      senderId: authUser.userId,
+      senderAnonName: senderMembership?.anonymous_name || "Attendee",
+      message,
+      preview: previewFor(type, content),
     })
 
     return successResponse(
