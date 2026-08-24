@@ -8,10 +8,6 @@ import { displayNameInConversation } from "./conversation-identity"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
-import { startChatLifecycleSweeper } from "./chat-lifecycle"
-import { startNotificationRetentionSweeper } from "./notification-retention"
-import { startPresenceSweeper } from "./presence-sweeper"
-import { startSentimentSweeper } from "./sentiment-sweeper"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -202,41 +198,76 @@ export type AuthenticatedSocket = Socket<
  * live event — burns queries for rooms nobody has open, which at 5-second
  * granularity is most of them most of the time.
  */
-const opsTimers = new Map<string, NodeJS.Timeout>()
+interface OpsLoop {
+  timer: NodeJS.Timeout | undefined
+  /** Marks the loop stopped so an in-flight pass does not schedule a successor. */
+  stop: () => void
+}
+
+const opsTimers = new Map<string, OpsLoop>()
 const OPS_INTERVAL_MS = 5000
 
 export function startOpsBroadcast(eventId: string): void {
   if (!io || opsTimers.has(eventId)) return
 
-  const timer = setInterval(() => {
-    void (async () => {
-      const room = `event:${eventId}:ops`
+  /*
+   * Self-scheduling, not `setInterval`.
+   *
+   * This was the one loop in the codebase using `setInterval` with an async
+   * body -- `lib/presence-sweeper.ts` and `lib/sentiment-sweeper.ts` both
+   * schedule the next pass from the end of the current one, and both carry a
+   * comment saying a slow pass must not overlap the next.
+   *
+   * It matters more here than there. `buildLiveSnapshot` issues around ten
+   * round trips, three of them against predicates that were unindexed until
+   * recently, and it runs every five seconds per watched event. A pass that
+   * takes longer than five seconds under load starts the next one on top of
+   * it, and each overlapping pass makes the database slower, which makes the
+   * next pass longer. The failure is not a slow screen, it is a queue that
+   * cannot drain -- and it is on the Socket.io event loop, so chat delivery
+   * queues behind it.
+   *
+   * The `stopped` flag is the re-entrancy guard's other half: `stopOpsBroadcast`
+   * can fire while a pass is awaiting, and without it the pass would schedule a
+   * successor after the timer was cleared.
+   */
+  let stopped = false
+  const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
+
+  const tick = async (): Promise<void> => {
+    const room = `event:${eventId}:ops`
+    try {
       const watchers = io ? await io.in(room).fetchSockets() : []
       if (watchers.length === 0) {
         stopOpsBroadcast(eventId)
         return
       }
-      try {
-        const snapshot = await buildLiveSnapshot(eventId)
-        if (snapshot) io?.to(room).emit("ops:snapshot", snapshot)
-      } catch (error) {
-        // A failed snapshot must not kill the timer or the process — the next
-        // tick may well succeed, and a dead timer is a silently frozen screen.
-        logger.warn("Live snapshot failed", {
-          eventId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-    })()
-  }, OPS_INTERVAL_MS)
+      const snapshot = await buildLiveSnapshot(eventId)
+      if (snapshot) io?.to(room).emit("ops:snapshot", snapshot)
+    } catch (error) {
+      // A failed pass must not kill the loop or the process — the next one may
+      // well succeed, and a dead loop is a silently frozen screen.
+      logger.warn("Live snapshot failed", {
+        eventId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    if (stopped) return
+    state.timer = setTimeout(() => void tick(), OPS_INTERVAL_MS)
+    opsTimers.set(eventId, state)
+  }
 
-  opsTimers.set(eventId, timer)
+  state.timer = setTimeout(() => void tick(), OPS_INTERVAL_MS)
+  opsTimers.set(eventId, state)
 }
 
 export function stopOpsBroadcast(eventId: string): void {
-  const timer = opsTimers.get(eventId)
-  if (timer) {
-    clearInterval(timer)
+  const loop = opsTimers.get(eventId)
+  if (loop) {
+    // Both halves: clear the pending timer, and tell any in-flight pass not to
+    // schedule a successor when it finishes.
+    loop.stop()
+    if (loop.timer) clearTimeout(loop.timer)
     opsTimers.delete(eventId)
   }
 }
@@ -707,17 +738,17 @@ export function initSocketServer(httpServer: HttpServer): Server {
   // Load and start all active sponsored message timers
   startSponsoredScheduler()
 
-  // Chat rooms close themselves. No external cron to configure — and the
-  // immediate pass on boot is the important one, since deploys restart this
-  // process often enough that boot is when any backlog gets cleared.
-  startChatLifecycleSweeper()
-  startNotificationRetentionSweeper()
-  // Same place, same reason: one entry point that starts every background loop.
-  startPresenceSweeper()
-  // Classifies chatroom messages into event_feedback, which is what the live
-  // screen's mood and category panels have always read and never had.
-  startSentimentSweeper()
-
+  /*
+   * The three sweepers used to start here. They are `lib/background.ts` now,
+   * called from `server.ts`.
+   *
+   * None of them emits over a socket, so attaching a websocket server was never
+   * the right trigger — and the coupling failed silently: serve the app any way
+   * that does not call this function and all three stop with no log line, which
+   * renders as occupancy climbing for ever and "the event was quiet".
+   *
+   * The sponsored scheduler stays, because it genuinely does need `io`.
+   */
   logger.info("Socket.io server initialized")
   return io
 }
