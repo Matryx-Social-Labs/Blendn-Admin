@@ -23,7 +23,7 @@ export interface DashboardNavItem {
   icon: typeof IconDashboard
   allowedRoles: DashboardRole[]
   /** Renders a count next to the item. */
-  badgeKey?: "pendingFlags" | "pendingApplications"
+  badgeKey?: "pendingFlags" | "pendingApplications" | "pendingClaims"
   isActive?: (pathname: string) => boolean
 }
 
@@ -125,12 +125,25 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["app_admin"],
   },
   {
-    title: "Venue claims",
+    /*
+     * One entry, two queues.
+     *
+     * Was "Venue claims". Claims on an event and claims on a venue are separate
+     * tables answering separate questions, and one job done by one person in one
+     * sitting -- so a second nav entry would have been a second place to
+     * remember to look, which is how a queue ends up unread.
+     *
+     * `isActive` covers both, or the sidebar would un-highlight itself the
+     * moment somebody switched tab.
+     */
+    title: "Claims",
     description:
-      "Ownership requests. Approving one hands over the events other organisers hold there.",
-    url: "/dashboard/venue-claims",
+      "Ownership requests for events and venues. Approving one hands over an attendee list.",
+    url: "/dashboard/claims",
     icon: IconFileCheck,
     allowedRoles: ["app_admin"],
+    badgeKey: "pendingClaims",
+    isActive: (pathname) => pathname.startsWith("/dashboard/claims"),
   },
   {
     title: "Applications",

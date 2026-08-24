@@ -22,7 +22,14 @@ export default async function DashboardLayout({
   // The badge covers both moderation queues. Counting only flags would leave a
   // harassment report with no number anywhere in the chrome — and a report is
   // the one of the two with a person waiting on the other end.
-  const [flagCount, userReportCount, messageReportCount, pendingApplications] = isAdmin
+  const [
+    flagCount,
+    userReportCount,
+    messageReportCount,
+    pendingApplications,
+    eventClaims,
+    venueClaims,
+  ] = isAdmin
     ? await Promise.all([
         db.moderation_flags.count({ where: { status: "pending" } }),
         db.user_reports.count({ where: { status: "pending" } }),
@@ -30,9 +37,21 @@ export default async function DashboardLayout({
         db.organiser_onboarding_requests.count({
           where: { status: { in: ["pending", "email_pending"] } },
         }),
+        db.event_claims.count({ where: { status: "pending" } }),
+        db.venue_claims.count({ where: { status: "pending" } }),
       ])
-    : [0, 0, 0, 0]
+    : [0, 0, 0, 0, 0, 0]
   const pendingFlags = flagCount + userReportCount + messageReportCount
+  /*
+   * Both claim queues in one number, for the same reason the moderation badge
+   * covers both of its queues: the nav has one entry, so a count that covered
+   * only half of it would leave somebody waiting with no number anywhere in the
+   * chrome.
+   *
+   * Counted in the server layout rather than by a client effect -- an alert
+   * that pops in after paint is one the operator has already scrolled past.
+   */
+  const pendingClaims = eventClaims + venueClaims
 
   return (
     <SidebarProvider
@@ -43,7 +62,7 @@ export default async function DashboardLayout({
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" badges={{ pendingFlags, pendingApplications }} />
+      <AppSidebar variant="inset" badges={{ pendingFlags, pendingApplications, pendingClaims }} />
       <SidebarInset className="overflow-hidden border border-border bg-background">
         <SiteHeader />
         {/*

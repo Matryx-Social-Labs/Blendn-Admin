@@ -226,3 +226,107 @@ export async function decideEventClaim(
     details: { eventId: claim.event.id, title: claim.event.title, orgId: claim.org_id },
   })
 }
+
+export interface EventClaimRow {
+  id: string
+  eventId: string
+  eventTitle: string
+  eventCity: string | null
+  eventStartsAt: string
+  /** The listing it was curated from, so a reviewer can open it. */
+  sourceUrl: string | null
+  /** Null when the claimant has no account yet. */
+  orgName: string | null
+  contactEmail: string
+  note: string | null
+  flags: ClaimFlag[]
+  /** How many times this event has been claimed, including this one. */
+  claimNumber: number
+  createdAt: string
+  /** Hours waiting. Age is the SLA, same as the moderation queue. */
+  ageHours: number
+  /** Why it cannot be decided right now, if so. */
+  blocked: "room_open" | "already_claimed" | null
+}
+
+/**
+ * The queue, oldest first.
+ *
+ * Age is the SLA — the same rule the moderation queue states and for the same
+ * reason. A claimant waiting on an answer is an organiser deciding whether this
+ * platform is worth their time, and newest-first would bury exactly the ones
+ * who have been waiting longest.
+ */
+export async function getEventClaimQueue(): Promise<EventClaimRow[]> {
+  const session = await getAuth()
+  /*
+   * The read half is gated too, not only the decide half.
+   *
+   * This returns contact email addresses and free-text notes for every pending
+   * claim on the platform. The moderation queue had exactly this gap -- the page
+   * redirected non-admins and the action that returned the sensitive data did
+   * not -- and it is the half that actually serves the data.
+   */
+  if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
+
+  const claims = await db.event_claims.findMany({
+    where: { status: "pending" },
+    orderBy: { created_at: "asc" },
+    take: 200,
+    select: {
+      id: true,
+      contact_email: true,
+      note: true,
+      flags: true,
+      created_at: true,
+      org: { select: { display_name: true } },
+      event: {
+        select: {
+          id: true,
+          title: true,
+          city: true,
+          source_url: true,
+          // Carries start_time and end_time, which claimRefusal needs.
+          ...curationSelect,
+        },
+      },
+    },
+  })
+
+  // One grouped query rather than a count per row: the number of prior claims
+  // is the reviewer's most useful fact and should not cost N round trips.
+  const counts = await db.event_claims.groupBy({
+    by: ["event_id"],
+    where: { event_id: { in: claims.map((c) => c.event.id) } },
+    _count: { _all: true },
+  })
+  const claimsPerEvent = new Map(counts.map((c) => [c.event_id, c._count._all]))
+
+  const now = Date.now()
+  return claims.map((c) => {
+    const refusal = claimRefusal(c.event)
+    return {
+      id: c.id,
+      eventId: c.event.id,
+      eventTitle: c.event.title,
+      eventCity: c.event.city,
+      eventStartsAt: c.event.start_time.toISOString(),
+      sourceUrl: c.event.source_url,
+      orgName: c.org?.display_name ?? null,
+      contactEmail: c.contact_email,
+      note: c.note,
+      flags: Array.isArray(c.flags) ? (c.flags as ClaimFlag[]) : [],
+      claimNumber: claimsPerEvent.get(c.event.id) ?? 1,
+      createdAt: c.created_at.toISOString(),
+      ageHours: Math.floor((now - c.created_at.getTime()) / (60 * 60 * 1000)),
+      /*
+       * Surfaced rather than discovered on submit.
+       *
+       * `decideEventClaim` re-checks this and throws, which is correct and is a
+       * terrible way to learn it. A reviewer working a queue should see that a
+       * row cannot be actioned yet before they read it, not after they decide.
+       */
+      blocked: refusal === "not_curated" ? null : refusal,
+    }
+  })
+}
