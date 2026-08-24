@@ -156,3 +156,86 @@ describe("who to show as the host", () => {
       .toBe(true)
   })
 })
+
+/**
+ * Two things the engineering review found, both of which passed every existing
+ * test because both are absences.
+ */
+describe("the host resolver is actually wired to something", () => {
+  /*
+   * `lib/event-host.ts` was written, tested, and imported by NOTHING.
+   *
+   * Its own docstring says putting the curating admin's name on a public card
+   * "would be both wrong and a small privacy leak -- it is the one place a
+   * founder's real name would appear on an attendee-facing surface." That leak
+   * was live: `events.service.ts` selected `organizer: { id, name, image }`,
+   * which for a curated event is the ADMIN who ran the curation, and
+   * `EventDetailScreen.tsx:258` renders `d.organizer?.name`.
+   *
+   * This is A1-A7's dominant theme -- a correct mechanism with no input -- and
+   * nothing caught it because `server-actions-reachable` only scans `lib/`
+   * modules beginning with `"use server"`, which this one does not.
+   */
+  const service = code("lib/services/events.service.ts")
+
+  it("the mobile payload resolves the host rather than passing the creator through", () => {
+    expect(service).toMatch(/import \{ eventHost \} from "@\/lib\/event-host"/)
+    expect(service).toMatch(/eventHost\(event\)/)
+    // The producer, not just the consumer: pinning only `organizer:` would pass
+    // against a version that assigned `event.organizer` straight back.
+    expect(service).not.toMatch(/organizer: event\.organizer,/)
+  })
+
+  it("selects the columns the resolver needs", () => {
+    // `...eventHostSelect` cannot be spread here -- it claims `organizer` too,
+    // with a narrower shape, and would silently drop `id`/`image`. So the
+    // columns are named, and they have to stay named.
+    expect(service).toMatch(/curated_at: true/)
+    expect(service).toMatch(/organizer_org: \{ select: \{ display_name: true \} \}/)
+  })
+
+  it("never shows the curating admin", () => {
+    const curated = eventHost({
+      curated_at: new Date(),
+      organizer_org: null,
+      organizer: { name: "Sagar Kishore Kumar" },
+    })
+    expect(curated.name).toBe(PLATFORM_HOST)
+    expect(curated.isPlatform).toBe(true)
+  })
+})
+
+describe("two admins cannot both approve", () => {
+  /*
+   * H13, closed rather than inherited.
+   *
+   * `decideEventClaim` re-reads `claimRefusal` before its transaction, and a
+   * read outside a transaction is not a lock: two admins with the queue open
+   * both see `claimed_at IS NULL`, both pass, and both commit. The result is
+   * two rows saying `approved`, an event owned by whichever transaction
+   * committed last, and a second organisation told they got it.
+   */
+  it("has a partial unique on approved claims", () => {
+    const sql = readFileSync(
+      join(ROOT, "prisma/migrations/20260824140000_one_approved_claim/migration.sql"),
+      "utf8"
+    )
+    expect(sql).toMatch(/CREATE UNIQUE INDEX "event_claims_one_approved_per_event"/)
+    expect(sql).toMatch(/ON "event_claims" \("event_id"\)/)
+    expect(sql).toMatch(/WHERE "status" = 'approved'/)
+  })
+
+  it("turns the loser's constraint violation into the right sentence", () => {
+    const src = code(ACTIONS)
+    expect(src).toMatch(/event_claims_one_approved_per_event/)
+    expect(src).toMatch(/Somebody else's claim was approved first\./)
+  })
+
+  it("wraps the transaction, not just the pre-check", () => {
+    // The catch has to sit around `$transaction`. A catch around only the
+    // pre-check would be the bug wearing a handler.
+    const src = code(ACTIONS)
+    const guarded = /try \{\s*await db\.\$transaction/
+    expect(src).toMatch(guarded)
+  })
+})

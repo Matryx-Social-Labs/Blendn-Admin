@@ -1587,6 +1587,18 @@ model event_claims {
   event events         @relation(fields: [event_id], references: [id], onDelete: Cascade)
   org   organisations? @relation(fields: [org_id], references: [id], onDelete: Cascade)
 
+  /// Three partial unique indexes live in SQL, because Prisma cannot express a
+  /// `WHERE` on a unique. They are load-bearing, so they are named here:
+  ///
+  ///   event_claims_one_pending_per_org    (event_id, org_id)   WHERE pending
+  ///   event_claims_one_pending_per_email  (event_id, email)    WHERE pending
+  ///   event_claims_one_approved_per_event (event_id)           WHERE approved
+  ///
+  /// The third is the one that matters. `decideEventClaim` re-checks
+  /// `claimRefusal` before its transaction, and a check outside a transaction
+  /// is not a lock: two admins approving competing claims on one event both
+  /// pass it. Only the database can serialise that, which is H13 in the
+  /// register and the reason this is not left to the application.
   @@index([status])
   @@index([event_id])
   @@index([org_id])

@@ -186,37 +186,56 @@ export async function decideEventClaim(
     }
   }
 
-  await db.$transaction(async (tx) => {
-    await tx.event_claims.update({
-      where: { id: claimId },
-      data: {
-        status: decision === "approve" ? "approved" : "declined",
-        reviewed_by: admin.id,
-        reviewed_at: new Date(),
-        decision_note: trimmed || null,
-      },
-    })
+  /*
+   * The race the check above cannot close.
+   *
+   * `claimRefusal` is a read, and a read outside a transaction is not a lock:
+   * two admins with the queue open both see `claimed_at IS NULL`, both pass,
+   * and both commit -- two rows saying `approved`, the event belonging to
+   * whichever committed last, and a second organisation told they got it.
+   * `event_claims_one_approved_per_event` is what actually serialises it, so
+   * the loser lands in the catch. H13 in the register, closed rather than
+   * inherited for the third instance of this pattern.
+   */
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.event_claims.update({
+        where: { id: claimId },
+        data: {
+          status: decision === "approve" ? "approved" : "declined",
+          reviewed_by: admin.id,
+          reviewed_at: new Date(),
+          decision_note: trimmed || null,
+        },
+      })
 
-    if (decision !== "approve") return
+      if (decision !== "approve") return
 
-    // The one write that unlocks every screen.
-    await tx.events.update({
-      where: { id: claim.event.id },
-      data: { organizer_org_id: claim.org_id, claimed_at: new Date() },
-    })
+      // The one write that unlocks every screen.
+      await tx.events.update({
+        where: { id: claim.event.id },
+        data: { organizer_org_id: claim.org_id, claimed_at: new Date() },
+      })
 
-    /*
-     * Everyone else who asked is superseded, not declined.
-     *
-     * `declined` is a judgement about the claimant and reaches them as one. A
-     * claim that lost a race deserves a different word, and a reviewer looking
-     * at the queue later needs to be able to tell the two apart.
-     */
-    await tx.event_claims.updateMany({
-      where: { event_id: claim.event.id, status: "pending", id: { not: claimId } },
-      data: { status: "superseded", reviewed_at: new Date() },
+      /*
+       * Everyone else who asked is superseded, not declined.
+       *
+       * `declined` is a judgement about the claimant and reaches them as one. A
+       * claim that lost a race deserves a different word, and a reviewer looking
+       * at the queue later needs to be able to tell the two apart.
+       */
+      await tx.event_claims.updateMany({
+        where: { event_id: claim.event.id, status: "pending", id: { not: claimId } },
+        data: { status: "superseded", reviewed_at: new Date() },
+      })
     })
-  })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (message.includes("event_claims_one_approved_per_event")) {
+      throw new Error("Somebody else's claim was approved first.")
+    }
+    throw error
+  }
 
   auditLog({
     userId: admin.id,
