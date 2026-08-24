@@ -1,6 +1,6 @@
 import { logger } from "../logger"
 
-import { classifyWithLexicon } from "./lexicon"
+import { classifyWithLexicon, lexiconFallback } from "./lexicon"
 import {
   ISSUE_CATEGORIES,
   isIssueCategory,
@@ -150,8 +150,16 @@ async function classifyBatchWithLlm(
  *
  * If tier 3 is unavailable — no API key, an outage, a timeout — messages it
  * would have handled come back with the lexicon's best guess at low confidence
- * and `source: "lexicon"`, never a confident wrong label. The UI is expected to
- * present low confidence differently, which is why the field exists.
+ * and `source: "lexicon"`, never a confident wrong label.
+ *
+ * That sentence used to be false: the branch wrote a hardcoded
+ * `neutral / other` and the lexicon was never consulted, so a recognised safety
+ * report degraded into neutral chatter and the safety alert became unfireable.
+ * `lexiconFallback` is what makes it true.
+ *
+ * Low confidence is still not presented differently anywhere — no UI reads the
+ * field. That remains open, and is why the fallback keeps the CATEGORY rather
+ * than relying on a caller to notice the confidence.
  */
 export async function classifyMessages(
   messages: MessageToClassify[]
@@ -175,16 +183,22 @@ export async function classifyMessages(
         settled.push({ id: message.id, ...result })
         continue
       }
-      // Degraded path. Something is better than nothing here — an unlabelled
-      // message vanishes from the digest entirely — but it must be visibly
-      // uncertain rather than quietly wrong.
-      settled.push({
-        id: message.id,
-        sentiment: "neutral",
-        category: "other",
-        confidence: 0.2,
-        source: "lexicon",
-      })
+      /*
+       * Degraded path. The lexicon's best guess, which is what the docstring
+       * above has always promised and what this branch did not do.
+       *
+       * It wrote a hardcoded `neutral / other / 0.2`, so a message the lexicon
+       * had already recognised as a safety report came out as neutral chatter.
+       * `classifyWithLexicon` returns null for `safety_conduct` deliberately —
+       * to force a real read — and this branch is where that deliberate null
+       * became a discarded detection.
+       *
+       * The consequence is not cosmetic: `deriveAlerts` fires the safety alert
+       * on `category === "safety_conduct"`, so without OPENAI_API_KEY the
+       * safety alert was wired to a value nothing ever produced. `lib/env.ts`
+       * marks that key optional and `DEPLOYMENT.md` lists it as not required.
+       */
+      settled.push({ id: message.id, ...lexiconFallback(message.text) })
     }
   }
 

@@ -6,10 +6,22 @@
 import { db } from "./db"
 import { occupancyFrom } from "./occupancy"
 import { escalates } from "./sentiment/taxonomy"
+import { resolveOccurrence } from "./occurrences"
 
 import type { LiveSnapshot } from "./live-metrics"
 
 const MINUTE = 60 * 1000
+
+/**
+ * How many ten-minute slots with an arrival before there is a baseline.
+ *
+ * With one or two, the baseline *is* the opening rush, so every event would
+ * trip the entry alert on its own second bucket. Three is the smallest number
+ * from which "typical" means anything, and until then `medianRate10m` is 0 and
+ * the alert stays silent — which is the correct answer for the first half hour
+ * of an event, where a queue is expected.
+ */
+const MIN_BUCKETS_FOR_BASELINE = 3
 
 function median(values: number[]): number {
   if (values.length === 0) return 0
@@ -58,6 +70,25 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
    *
    * The database answers all of it. Same pattern as `lib/occupancy.ts:121-127`.
    */
+  /*
+   * Which day it is, resolved once, exactly as `getOccupancy` does.
+   *
+   * Every count below was event-wide, so on day two of a run *every day-one row
+   * was already checked out* -- and `leaving_early` compares
+   * checkedOut/checkedIn against 0.25, which meant it fired at doors on the
+   * second morning of every multi-day event and stayed on. An alert that is
+   * always on is an alert nobody reads, and it sits beside the safety one.
+   *
+   * `inside` had the mirror of the same problem: a day-one attendee the sweeper
+   * missed is still `checked_in` and was counted as in the building on day
+   * three.
+   *
+   * Falls back to event-wide when nothing resolves, which is identical for a
+   * single-day event and is the honest answer for an event between days.
+   */
+  const slot = await resolveOccurrence(eventId, now)
+  const today = slot.occurrence ? { occurrence_id: slot.occurrence.id } : {}
+
   const [
     checkedInTotal,
     checkedOutTotal,
@@ -70,16 +101,16 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     feedback,
   ] = await Promise.all([
     db.event_check_ins.count({
-      where: { event_id: eventId, status: { in: ["checked_in", "checked_out"] } },
+      where: { event_id: eventId, status: { in: ["checked_in", "checked_out"] }, ...today },
     }),
     db.event_check_ins.count({
-      where: { event_id: eventId, check_out_time: { not: null } },
+      where: { event_id: eventId, check_out_time: { not: null }, ...today },
     }),
     db.event_check_ins.count({
-      where: { event_id: eventId, status: "checked_in", kind: "staff" },
+      where: { event_id: eventId, status: "checked_in", kind: "staff", ...today },
     }),
     db.event_check_ins.count({
-      where: { event_id: eventId, check_in_time: { gte: tenMinutesAgo } },
+      where: { event_id: eventId, check_in_time: { gte: tenMinutesAgo }, ...today },
     }),
     /*
      * The arrival histogram, bucketed by Postgres rather than by a loop.
@@ -145,7 +176,16 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     staffInside,
     // Not surfaced on the live tab — attendance is the Overview's question.
     uniqueAttendance: 0,
-    capacity: event.max_capacity,
+    /*
+     * The occurrence's capacity, not the event's.
+     *
+     * This read `event.max_capacity` while `getOccupancy` resolved a
+     * per-occurrence one, so the live tab and the occupancy panel reported
+     * different fills for the same room -- the exact "two screens, one room, two
+     * answers" the comment six lines up says the shared module prevents. It
+     * prevented the arithmetic diverging and not the input.
+     */
+    capacity: slot.occurrence?.capacity ?? event.max_capacity,
   })
 
   /*
@@ -154,29 +194,33 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
    * festival — so the alert compares against this event's own baseline.
    */
   /*
-   * Empty buckets are counted, and that is not incidental.
+   * The baseline the entry alert compares against: a typical **busy** ten
+   * minutes, not a typical ten minutes.
    *
-   * The `GROUP BY` returns only slots that had an arrival, but the median has
-   * to be taken over EVERY completed slot since doors — a quiet hour is
-   * baseline information, and dropping its zeros would raise the median and
-   * make the arrival-rate alert progressively harder to fire. So the sparse
-   * result is expanded back into a dense series here.
+   * This used to densify the sparse `GROUP BY` back into every completed slot
+   * since doors, on the reasoning that "a quiet hour is baseline information
+   * and dropping its zeros would raise the median and make the alert
+   * progressively harder to fire".
    *
-   * The end bound is `min(now, end_time)`, where the old loop used `now`
-   * alone: after an event finished it kept appending empty buckets forever,
-   * dragging the median to zero.
+   * That is backwards, and it disabled the alert outright. Arrivals cluster
+   * hard at the start, so most slots of an evening are zero — the median of a
+   * mostly-zero series is **zero**, and `deriveAlerts` guards on
+   * `medianRate10m > 0`. It was the zeros that made it unfireable, and they got
+   * more effective as the night went on.
+   *
+   * The question the alert is asking is "is the door struggling right now",
+   * and an empty slot says nothing about how fast the door can move — it says
+   * nobody was arriving. So the baseline is the median over slots that had an
+   * arrival.
+   *
+   * At least three of them before it means anything: with one or two, the
+   * baseline is the opening rush itself, and every event would trip on its own
+   * second bucket.
    */
-  const arrivalsByBucket = new Map(
-    arrivalBuckets.map((row) => [row.bucket.getTime(), Number(row.n)])
-  )
-  const buckets: number[] = []
-  const doors = event.start_time
-  const lastTick = Math.min(now.getTime(), event.end_time.getTime())
-  for (let t = doors.getTime(); t + 10 * MINUTE <= lastTick; t += 10 * MINUTE) {
-    // Align to the same 600-second floor the query bucketed on.
-    const slot = Math.floor(t / (10 * MINUTE)) * (10 * MINUTE)
-    buckets.push(arrivalsByBucket.get(slot) ?? 0)
-  }
+  const busyBuckets = arrivalBuckets
+    .map((row) => Number(row.n))
+    .filter((n) => n > 0)
+  const buckets = busyBuckets.length >= MIN_BUCKETS_FOR_BASELINE ? busyBuckets : []
 
   const sentiment = { positive: 0, neutral: 0, negative: 0 }
   const categoryCounts = new Map<string, number>()
