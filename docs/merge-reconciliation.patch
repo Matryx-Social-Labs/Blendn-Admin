@@ -1,0 +1,873 @@
+commit 05257b9023214995ad35df0ec41dc2916b99eb75
+Merge: bfc6163 48825f5
+Author: Sagar Kishore Kumar <47300709+sagarkishore-7@users.noreply.github.com>
+Date:   Mon Aug 24 16:46:30 2026 +0200
+
+    sim: resolve #274 vs #268 and reconcile the guards
+
+diff --cc __tests__/negative-controls.json
+index 58f9528,0000000..a41c0b1
+mode 100644,000000..100644
+--- a/__tests__/negative-controls.json
++++ b/__tests__/negative-controls.json
+@@@ -1,69 -1,0 +1,117 @@@
+ +{
+ +  "$comment": [
+ +    "R16: every structural guard ships with a documented mutation proving it",
+ +    "fails against broken code. A grep guard that passes against a broken",
+ +    "codebase converts an unknown into a false assurance, which is worse than",
+-     "having no guard — and this project has already shipped one `sed` control",
+++    "having no guard \u2014 and this project has already shipped one `sed` control",
+ +    "that silently never matched.",
+ +    "",
+ +    "`verified` entries record a mutation that was applied, observed to fail,",
+ +    "and reverted. `grandfathered` is the ratchet: guards that predate this",
+ +    "registry and have no recorded control. That list may shrink and must never",
+-     "grow — `negative-controls.test.ts` fails on a new structural guard with no",
+++    "grow \u2014 `negative-controls.test.ts` fails on a new structural guard with no",
+ +    "entry.",
+ +    "",
+ +    "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
+ +    "the guard fails, revert, and move it into `verified` with what you saw.",
+ +    "Never `git checkout` the file to revert if you have uncommitted work in it;",
+ +    "copy it aside first. That mistake has already cost this project a block of",
+ +    "unsaved analysis."
+ +  ],
+ +  "verified": {
+ +    "event-notifications-reachable.test.ts": {
+ +      "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers, comments excluded",
+ +      "mutation": "Delete the `await notifyEventCancelled(...)` call in app/api/events/[id]/route.ts",
+ +      "observed": "1 failing: 'notifyEventCancelled is called from both cancellation paths'",
+ +      "date": "2026-08-20"
+ +    },
+ +    "notification-content-retention.test.ts": {
+ +      "guards": "notifications.body is redacted for content-bearing kinds, on both the single and bulk insert",
+ +      "mutation": "Replace both `body: storedBodyFor(data.type, body)` with `body,`",
+ +      "observed": "2 failing: 'both the single and the bulk insert redact' and 'neither insert passes the raw body through'. NOTE: before these two assertions existed the control passed green, which is what prompted adding them.",
+ +      "date": "2026-08-20"
+ +    },
+ +    "hot-path-indexes.test.ts": {
+ +      "guards": "the five hot-path indexes are declared in schema.prisma and created by a migration",
+ +      "mutation": "Remove `@@index([event_id, check_in_time])` from the event_check_ins model",
+ +      "observed": "1 failing: 'event_check_ins has @@index([event_id, check_in_time])'",
+ +      "date": "2026-08-20"
+++    },
+++    "server-actions-reachable.test.ts": {
+++      "guards": "every exported lib/ function has a caller, comments excluded, and KNOWN_UNREACHABLE is checked in both directions",
+++      "mutation": "Add an exported function to lib/ with no callers",
+++      "observed": "1 failing: 'every exported function has a caller'",
+++      "date": "2026-08-24"
+++    },
+++    "suspension-blast-radius.test.ts": {
+++      "guards": "a suspension reaches every enumerated channel; adding a channel without wiring it fails",
+++      "mutation": "Remove the suspended_at check from lib/auth.ts authorize()",
+++      "observed": "1 failing: the dashboard sign-in gate assertion",
+++      "date": "2026-08-24"
+++    },
+++    "event-ownership.test.ts": {
+++      "guards": "every events.create writes organizer_org_id",
+++      "mutation": "Drop organizer_org_id from the create in app/api/events/route.ts",
+++      "observed": "1 failing: 'every write path gives the event an owning organisation'",
+++      "date": "2026-08-24"
+++    },
+++    "counting-people-not-rows.test.ts": {
+++      "guards": "occupancy scopes 'who is inside' to the resolved occurrence, and resolves it once",
+++      "mutation": "Remove `...today` from both inside counts in lib/occupancy.ts",
+++      "observed": "1 failing: 'scopes the inside counts to the resolved occurrence'",
+++      "date": "2026-08-23"
+++    },
+++    "count-people-boundary.test.ts": {
+++      "guards": "no _count on check-ins anywhere in lib/ or app/; turn-up is not clamped to 100",
+++      "mutation": "Add `check_ins: true` to a _count select in lib/reports.ts",
+++      "observed": "1 failing: 'has no _count on check-ins anywhere in lib/ or app/'",
+++      "date": "2026-08-23"
+++    },
+++    "privacy-leaks.test.ts": {
+++      "guards": "B1, B2, B3, G6, G7, G12 \u2014 six surfaces resolve identity through their gate",
+++      "mutation": "Return the raw participant object from POST /api/mobile/conversations",
+++      "observed": "1 failing: 'resolves the other person through the conversation gate'",
+++      "date": "2026-08-23"
+++    },
+++    "moderation-correctness.test.ts": {
+++      "guards": "G3, G4, G5, G8, G13 \u2014 nothing is called clean that was not checked; a manual mute sticks",
+++      "mutation": "Write `moderation_status: \"clean\"` regardless of `examined` in lib/moderation/actions.ts",
+++      "observed": "1 failing: 'writes unchecked rather than clean when nobody looked'",
+++      "date": "2026-08-23"
+++    },
+++    "geocode-and-sweeper-bounds.test.ts": {
+++      "guards": "both geocoder doors are budgeted; the presence sweeper is bounded by event",
+++      "mutation": "Remove the event scope from the sweeper's findMany in lib/presence-sweeper.ts",
+++      "observed": "1 failing: 'takes a bounded set of events rather than every open check-in'",
+++      "date": "2026-08-23"
+ +    }
+ +  },
+ +  "grandfathered": [
+ +    "account-deletion.test.ts",
+ +    "amenities.test.ts",
+ +    "apply-theme.test.ts",
+ +    "authz-scoping-boundary.test.ts",
+ +    "block-reaches-the-room.test.ts",
+ +    "blur-derivative.test.ts",
+ +    "changelog.test.ts",
+ +    "chat-groups-live.test.ts",
+ +    "chat-window-select.test.ts",
+ +    "connect-request.test.ts",
+ +    "container-queries.test.ts",
+ +    "conversation-identity.test.ts",
+ +    "conversation-provenance.test.ts",
+ +    "device-preview.test.ts",
+ +    "leave-and-report.test.ts",
+ +    "match-notifications.test.ts",
+ +    "media-guidance.test.ts",
+ +    "notifications.test.ts",
+ +    "reveal-state.test.ts",
+ +    "room-write-access.test.ts",
+ +    "roster-age.test.ts",
+ +    "rsc-boundary.test.ts",
+ +    "server-action-authz.test.ts",
+ +    "server-import-boundary.test.ts",
+ +    "socket-handler-registration.test.ts",
+ +    "trust-not-exposed.test.ts"
+ +  ]
+ +}
+diff --cc __tests__/server-actions-reachable.test.ts
+index d789115,0000000..16800cf
+mode 100644,000000..100644
+--- a/__tests__/server-actions-reachable.test.ts
++++ b/__tests__/server-actions-reachable.test.ts
+@@@ -1,250 -1,0 +1,247 @@@
+ +import { readFileSync, readdirSync, statSync, existsSync } from "fs"
+ +import { join } from "path"
+ +
+ +import { stripComments } from "./support/strip-comments"
+ +
+ +/**
+ + * Every export in `lib/` is called by something.
+ + *
+ + * ## Why this exists
+ + *
+ + * This codebase has now produced the same bug many times over: a capability is
+ + * fully built, typechecked, usually unit-tested — and called by nothing.
+ + * `may_sponsor` with no writer. `canSendSystemMessages` with no caller.
+ + * `likeAtEvent` with no caller. `stopAllOpsBroadcasts` with no caller. Two
+ + * sponsor nav items pointing at pages that did not exist. Every one shipped
+ + * green, because nothing in `tsc`, `jest` or `eslint` asks "can anybody get
+ + * here".
+ + *
+ + * The expensive version of this bug is not the wasted code. It is documentation
+ + * that becomes false. `lib/venue-claim-actions.ts` argues that its review bar
+ + * can be relaxed because "auto-link is reversible — an organiser can unlink any
+ + * event from a venue". That sentence is load-bearing for a security posture, and
+ + * it is false while `unlinkEventVenue` has no caller.
+ + *
+ + * ## Two holes this used to have
+ + *
+ + * It scanned only `lib/` modules whose first line is `"use server"`. That is a
+ + * fraction of the write surface, and every dead export a later audit turned up
+ + * — `isRoleAddressFor`, `canPublish`, `notifyEventCancelled`, `getTrustSignal`
+ + * — sat outside it, invisible. It now scans every exported function in `lib/`.
+ + *
+ + * And `callersOf` was a word-boundary match over raw file text, so a name that
+ + * appeared only in a **comment** counted as a caller. `escalates` was precisely
+ + * that: mentioned in prose in `lib/sentiment-sweeper.ts` and
+ + * `components/dashboard/charts.tsx`, called from nowhere, and passing. A
+ + * reachability check that counts a mention is worse than no check — it converts
+ + * an unknown into a false assurance. Source is stripped of comments first.
+ + *
+ + * ## Ratchet, not allowlist
+ + *
+ + * `KNOWN_UNREACHABLE` is checked in both directions. A new dead export fails,
+ + * and so does a *stale* entry — wire one up and this test tells you to delete
+ + * the line. An allowlist that only ever grows is how this class of bug survived
+ + * so many rounds.
+ + */
+ +
+ +const ROOT = join(__dirname, "..")
+ +
+ +/**
+ + * Everything that can legitimately call into `lib/`.
+ + *
+ + * The root files matter as much as the directories: `server.ts` is the real
+ + * production entrypoint, and without it `initSocketServer`, `validateEnv`,
+ + * `ensureBucketExists` and every `stop*Sweeper` read as dead. `scripts/` counts
+ + * too — a maintenance script is a caller. It is not a *user* path, but the
+ + * failure being caught here is "nothing calls this at all", and a script that
+ + * an operator runs is a real answer to it.
+ + *
+ + * `__tests__` is deliberately absent. A test is not reachability; being called
+ + * only by its own unit test is the exact shape of the bug.
+ + */
+ +const CALLER_DIRS = ["lib", "app", "components", "hooks", "scripts"]
+ +const CALLER_FILES = [
+ +  "server.ts",
+ +  "middleware.ts",
+ +  "instrumentation.ts",
+ +  "instrumentation-client.ts",
+ +  "sentry.server.config.ts",
+ +  "sentry.edge.config.ts",
+ +  "prisma/seed.ts",
+ +]
+ +
+ +/**
+ + * Built, tested, and reachable by nobody. Each line is a missing screen or a
+ + * missing wire, not a decision to leave the code dead — so each says which.
+ + *
+ + * Deleting one of these is usually the wrong move: most are the half of a
+ + * feature that makes the other half honest, and dropping them would quietly
+ + * ratify a false docblock rather than fix it.
+ + */
+ +const KNOWN_UNREACHABLE = new Map<string, string>([
+ +  // --- Venues: rows can be created and then never corrected -----------------
+ +  ["assignVenueOwner", "no admin control on /dashboard/venue-owners/[id]; owner org is set at creation and never after"],
+ +  ["updateVenue", "no edit form anywhere; a venue can be created and never corrected"],
+ +  ["unlinkEventVenue", "the reversibility lib/venue-claim-actions.ts cites to justify its review bar"],
+ +
+ +  // --- Safety and moderation: built, documented, never on screen ------------
+-   ["canPublish", "no publish path calls the gate, so an event with no coordinates still publishes and accepts check-ins from anywhere on earth"],
+ +  ["fencesOverlap", "the two-events-one-building warning; the geofence editor never asks for it"],
+ +  ["getTrustSignal", "trust-not-exposed.test.ts says moderation reads this through the dashboard — no dashboard screen does"],
+ +  ["contactInfoWarning", "the sentence shown above the composer; the chat route returns checkContactInfo's bare hint instead"],
+ +  ["unmoderatedPhotos", "the read side of the photo audit recordPhotoCheck writes; no admin screen queries the backlog"],
+ +  ["canSendSystemMessages", "named in CLAUDE.md as caller-less; kept as the written rule until something needs it"],
+ +  ["canSendPushNotifications", "same — the rule exists, the caller does not"],
+ +
+ +  // --- Notifications and real-time: the client contract outruns the server --
+-   ["notifyEventCancelled", "nobody favouriting an event is told when it is cancelled"],
+-   ["notifyEventDetailsChanged", "same for a time or venue change"],
+ +  ["emitChatReaction", "docs/SOCKET_EVENTS.md publishes chat:reaction to clients; nothing emits it, and there is no reaction write path to emit from"],
+ +
+ +  // --- Half-wired flows ------------------------------------------------------
+ +  ["isRoleAddressFor", "the domain-verification email fallback; only the DNS TXT path is wired"],
+ +  ["domainVerifyEmail", "the template that fallback would send"],
+ +  ["expertiseFor", "nothing serves the expertise options for a chosen work field"],
+ +  ["formatAge", "the moderation queue has no age column, which is the SLA it formats"],
+ +  ["cleanupExpiredTokens", "no cron sweeps mobile_refresh_tokens, so revoked and expired rows accumulate forever"],
+ +
+ +  // --- Genuinely test-only, by design ---------------------------------------
+ +  ["workFieldsMissingExpertise", "its own docblock says exported for the test rather than run at import"],
+ +  ["resetSpamHistory", "test seam for module-level state; production never wants it"],
+ +  ["clearAllSpamHistory", "same"],
+ +  ["resetMemoryStore", "same, for the in-process rate-limit fallback"],
+ +])
+ +
+ +function walk(dir: string, out: string[] = []): string[] {
+ +  if (!existsSync(dir)) return out
+ +  for (const entry of readdirSync(dir)) {
+ +    const full = join(dir, entry)
+ +    if (statSync(full).isDirectory()) {
+ +      if (entry === "node_modules" || entry.startsWith(".")) continue
+ +      walk(full, out)
+ +    } else if (entry.endsWith(".ts") || entry.endsWith(".tsx")) {
+ +      out.push(full)
+ +    }
+ +  }
+ +  return out
+ +}
+ +
+ +const callerFiles = [
+ +  ...CALLER_DIRS.flatMap((d) => walk(join(ROOT, d))),
+ +  ...CALLER_FILES.map((f) => join(ROOT, f)).filter(existsSync),
+ +]
+ +
+ +/** Comment-stripped, once. Every match below runs against these, never the raw file. */
+ +const sources = new Map(callerFiles.map((f) => [f, stripComments(readFileSync(f, "utf8"))]))
+ +const libFiles = callerFiles.filter((f) => f.startsWith(join(ROOT, "lib")))
+ +const rel = (f: string) => f.slice(ROOT.length + 1)
+ +
+ +/**
+ + * Exported *functions* only.
+ + *
+ + * Types are erased and constants are data — neither can be "called by nothing"
+ + * in the sense that matters, and listing them would drown the signal. An
+ + * `export const x = () => ...` is a function by any other name, so it counts.
+ + */
+ +const EXPORTED_FUNCTION =
+ +  /^export\s+(?:async\s+)?function\s+(\w+)|^export\s+const\s+(\w+)\s*(?::[^=]*)?=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*(?::[^=]*)?=>/gm
+ +
+ +interface Export {
+ +  module: string
+ +  name: string
+ +}
+ +
+ +const exports_: Export[] = libFiles.flatMap((file) =>
+ +  [...sources.get(file)!.matchAll(EXPORTED_FUNCTION)].map((m) => ({
+ +    module: file,
+ +    name: m[1] ?? m[2],
+ +  }))
+ +)
+ +
+ +/** Which other files name this export. */
+ +function callersOf(exp: Export): string[] {
+ +  const word = new RegExp(`\\b${exp.name}\\b`)
+ +  return callerFiles.filter((f) => f !== exp.module && word.test(sources.get(f)!)).map(rel)
+ +}
+ +
+ +/**
+ + * Used by its own module, so the module's public entry point reaches it.
+ + *
+ + * `pointInPolygon` is exported so its unit test can pin the maths, and called
+ + * by `distanceToPolygon` two lines down. That is a file-internal helper, not
+ + * unreachable capability, and flagging it would add sixty lines of noise to
+ + * `KNOWN_UNREACHABLE` that teach a reader nothing.
+ + *
+ + * Deliberately shallow: it does not check that the *caller* is itself reachable,
+ + * so two dead exports propping each other up inside one file still pass. Closing
+ + * that needs real import resolution, and the ratchet is worth more than the
+ + * completeness.
+ + */
+ +function usedInsideOwnModule(exp: Export): boolean {
+ +  return (sources.get(exp.module)!.match(new RegExp(`\\b${exp.name}\\b`, "g")) ?? []).length > 1
+ +}
+ +
+ +const isReachable = (exp: Export) => callersOf(exp).length > 0 || usedInsideOwnModule(exp)
+ +
+ +describe("lib exports are reachable", () => {
+ +  it("found exports and callers to check, so this cannot pass vacuously", () => {
+ +    expect(libFiles.length).toBeGreaterThan(80)
+ +    expect(callerFiles.length).toBeGreaterThan(300)
+ +    expect(exports_.length).toBeGreaterThan(300)
+ +    // The root entrypoints, which are how every sweeper and initialiser is
+ +    // reached. A path typo here would silently mark them all dead.
+ +    expect(callerFiles).toContain(join(ROOT, "server.ts"))
+ +  })
+ +
+ +  it("every exported function has a caller", () => {
+ +    const dead = exports_
+ +      .filter((e) => !KNOWN_UNREACHABLE.has(e.name))
+ +      .filter((e) => !isReachable(e))
+ +      .map((e) => `${rel(e.module)} :: ${e.name}`)
+ +
+ +    // Listed rather than counted, so a failure names what to wire up, delete,
+ +    // or add to KNOWN_UNREACHABLE with a reason.
+ +    expect(dead).toEqual([])
+ +  })
+ +})
+ +
+ +describe("the unreachable list is current", () => {
+ +  it.each([...KNOWN_UNREACHABLE])("%s — %s", (name) => {
+ +    const exp = exports_.find((e) => e.name === name)
+ +    // A renamed or deleted export leaves a line here that means nothing.
+ +    expect(exp).toBeDefined()
+ +    expect(isReachable(exp as Export)).toBe(false)
+ +  })
+ +})
+ +
+ +/**
+ + * A `"use server"` file may only export async functions.
+ + *
+ + * `next build` enforces this — "can only export async functions, found object" —
+ + * and nothing else does. `lib/sponsor-actions.ts` carried a `const` array and a
+ + * re-exported sync function for several commits while `tsc`, `jest` and `eslint`
+ + * all passed; the branch simply could not be deployed, and the only way to find
+ + * out was a 40-second production build.
+ + *
+ + * Types are exempt: `export interface` and `export type` are erased before the
+ + * directive means anything.
+ + */
+ +describe("use-server modules export only async functions", () => {
+ +  const actionModules = libFiles
+ +    .map((f) => [f, readFileSync(f, "utf8")] as const)
+ +    .filter(([, src]) => src.trimStart().startsWith('"use server"'))
+ +
+ +  const EXPORT =
+ +    /^export\s+(?!async function|interface|type\s|\{[^}]*\}\s+from|default\s+async)(.+)$/gm
+ +
+ +  it("finds the use-server modules at all", () => {
+ +    expect(actionModules.length).toBeGreaterThan(8)
+ +  })
+ +
+ +  it.each(actionModules.map(([f, src]) => [rel(f), src]))("%s", (_label, src) => {
+ +    const offenders = [...(src as string).matchAll(EXPORT)]
+ +      .map((m) => m[0].split("\n")[0].trim())
+ +      // A bare `export { x }` re-export is only safe if x is an async
+ +      // function, which this cannot see — but it is also the shape that broke
+ +      // the build, so it is not exempt.
+ +      .filter((line) => !line.startsWith("export type") && !line.startsWith("export interface"))
+ +    expect(offenders).toEqual([])
+ +  })
+ +})
+commit fef2186ed477c3afc3031e859de878e4fbbf5ca1
+Merge: 05257b9 8912625
+Author: Sagar Kishore Kumar <47300709+sagarkishore-7@users.noreply.github.com>
+Date:   Mon Aug 24 16:47:37 2026 +0200
+
+    sim: resolve #275 vs #278 imports, register alerts guard
+
+diff --cc __tests__/negative-controls.json
+index a41c0b1,0000000..aa2b281
+mode 100644,000000..100644
+--- a/__tests__/negative-controls.json
++++ b/__tests__/negative-controls.json
+@@@ -1,117 -1,0 +1,123 @@@
+ +{
+ +  "$comment": [
+ +    "R16: every structural guard ships with a documented mutation proving it",
+ +    "fails against broken code. A grep guard that passes against a broken",
+ +    "codebase converts an unknown into a false assurance, which is worse than",
+ +    "having no guard \u2014 and this project has already shipped one `sed` control",
+ +    "that silently never matched.",
+ +    "",
+ +    "`verified` entries record a mutation that was applied, observed to fail,",
+ +    "and reverted. `grandfathered` is the ratchet: guards that predate this",
+ +    "registry and have no recorded control. That list may shrink and must never",
+ +    "grow \u2014 `negative-controls.test.ts` fails on a new structural guard with no",
+ +    "entry.",
+ +    "",
+ +    "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
+ +    "the guard fails, revert, and move it into `verified` with what you saw.",
+ +    "Never `git checkout` the file to revert if you have uncommitted work in it;",
+ +    "copy it aside first. That mistake has already cost this project a block of",
+ +    "unsaved analysis."
+ +  ],
+ +  "verified": {
+ +    "event-notifications-reachable.test.ts": {
+ +      "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers, comments excluded",
+ +      "mutation": "Delete the `await notifyEventCancelled(...)` call in app/api/events/[id]/route.ts",
+ +      "observed": "1 failing: 'notifyEventCancelled is called from both cancellation paths'",
+ +      "date": "2026-08-20"
+ +    },
+ +    "notification-content-retention.test.ts": {
+ +      "guards": "notifications.body is redacted for content-bearing kinds, on both the single and bulk insert",
+ +      "mutation": "Replace both `body: storedBodyFor(data.type, body)` with `body,`",
+ +      "observed": "2 failing: 'both the single and the bulk insert redact' and 'neither insert passes the raw body through'. NOTE: before these two assertions existed the control passed green, which is what prompted adding them.",
+ +      "date": "2026-08-20"
+ +    },
+ +    "hot-path-indexes.test.ts": {
+ +      "guards": "the five hot-path indexes are declared in schema.prisma and created by a migration",
+ +      "mutation": "Remove `@@index([event_id, check_in_time])` from the event_check_ins model",
+ +      "observed": "1 failing: 'event_check_ins has @@index([event_id, check_in_time])'",
+ +      "date": "2026-08-20"
+ +    },
+ +    "server-actions-reachable.test.ts": {
+ +      "guards": "every exported lib/ function has a caller, comments excluded, and KNOWN_UNREACHABLE is checked in both directions",
+ +      "mutation": "Add an exported function to lib/ with no callers",
+ +      "observed": "1 failing: 'every exported function has a caller'",
+ +      "date": "2026-08-24"
+ +    },
+ +    "suspension-blast-radius.test.ts": {
+ +      "guards": "a suspension reaches every enumerated channel; adding a channel without wiring it fails",
+ +      "mutation": "Remove the suspended_at check from lib/auth.ts authorize()",
+ +      "observed": "1 failing: the dashboard sign-in gate assertion",
+ +      "date": "2026-08-24"
+ +    },
+ +    "event-ownership.test.ts": {
+ +      "guards": "every events.create writes organizer_org_id",
+ +      "mutation": "Drop organizer_org_id from the create in app/api/events/route.ts",
+ +      "observed": "1 failing: 'every write path gives the event an owning organisation'",
+ +      "date": "2026-08-24"
+ +    },
+ +    "counting-people-not-rows.test.ts": {
+ +      "guards": "occupancy scopes 'who is inside' to the resolved occurrence, and resolves it once",
+ +      "mutation": "Remove `...today` from both inside counts in lib/occupancy.ts",
+ +      "observed": "1 failing: 'scopes the inside counts to the resolved occurrence'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "count-people-boundary.test.ts": {
+ +      "guards": "no _count on check-ins anywhere in lib/ or app/; turn-up is not clamped to 100",
+ +      "mutation": "Add `check_ins: true` to a _count select in lib/reports.ts",
+ +      "observed": "1 failing: 'has no _count on check-ins anywhere in lib/ or app/'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "privacy-leaks.test.ts": {
+ +      "guards": "B1, B2, B3, G6, G7, G12 \u2014 six surfaces resolve identity through their gate",
+ +      "mutation": "Return the raw participant object from POST /api/mobile/conversations",
+ +      "observed": "1 failing: 'resolves the other person through the conversation gate'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "moderation-correctness.test.ts": {
+ +      "guards": "G3, G4, G5, G8, G13 \u2014 nothing is called clean that was not checked; a manual mute sticks",
+ +      "mutation": "Write `moderation_status: \"clean\"` regardless of `examined` in lib/moderation/actions.ts",
+ +      "observed": "1 failing: 'writes unchecked rather than clean when nobody looked'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "geocode-and-sweeper-bounds.test.ts": {
+ +      "guards": "both geocoder doors are budgeted; the presence sweeper is bounded by event",
+ +      "mutation": "Remove the event scope from the sweeper's findMany in lib/presence-sweeper.ts",
+ +      "observed": "1 failing: 'takes a bounded set of events rather than every open check-in'",
+ +      "date": "2026-08-23"
+++    },
+++    "alerts-that-fire.test.ts": {
+++      "guards": "I5, I6, I7, I13 \u2014 three alerts that could not fire and one that could not stop",
+++      "mutation": "Densify the arrival buckets with zeros again in lib/live-snapshot.ts",
+++      "observed": "2 failing, incl. 'takes the baseline over slots that had an arrival'",
+++      "date": "2026-08-24"
+ +    }
+ +  },
+ +  "grandfathered": [
+ +    "account-deletion.test.ts",
+ +    "amenities.test.ts",
+ +    "apply-theme.test.ts",
+ +    "authz-scoping-boundary.test.ts",
+ +    "block-reaches-the-room.test.ts",
+ +    "blur-derivative.test.ts",
+ +    "changelog.test.ts",
+ +    "chat-groups-live.test.ts",
+ +    "chat-window-select.test.ts",
+ +    "connect-request.test.ts",
+ +    "container-queries.test.ts",
+ +    "conversation-identity.test.ts",
+ +    "conversation-provenance.test.ts",
+ +    "device-preview.test.ts",
+ +    "leave-and-report.test.ts",
+ +    "match-notifications.test.ts",
+ +    "media-guidance.test.ts",
+ +    "notifications.test.ts",
+ +    "reveal-state.test.ts",
+ +    "room-write-access.test.ts",
+ +    "roster-age.test.ts",
+ +    "rsc-boundary.test.ts",
+ +    "server-action-authz.test.ts",
+ +    "server-import-boundary.test.ts",
+ +    "socket-handler-registration.test.ts",
+ +    "trust-not-exposed.test.ts"
+ +  ]
+ +}
+commit 32b3ca2c2d3216609c0a7d6207fdbbc86d7c5659
+Merge: fef2186 aba281f
+Author: Sagar Kishore Kumar <47300709+sagarkishore-7@users.noreply.github.com>
+Date:   Mon Aug 24 16:48:55 2026 +0200
+
+    sim: fold the notification-retention sweeper into background.ts
+
+diff --cc __tests__/negative-controls.json
+index aa2b281,0000000..c3e7d57
+mode 100644,000000..100644
+--- a/__tests__/negative-controls.json
++++ b/__tests__/negative-controls.json
+@@@ -1,123 -1,0 +1,129 @@@
+ +{
+ +  "$comment": [
+ +    "R16: every structural guard ships with a documented mutation proving it",
+ +    "fails against broken code. A grep guard that passes against a broken",
+ +    "codebase converts an unknown into a false assurance, which is worse than",
+ +    "having no guard \u2014 and this project has already shipped one `sed` control",
+ +    "that silently never matched.",
+ +    "",
+ +    "`verified` entries record a mutation that was applied, observed to fail,",
+ +    "and reverted. `grandfathered` is the ratchet: guards that predate this",
+ +    "registry and have no recorded control. That list may shrink and must never",
+ +    "grow \u2014 `negative-controls.test.ts` fails on a new structural guard with no",
+ +    "entry.",
+ +    "",
+ +    "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
+ +    "the guard fails, revert, and move it into `verified` with what you saw.",
+ +    "Never `git checkout` the file to revert if you have uncommitted work in it;",
+ +    "copy it aside first. That mistake has already cost this project a block of",
+ +    "unsaved analysis."
+ +  ],
+ +  "verified": {
+ +    "event-notifications-reachable.test.ts": {
+ +      "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers, comments excluded",
+ +      "mutation": "Delete the `await notifyEventCancelled(...)` call in app/api/events/[id]/route.ts",
+ +      "observed": "1 failing: 'notifyEventCancelled is called from both cancellation paths'",
+ +      "date": "2026-08-20"
+ +    },
+ +    "notification-content-retention.test.ts": {
+ +      "guards": "notifications.body is redacted for content-bearing kinds, on both the single and bulk insert",
+ +      "mutation": "Replace both `body: storedBodyFor(data.type, body)` with `body,`",
+ +      "observed": "2 failing: 'both the single and the bulk insert redact' and 'neither insert passes the raw body through'. NOTE: before these two assertions existed the control passed green, which is what prompted adding them.",
+ +      "date": "2026-08-20"
+ +    },
+ +    "hot-path-indexes.test.ts": {
+ +      "guards": "the five hot-path indexes are declared in schema.prisma and created by a migration",
+ +      "mutation": "Remove `@@index([event_id, check_in_time])` from the event_check_ins model",
+ +      "observed": "1 failing: 'event_check_ins has @@index([event_id, check_in_time])'",
+ +      "date": "2026-08-20"
+ +    },
+ +    "server-actions-reachable.test.ts": {
+ +      "guards": "every exported lib/ function has a caller, comments excluded, and KNOWN_UNREACHABLE is checked in both directions",
+ +      "mutation": "Add an exported function to lib/ with no callers",
+ +      "observed": "1 failing: 'every exported function has a caller'",
+ +      "date": "2026-08-24"
+ +    },
+ +    "suspension-blast-radius.test.ts": {
+ +      "guards": "a suspension reaches every enumerated channel; adding a channel without wiring it fails",
+ +      "mutation": "Remove the suspended_at check from lib/auth.ts authorize()",
+ +      "observed": "1 failing: the dashboard sign-in gate assertion",
+ +      "date": "2026-08-24"
+ +    },
+ +    "event-ownership.test.ts": {
+ +      "guards": "every events.create writes organizer_org_id",
+ +      "mutation": "Drop organizer_org_id from the create in app/api/events/route.ts",
+ +      "observed": "1 failing: 'every write path gives the event an owning organisation'",
+ +      "date": "2026-08-24"
+ +    },
+ +    "counting-people-not-rows.test.ts": {
+ +      "guards": "occupancy scopes 'who is inside' to the resolved occurrence, and resolves it once",
+ +      "mutation": "Remove `...today` from both inside counts in lib/occupancy.ts",
+ +      "observed": "1 failing: 'scopes the inside counts to the resolved occurrence'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "count-people-boundary.test.ts": {
+ +      "guards": "no _count on check-ins anywhere in lib/ or app/; turn-up is not clamped to 100",
+ +      "mutation": "Add `check_ins: true` to a _count select in lib/reports.ts",
+ +      "observed": "1 failing: 'has no _count on check-ins anywhere in lib/ or app/'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "privacy-leaks.test.ts": {
+ +      "guards": "B1, B2, B3, G6, G7, G12 \u2014 six surfaces resolve identity through their gate",
+ +      "mutation": "Return the raw participant object from POST /api/mobile/conversations",
+ +      "observed": "1 failing: 'resolves the other person through the conversation gate'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "moderation-correctness.test.ts": {
+ +      "guards": "G3, G4, G5, G8, G13 \u2014 nothing is called clean that was not checked; a manual mute sticks",
+ +      "mutation": "Write `moderation_status: \"clean\"` regardless of `examined` in lib/moderation/actions.ts",
+ +      "observed": "1 failing: 'writes unchecked rather than clean when nobody looked'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "geocode-and-sweeper-bounds.test.ts": {
+ +      "guards": "both geocoder doors are budgeted; the presence sweeper is bounded by event",
+ +      "mutation": "Remove the event scope from the sweeper's findMany in lib/presence-sweeper.ts",
+ +      "observed": "1 failing: 'takes a bounded set of events rather than every open check-in'",
+ +      "date": "2026-08-23"
+ +    },
+ +    "alerts-that-fire.test.ts": {
+ +      "guards": "I5, I6, I7, I13 \u2014 three alerts that could not fire and one that could not stop",
+ +      "mutation": "Densify the arrival buckets with zeros again in lib/live-snapshot.ts",
+ +      "observed": "2 failing, incl. 'takes the baseline over slots that had an arrival'",
+ +      "date": "2026-08-24"
+++    },
+++    "background-survivability.test.ts": {
+++      "guards": "I8, I9, I14 \u2014 sweepers start from server.ts, the ops loop self-schedules, the archive count reports what changed",
+++      "mutation": "Remove startBackgroundWork() from server.ts",
+++      "observed": "1 failing: 'starts them from server.ts, deliberately'",
+++      "date": "2026-08-24"
+ +    }
+ +  },
+ +  "grandfathered": [
+ +    "account-deletion.test.ts",
+ +    "amenities.test.ts",
+ +    "apply-theme.test.ts",
+ +    "authz-scoping-boundary.test.ts",
+ +    "block-reaches-the-room.test.ts",
+ +    "blur-derivative.test.ts",
+ +    "changelog.test.ts",
+ +    "chat-groups-live.test.ts",
+ +    "chat-window-select.test.ts",
+ +    "connect-request.test.ts",
+ +    "container-queries.test.ts",
+ +    "conversation-identity.test.ts",
+ +    "conversation-provenance.test.ts",
+ +    "device-preview.test.ts",
+ +    "leave-and-report.test.ts",
+ +    "match-notifications.test.ts",
+ +    "media-guidance.test.ts",
+ +    "notifications.test.ts",
+ +    "reveal-state.test.ts",
+ +    "room-write-access.test.ts",
+ +    "roster-age.test.ts",
+ +    "rsc-boundary.test.ts",
+ +    "server-action-authz.test.ts",
+ +    "server-import-boundary.test.ts",
+ +    "socket-handler-registration.test.ts",
+ +    "trust-not-exposed.test.ts"
+ +  ]
+ +}
+diff --cc lib/background.ts
+index 0000000,030c1c1..2c131af
+mode 000000,100644..100644
+--- a/lib/background.ts
++++ b/lib/background.ts
+@@@ -1,0 -1,61 +1,73 @@@
++ // Relative imports: reachable from server.ts, and `build:server` compiles with
++ // plain tsc, which emits the @/ alias verbatim into the require().
++ import { logger } from "./logger"
++ import { startChatLifecycleSweeper, stopChatLifecycleSweeper } from "./chat-lifecycle"
++ import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
++ import { startSentimentSweeper, stopSentimentSweeper } from "./sentiment-sweeper"
+++import {
+++  startNotificationRetentionSweeper,
+++  stopNotificationRetentionSweeper,
+++} from "./notification-retention"
++ 
++ /**
++  * Every recurring job this process owns, in one place.
++  *
++  * ## Why this is not inside `initSocketServer`
++  *
++  * It used to be. Four loops were started as a side effect of attaching a
++  * websocket server, which coupled them to a decision they have nothing to do
++  * with — none of them emits over a socket, and three of them exist to keep
++  * numbers honest whether or not anyone is connected.
++  *
++  * The consequence was silence, not an error. Serve the app any way that does
++  * not call `initSocketServer` — `next start`, a preview deploy, a worker
++  * container — and every one of them stops with no log line. The presence
++  * sweeper stopping means nobody is ever checked out, so occupancy climbs for
++  * ever and `over_capacity` latches as a permanent critical alert; the sentiment
++  * sweeper stopping renders as "the event was quiet".
++  *
++  * Making it a step `server.ts` takes deliberately means the coupling is visible,
++  * a structural test can assert it, and splitting these into a worker process
++  * later is moving one call rather than untangling an initialiser.
++  *
++  * ## What is not here
++  *
++  * `sponsoredMessageScheduler` stays in `lib/socket-server.ts`: it emits into
++  * chat rooms, so it genuinely needs `io` to exist first. It is stopped by the
++  * same shutdown handler.
++  */
++ export function startBackgroundWork(): void {
++   // Chat rooms close themselves. No external cron to configure — and the
++   // immediate pass on boot is the important one, since deploys restart this
++   // process often enough that boot is when any backlog gets cleared.
++   startChatLifecycleSweeper()
++   startPresenceSweeper()
++   // Classifies chatroom messages into event_feedback, which is what the live
++   // screen's mood and category panels have always read and never had.
++   startSentimentSweeper()
+++  /*
+++   * Prunes `notifications`, which is a permanent copy of every push preview and
+++   * had nothing pruning it. Arrived with the retention work and is listed here
+++   * because this file is the list -- a job started anywhere else is a job that
+++   * stops silently the next time somebody serves the app differently.
+++   */
+++  startNotificationRetentionSweeper()
++ 
++   logger.info("Background work started", {
+ -    loops: ["chat-lifecycle", "presence", "sentiment"],
+++    loops: ["chat-lifecycle", "presence", "sentiment", "notification-retention"],
++   })
++ }
++ 
++ /**
++  * Stop them all. Called from the shutdown handler.
++  *
++  * Every one of these holds an unref'd timer, so a missed stop keeps the event
++  * loop alive and the process waits out the forced-exit timeout — which is how
++  * the ops broadcast came to be the fifth timer nobody was stopping.
++  */
++ export function stopBackgroundWork(): void {
++   stopChatLifecycleSweeper()
++   stopPresenceSweeper()
++   stopSentimentSweeper()
+++  stopNotificationRetentionSweeper()
++ }
+commit 70ea607e66cc3040657f7cce16945ed24454bb78
+Author: Sagar Kishore Kumar <47300709+sagarkishore-7@users.noreply.github.com>
+Date:   Mon Aug 24 16:51:21 2026 +0200
+
+    sim: fourth sweeper self-schedules; all guards registered
+
+diff --git a/__tests__/negative-controls.json b/__tests__/negative-controls.json
+index c3e7d57..2899e73 100644
+--- a/__tests__/negative-controls.json
++++ b/__tests__/negative-controls.json
+@@ -96,6 +96,36 @@
+       "mutation": "Remove startBackgroundWork() from server.ts",
+       "observed": "1 failing: 'starts them from server.ts, deliberately'",
+       "date": "2026-08-24"
++    },
++    "presence-one-resolver.test.ts": {
++      "guards": "C1, C2, C3, C4 \u2014 one fence resolver; the mass-checkout guard has a floor; no prompt",
++      "mutation": "Drop the venue step from resolveFence in lib/geofence.ts",
++      "observed": "1 failing: \"falls back to the venue's, which schema.prisma has always promised\"",
++      "date": "2026-08-24"
++    },
++    "chat-write-path.test.ts": {
++      "guards": "C5, C6 \u2014 one write path, one answer about who may write",
++      "mutation": "Remove the deliverToRoom call from app/api/mobile/events/[eventId]/chat/route.ts",
++      "observed": "3 failing, incl. 'delivers from the event-chat write path'",
++      "date": "2026-08-24"
++    },
++    "what-an-organiser-sees.test.ts": {
++      "guards": "W18, W41 \u2014 no email or raw id on the roster; a disclosure floor on the digest",
++      "mutation": "Replace `mayQuote(...)` with `const quotable = true` in the feedback digest",
++      "observed": "1 failing: 'derives `quotable` from the rule, not from a constant'",
++      "date": "2026-08-24"
++    },
++    "export-caps.test.ts": {
++      "guards": "every CSV export has a ceiling and an ordering",
++      "mutation": "Remove `take: REPORT_ROW_LIMIT` from the attendees export in lib/reports.ts",
++      "observed": "1 failing: 'caps every case in the switch'",
++      "date": "2026-08-24"
++    },
++    "no-async-setinterval.test.ts": {
++      "guards": "no setInterval drives an async body; every sweeper reschedules from a path a throw cannot skip",
++      "mutation": "Move the reschedule inside the try in lib/presence-sweeper.ts",
++      "observed": "1 failing: 'reschedules every sweeper even when a pass throws'",
++      "date": "2026-08-24"
+     }
+   },
+   "grandfathered": [
+diff --git a/__tests__/no-async-setinterval.test.ts b/__tests__/no-async-setinterval.test.ts
+index c41adae..4ef97ff 100644
+--- a/__tests__/no-async-setinterval.test.ts
++++ b/__tests__/no-async-setinterval.test.ts
+@@ -67,7 +67,7 @@ describe("recurring work schedules itself", () => {
+     expect(offenders).toEqual([])
+   })
+ 
+-  it("reschedules the three sweepers even when a pass throws", () => {
++  it("reschedules every sweeper even when a pass throws", () => {
+     /*
+      * The property that matters more than overlap. A sweeper that stops is
+      * invisible: occupancy climbs for ever, and the mood panel reads "the event
+@@ -84,6 +84,7 @@ describe("recurring work schedules itself", () => {
+       "lib/chat-lifecycle.ts",
+       "lib/presence-sweeper.ts",
+       "lib/sentiment-sweeper.ts",
++      "lib/notification-retention.ts",
+     ]) {
+       const src = code(join(ROOT, rel))
+       const tryAt = src.indexOf("try {")
+diff --git a/lib/notification-retention.ts b/lib/notification-retention.ts
+index f71146e..bed73ad 100644
+--- a/lib/notification-retention.ts
++++ b/lib/notification-retention.ts
+@@ -32,7 +32,7 @@ export const UNREAD_RETENTION_DAYS = 90
+ const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
+ const BATCH_LIMIT = 5_000
+ 
+-let sweepTimer: ReturnType<typeof setInterval> | null = null
++let sweepTimer: ReturnType<typeof setTimeout> | null = null
+ 
+ function daysAgo(days: number, now: Date): Date {
+   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+@@ -81,21 +81,40 @@ async function runSweep(): Promise<void> {
+ }
+ 
+ /**
+- * Start the sweeper. Runs once immediately, then on an interval.
++ * Start the sweeper. Runs once immediately, then schedules itself.
+  *
+  * Same shape as `startChatLifecycleSweeper`, and for the same reason: deploys
+  * restart this process regularly, so boot is when any backlog gets cleared.
++ *
++ * Self-scheduling rather than `setInterval`, like the other three. A prune pass
++ * deletes in batches of 5,000 and takes locks a table every bell read touches,
++ * so it is the sweeper here most able to outlast its own interval — and
++ * `setInterval` would start the next pass on top of it, taking the same locks
++ * twice.
++ *
++ * The `finally` is what keeps the loop alive: `runSweep` swallows its own
++ * errors, and rescheduling from `finally` covers the case where it somehow
++ * throws anyway. A retention sweeper that stops is silent, and what accumulates
++ * is a permanent copy of every push preview.
+  */
+ export function startNotificationRetentionSweeper(): void {
+   if (sweepTimer) return
+-  void runSweep()
+-  sweepTimer = setInterval(() => void runSweep(), SWEEP_INTERVAL_MS)
+-  sweepTimer.unref?.()
++
++  const loop = async () => {
++    try {
++      await runSweep()
++    } finally {
++      sweepTimer = setTimeout(() => void loop(), SWEEP_INTERVAL_MS)
++      sweepTimer.unref?.()
++    }
++  }
++
++  void loop()
+ }
+ 
+ export function stopNotificationRetentionSweeper(): void {
+   if (sweepTimer) {
+-    clearInterval(sweepTimer)
++    clearTimeout(sweepTimer)
+     sweepTimer = null
+   }
+ }
