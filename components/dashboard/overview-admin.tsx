@@ -50,7 +50,55 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
   ]
 
   const cityColumns: Column<CityRow & { id: string }>[] = [
-    { key: "city", label: "City", sortType: "string", primary: true },
+    {
+      key: "city",
+      label: "City",
+      sortType: "string",
+      primary: true,
+      /*
+       * The row links into the curation queue for that city, so the read
+       * surface opens the write surface.
+       *
+       * That is structural rather than tidy. `city_demand` was written on every
+       * miss for months and read by nothing, and the way a signal ends up with
+       * no reader is that seeing it and acting on it live on different screens.
+       */
+      render: (row) => (
+        <Link
+          href={`/dashboard/events/curate?city=${encodeURIComponent(row.city)}`}
+          className="hover:underline"
+        >
+          {row.city}
+          {row.launchReady ? (
+            <span
+              className="ml-2 rounded-full border border-success/40 px-1.5 py-0.5 text-[0.6875rem] text-success"
+              title={`${row.waiting} people looking here and nothing to show them`}
+            >
+              ready
+            </span>
+          ) : null}
+        </Link>
+      ),
+    },
+    {
+      key: "waiting",
+      label: "Waiting",
+      align: "right",
+      sortType: "number",
+      /*
+       * Distinct people who looked here and found nothing. The column this
+       * table existed to have and never did — it was built by iterating events,
+       * so a city with demand and no events could not appear in it at all.
+       */
+      render: (row) =>
+        row.waiting > 0 ? (
+          <b className={row.launchReady ? "font-bold text-success" : "font-bold"}>
+            {formatNumber(row.waiting)}
+          </b>
+        ) : (
+          <span className="text-faint-foreground">—</span>
+        ),
+    },
     { key: "events", label: "Events", align: "right", sortType: "number" },
     { key: "rsvps", label: "RSVPs", align: "right", sortType: "number" },
     { key: "favourites", label: "Saves", align: "right", secondary: true, sortType: "number" },

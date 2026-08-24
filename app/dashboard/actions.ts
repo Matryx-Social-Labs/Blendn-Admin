@@ -7,6 +7,8 @@ import type { user_role } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
+import { cityDemand } from "@/lib/demand"
+import { cityKey } from "@/lib/address"
 import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
@@ -475,14 +477,49 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }))
     .sort((a, b) => b.published - a.published)
 
+  /*
+   * Cities, keyed the way the rest of the codebase keys them.
+   *
+   * This folded on the raw `city` string, so "Bengaluru" and "bengaluru" were
+   * two rows in the table a founder reads to decide where to launch. `cityKey`
+   * is what `city_demand` stores and what the events cache normalises on;
+   * anything else here would guarantee the two sides never line up.
+   */
   const cityMap = new Map<string, CityRow>()
   for (const event of cityRows) {
     const city = event.city as string
-    const existing = cityMap.get(city) ?? { city, events: 0, rsvps: 0, favourites: 0 }
+    const key = cityKey(city)
+    const existing = cityMap.get(key) ?? {
+      city, events: 0, rsvps: 0, favourites: 0, waiting: 0, launchReady: false,
+    }
     existing.events += 1
     existing.rsvps += event._count.rsvps
     existing.favourites += event._count.favorites
-    cityMap.set(city, existing)
+    cityMap.set(key, existing)
+  }
+
+  /*
+   * C12: the list could not render the signal it existed to collect.
+   *
+   * Built by iterating events, so a city with demand and ZERO events could not
+   * appear at all -- which is exactly the city the number is for: somewhere
+   * people are looking and nobody is supplying.
+   */
+  for (const row of await cityDemand(50)) {
+    const existing = cityMap.get(row.cityKey)
+    if (existing) {
+      existing.waiting = row.waiting
+      existing.launchReady = row.launchReady
+    } else {
+      cityMap.set(row.cityKey, {
+        city: row.city,
+        events: 0,
+        rsvps: 0,
+        favourites: 0,
+        waiting: row.waiting,
+        launchReady: row.launchReady,
+      })
+    }
   }
 
   /*
