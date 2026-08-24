@@ -84,3 +84,73 @@ Scope: `blendn-admin/` findings from an end-to-end flow audit (backend authoriza
 - Backend: ~70 mobile/admin API routes reviewed — ownership/membership checks consistently applied (profiles PUT, conversations, chat group messages/participants, check-ins, event PATCH/DELETE, moderation, blocks, account deletion) except the one item fixed above.
 - GPS check-in is server-validated (haversine distance) and rate-limited.
 - API error responses never leak stack traces. Sentry configured without PII collection.
+
+---
+
+## Measured against Railway, 2026-08-24
+
+Everything below was checked against the live `staging` and `production`
+environments rather than read out of the code. Both are healthy
+(`/api/health` returns `ok`, database connected); production is on **v0.60.0**
+and staging on **v0.69.0**.
+
+### [ ] There is no error monitoring in production, or in staging
+
+`NEXT_PUBLIC_SENTRY_DSN` is **absent from both environments.** All three Sentry
+configs read it and set `enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN`, so
+Sentry initialises disabled and reports nothing, anywhere.
+
+The wiring is complete and good — `@sentry/nextjs` is a dependency, `beforeSend`
+and `IGNORED_ERRORS` come from `lib/sentry-scrub.ts`, and `sendDefaultPii` is
+false. Nothing is missing except the DSN.
+
+This subsumes the earlier note that sourcemap upload no-ops without
+`SENTRY_AUTH_TOKEN`: that is true, and it is a symptom. The larger fact is that
+an unhandled exception in production is currently visible only in Railway's
+deploy logs, and only if somebody is looking.
+
+**Needs a Sentry project**, so it is the product owner's action rather than a
+code change. Set `NEXT_PUBLIC_SENTRY_DSN` on both services; add
+`SENTRY_AUTH_TOKEN` to get sourcemaps with it.
+
+### [ ] Production is nine minor versions behind staging
+
+`prod` last deployed 2026-08-08 at v0.60.0; staging is at v0.69.0. Production's
+schema stops at `20260808_preferences_and_trust` and is missing `notifications`,
+`city_demand` and `photo_checks` entirely.
+
+Not a defect, but it changes how a finding should be read: several audit items
+describe code that production is not yet running.
+
+### Resolved by measurement — do not re-audit
+
+- **`OPENAI_API_KEY` is set in both environments.** Several findings (G3, I7)
+  are premised on it being absent because `lib/env.ts` marks it optional. The
+  code defects are real on the error and timeout paths; the missing-key path is
+  not currently taken. Staging shows `clean` and `hidden` written as recently as
+  2026-08-16.
+- **`REDIS_URL` is set in both.** The rate limiter and the spam burst counter
+  are genuinely shared, not per-replica.
+- **Tigris is configured correctly** under `TIGRIS_*`. `CLAUDE.md` documented
+  `AWS_*` and has been corrected — that mismatch would have silently disabled
+  uploads for anyone configuring from it.
+- **No event has more than one occurrence**, in either environment. The
+  multi-day counting inflation (I1/W17) is a real defect and is **latent**: it
+  cannot be producing wrong numbers today.
+- **No `chat_group_members` row has `status = 'muted'`** in either environment,
+  so the mute-provenance backfill is a no-op against live data.
+- `peer_ratings`, `message_reactions` and `event_reports` are **empty in
+  production**, consistent with the audit's finding that each lacks a writer, a
+  reader, or both.
+
+### [ ] Most chat messages have no moderation status at all
+
+356 of 389 staging messages and 332 of 363 production messages have
+`moderation_status IS NULL`, spanning the same date range as the rows that do
+have one. The pipeline runs — `clean` and `hidden` are written — but most
+messages never reach it, which is consistent with `chat_messages` having write
+paths that bypass moderation entirely (the sponsored scheduler and the
+announcement routes both write the table directly).
+
+Worth a decision: either those paths moderate, or `null` becomes a documented
+state meaning "not user content".
