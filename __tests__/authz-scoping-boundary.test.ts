@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 
+import { stripComments } from "./support/strip-comments"
+
 /**
  * Authorization is organisation-shaped. Nothing may hand-roll it.
  *
@@ -53,14 +55,6 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
     else if (/\.tsx?$/.test(entry)) acc.push(full)
   }
   return acc
-}
-
-/**
- * Comments explain these bugs at several call sites, so a naive grep matches
- * the prose describing the fix and fails on correct code. Strip comments first.
- */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
 }
 
 /** Identity-scoped authorization comparisons that the resolver should own. */

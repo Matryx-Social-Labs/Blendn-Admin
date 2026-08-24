@@ -1,13 +1,15 @@
-import { readFileSync, readdirSync, statSync } from "fs"
+import { readFileSync, readdirSync, statSync, existsSync } from "fs"
 import { join } from "path"
 
+import { stripComments } from "./support/strip-comments"
+
 /**
- * Every server action is called by something a user can reach.
+ * Every export in `lib/` is called by something.
  *
  * ## Why this exists
  *
- * This codebase has now produced the same bug six times: a capability is fully
- * built, typechecked, usually unit-tested — and called by nothing.
+ * This codebase has now produced the same bug many times over: a capability is
+ * fully built, typechecked, usually unit-tested — and called by nothing.
  * `may_sponsor` with no writer. `canSendSystemMessages` with no caller.
  * `likeAtEvent` with no caller. `stopAllOpsBroadcasts` with no caller. Two
  * sponsor nav items pointing at pages that did not exist. Every one shipped
@@ -20,28 +22,98 @@ import { join } from "path"
  * event from a venue". That sentence is load-bearing for a security posture, and
  * it is false while `unlinkEventVenue` has no caller.
  *
+ * ## Two holes this used to have
+ *
+ * It scanned only `lib/` modules whose first line is `"use server"`. That is a
+ * fraction of the write surface, and every dead export a later audit turned up
+ * — `isRoleAddressFor`, `canPublish`, `notifyEventCancelled`, `getTrustSignal`
+ * — sat outside it, invisible. It now scans every exported function in `lib/`.
+ *
+ * And `callersOf` was a word-boundary match over raw file text, so a name that
+ * appeared only in a **comment** counted as a caller. `escalates` was precisely
+ * that: mentioned in prose in `lib/sentiment-sweeper.ts` and
+ * `components/dashboard/charts.tsx`, called from nowhere, and passing. A
+ * reachability check that counts a mention is worse than no check — it converts
+ * an unknown into a false assurance. Source is stripped of comments first.
+ *
  * ## Ratchet, not allowlist
  *
- * `KNOWN_UNREACHABLE` is checked in both directions. A new dead action fails,
+ * `KNOWN_UNREACHABLE` is checked in both directions. A new dead export fails,
  * and so does a *stale* entry — wire one up and this test tells you to delete
  * the line. An allowlist that only ever grows is how this class of bug survived
- * six rounds.
+ * so many rounds.
  */
 
 const ROOT = join(__dirname, "..")
-const PRODUCT_DIRS = ["lib", "app", "components", "hooks"]
 
 /**
- * Built, tested, and reachable by nobody. Each line is a missing screen, not a
- * decision to leave the code dead.
+ * Everything that can legitimately call into `lib/`.
  *
- * `assignVenueOwner`  — no admin control on /dashboard/venue-owners/[id].
- * `updateVenue`       — a venue can be created and never edited.
- * `unlinkEventVenue`  — the reversibility that venue-claim review leans on.
+ * The root files matter as much as the directories: `server.ts` is the real
+ * production entrypoint, and without it `initSocketServer`, `validateEnv`,
+ * `ensureBucketExists` and every `stop*Sweeper` read as dead. `scripts/` counts
+ * too — a maintenance script is a caller. It is not a *user* path, but the
+ * failure being caught here is "nothing calls this at all", and a script that
+ * an operator runs is a real answer to it.
+ *
+ * `__tests__` is deliberately absent. A test is not reachability; being called
+ * only by its own unit test is the exact shape of the bug.
  */
-const KNOWN_UNREACHABLE = new Set(["assignVenueOwner", "updateVenue", "unlinkEventVenue"])
+const CALLER_DIRS = ["lib", "app", "components", "hooks", "scripts"]
+const CALLER_FILES = [
+  "server.ts",
+  "middleware.ts",
+  "instrumentation.ts",
+  "instrumentation-client.ts",
+  "sentry.server.config.ts",
+  "sentry.edge.config.ts",
+  "prisma/seed.ts",
+]
+
+/**
+ * Built, tested, and reachable by nobody. Each line is a missing screen or a
+ * missing wire, not a decision to leave the code dead — so each says which.
+ *
+ * Deleting one of these is usually the wrong move: most are the half of a
+ * feature that makes the other half honest, and dropping them would quietly
+ * ratify a false docblock rather than fix it.
+ */
+const KNOWN_UNREACHABLE = new Map<string, string>([
+  // --- Venues: rows can be created and then never corrected -----------------
+  ["assignVenueOwner", "no admin control on /dashboard/venue-owners/[id]; owner org is set at creation and never after"],
+  ["updateVenue", "no edit form anywhere; a venue can be created and never corrected"],
+  ["unlinkEventVenue", "the reversibility lib/venue-claim-actions.ts cites to justify its review bar"],
+
+  // --- Safety and moderation: built, documented, never on screen ------------
+  ["canPublish", "no publish path calls the gate, so an event with no coordinates still publishes and accepts check-ins from anywhere on earth"],
+  ["fencesOverlap", "the two-events-one-building warning; the geofence editor never asks for it"],
+  ["getTrustSignal", "trust-not-exposed.test.ts says moderation reads this through the dashboard — no dashboard screen does"],
+  ["contactInfoWarning", "the sentence shown above the composer; the chat route returns checkContactInfo's bare hint instead"],
+  ["unmoderatedPhotos", "the read side of the photo audit recordPhotoCheck writes; no admin screen queries the backlog"],
+  ["canSendSystemMessages", "named in CLAUDE.md as caller-less; kept as the written rule until something needs it"],
+  ["canSendPushNotifications", "same — the rule exists, the caller does not"],
+
+  // --- Notifications and real-time: the client contract outruns the server --
+  ["notifyEventCancelled", "nobody favouriting an event is told when it is cancelled"],
+  ["notifyEventDetailsChanged", "same for a time or venue change"],
+  ["emitChatReaction", "docs/SOCKET_EVENTS.md publishes chat:reaction to clients; nothing emits it, and there is no reaction write path to emit from"],
+
+  // --- Half-wired flows ------------------------------------------------------
+  ["isRoleAddressFor", "the domain-verification email fallback; only the DNS TXT path is wired"],
+  ["domainVerifyEmail", "the template that fallback would send"],
+  ["expertiseFor", "nothing serves the expertise options for a chosen work field"],
+  ["formatAge", "the moderation queue has no age column, which is the SLA it formats"],
+  ["cleanupExpiredTokens", "no cron sweeps mobile_refresh_tokens, so revoked and expired rows accumulate forever"],
+
+  // --- Genuinely test-only, by design ---------------------------------------
+  ["workFieldsMissingExpertise", "its own docblock says exported for the test rather than run at import"],
+  ["resetSpamHistory", "test seam for module-level state; production never wants it"],
+  ["clearAllSpamHistory", "same"],
+  ["resetMemoryStore", "same, for the in-process rate-limit fallback"],
+])
 
 function walk(dir: string, out: string[] = []): string[] {
+  if (!existsSync(dir)) return out
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) {
@@ -54,54 +126,91 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-const productFiles = PRODUCT_DIRS.flatMap((d) => walk(join(ROOT, d)))
-const sources = new Map(productFiles.map((f) => [f, readFileSync(f, "utf8")]))
+const callerFiles = [
+  ...CALLER_DIRS.flatMap((d) => walk(join(ROOT, d))),
+  ...CALLER_FILES.map((f) => join(ROOT, f)).filter(existsSync),
+]
 
-/** `"use server"` modules — the ones whose exports are the app's write surface. */
-const actionModules = [...sources.entries()].filter(
-  ([f, src]) => f.includes(`${"lib"}/`) && src.trimStart().startsWith('"use server"')
-)
+/** Comment-stripped, once. Every match below runs against these, never the raw file. */
+const sources = new Map(callerFiles.map((f) => [f, stripComments(readFileSync(f, "utf8"))]))
+const libFiles = callerFiles.filter((f) => f.startsWith(join(ROOT, "lib")))
+const rel = (f: string) => f.slice(ROOT.length + 1)
 
-interface Action {
+/**
+ * Exported *functions* only.
+ *
+ * Types are erased and constants are data — neither can be "called by nothing"
+ * in the sense that matters, and listing them would drown the signal. An
+ * `export const x = () => ...` is a function by any other name, so it counts.
+ */
+const EXPORTED_FUNCTION =
+  /^export\s+(?:async\s+)?function\s+(\w+)|^export\s+const\s+(\w+)\s*(?::[^=]*)?=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*(?::[^=]*)?=>/gm
+
+interface Export {
   module: string
   name: string
 }
 
-const actions: Action[] = actionModules.flatMap(([file, src]) =>
-  [...src.matchAll(/^export async function (\w+)/gm)].map((m) => ({
+const exports_: Export[] = libFiles.flatMap((file) =>
+  [...sources.get(file)!.matchAll(EXPORTED_FUNCTION)].map((m) => ({
     module: file,
-    name: m[1],
+    name: m[1] ?? m[2],
   }))
 )
 
-/** Does any product file other than the declaring one mention this name? */
-function callersOf(action: Action): string[] {
-  const word = new RegExp(`\\b${action.name}\\b`)
-  return [...sources.entries()]
-    .filter(([file, src]) => file !== action.module && word.test(src))
-    .map(([file]) => file.slice(ROOT.length + 1))
+/** Which other files name this export. */
+function callersOf(exp: Export): string[] {
+  const word = new RegExp(`\\b${exp.name}\\b`)
+  return callerFiles.filter((f) => f !== exp.module && word.test(sources.get(f)!)).map(rel)
 }
 
-describe("server actions are reachable", () => {
-  it("found actions to check, so this cannot pass vacuously", () => {
-    expect(actionModules.length).toBeGreaterThan(8)
-    expect(actions.length).toBeGreaterThan(50)
+/**
+ * Used by its own module, so the module's public entry point reaches it.
+ *
+ * `pointInPolygon` is exported so its unit test can pin the maths, and called
+ * by `distanceToPolygon` two lines down. That is a file-internal helper, not
+ * unreachable capability, and flagging it would add sixty lines of noise to
+ * `KNOWN_UNREACHABLE` that teach a reader nothing.
+ *
+ * Deliberately shallow: it does not check that the *caller* is itself reachable,
+ * so two dead exports propping each other up inside one file still pass. Closing
+ * that needs real import resolution, and the ratchet is worth more than the
+ * completeness.
+ */
+function usedInsideOwnModule(exp: Export): boolean {
+  return (sources.get(exp.module)!.match(new RegExp(`\\b${exp.name}\\b`, "g")) ?? []).length > 1
+}
+
+const isReachable = (exp: Export) => callersOf(exp).length > 0 || usedInsideOwnModule(exp)
+
+describe("lib exports are reachable", () => {
+  it("found exports and callers to check, so this cannot pass vacuously", () => {
+    expect(libFiles.length).toBeGreaterThan(80)
+    expect(callerFiles.length).toBeGreaterThan(300)
+    expect(exports_.length).toBeGreaterThan(300)
+    // The root entrypoints, which are how every sweeper and initialiser is
+    // reached. A path typo here would silently mark them all dead.
+    expect(callerFiles).toContain(join(ROOT, "server.ts"))
   })
 
-  it.each(actions.filter((a) => !KNOWN_UNREACHABLE.has(a.name)).map((a) => [a.name, a]))(
-    "%s has a caller",
-    (_name, action) => {
-      expect(callersOf(action as Action)).not.toEqual([])
-    }
-  )
+  it("every exported function has a caller", () => {
+    const dead = exports_
+      .filter((e) => !KNOWN_UNREACHABLE.has(e.name))
+      .filter((e) => !isReachable(e))
+      .map((e) => `${rel(e.module)} :: ${e.name}`)
+
+    // Listed rather than counted, so a failure names what to wire up, delete,
+    // or add to KNOWN_UNREACHABLE with a reason.
+    expect(dead).toEqual([])
+  })
 })
 
 describe("the unreachable list is current", () => {
-  it.each([...KNOWN_UNREACHABLE])("%s is still unreachable, or should leave the list", (name) => {
-    const action = actions.find((a) => a.name === name)
-    // A renamed or deleted action leaves a line here that means nothing.
-    expect(action).toBeDefined()
-    expect(callersOf(action as Action)).toEqual([])
+  it.each([...KNOWN_UNREACHABLE])("%s — %s", (name) => {
+    const exp = exports_.find((e) => e.name === name)
+    // A renamed or deleted export leaves a line here that means nothing.
+    expect(exp).toBeDefined()
+    expect(isReachable(exp as Export)).toBe(false)
   })
 })
 
@@ -118,18 +227,24 @@ describe("the unreachable list is current", () => {
  * directive means anything.
  */
 describe("use-server modules export only async functions", () => {
-  const EXPORT = /^export\s+(?!async function|interface|type\s|\{[^}]*\}\s+from|default\s+async)(.+)$/gm
+  const actionModules = libFiles
+    .map((f) => [f, readFileSync(f, "utf8")] as const)
+    .filter(([, src]) => src.trimStart().startsWith('"use server"'))
 
-  it.each(actionModules.map(([f, src]) => [f.slice(ROOT.length + 1), src]))(
-    "%s",
-    (_label, src) => {
-      const offenders = [...(src as string).matchAll(EXPORT)]
-        .map((m) => m[0].split("\n")[0].trim())
-        // A bare `export { x }` re-export is only safe if x is an async
-        // function, which this cannot see — but it is also the shape that broke
-        // the build, so it is not exempt.
-        .filter((line) => !line.startsWith("export type") && !line.startsWith("export interface"))
-      expect(offenders).toEqual([])
-    }
-  )
+  const EXPORT =
+    /^export\s+(?!async function|interface|type\s|\{[^}]*\}\s+from|default\s+async)(.+)$/gm
+
+  it("finds the use-server modules at all", () => {
+    expect(actionModules.length).toBeGreaterThan(8)
+  })
+
+  it.each(actionModules.map(([f, src]) => [rel(f), src]))("%s", (_label, src) => {
+    const offenders = [...(src as string).matchAll(EXPORT)]
+      .map((m) => m[0].split("\n")[0].trim())
+      // A bare `export { x }` re-export is only safe if x is an async
+      // function, which this cannot see — but it is also the shape that broke
+      // the build, so it is not exempt.
+      .filter((line) => !line.startsWith("export type") && !line.startsWith("export interface"))
+    expect(offenders).toEqual([])
+  })
 })
