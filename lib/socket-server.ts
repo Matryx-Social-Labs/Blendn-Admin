@@ -5,7 +5,7 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
-import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
+import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { startChatLifecycleSweeper } from "./chat-lifecycle"
@@ -31,7 +31,20 @@ export type RoomType = "event" | "chat" | "user"
 // Socket events
 export interface ServerToClientEvents {
   // Event-related
+  /**
+   * A check-in happened. Deliberately carries no name.
+   *
+   * This is the room anyone who opened the event can join, so it drives the
+   * live counter and nothing else. `userId` stays so a client can recognise
+   * its own check-in; the pseudonym moved to `event:room:checkin`.
+   */
   "event:checkin": (data: {
+    eventId: string
+    userId: string
+    checkInTime: string
+  }) => void
+  /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. */
+  "event:room:checkin": (data: {
     eventId: string
     userId: string
     userName: string
@@ -122,6 +135,9 @@ export interface ClientToServerEvents {
   // Join/leave rooms
   "join:event": (eventId: string) => void
   "leave:event": (eventId: string) => void
+  /** The roster room. Requires a check-in; carries pseudonyms. */
+  "join:event:room": (eventId: string) => void
+  "leave:event:room": (eventId: string) => void
   /** Dashboard-only live operations room. */
   "join:eventOps": (eventId: string) => void
   "leave:eventOps": (eventId: string) => void
@@ -561,6 +577,29 @@ export function initSocketServer(httpServer: HttpServer): Server {
     })
 
     /*
+     * The roster room, for people who are actually in the room.
+     *
+     * Separate from `event:{id}` for the same reason `event:ops:{id}` is: that
+     * room is joinable by anyone who opened the event, and it was carrying
+     * `{ real userId, pseudonym }` pairs on every check-in. Anyone could sit in
+     * every public event's room and harvest the mapping.
+     */
+    authSocket.on("join:event:room", async (eventId) => {
+      await guardJoin(
+        authSocket,
+        `event:room:${eventId}`,
+        "Check in to see who else is here",
+        () => canJoinEventRoom(authSocket.data.userId, eventId)
+      )
+    })
+
+    authSocket.on("leave:event:room", (eventId) => {
+      const room = `event:room:${eventId}`
+      authSocket.leave(room)
+      logger.debug("Socket left room", { room, userId: authSocket.data.userId })
+    })
+
+    /*
      * Live operations room. Deliberately separate from `event:{id}` — that room
      * carries attendee-facing traffic including check-in names, and a host must
      * not receive it. This one carries aggregates only.
@@ -694,12 +733,33 @@ export function emitEventCheckIn(
 ): void {
   if (!io) return
 
+  const checkInTime = new Date().toISOString()
+
+  /*
+   * Two rooms, because two audiences want different things.
+   *
+   * `event:{id}` is joinable by anyone who opened the event, and it used to
+   * carry this whole payload — so `{ real userId, pseudonym }` went to every
+   * stranger watching. It gets the fact that a check-in happened, which is all
+   * the live counter ever needed, and `userId` so a client can recognise its
+   * own check-in.
+   *
+   * The name goes only to `event:room:{id}`, which requires a check-in — the
+   * same gate `GET /events/:id/checkins` applies when it answers "Check in to
+   * see who else is here".
+   */
   io.to(`event:${eventId}`).emit("event:checkin", {
+    eventId,
+    userId,
+    checkInTime,
+  })
+
+  io.to(`event:room:${eventId}`).emit("event:room:checkin", {
     eventId,
     userId,
     userName,
     userImage,
-    checkInTime: new Date().toISOString(),
+    checkInTime,
   })
 }
 

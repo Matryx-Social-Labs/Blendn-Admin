@@ -24,6 +24,7 @@ const mockDb = {
   },
   event_likes: { findFirst: jest.fn() },
   event_match_preferences: { findFirst: jest.fn() },
+  blocked_users: { findFirst: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -203,6 +204,7 @@ describe("maySeeIdentity after leaving", () => {
     mockDb.event_likes.findFirst.mockResolvedValue(null)
     mockDb.event_match_preferences.findFirst.mockResolvedValue(null)
     mockDb.private_conversations.findFirst.mockResolvedValue(null)
+    mockDb.blocked_users.findFirst.mockResolvedValue(null)
   })
 
   it("stops showing an identity once the pair has left each other", async () => {
@@ -242,5 +244,41 @@ describe("maySeeIdentity after leaving", () => {
 
     const liveQuery = mockDb.private_conversations.findFirst.mock.calls[0][0]
     expect(liveQuery.where.closed_at).toBeNull()
+  })
+
+  it("lets a block override a mutual like with no conversation", async () => {
+    /*
+     * The case a close does not cover.
+     *
+     * Blocking closes the conversation, so the branch above already handled
+     * pairs who had been talking. It did not handle the two ways of having met
+     * that leave no conversation behind — a mutual like nobody has messaged,
+     * and somebody who went public in a room you were both in. Both survive
+     * forever, so blocking a person you had revealed to left them pulling your
+     * real name and photographs from GET /users/:id indefinitely.
+     *
+     * Reveal is one-way and non-retractable by design. A block is the one way
+     * to un-tell a single person, and it has to reach this gate to mean that.
+     */
+    mockDb.event_likes.findFirst.mockResolvedValue({ id: "like-1" })
+    mockDb.event_match_preferences.findFirst.mockResolvedValue({ id: "pref-1" })
+    mockDb.blocked_users.findFirst.mockResolvedValue({ blocker_id: B })
+
+    expect(await maySeeIdentity(A, B)).toBe(false)
+  })
+
+  it("checks the block in both directions", async () => {
+    /*
+     * Symmetric on purpose: the person who blocked does not want to see, and
+     * the person blocked must not be seen. A one-directional check would leave
+     * whichever of those the implementer happened not to think of.
+     */
+    await maySeeIdentity(A, B)
+
+    const blockQuery = mockDb.blocked_users.findFirst.mock.calls[0][0]
+    expect(blockQuery.where.OR).toEqual([
+      { blocker_id: A, blocked_id: B },
+      { blocker_id: B, blocked_id: A },
+    ])
   })
 })

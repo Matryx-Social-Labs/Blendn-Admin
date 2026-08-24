@@ -45,11 +45,14 @@ import { db } from "@/lib/db"
  *
  * Co-presence alone is deliberately *not* enough. Sharing a room is what lets
  * you send a request; it is not consent to be identified.
+ *
+ * **A block in either direction beats all four.** Reveal is otherwise one-way
+ * and non-retractable; blocking is the single way to un-tell one person.
  */
 export async function maySeeIdentity(viewerId: string, targetId: string): Promise<boolean> {
   if (viewerId === targetId) return true
 
-  const [mutualLike, conversation, revealedToViewer, closed] = await Promise.all([
+  const [mutualLike, conversation, revealedToViewer, closed, blocked] = await Promise.all([
     // A like in each direction, at the same event.
     db.event_likes
       .findFirst({
@@ -123,8 +126,39 @@ export async function maySeeIdentity(viewerId: string, targetId: string): Promis
         select: { id: true },
       })
       .then(Boolean),
+
+    /*
+     * A block, in **either** direction, and it overrides everything.
+     *
+     * Reveal is one-way and non-retractable by design: you cannot un-tell the
+     * world your name. Blocking is the single exception -- you can un-tell one
+     * person -- and this gate did not implement it.
+     *
+     * Closing a conversation already covered the common case, because the block
+     * route closes the thread. What it did not cover is the two ways of having
+     * met that leave no conversation behind: a mutual like nobody has messaged
+     * yet, and someone who went public in a room you were both in. `event_likes`
+     * are never deleted and a public reveal stays public, so both branches above
+     * stayed true forever. Blocking somebody you had revealed to left them able
+     * to pull your real name and photographs from `GET /users/:id` indefinitely,
+     * which is the one thing blocking is supposed to stop.
+     *
+     * Checked in both directions because the harm is symmetric: the person who
+     * blocked does not want to see, and the person blocked must not be seen.
+     */
+    db.blocked_users
+      .findFirst({
+        where: {
+          OR: [
+            { blocker_id: viewerId, blocked_id: targetId },
+            { blocker_id: targetId, blocked_id: viewerId },
+          ],
+        },
+        select: { blocker_id: true },
+      })
+      .then(Boolean),
   ])
 
-  if (closed) return false
+  if (blocked || closed) return false
   return mutualLike || conversation || revealedToViewer
 }

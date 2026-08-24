@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { maySeeIdentity } from "@/lib/identity"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // GET /api/mobile/users/blocked — List users blocked by the current user
@@ -22,10 +23,35 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const users = blocks.map((b) => ({
+    /*
+     * Two endpoints, one pair of people, opposite answers.
+     *
+     * `GET /users/:id` returns 404 for somebody you have blocked. This one
+     * returned their real name and their photograph, to the same caller, in the
+     * same session -- so blocking somebody was a way to *keep* their identity
+     * after the gate that guards it had closed.
+     *
+     * Worse in one direction than it looks: block is the documented way to undo
+     * a reveal. Someone you had revealed to could block you and the list would
+     * still hold your face indefinitely.
+     *
+     * The list still has a job -- you need to see who you have blocked in order
+     * to unblock them -- so it keeps whatever it may legitimately show. That is
+     * the same `maySeeIdentity` the profile route asks, and for a blocked pair
+     * it is false unless the block is one-directional and something else in the
+     * rule still holds.
+     */
+    const visible = await Promise.all(
+      blocks.map((b) => maySeeIdentity(authUser.userId, b.blocked_id))
+    )
+
+    const users = blocks.map((b, i) => ({
       blocked_id: b.blocked_id,
-      blocked_user_name: b.blocked.name,
-      blocked_user_photo: b.blocked.image,
+      // `null`, not a pseudonym: a pseudonym is per-event and this list is not
+      // scoped to one. The client already renders a placeholder for an
+      // unrevealed person.
+      blocked_user_name: visible[i] ? b.blocked.name : null,
+      blocked_user_photo: visible[i] ? b.blocked.image : null,
       reason: null,
       blocked_at: b.created_at.toISOString(),
     }))

@@ -1,6 +1,5 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -51,10 +50,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .split(",")
         .map((value) => value.trim())
         .filter(Boolean)
-    )
-    const interestedLimit = Math.min(
-      Math.max(parseInt(searchParams.get("interestedLimit") || "6"), 1),
-      20
     )
 
     // Fetch event with all related data
@@ -141,32 +136,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Counted from check-in rows rather than a stored column.
     const occupancy = await getOccupancy(eventId)
 
-    // Get user's relationship with this event
-    type InterestedUserFavorite = Prisma.event_favoritesGetPayload<{
-      include: {
-        user: { select: { id: true; name: true; image: true } }
-      }
-    }>
-
-    const interestedUsersPromise: Promise<InterestedUserFavorite[]> =
-      includeSet.has("interestedUsers")
-        ? db.event_favorites.findMany({
-            where: { event_id: eventId },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  image: true,
-                },
-              },
-            },
-            orderBy: { created_at: "desc" },
-            take: interestedLimit,
-          })
-        : Promise.resolve([])
-
-    const [attendedCounts, userFavorite, userRating, userCheckIn, userRsvp, interestedUsers] =
+    const [attendedCounts, userFavorite, userRating, userCheckIn, userRsvp] =
       await Promise.all([
         /*
          * `checkInCount` was `_count.check_ins` filtered to `checked_in`, which
@@ -206,7 +176,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         }),
-        interestedUsersPromise,
       ])
 
     // Calculate average rating
@@ -326,13 +295,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         rsvpStatus: userRsvp?.status || null,
       },
       distance,
-      ...(includeSet.has("interestedUsers") && {
-        interestedUsers: interestedUsers.map((f) => ({
-          id: f.user.id,
-          name: f.user.name,
-          avatar: f.user.image,
-        })),
-      }),
+      /*
+       * The same disclosure the dedicated route already closed, reachable
+       * through a different door.
+       *
+       * `?include=interestedUsers` returned `{ real id, real name, real photo }`
+       * for everyone who had favourited an event, to any authenticated caller,
+       * with no check-in gate of any kind. `GET .../interested-users` was cut
+       * down to a bare count for exactly this reason, and its docstring makes
+       * the argument in full: favouriting has no check-in, no pseudonym and no
+       * reveal, so nobody who used it consented to being shown, and it is
+       * harvestable by topic.
+       *
+       * Fixing one route and leaving the query parameter is fixing the screen,
+       * not the leak. `favoriteCount` above is the social proof the frame asks
+       * for -- it leads with "124+".
+       *
+       * The key stays, as an empty array, so a build in the field iterating it
+       * gets a length of zero rather than a crash on undefined.
+       */
+      ...(includeSet.has("interestedUsers") && { interestedUsers: [] }),
     })
   } catch (error) {
     logger.error("Get event error", { error: error instanceof Error ? error.message : String(error) })
