@@ -4,12 +4,12 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { successResponse, errorResponse, unauthorizedResponse } from "@/lib/api-response"
-import { validateGeofence } from "@/lib/geofence"
+import { resolveFence, fenceSelect } from "@/lib/geofence"
 import { performCheckout } from "@/lib/checkout"
 import {
   evaluatePresence,
   shouldPersistPing,
-  DEPARTURE_GRACE_MINUTES,
+  DEPARTURE_ALLOWANCE_MINUTES,
   PING_INTERVAL_MINUTES,
   type PresenceState,
 } from "@/lib/presence"
@@ -66,7 +66,9 @@ export async function POST(
       left_area_at: true,
       departure_prompted_at: true,
       occurrence: { select: { end_time: true } },
-      event: { select: { geofence: true, venue: { select: { geofence: true } } } },
+      // Spread, not hand-picked: a select missing `check_in_radius` reads as
+      // "no legacy fence" and silently fails open for every pre-column event.
+      event: { select: { ...fenceSelect } },
     },
   })
 
@@ -77,12 +79,21 @@ export async function POST(
     return successResponse({ status: "not_checked_in" })
   }
 
-  const parsed =
-    validateGeofence(checkIn.event.geofence) ??
-    validateGeofence(checkIn.event.venue?.geofence)
-  if (!parsed.ok) {
-    // No usable fence means nothing to judge against. Say so rather than
-    // guessing them out of the room.
+  /*
+   * One resolver. See `resolveFence` in lib/geofence.ts.
+   *
+   * This was `validateGeofence(event) ?? validateGeofence(venue)`, which can
+   * never fall through -- `validateGeofence` returns `{ ok: false }`, never
+   * null. The venue branch was unreachable code, and `legacyGeofence` was never
+   * consulted at all, so every event created before the geofence column existed
+   * answered `inside / no_geofence` for ever. The presence check failed open
+   * while looking like it worked, and it is the only thing between a check-in
+   * and an occupancy number.
+   */
+  const fence = resolveFence(checkIn.event)
+  if (!fence) {
+    // Genuinely nothing to judge against -- no fence, no venue fence, and no
+    // coordinates. Say so rather than guessing them out of the room.
     return successResponse({ status: "inside", reason: "no_geofence" })
   }
 
@@ -90,13 +101,12 @@ export async function POST(
   const state: PresenceState = {
     kind: checkIn.kind,
     leftAreaAt: checkIn.left_area_at,
-    departurePromptedAt: checkIn.departure_prompted_at,
     lastSeenAt: checkIn.last_seen_at,
   }
   const decision = evaluatePresence(
     state,
     { point: { lat: latitude, lng: longitude }, accuracy: body.accuracy ?? null },
-    parsed.fence,
+    fence,
     checkIn.occurrence.end_time,
     now
   )
@@ -119,23 +129,33 @@ export async function POST(
         ...(decision.action === "clear_departure"
           ? { left_area_at: null, departure_prompted_at: null }
           : {}),
-        ...(decision.action === "prompt" ? { departure_prompted_at: now } : {}),
       },
     })
   }
 
   const leftAt = decision.action === "record_departure" ? now : checkIn.left_area_at
+  /*
+   * When they stop being counted, not when the grace ends.
+   *
+   * This reported `leftAt + DEPARTURE_GRACE_MINUTES`, which was the moment the
+   * (undelivered) prompt would have fired rather than the moment of checkout --
+   * so the client counted down to a deadline ten minutes before the real one.
+   */
   const graceEndsAt = leftAt
-    ? new Date(leftAt.getTime() + DEPARTURE_GRACE_MINUTES * 60_000).toISOString()
+    ? new Date(leftAt.getTime() + DEPARTURE_ALLOWANCE_MINUTES * 60_000).toISOString()
     : null
 
   return successResponse({
+    /*
+     * `prompt` is gone as a status. It was returned when the server had just
+     * written `departure_prompted_at` and sent nothing anywhere -- so the one
+     * client that could act on it was the one already pinging, which knows it is
+     * outside because it just said so.
+     */
     status:
-      decision.action === "prompt"
-        ? "prompt"
-        : decision.reason === "inside" || decision.reason === "returned"
-          ? "inside"
-          : "outside",
+      decision.reason === "inside" || decision.reason === "returned"
+        ? "inside"
+        : "outside",
     reason: decision.reason,
     shortfallMetres: decision.shortfall ? Math.round(decision.shortfall) : null,
     graceEndsAt,

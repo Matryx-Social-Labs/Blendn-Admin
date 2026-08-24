@@ -7,7 +7,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { evaluateCheckIn, legacyGeofence, validateGeofence } from "@/lib/geofence"
+import { evaluateCheckIn, resolveFence, fenceVenueSelect } from "@/lib/geofence"
 import {
   ErrorCode,
   successResponse,
@@ -75,9 +75,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Fetch event
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      // The venue relation is needed to tell staff from guests: a check-in is
-      // staff work if the person's org runs the event or owns the venue.
-      include: { venue: { select: { owner_org_id: true } } },
+      /*
+       * The venue relation is needed twice, for two unrelated reasons, and they
+       * have to be merged by hand.
+       *
+       * `owner_org_id` tells staff from guests -- a check-in is staff work if
+       * the person's org runs the event or owns the venue. `geofence` is what
+       * `resolveFence` falls back to when the event has none, which the door has
+       * never consulted even though the sweeper has and `schema.prisma`
+       * promises events inherit it.
+       *
+       * Spreading `fenceSelect` here instead would silently replace the venue
+       * select and take `owner_org_id` away, and every staff check-in would
+       * quietly become a guest one.
+       */
+      include: { venue: { select: { owner_org_id: true, ...fenceVenueSelect } } },
     })
 
     if (!event) {
@@ -173,12 +185,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * permissive than before, so nobody who could check in yesterday is
      * refused today.
      */
-    // A stored geofence that fails validation falls back rather than locking
-    // everyone out — bad data in one column must not take the venue offline.
-    const stored = event.geofence ? validateGeofence(event.geofence) : null
-    const fence = stored?.ok
-      ? stored.fence
-      : legacyGeofence(event.latitude, event.longitude, event.check_in_radius)
+    /*
+     * One resolver -- `resolveFence` in lib/geofence.ts.
+     *
+     * Same behaviour as before for the two cases this path already handled: a
+     * stored geofence that fails validation falls back rather than locking
+     * everyone out, because bad data in one column must not take the venue
+     * offline. What is new here is the **venue's** fence, between the two --
+     * `schema.prisma` has always promised events inherit it and nothing on the
+     * server honoured that; the sweeper consulted it and the door did not.
+     */
+    const fence = resolveFence(event)
 
     if (!fence) {
       logger.error("Check-in attempted on an event with no geofence", { eventId })

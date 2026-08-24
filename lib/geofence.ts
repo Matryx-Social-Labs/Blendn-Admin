@@ -469,3 +469,93 @@ function isValidLatLng(lat: number, lng: number): boolean {
     Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
   )
 }
+
+/* -------------------------------------------------------------------------- */
+/* Where the fence is — one answer                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The columns `resolveFence` needs. Spread it; do not hand-pick.
+ *
+ * It claims the `venue` relation, and `eventPermissionSelect` claims it too.
+ * Object spread means whichever fragment is written second silently wins, which
+ * is CLAUDE.md's "a select missing `venue` reads as no venue" arriving as a
+ * collision rather than an omission. A caller that needs both must merge the
+ * venue selects **by hand** and spread only `fenceSelectNoVenue` — there is no
+ * way to make that automatic, so the two names exist to make forgetting loud.
+ */
+export const fenceSelect = {
+  geofence: true,
+  latitude: true,
+  longitude: true,
+  check_in_radius: true,
+  venue: { select: { geofence: true } },
+} as const
+
+/** `fenceSelect` without the relation, for callers who select `venue` themselves. */
+export const fenceSelectNoVenue = {
+  geofence: true,
+  latitude: true,
+  longitude: true,
+  check_in_radius: true,
+} as const
+
+/** What `resolveFence` needs off the venue, for merging into a caller's select. */
+export const fenceVenueSelect = { geofence: true } as const
+
+export interface FenceSource {
+  geofence?: unknown
+  latitude?: number | null
+  longitude?: number | null
+  check_in_radius?: number | null
+  venue?: { geofence?: unknown } | null
+}
+
+/**
+ * The fence to judge a position against, in one place.
+ *
+ * ## Three resolvers, three answers
+ *
+ * Every path that needed a fence built its own, and no two agreed:
+ *
+ * | Path | Consulted | Missed |
+ * |---|---|---|
+ * | check-in | event JSON, then `legacyGeofence` | the venue's |
+ * | presence ping | event JSON only | the venue's, and legacy |
+ * | the sweeper | event JSON, then the venue's | legacy |
+ *
+ * So a **legacy event** — coordinates and a radius, no geofence JSON, which is
+ * every event created before the column existed — was enforced at the door and
+ * nowhere afterwards. And the presence route's venue branch was
+ * `validateGeofence(a) ?? validateGeofence(b)`, which can never fall through:
+ * `validateGeofence` returns `{ ok: false }`, never null or undefined. The
+ * second call was unreachable code, so the route answered
+ * `status: "inside", reason: "no_geofence"` **for ever**, for every legacy
+ * event — the presence check failing open while looking like it worked.
+ *
+ * ## The order, and why
+ *
+ * The event's own fence wins: an organiser who drew one meant it. The venue's
+ * is next, because `schema.prisma` promises events inherit it and until now
+ * nothing on the server honoured that — the "inheritance" was a prefill in the
+ * event form. `legacyGeofence` is last: coordinates plus a radius is the
+ * weakest of the three and the only one nobody chose deliberately.
+ *
+ * Returns null only when there is genuinely nothing to judge against. Callers
+ * must decide what that means for them — the door lets people in, and the
+ * sweeper leaves them alone — but they must decide it explicitly rather than
+ * inheriting an unreachable branch.
+ */
+export function resolveFence(event: FenceSource): Geofence | null {
+  const own = validateGeofence(event.geofence)
+  if (own.ok) return own.fence
+
+  const venue = validateGeofence(event.venue?.geofence)
+  if (venue.ok) return venue.fence
+
+  return legacyGeofence(
+    event.latitude ?? null,
+    event.longitude ?? null,
+    event.check_in_radius ?? null
+  )
+}

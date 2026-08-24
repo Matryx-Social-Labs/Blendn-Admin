@@ -4,9 +4,9 @@
 // anyway; stubbed here so the sweeper can be tested at all.
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
-import { sweepPresence, MASS_CHECKOUT_THRESHOLD } from "@/lib/presence-sweeper"
+import { sweepPresence, MASS_CHECKOUT_THRESHOLD, MASS_CHECKOUT_FLOOR } from "@/lib/presence-sweeper"
 import { getOccupancy } from "@/lib/occupancy"
-import { DEPARTURE_GRACE_MINUTES, PROMPT_TIMEOUT_MINUTES } from "@/lib/presence"
+import { DEPARTURE_GRACE_MINUTES, DEPARTURE_ALLOWANCE_MINUTES } from "@/lib/presence"
 
 import { db, closeDb, makeUser, testId } from "./helpers"
 
@@ -97,7 +97,12 @@ async function present(
 }
 
 describe("the sweeper acts on time passing", () => {
-  it("prompts someone whose grace has expired", async () => {
+  it("leaves someone alone while the allowance is still running", async () => {
+    /*
+     * This used to assert a prompt. The prompt wrote a timestamp and notified
+     * nobody, so the sweeper recorded `no_response` to a question never asked;
+     * it is gone, and the twenty-minute total tolerance is unchanged.
+     */
     const { eventId, occurrenceId } = await liveEvent()
     // Four inside; only one has been out long enough. One in four is exactly at
     // the guard threshold, not over it.
@@ -108,12 +113,10 @@ describe("the sweeper acts on time passing", () => {
     await present(eventId, occurrenceId, "p3")
     await present(eventId, occurrenceId, "p4")
 
-    const result = await sweepPresence()
-    expect(result.prompted).toBeGreaterThanOrEqual(1)
+    await sweepPresence()
 
     const row = await db.event_check_ins.findUniqueOrThrow({ where: { id: out.id } })
-    expect(row.departure_prompted_at).not.toBeNull()
-    // Prompted, not ejected.
+    // Past the grace, inside the allowance: still counted.
     expect(row.status).toBe("checked_in")
   })
 
@@ -121,7 +124,7 @@ describe("the sweeper acts on time passing", () => {
     const { eventId, occurrenceId } = await liveEvent()
     const gone = await present(eventId, occurrenceId, "g1", {
       left_area_at: ago(120),
-      departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
+      departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 5),
     })
     for (const l of ["g2", "g3", "g4", "g5"]) await present(eventId, occurrenceId, l)
 
@@ -138,7 +141,7 @@ describe("the sweeper acts on time passing", () => {
     const { eventId, occurrenceId } = await liveEvent()
     await present(eventId, occurrenceId, "i1", {
       left_area_at: ago(120),
-      departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
+      departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 5),
     })
     for (const l of ["i2", "i3", "i4", "i5"]) await present(eventId, occurrenceId, l)
 
@@ -160,32 +163,57 @@ describe("the sweeper acts on time passing", () => {
 })
 
 describe("the mass-checkout guard", () => {
-  it("acts on NOBODY when too much of the room would go at once", async () => {
+  it("acts on NOBODY when too much of a real crowd would go at once", async () => {
     // A venue whose wifi dies produces a burst of out-of-fence readings that
     // look exactly like everyone leaving. Emptying the room on the organiser's
     // screen would read as an evacuation.
     const { eventId, occurrenceId } = await liveEvent()
-    // Three of four past the prompt timeout — 75%, well over the threshold.
-    for (const l of ["m1", "m2", "m3"]) {
-      await present(eventId, occurrenceId, l, {
-        left_area_at: ago(120),
-        departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
-      })
+    // Six of eight — over the share, and enough people for the share to mean
+    // something. This case used to be three of four; see the test below for why
+    // that is no longer guarded.
+    for (const l of ["m1", "m2", "m3", "m4", "m5", "m6"]) {
+      await present(eventId, occurrenceId, l, { left_area_at: ago(120) })
     }
-    await present(eventId, occurrenceId, "m4")
+    for (const l of ["m7", "m8"]) await present(eventId, occurrenceId, l)
 
     const result = await sweepPresence()
     expect(result.guarded).toContain(eventId)
     expect(result.checkedOut).toBe(0)
     // Everyone still counted. The organiser gets an alert, not a wrong number.
-    expect((await getOccupancy(eventId)).inside).toBe(4)
+    expect((await getOccupancy(eventId)).inside).toBe(8)
+  })
+
+  it("does NOT guard a small room, however large the share", async () => {
+    /*
+     * The fix, and the reason the test above had to change.
+     *
+     * The share alone made auto-checkout unreachable in a small room. One
+     * person leaving a room of two is 100%; three of four is 75%; both used to
+     * trip a 25% threshold. So at a book club nobody was ever closed out and
+     * occupancy only climbed — and at the end of EVERY event, when everyone
+     * leaves at once, the guard tripped by construction and the room never
+     * emptied.
+     *
+     * The guard is about a venue-wide signal failure, which is a phenomenon of
+     * crowds. Three people leaving a room of four is three people leaving.
+     */
+    const { eventId, occurrenceId } = await liveEvent()
+    for (const l of ["s1", "s2", "s3"]) {
+      await present(eventId, occurrenceId, l, { left_area_at: ago(120) })
+    }
+    await present(eventId, occurrenceId, "s4")
+
+    const result = await sweepPresence()
+    expect(result.guarded).not.toContain(eventId)
+    expect(result.checkedOut).toBe(3)
+    expect((await getOccupancy(eventId)).inside).toBe(1)
   })
 
   it("does not trip below the threshold", async () => {
     const { eventId, occurrenceId } = await liveEvent()
     await present(eventId, occurrenceId, "t1", {
       left_area_at: ago(120),
-      departure_prompted_at: ago(PROMPT_TIMEOUT_MINUTES + 5),
+      departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 5),
     })
     for (const l of ["t2", "t3", "t4", "t5", "t6"]) await present(eventId, occurrenceId, l)
 
@@ -195,9 +223,16 @@ describe("the mass-checkout guard", () => {
     expect(result.checkedOut).toBe(1)
   })
 
-  it("has a threshold that is a share, not a count", () => {
+  it("has a threshold that is a share AND a floor that is a count", () => {
+    /*
+     * Both, because either alone is wrong. A share with no floor cannot tell a
+     * small room from a failing venue; a count with no share would trip on five
+     * people leaving a festival.
+     */
     expect(MASS_CHECKOUT_THRESHOLD).toBeGreaterThan(0)
     expect(MASS_CHECKOUT_THRESHOLD).toBeLessThan(1)
+    expect(MASS_CHECKOUT_FLOOR).toBeGreaterThan(1)
+    expect(Number.isInteger(MASS_CHECKOUT_FLOOR)).toBe(true)
   })
 })
 
