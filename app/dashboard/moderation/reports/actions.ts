@@ -6,6 +6,7 @@ import type { report_status } from "@prisma/client"
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { applySuspension, liftSuspension } from "@/lib/suspension"
 
 /**
  * What a person reported, and what an admin can do about it.
@@ -289,25 +290,19 @@ export async function resolveReport(
       })
     }
 
+    /*
+     * One implementation, in lib/suspension.ts, because this used to be four
+     * statements written inline and one of them — `session.deleteMany()` — was
+     * a no-op: the strategy is `jwt`, so there are no Session rows to delete.
+     * The reviewer's UI said suspending "blocks the account everywhere and
+     * signs it out", and it did neither.
+     */
     if (decision === "suspend" && subjectId) {
-      await tx.user.update({
-        where: { id: subjectId },
-        data: { suspended_at: new Date(), suspended_by: session.user.id },
-      })
-      // Without this the suspension only bites when the current refresh token
-      // expires — up to thirty days of continued access.
-      await tx.mobile_refresh_tokens.updateMany({
-        where: { user_id: subjectId, revoked_at: null },
-        data: { revoked_at: new Date() },
-      })
-      await tx.session.deleteMany({ where: { userId: subjectId } })
+      await applySuspension(tx, subjectId, session.user.id)
     }
 
     if (decision === "reinstate" && subjectId) {
-      await tx.user.update({
-        where: { id: subjectId },
-        data: { suspended_at: null, suspended_by: null },
-      })
+      await liftSuspension(tx, subjectId)
     }
   })
 

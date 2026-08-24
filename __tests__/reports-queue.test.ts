@@ -12,7 +12,8 @@ const tx = {
   chat_messages: { update: jest.fn() },
   user: { update: jest.fn() },
   mobile_refresh_tokens: { updateMany: jest.fn() },
-  session: { deleteMany: jest.fn() },
+  push_tokens: { deleteMany: jest.fn() },
+  chat_group_members: { updateMany: jest.fn() },
 }
 
 const mockDb = {
@@ -181,25 +182,42 @@ describe("resolveReport", () => {
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })
 
-  it("suspending blocks the account and kills its live sessions", async () => {
+  it("suspending reaches every channel a suspended person could still act through", async () => {
     /*
-     * The revocation is the half that makes suspension mean anything today:
-     * access tokens are verified without a database read, so without this a
-     * suspended account keeps its refresh token for up to thirty days.
+     * This test used to assert `session.deleteMany()` and pass — against a
+     * statement that could never do anything, because the strategy is `jwt` and
+     * there are no `Session` rows. So the test agreed with the code and both
+     * were wrong, while the reviewer's UI said suspension "blocks the account
+     * everywhere and signs it out".
+     *
+     * Four channels now, and the assertion names each one, because "everywhere"
+     * is only checkable as a list. `__tests__/suspension-blast-radius.test.ts`
+     * holds the other half: the four gates that have to read it.
      */
     mockDb.user_reports.findUnique.mockResolvedValue(pendingUserReport)
     await resolveReport("user", "ur1", "suspend")
 
+    // The fact.
     expect(tx.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "u9" },
         data: expect.objectContaining({ suspended_by: "admin1" }),
       })
     )
+    // No new app session. Access tokens are verified without a database read,
+    // so without this a suspended account keeps signing in for thirty days.
     expect(tx.mobile_refresh_tokens.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { user_id: "u9", revoked_at: null } })
     )
-    expect(tx.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "u9" } })
+    // No notifications.
+    expect(tx.push_tokens.deleteMany).toHaveBeenCalledWith({ where: { user_id: "u9" } })
+    // No posting, in any room.
+    expect(tx.chat_group_members.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ user_id: "u9" }),
+        data: { status: "banned" },
+      })
+    )
   })
 
   it("dismissing records that a human looked and did nothing", async () => {
