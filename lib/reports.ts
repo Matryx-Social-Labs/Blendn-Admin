@@ -99,7 +99,7 @@ export function canRunReport(key: string, role: user_role): boolean {
  * meaningless -- and different across organisations, so two hosts cannot
  * compare exports and discover they had the same person.
  */
-async function pseudonymScope(role: user_role, userId: string): Promise<string> {
+export async function pseudonymScope(role: user_role, userId: string): Promise<string> {
   if (role === "app_admin") return "platform"
   const memberships = await db.organisation_members.findMany({
     where: { user_id: userId },
@@ -109,7 +109,7 @@ async function pseudonymScope(role: user_role, userId: string): Promise<string> 
   return orgIds.length > 0 ? orgIds.join(",") : `user:${userId}`
 }
 
-async function eventScopeFor(role: user_role, userId: string) {
+export async function eventScopeFor(role: user_role, userId: string) {
   if (role === "app_admin") return { deleted_at: null }
 
   const memberships = await db.organisation_members.findMany({

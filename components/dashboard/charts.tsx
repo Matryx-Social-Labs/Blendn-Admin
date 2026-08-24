@@ -598,7 +598,15 @@ export function CategoryBars({
   onSelect,
   selected,
 }: {
-  data: Array<{ category: string; count: number }>
+  /**
+   * `count: null` means suppressed, not zero.
+   *
+   * A category with too few contributors is still listed — an organiser needs
+   * to know a safety concern was raised — but the number is withheld, because
+   * "1 safety_conduct" in a room of six is a sentence with an author. Rendering
+   * null as 0 would be worse than either: a false reassurance.
+   */
+  data: Array<{ category: string; count: number | null; suppressed?: boolean }>
   title?: string
   hint?: string
   empty?: boolean
@@ -611,7 +619,7 @@ export function CategoryBars({
   onSelect?: (category: string | null) => void
   selected?: string | null
 }) {
-  const max = Math.max(1, ...data.map((d) => d.count))
+  const max = Math.max(1, ...data.map((d) => d.count ?? 0))
   return (
     <ChartFrame title={title} hint={hint} empty={empty} emptyText={emptyText}>
       <div className="flex flex-col gap-1.5">
@@ -655,11 +663,20 @@ export function CategoryBars({
                     // still needs something to be big or small against.
                     selected && !isSelected && "opacity-40"
                   )}
-                  style={{ width: `${barWidth(d.count, max)}%` }}
+                  style={{ width: `${barWidth(d.count ?? 0, max)}%` }}
                 />
               </div>
               <span className="w-16 text-[0.75rem] tabular-nums">
-                <b className="font-bold">{d.count}</b>
+                {d.count === null ? (
+                  <b
+                    className="font-bold text-muted-foreground"
+                    title="Too few people raised this to show a count without identifying them"
+                  >
+                    &lt;5
+                  </b>
+                ) : (
+                  <b className="font-bold">{d.count}</b>
+                )}
                 {safety ? <span className="text-destructive"> → mod</span> : null}
               </span>
             </Row>

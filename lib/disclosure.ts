@@ -1,50 +1,194 @@
 import { SPONSORSHIP } from "@/lib/constants"
 
 /**
- * Suppressing small numbers so they describe people instead of naming them.
+ * When an aggregate stops being an aggregate.
  *
- * ## Why a floor alone is not enough
+ * ## This module did not exist
  *
- * The obvious rule — hide any count below `MIN_REPORTABLE` — leaks by
- * subtraction. Three ways, all of which have to be closed together:
+ * The audit register cites `lib/disclosure.ts` in six places — as "a correct
+ * four-part suppression rule" with "one caller", to be extended to four more.
+ * There was no such file, and no `discloseFigure`, and no poll suppression.
+ * The only small-number rule in the codebase was `MIN_ATTENDEES = 8`,
+ * hand-rolled in `lib/connection-metrics.ts`. So W19 was costed as wiring and is
+ * actually building.
  *
- * ```
- *   total 142, options [98, 41, 3]        hide the 3
- *     -> 142 - 98 - 41 = 3                recovered from the total
+ * That matters beyond bookkeeping: every finding that said "the rule exists and
+ * is not applied here" was really "there is no rule".
  *
- *   total 45, options [42, 3]             hide the 3
- *     -> one cell left standing at 42     the survivor IS the complement
+ * ## The four parts
  *
- *   at close: "fewer than 5"              later, campaign grows
- *     -> republished as 7                 the earlier suppression is undone
- * ```
+ * A count is safe to publish when all four hold. They are the standard
+ * statistical-disclosure checks, and each one exists because the others do not
+ * catch its case.
  *
- * So the rule is four parts, and every one of them is load-bearing:
+ * 1. **Minimum cell.** Fewer than `floor` contributors and the figure is about
+ *    named individuals. "One safety_conduct message" in a room of six is a
+ *    sentence with an author.
  *
- *   1. suppress any cell below the floor
- *   2. if ANY cell is suppressed, suppress the group total too
- *   3. if suppression leaves exactly one cell visible, suppress that one as
- *      well — it is recoverable from the total by definition
- *   4. suppression is sticky: a figure hidden once is not republished because
- *      the number later grew
+ * 2. **Dominance.** One contributor responsible for most of a cell is
+ *    identifying even when the cell is large. Forty complaints in a room of
+ *    two hundred looks safe until thirty-eight came from one person, and the
+ *    organiser can see who was upset.
  *
- * Rule 3 is the one that gets forgotten, and rule 2 is the one that makes
- * rule 1 worth anything.
+ * 3. **Completeness.** A cell equal to the population identifies *everyone* in
+ *    it. "All 6 attendees reported a safety concern" names six people as surely
+ *    as listing them.
  *
- * ## Where this applies
+ * 4. **Residual.** A cell one short of the population is the same fact
+ *    inverted — it identifies the one person who is not in it.
  *
- * `DESIGN_HANDOFF.md` guarantees small rooms are normal: check-in never
- * refuses, so capacity is a signal and not a door. In a room of six, "1 vote ·
- * Leaving early" names that person to everyone still there. The same reasoning
- * covers sponsor-facing reach, which additionally stops a sponsor being billed
- * against a three-person room.
+ * ## Why a floor of 5, and why 8 stays
  *
- * Pure by design — no database, no I/O — so every caller (socket emission, REST
- * payload, CSV export, the charts) reads the same answer. Raw counts must never
- * leave the module that calls this.
+ * Five is the conventional minimum cell and it is what the register names.
+ * `connection-metrics` keeps 8, because its figure is about *pairs* and pairs
+ * are more identifying than individuals — at eight attendees "3 connections" is
+ * 28 possible pairs. Per ER5 that is a **declared parameter**, passed in, not a
+ * second rule living somewhere else.
+ *
+ * ## What this does not do
+ *
+ * It does not decide what to show instead. A suppressed count is `null` and the
+ * caller writes the copy, because "fewer than 5" reads differently on a
+ * dashboard tile and in a post-event digest.
  */
 
-/** A value that may be withheld. `null` means "not reportable", not "zero". */
+/** The conventional minimum cell. Override only with a reason. */
+export const MIN_CELL = 5
+
+/**
+ * The share of a cell one contributor may hold before the cell identifies them.
+ *
+ * 0.5 rather than something stricter: a contributor holding exactly half of a
+ * five-person cell is two of four others, which is not yet a name. Above half
+ * they are the majority of the thing being reported.
+ */
+export const MAX_DOMINANCE = 0.5
+
+export interface DiscloseInput {
+  /** The figure being published. */
+  count: number
+  /** How many distinct people contributed to it. */
+  contributors: number
+  /** How many people could have. The denominator the cell sits in. */
+  population: number
+  /** The largest share held by any single contributor, if known. */
+  topContributorShare?: number
+  /** Defaults to `MIN_CELL`. Declare a different one, do not hand-roll. */
+  floor?: number
+}
+
+export type SuppressionReason =
+  | "min_cell"
+  | "dominance"
+  | "completeness"
+  | "residual"
+
+export interface Disclosure {
+  /** The figure, or null when it must not be published. */
+  value: number | null
+  suppressed: boolean
+  /** Why, so a caller can explain it and a test can assert which rule fired. */
+  reason: SuppressionReason | null
+}
+
+/**
+ * May this figure be shown?
+ *
+ * Checks in order of how obviously they identify somebody, so `reason` names
+ * the strongest objection rather than whichever ran first.
+ */
+export function discloseFigure(input: DiscloseInput): Disclosure {
+  const floor = input.floor ?? MIN_CELL
+
+  const suppress = (reason: SuppressionReason): Disclosure => ({
+    value: null,
+    suppressed: true,
+    reason,
+  })
+
+  // 1. Minimum cell.
+  if (input.contributors < floor) return suppress("min_cell")
+
+  /*
+   * 3 and 4 before 2: a cell that covers the whole population identifies
+   * everybody in it regardless of how evenly they contributed, so dominance is
+   * the weaker objection and should not be the one reported.
+   *
+   * Both need a population to reason about. `population === 0` means nobody
+   * could have contributed, so there is nothing to identify.
+   */
+  if (input.population > 0) {
+    if (input.contributors >= input.population) return suppress("completeness")
+    if (input.contributors === input.population - 1) return suppress("residual")
+  }
+
+  // 2. Dominance.
+  if (
+    input.topContributorShare !== undefined &&
+    input.topContributorShare > MAX_DOMINANCE
+  ) {
+    return suppress("dominance")
+  }
+
+  return { value: input.count, suppressed: false, reason: null }
+}
+
+/**
+ * May this *text* be shown, attributed to a pseudonym?
+ *
+ * Stricter than a count, and the register's sharpest finding is why: the
+ * feedback digest hands an organiser verbatim message text with a **room-stable**
+ * pseudonym and an exact timestamp, with no minimum cell at all. In a six-person
+ * room, one `safety_conduct` message names its author to somebody who has seen
+ * that pseudonym all night — and a safety concern is the one thing an attendee
+ * most needs not to be identified for raising.
+ *
+ * A quote cannot be partially suppressed, so this is a boolean rather than a
+ * figure. It applies the same population rules: a room too small, or a category
+ * everybody contributed to, and the text stays out.
+ *
+ * Deliberately not `discloseFigure` with `count: 1`. The question is different —
+ * publishing *a sentence somebody wrote* is not publishing a number they are
+ * inside — and collapsing them would make the digest's rule invisible.
+ */
+export function mayQuote(input: {
+  /** Distinct people who said something in this category. */
+  contributors: number
+  /** People in the room. */
+  population: number
+  floor?: number
+}): boolean {
+  return !discloseFigure({
+    count: 1,
+    contributors: input.contributors,
+    population: input.population,
+    floor: input.floor,
+  }).suppressed
+}
+
+/* -------------------------------------------------------------------------- */
+/* Breakdowns — a different question from a single figure                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Merged here from the sponsors branch, rather than left as a second module.
+ *
+ * Both branches independently wrote a `lib/disclosure.ts` — #264 for
+ * sponsor-facing breakdowns, #279 for the four-part rule the register said
+ * already existed and did not. Two homes for one answer is the exact shape of
+ * bug this whole audit is about, so they are one file.
+ *
+ * What survived from each: the four-part `discloseFigure` above, because
+ * `connection-metrics.ts` and the feedback digest already call that signature
+ * and it carries a `reason`; and the breakdown half below, because a set of
+ * cells with a shared total leaks by subtraction in ways a single figure
+ * cannot, and `poll-actions.ts` needs it. #264's two-argument `discloseFigure`
+ * is gone — it was rules 1 and 4 of the four, and had no caller after the
+ * merge.
+ *
+ * ER5 is satisfied: one module, floor 5 by default, per-metric override where
+ * justified (`MIN_ATTENDEES = 8` is passed as `floor`, not hand-rolled).
+ */
 export type Disclosed<T> = T | null
 
 export interface DisclosedBreakdown {
@@ -87,20 +231,6 @@ export function discloseBreakdown(
     total: anySuppressed ? null : total,
     suppressed: anySuppressed,
   }
-}
-
-/**
- * A single sponsor-facing figure — reach, exposures, spend-per-head.
- *
- * Separate from the breakdown because there is no complement to protect: one
- * number stands alone, so only rules 1 and 4 apply.
- */
-export function discloseFigure(
-  value: number,
-  alreadySuppressed = false
-): Disclosed<number> {
-  if (alreadySuppressed) return null
-  return value >= FLOOR ? value : null
 }
 
 /**

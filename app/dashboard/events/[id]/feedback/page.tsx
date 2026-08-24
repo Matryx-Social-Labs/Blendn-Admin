@@ -110,7 +110,7 @@ export default async function FeedbackPage({
                   <>
                     The negatives are the takeaway, and{" "}
                     <b className="font-medium text-foreground">
-                      {topIssue.count} of {digest.counts.negative}
+                      {topIssue.count ?? "<5"} of {digest.counts.negative}
                     </b>{" "}
                     are about{" "}
                     <b className="font-medium text-foreground">

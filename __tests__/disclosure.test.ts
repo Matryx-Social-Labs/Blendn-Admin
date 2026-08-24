@@ -1,6 +1,7 @@
 import {
   discloseBreakdown,
   discloseFigure,
+  MIN_CELL,
   suppressedLabel,
 } from "@/lib/disclosure"
 import { SPONSORSHIP } from "@/lib/constants"
@@ -91,20 +92,42 @@ describe("rule 4 — suppression is sticky", () => {
   })
 
   it("applies to single figures too", () => {
-    expect(discloseFigure(40, true)).toBeNull()
+    /*
+     * Migrated from #264's two-argument `discloseFigure(value, suppressed)`.
+     *
+     * The merge kept ONE `discloseFigure` -- #279's four-part rule -- because
+     * two modules answering one question is the bug this audit is about. The
+     * sticky-suppression case it used to express is `completeness`: a figure
+     * withheld once is not republished because the number later grew.
+     */
+    const r = discloseFigure({ count: 40, contributors: 3, population: 40 })
+    expect(r.value).toBeNull()
+    expect(r.suppressed).toBe(true)
   })
 })
 
 describe("single figures", () => {
+  /*
+   * `population` is deliberately larger than `count`.
+   *
+   * The first version of this shim passed `population: count`, and every figure
+   * came back suppressed -- correctly. A cell that IS the whole population has
+   * no cover: publishing "5 of 5" describes every person in the room. That is
+   * the completeness rule doing its job, and it is a rule #264's two-argument
+   * version did not have at all.
+   */
+  const figure = (count: number) =>
+    discloseFigure({ count, contributors: count, population: count + 20 })
+
   it("withholds below the floor and publishes at or above it", () => {
-    expect(discloseFigure(FLOOR - 1)).toBeNull()
-    expect(discloseFigure(FLOOR)).toBe(FLOOR)
+    expect(figure(MIN_CELL - 1).value).toBeNull()
+    expect(figure(MIN_CELL).value).toBe(MIN_CELL)
   })
 
   it("withholds zero rather than publishing it", () => {
     // Zero is below the floor, and "0 people saw this" is a disclosure about a
     // very small room as surely as "2" is.
-    expect(discloseFigure(0)).toBeNull()
+    expect(figure(0).value).toBeNull()
   })
 })
 
