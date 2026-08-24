@@ -89,7 +89,7 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
 
 /* -------------------------------------------------------------------------- */
 
-let sweepTimer: ReturnType<typeof setInterval> | null = null
+let sweepTimer: ReturnType<typeof setTimeout> | null = null
 
 async function runSweep(): Promise<void> {
   try {
@@ -106,25 +106,50 @@ async function runSweep(): Promise<void> {
 }
 
 /**
- * Start the sweeper. Runs once immediately, then on an interval.
+ * Start the sweeper. Runs once immediately, then schedules itself.
  *
  * The immediate pass matters more than the interval: deploys restart this
  * process regularly, so boot is when the backlog from any downtime gets
  * cleared. Mirrors how `SponsoredMessageScheduler` rehydrates on start.
+ *
+ * ## Self-scheduling, like the other three
+ *
+ * This was the last `setInterval` with an async body in the codebase. The ops
+ * broadcast was converted for the reason its comment gives — a pass slower than
+ * the interval starts the next one on top of itself — and the two other
+ * sweepers have always self-scheduled and say why.
+ *
+ * It is less likely to overlap here than there: the pass is bounded by
+ * `SWEEP_BATCH` and the interval is minutes, not five seconds. It is not
+ * impossible, and production has now shown these queries failing with
+ * *"Server has closed the connection"* — a dropped Postgres connection, which
+ * is exactly the kind of stall that makes a pass outlast its interval.
+ *
+ * The `finally` is what makes this safe: `runSweep` swallows its own errors, so
+ * the only way the loop could stop is if it threw before returning, and
+ * rescheduling from `finally` covers that too.
  */
 export function startChatLifecycleSweeper(): void {
   if (sweepTimer) return
-  void runSweep()
-  sweepTimer = setInterval(() => void runSweep(), SWEEP_INTERVAL_MS)
-  // Do not hold the event loop open on its own account — a process with
-  // nothing else to do should still be able to exit, which also keeps jest
-  // from hanging if this is ever started in a test.
-  sweepTimer.unref?.()
+
+  const loop = async () => {
+    try {
+      await runSweep()
+    } finally {
+      sweepTimer = setTimeout(() => void loop(), SWEEP_INTERVAL_MS)
+      // Do not hold the event loop open on its own account — a process with
+      // nothing else to do should still be able to exit, which also keeps jest
+      // from hanging if this is ever started in a test.
+      sweepTimer.unref?.()
+    }
+  }
+
+  void loop()
 }
 
 export function stopChatLifecycleSweeper(): void {
   if (sweepTimer) {
-    clearInterval(sweepTimer)
+    clearTimeout(sweepTimer)
     sweepTimer = null
   }
 }
