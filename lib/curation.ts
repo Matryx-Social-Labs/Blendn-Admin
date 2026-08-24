@@ -1,4 +1,5 @@
 import { CHAT_WINDOW_HOURS } from "./chat-window"
+import type { Geofence } from "./geofence"
 
 /**
  * Whether an event is the platform's or an organiser's, and whether anyone may
@@ -138,4 +139,47 @@ export function curatedDescription(input: {
     `${input.title}${at}. Listed by Blendn from a public listing — ` +
     `see the source for details and tickets.`
   )
+}
+
+/**
+ * The fence a curated event gets, and why it is looser than an organiser's.
+ *
+ * A curated pin is an **estimate made by somebody who has never stood there** —
+ * geocoded from an address on a listing page, confirmed on a map by an admin
+ * who is also guessing. An organiser drawing their own fence knows where the
+ * door is.
+ *
+ * The two ways to be wrong are not symmetric. Too tight turns somebody standing
+ * inside the venue away at the door, which is the product failing at the one
+ * moment it has to work — and they will not try twice. Too loose admits the
+ * café next door, which costs an inflated headcount and a match that should not
+ * have been offered. **Too tight is the more expensive error**, so a curated
+ * fence errs loose until a real organiser claims it and draws their own.
+ *
+ * 150m extent covers a venue and its frontage. 100m of buffer covers the queue,
+ * the pavement, and a pin that landed on the wrong side of the street — which
+ * is the single most common geocoding error and is roughly a street's width.
+ * Both are well inside `GEOFENCE_LIMITS`.
+ */
+export const CURATED_RADIUS_METRES = 150
+export const CURATED_BUFFER_METRES = 100
+
+/**
+ * Always a circle, and typed as one.
+ *
+ * A curated pin is a point with an uncertainty radius; there is no traced
+ * outline to make a polygon from, and pretending otherwise would let a caller
+ * ask a curated fence for a `ring` it can never have.
+ */
+export function curatedFence(
+  latitude: number,
+  longitude: number
+): Extract<Geofence, { type: "circle" }> {
+  return {
+    type: "circle",
+    lat: latitude,
+    lng: longitude,
+    radius: CURATED_RADIUS_METRES,
+    buffer: CURATED_BUFFER_METRES,
+  }
 }

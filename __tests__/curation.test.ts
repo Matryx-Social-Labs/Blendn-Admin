@@ -5,7 +5,12 @@ import {
   claimRefusal,
   isClaimable,
   curatedDescription,
+  curatedFence,
+  CURATED_RADIUS_METRES,
+  CURATED_BUFFER_METRES,
 } from "@/lib/curation"
+import { GEOFENCE_LIMITS, validateGeofence } from "@/lib/geofence"
+import { canPublish } from "@/lib/geofence-input"
 import { isAggregatorSource, sourceDomain } from "@/lib/curation-sources"
 
 /**
@@ -166,5 +171,93 @@ describe("the source URL is not editable by a claimant", () => {
      */
     const schema = readFileSync(join(__dirname, "..", "lib/validations/event.ts"), "utf8")
     expect(schema).not.toMatch(/source_url/)
+  })
+})
+
+describe("the curated fence errs loose, deliberately", () => {
+  it("is looser than an organiser's own", () => {
+    /*
+     * A curated pin is an estimate made by somebody who has never stood there —
+     * geocoded from a listing, confirmed on a map by an admin who is also
+     * guessing. An organiser drawing their own fence knows where the door is.
+     *
+     * The two ways to be wrong are not symmetric. Too tight turns somebody
+     * standing inside away at the door — the product failing at the one moment
+     * it has to work, and they will not try twice. Too loose costs an inflated
+     * headcount. Too tight is the more expensive error.
+     */
+    const fence = curatedFence(12.97, 77.59)
+    expect(fence.type).toBe("circle")
+    expect(fence.radius).toBe(CURATED_RADIUS_METRES)
+    expect(fence.buffer).toBe(CURATED_BUFFER_METRES)
+    expect(CURATED_BUFFER_METRES).toBeGreaterThan(0)
+  })
+
+  it("stays inside the limits the geofence module enforces", () => {
+    // A fence the validator would reject is a fence that publishes nothing.
+    expect(CURATED_RADIUS_METRES).toBeLessThanOrEqual(GEOFENCE_LIMITS.MAX_RADIUS)
+    expect(CURATED_BUFFER_METRES).toBeLessThanOrEqual(GEOFENCE_LIMITS.MAX_BUFFER)
+    expect(validateGeofence(curatedFence(12.97, 77.59)).ok).toBe(true)
+  })
+
+  it("passes the publish gate that had no caller until #268", () => {
+    /*
+     * A curated pin is the most likely of all pins to be missing, because
+     * nobody stood there — which is exactly the case `canPublish` was written
+     * for and never called on.
+     */
+    expect(canPublish({
+      latitude: 12.97, longitude: 77.59, geofence: curatedFence(12.97, 77.59),
+    }).ok).toBe(true)
+  })
+})
+
+describe("the curation write path", () => {
+  const src = readFileSync(join(__dirname, "..", "app/dashboard/events/curate/actions.ts"), "utf8")
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
+
+  it("copies neither the image nor the prose", () => {
+    /*
+     * Decision 2. Not only legal: a description lifted from elsewhere reads as
+     * somebody else's, and "we found this, go and check the source" is the line
+     * that keeps the platform trustworthy when a detail turns out to be wrong.
+     */
+    expect(code).not.toMatch(/cover_image_url/)
+    expect(code).not.toMatch(/full_description/)
+    expect(code).toMatch(/description: curatedDescription\(/)
+  })
+
+  it("is app_admin only, not any dashboard role", () => {
+    /*
+     * An organiser adding events "on behalf of" somebody else is the confusion
+     * the claim funnel exists to resolve — and it would let them mint an event
+     * another organiser could then be offered.
+     */
+    expect(code).toMatch(/role !== "app_admin"/)
+    expect(code).not.toMatch(/canAccessDashboard/)
+  })
+
+  it("marks it curated and records where it came from", () => {
+    expect(code).toMatch(/curated_at: new Date\(\)/)
+    expect(code).toMatch(/source_url: v\.source_url/)
+  })
+
+  it("leaves ownership null so a claim is one write", () => {
+    // eventPermissions short-circuits app_admin, so the platform can operate it
+    // meanwhile without a placeholder organisation to special-case.
+    expect(code).toMatch(/organizer_org_id: null/)
+  })
+
+  it("gates on canPublish before it writes", () => {
+    const gateAt = code.indexOf("canPublish(")
+    const writeAt = code.indexOf("db.events.create")
+    expect(gateAt).toBeGreaterThan(-1)
+    expect(writeAt).toBeGreaterThan(gateAt)
+  })
+
+  it("audits the source domain, not the whole URL", () => {
+    // Enough to answer "where are we curating from" without putting a query
+    // string in the audit trail.
+    expect(code).toMatch(/source: sourceDomain\(v\.source_url\)/)
   })
 })
