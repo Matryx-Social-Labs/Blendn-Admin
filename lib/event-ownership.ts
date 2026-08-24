@@ -30,9 +30,14 @@ import { db } from "./db"
  * ## Why admin returns null rather than throwing
  *
  * `eventPermissions` short-circuits `app_admin` before it looks at ownership,
- * so a platform-created event needs no org to be operable. When curation ships
- * this becomes the platform org (see the rebuild plan's §5), and at that point
- * null stops being a valid answer for anybody.
+ * so a platform-created event needs no org to be operable.
+ *
+ * This note used to say that curation would turn null into a platform org. It
+ * does not, and the reason is worth keeping: `events.curated_at` carries
+ * "the platform added this" as an assertion, so ownership does not have to
+ * carry it as an absence. A platform org would have bought nothing except a row
+ * that every permission check then has to special-case — and null already
+ * means three things without it.
  */
 export async function owningOrgFor(user: {
   id: string

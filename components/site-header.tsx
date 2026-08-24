@@ -43,6 +43,13 @@ const TIMELESS = new Set([
   "/dashboard/sponsor-claims",
   "/dashboard/creative-review",
   "/dashboard/charges",
+  // Two queues, not two reports. Curation health is "everything we ever added,
+  // and which of it is dead"; the claim queue is oldest-first by design. A
+  // range control over either would offer to hide the rows most worth seeing.
+  "/dashboard/events/curate",
+  "/dashboard/claims",
+  "/dashboard/claims/venues",
+  "/dashboard/venues/new",
 ])
 
 /** Reports read the range, so the control stays. */
@@ -59,6 +66,49 @@ const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard/events/new": {
     title: "New event",
     description: "Publish an event. Save a draft at any point.",
+  },
+  /*
+   * Both of these need an exact entry, and the reason is the fallback below.
+   *
+   * `/dashboard/events/curate` matches `startsWith("/dashboard/events/")`, so
+   * without this it inherited the event *detail* header — the curation screen
+   * announced itself as "Event · Setup, performance, and what happened on the
+   * night." `/dashboard/claims` matched nothing and fell to the generic
+   * "Overview · Live reporting across growth, attendance, and event activity."
+   *
+   * Both pages carry an `h2` and a comment saying this file owns their only
+   * `h1`, which is what made it invisible: the screens looked right, and the
+   * one element a screen reader announces first named a different screen.
+   */
+  "/dashboard/events/curate": {
+    title: "Curation",
+    description: "Events we added from public listings — and which of them nobody could get into.",
+  },
+  "/dashboard/claims": {
+    title: "Claims",
+    description: "Somebody wants ownership of an event or a venue. Decide, oldest first.",
+  },
+  /*
+   * Four more the guard found once it existed, three of them older than this
+   * screen. `/dashboard/leads` and `/dashboard/venues/new` were the worst of
+   * them: both render their own `h1`, so the page had *two* — a correct one in
+   * the body and "Overview" above it.
+   */
+  "/dashboard/claims/venues": {
+    title: "Claims",
+    description: "Somebody wants ownership of an event or a venue. Decide, oldest first.",
+  },
+  "/dashboard/moderation/reports": {
+    title: "Reports",
+    description: "What people reported about each other, and what was decided.",
+  },
+  "/dashboard/leads": {
+    title: "Leads",
+    description: "Demo requests from the organiser landing page. Separate from applications.",
+  },
+  "/dashboard/venues/new": {
+    title: "Add a venue",
+    description: "A permanent place. Events attach to it; its pin is the one they inherit.",
   },
   "/dashboard/attendees": {
     title: "Attendees",

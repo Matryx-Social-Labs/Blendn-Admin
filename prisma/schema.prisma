@@ -102,13 +102,14 @@ model User {
   moderation_flags moderation_flags[]
 
   // Reporting (users/messages)
-  user_reports_filed    user_reports[]    @relation("UserReportReporter")
-  user_reports_received user_reports[]    @relation("UserReportReported")
+  user_reports_filed    user_reports[]      @relation("UserReportReporter")
+  user_reports_received user_reports[]      @relation("UserReportReported")
   message_reports       message_reports[]
   photo_checks          photo_checks[]
   city_demand           city_demand[]
   leads_assigned        leads[]
   lead_notes            lead_notes[]
+  checkInRefusals       check_in_refusals[]
 
   /// This model had no index at all.
   ///
@@ -366,6 +367,31 @@ model events {
   updated_at        DateTime           @default(now()) @db.Timestamptz(6)
   deleted_at        DateTime?          @db.Timestamptz(6)
   organizer_id      String
+  /// When the platform added this event from a public listing, rather than its
+  /// own organiser creating it. Null for everything an organiser made.
+  ///
+  /// This is the discriminator, and it has to be, because `organizer_org_id` is
+  /// null for three different reasons: a legacy row, an event created before
+  /// anything wrote the column, and a curated event awaiting a claim. Only
+  /// `curated_at IS NOT NULL` separates the last from the first two — which is
+  /// why "unclaimed" is not modelled as an absence.
+  curated_at        DateTime?          @db.Timestamptz(6)
+  /// The public listing this was taken from, kept for attribution and for the
+  /// domain check when somebody claims it.
+  ///
+  /// Deliberately absent from `eventWriteSchema`, and that is the whole reason
+  /// it is a separate column from `external_link`: an owner may edit the link
+  /// they show attendees, and nobody may edit the URL their claim is verified
+  /// against. A claimant who could repoint this at their own domain would be
+  /// verifying themselves.
+  source_url        String?
+  /// When an organiser proved this curated event was theirs and took it over.
+  ///
+  /// `organizer_org_id` is the authority on who owns it; this records when that
+  /// changed hands, which is a different question and the one a reviewer asks.
+  /// Keeping it separate also means "claimed" survives an ownership transfer
+  /// between organisations later.
+  claimed_at        DateTime?          @db.Timestamptz(6)
   /// Which company is accountable. `organizer_id` still records who created
   /// it — a different question, kept for audit and for "my events".
   organizer_org_id  String?            @db.Uuid
@@ -401,6 +427,8 @@ model events {
   feedback           event_feedback[]
   venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
   organizer_org      organisations?             @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
+  eventClaims        event_claims[]
+  checkInRefusals    check_in_refusals[]
 
   @@index([latitude, longitude])
   @@index([status, start_time])
@@ -1276,6 +1304,7 @@ model organisations {
   join_requests  organisation_join_requests[]
   onboarding     organiser_onboarding_requests[]
   venue_claims   venue_claims[]
+  eventClaims    event_claims[]
   sponsors       sponsors[]
   sponsor_claims sponsor_claims[]
   upload_grants  upload_grants[]
@@ -1734,6 +1763,150 @@ enum venue_claim_status {
   pending
   approved
   declined
+}
+
+/// Somebody saying "this event is mine".
+///
+/// The second instance of the venue-claim pattern, with two deliberate
+/// differences, both forced by who files these.
+///
+/// **`org_id` is nullable.** A curated event's real organiser typically has no
+/// account at all — that is the point of curating it — so a large share of
+/// claims arrive from outside the platform. Those carry `onboarding_id`
+/// instead, reusing `organiser_onboarding_requests` to create the organisation
+/// the claim then needs. Exactly one of the two is set.
+///
+/// **Re-filing creates a new row.** `venue_claims` is `@@unique([venue_id,
+/// org_id])` and updates in place, which keeps the queue tidy and hides how
+/// many times somebody has asked. Here the count is the signal: a third claim
+/// on one event is a reviewer's most useful fact, and it is exactly what an
+/// upsert would erase.
+model event_claims {
+  id       String @id @default(uuid()) @db.Uuid
+  event_id String @db.Uuid
+
+  /// The organisation that would own the event. Null when the claimant has no
+  /// account yet; `onboarding_id` carries the request that will create one.
+  org_id        String? @db.Uuid
+  /// The onboarding request this claim is waiting on. Null once `org_id` is set.
+  onboarding_id String? @db.Uuid
+  /// Null when filed by somebody with no account.
+  filed_by      String?
+
+  /// What the claimant filed from. The domain check reads this, so it is
+  /// recorded even when an account exists and could have supplied one — the
+  /// address that was used to claim is the fact a reviewer needs.
+  contact_email String
+  /// Free text from the claimant. Read by a human, never parsed.
+  note          String?
+
+  status event_claim_status @default(pending)
+
+  /// What the automatic checks noticed, as a list of strings.
+  ///
+  /// Flags, never a decision. Nothing here auto-approves: approving hands a
+  /// stranger the attendee list for an event, and `unclaimEvent` cannot un-see
+  /// one. The venue queue's "does not have to be bulletproof, because auto-link
+  /// is reversible" argument does not transfer.
+  flags Json?
+
+  reviewed_by   String?
+  reviewed_at   DateTime? @db.Timestamptz(6)
+  decision_note String?
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  event events         @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  org   organisations? @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  /// Three partial unique indexes live in SQL, because Prisma cannot express a
+  /// `WHERE` on a unique. They are load-bearing, so they are named here:
+  ///
+  ///   event_claims_one_pending_per_org    (event_id, org_id)   WHERE pending
+  ///   event_claims_one_pending_per_email  (event_id, email)    WHERE pending
+  ///   event_claims_one_approved_per_event (event_id)           WHERE approved
+  ///
+  /// The third is the one that matters. `decideEventClaim` re-checks
+  /// `claimRefusal` before its transaction, and a check outside a transaction
+  /// is not a lock: two admins approving competing claims on one event both
+  /// pass it. Only the database can serialise that, which is H13 in the
+  /// register and the reason this is not left to the application.
+  @@index([status])
+  @@index([event_id])
+  @@index([org_id])
+}
+
+/// Somebody stood at the door and was turned away.
+///
+/// ## Why this exists
+///
+/// A refused check-in used to produce a 400 and no record, which made a wrong
+/// pin invisible until somebody complained -- and most people do not complain,
+/// they leave. That matters most for curated events, where the pin was placed
+/// by an admin who has never stood there, but it is the same blindness for an
+/// organiser who drew their fence around the wrong building.
+///
+/// One small table answers three questions: is a pin wrong, is a fence too
+/// tight, and how many people tried to get in and could not. The third is a
+/// genuine product signal and nothing else measures it.
+///
+/// ## What it deliberately does not store
+///
+/// **No coordinates.** `shortfall_metres` is how far outside they were, which
+/// is everything the diagnosis needs and cannot locate anybody. G11 found GPS
+/// surviving account deletion on `event_check_ins`; adding a second table with
+/// the same problem to fix the first would be absurd.
+///
+/// ## Retention (ER13)
+///
+/// Delete with the user. Rows are diagnostic, not evidence, and the aggregate a
+/// curation reviewer reads -- counts per event -- survives the individual rows
+/// going. Swept on the same 90-day window as the rest of the presence data.
+model check_in_refusals {
+  id            String  @id @default(uuid()) @db.Uuid
+  event_id      String  @db.Uuid
+  /// Which day, when the event has more than one. Null when none resolved.
+  occurrence_id String? @db.Uuid
+  user_id       String
+
+  reason           refusal_reason
+  /// Metres beyond the fence, buffer and accuracy allowance. Null unless the
+  /// refusal was about distance -- an age refusal has no shortfall.
+  shortfall_metres Int?
+  /// What the device claimed. A cluster of refusals at poor accuracy is a
+  /// different problem from a cluster at good accuracy, and only one of them is
+  /// the pin's fault.
+  accuracy_metres  Int?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  /// The curation-health read: refusals per event, newest first.
+  @@index([event_id, created_at])
+  @@index([user_id])
+}
+
+enum refusal_reason {
+  /// Outside the fence. The one that means the pin might be wrong.
+  out_of_range
+  /// No fence and no coordinates, so there was nothing to check against.
+  no_geofence
+  too_early
+  too_late
+  day_cancelled
+  under_age
+}
+
+enum event_claim_status {
+  pending
+  approved
+  declined
+  /// Filed against an event that stopped being claimable — usually because
+  /// somebody else's claim was approved first. Distinct from `declined`, which
+  /// is a judgement about the claimant.
+  superseded
 }
 
 enum venue_type {

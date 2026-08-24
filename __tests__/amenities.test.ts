@@ -37,12 +37,14 @@ describe("retiring an amenity must not rewrite history", () => {
   })
 
   it("carries is_active, so withdrawal is possible at all", () => {
-    // Without it, `Restrict` would make a mistaken amenity permanent.
-    //
-    // Matched on the field and its default, not on column alignment. The
-    // literal-with-three-spaces version broke the day an unrelated model was
-    // added and `prisma format` re-aligned the file — a red suite for a
-    // whitespace change, which teaches people to distrust it.
+    /*
+     * Without it, `Restrict` would make a mistaken amenity permanent.
+     *
+     * Matched on the fact, not the spacing. `prisma format` re-aligns a model's
+     * columns whenever any field in it changes width, so an exact-string
+     * assertion fails on an unrelated edit somewhere else in the same block --
+     * which reads as a broken guard rather than a formatter.
+     */
     expect(SCHEMA()).toMatch(/is_active\s+Boolean\s+@default\(true\)/)
   })
 
@@ -68,6 +70,7 @@ describe("ordering is explicit, not alphabetical", () => {
      * opinion, so two events with the same amenities list them the same way.
      */
     // Field and default, not column alignment — see the note above.
+    // Whitespace-insensitive; see the is_active assertion above.
     expect(SCHEMA()).toMatch(/sort_order\s+Int\s+@default\(0\)/)
     for (const f of [
       ["app", "api", "mobile", "amenities", "route.ts"],

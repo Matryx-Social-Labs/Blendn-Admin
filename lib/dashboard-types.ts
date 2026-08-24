@@ -103,6 +103,24 @@ export interface CityRow {
   events: number
   rsvps: number
   favourites: number
+  /**
+   * Distinct people who looked for events here and found none.
+   *
+   * `city_demand` has been written on every miss since it was added and read by
+   * nothing. This is the reader — and the row set is now the UNION of cities
+   * with events and cities with demand, because the old list was built by
+   * iterating events and so a city with demand and zero events could not appear
+   * in it at all (C12). That is precisely the city the number exists for.
+   */
+  waiting: number
+  /**
+   * Enough people waiting, and nobody serving them.
+   *
+   * A decision rather than a number, because a metric with no decision rule is
+   * a metric nobody acts on — which is how this table came to be written for
+   * months and read never.
+   */
+  launchReady: boolean
 }
 
 /**

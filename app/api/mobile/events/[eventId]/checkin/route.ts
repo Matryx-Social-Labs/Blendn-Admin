@@ -19,6 +19,7 @@ import {
 } from "@/lib/api-response"
 import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
+import { recordRefusal } from "@/lib/check-in-refusals"
 import { resolveOccurrence } from "@/lib/occurrences"
 import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
@@ -132,6 +133,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const ageRefusal = minAgeRefusal(profileAge, event.min_age)
     if (ageRefusal) {
+      recordRefusal({ eventId, userId: authUser.userId, reason: "under_age" })
       return errorResponse(ageRefusal, 403, ErrorCode.AGE_RESTRICTED)
     }
 
@@ -151,12 +153,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const slot = await resolveOccurrence(eventId, now)
 
     if (!slot.ok) {
+      /*
+       * Recorded, not just refused. A cluster of `too_early` is a wrong start
+       * time on the listing -- which is the second most common curation mistake
+       * after a wrong pin, and produces exactly the same silence.
+       */
+      const occurrenceId = slot.occurrence?.id ?? null
       if (slot.reason === "too_early") {
+        recordRefusal({ eventId, userId: authUser.userId, reason: "too_early", occurrenceId })
         return errorResponse("Event has not started yet", 400, ErrorCode.EVENT_NOT_STARTED)
       }
       if (slot.reason === "cancelled") {
+        recordRefusal({ eventId, userId: authUser.userId, reason: "day_cancelled", occurrenceId })
         return errorResponse("This day has been cancelled", 400, ErrorCode.EVENT_ENDED)
       }
+      recordRefusal({ eventId, userId: authUser.userId, reason: "too_late", occurrenceId })
       // "none" means the event has no occurrences at all, which should be
       // impossible — every event gets one. Treated as ended rather than 500:
       // the attendee cannot act on the difference.
@@ -199,6 +210,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!fence) {
       logger.error("Check-in attempted on an event with no geofence", { eventId })
+      recordRefusal({ eventId, userId: authUser.userId, reason: "no_geofence" })
       return errorResponse(
         "This event has no location set, so check-in is unavailable. Contact the organiser.",
         400,
@@ -208,6 +220,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const verdict = evaluateCheckIn({ lat: latitude, lng: longitude }, fence, gpsAccuracy)
     if (!verdict.ok) {
+      /*
+       * The refusal that matters. Everybody twenty metres out is a pin on the
+       * wrong side of the street; a wide spread is a fence too tight for the
+       * venue. Neither is visible without recording the shortfall.
+       *
+       * The shortfall and the reported accuracy, never the coordinates -- see
+       * lib/check-in-refusals.ts.
+       */
+      recordRefusal({
+        eventId,
+        userId: authUser.userId,
+        reason: "out_of_range",
+        occurrenceId: occurrence.id,
+        shortfallMetres: verdict.shortfall,
+        accuracyMetres: gpsAccuracy,
+      })
       return errorResponse(
         `You're about ${Math.round(verdict.shortfall)}m outside the check-in area. Move closer to the venue and try again.`,
         400,

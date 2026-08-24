@@ -78,7 +78,10 @@ describe("visibleNavFor", () => {
       "Organisers",
       "Venues",
       "Leads",
-      "Venue claims",
+      // "Venue claims" became "Claims" when #284 merged the event and venue
+      // queues behind one entry; the sponsor entries below are #264's and are
+      // unrelated to it. Only the merged tree sees both halves.
+      "Claims",
       "Brands",
       "Creative review",
       "Brand claims",
@@ -174,13 +177,33 @@ describe("visibleNavFor", () => {
     expect(titles("not-a-role")).toEqual([])
   })
 
-  it("badges only the two admin queues", () => {
-    // A badge is a claim that something is waiting. Both of these are worked
-    // through by a person, so both count down to zero; anything else with a
-    // badge would be decoration that never clears.
+  it("badges only the queues a person works through", () => {
+    /*
+     * A badge is a claim that something is waiting. Each of these is worked
+     * through by a person, so each counts down to zero; anything else with a
+     * badge would be decoration that never clears.
+     *
+     * Claims joined the list when the venue queue and the new event queue
+     * became one nav entry. The count covers both, for the same reason the
+     * moderation badge covers flags AND reports: one entry with a count for
+     * half of it leaves somebody waiting with no number anywhere in the chrome.
+     */
     const badged = visibleNavFor("app_admin").filter((item) => item.badgeKey)
-    expect(badged.map((item) => item.title)).toEqual(["Moderation", "Applications"])
-    expect(badged.map((item) => item.badgeKey)).toEqual(["pendingFlags", "pendingApplications"])
+    expect(badged.map((item) => item.title)).toEqual(["Moderation", "Claims", "Applications"])
+    expect(badged.map((item) => item.badgeKey)).toEqual([
+      "pendingFlags",
+      "pendingClaims",
+      "pendingApplications",
+    ])
+  })
+
+  it("keeps Claims lit across both of its queues", () => {
+    // Otherwise the sidebar un-highlights itself the moment somebody switches
+    // tab, which reads as having navigated away from the section they are in.
+    const claims = visibleNavFor("app_admin").find((i) => i.title === "Claims")!
+    expect(claims.isActive!("/dashboard/claims")).toBe(true)
+    expect(claims.isActive!("/dashboard/claims/venues")).toBe(true)
+    expect(claims.isActive!("/dashboard/events")).toBe(false)
   })
 })
 
