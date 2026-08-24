@@ -173,6 +173,15 @@ function Row({
           <Badge variant={row.eventCount === 0 ? "outline" : "secondary"}>
             {row.eventCount} event{row.eventCount === 1 ? "" : "s"}
           </Badge>
+          {/*
+            Interests sit beside events because they are what matching ranks
+            on. A category with no events and four hundred interests looks dead
+            by the event count alone, and retiring it used to destroy all four
+            hundred.
+          */}
+          <Badge variant={row.interestCount === 0 ? "outline" : "secondary"}>
+            {row.interestCount} interest{row.interestCount === 1 ? "" : "s"}
+          </Badge>
           <Button size="sm" variant="ghost" onClick={onRename} aria-label={`Rename ${row.name}`}>
             <IconPencil className="size-4" />
           </Button>
@@ -253,9 +262,10 @@ function MergeForm({
     <div className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
       <p className="text-[0.8125rem] leading-6">
         Merge <b>{from.name}</b> into another category. Its {from.eventCount} event
-        {from.eventCount === 1 ? "" : "s"} move across and <b>{from.name}</b> is deleted. There is no
-        delete without a merge, because a category removed on its own drops its events out of every
-        filter on the app.
+        {from.eventCount === 1 ? "" : "s"} and {from.interestCount} saved interest
+        {from.interestCount === 1 ? "" : "s"} move across, and <b>{from.name}</b> is deleted. There
+        is no delete without a merge, because a category removed on its own drops its events out of
+        every filter on the app — and took everyone&rsquo;s saved interest in it with them.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <Select value={intoId} onValueChange={setIntoId}>
@@ -278,7 +288,15 @@ function MergeForm({
             start(async () => {
               try {
                 const moved = await mergeCategory(from.id, intoId)
-                toast.success(`Merged into ${into?.name} · ${moved} event${moved === 1 ? "" : "s"} moved`)
+                // Both numbers, because the interests are the half that used to
+                // be destroyed and the admin never saw them mentioned at all.
+                const parts = [`${moved.events} event${moved.events === 1 ? "" : "s"}`]
+                if (moved.interests > 0) {
+                  parts.push(
+                    `${moved.interests} interest${moved.interests === 1 ? "" : "s"}`
+                  )
+                }
+                toast.success(`Merged into ${into?.name} · ${parts.join(", ")} moved`)
                 onDone()
               } catch (err) {
                 toast.error(err instanceof Error ? err.message : "Could not merge")
