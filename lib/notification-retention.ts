@@ -32,7 +32,7 @@ export const UNREAD_RETENTION_DAYS = 90
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
 const BATCH_LIMIT = 5_000
 
-let sweepTimer: ReturnType<typeof setInterval> | null = null
+let sweepTimer: ReturnType<typeof setTimeout> | null = null
 
 function daysAgo(days: number, now: Date): Date {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
@@ -86,16 +86,56 @@ async function runSweep(): Promise<void> {
  * Same shape as `startChatLifecycleSweeper`, and for the same reason: deploys
  * restart this process regularly, so boot is when any backlog gets cleared.
  */
+/*
+ * Self-scheduling, not `setInterval` — and this file is why the reconciliation
+ * exists rather than either branch.
+ *
+ * #265 wrote it with `setInterval`; #282 banned that pattern across `lib/`
+ * because a slow pass and a fixed interval eventually overlap. Neither PR could
+ * see the conflict: the guard did not exist on #265's base, and this file did
+ * not exist on #282's.
+ *
+ * It is also the sweeper *most* able to outlast its own interval. It deletes in
+ * batches of 5,000 and takes locks on `notifications`, a table every read of the
+ * notification bell touches — so a second pass starting on top of the first
+ * would queue behind its own locks and make the stall worse.
+ *
+ * `finally`, not the end of `try`: a throw must still reschedule, or one failed
+ * sweep retires the loop for the life of the process.
+ */
+let stopped = false
+
 export function startNotificationRetentionSweeper(): void {
   if (sweepTimer) return
-  void runSweep()
-  sweepTimer = setInterval(() => void runSweep(), SWEEP_INTERVAL_MS)
-  sweepTimer.unref?.()
+  stopped = false
+
+  const schedule = () => {
+    if (stopped) return
+    sweepTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          await runSweep()
+        } finally {
+          schedule()
+        }
+      })()
+    }, SWEEP_INTERVAL_MS)
+    sweepTimer.unref?.()
+  }
+
+  void (async () => {
+    try {
+      await runSweep()
+    } finally {
+      schedule()
+    }
+  })()
 }
 
 export function stopNotificationRetentionSweeper(): void {
+  stopped = true
   if (sweepTimer) {
-    clearInterval(sweepTimer)
+    clearTimeout(sweepTimer)
     sweepTimer = null
   }
 }

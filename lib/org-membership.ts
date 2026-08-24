@@ -42,18 +42,6 @@ export async function actorFor(user: {
  * an empty `orgIds`, so the `some` below would be vacuously false and an admin
  * would be refused their own platform's placement.
  */
-export async function maySponsorFor(actor: {
-  role: user_role
-  orgIds: string[]
-}): Promise<boolean> {
-  if (actor.role === "app_admin") return true
-  if (actor.orgIds.length === 0) return false
-
-  const count = await db.organisations.count({
-    where: { id: { in: actor.orgIds }, may_sponsor: true },
-  })
-  return count > 0
-}
 
 /**
  * Resolve the ONE organisation acting, with both of its entitlements together.

@@ -79,13 +79,22 @@ const CALLER_FILES = [
  * ratify a false docblock rather than fix it.
  */
 const KNOWN_UNREACHABLE = new Map<string, string>([
+  // --- Surfaced only by the merged tree, and owned by another workstream -----
+  //
+  // Both were dead on their own branch too; nothing there could see it, because
+  // the ratchet that finds them (#269) and the code that contains them (#264)
+  // never sat in one tree until now. R32 says dead code is deleted by the
+  // workstream that owns its area, reviewed next to whatever replaces it -- so
+  // they are recorded here rather than removed blind by a merge.
+  ["placesAtEventBulk", "the bulk sibling of a per-event check nothing batches yet; H-section item"],
+  ["isSameSponsorName", "re-exported by lib/sponsor-merge.ts and called through neither path; H-section item"],
+
   // --- Venues: rows can be created and then never corrected -----------------
   ["assignVenueOwner", "no admin control on /dashboard/venue-owners/[id]; owner org is set at creation and never after"],
   ["updateVenue", "no edit form anywhere; a venue can be created and never corrected"],
   ["unlinkEventVenue", "the reversibility lib/venue-claim-actions.ts cites to justify its review bar"],
 
   // --- Safety and moderation: built, documented, never on screen ------------
-  ["canPublish", "no publish path calls the gate, so an event with no coordinates still publishes and accepts check-ins from anywhere on earth"],
   ["fencesOverlap", "the two-events-one-building warning; the geofence editor never asks for it"],
   ["getTrustSignal", "trust-not-exposed.test.ts says moderation reads this through the dashboard — no dashboard screen does"],
   ["contactInfoWarning", "the sentence shown above the composer; the chat route returns checkContactInfo's bare hint instead"],
@@ -94,8 +103,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["canSendPushNotifications", "same — the rule exists, the caller does not"],
 
   // --- Notifications and real-time: the client contract outruns the server --
-  ["notifyEventCancelled", "nobody favouriting an event is told when it is cancelled"],
-  ["notifyEventDetailsChanged", "same for a time or venue change"],
   ["emitChatReaction", "docs/SOCKET_EVENTS.md publishes chat:reaction to clients; nothing emits it, and there is no reaction write path to emit from"],
 
   // --- Half-wired flows ------------------------------------------------------

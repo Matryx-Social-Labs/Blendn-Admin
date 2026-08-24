@@ -111,10 +111,6 @@ export function claimRefusal(
   return null
 }
 
-/** Convenience for the read paths that only need a yes or no. */
-export function isClaimable(event: CuratedEvent, now: Date = new Date()): boolean {
-  return claimRefusal(event, now) === null
-}
 
 /**
  * The description a curated event is published with.

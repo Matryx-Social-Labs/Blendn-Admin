@@ -41,7 +41,13 @@ describe("I8 — the sweepers are not a side effect of Socket.io", () => {
 
   it("keeps the sponsored scheduler with Socket.io, because it needs io", () => {
     // Not everything moves. This one emits into chat rooms.
-    expect(code("lib/socket-server.ts")).toMatch(/sponsoredMessageScheduler\.loadAll\(\)/)
+    //
+    // Pinned on `startSponsoredScheduler`, not `sponsoredMessageScheduler
+    // .loadAll()`. #264 extracted the scheduler into its own module and renamed
+    // the entry point while #276 was moving the other loops out; neither branch
+    // could see the other, so only the merged tree fails on the old name. The
+    // invariant is unchanged -- this loop stays coupled to `io` on purpose.
+    expect(code("lib/socket-server.ts")).toMatch(/startSponsoredScheduler\(/)
   })
 
   it("uses relative imports, because server.ts compiles with plain tsc", () => {

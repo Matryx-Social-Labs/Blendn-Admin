@@ -12,6 +12,9 @@ import { getEventOverview } from "@/lib/event-overview"
 
 import { EventTabs, eventTabsFor, type EventTabKey } from "./event-tabs"
 import { Overview } from "./overview"
+import { curationSelect, curationState } from "@/lib/curation"
+import { refusalSummary } from "@/lib/check-in-refusals"
+import { CurationHealth } from "./curation-health"
 
 export const dynamic = "force-dynamic"
 
@@ -50,6 +53,15 @@ export default async function EventDetailPage({
   const event = await db.events.findFirst({
     where: { id, deleted_at: null },
     select: {
+      /*
+       * Spread FIRST, deliberately. `curationSelect` claims `start_time`,
+       * `end_time` and `organizer_org_id`, which this select already names --
+       * spread last it wins and the explicit entries are overwritten (TS2783).
+       * Same collision as `broadcastAuthorSelect` through `venue`; the values
+       * are identical `true` either way, but the ordering is what makes that
+       * safe rather than lucky.
+       */
+      ...curationSelect,
       id: true,
       title: true,
       status: true,
@@ -150,9 +162,28 @@ export default async function EventDetailPage({
       ? await Promise.all([getEventAttendance(event.id), getConnectionMetrics(event.id)])
       : [null, null]
 
+  /*
+   * The per-event half of curation health.
+   *
+   * The queue screen answers "which of everything we added is dead"; this
+   * answers "and why is this one". `topReason` is the part the list cannot show
+   * -- a wrong pin and a wrong start time both produce zero check-ins, and only
+   * the dominant refusal reason tells them apart.
+   *
+   * Loaded only for curated events, so an organiser's own event pays nothing.
+   */
+  const state = curationState(event)
+  const refusals =
+    state === "curated_open" || state === "curated_claimed"
+      ? await refusalSummary(event.id)
+      : null
+
   return (
     <div className="flex flex-col gap-5">
       {header}
+      {refusals && refusals.attempts > 0 ? (
+        <CurationHealth state={state} refusals={refusals} />
+      ) : null}
       <Overview
         overview={overview}
         eventId={event.id}

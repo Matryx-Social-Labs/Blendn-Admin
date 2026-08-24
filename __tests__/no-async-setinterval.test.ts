@@ -60,8 +60,24 @@ describe("recurring work schedules itself", () => {
     const offenders = files
       .filter(([, abs]) => {
         const src = code(abs)
-        // `setInterval(() => void fn(), …)` and `setInterval(async () => …)`.
-        return /setInterval\(\s*(async\s*)?\(\s*\)\s*=>\s*(void\s+)?\w+\(/.test(src)
+        /*
+         * Three shapes, because the first version caught only one.
+         *
+         * It required the arrow body to be a bare call -- `() => void fn()` or
+         * `async () => fn()` -- so `setInterval(async () => { await work() }, ms)`
+         * passed. That is the most natural way to write the bug, and a negative
+         * control that ADDED it to a lib file left the suite green. A guard that
+         * passes against the thing it bans is worse than no guard, which is the
+         * whole of R16.
+         */
+        return (
+          // any async callback at all
+          /setInterval\(\s*async\b/.test(src) ||
+          // `() => void fn()` / `() => fn()`
+          /setInterval\(\s*\(\s*\)\s*=>\s*(void\s+)?\w+\(/.test(src) ||
+          // a block body that awaits
+          /setInterval\(\s*\(\s*\)\s*=>\s*\{[\s\S]{0,400}?\bawait\b/.test(src)
+        )
       })
       .map(([rel]) => rel)
     expect(offenders).toEqual([])

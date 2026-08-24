@@ -3,7 +3,6 @@ import { join } from "path"
 import {
   curationState,
   claimRefusal,
-  isClaimable,
   curatedDescription,
   curatedFence,
   CURATED_RADIUS_METRES,
@@ -73,7 +72,9 @@ describe("who may claim, and when", () => {
   })
 
   it("allows a claim before doors", () => {
-    expect(isClaimable(ev(), NOW)).toBe(true)
+    // `isClaimable` was a one-line wrapper over this and had no caller -- every
+    // read path used `claimRefusal` directly for the reason, not just the yes/no.
+    expect(claimRefusal(ev(), NOW)).toBeNull()
   })
 
   it("REFUSES a claim while the room is live", () => {

@@ -102,10 +102,6 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Reports",
     description: "What people reported about each other, and what was decided.",
   },
-  "/dashboard/leads": {
-    title: "Leads",
-    description: "Demo requests from the organiser landing page. Separate from applications.",
-  },
   "/dashboard/venues/new": {
     title: "Add a venue",
     description: "A permanent place. Events attach to it; its pin is the one they inherit.",

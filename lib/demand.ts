@@ -129,13 +129,3 @@ export async function cityDemand(limit = 50): Promise<DemandRow[]> {
   )
 }
 
-/**
- * The one number.
- *
- * Distinct people waiting in the best-served-by-nobody city. A single figure a
- * founder can act on, rather than a table they have to read.
- */
-export async function topUnservedCity(): Promise<DemandRow | null> {
-  const rows = await cityDemand(50)
-  return rows.find((r) => r.events === 0 && r.waiting > 0) ?? null
-}

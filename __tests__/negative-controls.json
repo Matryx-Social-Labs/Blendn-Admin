@@ -3,20 +3,25 @@
     "R16: every structural guard ships with a documented mutation proving it",
     "fails against broken code. A grep guard that passes against a broken",
     "codebase converts an unknown into a false assurance, which is worse than",
-    "having no guard — and this project has already shipped one `sed` control",
+    "having no guard \u2014 and this project has already shipped one `sed` control",
     "that silently never matched.",
     "",
     "`verified` entries record a mutation that was applied, observed to fail,",
     "and reverted. `grandfathered` is the ratchet: guards that predate this",
     "registry and have no recorded control. That list may shrink and must never",
-    "grow — `negative-controls.test.ts` fails on a new structural guard with no",
+    "grow \u2014 `negative-controls.test.ts` fails on a new structural guard with no",
     "entry.",
     "",
     "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
     "the guard fails, revert, and move it into `verified` with what you saw.",
     "Never `git checkout` the file to revert if you have uncommitted work in it;",
     "copy it aside first. That mistake has already cost this project a block of",
-    "unsaved analysis."
+    "unsaved analysis.",
+    "",
+    "Rows marked `source: transcribed-at-merge` had their control run on the",
+    "branch that introduced the guard and recorded in that commit message. They",
+    "could not be registered there because this file lives on #265. Transcribed",
+    "rather than re-run; re-running them is worth doing and is a tracked task."
   ],
   "verified": {
     "event-notifications-reachable.test.ts": {
@@ -36,6 +41,193 @@
       "mutation": "Remove `@@index([event_id, check_in_time])` from the event_check_ins model",
       "observed": "1 failing: 'event_check_ins has @@index([event_id, check_in_time])'",
       "date": "2026-08-20"
+    },
+    "dashboard-header-title.test.ts": {
+      "guards": "every static dashboard route has an exact routeContent entry; site-header owns the only h1",
+      "mutation": "Delete the \"/dashboard/events/curate\" entry from routeContent; separately, add an <h1> to app/dashboard/claims/venues/page.tsx; separately, demote chatrooms' h1 without pruning KNOWN_DOUBLE_H1",
+      "observed": "1 failing each of the three: the route suite, the ownership suite, and the staleness suite",
+      "date": "2026-08-24"
+    },
+    "event-claims.test.ts": {
+      "guards": "fileEventClaim never takes orgId from the caller, never returns flags, is rate-limited before the write; decideEventClaim's catch wraps the transaction; the funnel has a public entry",
+      "mutation": "Re-add orgId to FileClaimInput; return {ok,claimId,flags}; replace the overClaimLimit call with `const limited = null`; unwire fileEventClaim from claim-form.tsx; add \"/claim/:path*\" to the middleware matcher; change the migration predicate from 'approved' to 'pending'; move the catch off $transaction",
+      "observed": "1 failing per mutation, seven mutations, each reverted",
+      "date": "2026-08-25"
+    },
+    "curation.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/curation.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "14 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "admin-curation-screens.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/events/curate/page.tsx with an empty stub (`export {}`), run this suite, revert",
+      "observed": "8 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "demand.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "2 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "check-in-refusals.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/mobile/events/[eventId]/checkin/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "alerts-that-fire.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/live-snapshot.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "4 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "background-survivability.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/socket-server.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "chat-write-path.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/mobile/events/[eventId]/chat/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "count-people-boundary.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/users/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "counting-people-not-rows.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "event-ownership.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/events/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "export-caps.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/reports.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "2 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "geocode-and-sweeper-bounds.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/events/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "may-sponsor-grant.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/onboarding-actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "5 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "moderation-correctness.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/moderation/openai-moderation.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "nav-routes-exist.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace components/site-header.tsx with an empty stub (`export {}`), run this suite, revert",
+      "observed": "23 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "no-async-setinterval.test.ts": {
+      "guards": "no setInterval in lib/ drives an async callback; the three sweepers reschedule from a path a throw cannot skip",
+      "mutation": "Append `setInterval(async () => { await Promise.resolve() }, 1000)` to lib/chat-lifecycle.ts",
+      "observed": "1 failing \u2014 but ONLY after widening the regex. The original required the arrow body to be a bare call, so `setInterval(async () => { ... })` passed. The control found the guard vacuous for the most natural way to write the bug.",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "presence-one-resolver.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/mobile/events/[eventId]/presence/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "privacy-leaks.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/mobile/conversations/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "server-actions-reachable.test.ts": {
+      "guards": "every export in lib/ has a caller, comments excluded; KNOWN_UNREACHABLE is checked in both directions",
+      "mutation": "Delete a KNOWN_UNREACHABLE entry for something still dead, and separately wire up an entry still on the list",
+      "observed": "3 failing \u2014 the integration merge ran this for real: once #265 and #268 wired canPublish, notifyEventCancelled and notifyEventDetailsChanged, all three KNOWN_UNREACHABLE entries went stale and the suite named each one.",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsor-merge-coverage.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/sponsor-actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsor-onboarding.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/onboarding-actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "2 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsor-schema.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace prisma/schema.prisma with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsored-scheduler.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/sponsored-scheduler.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "21 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "suspension-blast-radius.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/auth.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "what-an-organiser-sees.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/events/[id]/feedback/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "4 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
     }
   },
   "grandfathered": [
