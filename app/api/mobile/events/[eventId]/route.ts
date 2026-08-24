@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { cancelEventCheckIns, isCancellingEvent } from "@/lib/event-cancellation"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
@@ -123,9 +124,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
         _count: {
           select: {
-            check_ins: {
-              where: { status: "checked_in" },
-            },
             favorites: true,
             ratings: true,
             rsvps: {
@@ -168,8 +166,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           })
         : Promise.resolve([])
 
-    const [userFavorite, userRating, userCheckIn, userRsvp, interestedUsers] =
+    const [attendedCounts, userFavorite, userRating, userCheckIn, userRsvp, interestedUsers] =
       await Promise.all([
+        /*
+         * `checkInCount` was `_count.check_ins` filtered to `checked_in`, which
+         * counted rows on a table holding one per person **per day** — and
+         * dropped anyone who had checked out, so the headline number fell as
+         * the night went on.
+         */
+        distinctAttendeeCounts([eventId]),
         db.event_favorites.findUnique({
           where: {
             event_id_user_id: {
@@ -306,7 +311,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })),
       chatGroup: event.chat_group,
       stats: {
-        checkInCount: event._count.check_ins,
+        checkInCount: attendedCounts.get(eventId) ?? 0,
         favoriteCount: event._count.favorites,
         ratingCount: event._count.ratings,
         averageRating: avgRating._avg.rating,

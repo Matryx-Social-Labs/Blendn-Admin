@@ -11,6 +11,8 @@ import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
 import { normaliseVenueName } from "@/lib/venue-name"
+import { repeatAttendees, turnUpPct, noShowPct } from "@/lib/counting"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import type {
   AdminOverview,
   CityRow,
@@ -148,12 +150,15 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
         _count: {
           select: {
             rsvps: { where: { status: "going" } },
-            check_ins: { where: { status: { in: ATTENDED } } },
           },
         },
       },
     }),
   ])
+
+  // Turn-up per event, in one grouped query rather than 25 `_count`s that
+  // cannot say DISTINCT.
+  const attendedPerEvent = await distinctAttendeeCounts(eventRows.map((e) => e.id))
 
   // No-show rate over the last 30 days, and the 30 before it, so the delta says
   // whether it is getting better rather than just what it is.
@@ -161,28 +166,46 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     db.event_rsvps.count({
       where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
     }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
+    /*
+     * Grouped by user, not counted. `event_check_ins` holds one row per person
+     * per day, so a three-day conference contributed three attendances against
+     * one RSVP — turn-up clamped to exactly 100% and no-show floored at 0%,
+     * which is the number this whole block exists to report.
+     */
+    db.event_check_ins.groupBy({
+      by: ["user_id"],
+      where: { status: { in: ATTENDED }, kind: "attendee", event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
     }),
     db.event_rsvps.count({
       where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
     }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
-    }),
     db.event_check_ins.groupBy({
       by: ["user_id"],
+      where: { status: { in: ATTENDED }, kind: "attendee", event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
+    }),
+    /*
+     * Rows, not a grouped row-count.
+     *
+     * This grouped by user and asked `_count._all > 1`, which counts *rows*.
+     * `event_check_ins` holds one row per person per day, so somebody who
+     * attended both days of one conference was two rows and read as a
+     * returning attendee — on the tile titled "came back for a 2nd event".
+     * `repeatAttendees` folds on distinct `event_id` instead.
+     */
+    db.event_check_ins.findMany({
       where: { status: { in: ATTENDED }, event: eventScope(userId) },
-      _count: { _all: true },
+      select: { user_id: true, event_id: true, kind: true },
     }),
   ])
 
-  // Turn-up capped at 100 (walk-ins check in without RSVPing), so no-show is
-  // floored at 0 rather than going negative.
-  const turnUpNow = pct(Math.min(attendedNow, committedNow), committedNow)
-  const turnUpPrior = pct(Math.min(attendedPrior, committedPrior), committedPrior)
-  const noShowNow = turnUpNow === null ? null : 100 - turnUpNow
-  const noShowPrior = turnUpPrior === null ? null : 100 - turnUpPrior
+  /*
+   * The clamp is gone. It was justified as "walk-ins check in without RSVPing",
+   * but its real job was absorbing the row-counting inflation above — and in
+   * doing so it hid the walk-ins it named. `noShowPct` floors at zero, because
+   * more people than RSVPs is zero no-shows plus some extra, not a negative.
+   */
+  const noShowNow = noShowPct(attendedNow.length, committedNow)
+  const noShowPrior = noShowPct(attendedPrior.length, committedPrior)
 
   let nextEvent: NextEvent | null = null
   let pacing: PacingPoint[] = []
@@ -242,7 +265,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     noShowRatePct: round1(noShowNow),
     noShowDelta:
       noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
-    repeatAttendees: repeatRows.filter((r) => r._count._all > 1).length,
+    repeatAttendees: repeatAttendees(repeatRows),
     averageRating: round1(ratingAggregate._avg.rating),
     ratingCount: ratingAggregate._count.rating,
     chatToday,
@@ -259,9 +282,9 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
           ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
           : null,
       turnUpPct:
-        event.start_time >= now || event._count.rsvps === 0
+        event.start_time >= now
           ? null
-          : Math.min(100, (event._count.check_ins / event._count.rsvps) * 100),
+          : turnUpPct(attendedPerEvent.get(event.id) ?? 0, event._count.rsvps),
     })),
   }
 }
@@ -835,11 +858,12 @@ export async function getEventRows(): Promise<EventRow[]> {
       _count: {
         select: {
           rsvps: { where: { status: "going" } },
-          check_ins: { where: { status: { in: ATTENDED } } },
         },
       },
     },
   })
+
+  const attendedPerEvent = await distinctAttendeeCounts(events.map((e) => e.id))
 
   return events.map((event) => ({
     id: event.id,
@@ -854,8 +878,8 @@ export async function getEventRows(): Promise<EventRow[]> {
         ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
         : null,
     turnUpPct:
-      event.start_time >= now || event._count.rsvps === 0
+      event.start_time >= now
         ? null
-        : Math.min(100, (event._count.check_ins / event._count.rsvps) * 100),
+        : turnUpPct(attendedPerEvent.get(event.id) ?? 0, event._count.rsvps),
   }))
 }

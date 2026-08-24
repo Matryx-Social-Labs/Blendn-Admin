@@ -1,8 +1,17 @@
-import { transformEvent } from "@/lib/services/events.service"
+import { transformEvents } from "@/lib/services/events.service"
 
 jest.mock("@/lib/location", () => ({
   resolveEventCity: jest.fn(async (city: string | null) => city),
 }))
+
+// `transformEvent` is private now — the plural owns the attendee query, so a
+// caller cannot build a list without answering "how many people" first.
+jest.mock("@/lib/attendee-counts", () => ({
+  distinctAttendeeCounts: jest.fn(async () => new Map([["e1", 4]])),
+}))
+
+const transformOne = async (event: unknown, ctx: Parameters<typeof transformEvents>[1]) =>
+  (await transformEvents([event] as never, ctx))[0]
 
 /*
  * The interested list stops handing out faces.
@@ -46,12 +55,12 @@ const EVENT = {
   organizer: null,
   categories: [],
   media: [],
-  _count: { check_ins: 4, favorites: 124, ratings: 0 },
+  _count: { favorites: 124, ratings: 0 },
 } as never
 
 describe("GET /events never previews who is interested", () => {
   it("returns no photographs of interested users", async () => {
-    const out = await transformEvent(EVENT, { favoriteEventIds: new Set<string>() })
+    const out = await transformOne(EVENT, { favoriteEventIds: new Set<string>() })
     expect(out).not.toHaveProperty("interestedPreview")
   })
 
@@ -61,7 +70,7 @@ describe("GET /events never previews who is interested", () => {
      * the old switch gets nothing rather than a rebuilt leak. Cast because the
      * property no longer exists on the type — which is the point.
      */
-    const out = await transformEvent(EVENT, {
+    const out = await transformOne(EVENT, {
       favoriteEventIds: new Set<string>(),
       includeInterestedPreview: true,
       interestedPreviewMap: { e1: ["https://cdn.example/real-face.jpg"] },
@@ -72,14 +81,14 @@ describe("GET /events never previews who is interested", () => {
 
   it("still carries the count, which is what the design needed", async () => {
     // "124 interested" is the social proof. The faces were never the point.
-    const out = await transformEvent(EVENT, { favoriteEventIds: new Set<string>() })
+    const out = await transformOne(EVENT, { favoriteEventIds: new Set<string>() })
     expect(out.favoriteCount).toBe(124)
   })
 
   it("leaks nothing else shaped like a person", async () => {
     // A blunt sweep, because the failure mode is a field nobody remembered.
     const body = JSON.stringify(
-      await transformEvent(EVENT, { favoriteEventIds: new Set<string>() })
+      await transformOne(EVENT, { favoriteEventIds: new Set<string>() })
     )
     for (const key of ["interestedPreview", "attendees", "favoritedBy", "checkedInUsers"]) {
       expect(body).not.toContain(key)

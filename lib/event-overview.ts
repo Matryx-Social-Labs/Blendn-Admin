@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { eventStateFor, publishBlockers, type EventState, type PublishBlocker } from "@/lib/event-phase"
 
 /**
@@ -52,7 +53,19 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
   const [going, checkedIn, everCheckedIn, ratings] = await Promise.all([
     db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
     db.event_check_ins.count({ where: { event_id: eventId, status: "checked_in" } }),
-    db.event_check_ins.count({ where: { event_id: eventId, check_in_time: { not: null } } }),
+    /*
+     * Rows, not people — and this one is rendered next to a panel that folds
+     * correctly, so the same screen showed two different turn-up figures. On a
+     * three-day event the hero read 100% (three attendance-days per person,
+     * clamped) while the attendance panel two boxes below read 62%.
+     *
+     * Staff excluded here too. They attend every day by definition, and the
+     * count was including them.
+     */
+    db.event_check_ins.findMany({
+      where: { event_id: eventId, check_in_time: { not: null } },
+      select: { user_id: true, kind: true },
+    }),
     db.event_ratings.findMany({ where: { event_id: eventId }, select: { rating: true } }),
   ])
 
@@ -60,7 +73,14 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
   const fillPct = capacity ? pct(going, capacity) : null
   // Turn-up is against people who said they were coming, not against capacity —
   // an event that half-filled and had everyone turn up did the hard part right.
-  const turnUpPct = going === 0 ? null : pct(Math.min(everCheckedIn, going), going)
+  const attendedPeople = distinctAttendees(everCheckedIn)
+  /*
+   * No `Math.min` clamp any more. It existed to stop no-show going negative
+   * when row-counting inflated attendance past the RSVP count; counting people
+   * removes the cause, and clamping now would hide walk-ins — the one signal
+   * that says an event outperformed what it was promised.
+   */
+  const turnUpPct = turnUp(attendedPeople, going)
   const avgRating =
     ratings.length === 0
       ? null
@@ -102,7 +122,7 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
               hint:
                 going === 0
                   ? "No RSVPs to compare against"
-                  : `${everCheckedIn} of ${going} who said they would`,
+                  : `${attendedPeople} of ${going} who said they would`,
             }
 
   const tiles: EventOverview["tiles"] =
@@ -117,18 +137,18 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
             { label: "Capacity", value: capacity === null ? null : String(capacity) },
             {
               label: "Checked in",
-              value: String(everCheckedIn),
+              value: String(attendedPeople),
               hint: "before the doors, usually zero",
             },
           ]
         : state === "live"
           ? [
-              { label: "Ever checked in", value: String(everCheckedIn) },
+              { label: "Ever checked in", value: String(attendedPeople) },
               { label: "Going", value: String(going) },
               { label: "Capacity", value: capacity === null ? null : String(capacity) },
             ]
           : [
-              { label: "Checked in", value: String(everCheckedIn) },
+              { label: "Checked in", value: String(attendedPeople) },
               { label: "Going", value: String(going) },
               {
                 label: "Rating",

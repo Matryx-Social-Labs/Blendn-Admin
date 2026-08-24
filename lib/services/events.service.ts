@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { resolveEventCity } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
 
@@ -78,9 +79,6 @@ export const eventListSelect = {
   },
   _count: {
     select: {
-      check_ins: {
-        where: { status: "checked_in" },
-      },
       favorites: true,
       ratings: true,
     },
@@ -102,9 +100,15 @@ interface TransformContext {
   includeCheckins?: boolean
 }
 
-export async function transformEvent(
+/*
+ * Private, and takes `attended` rather than reading it off `_count`, so a new
+ * caller cannot construct a list without answering "how many people" first.
+ * `transformEvents` below is the only door in.
+ */
+async function transformEvent(
   event: EventListItem,
-  ctx: TransformContext
+  ctx: TransformContext,
+  attended: Map<string, number>
 ) {
   return {
     id: event.id,
@@ -144,7 +148,7 @@ export async function transformEvent(
     organizer: event.organizer,
     categories: event.categories.map((c) => c.category),
     media: event.media,
-    checkInCount: event._count.check_ins,
+    checkInCount: attended.get(event.id) ?? 0,
     favoriteCount: event._count.favorites,
     ratingCount: event._count.ratings,
     isFavorited: ctx.favoriteEventIds.has(event.id),
@@ -177,5 +181,14 @@ export async function transformEvents(
   events: EventListItem[],
   ctx: TransformContext
 ) {
-  return Promise.all(events.map((event) => transformEvent(event, ctx)))
+  /*
+   * `checkInCount` was `_count.check_ins` filtered to `status: "checked_in"`,
+   * which was wrong twice over. `_count` has no DISTINCT and the table holds
+   * one row per person **per day**, so a three-day event read three times high
+   * — and filtering to `checked_in` alone meant the number went *down* as the
+   * night went on and people checked out. The headline count on the feed fell
+   * while the event was at its busiest.
+   */
+  const attended = await distinctAttendeeCounts(events.map((e) => e.id))
+  return Promise.all(events.map((event) => transformEvent(event, ctx, attended)))
 }

@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay } from "@/lib/conversations"
@@ -61,7 +62,6 @@ export async function GET(
         // Include some stats
         _count: {
           select: {
-            event_check_ins: true,
             event_favorites: true,
             organized_events: true,
           },
@@ -140,7 +140,7 @@ export async function GET(
       interests: user.user_interests.map((ui) => ui.category),
       memberSince: user.createdAt,
       stats: {
-        eventsAttended: user._count.event_check_ins,
+        eventsAttended: await distinctEventsAttended(user.id),
         eventsFavorited: user._count.event_favorites,
         eventsOrganized: user._count.organized_events,
       },
