@@ -5,6 +5,7 @@ import { eventWriteSchema } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
+import { owningOrgFor } from "@/lib/event-ownership"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
@@ -206,6 +207,21 @@ export async function POST(req: Request) {
     // Derived, never taken from the body — see lib/venue-link.ts.
     const venueLink = await resolveVenueLink(venue_id)
 
+    /*
+     * Resolved before the write, so a creator with no organisation is told at
+     * the moment they save rather than discovering it at the edit screen. A 400
+     * because it is a fixable problem with the account, not a server fault.
+     */
+    let owningOrgId: string | null
+    try {
+      owningOrgId = await owningOrgFor(session.user)
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "No owning organisation" },
+        { status: 400 }
+      )
+    }
+
     const event = await db.events.create({
       data: {
         ...venueLink,
@@ -239,7 +255,15 @@ export async function POST(req: Request) {
         is_recurring: is_recurring ?? undefined,
         check_in_radius: location.values.check_in_radius ?? undefined,
         geofence: location.values.geofence ?? undefined,
+        /*
+         * `organizer_id` records who created the row; `organizer_org_id` is who
+         * can act on it. Only the second is an authorization input, and until
+         * now nothing in production wrote it -- so `eventPermissions` could
+         * never match the organiser branch and a creator could not edit the
+         * event they had just saved.
+         */
         organizer_id: session.user.id,
+        organizer_org_id: owningOrgId,
         details: {
           create: {
             full_description: resolvedFullDescription,

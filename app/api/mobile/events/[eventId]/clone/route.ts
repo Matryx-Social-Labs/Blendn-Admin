@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { owningOrgFor } from "@/lib/event-ownership"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions } from "@/lib/rbac"
@@ -91,6 +92,18 @@ export async function POST(
         visibility: event.visibility,
         max_capacity: event.max_capacity,
         organizer_id: authUser.userId,
+        /*
+         * The clone was landing org-less. A comment above this route claims
+         * "`include` returns every scalar, so `organizer_org_id` is already
+         * here" -- true of the read, and the create below never copied it. So
+         * cloning produced an event its own cloner could not edit, and which
+         * every org-scoped dashboard listing and report silently excluded.
+         *
+         * Resolved from the cloner rather than copied from the source: cloning
+         * somebody else's event makes it yours, and inheriting their org would
+         * hand them edit rights over your copy.
+         */
+        organizer_org_id: await owningOrgFor({ id: requester.id, role: requester.role }),
         cover_image_url: event.cover_image_url,
         external_link: event.external_link,
         is_featured: false,
