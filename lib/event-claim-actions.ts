@@ -1,11 +1,15 @@
 "use server"
 
+import { headers } from "next/headers"
+
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
-import { CLAIM_PAGE, claimRefusal, curationSelect } from "@/lib/curation"
+import { CLAIM_LIMITS, CLAIM_PAGE, claimRefusal, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
+import { owningOrgFor } from "@/lib/event-ownership"
 import { logger } from "@/lib/logger"
+import { hit } from "@/lib/rate-limit-store"
 
 /**
  * "This event is mine."
@@ -24,33 +28,105 @@ export interface FileClaimInput {
   eventId: string
   contactEmail: string
   note?: string
-  /** The claimant's organisation, when they have one. */
-  orgId?: string
-  /** The onboarding request that will create one, when they do not. */
+  /**
+   * The onboarding request that will become the claimant's organisation.
+   *
+   * Accepted from the caller, unlike an org id, because an onboarding request
+   * **grants nothing** — it is itself pending review, and the admin deciding
+   * the claim sees both. An organisation id is the opposite: it names a real
+   * owner that already exists, so it is derived from the session below and
+   * never read from input. Attaching a stranger's claim to somebody else's
+   * organisation is not a thing this function should be able to express.
+   */
   onboardingId?: string
+}
+
+const HOUR_MS = 60 * 60 * 1000
+
+/**
+ * Three windows, checked together, Redis-backed.
+ *
+ * `lib/rate-limit.ts` wraps this for route handlers and needs a `NextRequest`;
+ * a server action has no request object, so it calls `hit()` directly rather
+ * than growing a second limiter — the counter, the store and the Redis
+ * fallback are all the same ones every rate-limited route already uses.
+ *
+ * Returns the message to refuse with, or null to proceed.
+ */
+async function overClaimLimit(email: string, eventId: string): Promise<string | null> {
+  /*
+   * `x-forwarded-for` is spoofable, which is why it is the weakest of the three
+   * and never the only one. Behind Railway's proxy the left-most entry is the
+   * real client; with no header at all every anonymous caller shares one
+   * bucket, which fails toward refusing rather than toward letting through.
+   */
+  const forwarded = (await headers()).get("x-forwarded-for") ?? "unknown"
+  const ip = forwarded.split(",")[0]!.trim() || "unknown"
+
+  const [byEmail, byEvent, byIp] = await Promise.all([
+    hit(`rl:claim:email:${email}`, HOUR_MS),
+    hit(`rl:claim:event:${eventId}`, HOUR_MS),
+    hit(`rl:claim:ip:${ip}`, HOUR_MS),
+  ])
+
+  if (byEmail.count > CLAIM_LIMITS.perEmailPerHour || byIp.count > CLAIM_LIMITS.perIpPerHour) {
+    return "You have filed several claims recently. Give us a little time to read them."
+  }
+  if (byEvent.count > CLAIM_LIMITS.perEventPerHour) {
+    // Deliberately the same sentence. Telling a flooder which bucket they hit
+    // tells them which one to vary.
+    return "You have filed several claims recently. Give us a little time to read them."
+  }
+  return null
 }
 
 export async function fileEventClaim(
   input: FileClaimInput
-): Promise<{ ok: true; claimId: string; flags: ClaimFlag[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; claimId: string } | { ok: false; error: string }> {
   /*
-   * Deliberately not authenticated.
+   * Deliberately not authenticated — but not unbounded, and not trusting.
    *
-   * Most claims arrive from somebody with no account — that is why the event
-   * was curated in the first place. Requiring a login here would turn the
-   * acquisition funnel into a signup wall in front of the acquisition funnel.
-   *
-   * The claim proves nothing by existing; a human reads it. What protects this
-   * is that filing costs nothing and grants nothing.
+   * Most claims arrive from somebody with no account: that is *why* the event
+   * was curated. Requiring a login here would put a signup wall in front of
+   * the acquisition funnel. What protects it instead is that filing costs
+   * nothing and grants nothing, plus the two things the eng review found
+   * missing — a rate limit, and refusing to let the caller name the
+   * organisation the claim is filed for.
    */
-  if (Boolean(input.orgId) === Boolean(input.onboardingId)) {
-    return { ok: false, error: "A claim needs exactly one of an organisation or an onboarding request" }
-  }
-
   const email = input.contactEmail.trim().toLowerCase()
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return { ok: false, error: "Give an email address we can reply to" }
   }
+
+  /*
+   * The organisation comes from the session or from an onboarding request.
+   * Never from input.
+   *
+   * `owningOrgFor` throws for a signed-in user with no membership, which is a
+   * broken onboarding rather than a claim problem — so it is caught and read
+   * as "you have no organisation yet", and they take the no-account path.
+   */
+  const session = await getAuth()
+  let orgId: string | null = null
+  if (session?.user && session.user.role !== "app_admin") {
+    try {
+      orgId = await owningOrgFor(session.user)
+    } catch {
+      orgId = null
+    }
+  }
+
+  if (Boolean(orgId) === Boolean(input.onboardingId)) {
+    return {
+      ok: false,
+      error: orgId
+        ? "You are signed in with an organisation, so this claim does not need an application"
+        : "Tell us about your organisation first, so there is something to hand the event to",
+    }
+  }
+
+  const limited = await overClaimLimit(email, input.eventId)
+  if (limited) return { ok: false, error: limited }
 
   const event = await db.events.findUnique({
     where: { id: input.eventId, deleted_at: null },
@@ -76,9 +152,9 @@ export async function fileEventClaim(
 
   const [priorClaims, verified] = await Promise.all([
     db.event_claims.count({ where: { event_id: event.id } }),
-    input.orgId
+    orgId
       ? db.organisation_domains.findMany({
-          where: { org_id: input.orgId, verified_at: { not: null } },
+          where: { org_id: orgId, verified_at: { not: null } },
           select: { domain: true },
         })
       : Promise.resolve([]),
@@ -89,14 +165,14 @@ export async function fileEventClaim(
     sourceUrl: event.source_url,
     verifiedDomains: verified.map((d) => d.domain.toLowerCase()),
     priorClaims,
-    withoutOrg: !input.orgId,
+    withoutOrg: !orgId,
   })
 
   try {
     const claim = await db.event_claims.create({
       data: {
         event_id: event.id,
-        org_id: input.orgId ?? null,
+        org_id: orgId,
         onboarding_id: input.onboardingId ?? null,
         contact_email: email,
         note: input.note?.trim() || null,
@@ -106,7 +182,16 @@ export async function fileEventClaim(
     })
 
     logger.info("Event claim filed", { eventId: event.id, claimId: claim.id, flags })
-    return { ok: true, claimId: claim.id, flags }
+    /*
+     * The flags stay here.
+     *
+     * They used to come back to the caller, which -- on an unauthenticated
+     * endpoint -- is an oracle: submit an address, read back whether it matches
+     * a verified domain. They are evidence for the reviewer, not feedback for
+     * the claimant, and telling a claimant which signal they failed is telling
+     * them what to forge next.
+     */
+    return { ok: true, claimId: claim.id }
   } catch (error) {
     /*
      * The partial unique indexes refuse a second PENDING claim from the same

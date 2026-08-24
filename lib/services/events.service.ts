@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client"
 import { resolveEventCity } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
 import { eventHost } from "@/lib/event-host"
+import { appUrl } from "@/lib/email"
 
 export const eventListSelect = {
   id: true,
@@ -28,14 +29,12 @@ export const eventListSelect = {
   is_featured: true,
   /*
    * `organizer` is the row's CREATOR, which for a curated event is the admin
-   * who ran the curation -- so this select alone would ship a founder's real
+   * who ran the curation -- so that column alone would ship a founder's real
    * name, avatar and user id to every attendee browsing the city.
-   * `eventHostSelect` is what answers "who to show", and it has to be spread
-   * here or the resolver has nothing to resolve from. See lib/event-host.ts.
-   */
-  /*
-   * NOT `...eventHostSelect`, and the reason is a rule this codebase already
-   * paid for once.
+   * `lib/event-host.ts` is what answers "who to show".
+   *
+   * But NOT `...eventHostSelect`, and the reason is a rule this codebase
+   * already paid for once.
    *
    * `eventHostSelect` claims `organizer` too, with a narrower `{ name }`. Spread
    * after this one it silently wins and `id`/`image` vanish -- the same
@@ -50,6 +49,7 @@ export const eventListSelect = {
    * from it.
    */
   curated_at: true,
+  claimed_at: true,
   organizer_org: { select: { display_name: true } },
   organizer: {
     select: {
@@ -183,6 +183,18 @@ export async function transformEvent(
         ? { id: null, name: host.name, image: null }
         : { id: event.organizer.id, name: host.name, image: event.organizer.image }
     })(),
+    /*
+     * How the real organiser ever finds out.
+     *
+     * A curated event shows "Blendn" as its host, which is honest and also a
+     * dead end -- the eng review's finding was that the claim funnel had an
+     * admin queue and no entry at all. This is the entry: a public,
+     * session-free URL the client can put behind "Is this your event?".
+     *
+     * Null the moment somebody claims it, so the affordance disappears with
+     * the thing it was for rather than needing a second flag to hide it.
+     */
+    claimUrl: event.curated_at && !event.claimed_at ? `${appUrl()}/claim/${event.id}` : null,
     categories: event.categories.map((c) => c.category),
     media: event.media,
     checkInCount: event._count.check_ins,

@@ -211,6 +211,25 @@ export default async function CuratePage({
                     source <IconExternalLink className="size-3.5" />
                   </a>
                 ) : null}
+
+                {/*
+                  The link an admin sends the real organiser.
+
+                  Curation is only half a funnel without it: `/claim/<id>` is
+                  public and session-free precisely so somebody with no account
+                  can use it, and cold outreach is how most of them will hear
+                  about it. Hidden once claimed, because then it refuses anyway
+                  and offering it would be a dead end with a button on it.
+                */}
+                {!row.claimed ? (
+                  <Link
+                    href={`/claim/${row.id}`}
+                    target="_blank"
+                    className="text-[0.75rem] text-muted-foreground hover:text-foreground"
+                  >
+                    claim link
+                  </Link>
+                ) : null}
               </li>
             )
           })}

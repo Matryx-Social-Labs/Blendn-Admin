@@ -197,3 +197,23 @@ export function curatedFence(
  */
 export const CURATION_PAGE = 100
 export const CLAIM_PAGE = 200
+
+/**
+ * How many claims one address, one event, and one IP may file per hour.
+ *
+ * Filing is unauthenticated by design, so these are the only bound on it. The
+ * per-event limit is the one that matters least often and most: a curated
+ * event has exactly one real organiser, so twenty attempts in an hour is not a
+ * queue, it is somebody wasting a reviewer's day.
+ *
+ * Here rather than beside `fileEventClaim`, for the same reason `CLAIM_PAGE`
+ * is: that file is `"use server"`, and every export in one becomes a callable
+ * server action. A plain object is not a function, so Next refuses the build --
+ * which `tsc` and 1623 unit tests both miss, and which is why there is now a
+ * test that fails on the pattern. It caught this one.
+ */
+export const CLAIM_LIMITS = {
+  perEmailPerHour: 5,
+  perEventPerHour: 20,
+  perIpPerHour: 10,
+} as const

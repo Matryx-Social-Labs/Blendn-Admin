@@ -26,16 +26,65 @@ describe("filing a claim", () => {
      * front of the acquisition funnel.
      *
      * Safe because filing proves nothing and grants nothing; a human reads it.
+     *
+     * This used to assert that `getAuth()` never appears. That was the right
+     * intent pinned to the wrong fact, and it went stale the moment the session
+     * became the ONLY acceptable source of an organisation id: the function
+     * reads the session now, it just never *demands* one. So what is pinned is
+     * the refusal — no `Forbidden`, no early return on a missing session.
      */
     const fileFn = /export async function fileEventClaim[\s\S]*?\n\}/.exec(src)
     expect(fileFn).not.toBeNull()
-    expect(fileFn![0]).not.toMatch(/getAuth\(\)/)
+    expect(fileFn![0]).not.toMatch(/Forbidden/)
+    expect(fileFn![0]).not.toMatch(/if \(!session/)
+  })
+
+  it("never takes the organisation from the caller", () => {
+    /*
+     * The eng review's second security finding. `orgId` used to arrive in the
+     * input of an UNAUTHENTICATED action, so anyone who knew an organisation's
+     * uuid could file a claim attributed to it — and the returned flags then
+     * answered "does this address match that org's verified domains", which on
+     * an open endpoint is an oracle.
+     *
+     * An `onboardingId` is still accepted, and the distinction is the point: a
+     * pending application grants nothing, an organisation id names an owner
+     * that already exists.
+     */
+    expect(src).toMatch(/interface FileClaimInput[\s\S]*?\n\}/)
+    const iface = /interface FileClaimInput[\s\S]*?\n\}/.exec(src)![0]
+    expect(iface).not.toMatch(/orgId/)
+    expect(iface).toMatch(/onboardingId/)
+    // The producer, not the consumer: the id has to come from `owningOrgFor`.
+    expect(src).toMatch(/owningOrgFor\(session\.user\)/)
+  })
+
+  it("does not hand the flags back to an anonymous caller", () => {
+    // Evidence for the reviewer, not feedback for the claimant. Telling someone
+    // which signal they failed tells them what to forge next.
+    expect(src).toMatch(/return \{ ok: true, claimId: claim\.id \}/)
+    expect(src).not.toMatch(/return \{ ok: true, claimId: claim\.id, flags \}/)
+  })
+
+  it("rate-limits an endpoint nothing else bounds", () => {
+    /*
+     * Filing is unauthenticated by design, so the limiter is the only bound.
+     * Three windows, because each alone is trivially sidestepped: vary the
+     * address, and the IP catches it; use a proxy pool, and the per-event
+     * bucket catches a flood aimed at one reviewer.
+     */
+    expect(src).toMatch(/overClaimLimit\(email, input\.eventId\)/)
+    expect(src).toMatch(/rl:claim:email:/)
+    expect(src).toMatch(/rl:claim:event:/)
+    expect(src).toMatch(/rl:claim:ip:/)
+    // Before the write, not after it.
+    expect(src.indexOf("overClaimLimit(email")).toBeLessThan(src.indexOf("event_claims.create"))
   })
 
   it("insists on exactly one route in", () => {
     // A claim with neither has nothing to approve into; a claim with both is
     // two answers to one question. The DB has a CHECK; this is the message.
-    expect(src).toMatch(/Boolean\(input\.orgId\) === Boolean\(input\.onboardingId\)/)
+    expect(src).toMatch(/Boolean\(orgId\) === Boolean\(input\.onboardingId\)/)
   })
 
   it("uses the same refusal gate the read path uses", () => {
@@ -237,5 +286,49 @@ describe("two admins cannot both approve", () => {
     const src = code(ACTIONS)
     const guarded = /try \{\s*await db\.\$transaction/
     expect(src).toMatch(guarded)
+  })
+})
+
+describe("the funnel has an entry", () => {
+  /*
+   * The eng review's scope finding, pinned so it cannot silently regress.
+   *
+   * `fileEventClaim` existed with ZERO callers and no page filed a claim. The
+   * admin half of W5 was complete -- queue, flags, decide, audit -- and the
+   * queue it reads could never fill. The venue queue has had a filing page
+   * since it shipped; the event queue did not.
+   */
+  it("has a public claim page that calls the action", () => {
+    const page = code("app/claim/[eventId]/claim-form.tsx")
+    expect(page).toMatch(/fileEventClaim\(\{/)
+  })
+
+  it("that page is outside every middleware guard", () => {
+    /*
+     * The person this page is for has no account -- that is *why* the event was
+     * curated. `middleware.ts` matches `/`, `/login`, `/dashboard/*` and
+     * `/api/mobile/*`; adding `/claim` to any of them would put a sign-in in
+     * front of the sign-up funnel.
+     */
+    const mw = code("middleware.ts")
+    expect(mw).not.toMatch(/["']\/claim/)
+  })
+
+  it("the mobile payload carries the link, and drops it once claimed", () => {
+    const svc = code("lib/services/events.service.ts")
+    expect(svc).toMatch(/claimUrl:/)
+    expect(svc).toMatch(/event\.curated_at && !event\.claimed_at/)
+  })
+
+  it("does not reuse the onboarding writer, it calls the one that exists", () => {
+    /*
+     * `POST /api/onboarding/apply` stays the only writer of
+     * `organiser_onboarding_requests` -- it owns the duplicate check, the tier,
+     * the email token and the verification mail. A second writer for one
+     * concept is the shape of half this codebase's audit.
+     */
+    const form = code("app/claim/[eventId]/claim-form.tsx")
+    expect(form).toMatch(/\/api\/onboarding\/apply/)
+    expect(form).not.toMatch(/organiser_onboarding_requests/)
   })
 })
