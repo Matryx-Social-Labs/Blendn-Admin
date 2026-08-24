@@ -86,8 +86,8 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
     }
   }
 
-  const verdict = await checkImageContent(url)
-  if (verdict && verdict.action === "hide") {
+  const check = await checkImageContent(url)
+  if (check.checked && check.result?.action === "hide") {
     return {
       ok: false,
       code: "unsafe",
@@ -98,16 +98,17 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
   /*
    * `checked: false` when moderation could not run.
    *
-   * `checkImageContent` returns null for both "clean" and "the API key is
-   * missing or the call failed", and the caller needs to tell those apart to
-   * record an honest status. Degrading **open** is the deliberate choice: a
-   * moderation outage must not stop people having a profile photo, which is the
-   * same call `lib/email.ts` makes. The row records `unchecked` so it can be
-   * swept later rather than being silently assumed fine.
+   * Degrading **open** is the deliberate choice: a moderation outage must not
+   * stop people having a profile photo, which is the same call `lib/email.ts`
+   * makes. The row records `unchecked` so it can be swept later rather than
+   * being silently assumed fine.
+   *
+   * This used to be `verdict !== null || hasModerationKey()`, an approximation
+   * of a question the API could not answer: `checkImageContent` returned null
+   * for clean, for a missing key and for a failed call alike. So a configured
+   * key plus an API error read as **checked** -- the one combination where the
+   * guess is wrong, and the one that happens during an outage. It now asks
+   * directly, and `hasModerationKey` is gone with it.
    */
-  return { ok: true, checked: verdict !== null || hasModerationKey() }
-}
-
-function hasModerationKey(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY)
+  return { ok: true, checked: check.checked }
 }

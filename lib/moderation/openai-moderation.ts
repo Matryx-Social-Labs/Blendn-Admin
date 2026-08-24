@@ -4,6 +4,45 @@ import { AUTO_HIDE_THRESHOLD, FLAG_THRESHOLD } from "./config"
 
 const OPENAI_MODERATION_URL = "https://api.openai.com/v1/moderations"
 
+/**
+ * Did we actually look at this, and what did we see.
+ *
+ * ## Why `null` was not good enough
+ *
+ * Both checks returned `ModerationResult | null`, and `null` carried **four**
+ * different facts: the content is clean, `OPENAI_API_KEY` is unset, the API
+ * errored, and — in the inline path's `Promise.race` — the check timed out.
+ * Only the first of those means the message was examined.
+ *
+ * The caller could not tell them apart, so it wrote `moderation_status: "clean"`
+ * for all four. **An unchecked message was recorded as checked and clean**, and
+ * `OPENAI_API_KEY` is marked optional in `lib/env.ts` and listed as not required
+ * in `DEPLOYMENT.md` — so the ordinary deployment records every message as
+ * moderated by a moderator that was never called.
+ *
+ * A moderator reading that column cannot distinguish a room nobody has abused
+ * from a pipeline that has been down for a week.
+ *
+ * ## The rule
+ *
+ * Deliver, but never call something clean that was not checked. `unchecked` is a
+ * real state with a real reader — the moderation screen's degraded count — which
+ * is what makes a broken pipeline actionable instead of silent. R13.
+ *
+ * The deterministic checks (keyword, spam, contact-info) are not subject to this:
+ * they need no external service, so they cannot fail open.
+ */
+export type ModerationCheck =
+  /** We looked. `result` is null when the content is clean. */
+  | { checked: true; result: ModerationResult | null }
+  /** We did not look, and this is why. */
+  | { checked: false; reason: "no_key" | "error" | "timeout" }
+
+/** The check never ran. Exported so the timeout path can say so too. */
+export function notChecked(reason: "no_key" | "error" | "timeout"): ModerationCheck {
+  return { checked: false, reason }
+}
+
 function getApiKey(): string | undefined {
   return process.env.OPENAI_API_KEY
 }
@@ -44,17 +83,16 @@ function evaluateScores(
 }
 
 /**
- * Check text content with OpenAI Moderation API.
- * Returns null if content is clean or API is unavailable.
- * Fails open: returns null on any error.
+ * Check text content with the OpenAI Moderation API.
+ *
+ * Still delivers on failure -- refusing to send a message because a third-party
+ * API is down is its own harm -- but says so, rather than reporting clean.
  */
-export async function checkTextContent(
-  content: string
-): Promise<ModerationResult | null> {
+export async function checkTextContent(content: string): Promise<ModerationCheck> {
   const apiKey = getApiKey()
   if (!apiKey) {
     logger.debug("OpenAI API key not configured, skipping text moderation")
-    return null
+    return notChecked("no_key")
   }
 
   try {
@@ -75,36 +113,36 @@ export async function checkTextContent(
         status: response.status,
         statusText: response.statusText,
       })
-      return null // Fail open
+      return notChecked("error")
     }
 
     const data = await response.json()
     const result = data.results?.[0]
-    if (!result) return null
+    if (!result) return notChecked("error")
 
-    return evaluateScores(
-      result.category_scores as OpenAIModerationCategory,
-      result.flagged as boolean,
-      "openai_text"
-    )
+    return {
+      checked: true,
+      result: evaluateScores(
+        result.category_scores as OpenAIModerationCategory,
+        result.flagged as boolean,
+        "openai_text"
+      ),
+    }
   } catch (error) {
     logger.error("OpenAI Moderation API call failed", { error: String(error) })
-    return null // Fail open
+    return notChecked("error")
   }
 }
 
 /**
- * Check image content with OpenAI Moderation API.
- * Returns null if content is clean or API is unavailable.
- * Fails open: returns null on any error.
+ * Check image content with the OpenAI Moderation API. Same contract as
+ * `checkTextContent`: delivers on failure, and says it did not look.
  */
-export async function checkImageContent(
-  imageUrl: string
-): Promise<ModerationResult | null> {
+export async function checkImageContent(imageUrl: string): Promise<ModerationCheck> {
   const apiKey = getApiKey()
   if (!apiKey) {
     logger.debug("OpenAI API key not configured, skipping image moderation")
-    return null
+    return notChecked("no_key")
   }
 
   try {
@@ -130,20 +168,23 @@ export async function checkImageContent(
         status: response.status,
         statusText: response.statusText,
       })
-      return null // Fail open
+      return notChecked("error")
     }
 
     const data = await response.json()
     const result = data.results?.[0]
-    if (!result) return null
+    if (!result) return notChecked("error")
 
-    return evaluateScores(
-      result.category_scores as OpenAIModerationCategory,
-      result.flagged as boolean,
-      "openai_image"
-    )
+    return {
+      checked: true,
+      result: evaluateScores(
+        result.category_scores as OpenAIModerationCategory,
+        result.flagged as boolean,
+        "openai_image"
+      ),
+    }
   } catch (error) {
     logger.error("OpenAI Image Moderation API call failed", { error: String(error) })
-    return null // Fail open
+    return notChecked("error")
   }
 }

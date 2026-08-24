@@ -50,6 +50,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         status: statusMap[action],
         banned_at: action === "ban" ? new Date() : action === "unban" ? null : undefined,
         banned_by: action === "ban" ? session.user.id : action === "unban" ? null : undefined,
+        /*
+         * A mute records who applied it, exactly as a ban does.
+         *
+         * `muted_by` was the missing half. `checkAndAutoUnmute` clears any
+         * `muted` status from a member with fewer than three auto-hide flags in
+         * the last hour, and an organiser-applied mute has **zero** -- so
+         * `0 < 3` held and the mute lifted itself on the muted person's next
+         * message. The moderator watched the action succeed and it undid itself.
+         */
+        muted_at: action === "mute" ? new Date() : action === "unmute" ? null : undefined,
+        muted_by: action === "mute" ? session.user.id : action === "unmute" ? null : undefined,
       },
     })
 

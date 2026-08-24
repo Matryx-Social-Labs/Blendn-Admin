@@ -32,7 +32,7 @@ export default async function ModerationPage({
   const active = (TABS.find((tab) => tab.value === status)?.value ??
     "pending") as moderation_status_type
 
-  const [{ rows, counts, highConfidence }, pendingReports] = await Promise.all([
+  const [{ rows, counts, highConfidence, uncheckedLastHour }, pendingReports] = await Promise.all([
     getModerationQueue(active),
     // Two cheap counts rather than the whole reports query: this page only
     // needs the number on the tab.
@@ -65,11 +65,31 @@ export default async function ModerationPage({
             </Link>
           ))}
         </nav>
-        {active === "pending" && highConfidence > 0 ? (
-          <span className="text-[0.75rem] text-destructive">
-            {highConfidence} at or above 0.9 confidence
-          </span>
-        ) : null}
+        <div className="flex items-center gap-3">
+          {active === "pending" && highConfidence > 0 ? (
+            <span className="text-[0.75rem] text-destructive">
+              {highConfidence} at or above 0.9 confidence
+            </span>
+          ) : null}
+          {/*
+            * The degraded-pipeline signal.
+            *
+            * An unchecked message was delivered without the model seeing it —
+            * no API key, an API error, or a timeout. It used to be recorded as
+            * `clean`, so a moderator watching a silent queue could not tell a
+            * quiet night from a moderation pipeline that had been down for a
+            * week. This is the number that makes the difference visible, which
+            * is the whole reason `unchecked` is a state rather than a shrug.
+            */}
+          {uncheckedLastHour > 0 ? (
+            <span
+              className="rounded-full border border-destructive/40 px-2.5 py-1 text-[0.75rem] text-destructive"
+              title="Delivered without reaching the moderation model — check OPENAI_API_KEY and the provider's status"
+            >
+              {uncheckedLastHour} unchecked in the last hour
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <ModerationTable rows={rows} status={active as "pending" | "approved" | "rejected"} />

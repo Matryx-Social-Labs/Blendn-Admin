@@ -127,3 +127,27 @@ export async function hit(key: string, windowMs: number): Promise<HitResult> {
 export function resetMemoryStore(): void {
   memory.clear()
 }
+
+/**
+ * Forget one key's window.
+ *
+ * A test seam, and a real one: any caller that keeps state of its own beside a
+ * counter here has to be able to reset both together, or a "reset" clears half
+ * the state and the next test inherits the other half. The spam detector hit
+ * exactly that when its burst counter moved out of its own Map.
+ *
+ * Best-effort against Redis. Failing to forget a 10-second window is not worth
+ * propagating an error for.
+ */
+export async function forget(key: string): Promise<void> {
+  memory.delete(key)
+  const redis = await getRedis()
+  if (!redis) return
+  try {
+    await (redis as unknown as { del(k: string): Promise<unknown> }).del(key)
+  } catch (error) {
+    logger.warn("Rate limit Redis delete failed", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}

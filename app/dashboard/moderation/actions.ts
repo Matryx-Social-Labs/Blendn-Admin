@@ -55,7 +55,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
 
   const now = Date.now()
 
-  const [flags, counts] = await Promise.all([
+  const [flags, counts, uncheckedLastHour] = await Promise.all([
     db.moderation_flags.findMany({
       where: { status },
       // Oldest first: the queue's SLA is how long something has been waiting,
@@ -80,6 +80,25 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
       },
     }),
     db.moderation_flags.groupBy({ by: ["status"], _count: { _all: true } }),
+    /*
+     * How many messages were **delivered without being examined** in the last
+     * hour.
+     *
+     * The point of the `unchecked` state. Previously the pipeline wrote
+     * `moderation_status: "clean"` whether or not the model had been reached,
+     * so a moderator could not distinguish a quiet room from a pipeline that
+     * had been down for a week -- and `OPENAI_API_KEY` is optional, so "down"
+     * is the ordinary configuration.
+     *
+     * An hour rather than all time: this is a health signal, and a total would
+     * accumulate a number nobody could act on.
+     */
+    db.chat_messages.count({
+      where: {
+        moderation_status: "unchecked",
+        created_at: { gte: new Date(now - 60 * 60 * 1000) },
+      },
+    }),
   ])
 
   const rows: ModerationRow[] = flags.map((flag) => ({
@@ -103,6 +122,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
       number
     >,
     highConfidence: rows.filter((r) => (r.confidence ?? 0) >= HIGH_CONFIDENCE).length,
+    uncheckedLastHour,
   }
 }
 
@@ -143,7 +163,27 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
     if (decision === "remove") {
       await tx.chat_messages.update({
         where: { id: flag.message_id },
-        data: { deleted_at: new Date() },
+        data: { moderation_status: "hidden", deleted_at: new Date() },
+      })
+    } else {
+      /*
+       * "Keep" has to actually keep it.
+       *
+       * This set the flag approved and never touched the message, so an
+       * auto-hidden message stayed soft-deleted with `moderation_status:
+       * "hidden"` and no path back -- while the toast said *"message kept"*.
+       * The flag left the queue, so nobody would ever look at it again either.
+       *
+       * The organiser's twin at `app/api/events/[id]/chat/moderation/[flagId]`
+       * has always restored correctly. Two screens deciding one thing, and the
+       * one an admin uses was the wrong one.
+       *
+       * `clean` rather than `unchecked`: a human looked, which is a stronger
+       * verdict than the model's, and it is the same value the twin writes.
+       */
+      await tx.chat_messages.update({
+        where: { id: flag.message_id },
+        data: { moderation_status: "clean", deleted_at: null },
       })
     }
   })
