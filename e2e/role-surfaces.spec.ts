@@ -36,6 +36,20 @@ import { statePathFor } from "./global-setup"
  *
  * The authorization question stays in `access-matrix.spec.ts`, which owns row
  * markers. This is the presentation of the answer, not the answer.
+ *
+ * ## Not in `negative-controls.json`, deliberately
+ *
+ * That registry covers *structural* guards — tests that read source and assert
+ * a shape — because those can pass vacuously when a regex stops matching. This
+ * one drives a browser, so a wrong assertion fails on its own terms.
+ *
+ * It has one vacuity risk of its own, and it is guarded in-band: if every
+ * navigation silently failed, `crashed` would be empty and the sweep would
+ * report a pass. The two assertions at the bottom are that control — an admin
+ * must reach pages, an attendee must reach none.
+ *
+ * The mutation was still run: restoring `/dashboard/users`'s old gate order
+ * fails this spec with organizer, venue and sponsor all listed.
  */
 
 /** Every static dashboard route on disk — dynamic segments need a real id. */
