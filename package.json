@@ -25,7 +25,9 @@
     "seed:review": "tsx scripts/seed-review-account.ts",
     "seed:room": "tsx scripts/seed-room.ts",
     "backfill:cities": "tsx scripts/backfill-event-cities.ts",
-    "seed:qa": "tsx scripts/seed-qa.ts"
+    "seed:qa": "tsx scripts/seed-qa.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "prisma": {
     "seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
@@ -93,6 +95,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^30.0.0",

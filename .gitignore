@@ -48,3 +48,9 @@ dist/
 # dev tool config
 .claude/
 .gstack/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/e2e/.auth/
