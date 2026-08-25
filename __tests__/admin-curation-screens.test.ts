@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from "fs"
-import { join } from "path"
+import { dirname, join } from "path"
 
 /**
  * The two admin screens curation needs, held to the rules `docs/DESIGN_SYSTEM.md`
@@ -299,10 +299,32 @@ describe("what the design review found", () => {
      * Both screens are force-dynamic with three or four round trips, so without
      * a loading state the previous page sits frozen. Five other dashboard
      * sections already had one.
+     *
+     * **Covered by, not located at.** This asserted a file in each route's own
+     * directory, which is a stricter thing than the requirement and it blocked
+     * the right fix: `loading.tsx` and `error.tsx` are *segment* boundaries, so
+     * one at `app/dashboard/` covers everything beneath it. Both routes had
+     * their own `error.tsx` saying exactly what the segment one says, and the
+     * duplicates carried a dead branch on `error.message` — unreachable
+     * (the pages redirect before they throw) and unusable (Next redacts Server
+     * Component messages in production).
+     *
+     * So the question is whether a boundary covers the route, and the walk up
+     * is what asks it.
      */
+    const coveredBy = (dir: string, file: string): boolean => {
+      let at = join(ROOT, dir)
+      const stop = join(ROOT, "app")
+      for (;;) {
+        if (existsSync(join(at, file))) return true
+        if (at === stop) return false
+        at = dirname(at)
+      }
+    }
+
     for (const dir of ["app/dashboard/claims", "app/dashboard/events/curate"]) {
-      expect(existsSync(join(ROOT, dir, "loading.tsx"))).toBe(true)
-      expect(existsSync(join(ROOT, dir, "error.tsx"))).toBe(true)
+      expect(coveredBy(dir, "loading.tsx")).toBe(true)
+      expect(coveredBy(dir, "error.tsx")).toBe(true)
     }
   })
 
