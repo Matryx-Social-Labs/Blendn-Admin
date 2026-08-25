@@ -172,6 +172,37 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", req.url))
   }
 
+  /*
+   * The API documentation is internal, and was public.
+   *
+   * `/api-docs` renders the whole OpenAPI surface and `/api/docs` serves the
+   * spec that feeds it — every mobile endpoint, its parameters, and which of
+   * them need a token. Neither had any check at all, so the complete map of the
+   * API was readable by anyone who guessed the path. That is not a
+   * vulnerability on its own; it is the reconnaissance step that makes finding
+   * one cheap.
+   *
+   * `app_admin` rather than any dashboard role: an organiser has no reason to
+   * read the mobile API's internals, and the narrowest gate that keeps the tool
+   * useful is the right one.
+   *
+   * Note the ordering — this sits ABOVE the `/dashboard` branch because these
+   * paths are not under `/dashboard` and would otherwise fall through to the
+   * unconditional `next()` at the end.
+   */
+  if (pathname === "/api-docs" || pathname === "/api/docs") {
+    if (token?.role !== "app_admin") {
+      // 404 rather than 401 for the JSON: telling an anonymous caller that a
+      // spec exists here and is merely protected is half the disclosure.
+      if (pathname === "/api/docs") {
+        return new NextResponse(null, { status: 404 })
+      }
+      const redirectUrl = req.nextUrl.clone()
+      redirectUrl.pathname = "/login"
+      return NextResponse.redirect(redirectUrl)
+    }
+  }
+
   if (pathname.startsWith("/dashboard")) {
     if (!token) {
       const redirectUrl = req.nextUrl.clone()
@@ -195,6 +226,9 @@ export const config = {
     "/api/mobile/:path*",
     "/login",
     "/api/auth/callback/credentials",
+    // Internal documentation, admin-only — see the gate above.
+    "/api-docs",
+    "/api/docs",
   ],
   // Note: /api/mobile/v1/* is matched by /api/mobile/:path*
 }

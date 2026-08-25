@@ -130,7 +130,16 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return successResponse(formattedConversations)
+    /*
+     * `{ conversations }`, not a bare array — see the note in
+     * `app/api/mobile/categories/route.ts`. These two were the only list
+     * endpoints answering `data` directly; every other answers `data.<name>`,
+     * and a rule with two exceptions is a rule nobody follows.
+     *
+     * This is the more pointed of the two: a conversation list is the surface
+     * most likely to need paging, and it had nowhere to put a cursor.
+     */
+    return successResponse({ conversations: formattedConversations })
   } catch (error) {
     logger.error("List conversations error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to list conversations")

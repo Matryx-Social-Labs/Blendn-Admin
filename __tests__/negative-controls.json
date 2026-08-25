@@ -3,13 +3,13 @@
     "R16: every structural guard ships with a documented mutation proving it",
     "fails against broken code. A grep guard that passes against a broken",
     "codebase converts an unknown into a false assurance, which is worse than",
-    "having no guard \u2014 and this project has already shipped one `sed` control",
+    "having no guard — and this project has already shipped one `sed` control",
     "that silently never matched.",
     "",
     "`verified` entries record a mutation that was applied, observed to fail,",
     "and reverted. `grandfathered` is the ratchet: guards that predate this",
     "registry and have no recorded control. That list may shrink and must never",
-    "grow \u2014 `negative-controls.test.ts` fails on a new structural guard with no",
+    "grow — `negative-controls.test.ts` fails on a new structural guard with no",
     "entry.",
     "",
     "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
@@ -162,7 +162,7 @@
     "no-async-setinterval.test.ts": {
       "guards": "no setInterval in lib/ drives an async callback; the three sweepers reschedule from a path a throw cannot skip",
       "mutation": "Append `setInterval(async () => { await Promise.resolve() }, 1000)` to lib/chat-lifecycle.ts",
-      "observed": "1 failing \u2014 but ONLY after widening the regex. The original required the arrow body to be a bare call, so `setInterval(async () => { ... })` passed. The control found the guard vacuous for the most natural way to write the bug.",
+      "observed": "1 failing — but ONLY after widening the regex. The original required the arrow body to be a bare call, so `setInterval(async () => { ... })` passed. The control found the guard vacuous for the most natural way to write the bug.",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -183,7 +183,7 @@
     "server-actions-reachable.test.ts": {
       "guards": "every export in lib/ has a caller, comments excluded; KNOWN_UNREACHABLE is checked in both directions",
       "mutation": "Delete a KNOWN_UNREACHABLE entry for something still dead, and separately wire up an entry still on the list",
-      "observed": "3 failing \u2014 the integration merge ran this for real: once #265 and #268 wired canPublish, notifyEventCancelled and notifyEventDetailsChanged, all three KNOWN_UNREACHABLE entries went stale and the suite named each one.",
+      "observed": "3 failing — the integration merge ran this for real: once #265 and #268 wired canPublish, notifyEventCancelled and notifyEventDetailsChanged, all three KNOWN_UNREACHABLE entries went stale and the suite named each one.",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -228,6 +228,13 @@
       "observed": "4 failing",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
+    },
+    "mobile-list-envelope.test.ts": {
+      "guards": "Every mobile list endpoint answers `data.<name>`, never a bare array — see the test's docblock",
+      "mutation": "In app/api/mobile/categories/route.ts revert `successResponse({ categories })` to `successResponse(categories)`, run this suite, revert",
+      "observed": "1 failing — offenders listed `app/api/mobile/categories/route.ts :: successResponse(categories)`; 2 passing after the revert",
+      "date": "2026-08-25",
+      "source": "run-at-e13-contract"
     }
   },
   "grandfathered": [

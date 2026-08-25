@@ -38,7 +38,7 @@
       "success"
     ],
     "data": [
-      "array<_count,children,description,icon,id,name,parent_id,slug>"
+      "categories"
     ]
   },
   "/api/mobile/amenities": {
@@ -81,7 +81,7 @@
       "success"
     ],
     "data": [
-      "array<empty>"
+      "conversations"
     ]
   },
   "/api/mobile/chat/groups": {

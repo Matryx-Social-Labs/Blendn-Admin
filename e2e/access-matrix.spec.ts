@@ -169,6 +169,39 @@ test.describe("the roles that must not be here", () => {
     }
   })
 
+  test("the API reference is admin-only, and says nothing to anyone else", async ({
+    baseURL,
+    request,
+  }) => {
+    /*
+     * `/api-docs` and `/api/docs` had no check at all: the complete map of the
+     * mobile API — every endpoint, its parameters, which need a token — was
+     * readable by anyone who guessed the path. Reconnaissance rather than a
+     * vulnerability, which is exactly what makes finding one cheap.
+     *
+     * The JSON answers 404 rather than 401 on purpose. "401" tells an anonymous
+     * caller that a spec lives here and is merely protected, which is half the
+     * disclosure.
+     */
+    expect((await request.get("/api/docs")).status(), "anonymous").toBe(404)
+
+    const organiser = await playwrightRequest.newContext({
+      baseURL,
+      storageState: statePathFor("organizer"),
+    })
+    expect((await organiser.get("/api/docs")).status(), "an organiser has no use for it").toBe(404)
+    await organiser.dispose()
+
+    const admin = await playwrightRequest.newContext({
+      baseURL,
+      storageState: statePathFor("admin"),
+    })
+    const res = await admin.get("/api/docs")
+    expect(res.status(), "an admin must still be able to read it — or this is not a gate, it is a deletion").toBe(200)
+    expect((await res.json()).openapi, "and it must still be a spec").toBeTruthy()
+    await admin.dispose()
+  })
+
   test("an organiser with no organisation is denied other people's events", async ({ browser }) => {
     const context = await browser.newContext({ storageState: statePathFor("outsider") })
     const page = await context.newPage()

@@ -31,7 +31,16 @@ registry.registerPath({
   description: "Returns hierarchical category tree with event and interest counts.",
   security: bearerAuth,
   responses: {
-    200: { description: "Categories", content: { "application/json": { schema: wrap(z.array(CategorySchema)) } } },
+    // `data.categories`, matching every other list endpoint — see
+    // app/api/mobile/categories/route.ts.
+    200: {
+      description: "Categories",
+      content: {
+        "application/json": {
+          schema: wrap(z.object({ categories: z.array(CategorySchema) })),
+        },
+      },
+    },
     ...standardErrors,
   },
 })
