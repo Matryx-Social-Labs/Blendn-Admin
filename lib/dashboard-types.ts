@@ -204,3 +204,24 @@ export interface VenueOverview {
 }
 
 export type DashboardOverview = OrganizerOverview | AdminOverview | VenueOverview
+
+/**
+ * One venue *record*, for the admin index.
+ *
+ * Deliberately not `VenueRow`, which is the venue owner's utilisation view —
+ * nights per week, ratings, next booking. That answers "how is my building
+ * doing"; this answers "what venues exist, who owns each, and which are
+ * unclaimed", which is what `dashboard-nav.ts` has described all along while
+ * pointing at a list of user accounts.
+ */
+export interface VenueRecordRow {
+  id: string
+  name: string
+  city: string | null
+  /** The owning organisation's name, or null when nobody has claimed it. */
+  owner: string | null
+  events: number
+  /** Claims waiting on a decision. A venue can attract more than one. */
+  pendingClaims: number
+  status: string
+}

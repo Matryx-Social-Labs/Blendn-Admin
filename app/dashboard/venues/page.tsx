@@ -10,8 +10,9 @@ import { formatDay, formatNumber } from "@/lib/dashboard-format"
 
 import { getLinkedEventsForOwner } from "@/lib/venue-link-actions"
 
-import { getDashboardOverview } from "../actions"
+import { getDashboardOverview, getVenueRecords } from "../actions"
 import { LinkedEvents } from "./linked-events"
+import { VenueRecords } from "./venue-records"
 
 export const dynamic = "force-dynamic"
 
@@ -31,6 +32,23 @@ const toneVariant = {
 export default async function MyVenuesPage() {
   const session = await getAuth()
   if (!session?.user) redirect("/login")
+
+  /*
+   * Admins get the record index; owners get their utilisation view.
+   *
+   * `dashboard-nav.ts` has promised admins "every venue record — who owns
+   * each, which are unclaimed" since it was written, and pointed at
+   * `/dashboard/venue-owners`, a list of *user accounts*. So the one role that
+   * can see every venue could see none of them: this route redirected them
+   * away, which also killed the venue detail page's own "← All venues" link
+   * for the only role that has a use for it.
+   *
+   * One route, two readings, because they are the same noun — and the detail
+   * page both roles land on is already shared.
+   */
+  if (session.user.role === "app_admin") {
+    return <VenueRecords venues={await getVenueRecords()} />
+  }
   if (session.user.role !== "venue_owner") redirect("/dashboard")
 
   const [overview, linkedEvents] = await Promise.all([

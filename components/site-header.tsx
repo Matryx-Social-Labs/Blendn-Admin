@@ -110,9 +110,18 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Attendees",
     description: "Who comes back, and who RSVPs but doesn't show.",
   },
+  /*
+   * "Venues", not "My venues": this route now serves two roles. An owner sees
+   * their utilisation view and an admin sees the record index, and the h1
+   * cannot say "my" to the one who owns none of them.
+   *
+   * The role-specific wording lives in `dashboard-nav.ts` instead, which is
+   * already filtered per role — so an owner still reads "My venues" in the
+   * sidebar, where saying it is both true and useful.
+   */
   "/dashboard/venues": {
-    title: "My venues",
-    description: "Utilisation, ratings and bookings — one section per venue.",
+    title: "Venues",
+    description: "Who owns each, and what runs there.",
   },
   // Pre-existing gaps, found by __tests__/nav-routes-exist.test.ts: both had
   // nav entries and no title, so both rendered with the document's only h1

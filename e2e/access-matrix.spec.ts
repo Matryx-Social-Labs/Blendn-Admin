@@ -52,6 +52,17 @@ const ROW_MARKER: Record<string, string> = {
   "/dashboard/onboarding": "founder@thehummingtree.com",
   "/dashboard/claims": "events@toit.in",
   "/dashboard/sponsors": "Blue Tokai",
+  /*
+   * The unclaimed venue, deliberately — it is the row the admin index exists
+   * to surface, and the one a venue-owner-scoped page can never show.
+   *
+   * This URL used to sit in `STREAMED_OR_UNSEEDED` with the note "no admin
+   * venue index exists (K2.7)": as an admin the route rendered the venue
+   * owner's page, scoped to organisations an admin belongs to none of, and
+   * then redirected away. The index now exists and is server-rendered, so the
+   * page can be asserted rather than excused.
+   */
+  "/dashboard/venues": "Church Street Social",
 }
 
 /**
@@ -61,17 +72,10 @@ const ROW_MARKER: Record<string, string> = {
  * paint is never in that body, so its absence proves nothing about
  * entitlement. These want a browser-driven spec instead, and E3–E6 are where
  * that belongs.
- *
- * `/dashboard/venues` is not in either list on purpose: as an admin it renders
- * "My venues" — the venue owner's page, scoped to organisations an admin does
- * not belong to — and is therefore always empty. That is K2.7 in the register:
- * there is no admin venue index, and the nav has been describing one that does
- * not exist.
  */
 const STREAMED_OR_UNSEEDED = new Set([
   "/dashboard/events", // "Loading events..." — client-streamed table
   "/dashboard/categories", // taxonomy comes from `npm run seed:categories`
-  "/dashboard/venues", // no admin venue index exists (K2.7)
   "/dashboard/moderation", // queue is clear in the seeded world, by design
   "/dashboard/audit", // empty until an admin acts
   "/dashboard/reports", // a form, not a table
@@ -85,6 +89,24 @@ const STREAMED_OR_UNSEEDED = new Set([
   "/dashboard/charges",
   "/dashboard/organisation",
 ])
+
+/**
+ * Entitlement for routes deliberately kept out of the nav.
+ *
+ * `visibleNavFor` is the *sidebar's* answer, and this test treats it as the
+ * whole answer — which holds right up until a route is unlisted on purpose.
+ * `/dashboard/venue-owners` is admin-only and reachable; it left the sidebar
+ * when "Venues" was repointed at the record index, because "who owns this
+ * venue" is a question you arrive at from a venue rather than from the nav.
+ *
+ * Stated here rather than folded into `allowed`, so unlisting a route cannot
+ * quietly turn it into an expected *denial* — which would have this test
+ * demanding that admins be locked out of an admin-only page. Every role not
+ * named is still checked, so the protection is unchanged for the other three.
+ */
+const UNLISTED_ENTITLEMENT: Record<string, string[]> = {
+  "/dashboard/venue-owners": ["app_admin"],
+}
 
 test.describe("a role receives only the rows it is entitled to", () => {
   test("no denied page returns its data", async ({ baseURL }) => {
@@ -102,6 +124,7 @@ test.describe("a role receives only the rows it is entitled to", () => {
 
       for (const [url, marker] of Object.entries(ROW_MARKER)) {
         if (allowed.has(url)) continue
+        if (UNLISTED_ENTITLEMENT[url]?.includes(ROLE_ACCOUNTS[role].role)) continue
         const body = await (await ctx.get(url)).text()
         if (body.includes(marker)) leaked.push(`${role} sees "${marker}" on ${url}`)
       }

@@ -130,7 +130,14 @@ export const dashboardNav: DashboardNavItem[] = [
   {
     title: "Venues",
     description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
-    url: "/dashboard/venue-owners",
+    /*
+     * Was `/dashboard/venue-owners`, which is a list of venue-owner *user
+     * accounts* — so this entry described venue records and delivered people.
+     * The records screen now exists; the accounts screen stays reachable and
+     * is listed in `unlistedRoutes`, since "who owns this venue" is a question
+     * you arrive at from a venue rather than from the sidebar.
+     */
+    url: "/dashboard/venues",
     icon: IconBuildingStore,
     allowedRoles: ["app_admin"],
   },
@@ -260,7 +267,7 @@ export const dashboardNav: DashboardNavItem[] = [
  * route inventory stays honest — a screen with no entry in either list is one
  * nobody can find.
  */
-export const unlistedRoutes = ["/dashboard/settings"] as const
+export const unlistedRoutes = ["/dashboard/settings", "/dashboard/venue-owners"] as const
 
 /** Fails closed: an unknown or absent role sees nothing. */
 export function visibleNavFor(role: string | undefined): DashboardNavItem[] {

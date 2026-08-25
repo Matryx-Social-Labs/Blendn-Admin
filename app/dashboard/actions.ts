@@ -26,6 +26,7 @@ import type {
   PacingPoint,
   RatingCounts,
   VenueOverview,
+  VenueRecordRow,
   VenueRow,
 } from "@/lib/dashboard-types"
 
@@ -960,5 +961,53 @@ export async function getEventRows(): Promise<EventRow[]> {
       event.start_time >= now
         ? null
         : turnUpPct(attendedPerEvent.get(event.id) ?? 0, event._count.rsvps),
+  }))
+}
+
+/**
+ * Every venue record, for the admin index.
+ *
+ * `dashboard-nav.ts` has described this screen since it was written — "every
+ * venue record — who owns each, which are unclaimed" — and pointed at
+ * `/dashboard/venue-owners`, which is a list of *user accounts*. So the one
+ * role that can see every venue had no way to see any of them, the unclaimed
+ * venue nobody had assigned was invisible to the person who would assign it,
+ * and the venue detail page's own "← All venues" link went to a screen that
+ * redirected admins away.
+ *
+ * Records, not utilisation. The owner's view answers "how is my building
+ * doing"; this answers "what exists and who owns it", which is an operational
+ * question with a different shape and a different sort order.
+ */
+export async function getVenueRecords(): Promise<VenueRecordRow[]> {
+  const session = await getAuth()
+  if (session?.user?.role !== "app_admin") throw new Error("Forbidden")
+
+  const venues = await db.venues.findMany({
+    where: { deleted_at: null },
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      status: true,
+      owner_org: { select: { display_name: true } },
+      _count: {
+        select: {
+          events: { where: { deleted_at: null } },
+          claims: { where: { status: "pending" } },
+        },
+      },
+    },
+    orderBy: { name: "asc" },
+  })
+
+  return venues.map((venue) => ({
+    id: venue.id,
+    name: venue.name,
+    city: venue.city,
+    owner: venue.owner_org?.display_name ?? null,
+    events: venue._count.events,
+    pendingClaims: venue._count.claims,
+    status: venue.status,
   }))
 }
