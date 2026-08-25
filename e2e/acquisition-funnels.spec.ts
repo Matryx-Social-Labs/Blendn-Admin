@@ -48,7 +48,22 @@ const uniq = () => Math.random().toString(36).slice(2, 8)
  * where it is a subject rather than an obstacle.
  */
 let applicant = 0
-const fromNewIp = () => ({ "X-Forwarded-For": `203.0.113.${++applicant}` })
+/*
+ * Unique per RUN, not merely per test.
+ *
+ * A fixed `203.0.113.1` for the first applicant meant every run reused the same
+ * bucket, so the suite passed once and then failed for the next hour — with a
+ * 429 that reads as the gate having changed. The window is an hour; the run
+ * has to be disposable within it.
+ *
+ * 203.0.113.0/24 is TEST-NET-3 (RFC 5737): reserved for documentation and
+ * guaranteed never to be a real client.
+ */
+const RUN = Math.floor(Math.random() * 250) + 1
+// 198.18.0.0/15 is the RFC 2544 benchmarking range: reserved, never a real
+// client, and it leaves two octets free so a run and its applicants each get
+// their own.
+const fromNewIp = () => ({ "X-Forwarded-For": `198.18.${RUN}.${++applicant}` })
 
 test.describe("landing page application", () => {
   test("a company-domain address passes the gate with nothing else", async ({ request }) => {
@@ -185,7 +200,10 @@ test.describe("the application limiter", () => {
      * a real protection into one nothing covers — which is how a limiter ends
      * up switched off by a config change nobody notices.
      */
-    const ip = { "X-Forwarded-For": "198.51.100.7" }
+    // Its own address, and its own per RUN — a fixed one would be exhausted by
+    // the previous run, so the first attempt would already be 429 and the test
+    // would pass for entirely the wrong reason.
+    const ip = { "X-Forwarded-For": `198.18.${RUN}.250` }
     const send = () =>
       request.post("/api/onboarding/apply", {
         headers: ip,
@@ -202,7 +220,12 @@ test.describe("the application limiter", () => {
     const codes: number[] = []
     for (let i = 0; i < 4; i++) codes.push((await send()).status())
 
-    expect(codes.at(-1), `four attempts returned ${codes.join(", ")}`).toBe(429)
+    // Both halves: three get through, the fourth does not. Asserting only the
+    // fourth would pass against a limiter that refused all four.
+    expect(
+      { firstThree: codes.slice(0, 3), fourth: codes[3] },
+      `four attempts returned ${codes.join(", ")}`
+    ).toEqual({ firstThree: [200, 200, 200], fourth: 429 })
   })
 })
 
