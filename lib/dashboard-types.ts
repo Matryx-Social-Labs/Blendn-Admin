@@ -152,6 +152,8 @@ export interface AdminOverview {
   /** The window these figures cover, for the tiles' hint text. */
   rangeLabel: string
   publishingHosts: { publishing: number; total: number }
+  /** Events we listed ourselves. Never host liquidity — see `hostSupply`. */
+  curated: { published: number; unclaimed: number }
   growth: Array<{ label: string; signups: number; active: number }>
   funnel: Array<{ label: string; value: number }>
   supply: OrganiserSupplyRow[]

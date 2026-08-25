@@ -174,8 +174,25 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           hint={data.deltas.publishedEvents.hint ?? "all time"}
           href="/dashboard/events"
         />
+        {/*
+         * "Arrivals", not "Check-ins", because the funnel two panels down has
+         * a stage called "checked in" holding a different number — 8 here and
+         * 7 there against the same world. Both are right: this counts
+         * `event_check_ins` rows in range, the funnel counts distinct people,
+         * and one person at two events is two rows.
+         *
+         * Nothing on the screen said which was which, so a reader who noticed
+         * could only conclude that one was broken, and could only find out
+         * which by reading the source. Same shape as the two turn-up figures
+         * on the event page.
+         *
+         * Fixed by naming rather than by labelling: a hint cannot carry it,
+         * because `deltaHint` displaces the fallback with "new" whenever the
+         * previous window was zero — which is exactly when a number is most
+         * likely to be read for the first time.
+         */}
         <MetricTile
-          label="Check-ins"
+          label="Arrivals"
           value={formatCompact(data.checkIns)}
           {...data.deltas.checkIns}
           hint={data.deltas.checkIns.hint ?? "GPS-validated"}
@@ -199,7 +216,7 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           ]}
           empty={data.users === 0}
         />
-        <Funnel stages={data.funnel} empty={data.users === 0} />
+        <Funnel stages={data.funnel} hint="all time · distinct people" empty={data.users === 0} />
       </div>
 
       <div className="grid gap-6 @3xl/main:grid-cols-2">
@@ -220,9 +237,21 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
               />
             }
             footer={
+              /*
+               * Curated rows are absent from the table above and named here
+               * instead, because `organizer_id` on a curated event is the
+               * admin who created it — so the organiser-keyed table cannot
+               * represent one without attributing our own supply to a founder.
+               *
+               * Kept to the same line rather than given a tile: it is context
+               * for this table, and a reader who sees a total that does not
+               * reconcile needs one clause, not a section.
+               */
               <span>
                 {data.publishingHosts.publishing} of {data.publishingHosts.total} hosts have
                 published
+                {data.curated.published > 0 &&
+                  ` · ${data.curated.published} curated by us, ${data.curated.unclaimed} unclaimed`}
               </span>
             }
           />

@@ -40,6 +40,34 @@ function eventScope(userId?: string) {
   return { deleted_at: null, ...(userId ? { organizer_id: userId } : {}) }
 }
 
+/**
+ * Supply a *host* published — curated rows excluded, all of them.
+ *
+ * Host liquidity answers "are real organisers publishing?", and the whole
+ * premise of curation is that they are not yet and we are filling the gap
+ * ourselves. Curated events carry `organizer_id = <the admin who curated
+ * them>`, because that column records who *created* the row — so every
+ * organiser-keyed supply query counted a founder as a host. Three curated
+ * events read as `PUBLISHING HOSTS 2 of 3`. Curate enough and the number
+ * reports a healthy host base made entirely of us, which is the opposite of
+ * what it exists to say.
+ *
+ * **Claimed curated events are excluded too, and that is deliberate.** A claim
+ * writes `organizer_org_id` and leaves `organizer_id` pointing at the admin
+ * (CLAUDE.md: it is the audit column, never rewritten). So for a claimed row
+ * the organiser-keyed table would still attribute it to a founder. The table
+ * is keyed on the wrong column to represent any curated row, so it excludes
+ * the lot and reports them on their own line instead. That undercounts a
+ * claimed event by one — the safe direction, since the failure it replaces
+ * was inflation.
+ *
+ * `lib/event-host.ts` answers the same question for the mobile payload and
+ * says the same thing: the curating admin is never the host.
+ */
+function hostSupply(userId?: string) {
+  return { ...eventScope(userId), curated_at: null }
+}
+
 function pct(part: number, whole: number) {
   return whole === 0 ? null : (part / whole) * 100
 }
@@ -323,6 +351,8 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     checkIns,
     hostAccounts,
     publishingHosts,
+    curatedPublished,
+    curatedUnclaimed,
     onboarded,
     rsvpUsers,
     checkedInUsers,
@@ -374,11 +404,22 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     db.user.count({ where: { role: { in: ["organizer", "venue_owner"] } } }),
     db.events
       .findMany({
-        where: { ...eventScope(), status: "published" },
+        where: { ...hostSupply(), status: "published" },
         select: { organizer_id: true },
         distinct: ["organizer_id"],
       })
       .then((rows) => rows.length),
+    db.events.count({
+      where: { ...eventScope(), status: "published", curated_at: { not: null } },
+    }),
+    db.events.count({
+      where: {
+        ...eventScope(),
+        status: "published",
+        curated_at: { not: null },
+        claimed_at: null,
+      },
+    }),
     /*
      * Funnel stages must be nested subsets, or the shape lies.
      *
@@ -428,7 +469,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }),
     db.events.groupBy({
       by: ["organizer_id", "status"],
-      where: eventScope(),
+      where: hostSupply(),
       _count: { _all: true },
     }),
     db.events.findMany({
@@ -478,7 +519,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }),
     db.events.groupBy({
       by: ["organizer_id"],
-      where: { ...eventScope(), status: "published" },
+      where: { ...hostSupply(), status: "published" },
       _max: { start_time: true },
     }),
   ])
@@ -591,6 +632,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     },
     rangeLabel: rangeLabel(range),
     publishingHosts: { publishing: publishingHosts, total: hostAccounts },
+    curated: { published: curatedPublished, unclaimed: curatedUnclaimed },
     growth,
     funnel: [
       { label: "signed up", value: users },
