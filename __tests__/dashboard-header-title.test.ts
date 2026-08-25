@@ -115,8 +115,7 @@ describe("site-header owns the only h1", () => {
     "/dashboard/chatrooms",
     "/dashboard/events",
     "/dashboard/organisers",
-    "/dashboard/users",
-    "/dashboard/venue-owners",
+      "/dashboard/venue-owners",
   ]
 
   const pages = staticRoutes(DASHBOARD)

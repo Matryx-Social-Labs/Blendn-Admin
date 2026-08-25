@@ -242,6 +242,13 @@
       "observed": "1 failing of 2 — the offender block was listed; 2 passing after the revert",
       "date": "2026-08-25",
       "source": "run-at-e3-admin-surface"
+    },
+    "role-surfaces.spec.ts": {
+      "guards": "Every role x every static dashboard page settles without an error boundary — a refusal must render as a refusal, not as 'Something went wrong'",
+      "mutation": "In app/dashboard/users/page.tsx move getAuth() back inside the Promise.all with the role check after it, rebuild, run `npx playwright test role-surfaces`, revert",
+      "observed": "1 failing of 2 — crashed listed organizer, venue and sponsor on /dashboard/users; 2 passing after the revert",
+      "date": "2026-08-25",
+      "source": "run-at-e3-e6-role-sweep"
     }
   },
   "grandfathered": [
