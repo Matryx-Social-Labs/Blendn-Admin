@@ -120,12 +120,25 @@ describe("the organiser asserts; nothing is inherited or assumed", () => {
   it("replaces the whole set rather than diffing it", () => {
     /*
      * The payload is the full list the organiser ticked, so a diff would have
-     * to tell "unticked" from "not sent". `undefined` already means "not
+     * to tell "unticked" from "not sent". An **absent key** already means "not
      * sent", which is what leaves an event's amenities alone.
+     *
+     * The anchor moved when the route dropped `?? undefined` for conditional
+     * spreads (SCRUM-53): the shape is now
+     * `...(Array.isArray(amenity_ids) ? { amenities: { deleteMany ... } } : {})`
+     * rather than `amenities: Array.isArray(...) ? ... : undefined`. Same
+     * behaviour, and the key is omitted rather than set to undefined — which
+     * is the point of that change. Only the text this test greps for changed.
      */
     const update = read("app", "api", "events", "[id]", "route.ts")
-    const block = update.slice(update.indexOf("amenities: Array.isArray(amenity_ids)"))
-    expect(block.slice(0, block.indexOf("media:"))).toContain("deleteMany: {}")
+    const start = update.indexOf("Array.isArray(amenity_ids)")
+    // jest takes one argument; the message-as-second-arg is a Playwright idiom.
+    expect({ found: start > -1 }).toEqual({ found: true })
+    const block = update.slice(start, update.indexOf("media_items", start))
+    expect(block).toContain("deleteMany: {}")
+    // And still guarded, so a PATCH that does not mention amenities leaves
+    // them alone rather than clearing them.
+    expect(block).toContain("amenity_ids.map")
   })
 
   it("validates the ids as uuids before they reach a connect", () => {

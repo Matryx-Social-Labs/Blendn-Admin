@@ -4,6 +4,13 @@ import { join, sep } from "path"
 /**
  * The explicit-`undefined` budget, and why it may only shrink.
  *
+ * **Progress: `app/api/events/[id]/route.ts` is done — 33 sites to 0**, which
+ * was half the original 68. Converted to conditional spreads, one judgement
+ * per site, with the operator chosen per field: `!= null` where the original
+ * used `??` (so `0`, `false` and `""` survive), truthiness only where the
+ * original used it, and `!== undefined` for `min_age`, the one field an
+ * explicit null must be able to clear.
+ *
  * ## The hazard, which is a runtime one
  *
  * Prisma *strips* `undefined` keys from a where-clause rather than matching
@@ -34,6 +41,11 @@ import { join, sep } from "path"
  * hold the whole thing in their head to make progress: fix one file, lower one
  * number.
  *
+ * The count is an over-estimate, deliberately. The regex sees any
+ * `: undefined` in `app/` or `lib/`, including local sentinels that never
+ * reach Prisma. That is the right way for a ratchet to be wrong: it can only
+ * make the remaining work look larger than it is, never smaller.
+ *
  * When every count reaches zero, enable `strictUndefinedChecks` and delete
  * this file. Tracked as the J1 half of SCRUM-52's territory.
  */
@@ -46,7 +58,6 @@ const ROOT = join(__dirname, "..")
  */
 const BUDGET: Record<string, number> = {
   "app/api/events/[id]/chat/members/[userId]/route.ts": 4,
-  "app/api/events/[id]/route.ts": 33,
   "app/api/events/route.ts": 8,
   "app/api/mobile/events/[eventId]/announce/route.ts": 1,
   "app/api/mobile/events/[eventId]/clone/route.ts": 3,
