@@ -9,7 +9,6 @@ import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
 import { checkKeywords } from "@/lib/moderation/keyword-filter"
-import { checkContactInfo } from "@/lib/moderation/contact-info"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import {
   successResponse,
@@ -375,20 +374,21 @@ export async function POST(
     }
 
     /*
-     * Contact details — flagged, never blocked, and deliberately after the
-     * hide gate above.
+     * Contact details are detected by `moderateMessage`, not here.
      *
-     * The message is sent. This records that somebody handed out a number or a
-     * handle in a pseudonymous room, so the pattern is visible to a moderator;
-     * it does not refuse them. Refusing would teach the boundary in one message
-     * and cost the visibility too -- the next attempt is spelled out, and now
-     * there is no flag either.
+     * This route used to run `checkContactInfo` itself, and
+     * `events/[eventId]/chat` did not — so the event room, the surface this
+     * product is actually about, never detected a phone number or a handle.
+     * The check now lives in the pipeline, which both routes call and a third
+     * one cannot forget.
      *
-     * The client shows the warning *before* sending, from the same module, so
-     * what a sender was told and what a moderator sees cannot disagree.
+     * It flags rather than refusing. Taking a conversation off-platform is
+     * where there is no block, no report and no record, so a moderator should
+     * see the pattern — refusing would teach the sender the boundary and cost
+     * the visibility, and the next attempt would be spelled out with no flag
+     * behind it. The client shows its warning before sending, from the same
+     * module, so what a sender was told and what a moderator sees agree.
      */
-    const contactResult = checkContactInfo(content)
-
     // Create the message
     const message = await db.chat_messages.create({
       data: {
@@ -428,10 +428,6 @@ export async function POST(
      * message that is both hidden and full of contact details still carries
      * both signals into review.
      */
-    if (contactResult) {
-      void flagForReview(message.id, chatGroupId, user.userId, contactResult)
-    }
-
     /*
      * Did anybody actually look at this message?
      *

@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent } from "./openai-moderation"
 import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
+import { checkContactInfo } from "./contact-info"
 
 /**
  * Main moderation orchestrator.
@@ -62,7 +63,33 @@ export async function moderateMessage(
       }
     }
 
-    // 4. Flag anything that was caught by keyword or text moderation at lower confidence
+    /*
+     * 4. Contact details, in the pipeline rather than in a route.
+     *
+     * This ran in `chat/groups/[chatGroupId]/messages` and **not** in
+     * `events/[eventId]/chat`, so the event room — the surface this product is
+     * actually about — never detected a phone number or a handle. Measured:
+     * posting "add me on whatsapp 9876543210" to a live event room raised no
+     * flag at all.
+     *
+     * `contact-info.ts`'s own docstring says it runs "server-side before
+     * persist", which was true of one of the two write paths. Moving it here
+     * makes it true of both, and of the third one somebody adds — the same
+     * argument as every resolver in this codebase: the mechanism was right and
+     * using it was optional.
+     *
+     * It flags and never hides. Taking a conversation off-platform is where
+     * there is no block, no report and no record, so a moderator should see the
+     * pattern — but refusing the message would teach the sender the boundary
+     * and cost the visibility, and the next attempt would be spelled out with
+     * no flag behind it.
+     */
+    const contactResult = checkContactInfo(content)
+    if (contactResult) {
+      await flagForReview(messageId, chatGroupId, userId, contactResult)
+    }
+
+    // 5. Flag anything caught by keyword or text moderation at lower confidence
     const flagResult = keywordResult || textResult
     if (flagResult && flagResult.action === "flag") {
       await flagForReview(messageId, chatGroupId, userId, flagResult)
@@ -70,7 +97,24 @@ export async function moderateMessage(
     }
 
     /*
-     * 5. Nothing was caught. Whether that means "clean" depends on whether
+     * A contact-info flag ends the pipeline here, for the same reason the two
+     * branches above return: `recordExamined` writes `moderation_status`
+     * unconditionally, so falling through would overwrite `flagged` with
+     * `unchecked` and leave the message contradicting its own flag row.
+     *
+     * Found by running it rather than reading it — the flag was created
+     * correctly and the status said `unchecked`, which is precisely the
+     * two-vocabularies-for-one-word problem this schema already has once.
+     *
+     * It is checked separately from `flagResult` rather than folded into it so
+     * that a message carrying *both* contact details and a low-confidence
+     * keyword hit raises both flags. They are different categories and a
+     * moderator wants both.
+     */
+    if (contactResult) return
+
+    /*
+     * 6. Nothing was caught. Whether that means "clean" depends on whether
      *    anybody actually looked.
      *
      * This wrote `clean` unconditionally, so with `OPENAI_API_KEY` unset -- the

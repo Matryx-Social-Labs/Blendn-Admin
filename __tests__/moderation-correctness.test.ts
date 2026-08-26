@@ -150,3 +150,61 @@ describe("G13 — the burst limit is one bucket, not one per replica", () => {
     expect(src).toMatch(/export async function clearAllSpamHistory/)
   })
 })
+
+describe("contact details are detected on every write path, not one of them", () => {
+  /*
+   * Two routes write `chat_messages`, and only `chat/groups/[chatGroupId]`
+   * ran `checkContactInfo`. `events/[eventId]/chat` — the event room, which is
+   * the surface this product is actually about — did not, so a phone number or
+   * a handle posted there raised nothing at all.
+   *
+   * Measured before the fix by posting "add me on whatsapp 9876543210" into a
+   * live event room: message stored, zero flags. `contact-info.ts`'s own
+   * docstring says it runs "server-side before persist", which was true of one
+   * of the two paths.
+   *
+   * The check moved into `moderateMessage`, which both routes call — the same
+   * argument as every resolver here: the mechanism was right and using it was
+   * optional.
+   */
+
+  it("runs the check inside the pipeline", () => {
+    const src = code("lib/moderation/index.ts")
+    expect(src).toMatch(/checkContactInfo\(content\)/)
+  })
+
+  it("stops after flagging, so the status is not overwritten", () => {
+    /*
+     * `recordExamined` writes `moderation_status` unconditionally, so falling
+     * through to it overwrites `flagged` with `unchecked` and leaves the
+     * message contradicting its own flag row.
+     *
+     * That is exactly what happened on the first attempt, and it was found by
+     * posting a message and reading the row back — not by reading the code.
+     * The flag was created correctly and the status still said `unchecked`.
+     */
+    const src = code("lib/moderation/index.ts")
+    const contactAt = src.indexOf("checkContactInfo(content)")
+    const recordAt = src.indexOf("recordExamined(")
+    expect(contactAt).toBeGreaterThan(-1)
+    expect(recordAt).toBeGreaterThan(contactAt)
+    // A bare `return` guarded by the contact result, between the two.
+    expect(src.slice(contactAt, recordAt)).toMatch(/if \(contactResult\) return/)
+  })
+
+  it("leaves neither send route running its own copy", () => {
+    /*
+     * One pipeline, or the next route to be added inherits the choice of
+     * whether to bother. `flagForReview` is a bare `create` with no unique
+     * constraint behind it, so a route flagging as well as the pipeline puts
+     * the same message in the queue twice.
+     */
+    const routes = [
+      "app/api/mobile/events/[eventId]/chat/route.ts",
+      "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts",
+    ]
+    const offenders = routes.filter((r) => /checkContactInfo\s*\(/.test(code(r)))
+    expect({ offenders, hint: offenders.length ? "moderateMessage already does this" : "" })
+      .toEqual({ offenders: [], hint: "" })
+  })
+})

@@ -146,11 +146,11 @@
       "source": "run-at-integration-merge"
     },
     "moderation-correctness.test.ts": {
-      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
-      "mutation": "Replace lib/moderation/openai-moderation.ts with an empty stub (`export {}`), run this suite, revert",
-      "observed": "1 failing",
-      "date": "2026-08-25",
-      "source": "run-at-integration-merge"
+      "guards": "The five ways the moderation pipeline reported success while failing, plus: contact details are detected inside moderateMessage (both write paths), and the flag is not overwritten by recordExamined",
+      "mutation": "Two run: (a) replace `checkContactInfo(content)` with `null` in lib/moderation/index.ts; (b) delete the `if (contactResult) return` guard. Run this suite, revert each.",
+      "observed": "(a) 2 failing of 14; (b) 1 failing of 14 — the status-overwrite test specifically; 14 passing after each revert",
+      "date": "2026-08-26",
+      "source": "run-at-e10-chat-moderation"
     },
     "nav-routes-exist.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
