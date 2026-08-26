@@ -107,6 +107,14 @@ interface ChatFeedProps {
 export function ChatFeed({ eventId }: ChatFeedProps) {
   const [data, setData] = useState<ChatFeedData | null>(null)
   const [loading, setLoading] = useState(true)
+  /*
+   * Whether the last load failed, as distinct from having nothing to show.
+   *
+   * Without this a 403 rendered as "No chatroom for this event yet." — a
+   * failure explained as an absence, and the wrong absence at that. An
+   * organiser who had lost access to a room was told the room did not exist.
+   */
+  const [failed, setFailed] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"messages" | "members">("messages")
   const [expandedUser, setExpandedUser] = useState<string | null>(null)
@@ -117,7 +125,19 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
     try {
       if (!silent) setLoading(true)
       const res = await fetch(`/api/events/${eventId}/chat/messages`, { cache: "no-store" })
-      if (res.ok) {
+      if (!res.ok) {
+        /*
+         * A failed poll keeps whatever is on screen — the messages were real
+         * when they arrived — but it must not be silent. This refreshes every
+         * five seconds, so without a flag a room that has started refusing
+         * simply freezes, and the last good render is indistinguishable from a
+         * quiet room.
+         */
+        setFailed(true)
+        return
+      }
+      setFailed(false)
+      {
         const json = await res.json() as ChatFeedData
         setData(json)
         if (isFirstLoad.current) {
@@ -262,6 +282,12 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
         {loading && !data ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-sm text-muted-foreground">Loading chat\u2026</p>
+          </div>
+        ) : failed && !data ? (
+          <div className="flex items-center justify-center h-full p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              That feed did not load. It may not be yours to read.
+            </p>
           </div>
         ) : !data?.chatGroupId ? (
           <div className="flex items-center justify-center h-full p-6 text-center">

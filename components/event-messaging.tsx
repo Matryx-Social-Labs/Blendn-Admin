@@ -107,10 +107,24 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
       .catch(() => setSponsors([]))
   }, [eventId])
 
+  /*
+   * Whether the last load failed, as distinct from there being nothing to show.
+   *
+   * Without it a 403 or a 500 rendered as "No sponsored messages yet. Add one
+   * to get started." — a failure explained as an absence, and an invitation to
+   * create a duplicate of something the caller simply could not read.
+   */
+  const [failed, setFailed] = useState(false)
+
   const fetchMessages = useCallback(async () => {
     try {
       const res = await fetch(`/api/events/${eventId}/sponsored-messages`)
-      if (res.ok) setMessages(await res.json())
+      if (!res.ok) {
+        setFailed(true)
+        return
+      }
+      setFailed(false)
+      setMessages(await res.json())
     } finally {
       setLoading(false)
     }
@@ -300,6 +314,10 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
       {/* List */}
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : failed ? (
+        <p className="text-sm text-muted-foreground">
+          Those messages did not load. Nothing was changed — try again.
+        </p>
       ) : messages.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed p-6 text-center text-sm text-muted-foreground">
           No sponsored messages yet. Add one to get started.
@@ -401,6 +419,9 @@ type MessagingTab = "announcements" | "polls" | "sponsored"
 
 function AnnouncementsPanel({ eventId }: { eventId: string }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  // Same distinction as the sponsored list above: a failed read is not an
+  // empty one, and "No announcements sent yet" is a claim about the event.
+  const [announcementsFailed, setAnnouncementsFailed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState("")
   const [sending, setSending] = useState(false)
@@ -410,7 +431,9 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
   const fetchAnnouncements = useCallback(async () => {
     try {
       const res = await fetch(`/api/events/${eventId}/announcements`)
+      if (!res.ok) setAnnouncementsFailed(true)
       if (res.ok) {
+        setAnnouncementsFailed(false)
         const body = await res.json()
         setAnnouncements(body.announcements ?? [])
         setAudience(body.audience ?? { members: 0, reachable: 0 })
@@ -541,6 +564,10 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
         <p className="text-sm font-medium mb-2">Recent Announcements</p>
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : announcementsFailed ? (
+          <p className="text-sm text-muted-foreground">
+            Those announcements did not load. Nothing was sent — try again.
+          </p>
         ) : announcements.length === 0 ? (
           <p className="text-sm text-muted-foreground">No announcements sent yet.</p>
         ) : (

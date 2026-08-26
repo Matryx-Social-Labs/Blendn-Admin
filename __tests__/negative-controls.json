@@ -256,6 +256,13 @@
       "observed": "1 failing of 2 — missing listed app/dashboard/events/curate/actions.ts; 2 passing after the revert",
       "date": "2026-08-26",
       "source": "run-at-e9-checkin"
+    },
+    "failed-fetch-is-not-empty.test.ts": {
+      "guards": "No dashboard component branches on res.ok without saying what happens when it is false, so a 403 cannot render as an empty result",
+      "mutation": "In components/chat-feed.tsx replace the `if (!res.ok) { setFailed(true); return }` early return with a bare `if (res.ok) {`, run this suite, revert",
+      "observed": "1 failing of 2 — silent listed components/chat-feed.tsx; 2 passing after the revert. NOTE: the first version of this guard did NOT fail against the same mutation, because its `!res.ok` exemption was file-scoped and chat-feed has one in deleteMessage. Rescoped to the call site.",
+      "date": "2026-08-26",
+      "source": "run-at-e16-code-quality"
     }
   },
   "grandfathered": [
