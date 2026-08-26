@@ -4,6 +4,7 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
+import { syncOccurrences } from "../lib/occurrences"
 
 /**
  * A world the QA team can actually test against.
@@ -637,6 +638,33 @@ async function main() {
     })
 
     /*
+     * Occurrences, through the same writer the product uses.
+     *
+     * `resolveOccurrence` is what check-in asks "which day is this?", and it
+     * answers `none` for an event with no occurrence rows. The route treats
+     * `none` as `too_late` — so **an event two days in the future refused
+     * check-in with "Event has already ended"**, and recorded the refusal as
+     * `too_late`, which is a real signal on the curation-health screen.
+     *
+     * The route's comment says every event has at least one occurrence and it
+     * is right about the product: `POST /api/events` calls `syncOccurrences`.
+     * It was wrong about the seeded world, because this script wrote `events`
+     * rows directly and only built occurrences for the two it wanted check-ins
+     * on. So the fixture quietly disagreed with the thing it exists to
+     * represent, in the one mechanic the product cannot do without.
+     *
+     * Calling the real writer rather than inserting rows here is the point: a
+     * fixture that hand-rolls what production computes is a second
+     * implementation, and it will drift again.
+     */
+    await syncOccurrences(
+      event.id,
+      start,
+      hoursFromNow(spec.startsIn + spec.hours),
+      city.tz
+    )
+
+    /*
      * The clip, as an `event_media` row rather than a column.
      *
      * `event_media` has carried `type: image | video | document`, a `url`, a
@@ -898,6 +926,14 @@ async function main() {
         source_url: `https://in.bookmyshow.com/events/${c.slug}`,
       },
     })
+
+    // Same reason as the main event loop above: without occurrences the
+    // check-in route answers "Event has already ended" for a future event, and
+    // a curated event that cannot be checked into is the one case where that
+    // silence is indistinguishable from the wrong-pin signal curation exists
+    // to measure.
+    await syncOccurrences(ev.id, start, new Date(start.getTime() + 4 * 3_600_000), CITY.bengaluru.tz)
+
     curatedIds[c.slug] = ev.id
   }
 

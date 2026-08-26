@@ -11,6 +11,7 @@ import { db } from "@/lib/db"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { canPublish } from "@/lib/geofence-input"
 import { logger } from "@/lib/logger"
+import { syncOccurrences } from "@/lib/occurrences"
 
 /**
  * Add an event the platform found, so a city with no supply has something in it.
@@ -135,6 +136,27 @@ export async function curateEvent(
       },
       select: { id: true, slug: true },
     })
+
+    /*
+     * Occurrences, or the event cannot be checked into at all.
+     *
+     * `resolveOccurrence` answers check-in's "which day is this?", and returns
+     * `none` for an event with no occurrence rows — which the check-in route
+     * treats as `too_late`. So a curated event three days in the future refused
+     * with **"Event has already ended"**, and recorded the refusal as
+     * `too_late`.
+     *
+     * That is worse here than anywhere else in the product. Curation's one
+     * success metric is "did anybody get in?", and the curation-health screen
+     * reads zero check-ins as a wrong pin or a dead listing. Without this call
+     * every curated event scored as a failed listing by construction, and the
+     * screen built to catch a bad pin would have been reporting this instead.
+     *
+     * `POST /api/events` has always called this. Curation is a second write
+     * path to the same table and did not, which is the shape this whole audit
+     * keeps finding: the mechanism is right, using it is optional.
+     */
+    await syncOccurrences(event.id, start, end, v.timezone)
 
     auditLog({
       userId: session.user.id,

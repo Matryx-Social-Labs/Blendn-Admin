@@ -14,6 +14,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { randomUUID } from "crypto"
+import { syncOccurrences } from "@/lib/occurrences"
 
 export async function POST(
   request: NextRequest,
@@ -142,6 +143,20 @@ export async function POST(
       },
       select: { id: true, slug: true, title: true, status: true },
     })
+
+    /*
+     * Occurrences, like every other write path to this table.
+     *
+     * `resolveOccurrence` answers check-in's "which day is this?" and returns
+     * `none` when an event has no occurrence rows; the check-in route reads
+     * `none` as `too_late`, so a clone refused with "Event has already ended"
+     * however far in the future it sat.
+     *
+     * A clone lands as a draft, so nobody could check into it *yet* either way
+     * — which is exactly why this was invisible. It becomes real the moment the
+     * cloner publishes, and by then nothing connects the failure to this route.
+     */
+    await syncOccurrences(cloned.id, event.start_time, event.end_time, event.timezone)
 
     return successResponse(cloned, 201)
   } catch (error) {

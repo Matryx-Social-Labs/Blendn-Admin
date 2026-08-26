@@ -249,6 +249,13 @@
       "observed": "1 failing of 2 — reported leads/page.tsx at 229 chars; 2 passing after the revert",
       "date": "2026-08-25",
       "source": "run-at-e17-density"
+    },
+    "events-have-occurrences.test.ts": {
+      "guards": "Every write path that creates an event also calls syncOccurrences, so check-in can resolve a day for it",
+      "mutation": "Comment out the syncOccurrences call in app/dashboard/events/curate/actions.ts, run this suite, revert",
+      "observed": "1 failing of 2 — missing listed app/dashboard/events/curate/actions.ts; 2 passing after the revert",
+      "date": "2026-08-26",
+      "source": "run-at-e9-checkin"
     }
   },
   "grandfathered": [
