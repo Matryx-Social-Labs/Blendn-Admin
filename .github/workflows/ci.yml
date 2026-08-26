@@ -106,8 +106,11 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Push database schema
-        run: npm run db:push
+      # `migrate deploy`, so the integration suites run against a schema built
+      # the way production builds one. `db push` here would test a schema no
+      # deployed environment ever has.
+      - name: Apply migrations from empty
+        run: npm run db:migrate
 
       - name: Test
         run: npm test -- --ci
@@ -172,13 +175,21 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      # `db push`, not `migrate deploy`, and that is a finding rather than a
-      # preference: `prisma migrate deploy` fails against a clean database
-      # because an early migration references `profiles` before it exists.
-      # Tracked as its own task; using push here would otherwise hide it, so the
-      # migration check below is what keeps it visible.
-      - name: Push database schema
-        run: npm run db:push
+      # `migrate deploy`, not `db push` — and this step is the guard.
+      #
+      # It used to be `db push`, because `migrate deploy` failed against a
+      # clean database: the chain had no baseline (the schema was originally
+      # created by push, and migrations were written on top of one that already
+      # existed), two migrations written on the same day depended on each other
+      # in the reverse of their alphabetical order, and three moderation
+      # objects were never written down at all.
+      #
+      # All four are fixed. Using `migrate deploy` here is what keeps them
+      # fixed: this lane builds a database from empty on every run, so the next
+      # migration that cannot replay fails CI rather than waiting for a
+      # disaster recovery to discover it.
+      - name: Apply migrations from empty
+        run: npm run db:migrate
 
       - name: Seed the QA world
         run: npm run seed:qa -- --apply
