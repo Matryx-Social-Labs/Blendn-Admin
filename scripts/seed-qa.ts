@@ -838,6 +838,58 @@ async function main() {
   // Person 0 is in both, and is the only true repeat attendee in the world.
   const _pastCheckIns = await checkInto("monsoon-flea-market", [attendeeIds[0], ...attendeeIds.slice(6)], "checked_out")
 
+  /*
+   * Somebody who attended TWO DAYS of one event.
+   *
+   * `event_check_ins` holds one row per person per day, and nine dashboard
+   * sites once counted rows and called them people — so every figure on a
+   * multi-day event was multiplied by the day count. W17 fixed it, and a
+   * fixture only *proves* it stayed fixed if somebody in it attended twice.
+   *
+   * On a single-day world `rows == people`, and every assertion about counting
+   * passes against code that counts either. `e2e/attendance-numbers.spec.ts`
+   * refuses to run without this, which is how its absence was noticed: the
+   * previous world produced two rows per person only because two write paths
+   * disagreed about which occurrence a check-in belonged to, and that artifact
+   * disappeared the moment the seed started building occurrences properly.
+   *
+   * Design Week is the only genuinely multi-day event here — a span, so
+   * `syncOccurrences` gives it a real occurrence per day rather than one
+   * invented for the fixture.
+   */
+  const multiDay = await db.events.findUnique({
+    where: { slug: "design-week-bengaluru" },
+    select: { id: true, start_time: true },
+  })
+  let _multiDayCheckIns = 0
+  if (multiDay) {
+    const days = await db.event_occurrences.findMany({
+      where: { event_id: multiDay.id },
+      orderBy: { occurs_on: "asc" },
+      take: 2,
+    })
+    // The same two people on both days: 4 rows, 2 people. Anything that
+    // reports 4 is counting rows.
+    for (const day of days) {
+      for (const userId of attendeeIds.slice(0, 2)) {
+        await db.event_check_ins.upsert({
+          where: { occurrence_id_user_id: { occurrence_id: day.id, user_id: userId } },
+          update: { status: "checked_out" },
+          create: {
+            event_id: multiDay.id,
+            occurrence_id: day.id,
+            user_id: userId,
+            kind: "attendee",
+            status: "checked_out",
+            check_in_time: day.start_time,
+            check_out_time: day.end_time,
+          },
+        })
+        _multiDayCheckIns++
+      }
+    }
+  }
+
   // ── a room with something in it ──────────────────────────────────────────
   const liveEvent = await db.events.findUnique({
     where: { slug: "founders-filter-coffee" },
@@ -984,6 +1036,58 @@ async function main() {
       where: { event_id: spec.eventId, contact_email: spec.email },
     })
     if (existing) continue
+    /*
+     * Exactly one claimant, because the database insists.
+     *
+     * `event_claims_one_claimant` is
+     * `CHECK ((org_id IS NULL) <> (onboarding_id IS NULL))` -- a claim comes
+     * either from an organisation that already exists, or from an onboarding
+     * request filed by somebody with no account. Never both, and never
+     * neither.
+     *
+     * This seed used to set `org_id` on the approved claim and leave *both*
+     * columns null on the other four, which the constraint rejects. It never
+     * failed locally because `prisma db push` does not create CHECK
+     * constraints at all -- `schema.prisma` cannot express them, so they exist
+     * only in migration SQL. Three of them were missing from every
+     * `db push` database in this project, including the one this seed had
+     * always been tested against. CI caught it the moment that lane switched
+     * to `migrate deploy`.
+     *
+     * The fix mirrors the real funnel rather than working around the check:
+     * `/claim/[eventId]` sends a claimant with no account through
+     * `POST /api/onboarding/apply` first, then files the claim against the
+     * request that returns. So the seed does the same.
+     */
+    let onboardingId: string | null = null
+    if (spec.status !== "approved") {
+      const existingRequest = await db.organiser_onboarding_requests.findFirst({
+        where: { contact_email: spec.email },
+        select: { id: true },
+      })
+      onboardingId =
+        existingRequest?.id ??
+        (
+          await db.organiser_onboarding_requests.create({
+            data: {
+              kind: "company",
+              display_name: spec.email.split("@")[1] ?? spec.email,
+              legal_name: `${spec.email.split("@")[1] ?? spec.email} Pvt Ltd`,
+              city: CITY.bengaluru.name,
+              contact_name: "Seeded Claimant",
+              contact_email: spec.email,
+              requested_role: "organizer",
+              // A free provider or an aggregator address is exactly the
+              // needs_proof path — the tier the real gate assigns when the
+              // domain proves nothing on its own.
+              tier: "needs_proof",
+              status: "pending",
+            },
+            select: { id: true },
+          })
+        ).id
+    }
+
     await db.event_claims.create({
       data: {
         event_id: spec.eventId,
@@ -992,6 +1096,7 @@ async function main() {
         status: spec.status,
         flags: spec.flags,
         org_id: spec.status === "approved" ? orgs.events.id : null,
+        onboarding_id: onboardingId,
         reviewed_by: spec.status === "pending" ? null : users.sagar,
         reviewed_at: spec.status === "pending" ? null : hoursFromNow(-20),
         decision_note: spec.status === "declined" ? "Personal address, no proof of connection." : null,

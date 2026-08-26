@@ -24,7 +24,8 @@ npm run lint                # ESLint
 npm test                    # Jest
 npm run test:watch          # Jest watch mode
 npx jest __tests__/spam-detector.test.ts   # Run a single test file
-npm run db:push             # Push schema changes to DB without a migration (dev only)
+npm run db:push             # Schema without a migration. NOT equivalent to db:migrate — see below
+npm run db:migrate          # Apply migrations. Use this to build a local database
 npm run db:migrate          # Apply migrations (prisma migrate deploy)
 npm run db:seed             # Seed database
 ```
@@ -96,7 +97,32 @@ Admin actions (role changes, moderation overrides, etc.) are recorded via `lib/a
 
 Prisma schema: `prisma/schema.prisma`. Key models: `User`/`profiles` (NextAuth user vs. extended profile — two separate models, joined), `events`/`event_details`/`recurring_events`, `event_check_ins` (GPS-validated), `chat_groups`/`chat_messages`/`chat_group_members`/`message_reactions`, `private_conversations`/`private_messages`, `event_rsvps`/`event_favorites`/`event_ratings`/`event_reports`, `moderation_flags`, `blocked_users`/`message_requests`, `push_tokens`, `mobile_refresh_tokens`, `audit_logs`.
 
-When changing the schema: run `npm run db:generate` after editing `schema.prisma`, use `db:push` for local iteration, and a real migration (`prisma migrate dev` then `db:migrate` for deploy) for anything going to a shared environment.
+When changing the schema: run `npm run db:generate` after editing
+`schema.prisma`, use `db:push` for local iteration, and a real migration
+(`prisma migrate dev` then `db:migrate` for deploy) for anything going to a
+shared environment.
+
+**But build your local database with `db:migrate`, not `db:push`.** They do not
+produce the same schema, and the difference is silent. `schema.prisma` cannot
+express a CHECK constraint, so `db push` creates none — while three exist in
+migration SQL and therefore in every deployed environment:
+
+| Constraint | What it enforces |
+|---|---|
+| `event_claims_one_claimant` | `(org_id IS NULL) <> (onboarding_id IS NULL)` |
+| `events_capacity_non_negative` | `current_capacity >= 0` |
+| `sponsored_active_needs_sponsor` | an active placement has a sponsor |
+
+A `db push` database is therefore **strictly weaker than production**, and code
+tested against one can write rows the real database rejects. That is not
+hypothetical: `scripts/seed-qa.ts` created event claims with neither `org_id`
+nor `onboarding_id` and passed locally for as long as it existed, because the
+constraint that forbids it was never there. CI caught it the day that lane
+switched to `migrate deploy`.
+
+It also means a schema comparison by columns alone proves less than it appears
+to — `information_schema.columns` matched exactly between the two while all
+three constraints were missing.
 
 ## Environment Variables
 
