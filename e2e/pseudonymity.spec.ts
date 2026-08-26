@@ -134,4 +134,44 @@ test.describe("a room never carries another attendee's real name", () => {
       "pseudonymity is the promise every other feature is downstream of"
     ).toEqual({ leaked: [], hint: "" })
   })
+
+  test("no stored notification carries a real name", async () => {
+    /*
+     * `notifications` is the copy that outlives the push.
+     *
+     * A push notification is transient - it shows on a lock screen and is gone.
+     * The row written beside it is permanent, sits outside every control that
+     * guards `private_messages`, and was originally a verbatim copy of the
+     * preview: message text and counterparty names, retained forever. That was
+     * the single biggest obstacle to any privacy claim about DMs, encrypted or
+     * not.
+     *
+     * `storedBodyFor` now redacts the content-bearing kinds, so the push says
+     * what it needs to and the row says "New message in the room". This asserts
+     * the property that redaction exists to produce, rather than asserting that
+     * the function was called.
+     *
+     * `event_checkin` bodies legitimately name somebody - "Cosmic Panda just
+     * checked in" - because a pseudonym is what the room is for. Only real
+     * names are forbidden.
+     */
+    const people = await db.user.findMany({
+      where: { name: { not: null } },
+      select: { name: true },
+    })
+    const realNames = people.map((p) => p.name!).filter((n) => n.trim().length > 3)
+    expect(realNames.length, "the seed must have named accounts, or this is vacuous").toBeGreaterThan(3)
+
+    const stored = await db.notifications.findMany({ select: { kind: true, title: true, body: true } })
+    expect(stored.length, "the seed must have notifications, or this is vacuous").toBeGreaterThan(0)
+
+    const leaked = stored
+      .filter((n) => realNames.some((name) => n.body.includes(name) || n.title.includes(name)))
+      .map((n) => `${n.kind}: ${JSON.stringify(n.body.slice(0, 60))}`)
+
+    expect(
+      { leaked, hint: leaked.length ? "A permanent row is holding a real name." : "" },
+      "the stored copy outlives the push and sits outside the controls that guard the message"
+    ).toEqual({ leaked: [], hint: "" })
+  })
 })
