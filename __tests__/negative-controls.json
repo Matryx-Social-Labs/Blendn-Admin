@@ -263,6 +263,13 @@
       "observed": "1 failing of 2 — silent listed components/chat-feed.tsx; 2 passing after the revert. NOTE: the first version of this guard did NOT fail against the same mutation, because its `!res.ok` exemption was file-scoped and chat-feed has one in deleteMessage. Rescoped to the call site.",
       "date": "2026-08-26",
       "source": "run-at-e16-code-quality"
+    },
+    "undefined-query-budget.test.ts": {
+      "guards": "The 68 explicit-undefined query sites blocking strictUndefinedChecks may only shrink; the budget cannot become an allowlist",
+      "mutation": "Two run against lib/pagination.ts: (a) add a `cursor: undefined` site; (b) remove its existing site without lowering the budget",
+      "observed": "(a) 1 failing — 'lib/pagination.ts: 2 sites, budget 1'; (b) 1 failing — 'budget 1, actually 0 - lower it'; 3 passing after each revert",
+      "date": "2026-08-26",
+      "source": "run-at-e16-code-quality"
     }
   },
   "grandfathered": [
