@@ -242,6 +242,13 @@
       "observed": "1 failing of 2 — the offender block was listed; 2 passing after the revert",
       "date": "2026-08-25",
       "source": "run-at-e3-admin-surface"
+    },
+    "dashboard-prose-budget.test.ts": {
+      "guards": "No dashboard page leads with more than 180 characters of literal explanatory prose — site-header already says what the screen is",
+      "mutation": "Prepend the header's own description back onto the paragraph in app/dashboard/leads/page.tsx, run this suite, revert",
+      "observed": "1 failing of 2 — reported leads/page.tsx at 229 chars; 2 passing after the revert",
+      "date": "2026-08-25",
+      "source": "run-at-e17-density"
     }
   },
   "grandfathered": [

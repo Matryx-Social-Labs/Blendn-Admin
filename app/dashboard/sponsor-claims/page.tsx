@@ -16,11 +16,11 @@ export default async function SponsorClaimsPage() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
+        {/* The header covers what approving hands over. This is the part it
+            does not: the one thing approving deliberately withholds. */}
         <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-          Oldest first. Approving hands over the brand name, the logo shown beside
-          every sponsored message, and the reporting on placements other people
-          set up. It does not grant the right to place a sponsored message — that
-          is the sponsoring grant on the organisation, set separately.
+          Approving does not grant the right to place a sponsored message — that is
+          the sponsoring grant on the organisation, set separately.
         </p>
       </div>
       <SponsorClaimQueue claims={claims} />

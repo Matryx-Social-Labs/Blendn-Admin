@@ -172,9 +172,17 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Organisers",
     description: "The supply side: who publishes, and how concentrated it is.",
   },
+  /*
+   * "Venue owners", not "Venues" — accounts, not records.
+   *
+   * This route rendered an h1 reading "Venues" over a list of *people*, and
+   * described itself as "every venue record", which is the screen that did not
+   * exist until `/dashboard/venues` grew an admin index. Two routes then shared
+   * one heading and neither matched its contents.
+   */
   "/dashboard/venue-owners": {
-    title: "Venues",
-    description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
+    title: "Venue owners",
+    description: "The people who run venues — accounts, not the venue records.",
   },
   "/dashboard/onboarding": {
     title: "Applications",

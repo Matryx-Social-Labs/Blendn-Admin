@@ -20,9 +20,6 @@ export default async function OrganisersPage() {
       <div className="px-4 lg:px-6">
         <div className="rounded-xl border bg-card px-6 py-6">
           <h1 className="text-3xl font-semibold">Organisers</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Manage organiser accounts, review event supply, and support host onboarding.
-          </p>
         </div>
       </div>
 

@@ -77,10 +77,12 @@ export default async function MyVenuesPage() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
+        {/* Only the part a reader cannot deduce from the grouping itself: some
+            events are attached to a venue record and some are still just a
+            string, and those two group differently. */}
         <p className="max-w-prose text-[0.8125rem] text-muted-foreground">
-          Events linked to one of your venues are grouped by that venue. Anything still on a
-          free-text name is grouped by the name, ignoring case and spacing. Capacity is the
-          largest any event there has declared.
+          Events still on a free-text venue name are grouped by that name, ignoring case
+          and spacing.
         </p>
         <Button asChild>
           <Link href="/dashboard/venues/new">Add a venue</Link>

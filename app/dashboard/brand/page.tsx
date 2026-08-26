@@ -28,10 +28,11 @@ export default async function BrandPage() {
   return (
     <div className="flex flex-col gap-6 py-6">
       <div className="flex flex-col gap-4 px-4 lg:px-6">
+        {/* The header says attendees see this. The non-obvious part is that they
+            see nothing else named, which is why it is worth getting right. */}
         <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-          Your name and logo appear beside every sponsored message you place. The
-          room is pseudonymous — attendees are shown a nickname, so your brand is
-          the only named participant in it. Worth getting right.
+          The room is pseudonymous — attendees are shown a nickname, so your brand is
+          the only named participant in it.
         </p>
         {/*
           Claim first, create second. An organiser may already have added this

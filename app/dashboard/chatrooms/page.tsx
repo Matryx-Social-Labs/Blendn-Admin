@@ -155,10 +155,6 @@ export default async function ChatroomsPage() {
           <div className="mt-4 flex flex-col gap-6 @2xl/main:flex-row @2xl/main:items-end @2xl/main:justify-between">
             <div>
               <h1 className="text-3xl font-semibold text-foreground">Chatrooms</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Choose a live event to review the chat feed, send announcements, and manage
-                sponsored messages from one workspace.
-              </p>
             </div>
             <div className="grid gap-3 @xl/main:grid-cols-3">
               <div className="rounded-lg border bg-muted px-4 py-4">

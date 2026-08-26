@@ -74,8 +74,26 @@ function staticDashboardRoutes(): string[] {
 const ROUTES = staticDashboardRoutes()
 const ROLES = Object.keys(ROLE_ACCOUNTS).filter((r) => r !== "outsider") as RoleKey[]
 
-/** The copy an error boundary renders. A refusal must never produce it. */
-const CRASH = ["Something went wrong", "Application error", "Unhandled Runtime Error"]
+/**
+ * The copy an error boundary renders. A refusal must never produce any of it.
+ *
+ * **"That page did not load" is `app/dashboard/error.tsx`, and it belongs on
+ * this list.** Adding that boundary very nearly disarmed this test: errors used
+ * to fall through to `app/global-error.tsx` and say "Something went wrong", and
+ * once they stopped saying that, the sweep would have walked past a broken page
+ * and counted it as reached. The guard would have kept passing while the thing
+ * it guards regressed — which is worse than never having had it.
+ *
+ * The general shape: a test that matches on copy is coupled to that copy, so it
+ * has to move whenever the copy does. Cheap here because there are two
+ * boundaries and both are in this repo.
+ */
+const CRASH = [
+  "Something went wrong", // app/global-error.tsx
+  "That page did not load", // app/dashboard/error.tsx
+  "Application error",
+  "Unhandled Runtime Error",
+]
 
 let browser: Browser
 test.beforeAll(async () => {
@@ -107,7 +125,29 @@ test.describe("every role, every dashboard page", () => {
       reached[role] = []
 
       for (const url of ROUTES) {
-        await page.goto(url, { waitUntil: "networkidle" })
+        /*
+         * `networkidle`, with a raised navigation timeout.
+         *
+         * This suite failed exactly once, on a machine whose 15-minute load
+         * average was 20 while macOS reindexed a photo library. Starved of CPU,
+         * the 500ms of network silence never arrived inside the default 30s and
+         * `goto` threw. The app was fine — three runs on an idle machine gave
+         * byte-identical numbers — so the timeout is the thing that was wrong.
+         *
+         * I first replaced the wait with `domcontentloaded` plus a bounded
+         * wait for the URL to change, on the reasoning that a refusal here is a
+         * client-side navigation and network quiet is a timing claim rather than
+         * a state one. That reasoning is fine and the change was still wrong: a
+         * client redirect left pending from the previous page fires *into* the
+         * next `goto` and Chromium aborts it, so the sweep died with
+         * `net::ERR_ABORTED` on whichever page happened to follow a redirect.
+         * `networkidle` does not have that race precisely because it waits for
+         * the redirect to finish.
+         *
+         * A slow wait that is correct beats a fast one that is racy, and the
+         * starvation case is answered by the timeout on its own.
+         */
+        await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 })
         const body = (await page.locator("body").innerText()).replace(/\s+/g, " ")
 
         const hit = CRASH.find((c) => body.includes(c))

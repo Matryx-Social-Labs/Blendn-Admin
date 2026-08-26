@@ -40,9 +40,11 @@ export default async function LeadsPage({
       <div className="flex flex-col gap-1">
         {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
         <h2 className="text-[length:var(--text-h1)] font-bold">Leads</h2>
+        {/* The header says what these are. This says what they are not, which
+            is the distinction that decides which queue a row belongs in. */}
         <p className="text-[0.8125rem] text-muted-foreground">
-          Demo requests from the organiser landing page. Separate from applications — someone
-          asking for a walkthrough has not asked for an account.
+          Separate from applications — someone asking for a walkthrough has not asked
+          for an account.
         </p>
       </div>
 

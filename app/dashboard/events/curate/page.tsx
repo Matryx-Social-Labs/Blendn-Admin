@@ -58,10 +58,11 @@ export default async function CuratePage({
         <h2 className="text-sm font-bold">
           Curation health{city ? <span className="font-normal text-muted-foreground"> · {city}</span> : null}
         </h2>
+        {/* The header already names the number that matters. What it cannot fit
+            is how to read it, which is the only thing this line adds. */}
         <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-          Events we added from public listings. The number that matters is the
-          one that ended with nobody getting in — and whether anybody tried,
-          which is the difference between a wrong pin and a dead listing.
+          Whether anybody tried is the difference between a wrong pin and a dead
+          listing.
         </p>
       </div>
 

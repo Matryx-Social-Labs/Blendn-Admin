@@ -30,10 +30,11 @@ export default async function OnboardingPage() {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* The submission rule, which decides how much weight a row deserves and
+          is invisible from the row itself. */}
       <p className="text-[0.8125rem] text-muted-foreground">
-        Applications from people who want to host on Blend&apos;n. A company email address is
-        accepted as-is; a personal one had to supply a GSTIN or a website before it could be
-        submitted. Neither is proof — both are shown so you can weigh them.
+        A company email address was accepted as-is; a personal one had to supply a
+        GSTIN or a website. Neither is proof — both are shown so you can weigh them.
       </p>
 
       {!emailConfigured() ? (

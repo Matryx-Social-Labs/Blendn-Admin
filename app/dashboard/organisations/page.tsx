@@ -39,9 +39,11 @@ export default async function OrganisationsPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* What suspending does and does not do. Reversibility is the fact that
+          decides whether somebody clicks it, and it is not on the button. */}
       <p className="text-[0.8125rem] text-muted-foreground">
-        Every host on the platform. Suspending stops the organisation operating without deleting
-        anyone&apos;s history — events, check-ins and messages stay intact and it can be undone.
+        Suspending stops an organisation operating without deleting anyone&apos;s history
+        — events, check-ins and messages stay intact, and it can be undone.
       </p>
 
       {orgs.map((org) => (

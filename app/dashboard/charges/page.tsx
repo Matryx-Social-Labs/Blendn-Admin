@@ -23,11 +23,11 @@ export default async function ChargesPage() {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* Two words on this screen mean something specific, and neither is
+          guessable from the column heading. That is all this line is for. */}
       <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-        Every approved placement, including the ones nobody has priced — those are
-        the point of this screen. A price becomes a receivable when the sponsor
-        accepts it, and settled means the money arrived and there is a reference
-        to check it against.
+        A price becomes a receivable when the sponsor accepts it; settled means the
+        money arrived and there is a reference to check it against.
       </p>
       <ChargeLedgerView ledger={ledger} />
     </div>
