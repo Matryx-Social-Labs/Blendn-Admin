@@ -96,26 +96,18 @@ test.describe("a room never carries another attendee's real name", () => {
 
   test("no room surface leaks one attendee's name to another", async ({ baseURL }) => {
     /*
-     * A longer budget and per-surface timing, because this hangs in CI.
+     * Per-surface timing, kept.
      *
-     * It passes locally in ~2s and passed in CI when run in isolation, but in
-     * the full run it sits for the whole 45s default and the job is reported
-     * as cancelled. Three explanations have been measured and discarded:
-     * runner memory and disk (14GB and 83GB free), the two heavy sweeps (they
-     * run after this and never started), and Prisma pool exhaustion (peak
-     * connections were 21 either way).
+     * It cost nothing and it is the kind of number that is missing exactly
+     * when it is wanted — these three routes take ~30ms locally, so a CI log
+     * showing seconds would say something real by contrast.
      *
-     * What is left is that these three routes are the first of their kind the
-     * suite touches — `mobile-contract` covers thirteen others and took 28.8s
-     * in CI against 0.5s locally, which is 55x where the rest of the suite is
-     * 2-5x. That smells like first-hit cost, not a hang.
-     *
-     * So: raise the ceiling so a slow pass is a pass, and print each surface's
-     * timing so the next CI run says which one is expensive instead of leaving
-     * it to be inferred. If it still exhausts 120s, it is stuck rather than
-     * slow, and that is a different bug worth knowing about.
+     * The 120s budget that briefly sat here is gone: this spec was suspected
+     * of hanging in CI and was not. The job was being reclaimed mid-run
+     * because the organisation is over its Actions minutes, and `e2e` is the
+     * only job still running by then — the shorter ones finish first and slip
+     * through. No test was ever at fault.
      */
-    test.setTimeout(120_000)
     const room = await liveRoom()
     test.skip(!room, "no live event - see the test above")
 

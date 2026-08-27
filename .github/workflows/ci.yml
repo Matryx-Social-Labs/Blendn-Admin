@@ -223,17 +223,6 @@ jobs:
           tail -50 /tmp/server.log
           exit 1
 
-      # This lane has never completed in CI. It dies after ~25 of 28 specs with
-      # "The operation was canceled" and no other detail, which is GitHub's
-      # word rather than Playwright's — so the failure is the job being taken
-      # away, not an assertion. Memory and disk are the plausible causes and
-      # neither was measured, so measure them.
-      - name: Resources before E2E
-        run: |
-          echo "── memory ──"; free -m
-          echo "── disk ──";   df -h /
-          echo "── heaviest dirs ──"; du -sh node_modules .next ~/.cache 2>/dev/null || true
-
       # Two of the 31 specs are exhaustive sweeps — `responsive` walks 27 pages
       # at three widths, `role-surfaces` walks 30 routes as five roles. Between
       # them that is 231 navigations and most of this lane's cost; the other 25
@@ -249,48 +238,14 @@ jobs:
       # `full-e2e` when a change plausibly moves layout or role access.
       - name: E2E
         env:
-          # The pattern excluded from the SECOND invocation. `pseudonymity` is
-          # always in it because it runs first, on its own; `@sweep` joins it
-          # on ordinary PRs and drops out nightly or under the `full-e2e`
-          # label, when the exhaustive sweeps should run.
+          # Skipped on ordinary PRs; runs nightly and under the `full-e2e`
+          # label. `$^` matches nothing, so nothing is excluded.
           E2E_EXCLUDE: >-
             ${{ (github.event_name == 'schedule'
                  || contains(github.event.pull_request.labels.*.name, 'full-e2e'))
-                && 'a room never carries'
-                || '@sweep|a room never carries' }}
-        run: |
-          # Two invocations, and the reason is an unexplained interaction
-          # rather than a preference.
-          #
-          # `pseudonymity` passes in CI when run on its own and fails when it
-          # runs after the other 24 specs — the job is taken away 3-46s into
-          # its second test, with "The operation was canceled". Measured and
-          # ruled out: runner memory and disk (14GB and 83GB free), the two
-          # heavy sweeps (they run later and never start), Prisma pool
-          # exhaustion (peak 21 connections whether the spec pools are capped
-          # at 1 or 10), and a test timeout (killed 4.4s into a 120s budget).
-          # It passes locally on a fresh migrate-built database in ~10s.
-          #
-          # Running it first in its own process keeps the coverage — this is
-          # the spec that asserts no room surface carries a peer's real name,
-          # which is the product's central promise — while avoiding whatever
-          # the interaction is. Both invocations must pass; `bash -e` stops on
-          # the first failure.
-          #
-          # Tracked rather than forgotten: the cause is still unknown, and a
-          # green lane with a documented workaround is worth more than a red
-          # one with an open mystery.
-          npx playwright test --grep="a room never carries" --reporter=list
-          npx playwright test --grep-invert="$E2E_EXCLUDE" --reporter=list
-
-      # Whatever killed it, these are the two records that would say so.
-      - name: Resources and server log after E2E
-        if: always()
-        run: |
-          echo "── memory ──"; free -m
-          echo "── disk ──";   df -h /
-          echo "── server log, last 80 lines ──"
-          tail -80 /tmp/server.log || echo "(no server log)"
+                && '$^'
+                || '@sweep' }}
+        run: npm run test:e2e -- --grep-invert="$E2E_EXCLUDE"
 
       # The point of the lane: somebody who did not write the test can see what
       # broke without rerunning it.
