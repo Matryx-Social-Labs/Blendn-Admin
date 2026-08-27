@@ -42,7 +42,22 @@ import { MAX_GPS_ACCURACY_METERS } from "../lib/validations/event"
  */
 
 const db = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  adapter: new PrismaPg({
+    connectionString: process.env.DATABASE_URL,
+    /*
+     * One connection, because a spec file queries sequentially.
+     *
+     * Left unset, `@prisma/adapter-pg` takes node-postgres' default of ten.
+     * Five spec files each opened a pool that size, alongside the server's
+     * twenty, against Postgres' default `max_connections` of 100 — and pools
+     * are not released between files. In CI that showed as `mobile-contract`
+     * taking 28.8s against 0.5s locally, and then the next spec hanging for
+     * the full 45s test timeout waiting for a connection that never freed.
+     * The job was reported as cancelled, which is what sent me looking at
+     * runner memory and disk for three runs.
+     */
+    max: 1,
+  }),
 })
 
 /** Metres → degrees, at Bengaluru's latitude. Good enough to place a fix. */

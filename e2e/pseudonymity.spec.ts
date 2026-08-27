@@ -30,7 +30,22 @@ import { signAccessToken } from "../lib/mobile-auth"
  */
 
 const db = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  adapter: new PrismaPg({
+    connectionString: process.env.DATABASE_URL,
+    /*
+     * One connection, because a spec file queries sequentially.
+     *
+     * Left unset, `@prisma/adapter-pg` takes node-postgres' default of ten.
+     * Five spec files each opened a pool that size, alongside the server's
+     * twenty, against Postgres' default `max_connections` of 100 — and pools
+     * are not released between files. In CI that showed as `mobile-contract`
+     * taking 28.8s against 0.5s locally, and then the next spec hanging for
+     * the full 45s test timeout waiting for a connection that never freed.
+     * The job was reported as cancelled, which is what sent me looking at
+     * runner memory and disk for three runs.
+     */
+    max: 1,
+  }),
 })
 
 test.afterAll(async () => {
@@ -80,6 +95,27 @@ test.describe("a room never carries another attendee's real name", () => {
   })
 
   test("no room surface leaks one attendee's name to another", async ({ baseURL }) => {
+    /*
+     * A longer budget and per-surface timing, because this hangs in CI.
+     *
+     * It passes locally in ~2s and passed in CI when run in isolation, but in
+     * the full run it sits for the whole 45s default and the job is reported
+     * as cancelled. Three explanations have been measured and discarded:
+     * runner memory and disk (14GB and 83GB free), the two heavy sweeps (they
+     * run after this and never started), and Prisma pool exhaustion (peak
+     * connections were 21 either way).
+     *
+     * What is left is that these three routes are the first of their kind the
+     * suite touches — `mobile-contract` covers thirteen others and took 28.8s
+     * in CI against 0.5s locally, which is 55x where the rest of the suite is
+     * 2-5x. That smells like first-hit cost, not a hang.
+     *
+     * So: raise the ceiling so a slow pass is a pass, and print each surface's
+     * timing so the next CI run says which one is expensive instead of leaving
+     * it to be inferred. If it still exhausts 120s, it is stuck rather than
+     * slow, and that is a different bug worth knowing about.
+     */
+    test.setTimeout(120_000)
     const room = await liveRoom()
     test.skip(!room, "no live event - see the test above")
 
@@ -106,7 +142,10 @@ test.describe("a room never carries another attendee's real name", () => {
 
     const leaked: string[] = []
     for (const url of surfaces) {
+      const startedAt = Date.now()
       const res = await ctx.get(url)
+      // eslint-disable-next-line no-console -- the point is the CI log
+      console.log(`  [timing] ${url} -> ${res.status()} in ${Date.now() - startedAt}ms`)
       expect(res.status(), `${url} must answer, or this proves nothing`).toBeLessThan(400)
       const body = await res.text()
       for (const person of named) {
