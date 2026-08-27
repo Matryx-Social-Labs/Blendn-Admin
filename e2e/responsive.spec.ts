@@ -21,6 +21,19 @@ import { statePathFor } from "./global-setup"
  * hiding the rule the control depends on. Neither is visible in the class
  * names; both are obvious the moment a real browser lays them out.
  *
+ * ## Tagged `@sweep`: nightly and on demand, not on every commit
+ *
+ * 27 pages times three widths is 81 navigations, and the runner is far slower
+ * than a laptop — a single mobile-contract test that takes 0.3s locally took
+ * 21.5s in CI. This and `role-surfaces` between them are most of the e2e
+ * lane's cost, while the other 25 specs finish in about twenty seconds.
+ *
+ * It is a regression sweep over the whole surface: valuable, and not valuable
+ * *per commit*. So PRs skip it and it runs nightly, or on a PR labelled
+ * `full-e2e` when a change plausibly moves layout. The control below still
+ * runs everywhere, because it is cheap and it is what stops this passing
+ * vacuously.
+ *
  * ## The control is not optional
  *
  * A sweep that visits nothing reports a clean pass. So this asserts a floor on
@@ -56,7 +69,7 @@ test.afterAll(async () => {
   await browser.close()
 })
 
-test("no dashboard page scrolls sideways at 375, 768 or 1280", async ({ baseURL }) => {
+test("@sweep no dashboard page scrolls sideways at 375, 768 or 1280", async ({ baseURL }) => {
   test.setTimeout(600_000)
   const overflowing: string[] = []
   let measured = 0

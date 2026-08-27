@@ -10,6 +10,10 @@ on:
   push:
     branches: [dev]
     paths-ignore: ["**.md", "docs/**", ".benchmarks/**"]
+  # Nightly, so the two exhaustive e2e sweeps still run over the whole surface
+  # without charging every commit for them. See the E2E step below.
+  schedule:
+    - cron: "0 3 * * *"
 
 # Pushing twice in quick succession used to leave the first run grinding to
 # completion against code nobody was waiting on.
@@ -210,8 +214,27 @@ jobs:
           done
           echo "server did not become healthy in 60s" && exit 1
 
+      # Two of the 31 specs are exhaustive sweeps — `responsive` walks 27 pages
+      # at three widths, `role-surfaces` walks 30 routes as five roles. Between
+      # them that is 231 navigations and most of this lane's cost; the other 25
+      # specs finish in about twenty seconds.
+      #
+      # The runner is also much slower than a laptop: a mobile-contract test
+      # that takes 0.3s locally took 21.5s here. A run was killed mid-sweep at
+      # test 26 of 31 with the whole product already verified, which is the
+      # worst possible place to spend the budget.
+      #
+      # So a sweep over the entire surface is valuable without being valuable
+      # *per commit*: PRs skip it, and it runs nightly or on a PR labelled
+      # `full-e2e` when a change plausibly moves layout or role access.
       - name: E2E
-        run: npm run test:e2e
+        env:
+          E2E_FILTER: >-
+            ${{ (github.event_name == 'schedule'
+                 || contains(github.event.pull_request.labels.*.name, 'full-e2e'))
+                && '--grep-invert=$^'
+                || '--grep-invert=@sweep' }}
+        run: npm run test:e2e -- "$E2E_FILTER"
 
       # The point of the lane: somebody who did not write the test can see what
       # broke without rerunning it.

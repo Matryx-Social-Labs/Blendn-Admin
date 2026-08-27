@@ -22,6 +22,14 @@ import { statePathFor } from "./global-setup"
  * asks the other question, the one only a browser can answer: **once the page
  * has settled, what is actually on the screen?**
  *
+ * ## Tagged `@sweep`: nightly and on demand, not on every commit
+ *
+ * 30 routes times five roles is 150 navigations, each waiting for the page to
+ * settle. With `responsive` it is most of the e2e lane's cost; the other 25
+ * specs finish in about twenty seconds. A regression sweep over the whole
+ * surface is valuable without being valuable per commit, so PRs skip it and it
+ * runs nightly, or on a PR labelled `full-e2e`.
+ *
  * ## What it asserts
  *
  * One property, and it is deliberately not about authorization: *a page a role
@@ -103,7 +111,7 @@ test.afterAll(async () => {
   await browser.close()
 })
 
-test.describe("every role, every dashboard page", () => {
+test.describe("@sweep every role, every dashboard page", () => {
   test("finds the routes at all", () => {
     // Guards the walker: an empty list would make the sweep below vacuous
     // while reporting a pass, which is the failure R16's controls exist for.
