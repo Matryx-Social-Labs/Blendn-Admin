@@ -204,15 +204,35 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
+      # Detached, with its output on disk rather than in this step's log.
+      #
+      # `npm run start &` left the server as an orphan of the step's shell and
+      # sent its stdout into the step log, so a crash mid-suite produced no
+      # usable record — the run that prompted this died with 25 tests green and
+      # nothing to read.
       - name: Start the production server
         run: |
-          npm run start &
+          nohup npm run start > /tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
           # Poll the health endpoint rather than adding a dependency for it.
           for i in $(seq 1 60); do
             curl -sf http://localhost:3000/api/health > /dev/null && exit 0
             sleep 1
           done
-          echo "server did not become healthy in 60s" && exit 1
+          echo "server did not become healthy in 60s"
+          tail -50 /tmp/server.log
+          exit 1
+
+      # This lane has never completed in CI. It dies after ~25 of 28 specs with
+      # "The operation was canceled" and no other detail, which is GitHub's
+      # word rather than Playwright's — so the failure is the job being taken
+      # away, not an assertion. Memory and disk are the plausible causes and
+      # neither was measured, so measure them.
+      - name: Resources before E2E
+        run: |
+          echo "── memory ──"; free -m
+          echo "── disk ──";   df -h /
+          echo "── heaviest dirs ──"; du -sh node_modules .next ~/.cache 2>/dev/null || true
 
       # Two of the 31 specs are exhaustive sweeps — `responsive` walks 27 pages
       # at three widths, `role-surfaces` walks 30 routes as five roles. Between
@@ -235,6 +255,15 @@ jobs:
                 && '--grep-invert=$^'
                 || '--grep-invert=@sweep' }}
         run: npm run test:e2e -- "$E2E_FILTER"
+
+      # Whatever killed it, these are the two records that would say so.
+      - name: Resources and server log after E2E
+        if: always()
+        run: |
+          echo "── memory ──"; free -m
+          echo "── disk ──";   df -h /
+          echo "── server log, last 80 lines ──"
+          tail -80 /tmp/server.log || echo "(no server log)"
 
       # The point of the lane: somebody who did not write the test can see what
       # broke without rerunning it.
