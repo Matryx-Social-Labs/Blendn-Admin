@@ -5,6 +5,7 @@ import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
+import { storedBodyFor } from "../lib/push-notifications"
 
 /**
  * A world the QA team can actually test against.
@@ -1196,6 +1197,60 @@ async function main() {
         decline_reason: a.status === "declined" ? "No verifiable connection to the events listed." : null,
       },
     })
+  }
+
+  /*
+   * ── the notification centre, which had no rows at all ───────────────────
+   *
+   * `notifications` is the bell in the Pulse's top bar and the permanent copy
+   * that outlives every push — the row that sits outside all the controls
+   * guarding `private_messages`, and the reason `storedBodyFor` redacts
+   * content-bearing kinds at all.
+   *
+   * The seed never wrote one. `e2e/pseudonymity.spec.ts` asserts that no
+   * stored notification carries a real name, and that passed locally only
+   * because messages posted by hand during testing had left rows behind. On a
+   * fresh database there were zero, and its own vacuity guard refused:
+   * "the seed must have notifications, or this is vacuous". It was right — the
+   * property was being asserted over an empty set.
+   *
+   * Bodies go through `storedBodyFor`, exactly as the push path does, so the
+   * seeded world shows what the product actually stores rather than a
+   * hand-written approximation of it. A `group_message` therefore reads "New
+   * message in the room" here, and the pseudonymous check-in line keeps its
+   * pseudonym — which is the distinction the spec exists to police.
+   */
+  const notificationSpecs = [
+    { kind: "group_message" as const, title: "New message",
+      body: "hey, is anyone near the bar?" },
+    { kind: "private_message" as const, title: "New message",
+      body: "loved chatting earlier — same time next week?" },
+    { kind: "event_checkin" as const, title: "Someone just arrived",
+      body: "Cosmic Panda just checked in!" },
+    { kind: "match" as const, title: "It's a match",
+      body: "You and someone in the room both said yes." },
+    { kind: "announcement" as const, title: "From the organiser",
+      body: "Last orders in twenty minutes." },
+  ]
+  let notificationsMade = 0
+  for (const [i, spec] of notificationSpecs.entries()) {
+    const userId = attendeeIds[i % attendeeIds.length]
+    const existing = await db.notifications.findFirst({
+      where: { user_id: userId, kind: spec.kind, title: spec.title },
+      select: { id: true },
+    })
+    if (existing) continue
+    await db.notifications.create({
+      data: {
+        user_id: userId,
+        kind: spec.kind,
+        title: spec.title,
+        // Through the product's own redaction, not around it.
+        body: storedBodyFor(spec.kind, spec.body),
+        read_at: i % 2 === 0 ? null : hoursFromNow(-3),
+      },
+    })
+    notificationsMade++
   }
 
   // ── demand, so the Cities table has a row with no supply ─────────────────

@@ -254,25 +254,7 @@ jobs:
                  || contains(github.event.pull_request.labels.*.name, 'full-e2e'))
                 && '--grep-invert=$^'
                 || '--grep-invert=@sweep' }}
-        run: |
-          # DIAGNOSTIC, temporary. This lane has never finished: it dies after
-          # test 25 of 28 with "The operation was canceled", which is the job
-          # being taken away rather than an assertion failing. Measured this
-          # run: 14GB RAM and 83GB disk free immediately before, so it is not
-          # resources; the gap between test 25 and the cancel varies (28s, 10s,
-          # 3.3s), so it is not a timeout.
-          #
-          # Two hypotheses remain, and running the suite in two halves
-          # separates them in one run:
-          #
-          #   1. `pseudonymity` is fatal      -> the FIRST command dies
-          #   2. it is cumulative or infra    -> the first passes, second dies
-          #
-          # Revert to a single command once this is answered.
-          echo "───── half 1: pseudonymity alone ─────"
-          npx playwright test --grep="a room never carries" --reporter=list
-          echo "───── half 2: everything else ─────"
-          npx playwright test --grep-invert="@sweep|a room never carries" --reporter=list
+        run: npm run test:e2e -- "$E2E_FILTER"
 
       # Whatever killed it, these are the two records that would say so.
       - name: Resources and server log after E2E
