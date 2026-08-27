@@ -102,7 +102,11 @@ describe("G5 — a manual mute is not an automatic one", () => {
     const schema = readFileSync(join(ROOT, "prisma/schema.prisma"), "utf8")
     expect(schema).toMatch(/muted_by\s+String\?/)
     expect(code("app/api/events/[id]/chat/members/[userId]/route.ts")).toMatch(
-      /muted_by: action === "mute" \? session\.user\.id/
+      // The shape moved to a conditional spread when `?? undefined` was
+      // removed for `strictUndefinedChecks` (SCRUM-53). Same behaviour:
+      // mute writes the actor, unmute nulls it, neither touches the other
+      // pair. Only the text this greps for changed.
+      /muted_at: new Date\(\), muted_by: session\.user\.id/
     )
   })
 

@@ -264,7 +264,14 @@ export async function POST(req: Request) {
         status: status ?? "draft",
         visibility: visibility ?? "public",
         max_capacity,
-        door_policy: door_policy ?? undefined,
+        /*
+         * Conditional spreads, not `?? undefined` — the same conversion as the
+         * sibling PATCH route, for the same reason: Prisma strips an undefined
+         * value rather than writing nothing, and that is the idiom
+         * `strictUndefinedChecks` exists to outlaw. `!= null` throughout, so
+         * `false` survives for the booleans and `0` for the radius.
+         */
+        ...(door_policy != null && { door_policy }),
         // Null for almost every event. The organiser is the only party who
         // knows a club night is 18+, and check-in is where it is enforced.
         min_age,
@@ -272,10 +279,12 @@ export async function POST(req: Request) {
         longitude,
         cover_image_url,
         external_link,
-        is_featured: is_featured ?? undefined,
-        is_recurring: is_recurring ?? undefined,
-        check_in_radius: location.values.check_in_radius ?? undefined,
-        geofence: location.values.geofence ?? undefined,
+        ...(is_featured != null && { is_featured }),
+        ...(is_recurring != null && { is_recurring }),
+        ...(location.values.check_in_radius != null && {
+          check_in_radius: location.values.check_in_radius,
+        }),
+        ...(location.values.geofence != null && { geofence: location.values.geofence }),
         /*
          * `organizer_id` records who created the row; `organizer_org_id` is who
          * can act on it. Only the second is an authorization input, and until
@@ -296,45 +305,53 @@ export async function POST(req: Request) {
             covid_guidelines,
           },
         },
-        categories: Array.isArray(category_ids) && category_ids.length > 0
+        ...(Array.isArray(category_ids) && category_ids.length > 0
           ? {
-              create: category_ids.map((categoryId: string, index: number) => ({
-                category: {
-                  connect: { id: categoryId },
-                },
-                primary: categoryId === primary_category_id,
-                created_at: new Date(Date.now() + index),
-              })),
+              categories: {
+                create: category_ids.map((categoryId: string, index: number) => ({
+                  category: { connect: { id: categoryId } },
+                  primary: categoryId === primary_category_id,
+                  created_at: new Date(Date.now() + index),
+                })),
+              },
             }
-          : undefined,
+          : {}),
         /*
          * Ticked by the organiser, not inherited from the venue. The venue
          * layer that would pre-tick these is deliberately unbuilt — an unowned
          * venue has no list to suggest from, and almost no venue is owned.
          * See `docs/AMENITIES.md`.
          */
-        amenities: Array.isArray(amenity_ids) && amenity_ids.length > 0
+        ...(Array.isArray(amenity_ids) && amenity_ids.length > 0
           ? {
-              create: amenity_ids.map((amenityId: string) => ({
-                amenity: { connect: { id: amenityId } },
-              })),
+              amenities: {
+                create: amenity_ids.map((amenityId: string) => ({
+                  amenity: { connect: { id: amenityId } },
+                })),
+              },
             }
-          : undefined,
-        media: Array.isArray(media_items) && media_items.length > 0
+          : {}),
+        ...(Array.isArray(media_items) && media_items.length > 0
           ? {
-              create: media_items.map((item: Record<string, unknown>, index: number) => ({
-                type: item.type as "image" | "video" | "document",
-                url: item.url as string,
-                thumbnail_url: (item.thumbnail_url as string) || undefined,
-                title: (item.title as string) || undefined,
-                description: (item.description as string) || undefined,
-                order:
-                  typeof item.order === "number"
-                    ? item.order
-                    : index,
-              })),
+              media: {
+                create: media_items.map((item: Record<string, unknown>, index: number) => ({
+                  type: item.type as "image" | "video" | "document",
+                  url: item.url as string,
+                  // `||`, not `!= null`: these are unvalidated strings off the
+                  // body, and an empty one should leave the column at its
+                  // default rather than write "".
+                  ...((item.thumbnail_url as string) && {
+                    thumbnail_url: item.thumbnail_url as string,
+                  }),
+                  ...((item.title as string) && { title: item.title as string }),
+                  ...((item.description as string) && {
+                    description: item.description as string,
+                  }),
+                  order: typeof item.order === "number" ? item.order : index,
+                })),
+              },
             }
-          : undefined,
+          : {}),
       },
     })
 

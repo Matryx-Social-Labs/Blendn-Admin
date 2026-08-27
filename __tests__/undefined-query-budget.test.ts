@@ -4,8 +4,8 @@ import { join, sep } from "path"
 /**
  * The explicit-`undefined` budget, and why it may only shrink.
  *
- * **Progress: `app/api/events/[id]/route.ts` is done — 33 sites to 0**, which
- * was half the original 68. Converted to conditional spreads, one judgement
+ * **Progress: 45 of the original 68 are done.** `app/api/events/[id]/route.ts`
+ * (33), `app/api/events/route.ts` (8) and the chat-members ban/mute route (4). Converted to conditional spreads, one judgement
  * per site, with the operator chosen per field: `!= null` where the original
  * used `??` (so `0`, `false` and `""` survive), truthiness only where the
  * original used it, and `!== undefined` for `min_age`, the one field an
@@ -57,8 +57,6 @@ const ROOT = join(__dirname, "..")
  * grow.** A number that goes up means a new unscoped-query hazard was added.
  */
 const BUDGET: Record<string, number> = {
-  "app/api/events/[id]/chat/members/[userId]/route.ts": 4,
-  "app/api/events/route.ts": 8,
   "app/api/mobile/events/[eventId]/announce/route.ts": 1,
   "app/api/mobile/events/[eventId]/clone/route.ts": 3,
   "app/api/mobile/events/[eventId]/route.ts": 2,
