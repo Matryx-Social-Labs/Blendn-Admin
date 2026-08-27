@@ -1232,7 +1232,7 @@ async function main() {
     { kind: "announcement" as const, title: "From the organiser",
       body: "Last orders in twenty minutes." },
   ]
-  let notificationsMade = 0
+  let _notificationsMade = 0
   for (const [i, spec] of notificationSpecs.entries()) {
     const userId = attendeeIds[i % attendeeIds.length]
     const existing = await db.notifications.findFirst({
@@ -1250,7 +1250,7 @@ async function main() {
         read_at: i % 2 === 0 ? null : hoursFromNow(-3),
       },
     })
-    notificationsMade++
+    _notificationsMade++
   }
 
   // ── demand, so the Cities table has a row with no supply ─────────────────
