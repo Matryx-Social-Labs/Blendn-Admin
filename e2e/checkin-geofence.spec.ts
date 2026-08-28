@@ -47,14 +47,17 @@ const db = new PrismaClient({
     /*
      * One connection, because a spec file queries sequentially.
      *
-     * Left unset, `@prisma/adapter-pg` takes node-postgres' default of ten.
-     * Five spec files each opened a pool that size, alongside the server's
-     * twenty, against Postgres' default `max_connections` of 100 — and pools
-     * are not released between files. In CI that showed as `mobile-contract`
-     * taking 28.8s against 0.5s locally, and then the next spec hanging for
-     * the full 45s test timeout waiting for a connection that never freed.
-     * The job was reported as cancelled, which is what sent me looking at
-     * runner memory and disk for three runs.
+     * Tidiness, not a fix, and the distinction is worth keeping. I capped these
+     * believing five spec pools of ten, plus the server's twenty, were
+     * exhausting Postgres' hundred and hanging CI. Measured: peak connections
+     * were **21 with the caps and 21 without** — node-postgres pools lazily and
+     * these specs never open more than one. The hypothesis was arithmetic, not
+     * evidence.
+     *
+     * The real cause was the organisation being over its Actions minutes; `e2e`
+     * is the longest job and so the only one reclaimed. The cap stays because
+     * ten connections for a sequential file is still wrong, not because it
+     * changed anything.
      */
     max: 1,
   }),
