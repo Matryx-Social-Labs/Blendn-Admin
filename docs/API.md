@@ -150,6 +150,48 @@ checked out stays matchable and stops being listed as present — "was here" ver
 
 ---
 
+### GET /me/attendance
+
+The events behind the number. A profile has always reported
+`stats.eventsAttended` with no way to see which events they were.
+
+```
+GET /api/mobile/me/attendance?page=1&limit=20
+```
+
+```json
+{ "success": true, "data": {
+  "events": [
+    { "id": "…", "slug": "…", "title": "Design Week",
+      "cover_image_url": null, "start_time": "…", "end_time": "…",
+      "venue_name": "The Humming Tree", "city": "Bengaluru",
+      "attendedAt": "2026-08-14T18:04:00.000Z" }
+  ],
+  "pagination": { "page": 1, "limit": 20, "totalCount": 7, "totalPages": 1, "hasMore": false }
+} }
+```
+
+Three things are worth knowing before building against it.
+
+**`/me`, and there is no `/users/:id/attendance`.** Attendance history is where
+somebody was, on which nights, at which venues — the correlation the whole
+pseudonym design exists to prevent being assembled. Scoping it to the caller by
+construction means there is no id in the path to get wrong and no later change
+that widens it by accident.
+
+**One entry per event, however many days of it you attended.** `event_check_ins`
+holds a row per person per occurrence, so a three-day conference is three rows
+and one event. `attendedAt` is the **first** check-in for that event — when you
+arrived, not when you last turned up.
+
+**`totalCount` is the same figure as `stats.eventsAttended`** on the profile, by
+construction: the list and the count share one predicate, so they cannot
+disagree. Working an event as staff is not attending it, and appears in neither.
+
+A page may hold fewer events than `totalCount` suggests if the platform has
+since deleted one. That is deliberate — a deletion does not change how many
+events you went to.
+
 ## Events
 
 | Method | Endpoint | Description |

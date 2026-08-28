@@ -75,3 +75,39 @@ export async function distinctEventsAttended(userId: string): Promise<number> {
   `
   return Number(row?.events ?? 0)
 }
+
+
+/**
+ * *Which* events this person has attended, most recent first.
+ *
+ * Deliberately next to `distinctEventsAttended` and sharing its predicate. The
+ * count is rendered on a profile and this is the list behind it, so the two
+ * answering differently is the exact failure this module exists to prevent —
+ * "you attended 7 events" above a list of 9 is worse than either number alone,
+ * because it makes the user distrust both.
+ *
+ * `DISTINCT ON` rather than a group-by, because a multi-day event gives one
+ * person a check-in row per day and the useful timestamp is the **first** one:
+ * when they arrived at that event, not when they last turned up to it. Ordering
+ * inside `DISTINCT ON` picks that row; the outer ordering is what the caller
+ * reads.
+ */
+export async function attendedEventIds(
+  userId: string,
+  opts: { limit: number; skip: number }
+): Promise<Array<{ event_id: string; first_seen: Date }>> {
+  return db.$queryRaw<Array<{ event_id: string; first_seen: Date }>>`
+    SELECT event_id, first_seen FROM (
+      SELECT DISTINCT ON (event_id)
+             event_id,
+             COALESCE(check_in_time, created_at) AS first_seen
+      FROM event_check_ins
+      WHERE user_id = ${userId}
+        AND status::text IN (${Prisma.join(ATTENDED)})
+        AND kind = 'attendee'
+      ORDER BY event_id, COALESCE(check_in_time, created_at) ASC
+    ) AS attended
+    ORDER BY first_seen DESC
+    LIMIT ${opts.limit} OFFSET ${opts.skip}
+  `
+}

@@ -108,8 +108,26 @@ describe("counting people, not rows", () => {
     const src = code(join(ROOT, "lib/attendee-counts.ts"))
     expect(src).toMatch(/COUNT\(DISTINCT user_id\)/)
     expect(src).toMatch(/COUNT\(DISTINCT event_id\)/)
-    // Both folds exclude staff, who attend every day by definition.
-    expect((src.match(/kind = 'attendee'/g) ?? []).length).toBe(2)
+
+    /*
+     * Every read of the table excludes staff, who attend every day by
+     * definition — asserted as a *relationship* rather than as a count.
+     *
+     * This pinned the literal number 2, which is the same fact while the module
+     * has two queries and a false failure the moment it grows a third. It grew
+     * one (`attendedEventIds`, the list behind the profile's count), and the
+     * pin fired at correct code — a guard failing for its own reasons rather
+     * than the codebase's, which is how a guard gets an `--ignore`.
+     *
+     * One `kind = 'attendee'` per `FROM event_check_ins` says the thing the
+     * number was standing in for, and keeps saying it at four queries.
+     */
+    const reads = (src.match(/FROM event_check_ins/g) ?? []).length
+    const staffExcluded = (src.match(/kind = 'attendee'/g) ?? []).length
+
+    // The control: if the file stops matching, both are 0 and 0 === 0 passes.
+    expect(reads).toBeGreaterThan(1)
+    expect({ reads, staffExcluded }).toEqual({ reads, staffExcluded: reads })
   })
 
   it("does not clamp turn-up to 100", () => {
