@@ -190,7 +190,23 @@ export async function POST(
           data: {
             chat_group_id: event.chat_group.id,
             user_id: authUser.userId,
-            type: "text",
+            /*
+             * `announcement`, not `text` — the enum value has existed since the
+             * schema was written and nothing had ever written it.
+             *
+             * The kind was carried only by the `📢 [Announcement from …]`
+             * prefix on the content, which any attendee can type. On reload the
+             * marker survived as a string and nothing structural said what this
+             * message was, so the client could not style it, moderation could
+             * not exclude it, and the sentiment sweeper counted it as room mood
+             * (K3.1–K3.3, K3.7).
+             *
+             * Safe to move because `broadcastMayCarryMedia` is true only for
+             * `sponsored`: an announcement is text by rule, so nothing is lost
+             * by spending the column on the kind. That is NOT true of a
+             * sponsored send — see the note in `lib/sponsored-scheduler.ts`.
+             */
+            type: "announcement",
             content: chatContent,
             metadata: { announcement_id: announcement.id },
           },

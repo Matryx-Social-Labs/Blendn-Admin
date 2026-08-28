@@ -419,6 +419,33 @@ async function sendOne(
     data: {
       chat_group_id: groupId,
       user_id: event.organizer_id,
+      /*
+       * Still the MEDIA kind, not `sponsored`, and that is a deferral rather
+       * than an oversight.
+       *
+       * `message_type` carries a `sponsored` value that nothing writes, and the
+       * announcement routes have just started writing their equivalent — so the
+       * obvious next step is to write it here too. It cannot be done without a
+       * decision, because this column is doing two jobs at once: there are no
+       * media columns on `chat_messages`, the URL lives in `metadata`, and
+       * `type` is the only structured signal that a message is an image or a
+       * video. Spending it on the kind loses that.
+       *
+       * Announcements were safe to move precisely because
+       * `broadcastMayCarryMedia` returns true only for `sponsored` — an
+       * announcement is text by rule. A sponsored send is the one broadcast
+       * that may carry an image, so it is the one place the two meanings
+       * actually collide.
+       *
+       * The decision, when someone takes it: either the client reads
+       * `metadata.media_type` for ads (a client change, so no longer additive),
+       * or the kind goes somewhere other than this column — which ER1 argues
+       * against, having watched this repo ship two vocabularies sharing one
+       * name before.
+       *
+       * Until then the marker remains `metadata.sponsored_message_id`, which
+       * the REST read has and the socket payload does not (K3.4).
+       */
       type,
       content: `📣 [Sponsored]\n${creative.content}`,
       metadata: {

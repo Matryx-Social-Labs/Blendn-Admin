@@ -141,7 +141,10 @@ export async function POST(req: Request, { params }: RouteContext) {
       data: {
         chat_group_id: chatGroupId,
         user_id: session.user.id,
-        type: "text",
+        // See the mobile twin: `announcement` is the enum value that has always
+        // existed and never been written. Text-only by rule, so the column
+        // costs nothing to spend on the kind.
+        type: "announcement",
         content: chatContent,
         metadata: { announcement_id: announcement.id },
       },
@@ -156,7 +159,10 @@ export async function POST(req: Request, { params }: RouteContext) {
     emitChatMessage(chatGroupId, {
       id: chatMsg.id,
       content: chatMsg.content,
-      type: "text",
+      // The wire and the history agree on the kind, too. They already agree on
+      // the author; a socket saying `text` for a row stored as `announcement`
+      // is the same class of disagreement one line down.
+      type: "announcement",
       userId: session.user.id,
       // The wire says the same thing the persisted content does. It said the
       // organiser's real name, so the socket disagreed with the history.
