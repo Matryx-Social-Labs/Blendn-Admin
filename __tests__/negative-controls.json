@@ -289,6 +289,14 @@
       "date": "2026-08-28",
       "source": "run-at-scrum-52",
       "note": "Control (a) failed to fail on the first attempt and that is why it is worth recording. The fixture let the quoted author send a message that was itself on the page, so their id arrived through the sender path and the assertion held whatever the reply path did — the test asserted less than its own docstring claimed. Fixed with `limit=1` so the author is reachable only as a parent. The same gap was then found by inspection in the event-chat test, which had no reaction author who was not also a sender; control (d) exists because of it."
+    },
+    "select-fragment-collision.test.ts": {
+      "guards": "No object spreads two select fragments (or a fragment plus an inline key) that claim the same key, and the allowlist cannot go stale",
+      "mutation": "Three: (a) add an inline `venue: true` beside `...eventPermissionSelect` in lib/sponsor-actions.ts; (b) delete the `...curationSelect` spread from the one allowlisted file; (c) point the fragment-detector regex at a name that matches nothing",
+      "observed": "(a) 1 failing — 'has no unallowed collision'; (b) 1 failing — 'keeps the allowlist honest'; (c) 3 failing, including the two controls; 4 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-e16",
+      "note": "Written because the rule had bitten three times and `tsc` caught only two. TS objects with TS2783 when two spreads are structurally incompatible, which is luck: two fragments both selecting a relation with different nested columns are assignable to each other, so the overwrite is silent — and a relation is where it costs most. The live case this guards is latent rather than present: `eventPermissionSelect` and `fenceSelect` both claim `venue`, nothing spreads both yet, and CLAUDE.md records that a select missing `venue` silently denies a venue owner."
     }
   },
   "grandfathered": [

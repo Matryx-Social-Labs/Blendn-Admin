@@ -71,6 +71,23 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit -p tsconfig.json
 
+      # There was no audit step at all, which is how two Dependabot alerts sat
+      # open for over a week against versions the lockfile had already moved
+      # past. Nothing in CI ever asked the question, so nothing ever answered it.
+      #
+      # `npm audit` was the accurate source in that disagreement, not the
+      # suspect one: GitHub's own advisories put js-yaml's fix at 4.3.1 and
+      # nanoid's at 3.3.18, and both were installed at exactly those versions.
+      # Dependabot alerts do not re-evaluate when a lockfile changes by some
+      # other route, so they went stale and read as two live high-severity
+      # findings in production code.
+      #
+      # High and above only. Moderate advisories in build-time transitive
+      # dependencies would make this noisy, and a check people learn to ignore
+      # is worse than no check.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
   test:
     runs-on: ubuntu-latest
 
