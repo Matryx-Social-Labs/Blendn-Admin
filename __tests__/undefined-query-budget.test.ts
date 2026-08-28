@@ -54,9 +54,35 @@ import { join, sep } from "path"
  * early, at unit-test time, before somebody has to execute the path to find
  * out. The third assertion below — that the flag is still enabled — is the one
  * that actually matters.
+ *
+ * That division of labour was then demonstrated in the least comfortable way.
+ * This file scanned `app` and `lib`; the seed script lives in `scripts`, passes
+ * `geofence: X ?? undefined` twice, and brought down the `e2e` job the moment
+ * the flag went on — while every other job stayed green. `scripts` is in scope
+ * now, and one of those two sites would still have escaped it, because the
+ * object is built outside the Prisma call. The flag caught what the scanner
+ * structurally could not, which is the argument for having both.
  */
 
 const ROOT = join(__dirname, "..")
+
+/**
+ * Where a Prisma call can live — and `scripts` is here because leaving it out
+ * broke CI.
+ *
+ * The scan was `app` and `lib` only. `scripts/seed-qa.ts` passes
+ * `geofence: X ?? undefined` in two places, so enabling the flag made the seed
+ * throw, and the `e2e` job failed at "Seed the QA world" while every other job
+ * went green. A script is not production code, but it is code the flag applies
+ * to, and it is the code CI runs first.
+ *
+ * One of those two sites would have been missed even so: it builds a `data`
+ * object *outside* the `db.venues.create()` call, and the counter below only
+ * looks inside call arguments. That limitation is documented above and is
+ * exactly why the runtime flag, not this file, is the real guard — but the
+ * cheap half of the coverage should still be there.
+ */
+const ROOTS = ["app", "lib", "scripts"]
 
 function tsFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -108,7 +134,7 @@ function countIn(src: string): number {
 
 describe("no explicit undefined reaches a Prisma call", () => {
   const measured: Record<string, number> = {}
-  for (const dir of ["app", "lib"]) {
+  for (const dir of ROOTS) {
     for (const file of tsFiles(join(ROOT, dir))) {
       const rel = file.slice(ROOT.length + 1).split(sep).join("/")
       const n = countIn(readFileSync(file, "utf8"))

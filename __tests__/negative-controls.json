@@ -276,11 +276,11 @@
     },
     "undefined-query-budget.test.ts": {
       "guards": "No explicit undefined reaches a Prisma call, the counter is not vacuous now that the tree is at zero, and strictUndefinedChecks stays enabled",
-      "mutation": "Three: (a) restore `faq: event.details.faq ?? undefined` in the clone route; (b) delete the previewFeatures line from schema.prisma; (c) point the Prisma-call regex at a token that matches nothing",
-      "observed": "1 failing each — (a) 'finds none in the tree', (b) 'keeps strictUndefinedChecks enabled', (c) 'still counts a hazard when it sees one'; 3 passing after each revert",
+      "mutation": "Four: (a) restore `faq: event.details.faq ?? undefined` in the clone route; (b) delete the previewFeatures line from schema.prisma; (c) point the Prisma-call regex at a token that matches nothing; (d) restore `geofence: venue?.geofence ?? undefined` in scripts/seed-qa.ts",
+      "observed": "1 failing each — (a) and (d) 'finds none in the tree', (b) 'keeps strictUndefinedChecks enabled', (c) 'still counts a hazard when it sees one'; 3 passing after each revert",
       "date": "2026-08-28",
       "source": "run-at-scrum-53-completion",
-      "note": "Rewritten when the count reached zero. The old entry guarded a shrinking budget; at zero, 'found nothing' is the pass condition, so a broken counter and a clean tree became indistinguishable — control (c) is what separates them, and it needed a synthetic fixture because there is no longer a real site to find."
+      "note": "Rewritten when the count reached zero. The old entry guarded a shrinking budget; at zero, 'found nothing' is the pass condition, so a broken counter and a clean tree became indistinguishable — control (c) is what separates them, and it needed a synthetic fixture because there is no longer a real site to find. Scope later widened to `scripts` after the flag broke `scripts/seed-qa.ts` and failed CI's e2e job at the seed step while every other job stayed green — the scan had been `app` and `lib` only. One of the two seed sites would still have escaped it, because the object is built outside the Prisma call; the flag caught what the scanner structurally cannot, which is the argument for having both."
     },
     "room-pseudonyms.itest.ts": {
       "guards": "Every sender, quoted author and reaction author on a room page gets their pseudonym, and neither read route goes back to loading the whole roster to render one page",

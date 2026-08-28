@@ -629,7 +629,12 @@ async function main() {
         city: city.name,
         latitude: venue?.latitude ?? city.lat,
         longitude: venue?.longitude ?? city.lng,
-        geofence: venue?.geofence ?? undefined,
+        /*
+         * Omitted rather than `?? undefined`, which `strictUndefinedChecks`
+         * refuses. A venue without a fence means "this event has none", and an
+         * absent key is how you say that on a create.
+         */
+        ...(venue?.geofence != null && { geofence: venue.geofence }),
         check_in_radius: 60,
         venue_id: venue?.id ?? null,
         venue_name: venue?.name ?? `${city.name} public space`,
@@ -1378,7 +1383,16 @@ async function upsertVenue(input: {
     owner_org_id: input.ownerOrgId,
     owner_id: input.ownerId,
     claimed_at: input.ownerOrgId ? new Date() : null,
-    geofence: (input.geofence ?? undefined) as never,
+    /*
+     * Same reason, and one the static guard could not see: this object is built
+     * outside the `db.venues.create()` call, so a scanner looking inside Prisma
+     * call arguments walks straight past it. The runtime flag is what caught it.
+     *
+     * Omitting also happens to be right for the `update` branch below, where an
+     * absent key means "leave the existing fence alone" rather than clear it —
+     * which is what a re-runnable seed should do.
+     */
+    ...(input.geofence != null && { geofence: input.geofence as never }),
     venue_type: "banquet_hall" as never,
     capacity: 300,
     deleted_at: null,
