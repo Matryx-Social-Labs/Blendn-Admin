@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
+import { Prisma } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
@@ -310,9 +311,34 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         ...(location.values.check_in_radius != null && {
           check_in_radius: location.values.check_in_radius,
         }),
-        ...("geofence" in location.values && location.values.geofence != null
-          ? { geofence: location.values.geofence }
-          : {}),
+        /*
+         * `in`, and nothing else — an explicit null has to reach the column.
+         *
+         * `validateLocationInput` sets `values.geofence = null` on purpose,
+         * with the comment "Explicit null clears it and falls back to the point
+         * + radius columns", and the `!= null` here then dropped exactly that
+         * value. So an organiser who removed a drawn fence kept it: the request
+         * succeeded, the response looked right, and the door went on testing
+         * against a shape that was no longer on the screen.
+         *
+         * Neither half is wrong on its own, which is why it survived. The
+         * module distinguishes absent from null and the caller collapsed them
+         * again, and `"geofence" in values` is already precisely "the request
+         * said something about the fence" — `values.geofence` is only assigned
+         * when the input was not `undefined`.
+         */
+        ...("geofence" in location.values && {
+          /*
+           * `Prisma.DbNull`, not `null`, and this is why the clear was never
+           * implemented rather than merely forgotten: `geofence` is `Json?`,
+           * and Prisma refuses a bare `null` on a nullable Json column at the
+           * type level — it cannot tell "set the column to SQL NULL" from "set
+           * it to the JSON value null". `tsc` rejects the obvious fix, and
+           * dropping the null is what somebody does next.
+           */
+          geofence:
+            location.values.geofence === null ? Prisma.DbNull : location.values.geofence,
+        }),
         /*
          * `parseJsonField` returns `undefined` for an empty or unparseable
          * string, so those three keys are omitted rather than passed — the

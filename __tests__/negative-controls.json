@@ -21,7 +21,16 @@
     "Rows marked `source: transcribed-at-merge` had their control run on the",
     "branch that introduced the guard and recorded in that commit message. They",
     "could not be registered there because this file lives on #265. Transcribed",
-    "rather than re-run; re-running them is worth doing and is a tracked task."
+    "rather than re-run; re-running them is worth doing and is a tracked task.",
+    "",
+    "One qualification on \"behavioural tests need no entry\", learned at E8. A",
+    "behavioural test CAN pass vacuously when the thing it asserts is invisible",
+    "through the client it uses: `geofence-clear.itest.ts` could not tell",
+    "`Prisma.DbNull` from `Prisma.JsonNull`, because both read back as JS `null`",
+    "— so it agreed a fence was cleared while `geofence IS NULL` was false. It",
+    "took a raw-SQL assertion to see the difference. The rule still holds for",
+    "which tests need a registry entry; it does not mean a behavioural test is",
+    "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
     "event-notifications-reachable.test.ts": {
