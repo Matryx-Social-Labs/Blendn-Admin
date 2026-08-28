@@ -215,15 +215,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * read in the room.
      */
 
-    // Build anonymous name map from chat_group_members
-    const allMembers = await db.chat_group_members.findMany({
-      where: { chat_group_id: chatGroup.id },
-      select: { user_id: true, anonymous_name: true },
-    })
-    const anonMap = new Map(
-      allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
-    )
-
     // Build where clause for messages — include moderation-hidden messages
     // for the sender so they see "This message was removed" placeholders
     /*
@@ -326,6 +317,32 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * away. `closesAt` lets the room say "6 hours left" honestly instead of
      * counting down to a number it inferred.
      */
+    /*
+     * The pseudonym map, scoped to this page rather than to the whole room.
+     *
+     * This loaded every `chat_group_members` row for the group before the
+     * messages were fetched, so the cost grew with the room while the need did
+     * not — a 500-person room paid 500 rows to render one page. The map's
+     * consumers are the message sender and each reaction's author, and both are
+     * inside the page.
+     *
+     * Not a `take:`. A cap here would be wrong rather than slow: anyone it
+     * dropped renders as "Attendee", which is the K3.2 misattribution bug
+     * arriving by a different route.
+     */
+    const pseudonymFor = new Set<string>()
+    for (const m of messages) {
+      pseudonymFor.add(m.user.id)
+      for (const r of m.reactions) pseudonymFor.add(r.user_id)
+    }
+    const pageMembers = pseudonymFor.size
+      ? await db.chat_group_members.findMany({
+          where: { chat_group_id: chatGroup.id, user_id: { in: [...pseudonymFor] } },
+          select: { user_id: true, anonymous_name: true },
+        })
+      : []
+    const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
+
     const denial = mayWriteToRoom(
       // Null only when the auto-join above just created the row, which creates
       // it `active`. A banned or muted row is never replaced, so it arrives here

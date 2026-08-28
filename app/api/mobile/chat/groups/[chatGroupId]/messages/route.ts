@@ -72,15 +72,6 @@ export async function GET(
       return forbiddenResponse("You are not a member of this chat group")
     }
 
-    // Build anonymous name map
-    const allMembers = await db.chat_group_members.findMany({
-      where: { chat_group_id: chatGroupId },
-      select: { user_id: true, anonymous_name: true },
-    })
-    const anonMap = new Map(
-      allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
-    )
-
     // Build query for messages — include moderation-hidden messages
     // so the sender can see "This message was removed" placeholders
     /*
@@ -160,6 +151,33 @@ export async function GET(
 
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()
+
+    /*
+     * The pseudonym map, scoped to this page rather than to the whole room.
+     *
+     * This used to load every `chat_group_members` row for the group before
+     * the messages were even fetched — so a 500-person room paid 500 rows to
+     * render 50 messages, and the cost grew with the room while the need did
+     * not. The map has exactly two consumers, the sender and the quoted
+     * message's author, and both are inside the page.
+     *
+     * Same answer, bounded by `limit`. Not a `take:` — a cap here would be
+     * wrong rather than slow, because the members a cap dropped would render
+     * as "Attendee" and that is the K3.2 misattribution bug, arriving by a
+     * different route.
+     */
+    const pseudonymFor = new Set<string>()
+    for (const m of messagesToReturn) {
+      pseudonymFor.add(m.user.id)
+      if (m.parent_message) pseudonymFor.add(m.parent_message.user.id)
+    }
+    const pageMembers = pseudonymFor.size
+      ? await db.chat_group_members.findMany({
+          where: { chat_group_id: chatGroupId, user_id: { in: [...pseudonymFor] } },
+          select: { user_id: true, anonymous_name: true },
+        })
+      : []
+    const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
 
     return successResponse({
       messages: messagesToReturn.map((m) => {

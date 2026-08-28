@@ -56,10 +56,31 @@ const REGISTRY = JSON.parse(
  * wrong, the test fails on its own terms rather than passing vacuously.
  */
 function structuralGuards(): string[] {
-  return readdirSync(TESTS_DIR)
-    .filter((f) => f.endsWith(".test.ts"))
-    .filter((f) => f !== "negative-controls.test.ts")
-    .filter((f) => readFileSync(join(TESTS_DIR, f), "utf8").includes("readFileSync"))
+  /*
+   * Both directories, because the first structural guard written inside an
+   * integration suite escaped this registry completely.
+   *
+   * The scan was top-level `*.test.ts` only, so a guard living in
+   * `integration/*.itest.ts` was invisible: it needed no entry, and an entry
+   * added for it read as *stale* and failed the build. That is the R16 hole in
+   * miniature — a guard nobody has to verify — and it was found by writing one
+   * rather than by reading this.
+   *
+   * Keyed by basename, which the registry already uses and which is unique
+   * across the two directories.
+   */
+  const roots: Array<[string, (f: string) => boolean]> = [
+    [TESTS_DIR, (f) => f.endsWith(".test.ts")],
+    [join(TESTS_DIR, "integration"), (f) => f.endsWith(".itest.ts")],
+  ]
+
+  return roots
+    .flatMap(([dir, matches]) =>
+      readdirSync(dir)
+        .filter(matches)
+        .filter((f) => f !== "negative-controls.test.ts")
+        .filter((f) => readFileSync(join(dir, f), "utf8").includes("readFileSync"))
+    )
     .sort()
 }
 
