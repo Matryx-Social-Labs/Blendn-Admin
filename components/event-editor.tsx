@@ -10,6 +10,7 @@ import type { AmenityOption } from "@/components/event-form/amenities-section"
 import { EventForm, type EventFormValues } from "@/components/event-form"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
+import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
 
 interface CategoryOption {
   id: string
@@ -141,7 +142,7 @@ export function EventEditor({ categories, amenities = [], initialEvent }: EventE
       cover_image_url: initialEvent.cover_image_url ?? undefined,
       external_link: initialEvent.external_link ?? undefined,
       is_featured: initialEvent.is_featured ?? false,
-      check_in_radius: initialEvent.check_in_radius ?? 100,
+      check_in_radius: initialEvent.check_in_radius ?? DEFAULT_CHECK_IN_RADIUS_M,
       geofence: initialEvent.geofence ?? undefined,
       category_ids: initialEvent.category_ids ?? [],
       amenity_ids: initialEvent.amenity_ids ?? [],

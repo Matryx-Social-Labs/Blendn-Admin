@@ -46,6 +46,24 @@ export function CapacitySettingsSection({
                   <SelectItem value="draft">Draft</SelectItem>
                   <SelectItem value="published">Published</SelectItem>
                   <SelectItem value="cancelled">Cancelled</SelectItem>
+                  {/*
+                    `completed` is organiser-set and has no automatic writer, on
+                    purpose.
+
+                    The register files it as declared-but-unreachable, which is
+                    half right: nothing marks an event complete when it ends,
+                    and it does not need to. `eventStateFor` already returns
+                    "over" from `end_time` whatever the status says, so a stored
+                    `completed` only short-circuits a value that is derived
+                    anyway. A sweeper maintaining it would be a second source of
+                    truth for a question the timestamps already answer — which
+                    is `events.current_capacity`, a counter with no writer that
+                    three surfaces still render.
+
+                    So it stays selectable and stays manual. Picking it early is
+                    an organiser saying "this is finished", which closes the
+                    room, and that is a decision they are allowed to make.
+                  */}
                   <SelectItem value="completed">Completed</SelectItem>
                 </SelectContent>
               </Select>

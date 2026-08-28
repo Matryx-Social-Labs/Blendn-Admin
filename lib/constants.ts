@@ -51,6 +51,32 @@ export const PAGINATION = {
  * The app shows the same number (`components/InterestPicker.tsx`), which until
  * now was the only thing enforcing it.
  */
+/**
+ * The check-in radius a new event's form starts at, in metres.
+ *
+ * Three files hardcoded `100` — the create form's default, the editor's
+ * rehydrate fallback, and the location section's display fallback — while
+ * `events.check_in_radius` carries a database default of **30**. Two numbers
+ * for one field, and the register counted them as three conflicting defaults.
+ *
+ * The client trio is what an organiser actually meets, so it is consolidated
+ * here rather than aligned downward: the register's own conclusion about
+ * curated pins applies to every event, in that *too tight is the more
+ * expensive error* — a fence that refuses somebody standing in the right place
+ * costs more than one that admits the pavement.
+ *
+ * **The column default is deliberately left at 30 rather than migrated.** It is
+ * reachable only by a caller that omits the field entirely, since both write
+ * paths spread it conditionally and the form always sends a value; changing a
+ * production column default to fix a value nearly nothing reads would be a
+ * migration bought for a comment. This is that comment.
+ *
+ * Mostly vestigial either way: `geofence` supersedes this column, and where a
+ * fence exists the form derives the radius from it (`extent + buffer`) rather
+ * than using any default at all.
+ */
+export const DEFAULT_CHECK_IN_RADIUS_M = 100
+
 export const MAX_INTERESTS = 10
 
 // ── Check-in ──────────────────────────────────────────

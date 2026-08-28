@@ -50,7 +50,27 @@ export async function GET(req: NextRequest) {
   // address.
   let upstream: string
   if (q) {
-    upstream = `${NOMINATIM}/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1&countrycodes=in`
+    /*
+     * The country restriction is configuration, not a constant.
+     *
+     * This was `countrycodes=in`, hardcoded, with nothing anywhere saying so —
+     * a product constraint stated in one query parameter. It fails in the least
+     * helpful way available: an organiser outside India types their venue, gets
+     * no results and no explanation, and cannot work around it by typing
+     * coordinates, because the form derives those from the pin they cannot
+     * place.
+     *
+     * Default unchanged, so this alters nothing today. Set
+     * `GEOCODE_COUNTRY_CODES=""` to search worldwide.
+     */
+    // Read directly rather than through `validateEnv()`, which re-parses the
+    // whole environment and throws — not something a per-request path should
+    // do. It is still declared in `lib/env.ts`, which is what documents it and
+    // validates it at boot.
+    const countries = (process.env.GEOCODE_COUNTRY_CODES ?? "in").trim()
+    upstream =
+      `${NOMINATIM}/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1` +
+      (countries ? `&countrycodes=${encodeURIComponent(countries)}` : "")
   } else if (lat && lon && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))) {
     upstream = `${NOMINATIM}/reverse?lat=${Number(lat)}&lon=${Number(lon)}&format=json&addressdetails=1`
   } else {
