@@ -133,9 +133,20 @@ export async function POST(
               full_description: event.details.full_description,
               house_rules: event.details.house_rules,
               cancellation_policy: event.details.cancellation_policy,
-              additional_info: event.details.additional_info ?? undefined,
-              faq: event.details.faq ?? undefined,
-              accessibility_info: event.details.accessibility_info ?? undefined,
+              /*
+               * The last three explicit-undefined sites in the tree
+               * (SCRUM-53). These are Json columns, so `null` and "absent" are
+               * genuinely different to Prisma — a spread omits the key and
+               * leaves the column at its default, which is what `?? undefined`
+               * was reaching for.
+               */
+              ...(event.details.additional_info != null && {
+                additional_info: event.details.additional_info,
+              }),
+              ...(event.details.faq != null && { faq: event.details.faq }),
+              ...(event.details.accessibility_info != null && {
+                accessibility_info: event.details.accessibility_info,
+              }),
               covid_guidelines: event.details.covid_guidelines,
             },
           },

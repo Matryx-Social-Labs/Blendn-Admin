@@ -304,14 +304,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         check_in_time: now,
         latitude,
         longitude,
-        device_info: deviceInfo,
+        /*
+         * `deviceInfo` is optional in the request schema, so it is `undefined`
+         * whenever a client omits it — and no static scan can see that. The
+         * source reads `device_info: deviceInfo`, which is indistinguishable
+         * from every other field; only `strictUndefinedChecks` at runtime
+         * catches it. That is the argument for the flag over the ratchet.
+         */
+        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
       },
       update: {
         status: "checked_in",
         check_in_time: now,
         latitude,
         longitude,
-        device_info: deviceInfo,
+        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
         updated_at: now,
       },
     })

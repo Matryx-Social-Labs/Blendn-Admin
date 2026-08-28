@@ -1,5 +1,22 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  /// Enabled once every explicit-undefined site inside a Prisma call was
+  /// converted to a conditional spread (SCRUM-53, 48 sites).
+  ///
+  /// 48, not the 68 first reported: that count came from a regex over all of
+  /// `app/` and `lib/`, and 20 of its hits were return values, socket
+  /// payloads and local variables that cannot widen a query.
+  ///
+  /// Prisma strips an `undefined` value rather than matching or writing
+  /// nothing, which is how a scoped query silently becomes unscoped — the
+  /// failure that once turned a moderation lookup cross-org. This is the only
+  /// mechanical guard against that class.
+  ///
+  /// It is a RUNTIME check: enabling it produces no typecheck errors and a
+  /// green unit suite, because every DB-touching unit test mocks `@/lib/db`.
+  /// Verify against real Postgres — the integration suites are the only tests
+  /// that can see it.
+  previewFeatures = ["strictUndefinedChecks"]
 }
 
 datasource db {
