@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { tallyReactions } from "@/lib/reactions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -333,7 +334,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const pseudonymFor = new Set<string>()
     for (const m of messages) {
       pseudonymFor.add(m.user.id)
-      for (const r of m.reactions) pseudonymFor.add(r.user_id)
+      /*
+       * Senders only. Reaction authors used to be looked up here because the
+       * payload named them; it reports counts now, so resolving a pseudonym for
+       * somebody whose name is never rendered would be fetching a fact in order
+       * to discard it.
+       */
     }
     const pageMembers = pseudonymFor.size
       ? await db.chat_group_members.findMany({
@@ -385,11 +391,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             name: anonMap.get(m.user.id) || "Attendee",
             image: null,
           },
-          reactions: isHidden ? [] : m.reactions.map((r) => ({
-            emoji: r.emoji,
-            userId: r.user_id,
-            userName: anonMap.get(r.user_id) || "Attendee",
-          })),
+          reactions: isHidden ? [] : tallyReactions(m.reactions, authUser.userId),
           isOwn: m.user_id === authUser.userId,
         }
       }),

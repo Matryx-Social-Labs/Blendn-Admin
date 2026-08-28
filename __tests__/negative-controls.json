@@ -305,6 +305,14 @@
       "date": "2026-08-28",
       "source": "run-at-e16",
       "note": "A ratchet rather than the migration J9 asks for, deliberately. Two dashboard consumers read error bodies as text — `event-messaging.tsx` shows `canActivate`'s seven distinct refusal sentences verbatim, `reports/builder.tsx` calls `res.text()` — so converting routes without their consumers would put raw JSON in a toast where a sentence used to be, regressing the exact case the current shape protects. Migration is route-and-consumer in pairs; the count meanwhile may only fall."
+    },
+    "reactions-tally.test.ts": {
+      "guards": "Reactions serialise as {emoji, count, mine} and neither room read path emits a reactor's id or name",
+      "mutation": "Two: (a) restore `reactions: m.reactions.map((r) => ({ emoji, userId: r.user_id }))` in the event-chat route; (b) point the `reactions:` scan at a token that matches nothing",
+      "observed": "(a) 2 failing — 'finds the routes' and 'emits no identity'; (b) 1 failing — 'detects an identity when one is there'; 8 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-tr2",
+      "note": "Control (b) failed to fail on the first attempt: blinding the regex left the guard green, because the tree is clean and 'found no offenders' is the pass condition. Fixed with a fixture the detector runs against. The scan also needed narrowing three times, each the same mistake — a rule about what is emitted, written as a search for a string that also appears in what is read: first `user_id` in the Prisma select that feeds `mine`, then `authUser.userId` in the call computing it. snake_case is a column, camelCase is the wire, and only a `userId:` key is forbidden."
     }
   },
   "grandfathered": [

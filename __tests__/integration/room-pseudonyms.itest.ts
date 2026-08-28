@@ -213,18 +213,24 @@ describe("a room page carries every sender's pseudonym", () => {
     expect(reply.parent_message.user.name).toBe(quoted.pseudonym)
   })
 
-  it("names each sender, and each reaction's author, on the event-chat route", async () => {
+  it("names each sender, and tells nobody who reacted, on the event-chat route", async () => {
     const { eventId, groupId, people } = await room(3)
     for (const p of people) await say(groupId, p.id, `hi from ${p.pseudonym}`)
 
     /*
      * A reaction from somebody with no message on this page.
      *
-     * The event-chat route pseudonymises reaction authors as well as senders,
-     * so the page-scoped id set has to include them. Without a reactor who is
-     * *only* a reactor, that branch is never exercised — the same gap the
-     * recorded control found in the quoted-author test, where the author had
-     * also spoken and so arrived through the sender path regardless.
+     * This used to assert that the reactor's *pseudonym* came back, because the
+     * payload named them. `docs/CHAT.md:119` says the opposite — "reactions show
+     * the count only, never who — who reacted is exactly the kind of thing this
+     * room does not disclose" — and the client honoured it by choosing not to
+     * draw a name that was sitting in the response.
+     *
+     * So the assertion inverted: the reaction must come back as a tally, and
+     * this person's identity must not appear anywhere in the body. A reactor who
+     * is *only* a reactor is what makes that checkable — if they had also sent a
+     * message, their pseudonym would legitimately be in the payload as a sender
+     * and the absence would prove nothing.
      */
     const reactor = await member("rp_react")
     const reactorPseudonym = `Pseudo react ${testId("x")}`
@@ -260,13 +266,27 @@ describe("a room page carries every sender's pseudonym", () => {
     expect({ wrong, hint: "" }).toEqual({ wrong: [], hint: "" })
 
     const reacted = (
-      returned as unknown as Array<{ reactions: Array<{ userId: string; userName: string }> }>
+      returned as unknown as Array<{
+        reactions: Array<{ emoji: string; count: number; mine: boolean }>
+      }>
     ).flatMap((m) => m.reactions)
 
-    // The control: the reaction must be on the page at all, or the name check
-    // below is reading an empty list.
-    expect(reacted.map((r) => r.userId)).toContain(reactor.id)
-    expect(reacted.find((r) => r.userId === reactor.id)?.userName).toBe(reactorPseudonym)
+    // The control: the reaction must be on the page at all, or "no identity
+    // leaked" is true of a response that simply has no reactions in it.
+    expect(reacted).toEqual([{ emoji: "🔥", count: 1, mine: false }])
+
+    /*
+     * And nothing anywhere in the response identifies them — not the user id,
+     * not the pseudonym. Asserted over the whole serialised body rather than
+     * over the reactions array, because the leak this replaces was a field
+     * nobody was looking at.
+     */
+    const wire = JSON.stringify(body)
+    expect({
+      carriesReactorId: wire.includes(reactor.id),
+      carriesReactorPseudonym: wire.includes(reactorPseudonym),
+      hint: "",
+    }).toEqual({ carriesReactorId: false, carriesReactorPseudonym: false, hint: "" })
   })
 
   it("does not read the whole roster to render one page", async () => {

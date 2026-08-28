@@ -4,6 +4,7 @@ import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
@@ -184,6 +185,15 @@ export async function GET(
         const isHidden = m.moderation_status === "hidden"
         return {
           ...m,
+          /*
+           * Counts, not names. The spread above carries `reactions` straight
+           * out of the row — `{ id, emoji, user_id }` per reaction — so this
+           * route disclosed exactly who reacted to what, to everybody in the
+           * room. `docs/CHAT.md:119`: "reactions show the count only, never
+           * who". Overridden here rather than narrowed in the `select`, because
+           * `user_id` is what `mine` is computed from.
+           */
+          reactions: isHidden ? [] : tallyReactions(m.reactions, user.userId),
           // Redact content for moderation-hidden messages; show placeholder
           content: isHidden ? null : m.content,
           moderation_hidden: isHidden,

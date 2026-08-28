@@ -33,10 +33,21 @@ const ChatUserSchema = z.object({
   image: z.string().nullable(),
 })
 
+/**
+ * A tally, not a roster.
+ *
+ * This carried `userId` and `userName`, which `docs/CHAT.md:119` forbids —
+ * "reactions show the count only, never who — who reacted is exactly the kind
+ * of thing this room does not disclose". The client already rendered only the
+ * emoji and a tally, so the disclosure was in the payload and nowhere on the
+ * screen, which is the version that survives review.
+ */
 const ReactionSchema = z.object({
   emoji: z.string(),
-  userId: z.string(),
-  userName: z.string().optional(),
+  count: z.number().openapi({ description: "How many people reacted with this emoji." }),
+  mine: z
+    .boolean()
+    .openapi({ description: "Whether the authenticated caller is one of them." }),
 })
 
 export const ChatMessageSchema = z
