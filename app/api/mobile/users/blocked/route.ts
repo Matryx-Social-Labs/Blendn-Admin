@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { maySeeIdentity } from "@/lib/identity"
+import { maySeeIdentityFor } from "@/lib/identity"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // GET /api/mobile/users/blocked — List users blocked by the current user
@@ -41,17 +41,27 @@ export async function GET(request: NextRequest) {
      * it is false unless the block is one-directional and something else in the
      * rule still holds.
      */
-    const visible = await Promise.all(
-      blocks.map((b) => maySeeIdentity(authUser.userId, b.blocked_id))
+    /*
+     * Asked once for the whole list, not once per person.
+     *
+     * This was `blocks.map((b) => maySeeIdentity(...))`, and the singular gate
+     * runs five queries — so a list of twenty blocked people cost a hundred.
+     * It reads as correct in review, which is the point: a singular gate on a
+     * surface that is always a list invites exactly this, and every surface
+     * that resolves identity here is a list.
+     */
+    const visible = await maySeeIdentityFor(
+      authUser.userId,
+      blocks.map((b) => b.blocked_id)
     )
 
-    const users = blocks.map((b, i) => ({
+    const users = blocks.map((b) => ({
       blocked_id: b.blocked_id,
       // `null`, not a pseudonym: a pseudonym is per-event and this list is not
       // scoped to one. The client already renders a placeholder for an
       // unrevealed person.
-      blocked_user_name: visible[i] ? b.blocked.name : null,
-      blocked_user_photo: visible[i] ? b.blocked.image : null,
+      blocked_user_name: visible.has(b.blocked_id) ? b.blocked.name : null,
+      blocked_user_photo: visible.has(b.blocked_id) ? b.blocked.image : null,
       reason: null,
       blocked_at: b.created_at.toISOString(),
     }))

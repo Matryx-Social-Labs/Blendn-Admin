@@ -103,7 +103,8 @@ describe("G7 — the blocked list is not a way to keep an identity", () => {
      * and photograph to the same caller in the same session.
      */
     const src = code("app/api/mobile/users/blocked/route.ts")
-    expect(src).toMatch(/maySeeIdentity\(/)
+    // Plural: the list asks once for everyone rather than once per person.
+    expect(src).toMatch(/maySeeIdentityFor\(/)
     expect(src).not.toMatch(/blocked_user_name: b\.blocked\.name,/)
   })
 
@@ -116,8 +117,13 @@ describe("G7 — the blocked list is not a way to keep an identity", () => {
      * both survive forever.
      */
     const src = code("lib/identity.ts")
-    expect(src).toMatch(/blocked_users\s*\n?\s*\.findFirst/)
-    expect(src).toMatch(/if \(blocked \|\| closed\) return false/)
+    expect(src).toMatch(/blocked_users\s*\n?\s*\.findMany/)
+    // Both directions in the predicate, and the override in the fold. The rule
+    // itself is asserted behaviourally in `conversation-close.test.ts`; this
+    // pins that the override has not been quietly dropped from the source.
+    expect(src).toMatch(/blocker_id: viewerId, blocked_id: \{ in: others \}/)
+    expect(src).toMatch(/blocked_id: viewerId, blocker_id: \{ in: others \}/)
+    expect(src).toMatch(/if \(blocked\.has\(id\) \|\| closed\.has\(id\)\) continue/)
   })
 })
 

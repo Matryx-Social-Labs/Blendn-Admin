@@ -174,11 +174,12 @@
       "source": "run-at-integration-merge"
     },
     "privacy-leaks.test.ts": {
-      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
-      "mutation": "Replace app/api/mobile/conversations/route.ts with an empty stub (`export {}`), run this suite, revert",
-      "observed": "1 failing",
-      "date": "2026-08-25",
-      "source": "run-at-integration-merge"
+      "guards": "see the test's own docblock; the mutations below prove it is not vacuous",
+      "mutation": "Two: (a) replace app/api/mobile/conversations/route.ts with an empty stub (`export {}`); (b) delete the reverse direction from the block predicate in lib/identity.ts",
+      "observed": "(a) 1 failing; (b) 1 failing — 'makes a block override the identity gate in both directions'; passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-scrum-52",
+      "note": "Re-verified when the identity gate became plural. G7 pinned `blocked_users.findFirst` and the literal `if (blocked || closed) return false`, both of which the refactor changed — so this guard needed rewriting to keep asserting the same property against a new shape rather than a stale one."
     },
     "server-actions-reachable.test.ts": {
       "guards": "every export in lib/ has a caller, comments excluded; KNOWN_UNREACHABLE is checked in both directions",

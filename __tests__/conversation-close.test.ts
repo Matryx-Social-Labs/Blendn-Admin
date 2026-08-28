@@ -22,9 +22,9 @@ const mockDb = {
     upsert: jest.fn(),
     updateMany: jest.fn(),
   },
-  event_likes: { findFirst: jest.fn() },
-  event_match_preferences: { findFirst: jest.fn() },
-  blocked_users: { findFirst: jest.fn() },
+  event_likes: { findFirst: jest.fn(), findMany: jest.fn() },
+  event_match_preferences: { findFirst: jest.fn(), findMany: jest.fn() },
+  blocked_users: { findFirst: jest.fn(), findMany: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -200,11 +200,101 @@ describe("closedPairKeys", () => {
 })
 
 describe("maySeeIdentity after leaving", () => {
+  /*
+   * These fixtures are **rows**, not per-call return values.
+   *
+   * They used to be `mockResolvedValueOnce` pairs against `findFirst`, which
+   * meant each test encoded the order the five branches happened to run in —
+   * so "no live conversation, but a closed one" was expressed as first-call
+   * null, second-call a row. `maySeeIdentity` is now a wrapper over
+   * `maySeeIdentityFor`, which reads open and closed in one query, and that
+   * ordering stopped existing.
+   *
+   * Stating the rows instead says what is true of the database rather than what
+   * the implementation asks for, and it is the reason the rewrite could keep
+   * every assertion below intact.
+   */
+  const EVENT = "event-1"
+
+  function given(rows: {
+    likedByViewer?: boolean
+    likedViewer?: boolean
+    conversation?: "open" | "closed" | null
+    theyRevealed?: boolean
+    blocked?: "viewer" | "target" | null
+  }) {
+    mockDb.event_likes.findMany.mockImplementation(async (args: { where: Record<string, unknown> }) =>
+      "liker_id" in args.where && typeof args.where.liker_id === "string"
+        ? rows.likedByViewer
+          ? [{ event_id: EVENT, liked_id: B }]
+          : []
+        : rows.likedViewer
+          ? [{ event_id: EVENT, liker_id: B }]
+          : []
+    )
+    mockDb.private_conversations.findMany.mockResolvedValue(
+      rows.conversation
+        ? [
+            {
+              user1_id: A,
+              user2_id: B,
+              closed_at: rows.conversation === "closed" ? new Date() : null,
+            },
+          ]
+        : []
+    )
+    mockDb.event_match_preferences.findMany.mockResolvedValue(
+      rows.theyRevealed ? [{ user_id: B }] : []
+    )
+    /*
+     * This mock honours the `where`, and the recorded control is why.
+     *
+     * It first returned the block row regardless of what was asked for, so
+     * deleting one direction from the real query changed nothing here and the
+     * symmetry test below passed against a one-directional gate — only the
+     * structural assertion in `privacy-leaks.test.ts` caught it. A mock that
+     * ignores its own predicate makes every test using it weaker than it reads,
+     * and here it silently removed the half of "both directions" that the test
+     * exists for.
+     */
+    const blockRows =
+      rows.blocked === "viewer"
+        ? [{ blocker_id: A, blocked_id: B }]
+        : rows.blocked === "target"
+          ? [{ blocker_id: B, blocked_id: A }]
+          : []
+    mockDb.blocked_users.findMany.mockImplementation(
+      async (args: { where: { OR: Array<{ blocker_id: unknown; blocked_id: unknown }> } }) => {
+        const matches = (row: { blocker_id: string; blocked_id: string }) =>
+          args.where.OR.some((clause) => {
+            const blockerOk =
+              typeof clause.blocker_id === "string"
+                ? clause.blocker_id === row.blocker_id
+                : (clause.blocker_id as { in: string[] }).in.includes(row.blocker_id)
+            const blockedOk =
+              typeof clause.blocked_id === "string"
+                ? clause.blocked_id === row.blocked_id
+                : (clause.blocked_id as { in: string[] }).in.includes(row.blocked_id)
+            return blockerOk && blockedOk
+          })
+        return blockRows.filter(matches)
+      }
+    )
+  }
+
   beforeEach(() => {
-    mockDb.event_likes.findFirst.mockResolvedValue(null)
-    mockDb.event_match_preferences.findFirst.mockResolvedValue(null)
-    mockDb.private_conversations.findFirst.mockResolvedValue(null)
-    mockDb.blocked_users.findFirst.mockResolvedValue(null)
+    given({})
+  })
+
+  it("sees a live mutual match — the control for every negative below", async () => {
+    /*
+     * Added with the rewrite, because every other test here asserts `false`.
+     * A `maySeeIdentityFor` that returned an empty set unconditionally — a
+     * broken intersection, a fold that never adds anyone — would pass all five
+     * of them and fail only this one.
+     */
+    given({ likedByViewer: true, likedViewer: true })
+    expect(await maySeeIdentity(A, B)).toBe(true)
   })
 
   it("stops showing an identity once the pair has left each other", async () => {
@@ -217,21 +307,18 @@ describe("maySeeIdentity after leaving", () => {
      * otherwise the other person keeps pulling your real name and photos from
      * GET /users/:id in the two most common ways of having met.
      */
-    mockDb.event_likes.findFirst.mockResolvedValue({ id: "like-1" }) // mutual like survives
-    mockDb.event_match_preferences.findFirst.mockResolvedValue({ id: "pref-1" }) // was public
-    mockDb.private_conversations.findFirst
-      .mockResolvedValueOnce(null) // no LIVE conversation
-      .mockResolvedValueOnce({ id: "conv-1" }) // but a closed one exists
+    given({
+      likedByViewer: true,
+      likedViewer: true,
+      theyRevealed: true,
+      conversation: "closed",
+    })
 
     expect(await maySeeIdentity(A, B)).toBe(false)
   })
 
   it("still shows an identity to a live mutual match", async () => {
-    mockDb.event_likes.findFirst.mockResolvedValue({ id: "like-1" })
-    mockDb.private_conversations.findFirst
-      .mockResolvedValueOnce({ id: "conv-1" }) // live conversation
-      .mockResolvedValueOnce(null) // nothing closed
-
+    given({ likedByViewer: true, likedViewer: true, conversation: "open" })
     expect(await maySeeIdentity(A, B)).toBe(true)
   })
 
@@ -240,10 +327,40 @@ describe("maySeeIdentity after leaving", () => {
   })
 
   it("asks for a LIVE conversation, not any conversation", async () => {
-    await maySeeIdentity(A, B)
+    /*
+     * The predicate moved rather than disappearing. One query now returns both
+     * states and `closed_at` is read in the fold, so what has to be pinned is
+     * that a closed row is still *distinguished* — a fold that ignored
+     * `closed_at` would make leaving cosmetic again, which is this file's
+     * whole subject.
+     */
+    given({ likedByViewer: true, likedViewer: true, conversation: "closed" })
+    expect(await maySeeIdentity(A, B)).toBe(false)
 
-    const liveQuery = mockDb.private_conversations.findFirst.mock.calls[0][0]
-    expect(liveQuery.where.closed_at).toBeNull()
+    given({ likedByViewer: true, likedViewer: true, conversation: "open" })
+    expect(await maySeeIdentity(A, B)).toBe(true)
+  })
+
+  it("needs the like to be mutual AND at the same event", async () => {
+    /*
+     * The half a set-based intersection can get wrong that a correlated
+     * subquery could not. `maySeeIdentityFor` fetches both directions and
+     * intersects on `(event_id, other)`; an implementation that intersected on
+     * the person alone would call two one-way likes at two different events a
+     * match.
+     */
+    given({ likedByViewer: true })
+    expect(await maySeeIdentity(A, B)).toBe(false)
+
+    given({ likedViewer: true })
+    expect(await maySeeIdentity(A, B)).toBe(false)
+
+    mockDb.event_likes.findMany.mockImplementation(async (args: { where: Record<string, unknown> }) =>
+      typeof args.where.liker_id === "string"
+        ? [{ event_id: "event-1", liked_id: B }]
+        : [{ event_id: "event-2", liker_id: B }]
+    )
+    expect(await maySeeIdentity(A, B)).toBe(false)
   })
 
   it("lets a block override a mutual like with no conversation", async () => {
@@ -260,9 +377,12 @@ describe("maySeeIdentity after leaving", () => {
      * Reveal is one-way and non-retractable by design. A block is the one way
      * to un-tell a single person, and it has to reach this gate to mean that.
      */
-    mockDb.event_likes.findFirst.mockResolvedValue({ id: "like-1" })
-    mockDb.event_match_preferences.findFirst.mockResolvedValue({ id: "pref-1" })
-    mockDb.blocked_users.findFirst.mockResolvedValue({ blocker_id: B })
+    given({
+      likedByViewer: true,
+      likedViewer: true,
+      theyRevealed: true,
+      blocked: "target",
+    })
 
     expect(await maySeeIdentity(A, B)).toBe(false)
   })
@@ -272,13 +392,15 @@ describe("maySeeIdentity after leaving", () => {
      * Symmetric on purpose: the person who blocked does not want to see, and
      * the person blocked must not be seen. A one-directional check would leave
      * whichever of those the implementer happened not to think of.
+     *
+     * Asserted behaviourally rather than by reading the `where` clause, which
+     * is what this pinned before. A query-shape assertion passes against a fold
+     * that fetches both directions and then acts on one.
      */
-    await maySeeIdentity(A, B)
+    given({ likedByViewer: true, likedViewer: true, blocked: "viewer" })
+    expect(await maySeeIdentity(A, B)).toBe(false)
 
-    const blockQuery = mockDb.blocked_users.findFirst.mock.calls[0][0]
-    expect(blockQuery.where.OR).toEqual([
-      { blocker_id: A, blocked_id: B },
-      { blocker_id: B, blocked_id: A },
-    ])
+    given({ likedByViewer: true, likedViewer: true, blocked: "target" })
+    expect(await maySeeIdentity(A, B)).toBe(false)
   })
 })
