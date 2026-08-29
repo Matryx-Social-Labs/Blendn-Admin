@@ -161,8 +161,10 @@ CREATE TABLE IF NOT EXISTS "profiles" (
     "interests" TEXT[],
     "photos" TEXT[],
     "onboarded" BOOLEAN NOT NULL DEFAULT false,
-    "push_token" TEXT,
-    "push_platform" TEXT,
+    -- `push_token` / `push_platform` deliberately absent: `20260309_phase1_fixes`
+    -- drops them, since every push token lives in `push_tokens`. Same reasoning
+    -- as the index note further down — creating them here resurrects two dead
+    -- columns on any database where that migration has already run.
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -575,8 +577,21 @@ CREATE INDEX IF NOT EXISTS "event_check_ins_user_id_idx" ON "event_check_ins"("u
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "event_check_ins_user_id_status_idx" ON "event_check_ins"("user_id", "status");
 
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "event_check_ins_event_id_user_id_key" ON "event_check_ins"("event_id", "user_id");
+-- DELIBERATELY NOT CREATED: "event_check_ins_event_id_user_id_key".
+--
+-- `20260807_event_occurrences` drops this unique and replaces it with one on
+-- (occurrence_id, user_id), because a multi-day event needs a row per person
+-- per DAY. Creating it here was harmless on a fresh install — the later
+-- migration dropped it moments after — and destructive on an existing database,
+-- where that migration ran months ago and will not run again.
+--
+-- The baseline is pending on every deployed environment, so it applies AFTER
+-- the migrations that came chronologically later. Re-creating this index would
+-- have made a second-day check-in violate a unique constraint: multi-day
+-- attendance, silently impossible, on the mechanic the product is built on.
+--
+-- Verified against a copy of staging: replaying the chain reintroduced it.
+-- Nothing in the schema wants it, so it is not created at all.
 
 -- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "chat_groups_event_id_key" ON "chat_groups"("event_id");
