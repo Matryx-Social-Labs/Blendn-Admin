@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { tallyReactions } from "@/lib/reactions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -27,9 +28,10 @@ import {
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
+import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
 import { checkKeywords } from "@/lib/moderation/keyword-filter"
-import { checkTextContent } from "@/lib/moderation/openai-moderation"
+import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -214,15 +216,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * read in the room.
      */
 
-    // Build anonymous name map from chat_group_members
-    const allMembers = await db.chat_group_members.findMany({
-      where: { chat_group_id: chatGroup.id },
-      select: { user_id: true, anonymous_name: true },
-    })
-    const anonMap = new Map(
-      allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
-    )
-
     // Build where clause for messages — include moderation-hidden messages
     // for the sender so they see "This message was removed" placeholders
     /*
@@ -325,6 +318,37 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * away. `closesAt` lets the room say "6 hours left" honestly instead of
      * counting down to a number it inferred.
      */
+    /*
+     * The pseudonym map, scoped to this page rather than to the whole room.
+     *
+     * This loaded every `chat_group_members` row for the group before the
+     * messages were fetched, so the cost grew with the room while the need did
+     * not — a 500-person room paid 500 rows to render one page. The map's
+     * consumers are the message sender and each reaction's author, and both are
+     * inside the page.
+     *
+     * Not a `take:`. A cap here would be wrong rather than slow: anyone it
+     * dropped renders as "Attendee", which is the K3.2 misattribution bug
+     * arriving by a different route.
+     */
+    const pseudonymFor = new Set<string>()
+    for (const m of messages) {
+      pseudonymFor.add(m.user.id)
+      /*
+       * Senders only. Reaction authors used to be looked up here because the
+       * payload named them; it reports counts now, so resolving a pseudonym for
+       * somebody whose name is never rendered would be fetching a fact in order
+       * to discard it.
+       */
+    }
+    const pageMembers = pseudonymFor.size
+      ? await db.chat_group_members.findMany({
+          where: { chat_group_id: chatGroup.id, user_id: { in: [...pseudonymFor] } },
+          select: { user_id: true, anonymous_name: true },
+        })
+      : []
+    const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
+
     const denial = mayWriteToRoom(
       // Null only when the auto-join above just created the row, which creates
       // it `active`. A banned or muted row is never replaced, so it arrives here
@@ -367,11 +391,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             name: anonMap.get(m.user.id) || "Attendee",
             image: null,
           },
-          reactions: isHidden ? [] : m.reactions.map((r) => ({
-            emoji: r.emoji,
-            userId: r.user_id,
-            userName: anonMap.get(r.user_id) || "Attendee",
-          })),
+          reactions: isHidden ? [] : tallyReactions(m.reactions, authUser.userId),
           isOwn: m.user_id === authUser.userId,
         }
       }),
@@ -424,19 +444,26 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!chatGroup) {
-      const checkIn = await db.event_check_ins.findFirst({
-      // Event-level, not per-day: attending any day of a run gets you the room.
-      where: { event_id: eventId, user_id: authUser.userId },
-        select: { status: true },
-      })
-
-      if (checkIn?.status !== "checked_in") {
+      /*
+       * The same entitlement the GET twin uses to create the room lazily.
+       *
+       * This asked for a check-in, so an RSVP'd user who opened the chat (which
+       * creates the room) and then sent the first message got 404 on the send
+       * -- the room they were looking at "not available". Two endpoints
+       * creating one room on two different conditions.
+       */
+      const entitlement = await resolveEntitlement(eventId, authUser.userId)
+      if (!entitlement) {
         return notFoundResponse("Chat not available for this event")
       }
 
       const event = await db.events.findUnique({
         where: { id: eventId, deleted_at: null },
-        select: { title: true, end_time: true },
+        // `start_time` is unused here — this select only names the room. It is
+        // pulled anyway because `chatWindowState` treats a missing start as "no
+        // floor" rather than erroring, so an event object in this file that
+        // lacks it is one edit away from silently opening a room early.
+        select: { title: true, start_time: true, end_time: true },
       })
       if (!event) {
         return notFoundResponse("Chat not available for this event")
@@ -497,17 +524,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Auto-join: if not a member yet, check if user is checked in
+    /*
+     * Auto-join, through the same resolver the GET uses.
+     *
+     * This hand-rolled its own gate -- `checkIn?.status !== "checked_in"` --
+     * while the GER above resolves an entitlement that also admits an RSVP or a
+     * saved event inside the pre-event window. So the two handlers on one
+     * resource disagreed about one person: the GET told an RSVP'd user
+     * `write.allowed: true`, the composer opened, and the POST answered
+     * NOT_CHECKED_IN after they had typed.
+     *
+     * Fixing only the write path would have left half the bug, because the lie
+     * is on the read: the user was told they could write. One resolver, both
+     * handlers, is the only version of this that stays fixed.
+     */
     if (!membership) {
-      const checkIn = await db.event_check_ins.findFirst({
-      // Event-level, not per-day: attending any day of a run gets you the room.
-      where: { event_id: eventId, user_id: authUser.userId },
-        select: { status: true },
-      })
+      const entitlement = await resolveEntitlement(eventId, authUser.userId)
+      const window = chatWindowState(chatGroup.event, chatGroup)
 
-      if (checkIn?.status !== "checked_in") {
+      if (!entitlementAdmits(entitlement, window)) {
+        // Which of the two things is missing, because the remedies differ:
+        // turn up, or come back tomorrow.
         return errorResponse(
-          "You must check in to the event to send messages",
+          entitlement
+            ? chatClosedMessage(window.open ? "window_closed" : window.reason)
+            : "RSVP to this event to join the chat",
           403,
           ErrorCode.NOT_CHECKED_IN
         )
@@ -589,7 +630,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Spam check (sync — block before saving)
-    const spamResult = checkSpam(authUser.userId, chatGroup.id, content)
+    const spamResult = await checkSpam(authUser.userId, chatGroup.id, content)
     if (spamResult && spamResult.action === "hide") {
       return errorResponse(
         spamResult.reason || "Message blocked as spam. Please slow down.",
@@ -639,6 +680,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
+    /*
+     * Did anybody actually look at this message?
+     *
+     * Only the inline text check can answer yes. Media goes to the async
+     * pipeline, which records its own outcome, and so does anything the inline
+     * check failed to examine -- so `clean` is written here only when this
+     * request examined the content itself and found nothing.
+     */
+    let examinedInline = false
+
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     if (type === "text") {
       try {
@@ -650,12 +701,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
          * thing that stops being harmless under load.
          */
         let timeoutHandle: NodeJS.Timeout | undefined
-        const openaiResult = await Promise.race([
+        /*
+         * The timeout is a *reason*, not a verdict.
+         *
+         * This resolved to `null`, which was the same value the check returns
+         * for clean content -- and for a missing API key, and for an API error.
+         * Four facts in one value, and the code below then wrote
+         * `moderation_status: "clean"` for all of them.
+         */
+        const openaiCheck = await Promise.race([
           checkTextContent(content),
-          new Promise<null>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve(null), 1000)
+          new Promise<ModerationCheck>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
           }),
         ]).finally(() => clearTimeout(timeoutHandle))
+        examinedInline = openaiCheck.checked
+        const openaiResult = openaiCheck.checked ? openaiCheck.result : null
         if (openaiResult && openaiResult.action === "hide") {
           await hideMessage(message.id, chatGroup.id, authUser.userId, openaiResult)
           await flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
@@ -673,8 +734,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         if (openaiResult && openaiResult.action === "flag") {
           void flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
         }
-        // Timeout fallback — run full async pipeline
-        if (!openaiResult && content.length > 5) {
+        /*
+         * Anything the inline check did not examine goes to the full pipeline,
+         * which owns the verdict and will record `unchecked` if it cannot get
+         * one either.
+         *
+         * The `content.length > 5` guard is gone. It meant a short message that
+         * timed out was examined by nobody and then recorded as clean, and short
+         * messages are not a category that needs less moderation -- a slur is
+         * five characters.
+         */
+        if (!openaiCheck.checked) {
           void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
         }
       } catch {
@@ -692,18 +762,35 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Mark clean if passed all checks
-    if (!message.moderation_status || message.moderation_status === "pending") {
-      void db.chat_messages.update({
-        where: { id: message.id },
-        data: { moderation_status: "clean" },
-      }).catch((err: unknown) =>
-      // Push is best-effort and must not fail the request, but swallowing the
-      // error entirely means a broken push pipeline is invisible.
-      logger.warn("Push notification failed", {
-        context: "event chat message",
-        error: err instanceof Error ? err.message : String(err),
-      })
-    )
+    /*
+     * Clean means somebody looked and found nothing.
+     *
+     * This wrote `clean` unconditionally -- including when the block above had
+     * just handed the message to the async pipeline because the model was
+     * unreachable or timed out. So the inline write RACED the pipeline's
+     * verdict, and being the later write it could overwrite a `flagged` with a
+     * `clean`.
+     *
+     * Now it only claims the verdict it actually has. Everything else is the
+     * pipeline's to record, including `unchecked`.
+     */
+    if (
+      examinedInline &&
+      (!message.moderation_status || message.moderation_status === "pending")
+    ) {
+      void db.chat_messages
+        .update({
+          where: { id: message.id },
+          data: { moderation_status: "clean" },
+        })
+        .catch((err: unknown) =>
+          // Best-effort: a failure here leaves the message pending for the
+          // sweeper rather than failing the send.
+          logger.warn("Failed to record moderation outcome", {
+            context: "event chat message",
+            error: err instanceof Error ? err.message : String(err),
+          })
+        )
     }
 
     // Get anonymous name for response
@@ -724,6 +811,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         last_message_at: new Date(),
         updated_at: new Date(),
       },
+    })
+
+    /*
+     * Deliver it. This handler persisted the message and stopped.
+     *
+     * No socket emit and no push, so a message sent from the event chat screen
+     * was **invisible to everyone else until they re-polled** -- and for anyone
+     * who already had the room open, that is never. The sibling endpoint,
+     * writing to the same `chat_messages` table for the same group, has always
+     * done both.
+     *
+     * After moderation, never before. Emitting first and moderating after
+     * creates a window where flagged content is briefly visible to the room,
+     * which was a real bug here once already.
+     */
+    await deliverToRoom({
+      chatGroupId: chatGroup.id,
+      groupName: chatGroup.name,
+      senderId: authUser.userId,
+      senderAnonName: senderMembership?.anonymous_name || "Attendee",
+      message,
+      preview: previewFor(type, content),
     })
 
     return successResponse(

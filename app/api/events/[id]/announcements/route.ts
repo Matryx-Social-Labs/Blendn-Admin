@@ -2,7 +2,9 @@ import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { eventPermissions } from "@/lib/rbac"
+import { roomAudience } from "@/lib/room-audience"
+import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
+import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
 import { actorFor } from "@/lib/org-membership"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { announcementSchema } from "@/lib/validations/event"
@@ -49,26 +51,23 @@ export async function GET(_: Request, { params }: RouteContext) {
       where: { event_id: eventId },
       select: { id: true },
     })
-    const members = chatGroup
-      ? await db.chat_group_members.count({
-          where: { chat_group_id: chatGroup.id, status: { not: "banned" } },
-        })
-      : 0
-    // Distinct users, not tokens: one person with a phone and a tablet is one
-    // recipient, and counting tokens would overstate the reach.
-    const reachable = chatGroup
-      ? (
-          await db.push_tokens.findMany({
-            where: {
-              user: { chat_group_memberships: { some: { chat_group_id: chatGroup.id } } },
-            },
-            select: { user_id: true },
-            distinct: ["user_id"],
-          })
-        ).length
-      : 0
 
-    return NextResponse.json({ announcements, audience: { members, reachable } })
+    /*
+     * One definition of "the audience", shared with the sponsor report.
+     *
+     * This used to count members with `status: { not: "banned" }`. `left` is a
+     * member_status, and the row is deliberately KEPT when somebody leaves
+     * because `anonymous_name` lives on it — so the blast radius counted
+     * everyone who had ever joined and grew all night as people left.
+     *
+     * `reachable` also fetched every push_token row into Node to call `.length`
+     * on the array; `lib/room-audience.ts` groups in the database instead.
+     */
+    const audience = chatGroup
+      ? await roomAudience(chatGroup.id)
+      : { members: 0, reachable: 0 }
+
+    return NextResponse.json({ announcements, audience })
   } catch (err) {
     logger.error("Error fetching announcements", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
@@ -100,7 +99,8 @@ export async function POST(req: Request, { params }: RouteContext) {
     const event = await db.events.findUnique({
       where: { id: eventId },
       select: {
-        organizer_org_id: true, venue: { select: { owner_org_id: true } },
+        ...eventPermissionSelect,
+        ...broadcastAuthorSelect,
         chat_group: { select: { id: true } },
       },
     })
@@ -122,10 +122,18 @@ export async function POST(req: Request, { params }: RouteContext) {
         content,
         sent_by: session.user.id,
       },
-      include: { sender: { select: { name: true, email: true } } },
+      include: { sender: { select: { name: true } } },
     })
 
-    const senderName = session.user.name ?? session.user.email ?? "Organiser"
+    /*
+     * The organisation, not the person. See `lib/broadcast-author.ts`.
+     *
+     * This was `session.user.name ?? session.user.email ?? "Organiser"`, so an
+     * organiser with no display name **persisted their email address** into a
+     * room where everybody else is a pseudonym. `sender.email` was being
+     * selected and returned in the response too.
+     */
+    const senderName = broadcastAuthorName(event)
     const chatContent = `📢 [Announcement from ${senderName}]\n${content}`
 
     // Persist as a chat message
@@ -133,7 +141,10 @@ export async function POST(req: Request, { params }: RouteContext) {
       data: {
         chat_group_id: chatGroupId,
         user_id: session.user.id,
-        type: "text",
+        // See the mobile twin: `announcement` is the enum value that has always
+        // existed and never been written. Text-only by rule, so the column
+        // costs nothing to spend on the kind.
+        type: "announcement",
         content: chatContent,
         metadata: { announcement_id: announcement.id },
       },
@@ -148,9 +159,14 @@ export async function POST(req: Request, { params }: RouteContext) {
     emitChatMessage(chatGroupId, {
       id: chatMsg.id,
       content: chatMsg.content,
-      type: "text",
+      // The wire and the history agree on the kind, too. They already agree on
+      // the author; a socket saying `text` for a row stored as `announcement`
+      // is the same class of disagreement one line down.
+      type: "announcement",
       userId: session.user.id,
-      userName: session.user.name ?? "Organiser",
+      // The wire says the same thing the persisted content does. It said the
+      // organiser's real name, so the socket disagreed with the history.
+      userName: senderName,
       createdAt: chatMsg.created_at.toISOString(),
     })
 

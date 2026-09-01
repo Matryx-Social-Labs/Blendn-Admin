@@ -1,7 +1,12 @@
 import type { user_role } from "@prisma/client"
 
 export function canAccessDashboard(role: user_role): boolean {
-  return role === "app_admin" || role === "organizer" || role === "venue_owner"
+  return (
+    role === "app_admin" ||
+    role === "organizer" ||
+    role === "venue_owner" ||
+    role === "sponsor"
+  )
 }
 
 export function canSendSystemMessages(role: user_role): boolean {
@@ -160,37 +165,88 @@ export type BroadcastKind = "announcement" | "sponsored" | "system"
  * It renders as Blend'n itself. An organiser who could send one could issue a
  * safety notice, or a "verified by Blend'n" claim, in the platform's voice.
  */
+/**
+ * The single organisation acting, and what it is entitled to.
+ *
+ * ## Why this is a tuple and not two booleans
+ *
+ * It was two booleans, and that was a confused deputy.
+ * `lib/org-membership.ts:maySponsorFor` answers "does **any** org you belong to
+ * hold the flag", and a `placesAtEvent` written the same way answers "does
+ * **any** org you belong to have a placement". A person who is staff at Org A
+ * (holds `may_sponsor`, no placement) and Org B (has a placement, no flag)
+ * satisfies both, and posts a sponsored message that neither organisation is
+ * entitled to send.
+ *
+ * Both facts must come from the SAME `org_id`. Resolving them together, once,
+ * in `lib/org-membership.ts` is what makes that structural rather than a thing
+ * every caller has to remember.
+ *
+ * Passed in rather than read here for the same reason `orgIds` is: this module
+ * is reachable from `lib/validations/profile.ts`, which a client component may
+ * import, and `__tests__/server-import-boundary.test.ts` exists because a `db`
+ * import here has gone wrong before.
+ */
+export interface SponsorGrant {
+  orgId: string
+  /** `organisations.may_sponsor` for THIS org. */
+  maySponsor: boolean
+  /** THIS org holds an `approved` placement at THIS event. */
+  placesAtEvent: boolean
+}
+
 export function canBroadcast(
   actor: PermissionActor,
   event: PermissionEvent,
   kind: BroadcastKind,
   /**
-   * Whether any org this actor belongs to may sell placement.
-   *
-   * Passed in rather than read here for the same reason `orgIds` is: this
-   * module is reachable from `lib/validations/profile.ts`, which a client
-   * component may import, and `__tests__/server-import-boundary.test.ts` exists
-   * because a `db` import here has gone wrong before.
+   * Omitted means no grant, which fails closed — the property
+   * `__tests__/broadcast-permissions.test.ts` pins.
    */
-  maySponsor = false
+  grant?: SponsorGrant
 ): boolean {
   if (!actor?.id) return false
 
   // Speaks as the platform. Nobody outside it, whatever they own.
   if (kind === "system") return actor.role === "app_admin"
 
-  const { canOperate } = eventPermissions(actor, event)
-  if (!canOperate) return false
+  if (kind === "sponsored") {
+    /*
+     * app_admin is not exempt from the flag by accident — it is exempt on
+     * purpose. An admin placing an ad is the platform placing an ad, which is
+     * what `may_sponsor` is a delegation *of*.
+     */
+    if (actor.role === "app_admin") return true
+    if (!grant) return false
 
-  /*
-   * app_admin is not exempt from the flag by accident — it is exempt on
-   * purpose. `eventPermissions` already returns true for them unconditionally,
-   * and an admin placing an ad is the platform placing an ad, which is what
-   * `may_sponsor` is a delegation *of*.
-   */
-  if (kind === "sponsored") return actor.role === "app_admin" || maySponsor
+    /*
+     * Every sponsored message anchors to a placement, INCLUDING a host
+     * promoting their own brand.
+     *
+     * An earlier draft allowed `canOperate && maySponsor` with no placement,
+     * which contradicted the claim that the placement is the authorization
+     * object — and left the sponsor's own org unable to post at all, since a
+     * sponsor is neither the organising org nor the venue's owner and so never
+     * has `canOperate`.
+     */
+    if (!grant.maySponsor || !grant.placesAtEvent) return false
+    return true
+  }
 
-  return true
+  // announcement: whoever operates the event. No placement involved.
+  return eventPermissions(actor, event).canOperate
+}
+
+/**
+ * Who may create events.
+ *
+ * NOT "everyone who is not an attendee". `app/dashboard/events/new/page.tsx`
+ * used to gate on `role === "attendee"`, a denylist — so adding `sponsor` to
+ * the enum would have handed every sponsor the ability to publish events, with
+ * no error and nothing in a log.
+ */
+export function canCreateEvents(role: user_role): boolean {
+  return role === "app_admin" || role === "organizer" || role === "venue_owner"
 }
 
 /**

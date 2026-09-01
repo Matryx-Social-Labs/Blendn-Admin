@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canBroadcast, eventPermissions } from "@/lib/rbac"
-import { actorFor, maySponsorFor } from "@/lib/org-membership"
+import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { sponsoredMessageCreateSchema } from "@/lib/validations/event"
 import { PAGINATION } from "@/lib/constants"
@@ -27,9 +27,25 @@ export async function GET(_: Request, { params }: RouteContext) {
       where: { event_id: eventId },
       orderBy: { created_at: "asc" },
       take: PAGINATION.MAX_LIMIT,
+      include: {
+        // The artwork lives on the creative, not the campaign — revisions are
+        // the whole point, so a send from last night keeps pointing at the
+        // image it actually delivered. The list needs the CURRENT one.
+        creatives: {
+          select: { media_url: true, media_type: true },
+          orderBy: { created_at: "desc" },
+          take: 1,
+        },
+      },
     })
 
-    return NextResponse.json(messages)
+    return NextResponse.json(
+      messages.map(({ creatives, ...m }) => ({
+        ...m,
+        media_url: creatives[0]?.media_url ?? null,
+        media_type: creatives[0]?.media_type ?? null,
+      }))
+    )
   } catch (err) {
     logger.error("Error fetching sponsored messages", { error: err instanceof Error ? err.message : String(err) })
     return new NextResponse("Internal error", { status: 500 })
@@ -63,7 +79,8 @@ export async function POST(req: Request, { params }: RouteContext) {
      * they cannot self-serve.
      */
     const actor = await actorFor(session.user)
-    if (!canBroadcast(actor, event, "sponsored", await maySponsorFor(actor))) {
+    const grant = await resolveSponsorGrant(actor, eventId)
+    if (!canBroadcast(actor, event, "sponsored", grant ?? undefined)) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
@@ -79,15 +96,57 @@ export async function POST(req: Request, { params }: RouteContext) {
         { status: 400 }
       )
     }
-    const { content, interval_minutes } = parsed.data
+    const { content, interval_minutes, sponsor_id } = parsed.data
 
-    const message = await db.event_sponsored_messages.create({
-      data: {
+    /*
+     * The brand in the body must be the brand this actor is entitled to place.
+     *
+     * `resolveSponsorGrant` above proves *an* organisation of theirs has
+     * `may_sponsor` and an approved placement here. It says nothing about which
+     * brand `sponsor_id` names, so without this an org with one legitimate
+     * placement could file campaigns under any other brand on the platform —
+     * the same confused-deputy shape the grant tuple exists to close.
+     *
+     * An admin has no grant by design, so for them the placement alone is the
+     * check.
+     */
+    const placement = await db.event_sponsors.findFirst({
+      where: {
         event_id: eventId,
-        content,
-        interval_minutes,
-        is_active: false,
+        sponsor_id,
+        status: "approved",
+        sponsor: {
+          deleted_at: null,
+          merged_into: null,
+          ...(grant ? { org_id: grant.orgId } : {}),
+        },
       },
+      select: { id: true },
+    })
+    if (!placement) return new NextResponse("Forbidden", { status: 403 })
+
+    /*
+     * Campaign and first creative together.
+     *
+     * `sponsored_creatives` is what a send records against, so a campaign with
+     * no creative row is one the scheduler skips — and `moderation_status`
+     * defaults to `pending` on both, which is the correct starting state: no
+     * copy has been reviewed yet.
+     */
+    const message = await db.$transaction(async (tx) => {
+      const created = await tx.event_sponsored_messages.create({
+        data: {
+          event_id: eventId,
+          sponsor_id,
+          content,
+          interval_minutes,
+          is_active: false,
+        },
+      })
+      await tx.sponsored_creatives.create({
+        data: { message_id: created.id, content },
+      })
+      return created
     })
 
     return NextResponse.json(message, { status: 201 })

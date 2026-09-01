@@ -1,9 +1,9 @@
+import { SPONSORSHIP } from "./constants"
 import { logger } from "./logger"
 import {
   HeadObjectCommand,
   S3Client,
   PutObjectCommand,
-  GetObjectCommand,
   DeleteObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
@@ -52,7 +52,7 @@ function getS3Client(): S3Client {
 }
 
 // Folder types for organizing uploads
-export type UploadFolder = "profile" | "chat" | "events"
+export type UploadFolder = "profile" | "chat" | "events" | "sponsored"
 
 /**
  * Generate a unique filename with folder prefix
@@ -83,7 +83,18 @@ export async function getPresignedUploadUrl(
   filename: string,
   contentType: string,
   folder: UploadFolder,
-  userId: string
+  userId: string,
+  opts: {
+    /**
+     * Ask the storage to compute and store a SHA-256.
+     *
+     * Signed into the URL, so a client that ignores it gets a rejected PUT
+     * rather than a silently unverifiable object. Only worth the round trip
+     * where provenance matters — sponsored media, which is reviewed once and
+     * then sent unattended for hours.
+     */
+    checksum?: boolean
+  } = {}
 ): Promise<{ uploadUrl: string; publicUrl: string; key: string }> {
   const client = getS3Client()
   const key = generateKey(folder, filename, userId)
@@ -92,6 +103,7 @@ export async function getPresignedUploadUrl(
     Bucket: TIGRIS_BUCKET,
     Key: key,
     ContentType: contentType,
+    ...(opts.checksum ? { ChecksumAlgorithm: "SHA256" as const } : {}),
     // Set cache control for browser caching
     CacheControl: "public, max-age=31536000",
     // Set metadata
@@ -242,22 +254,6 @@ export async function getObjectSize(key: string): Promise<number | null> {
 }
 
 /**
- * Generate a presigned download URL for a stored object
- */
-export async function getPresignedDownloadUrl(
-  key: string,
-  expiresIn: number = 604800
-): Promise<string> {
-  const client = getS3Client()
-  const command = new GetObjectCommand({
-    Bucket: TIGRIS_BUCKET,
-    Key: key,
-  })
-
-  return getSignedUrl(client, command, { expiresIn })
-}
-
-/**
  * Resolve a media URL/key to a publicly-accessible URL.
  * The bucket has a public-read policy so no signing is needed.
  * Non-Tigris URLs are returned unchanged.
@@ -295,6 +291,16 @@ export function validateContentType(contentType: string, folder: UploadFolder): 
       "audio/mp4",
     ],
     events: ["image/jpeg", "image/png", "image/webp"],
+    /*
+     * Deliberately narrower than `chat`, which allows GIF, QuickTime and audio.
+     *
+     * An animated GIF in a room is a loop nobody can stop. QuickTime does not
+     * play inline on Android. Audio has no poster frame, so it cannot be
+     * rendered as anything a person can decline to open. Sponsored media is the
+     * one kind an attendee did not choose to receive, so the format has to be
+     * one every phone plays inline, muted, on demand.
+     */
+    sponsored: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
   }
 
   return allowedTypes[folder]?.includes(contentType) ?? false
@@ -308,6 +314,9 @@ export function getMaxFileSize(folder: UploadFolder): number {
     profile: 10 * 1024 * 1024, // 10MB
     chat: 50 * 1024 * 1024, // 50MB
     events: 20 * 1024 * 1024, // 20MB
+    // The ceiling for the folder. `lib/upload-grant-actions.ts` narrows it
+    // further per content type — an image has no business being 100MB.
+    sponsored: SPONSORSHIP.MAX_VIDEO_BYTES,
   }
 
   return maxSizes[folder] ?? 10 * 1024 * 1024
@@ -444,4 +453,53 @@ export async function testConnection(): Promise<{ success: boolean; message: str
     const message = error instanceof Error ? error.message : "Connection failed"
     return { success: false, message }
   }
+}
+
+export interface ObjectFacts {
+  bytes: number
+  contentType: string | null
+  /**
+   * The object version, when the bucket has versioning on.
+   *
+   * This is what actually pins the bytes. A content-addressed KEY is impossible
+   * with a presigned PUT — the key is chosen before the bytes exist — so the
+   * only defence against the same key being overwritten after review is to pin
+   * the version that was reviewed and serve that one.
+   */
+  versionId: string | null
+  /**
+   * SHA-256, only when the storage computed one.
+   *
+   * Requested via `ChecksumAlgorithm` on the presigned PUT, which the client has
+   * to honour. Recorded when present and never fabricated: a checksum we made up
+   * from an ETag would look like provenance and be an MD5 for single-part
+   * uploads and a hash-of-hashes for multipart, which is not a content identity
+   * at all.
+   */
+  checksumSha256: string | null
+}
+
+/** Everything about a stored object that a grant needs to pin. One HEAD. */
+export async function headObject(key: string): Promise<ObjectFacts | null> {
+  const client = getS3Client()
+  try {
+    const head = await client.send(
+      new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key, ChecksumMode: "ENABLED" })
+    )
+    return {
+      bytes: head.ContentLength ?? 0,
+      contentType: head.ContentType ?? null,
+      versionId: head.VersionId ?? null,
+      checksumSha256: head.ChecksumSHA256 ?? null,
+    }
+  } catch {
+    // Missing, or a permissions problem. Both mean "cannot vouch for this".
+    return null
+  }
+}
+
+/** The public URL for a key, pinned to a version when there is one. */
+export function pinnedUrl(key: string, versionId: string | null): string {
+  const base = getPublicUrl(key)
+  return versionId ? `${base}?versionId=${encodeURIComponent(versionId)}` : base
 }

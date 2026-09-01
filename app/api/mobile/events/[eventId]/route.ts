@@ -1,13 +1,15 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { cancelEventCheckIns, isCancellingEvent } from "@/lib/event-cancellation"
+import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mobileEventPatchSchema } from "@/lib/validations/event"
+import { canPublish } from "@/lib/geofence-input"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { getOccupancy } from "@/lib/occupancy"
@@ -48,10 +50,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .split(",")
         .map((value) => value.trim())
         .filter(Boolean)
-    )
-    const interestedLimit = Math.min(
-      Math.max(parseInt(searchParams.get("interestedLimit") || "6"), 1),
-      20
     )
 
     // Fetch event with all related data
@@ -121,9 +119,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
         _count: {
           select: {
-            check_ins: {
-              where: { status: "checked_in" },
-            },
             favorites: true,
             ratings: true,
             rsvps: {
@@ -141,33 +136,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Counted from check-in rows rather than a stored column.
     const occupancy = await getOccupancy(eventId)
 
-    // Get user's relationship with this event
-    type InterestedUserFavorite = Prisma.event_favoritesGetPayload<{
-      include: {
-        user: { select: { id: true; name: true; image: true } }
-      }
-    }>
-
-    const interestedUsersPromise: Promise<InterestedUserFavorite[]> =
-      includeSet.has("interestedUsers")
-        ? db.event_favorites.findMany({
-            where: { event_id: eventId },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  image: true,
-                },
-              },
-            },
-            orderBy: { created_at: "desc" },
-            take: interestedLimit,
-          })
-        : Promise.resolve([])
-
-    const [userFavorite, userRating, userCheckIn, userRsvp, interestedUsers] =
+    const [attendedCounts, userFavorite, userRating, userCheckIn, userRsvp] =
       await Promise.all([
+        /*
+         * `checkInCount` was `_count.check_ins` filtered to `checked_in`, which
+         * counted rows on a table holding one per person **per day** — and
+         * dropped anyone who had checked out, so the headline number fell as
+         * the night went on.
+         */
+        distinctAttendeeCounts([eventId]),
         db.event_favorites.findUnique({
           where: {
             event_id_user_id: {
@@ -199,7 +176,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         }),
-        interestedUsersPromise,
       ])
 
     // Calculate average rating
@@ -304,7 +280,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })),
       chatGroup: event.chat_group,
       stats: {
-        checkInCount: event._count.check_ins,
+        checkInCount: attendedCounts.get(eventId) ?? 0,
         favoriteCount: event._count.favorites,
         ratingCount: event._count.ratings,
         averageRating: avgRating._avg.rating,
@@ -319,13 +295,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         rsvpStatus: userRsvp?.status || null,
       },
       distance,
-      ...(includeSet.has("interestedUsers") && {
-        interestedUsers: interestedUsers.map((f) => ({
-          id: f.user.id,
-          name: f.user.name,
-          avatar: f.user.image,
-        })),
-      }),
+      /*
+       * The same disclosure the dedicated route already closed, reachable
+       * through a different door.
+       *
+       * `?include=interestedUsers` returned `{ real id, real name, real photo }`
+       * for everyone who had favourited an event, to any authenticated caller,
+       * with no check-in gate of any kind. `GET .../interested-users` was cut
+       * down to a bare count for exactly this reason, and its docstring makes
+       * the argument in full: favouriting has no check-in, no pseudonym and no
+       * reveal, so nobody who used it consented to being shown, and it is
+       * harvestable by topic.
+       *
+       * Fixing one route and leaving the query parameter is fixing the screen,
+       * not the leak. `favoriteCount` above is the social proof the frame asks
+       * for -- it leads with "124+".
+       *
+       * The key stays, as an empty array, so a build in the field iterating it
+       * gets a length of zero rather than a crash on undefined.
+       */
+      ...(includeSet.has("interestedUsers") && { interestedUsers: [] }),
     })
   } catch (error) {
     logger.error("Get event error", { error: error instanceof Error ? error.message : String(error) })
@@ -357,7 +346,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // as "no organiser, no venue".
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, status: true, ...eventPermissionSelect },
+      // The location columns are here for the publish gate below, not for the
+      // response: this route can flip an event to published too.
+      select: {
+        id: true,
+        status: true,
+        latitude: true,
+        longitude: true,
+        geofence: true,
+        ...eventPermissionSelect,
+      },
     })
 
     if (!event) {
@@ -401,6 +399,20 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
     const { title, description, shortDescription, status } = parsed.data
 
+    /*
+     * The same gate the dashboard PATCH runs, for the same reason and through
+     * the other door: this route accepts `status: "published"` as well, and an
+     * event published with no coordinates refuses every attendee at check-in
+     * with OUT_OF_RANGE. The mobile body carries no location fields, so there
+     * is nothing to merge — the event has a pin or it does not.
+     */
+    if (status === "published" && event.status !== "published") {
+      const gate = canPublish(event)
+      if (!gate.ok) {
+        return errorResponse(gate.reason ?? "This event cannot be published yet", 400)
+      }
+    }
+
     const isCancelling = isCancellingEvent(status, event.status)
 
     const updated = await db.events.update({
@@ -425,6 +437,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      */
     if (isCancelling) {
       await cancelEventCheckIns(eventId)
+      // And tell them. `notifyEventCancelled` never throws — the cancellation
+      // has already committed and must not be undone by a failed push.
+      //
+      // No `notifyEventDetailsChanged` here: this route only accepts title,
+      // description and status, and none of those is a fact anybody leaves the
+      // house for. Time and venue are dashboard-only edits.
+      await notifyEventCancelled(updated.id, updated.title)
     }
 
     return successResponse({

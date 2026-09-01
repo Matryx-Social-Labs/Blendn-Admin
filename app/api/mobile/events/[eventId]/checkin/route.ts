@@ -7,7 +7,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { evaluateCheckIn, legacyGeofence, validateGeofence } from "@/lib/geofence"
+import { evaluateCheckIn, resolveFence, fenceVenueSelect } from "@/lib/geofence"
 import {
   ErrorCode,
   successResponse,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/api-response"
 import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
 import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
+import { recordRefusal } from "@/lib/check-in-refusals"
 import { resolveOccurrence } from "@/lib/occurrences"
 import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
@@ -75,9 +76,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Fetch event
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      // The venue relation is needed to tell staff from guests: a check-in is
-      // staff work if the person's org runs the event or owns the venue.
-      include: { venue: { select: { owner_org_id: true } } },
+      /*
+       * The venue relation is needed twice, for two unrelated reasons, and they
+       * have to be merged by hand.
+       *
+       * `owner_org_id` tells staff from guests -- a check-in is staff work if
+       * the person's org runs the event or owns the venue. `geofence` is what
+       * `resolveFence` falls back to when the event has none, which the door has
+       * never consulted even though the sweeper has and `schema.prisma`
+       * promises events inherit it.
+       *
+       * Spreading `fenceSelect` here instead would silently replace the venue
+       * select and take `owner_org_id` away, and every staff check-in would
+       * quietly become a guest one.
+       */
+      include: { venue: { select: { owner_org_id: true, ...fenceVenueSelect } } },
     })
 
     if (!event) {
@@ -120,6 +133,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const ageRefusal = minAgeRefusal(profileAge, event.min_age)
     if (ageRefusal) {
+      recordRefusal({ eventId, userId: authUser.userId, reason: "under_age" })
       return errorResponse(ageRefusal, 403, ErrorCode.AGE_RESTRICTED)
     }
 
@@ -139,12 +153,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const slot = await resolveOccurrence(eventId, now)
 
     if (!slot.ok) {
+      /*
+       * Recorded, not just refused. A cluster of `too_early` is a wrong start
+       * time on the listing -- which is the second most common curation mistake
+       * after a wrong pin, and produces exactly the same silence.
+       */
+      const occurrenceId = slot.occurrence?.id ?? null
       if (slot.reason === "too_early") {
+        recordRefusal({ eventId, userId: authUser.userId, reason: "too_early", occurrenceId })
         return errorResponse("Event has not started yet", 400, ErrorCode.EVENT_NOT_STARTED)
       }
       if (slot.reason === "cancelled") {
+        recordRefusal({ eventId, userId: authUser.userId, reason: "day_cancelled", occurrenceId })
         return errorResponse("This day has been cancelled", 400, ErrorCode.EVENT_ENDED)
       }
+      recordRefusal({ eventId, userId: authUser.userId, reason: "too_late", occurrenceId })
       // "none" means the event has no occurrences at all, which should be
       // impossible — every event gets one. Treated as ended rather than 500:
       // the attendee cannot act on the difference.
@@ -173,15 +196,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * permissive than before, so nobody who could check in yesterday is
      * refused today.
      */
-    // A stored geofence that fails validation falls back rather than locking
-    // everyone out — bad data in one column must not take the venue offline.
-    const stored = event.geofence ? validateGeofence(event.geofence) : null
-    const fence = stored?.ok
-      ? stored.fence
-      : legacyGeofence(event.latitude, event.longitude, event.check_in_radius)
+    /*
+     * One resolver -- `resolveFence` in lib/geofence.ts.
+     *
+     * Same behaviour as before for the two cases this path already handled: a
+     * stored geofence that fails validation falls back rather than locking
+     * everyone out, because bad data in one column must not take the venue
+     * offline. What is new here is the **venue's** fence, between the two --
+     * `schema.prisma` has always promised events inherit it and nothing on the
+     * server honoured that; the sweeper consulted it and the door did not.
+     */
+    const fence = resolveFence(event)
 
     if (!fence) {
       logger.error("Check-in attempted on an event with no geofence", { eventId })
+      recordRefusal({ eventId, userId: authUser.userId, reason: "no_geofence" })
       return errorResponse(
         "This event has no location set, so check-in is unavailable. Contact the organiser.",
         400,
@@ -191,6 +220,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const verdict = evaluateCheckIn({ lat: latitude, lng: longitude }, fence, gpsAccuracy)
     if (!verdict.ok) {
+      /*
+       * The refusal that matters. Everybody twenty metres out is a pin on the
+       * wrong side of the street; a wide spread is a fence too tight for the
+       * venue. Neither is visible without recording the shortfall.
+       *
+       * The shortfall and the reported accuracy, never the coordinates -- see
+       * lib/check-in-refusals.ts.
+       */
+      recordRefusal({
+        eventId,
+        userId: authUser.userId,
+        reason: "out_of_range",
+        occurrenceId: occurrence.id,
+        shortfallMetres: verdict.shortfall,
+        accuracyMetres: gpsAccuracy,
+      })
       return errorResponse(
         `You're about ${Math.round(verdict.shortfall)}m outside the check-in area. Move closer to the venue and try again.`,
         400,
@@ -259,14 +304,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         check_in_time: now,
         latitude,
         longitude,
-        device_info: deviceInfo,
+        /*
+         * `deviceInfo` is optional in the request schema, so it is `undefined`
+         * whenever a client omits it — and no static scan can see that. The
+         * source reads `device_info: deviceInfo`, which is indistinguishable
+         * from every other field; only `strictUndefinedChecks` at runtime
+         * catches it. That is the argument for the flag over the ratchet.
+         */
+        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
       },
       update: {
         status: "checked_in",
         check_in_time: now,
         latitude,
         longitude,
-        device_info: deviceInfo,
+        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
         updated_at: now,
       },
     })

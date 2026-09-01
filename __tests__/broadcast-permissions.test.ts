@@ -4,6 +4,7 @@ import {
   type BroadcastKind,
   type PermissionActor,
   type PermissionEvent,
+  type SponsorGrant,
 } from "@/lib/rbac"
 
 /**
@@ -68,7 +69,15 @@ describe("announcement — anyone who operates the event", () => {
   })
 })
 
-describe("sponsored — operating is necessary and not sufficient", () => {
+describe("sponsored — a placement, held by the org that holds the flag", () => {
+  /** A grant is one organisation's answer to both questions. */
+  const grant = (over: Partial<SponsorGrant> = {}): SponsorGrant => ({
+    orgId: "org-1",
+    maySponsor: true,
+    placesAtEvent: true,
+    ...over,
+  })
+
   it("refuses an operator whose org may not sell placement", () => {
     /*
      * The whole point of the separate flag. If everyone who can announce can
@@ -76,29 +85,49 @@ describe("sponsored — operating is necessary and not sufficient", () => {
      * and becomes a styling choice — and a reader has no way to tell an
      * advertisement from an announcement.
      */
-    expect(canBroadcast(host, event, "sponsored", false)).toBe(false)
+    expect(canBroadcast(host, event, "sponsored", grant({ maySponsor: false }))).toBe(false)
   })
 
-  it("allows it once the organisation is approved", () => {
-    expect(canBroadcast(host, event, "sponsored", true)).toBe(true)
+  it("allows it once the organisation is approved and holds a placement", () => {
+    expect(canBroadcast(host, event, "sponsored", grant())).toBe(true)
   })
 
-  it("still requires operating the event, flag or not", () => {
-    // An approved org cannot advertise in somebody else's room.
-    expect(canBroadcast(stranger, event, "sponsored", true)).toBe(false)
+  it("refuses an approved org with no placement at this event", () => {
+    /*
+     * Every sponsored message anchors to a placement, including a host
+     * promoting their own brand. Without this, "the placement is the
+     * authorization object" is a claim the code does not keep.
+     */
+    expect(canBroadcast(host, event, "sponsored", grant({ placesAtEvent: false }))).toBe(false)
   })
 
-  it("lets an app_admin place one without the flag", () => {
+  it("refuses when no grant resolved at all", () => {
+    // The fail-closed default. `resolveSponsorGrant` returns null when no
+    // single org satisfies both conditions.
+    expect(canBroadcast(host, event, "sponsored")).toBe(false)
+  })
+
+  it("lets an app_admin place one with no grant", () => {
     /*
      * Not an oversight. `may_sponsor` is a delegation of the platform's own
      * ability to sell placement, so the platform holding it unconditionally is
      * the thing being delegated.
      */
-    expect(canBroadcast(admin, event, "sponsored", false)).toBe(true)
+    expect(canBroadcast(admin, event, "sponsored")).toBe(true)
   })
 
-  it("lets the venue owner place one when their org is approved", () => {
-    expect(canBroadcast(venueOwner, event, "sponsored", true)).toBe(true)
+  it("lets a sponsor org post without operating the event", () => {
+    /*
+     * The reason the grant exists at all. A sponsor is neither the organising
+     * org nor the venue's owner, so it never has `canOperate` — gating
+     * sponsored on `canOperate` meant the one party the feature is FOR could
+     * never use it.
+     */
+    expect(canBroadcast(stranger, event, "sponsored", grant())).toBe(true)
+  })
+
+  it("refuses a stranger with no grant, so the above is not a hole", () => {
+    expect(canBroadcast(stranger, event, "sponsored")).toBe(false)
   })
 })
 
@@ -119,7 +148,13 @@ describe("system — the platform's own voice", () => {
   it("is refused even to an org allowed to sponsor", () => {
     // The two capabilities are unrelated; buying placement is not speaking as
     // the platform.
-    expect(canBroadcast(host, event, "system", true)).toBe(false)
+    expect(
+      canBroadcast(host, event, "system", {
+        orgId: "org-1",
+        maySponsor: true,
+        placesAtEvent: true,
+      })
+    ).toBe(false)
   })
 })
 
@@ -159,7 +194,13 @@ describe("fails closed", () => {
   it("refuses a half-built actor", () => {
     const broken = { id: "", role: "organizer", orgIds: [ORG] } as PermissionActor
     for (const kind of ["announcement", "sponsored", "system"] as BroadcastKind[]) {
-      expect(canBroadcast(broken, event, kind, true)).toBe(false)
+      expect(
+        canBroadcast(broken, event, kind, {
+          orgId: "org-1",
+          maySponsor: true,
+          placesAtEvent: true,
+        })
+      ).toBe(false)
     }
   })
 

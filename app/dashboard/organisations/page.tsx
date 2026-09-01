@@ -8,6 +8,7 @@ import { getOrganisations } from "@/lib/onboarding-actions"
 import { formatDay } from "@/lib/dashboard-format"
 
 import { OrgStatusControl } from "./status-control"
+import { OrgSponsorControl } from "./sponsor-control"
 
 export const dynamic = "force-dynamic"
 
@@ -38,9 +39,11 @@ export default async function OrganisationsPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* What suspending does and does not do. Reversibility is the fact that
+          decides whether somebody clicks it, and it is not on the button. */}
       <p className="text-[0.8125rem] text-muted-foreground">
-        Every host on the platform. Suspending stops the organisation operating without deleting
-        anyone&apos;s history — events, check-ins and messages stay intact and it can be undone.
+        Suspending stops an organisation operating without deleting anyone&apos;s history
+        — events, check-ins and messages stay intact, and it can be undone.
       </p>
 
       {orgs.map((org) => (
@@ -94,7 +97,15 @@ export default async function OrganisationsPage() {
             </div>
           ) : null}
 
-          <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
+          <div className="flex flex-col gap-3">
+            <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
+            <OrgSponsorControl
+              orgId={org.id}
+              maySponsor={org.may_sponsor}
+              status={org.status}
+              name={org.display_name}
+            />
+          </div>
         </section>
       ))}
     </div>

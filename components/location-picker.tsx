@@ -67,6 +67,22 @@ export function LocationPicker({
   const markerRef = useRef<Marker | null>(null)
   const circleRef = useRef<Circle | null>(null)
   const checkInRadiusRef = useRef(checkInRadius)
+  /**
+   * The live `addMarkerAndCircle`, and the coordinates it should be showing.
+   *
+   * The map is built inside a `[]` effect and its helpers close over Leaflet,
+   * so nothing outside could move the pin. These two are what let a later prop
+   * change reach it, following the same ref-plus-effect shape
+   * `checkInRadiusRef` already uses for the circle's radius.
+   *
+   * `desiredRef` exists because Leaflet is imported asynchronously: a venue
+   * picked before `import("leaflet")` resolves would otherwise be lost, since
+   * the init effect's closure holds the props from mount.
+   */
+  const placeRef = useRef<((lat: number, lng: number) => void) | null>(null)
+  const desiredRef = useRef<{ lat: number; lng: number } | null>(
+    initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : null
+  )
 
   const [search, setSearch] = useState("")
   const [suggestions, setSuggestions] = useState<NominatimResult[]>([])
@@ -130,9 +146,17 @@ export function LocationPicker({
       document.head.appendChild(link)
     }
 
-    const defaultLat = initialLat ?? 12.9716
-    const defaultLng = initialLng ?? 77.5946
-    const hasInitialLocation = Boolean(initialLat && initialLng)
+    /*
+     * From the ref, not the closure: a venue picked while Leaflet was still
+     * loading has already updated `desiredRef`, and the props captured at mount
+     * would put the pin back where it started.
+     */
+    const desired = desiredRef.current
+    const defaultLat = desired?.lat ?? 12.9716
+    const defaultLng = desired?.lng ?? 77.5946
+    // `!= null`, because `Boolean(lat && lng)` is false on the equator and the
+    // prime meridian — the same bug `canPublish` documents having replaced.
+    const hasInitialLocation = desired != null
 
     import("leaflet").then((L) => {
       if (!mapContainerRef.current || mapInstanceRef.current) return
@@ -187,6 +211,8 @@ export function LocationPicker({
         }
       }
 
+      placeRef.current = addMarkerAndCircle
+
       if (hasInitialLocation) {
         addMarkerAndCircle(defaultLat, defaultLng)
       }
@@ -203,9 +229,49 @@ export function LocationPicker({
       mapInstanceRef.current = null
       markerRef.current = null
       circleRef.current = null
+      placeRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /*
+   * Follow the coordinates when something else moves them.
+   *
+   * Picking a venue writes `latitude`/`longitude` on the form and the parent
+   * passes them down. Without this the pin stayed where it was while the fence
+   * and the read-only coordinates moved — two maps on one screen disagreeing
+   * about where the event is, which is the diagnosis of this whole audit
+   * rendered side by side.
+   *
+   * **This effect is the fix.** The map is built in a `[]` effect, so a new
+   * prop reached the component and could do nothing with it. The parent's
+   * `getValues` looked like the other half and was not: a control reverting it
+   * left the browser test passing, because a sibling `watch` re-renders the
+   * section at the same moment.
+   *
+   * The distance guard is what stops it fighting the user: dragging the marker
+   * calls `onLocationChange`, the parent writes those values back, and they
+   * arrive here as new props. Without the comparison that would re-place the
+   * marker on every drag and pan the map out from under them.
+   */
+  useEffect(() => {
+    if (initialLat == null || initialLng == null) return
+    desiredRef.current = { lat: initialLat, lng: initialLng }
+
+    const current = markerRef.current?.getLatLng()
+    if (
+      current &&
+      Math.abs(current.lat - initialLat) < 1e-7 &&
+      Math.abs(current.lng - initialLng) < 1e-7
+    ) {
+      return
+    }
+
+    // Null until Leaflet resolves. `desiredRef` above is what the init effect
+    // reads, so nothing is lost by returning here.
+    placeRef.current?.(initialLat, initialLng)
+    mapInstanceRef.current?.setView([initialLat, initialLng], 15)
+  }, [initialLat, initialLng])
 
   const handleSearch = useCallback((query: string) => {
     setSearch(query)

@@ -77,6 +77,51 @@ railway up
 railway run npx prisma migrate deploy
 ```
 
+Railway also runs this automatically on deploy, so you rarely need it by hand.
+
+#### `migrate status` reports two missing migration files. That is expected.
+
+On production and staging you will see something like:
+
+```
+The following migration(s) are applied to the database but missing from
+the local migrations directory: 20260805_org_onboarding,
+20260805_venues_and_suspension
+```
+
+**Nothing is wrong, and nothing needs doing.** Both were renamed, on purpose:
+
+| Was | Is now |
+|---|---|
+| `20260805_org_onboarding` | `20260806a_org_onboarding` |
+| `20260805_venues_and_suspension` | `20260804_venues_and_suspension` |
+
+Five migrations were written on 2026-08-05 with no time component in their
+names, so their order was decided alphabetically rather than by intent — and
+the dependency order turned out to be the reverse of it. `organisations` needed
+`venues`, and `org_onboarding` needed `organisations`, but both sorted before
+what they required. Any database built by replaying the chain failed; ours never
+were, because the schema was originally created with `db push` and every
+migration was recorded as applied against a database that already had
+everything.
+
+They were **renamed rather than edited** because Prisma stores a checksum for
+each applied migration — editing one in place makes `migrate deploy` fail on
+every environment that has already run it. Under a new name each is simply a
+new migration, so existing environments run it once more. Every statement in
+both is idempotent (`IF NOT EXISTS`, or catching `duplicate_object`), so that
+run changes nothing.
+
+The old rows stay behind with no matching directory. `migrate deploy` ignores
+them; only `migrate status` mentions them. **Do not delete those rows** — they
+are the record that the original migrations ran, and removing them would make
+Prisma try to apply migrations that no longer exist.
+
+Verified before shipping, against a database built to look like production
+(schema pushed, 52 migration rows under the original names): the five new and
+renamed migrations applied as true no-ops, the schema was unchanged
+column-for-column, and a second `migrate deploy` reported nothing pending.
+
 ### 7. Seed the App Store review account
 
 **Mandatory after any database wipe, and before any App Store or Play

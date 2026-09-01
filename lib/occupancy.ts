@@ -105,25 +105,55 @@ export function occupancyFrom({
  * decide which day someone is checking in to. Two implementations of "which day
  * is it" would eventually disagree about a club night that runs past midnight.
  */
-async function capacityForNow(eventId: string, eventCapacity: number | null): Promise<number | null> {
-  const slot = await resolveOccurrence(eventId)
+function capacityForNow(
+  slot: Awaited<ReturnType<typeof resolveOccurrence>>,
+  eventCapacity: number | null
+): number | null {
   // `ok: false` still carries the occurrence when the reason is timing rather
   // than absence — an event between days should still measure against the day
   // it is between, not lose its capacity entirely.
+  //
+  // Takes the resolved slot rather than resolving its own: `getOccupancy` needs
+  // the same answer to scope its counts, and asking twice is how the counts and
+  // the capacity came to disagree in the first place.
   return slot.occurrence?.capacity ?? eventCapacity
 }
 
 export async function getOccupancy(eventId: string): Promise<Occupancy> {
+  /*
+   * Resolved once, and used for the counts as well as the capacity.
+   *
+   * `capacityForNow` already asked which day it is, and the counts did not —
+   * so capacity was per-occurrence while occupancy was across every day of the
+   * run. On day three of a conference, a day-one attendee whose row is still
+   * `checked_in` counted as inside, against day three's capacity.
+   *
+   * Rows go stale exactly that way: the sweeper closes people on a timer, and
+   * anyone it misses stays `checked_in` forever. So the number an organiser
+   * watches live, and the number a fire officer is quoted, drifted upward
+   * across a multi-day event and never came back down.
+   *
+   * The comment on `capacityForNow` warns that two implementations of "which
+   * day is it" would eventually disagree. There were two: one asked, one did
+   * not.
+   *
+   * Falls back to event-wide when no occurrence resolves — a single-day event
+   * has one occurrence and the scope is identical, and an event between days
+   * should report what is in the building rather than zero.
+   */
+  const slot = await resolveOccurrence(eventId)
+  const today = slot.occurrence ? { occurrence_id: slot.occurrence.id } : {}
+
   const [event, inside, staffInside, uniqueGuests] = await Promise.all([
     db.events.findUnique({
       where: { id: eventId },
       select: { max_capacity: true },
     }),
     db.event_check_ins.count({
-      where: { event_id: eventId, status: "checked_in" },
+      where: { event_id: eventId, status: "checked_in", ...today },
     }),
     db.event_check_ins.count({
-      where: { event_id: eventId, status: "checked_in", kind: "staff" },
+      where: { event_id: eventId, status: "checked_in", kind: "staff", ...today },
     }),
     db.event_check_ins.findMany({
       where: { event_id: eventId, kind: "attendee", check_in_time: { not: null } },
@@ -135,8 +165,14 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
   return occupancyFrom({
     inside,
     staffInside,
+    /*
+     * Deliberately NOT scoped to today. "Inside" is a question about right now;
+     * "how many people has this event drawn" is a question about the whole run,
+     * and scoping this one would make a three-day event forget its first two
+     * days every morning.
+     */
     uniqueAttendance: uniqueGuests.length,
-    capacity: await capacityForNow(eventId, event?.max_capacity ?? null),
+    capacity: capacityForNow(slot, event?.max_capacity ?? null),
   })
 }
 

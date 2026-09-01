@@ -53,6 +53,23 @@ const envSchema = z.object({
   // BOTH are set — half-configured is a mistake, not a policy, and enforcing
   // half of it would break one surface for no stated reason. Unset everywhere
   // means everything serves everywhere, which is right for local development.
+  /**
+   * Comma-separated ISO country codes the address search is restricted to, or
+   * empty for no restriction. Defaults to India, which is where the product
+   * launches.
+   *
+   * The restriction was hardcoded as `countrycodes=in` with nothing naming it,
+   * and it fails in the least helpful way available: an organiser outside India
+   * types their venue, gets **no results and no explanation**, and cannot fall
+   * back to typing coordinates because the form derives those from the pin. A
+   * product constraint no other file states, enforced silently by a query
+   * parameter.
+   *
+   * Note the asymmetry it creates, which is now deliberate rather than
+   * accidental: reverse geocoding (pin to address) has never been restricted,
+   * so dropping a pin abroad resolves fine while searching for it does not.
+   */
+  GEOCODE_COUNTRY_CODES: z.string().default("in"),
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
 
@@ -78,14 +95,6 @@ export function validateEnv(): Env {
   }
 
   return parsed.data
-}
-
-/**
- * Get validated environment variables
- * Use this instead of process.env directly
- */
-export function getEnv(): Env {
-  return envSchema.parse(process.env)
 }
 
 /**
@@ -128,18 +137,4 @@ export function googleSignInConfigWarning(
     return "GOOGLE_WEB_CLIENT_ID unset while a native client id is set — the mobile SDK audiences its id token to the *web* client, so every Google sign-in will fail on `aud`"
   }
   return null
-}
-
-/**
- * Check if running in production
- */
-export function isProduction(): boolean {
-  return process.env.NODE_ENV === "production"
-}
-
-/**
- * Check if running in development
- */
-export function isDevelopment(): boolean {
-  return process.env.NODE_ENV === "development"
 }

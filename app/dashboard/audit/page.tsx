@@ -34,10 +34,13 @@ export default async function AuditPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Scope only. The header already says entries are automatic and never
+          editable; what it cannot say is whose actions you are looking at,
+          because that depends on who is looking. */}
       <p className="text-[0.8125rem] text-muted-foreground">
         {page.scopedToOrg
-          ? "Everything your organisation's members have done. Actions by other organisations are not shown."
-          : "Every recorded action across the platform. Written automatically — entries cannot be edited or deleted from the dashboard."}
+          ? "Your organisation's members only — actions by other organisations are not shown."
+          : "Every organisation on the platform."}
       </p>
 
       {page.entries.length === 0 ? (

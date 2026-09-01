@@ -2,10 +2,12 @@ import { logger } from "@/lib/logger"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
-import { validateLocationInput } from "@/lib/geofence-input"
+import { canPublish, validateLocationInput } from "@/lib/geofence-input"
+import { resolveEventCity } from "@/lib/location"
 import { actorFor } from "@/lib/org-membership"
 import { db } from "@/lib/db"
-import slugify from "slugify"
+import { owningOrgFor } from "@/lib/event-ownership"
+import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
@@ -160,6 +162,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: location.error }, { status: 400 })
     }
 
+    /*
+     * The editor only ever posts `draft`, but the route accepts whatever the
+     * body says — so an event could be created already published with no
+     * coordinates at all. Check-in is GPS-gated, so that event 400s every
+     * attendee at the door with OUT_OF_RANGE, and the app looks broken rather
+     * than the event looking unfinished.
+     *
+     * `canPublish` has existed for exactly this and had no caller outside its
+     * own test; the Overview's blocker badge was advisory only.
+     */
+    if ((status ?? "draft") === "published") {
+      const gate = canPublish({
+        latitude: latitude ?? null,
+        longitude: longitude ?? null,
+        geofence: location.values.geofence ?? null,
+      })
+      if (!gate.ok) {
+        return NextResponse.json({ error: gate.reason }, { status: 400 })
+      }
+    }
+
     // Debug: Log cover_image_url
     logger.info("Creating event - cover_image_url", { coverImageUrl: cover_image_url ?? null })
 
@@ -185,16 +208,53 @@ export async function POST(req: Request) {
     // Derived, never taken from the body — see lib/venue-link.ts.
     const venueLink = await resolveVenueLink(venue_id)
 
+    /*
+     * Resolved before the write, so a creator with no organisation is told at
+     * the moment they save rather than discovering it at the edit screen. A 400
+     * because it is a fixable problem with the account, not a server fault.
+     */
+    let owningOrgId: string | null
+    try {
+      owningOrgId = await owningOrgFor(session.user)
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "No owning organisation" },
+        { status: 400 }
+      )
+    }
+
+    /*
+     * The city is resolved here, once, rather than on every read.
+     *
+     * The discovery feed called `resolveEventCity` per event, and that
+     * reverse-geocodes through Nominatim whenever `city` is null -- so a page of
+     * twenty null-city rows fanned out twenty concurrent requests to a public
+     * API, on a user-facing path, bypassing the `/api/geocode` proxy that exists
+     * to stop exactly that.
+     *
+     * It was never a read-path question. An event's city is a fact about the
+     * event, decided when it is created, and it changes only when the
+     * coordinates do. Resolving it here means the read path has a value to
+     * serve and no reason to call anybody.
+     *
+     * Failure is not fatal: a null city costs a missing label on a card, and
+     * refusing to create an event because a geocoder is down is a much worse
+     * trade.
+     */
+    const resolvedCity = await resolveEventCity(city, latitude, longitude)
+
     const event = await db.events.create({
       data: {
         ...venueLink,
         title,
-        slug: slugify(title, { lower: true, strict: true }),
+        // Suffixed when taken. `slugify(title)` alone turned a second "Summer
+        // Sessions" into a P2002 the organiser saw as an internal error.
+        slug: await uniqueEventSlug(title),
         description,
         short_description,
         venue_name,
         address,
-        city,
+        city: resolvedCity,
         state,
         country,
         postal_code,
@@ -204,7 +264,14 @@ export async function POST(req: Request) {
         status: status ?? "draft",
         visibility: visibility ?? "public",
         max_capacity,
-        door_policy: door_policy ?? undefined,
+        /*
+         * Conditional spreads, not `?? undefined` — the same conversion as the
+         * sibling PATCH route, for the same reason: Prisma strips an undefined
+         * value rather than writing nothing, and that is the idiom
+         * `strictUndefinedChecks` exists to outlaw. `!= null` throughout, so
+         * `false` survives for the booleans and `0` for the radius.
+         */
+        ...(door_policy != null && { door_policy }),
         // Null for almost every event. The organiser is the only party who
         // knows a club night is 18+, and check-in is where it is enforced.
         min_age,
@@ -212,11 +279,21 @@ export async function POST(req: Request) {
         longitude,
         cover_image_url,
         external_link,
-        is_featured: is_featured ?? undefined,
-        is_recurring: is_recurring ?? undefined,
-        check_in_radius: location.values.check_in_radius ?? undefined,
-        geofence: location.values.geofence ?? undefined,
+        ...(is_featured != null && { is_featured }),
+        ...(is_recurring != null && { is_recurring }),
+        ...(location.values.check_in_radius != null && {
+          check_in_radius: location.values.check_in_radius,
+        }),
+        ...(location.values.geofence != null && { geofence: location.values.geofence }),
+        /*
+         * `organizer_id` records who created the row; `organizer_org_id` is who
+         * can act on it. Only the second is an authorization input, and until
+         * now nothing in production wrote it -- so `eventPermissions` could
+         * never match the organiser branch and a creator could not edit the
+         * event they had just saved.
+         */
         organizer_id: session.user.id,
+        organizer_org_id: owningOrgId,
         details: {
           create: {
             full_description: resolvedFullDescription,
@@ -228,45 +305,53 @@ export async function POST(req: Request) {
             covid_guidelines,
           },
         },
-        categories: Array.isArray(category_ids) && category_ids.length > 0
+        ...(Array.isArray(category_ids) && category_ids.length > 0
           ? {
-              create: category_ids.map((categoryId: string, index: number) => ({
-                category: {
-                  connect: { id: categoryId },
-                },
-                primary: categoryId === primary_category_id,
-                created_at: new Date(Date.now() + index),
-              })),
+              categories: {
+                create: category_ids.map((categoryId: string, index: number) => ({
+                  category: { connect: { id: categoryId } },
+                  primary: categoryId === primary_category_id,
+                  created_at: new Date(Date.now() + index),
+                })),
+              },
             }
-          : undefined,
+          : {}),
         /*
          * Ticked by the organiser, not inherited from the venue. The venue
          * layer that would pre-tick these is deliberately unbuilt — an unowned
          * venue has no list to suggest from, and almost no venue is owned.
          * See `docs/AMENITIES.md`.
          */
-        amenities: Array.isArray(amenity_ids) && amenity_ids.length > 0
+        ...(Array.isArray(amenity_ids) && amenity_ids.length > 0
           ? {
-              create: amenity_ids.map((amenityId: string) => ({
-                amenity: { connect: { id: amenityId } },
-              })),
+              amenities: {
+                create: amenity_ids.map((amenityId: string) => ({
+                  amenity: { connect: { id: amenityId } },
+                })),
+              },
             }
-          : undefined,
-        media: Array.isArray(media_items) && media_items.length > 0
+          : {}),
+        ...(Array.isArray(media_items) && media_items.length > 0
           ? {
-              create: media_items.map((item: Record<string, unknown>, index: number) => ({
-                type: item.type as "image" | "video" | "document",
-                url: item.url as string,
-                thumbnail_url: (item.thumbnail_url as string) || undefined,
-                title: (item.title as string) || undefined,
-                description: (item.description as string) || undefined,
-                order:
-                  typeof item.order === "number"
-                    ? item.order
-                    : index,
-              })),
+              media: {
+                create: media_items.map((item: Record<string, unknown>, index: number) => ({
+                  type: item.type as "image" | "video" | "document",
+                  url: item.url as string,
+                  // `||`, not `!= null`: these are unvalidated strings off the
+                  // body, and an empty one should leave the column at its
+                  // default rather than write "".
+                  ...((item.thumbnail_url as string) && {
+                    thumbnail_url: item.thumbnail_url as string,
+                  }),
+                  ...((item.title as string) && { title: item.title as string }),
+                  ...((item.description as string) && {
+                    description: item.description as string,
+                  }),
+                  order: typeof item.order === "number" ? item.order : index,
+                })),
+              },
             }
-          : undefined,
+          : {}),
       },
     })
 

@@ -1,4 +1,15 @@
-export type DashboardRole = "app_admin" | "organizer" | "venue_owner"
+/**
+ * Roles that get a dashboard shell.
+ *
+ * Kept in step with `user_role` by `__tests__/dashboard-view.test.ts`, which
+ * exists because the nav gate drifted from `lib/rbac.ts` once already and a
+ * whole role was locked out of a screen the authorization layer had always been
+ * willing to serve.
+ *
+ * `attendee` is deliberately absent: attendees are mobile-only and
+ * `middleware.ts` redirects them away.
+ */
+export type DashboardRole = "app_admin" | "organizer" | "venue_owner" | "sponsor"
 
 /* -------------------------------------------------------------------------- */
 /* Shared                                                                      */
@@ -92,6 +103,24 @@ export interface CityRow {
   events: number
   rsvps: number
   favourites: number
+  /**
+   * Distinct people who looked for events here and found none.
+   *
+   * `city_demand` has been written on every miss since it was added and read by
+   * nothing. This is the reader — and the row set is now the UNION of cities
+   * with events and cities with demand, because the old list was built by
+   * iterating events and so a city with demand and zero events could not appear
+   * in it at all (C12). That is precisely the city the number exists for.
+   */
+  waiting: number
+  /**
+   * Enough people waiting, and nobody serving them.
+   *
+   * A decision rather than a number, because a metric with no decision rule is
+   * a metric nobody acts on — which is how this table came to be written for
+   * months and read never.
+   */
+  launchReady: boolean
 }
 
 /**
@@ -123,6 +152,8 @@ export interface AdminOverview {
   /** The window these figures cover, for the tiles' hint text. */
   rangeLabel: string
   publishingHosts: { publishing: number; total: number }
+  /** Events we listed ourselves. Never host liquidity — see `hostSupply`. */
+  curated: { published: number; unclaimed: number }
   growth: Array<{ label: string; signups: number; active: number }>
   funnel: Array<{ label: string; value: number }>
   supply: OrganiserSupplyRow[]
@@ -173,3 +204,24 @@ export interface VenueOverview {
 }
 
 export type DashboardOverview = OrganizerOverview | AdminOverview | VenueOverview
+
+/**
+ * One venue *record*, for the admin index.
+ *
+ * Deliberately not `VenueRow`, which is the venue owner's utilisation view —
+ * nights per week, ratings, next booking. That answers "how is my building
+ * doing"; this answers "what venues exist, who owns each, and which are
+ * unclaimed", which is what `dashboard-nav.ts` has described all along while
+ * pointing at a list of user accounts.
+ */
+export interface VenueRecordRow {
+  id: string
+  name: string
+  city: string | null
+  /** The owning organisation's name, or null when nobody has claimed it. */
+  owner: string | null
+  events: number
+  /** Claims waiting on a decision. A venue can attract more than one. */
+  pendingClaims: number
+  status: string
+}

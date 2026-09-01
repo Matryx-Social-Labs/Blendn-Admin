@@ -19,6 +19,7 @@ import type { EventFormValues } from "@/components/event-form/schema"
 import { VenuePicker } from "@/components/event-form/venue-picker"
 import { venueById, type VenueOption } from "@/lib/venue-actions"
 import { validateGeofence } from "@/lib/geofence"
+import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
 
 export function LocationSection({
   form,
@@ -27,9 +28,27 @@ export function LocationSection({
   form: UseFormReturn<EventFormValues>
   onLocationChange: (data: LocationData) => void
 }) {
-  const checkInRadius = form.watch("check_in_radius") ?? 100
-  const initialLat = form.getValues("latitude")
-  const initialLng = form.getValues("longitude")
+  const checkInRadius = form.watch("check_in_radius") ?? DEFAULT_CHECK_IN_RADIUS_M
+  /*
+   * `watch`, not `getValues` — robustness, and NOT the bug.
+   *
+   * The obvious story is that `getValues` does not subscribe, so the pin never
+   * heard about a picked venue. That story is wrong, and the recorded control
+   * is what showed it: reverting this line to `getValues` leaves
+   * `e2e/venue-pin.spec.ts` **passing**. The section re-renders anyway, because
+   * `venue_id` two lines below is watched and changes at the same moment, and
+   * `getValues` is re-read during that render.
+   *
+   * So it worked by coincidence — one field's subscription carrying another
+   * field's value. The actual defect was in `LocationPicker`, whose map effect
+   * had `[]` deps and could not act on a changed prop however it arrived.
+   *
+   * `watch` stays because depending on a sibling's re-render is a trap: remove
+   * or memoise that `venue_id` watch and the pin silently stops following,
+   * with nothing in this file to explain why.
+   */
+  const initialLat = form.watch("latitude")
+  const initialLng = form.watch("longitude")
 
   const [venue, setVenue] = useState<VenueOption | null>(null)
   const venueId = form.watch("venue_id")

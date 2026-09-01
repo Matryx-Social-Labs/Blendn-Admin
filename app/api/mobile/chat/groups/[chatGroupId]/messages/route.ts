@@ -4,14 +4,13 @@ import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { emitChatMessage } from "@/lib/socket-server"
-import { notifyGroupMessage } from "@/lib/push-notifications"
+import { tallyReactions } from "@/lib/reactions"
+import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
 import { checkKeywords } from "@/lib/moderation/keyword-filter"
-import { checkContactInfo } from "@/lib/moderation/contact-info"
-import { checkTextContent } from "@/lib/moderation/openai-moderation"
+import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import {
   successResponse,
   errorResponse,
@@ -73,15 +72,6 @@ export async function GET(
     if (!isMember) {
       return forbiddenResponse("You are not a member of this chat group")
     }
-
-    // Build anonymous name map
-    const allMembers = await db.chat_group_members.findMany({
-      where: { chat_group_id: chatGroupId },
-      select: { user_id: true, anonymous_name: true },
-    })
-    const anonMap = new Map(
-      allMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"])
-    )
 
     // Build query for messages — include moderation-hidden messages
     // so the sender can see "This message was removed" placeholders
@@ -163,11 +153,47 @@ export async function GET(
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()
 
+    /*
+     * The pseudonym map, scoped to this page rather than to the whole room.
+     *
+     * This used to load every `chat_group_members` row for the group before
+     * the messages were even fetched — so a 500-person room paid 500 rows to
+     * render 50 messages, and the cost grew with the room while the need did
+     * not. The map has exactly two consumers, the sender and the quoted
+     * message's author, and both are inside the page.
+     *
+     * Same answer, bounded by `limit`. Not a `take:` — a cap here would be
+     * wrong rather than slow, because the members a cap dropped would render
+     * as "Attendee" and that is the K3.2 misattribution bug, arriving by a
+     * different route.
+     */
+    const pseudonymFor = new Set<string>()
+    for (const m of messagesToReturn) {
+      pseudonymFor.add(m.user.id)
+      if (m.parent_message) pseudonymFor.add(m.parent_message.user.id)
+    }
+    const pageMembers = pseudonymFor.size
+      ? await db.chat_group_members.findMany({
+          where: { chat_group_id: chatGroupId, user_id: { in: [...pseudonymFor] } },
+          select: { user_id: true, anonymous_name: true },
+        })
+      : []
+    const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
+
     return successResponse({
       messages: messagesToReturn.map((m) => {
         const isHidden = m.moderation_status === "hidden"
         return {
           ...m,
+          /*
+           * Counts, not names. The spread above carries `reactions` straight
+           * out of the row — `{ id, emoji, user_id }` per reaction — so this
+           * route disclosed exactly who reacted to what, to everybody in the
+           * room. `docs/CHAT.md:119`: "reactions show the count only, never
+           * who". Overridden here rather than narrowed in the `select`, because
+           * `user_id` is what `mine` is computed from.
+           */
+          reactions: isHidden ? [] : tallyReactions(m.reactions, user.userId),
           // Redact content for moderation-hidden messages; show placeholder
           content: isHidden ? null : m.content,
           moderation_hidden: isHidden,
@@ -337,7 +363,7 @@ export async function POST(
     }
 
     // Spam check (sync — block before saving)
-    const spamResult = checkSpam(user.userId, chatGroupId, content)
+    const spamResult = await checkSpam(user.userId, chatGroupId, content)
     if (spamResult && spamResult.action === "hide") {
       return errorResponse(
         spamResult.reason || "Message blocked as spam. Please slow down.",
@@ -376,20 +402,21 @@ export async function POST(
     }
 
     /*
-     * Contact details — flagged, never blocked, and deliberately after the
-     * hide gate above.
+     * Contact details are detected by `moderateMessage`, not here.
      *
-     * The message is sent. This records that somebody handed out a number or a
-     * handle in a pseudonymous room, so the pattern is visible to a moderator;
-     * it does not refuse them. Refusing would teach the boundary in one message
-     * and cost the visibility too -- the next attempt is spelled out, and now
-     * there is no flag either.
+     * This route used to run `checkContactInfo` itself, and
+     * `events/[eventId]/chat` did not — so the event room, the surface this
+     * product is actually about, never detected a phone number or a handle.
+     * The check now lives in the pipeline, which both routes call and a third
+     * one cannot forget.
      *
-     * The client shows the warning *before* sending, from the same module, so
-     * what a sender was told and what a moderator sees cannot disagree.
+     * It flags rather than refusing. Taking a conversation off-platform is
+     * where there is no block, no report and no record, so a moderator should
+     * see the pattern — refusing would teach the sender the boundary and cost
+     * the visibility, and the next attempt would be spelled out with no flag
+     * behind it. The client shows its warning before sending, from the same
+     * module, so what a sender was told and what a moderator sees agree.
      */
-    const contactResult = checkContactInfo(content)
-
     // Create the message
     const message = await db.chat_messages.create({
       data: {
@@ -429,9 +456,15 @@ export async function POST(
      * message that is both hidden and full of contact details still carries
      * both signals into review.
      */
-    if (contactResult) {
-      void flagForReview(message.id, chatGroupId, user.userId, contactResult)
-    }
+    /*
+     * Did anybody actually look at this message?
+     *
+     * Only the inline text check can answer yes. Media goes to the async
+     * pipeline, which records its own outcome, and so does anything the inline
+     * check failed to examine -- so `clean` is written here only when this
+     * request examined the content itself and found nothing.
+     */
+    let examinedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     // Run OpenAI moderation before broadcasting. If it takes >1s, emit anyway
@@ -446,12 +479,22 @@ export async function POST(
          * thing that stops being harmless under load.
          */
         let timeoutHandle: NodeJS.Timeout | undefined
-        const openaiResult = await Promise.race([
+        /*
+         * The timeout is a *reason*, not a verdict.
+         *
+         * This resolved to `null`, which was the same value the check returns
+         * for clean content -- and for a missing API key, and for an API error.
+         * Four facts in one value, and the code below then wrote
+         * `moderation_status: "clean"` for all of them.
+         */
+        const openaiCheck = await Promise.race([
           checkTextContent(content),
-          new Promise<null>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve(null), 1000)
+          new Promise<ModerationCheck>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
           }),
         ]).finally(() => clearTimeout(timeoutHandle))
+        examinedInline = openaiCheck.checked
+        const openaiResult = openaiCheck.checked ? openaiCheck.result : null
         if (openaiResult && openaiResult.action === "hide") {
           // Hide immediately — never broadcast to other users
           await hideMessage(message.id, chatGroupId, user.userId, openaiResult)
@@ -469,9 +512,17 @@ export async function POST(
         if (openaiResult && openaiResult.action === "flag") {
           void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
         }
-        // If timeout (null) or clean, proceed to emit
-        // For timeout case, fire-and-forget the full moderation pipeline as fallback
-        if (!openaiResult && content.length > 5) {
+        /*
+         * Anything the inline check did not examine goes to the full pipeline,
+         * which owns the verdict and will record `unchecked` if it cannot get
+         * one either.
+         *
+         * The `content.length > 5` guard is gone. It meant a short message that
+         * timed out was examined by nobody and then recorded as clean, and short
+         * messages are not a category that needs less moderation -- a slur is
+         * five characters.
+         */
+        if (!openaiCheck.checked) {
           void moderateMessage(message.id, content, type, user.userId, chatGroupId)
         }
       } catch {
@@ -490,19 +541,35 @@ export async function POST(
       )
     }
 
-    // Mark as clean if we got past all checks
-    if (!message.moderation_status || message.moderation_status === "pending") {
-      void db.chat_messages.update({
-        where: { id: message.id },
-        data: { moderation_status: "clean" },
-      }).catch((err: unknown) =>
-      // Push is best-effort and must not fail the request, but swallowing the
-      // error entirely means a broken push pipeline is invisible.
-      logger.warn("Push notification failed", {
-        context: "group chat message",
-        error: err instanceof Error ? err.message : String(err),
-      })
-    )
+    /*
+     * Clean means somebody looked and found nothing.
+     *
+     * This wrote `clean` unconditionally -- including when the block above had
+     * just handed the message to the async pipeline because the model was
+     * unreachable or timed out. So the inline write RACED the pipeline's
+     * verdict, and being the later write it could overwrite a `flagged` with a
+     * `clean`.
+     *
+     * Now it only claims the verdict it actually has. Everything else is the
+     * pipeline's to record, including `unchecked`.
+     */
+    if (
+      examinedInline &&
+      (!message.moderation_status || message.moderation_status === "pending")
+    ) {
+      void db.chat_messages
+        .update({
+          where: { id: message.id },
+          data: { moderation_status: "clean" },
+        })
+        .catch((err: unknown) =>
+          // Best-effort: a failure here leaves the message pending for the
+          // sweeper rather than failing the send.
+          logger.warn("Failed to record moderation outcome", {
+            context: "group chat message",
+            error: err instanceof Error ? err.message : String(err),
+          })
+        )
     }
 
     // Update chat group's last_message_at
@@ -515,50 +582,24 @@ export async function POST(
     const senderAnonName = membership.anonymous_name || "Attendee"
 
     /*
-     * Everyone in a block relationship with the sender, in either direction.
+     * Socket then push, block-filtered, in `lib/room-delivery.ts`.
      *
-     * Fetched once and used for all three delivery paths below -- the live
-     * socket, and the push fan-out. The REST history above filters on the same
-     * set, so the three surfaces cannot disagree about who is in the room.
+     * Shared with the event-chat POST, which persisted a message and stopped --
+     * no emit, no push -- so a message sent from that screen was invisible to
+     * anyone who already had the room open. Two write paths into one table, and
+     * only one of them delivered.
+     *
+     * Awaited rather than fire-and-forget: it never throws, and awaiting means
+     * the sender's 200 is not ahead of the room's copy.
      */
-    const senderBlocked = await blockCounterparties(user.userId)
-
-    // Emit real-time message — only reaches here if moderation passed
-    emitChatMessage(
+    await deliverToRoom({
       chatGroupId,
-      {
-        id: message.id,
-        content: message.content,
-        type: message.type,
-        userId: message.user_id,
-        userName: senderAnonName,
-        userImage: undefined,
-        createdAt: message.created_at.toISOString(),
-        parentId: message.parent_id || undefined,
-      },
-      senderBlocked
-    )
-
-    // Send push notifications to group members (async, don't await)
-    db.chat_group_members
-      .findMany({
-        where: {
-          chat_group_id: chatGroupId,
-          status: "active",
-          // A lock screen is the loudest surface in the product. Somebody who
-          // blocked this sender must not get a notification from them.
-          ...(senderBlocked.length ? { user_id: { notIn: senderBlocked } } : {}),
-        },
-        select: { user_id: true },
-      })
-      .then((members) => {
-        const memberIds = members.map((m) => m.user_id)
-        const groupName = chatGroup.name || "Group Chat"
-        const messagePreview = type === "text" ? content : type === "image" ? "📷 Photo" : "🎥 Video"
-
-        return notifyGroupMessage(memberIds, senderAnonName, groupName, messagePreview, chatGroupId, user.userId)
-      })
-      .catch((err) => logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) }))
+      groupName: chatGroup.name,
+      senderId: user.userId,
+      senderAnonName,
+      message,
+      preview: previewFor(type, content),
+    })
 
     // Return anonymized response
     return successResponse({

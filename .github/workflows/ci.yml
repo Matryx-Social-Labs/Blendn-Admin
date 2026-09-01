@@ -10,6 +10,10 @@ on:
   push:
     branches: [dev]
     paths-ignore: ["**.md", "docs/**", ".benchmarks/**"]
+  # Nightly, so the two exhaustive e2e sweeps still run over the whole surface
+  # without charging every commit for them. See the E2E step below.
+  schedule:
+    - cron: "0 3 * * *"
 
 # Pushing twice in quick succession used to leave the first run grinding to
 # completion against code nobody was waiting on.
@@ -67,6 +71,23 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit -p tsconfig.json
 
+      # There was no audit step at all, which is how two Dependabot alerts sat
+      # open for over a week against versions the lockfile had already moved
+      # past. Nothing in CI ever asked the question, so nothing ever answered it.
+      #
+      # `npm audit` was the accurate source in that disagreement, not the
+      # suspect one: GitHub's own advisories put js-yaml's fix at 4.3.1 and
+      # nanoid's at 3.3.18, and both were installed at exactly those versions.
+      # Dependabot alerts do not re-evaluate when a lockfile changes by some
+      # other route, so they went stale and read as two live high-severity
+      # findings in production code.
+      #
+      # High and above only. Moderate advisories in build-time transitive
+      # dependencies would make this noisy, and a check people learn to ignore
+      # is worse than no check.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
   test:
     runs-on: ubuntu-latest
 
@@ -106,8 +127,11 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Push database schema
-        run: npm run db:push
+      # `migrate deploy`, so the integration suites run against a schema built
+      # the way production builds one. `db push` here would test a schema no
+      # deployed environment ever has.
+      - name: Apply migrations from empty
+        run: npm run db:migrate
 
       - name: Test
         run: npm test -- --ci
@@ -118,6 +142,138 @@ jobs:
       # over Railway's public proxy. Check the test COUNT, not the duration.
       - name: Integration tests
         run: npm run test:integration -- --ci
+
+  # The lane that opens the app.
+  #
+  # Everything above tests the product without running it: the unit suite mocks
+  # `@/lib/db`, and the integration suite executes SQL and renders no page.
+  # Neither can see what a browser sees — three bugs on the curation screens and
+  # two on the claim funnel were found by opening a page, and none was visible
+  # to tsc, jest or a real `next build`.
+  #
+  # Runs against the PRODUCTION server (`npm run start` -> `dist/server.js`),
+  # not `next dev`. `server.ts` is the entry point that attaches Socket.io and
+  # starts the background loops, and it is what production executes; a lane that
+  # booted `next dev` would be testing something nobody ships.
+  e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: blendn_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Fixed, so the seeded world is reproducible and the suite can sign in.
+      SEED_PASSWORD: Blendn-CI-2026!
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+      - uses: actions/cache@v6
+        id: modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      # `migrate deploy`, not `db push` — and this step is the guard.
+      #
+      # It used to be `db push`, because `migrate deploy` failed against a
+      # clean database: the chain had no baseline (the schema was originally
+      # created by push, and migrations were written on top of one that already
+      # existed), two migrations written on the same day depended on each other
+      # in the reverse of their alphabetical order, and three moderation
+      # objects were never written down at all.
+      #
+      # All four are fixed. Using `migrate deploy` here is what keeps them
+      # fixed: this lane builds a database from empty on every run, so the next
+      # migration that cannot replay fails CI rather than waiting for a
+      # disaster recovery to discover it.
+      - name: Apply migrations from empty
+        run: npm run db:migrate
+
+      - name: Seed the QA world
+        run: npm run seed:qa -- --apply
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Detached, with its output on disk rather than in this step's log.
+      #
+      # `npm run start &` left the server as an orphan of the step's shell and
+      # sent its stdout into the step log, so a crash mid-suite produced no
+      # usable record — the run that prompted this died with 25 tests green and
+      # nothing to read.
+      - name: Start the production server
+        run: |
+          nohup npm run start > /tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          # Poll the health endpoint rather than adding a dependency for it.
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3000/api/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "server did not become healthy in 60s"
+          tail -50 /tmp/server.log
+          exit 1
+
+      # Two of the 31 specs are exhaustive sweeps — `responsive` walks 27 pages
+      # at three widths, `role-surfaces` walks 30 routes as five roles. Between
+      # them that is 231 navigations and most of this lane's cost; the other 25
+      # specs finish in about twenty seconds.
+      #
+      # The runner is also much slower than a laptop: a mobile-contract test
+      # that takes 0.3s locally took 21.5s here. A run was killed mid-sweep at
+      # test 26 of 31 with the whole product already verified, which is the
+      # worst possible place to spend the budget.
+      #
+      # So a sweep over the entire surface is valuable without being valuable
+      # *per commit*: PRs skip it, and it runs nightly or on a PR labelled
+      # `full-e2e` when a change plausibly moves layout or role access.
+      - name: E2E
+        env:
+          # Skipped on ordinary PRs; runs nightly and under the `full-e2e`
+          # label. `$^` matches nothing, so nothing is excluded.
+          E2E_EXCLUDE: >-
+            ${{ (github.event_name == 'schedule'
+                 || contains(github.event.pull_request.labels.*.name, 'full-e2e'))
+                && '$^'
+                || '@sweep' }}
+        run: npm run test:e2e -- --grep-invert="$E2E_EXCLUDE"
+
+      # The point of the lane: somebody who did not write the test can see what
+      # broke without rerunning it.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
 
   build:
     runs-on: ubuntu-latest

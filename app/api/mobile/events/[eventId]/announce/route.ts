@@ -2,7 +2,8 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { actorFor, maySponsorFor } from "@/lib/org-membership"
+import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
+import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
 import {
   broadcastMayCarryMedia,
   canBroadcast,
@@ -48,6 +49,7 @@ export async function POST(
         id: true,
         organizer_id: true,
         ...eventPermissionSelect,
+        ...broadcastAuthorSelect,
         chat_group: {
           select: { id: true },
         },
@@ -100,9 +102,9 @@ export async function POST(
     if (!sender) return forbiddenResponse("You cannot broadcast to this event")
 
     const actor = await actorFor({ id: sender.id, role: sender.role })
-    const maySponsor = kind === "sponsored" ? await maySponsorFor(actor) : false
+    const grant = kind === "sponsored" ? await resolveSponsorGrant(actor, eventId) : null
 
-    if (!canBroadcast(actor, event, kind, maySponsor)) {
+    if (!canBroadcast(actor, event, kind, grant ?? undefined)) {
       /*
        * One message for all three refusals, deliberately.
        *
@@ -169,9 +171,18 @@ export async function POST(
      * and moderator deletes against that id all missed their target. The
      * `chat_messages` id is emitted now.
      */
+    /*
+     * The organisation, not the person. See `lib/broadcast-author.ts`.
+     *
+     * This named the individual who typed it -- persisted into
+     * `chat_messages.content`, in a room where every attendee is a pseudonym.
+     * The dashboard twin was worse (it fell back to the email address), but
+     * both put a real person's name into the pseudonymous room.
+     */
+    const author = broadcastAuthorName(event)
     const chatContent =
       kind === "announcement"
-        ? `📢 [Announcement from ${sender.name ?? "Organiser"}]\n${content.trim()}`
+        ? `📢 [Announcement from ${author}]\n${content.trim()}`
         : content.trim()
 
     const chatMsg = event.chat_group?.id
@@ -179,7 +190,23 @@ export async function POST(
           data: {
             chat_group_id: event.chat_group.id,
             user_id: authUser.userId,
-            type: "text",
+            /*
+             * `announcement`, not `text` — the enum value has existed since the
+             * schema was written and nothing had ever written it.
+             *
+             * The kind was carried only by the `📢 [Announcement from …]`
+             * prefix on the content, which any attendee can type. On reload the
+             * marker survived as a string and nothing structural said what this
+             * message was, so the client could not style it, moderation could
+             * not exclude it, and the sentiment sweeper counted it as room mood
+             * (K3.1–K3.3, K3.7).
+             *
+             * Safe to move because `broadcastMayCarryMedia` is true only for
+             * `sponsored`: an announcement is text by rule, so nothing is lost
+             * by spending the column on the kind. That is NOT true of a
+             * sponsored send — see the note in `lib/sponsored-scheduler.ts`.
+             */
+            type: "announcement",
             content: chatContent,
             metadata: { announcement_id: announcement.id },
           },
@@ -209,8 +236,14 @@ export async function POST(
          * a user message can never occupy that shape, so the label cannot be
          * forged by somebody choosing a convincing pseudonym.
          */
-        userName: kind === "system" ? "Blend'n" : (sender.name ?? "Organiser"),
-        userImage: kind === "system" ? undefined : (sender.image ?? undefined),
+        userName: kind === "system" ? "Blend'n" : author,
+        /*
+         * No photograph either. A broadcast is the organisation speaking, and
+         * this shipped the individual's avatar into the pseudonymous room
+         * beside their name -- a face identifies as surely, which is the
+         * argument this route already makes about attendee media forty lines up.
+         */
+        userImage: undefined,
         /*
          * Not emitted, deliberately.
          *

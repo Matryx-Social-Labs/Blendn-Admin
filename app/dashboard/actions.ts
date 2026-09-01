@@ -7,10 +7,14 @@ import type { user_role } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
+import { cityDemand } from "@/lib/demand"
+import { cityKey } from "@/lib/address"
 import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
 import { normaliseVenueName } from "@/lib/venue-name"
+import { repeatAttendees, turnUpPct, noShowPct } from "@/lib/counting"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import type {
   AdminOverview,
   CityRow,
@@ -22,6 +26,7 @@ import type {
   PacingPoint,
   RatingCounts,
   VenueOverview,
+  VenueRecordRow,
   VenueRow,
 } from "@/lib/dashboard-types"
 
@@ -34,6 +39,34 @@ const WINDOW_WEEKS = 8
 
 function eventScope(userId?: string) {
   return { deleted_at: null, ...(userId ? { organizer_id: userId } : {}) }
+}
+
+/**
+ * Supply a *host* published — curated rows excluded, all of them.
+ *
+ * Host liquidity answers "are real organisers publishing?", and the whole
+ * premise of curation is that they are not yet and we are filling the gap
+ * ourselves. Curated events carry `organizer_id = <the admin who curated
+ * them>`, because that column records who *created* the row — so every
+ * organiser-keyed supply query counted a founder as a host. Three curated
+ * events read as `PUBLISHING HOSTS 2 of 3`. Curate enough and the number
+ * reports a healthy host base made entirely of us, which is the opposite of
+ * what it exists to say.
+ *
+ * **Claimed curated events are excluded too, and that is deliberate.** A claim
+ * writes `organizer_org_id` and leaves `organizer_id` pointing at the admin
+ * (CLAUDE.md: it is the audit column, never rewritten). So for a claimed row
+ * the organiser-keyed table would still attribute it to a founder. The table
+ * is keyed on the wrong column to represent any curated row, so it excludes
+ * the lot and reports them on their own line instead. That undercounts a
+ * claimed event by one — the safe direction, since the failure it replaces
+ * was inflation.
+ *
+ * `lib/event-host.ts` answers the same question for the mobile payload and
+ * says the same thing: the curating admin is never the host.
+ */
+function hostSupply(userId?: string) {
+  return { ...eventScope(userId), curated_at: null }
 }
 
 function pct(part: number, whole: number) {
@@ -148,12 +181,15 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
         _count: {
           select: {
             rsvps: { where: { status: "going" } },
-            check_ins: { where: { status: { in: ATTENDED } } },
           },
         },
       },
     }),
   ])
+
+  // Turn-up per event, in one grouped query rather than 25 `_count`s that
+  // cannot say DISTINCT.
+  const attendedPerEvent = await distinctAttendeeCounts(eventRows.map((e) => e.id))
 
   // No-show rate over the last 30 days, and the 30 before it, so the delta says
   // whether it is getting better rather than just what it is.
@@ -161,28 +197,46 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     db.event_rsvps.count({
       where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
     }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
+    /*
+     * Grouped by user, not counted. `event_check_ins` holds one row per person
+     * per day, so a three-day conference contributed three attendances against
+     * one RSVP — turn-up clamped to exactly 100% and no-show floored at 0%,
+     * which is the number this whole block exists to report.
+     */
+    db.event_check_ins.groupBy({
+      by: ["user_id"],
+      where: { status: { in: ATTENDED }, kind: "attendee", event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
     }),
     db.event_rsvps.count({
       where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
     }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
-    }),
     db.event_check_ins.groupBy({
       by: ["user_id"],
+      where: { status: { in: ATTENDED }, kind: "attendee", event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
+    }),
+    /*
+     * Rows, not a grouped row-count.
+     *
+     * This grouped by user and asked `_count._all > 1`, which counts *rows*.
+     * `event_check_ins` holds one row per person per day, so somebody who
+     * attended both days of one conference was two rows and read as a
+     * returning attendee — on the tile titled "came back for a 2nd event".
+     * `repeatAttendees` folds on distinct `event_id` instead.
+     */
+    db.event_check_ins.findMany({
       where: { status: { in: ATTENDED }, event: eventScope(userId) },
-      _count: { _all: true },
+      select: { user_id: true, event_id: true, kind: true },
     }),
   ])
 
-  // Turn-up capped at 100 (walk-ins check in without RSVPing), so no-show is
-  // floored at 0 rather than going negative.
-  const turnUpNow = pct(Math.min(attendedNow, committedNow), committedNow)
-  const turnUpPrior = pct(Math.min(attendedPrior, committedPrior), committedPrior)
-  const noShowNow = turnUpNow === null ? null : 100 - turnUpNow
-  const noShowPrior = turnUpPrior === null ? null : 100 - turnUpPrior
+  /*
+   * The clamp is gone. It was justified as "walk-ins check in without RSVPing",
+   * but its real job was absorbing the row-counting inflation above — and in
+   * doing so it hid the walk-ins it named. `noShowPct` floors at zero, because
+   * more people than RSVPs is zero no-shows plus some extra, not a negative.
+   */
+  const noShowNow = noShowPct(attendedNow.length, committedNow)
+  const noShowPrior = noShowPct(attendedPrior.length, committedPrior)
 
   let nextEvent: NextEvent | null = null
   let pacing: PacingPoint[] = []
@@ -242,7 +296,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     noShowRatePct: round1(noShowNow),
     noShowDelta:
       noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
-    repeatAttendees: repeatRows.filter((r) => r._count._all > 1).length,
+    repeatAttendees: repeatAttendees(repeatRows),
     averageRating: round1(ratingAggregate._avg.rating),
     ratingCount: ratingAggregate._count.rating,
     chatToday,
@@ -259,9 +313,9 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
           ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
           : null,
       turnUpPct:
-        event.start_time >= now || event._count.rsvps === 0
+        event.start_time >= now
           ? null
-          : Math.min(100, (event._count.check_ins / event._count.rsvps) * 100),
+          : turnUpPct(attendedPerEvent.get(event.id) ?? 0, event._count.rsvps),
     })),
   }
 }
@@ -298,6 +352,8 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     checkIns,
     hostAccounts,
     publishingHosts,
+    curatedPublished,
+    curatedUnclaimed,
     onboarded,
     rsvpUsers,
     checkedInUsers,
@@ -349,11 +405,22 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     db.user.count({ where: { role: { in: ["organizer", "venue_owner"] } } }),
     db.events
       .findMany({
-        where: { ...eventScope(), status: "published" },
+        where: { ...hostSupply(), status: "published" },
         select: { organizer_id: true },
         distinct: ["organizer_id"],
       })
       .then((rows) => rows.length),
+    db.events.count({
+      where: { ...eventScope(), status: "published", curated_at: { not: null } },
+    }),
+    db.events.count({
+      where: {
+        ...eventScope(),
+        status: "published",
+        curated_at: { not: null },
+        claimed_at: null,
+      },
+    }),
     /*
      * Funnel stages must be nested subsets, or the shape lies.
      *
@@ -403,7 +470,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }),
     db.events.groupBy({
       by: ["organizer_id", "status"],
-      where: eventScope(),
+      where: hostSupply(),
       _count: { _all: true },
     }),
     db.events.findMany({
@@ -453,7 +520,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }),
     db.events.groupBy({
       by: ["organizer_id"],
-      where: { ...eventScope(), status: "published" },
+      where: { ...hostSupply(), status: "published" },
       _max: { start_time: true },
     }),
   ])
@@ -475,14 +542,49 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }))
     .sort((a, b) => b.published - a.published)
 
+  /*
+   * Cities, keyed the way the rest of the codebase keys them.
+   *
+   * This folded on the raw `city` string, so "Bengaluru" and "bengaluru" were
+   * two rows in the table a founder reads to decide where to launch. `cityKey`
+   * is what `city_demand` stores and what the events cache normalises on;
+   * anything else here would guarantee the two sides never line up.
+   */
   const cityMap = new Map<string, CityRow>()
   for (const event of cityRows) {
     const city = event.city as string
-    const existing = cityMap.get(city) ?? { city, events: 0, rsvps: 0, favourites: 0 }
+    const key = cityKey(city)
+    const existing = cityMap.get(key) ?? {
+      city, events: 0, rsvps: 0, favourites: 0, waiting: 0, launchReady: false,
+    }
     existing.events += 1
     existing.rsvps += event._count.rsvps
     existing.favourites += event._count.favorites
-    cityMap.set(city, existing)
+    cityMap.set(key, existing)
+  }
+
+  /*
+   * C12: the list could not render the signal it existed to collect.
+   *
+   * Built by iterating events, so a city with demand and ZERO events could not
+   * appear at all -- which is exactly the city the number is for: somewhere
+   * people are looking and nobody is supplying.
+   */
+  for (const row of await cityDemand(50)) {
+    const existing = cityMap.get(row.cityKey)
+    if (existing) {
+      existing.waiting = row.waiting
+      existing.launchReady = row.launchReady
+    } else {
+      cityMap.set(row.cityKey, {
+        city: row.city,
+        events: 0,
+        rsvps: 0,
+        favourites: 0,
+        waiting: row.waiting,
+        launchReady: row.launchReady,
+      })
+    }
   }
 
   /*
@@ -531,6 +633,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     },
     rangeLabel: rangeLabel(range),
     publishingHosts: { publishing: publishingHosts, total: hostAccounts },
+    curated: { published: curatedPublished, unclaimed: curatedUnclaimed },
     growth,
     funnel: [
       { label: "signed up", value: users },
@@ -835,11 +938,12 @@ export async function getEventRows(): Promise<EventRow[]> {
       _count: {
         select: {
           rsvps: { where: { status: "going" } },
-          check_ins: { where: { status: { in: ATTENDED } } },
         },
       },
     },
   })
+
+  const attendedPerEvent = await distinctAttendeeCounts(events.map((e) => e.id))
 
   return events.map((event) => ({
     id: event.id,
@@ -854,8 +958,56 @@ export async function getEventRows(): Promise<EventRow[]> {
         ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
         : null,
     turnUpPct:
-      event.start_time >= now || event._count.rsvps === 0
+      event.start_time >= now
         ? null
-        : Math.min(100, (event._count.check_ins / event._count.rsvps) * 100),
+        : turnUpPct(attendedPerEvent.get(event.id) ?? 0, event._count.rsvps),
+  }))
+}
+
+/**
+ * Every venue record, for the admin index.
+ *
+ * `dashboard-nav.ts` has described this screen since it was written — "every
+ * venue record — who owns each, which are unclaimed" — and pointed at
+ * `/dashboard/venue-owners`, which is a list of *user accounts*. So the one
+ * role that can see every venue had no way to see any of them, the unclaimed
+ * venue nobody had assigned was invisible to the person who would assign it,
+ * and the venue detail page's own "← All venues" link went to a screen that
+ * redirected admins away.
+ *
+ * Records, not utilisation. The owner's view answers "how is my building
+ * doing"; this answers "what exists and who owns it", which is an operational
+ * question with a different shape and a different sort order.
+ */
+export async function getVenueRecords(): Promise<VenueRecordRow[]> {
+  const session = await getAuth()
+  if (session?.user?.role !== "app_admin") throw new Error("Forbidden")
+
+  const venues = await db.venues.findMany({
+    where: { deleted_at: null },
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      status: true,
+      owner_org: { select: { display_name: true } },
+      _count: {
+        select: {
+          events: { where: { deleted_at: null } },
+          claims: { where: { status: "pending" } },
+        },
+      },
+    },
+    orderBy: { name: "asc" },
+  })
+
+  return venues.map((venue) => ({
+    id: venue.id,
+    name: venue.name,
+    city: venue.city,
+    owner: venue.owner_org?.display_name ?? null,
+    events: venue._count.events,
+    pendingClaims: venue._count.claims,
+    status: venue.status,
   }))
 }

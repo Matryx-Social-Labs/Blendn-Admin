@@ -4,6 +4,8 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
+import { syncOccurrences } from "../lib/occurrences"
+import { storedBodyFor } from "../lib/push-notifications"
 
 /**
  * A world the QA team can actually test against.
@@ -89,6 +91,37 @@ const CITY = {
 } as const
 
 const ACCOUNTS = [
+  /*
+   * The three product owners, by name.
+   *
+   * A shared generic admin means a board full of actions nobody can attribute
+   * -- the audit log records who did a thing, and "Priya Menon" is nobody.
+   * These are the accounts the people running the product actually sign in as.
+   */
+  {
+    key: "sagar",
+    email: "sagar.kishore@blendn.app",
+    name: "Sagar Kishore",
+    role: "app_admin" as user_role,
+    org: null,
+    note: "Product owner. Full admin.",
+  },
+  {
+    key: "hemanth",
+    email: "hemanth.ramesh@blendn.app",
+    name: "Hemanth Ramesh",
+    role: "app_admin" as user_role,
+    org: null,
+    note: "Product owner. Full admin.",
+  },
+  {
+    key: "likhith",
+    email: "likhith.gowda@blendn.app",
+    name: "Likhith Gowda",
+    role: "app_admin" as user_role,
+    org: null,
+    note: "Product owner. Full admin.",
+  },
   {
     key: "admin",
     email: "priya.menon@blendn.app",
@@ -128,6 +161,42 @@ const ACCOUNTS = [
      */
     note: "NEGATIVE CONTROL. Dashboard role, no org — must be denied on every event.",
   },
+  /*
+   * The fifth role, and the one with no fixture at all until now.
+   *
+   * `getDashboardOverview` branches on app_admin and venue_owner, then falls
+   * through to the organiser query scoped to `organizer_id = <this user>` — so
+   * a sponsor's home screen is permanently all-zero. That cannot be seen, let
+   * alone fixed, without an account to sign in as.
+   */
+  {
+    key: "sponsor",
+    email: "meera.iyer@blendn.app",
+    name: "Meera Iyer",
+    role: "sponsor" as user_role,
+    org: "brands" as const,
+    note: "Member of the org that BUYS placements. Brand, placements, charges.",
+  },
+] as const
+
+/**
+ * People to fill the rooms.
+ *
+ * Attendees are mobile-only — `canAccessDashboard` bounces them — but nothing
+ * about chat, matching, check-in, occupancy or any organiser number can be
+ * exercised without real rows behind them. Six is enough to cross the
+ * disclosure floor of five and still have a room that sits under it.
+ */
+const ATTENDEES = [
+  { email: "ananya.b@blendn.app", name: "Ananya Bhat", age: 27 },
+  { email: "rohan.d@blendn.app", name: "Rohan Desai", age: 31 },
+  { email: "kavya.n@blendn.app", name: "Kavya Nair", age: 24 },
+  { email: "imran.q@blendn.app", name: "Imran Qureshi", age: 29 },
+  { email: "sneha.p@blendn.app", name: "Sneha Pillai", age: 35 },
+  { email: "vikram.s@blendn.app", name: "Vikram Shetty", age: 22 },
+  /* Under 18, so the age gate has something to refuse rather than only
+     something to admit. */
+  { email: "teen.tester@blendn.app", name: "Aarav Menon", age: 16 },
 ] as const
 
 const hoursFromNow = (h: number) => new Date(Date.now() + h * 3_600_000)
@@ -396,7 +465,9 @@ async function main() {
 
   if (!APPLY) {
     console.log("Would create:")
-    console.log(`  2 organisations, ${ACCOUNTS.length} accounts, 3 venues, ${EVENTS.length} events`)
+    console.log(`  3 organisations, ${ACCOUNTS.length} dashboard accounts, ${ATTENDEES.length} attendees,`)
+    console.log(`  3 venues, ${EVENTS.length} events, plus curated events, claims in every state,`)
+    console.log(`  applications in every state, check-ins, chat, sponsors and city demand`)
     for (const a of ACCOUNTS) console.log(`    ${a.role.padEnd(12)} ${a.email}`)
     for (const e of EVENTS) console.log(`    ${e.slug.padEnd(22)} ${e.why}`)
     console.log("\nRe-run with --apply to write.\n")
@@ -407,6 +478,7 @@ async function main() {
   const orgs = {
     events: await upsertOrg("Nightshift Collective"),
     venues: await upsertOrg("Indiranagar Hospitality Group"),
+    brands: await upsertOrg("Blue Tokai Coffee Roasters"),
   }
 
   // ── accounts ─────────────────────────────────────────────────────────────
@@ -557,7 +629,12 @@ async function main() {
         city: city.name,
         latitude: venue?.latitude ?? city.lat,
         longitude: venue?.longitude ?? city.lng,
-        geofence: venue?.geofence ?? undefined,
+        /*
+         * Omitted rather than `?? undefined`, which `strictUndefinedChecks`
+         * refuses. A venue without a fence means "this event has none", and an
+         * absent key is how you say that on a create.
+         */
+        ...(venue?.geofence != null && { geofence: venue.geofence }),
         check_in_radius: 60,
         venue_id: venue?.id ?? null,
         venue_name: venue?.name ?? `${city.name} public space`,
@@ -565,6 +642,33 @@ async function main() {
         organizer_org_id: orgs.events.id,
       },
     })
+
+    /*
+     * Occurrences, through the same writer the product uses.
+     *
+     * `resolveOccurrence` is what check-in asks "which day is this?", and it
+     * answers `none` for an event with no occurrence rows. The route treats
+     * `none` as `too_late` — so **an event two days in the future refused
+     * check-in with "Event has already ended"**, and recorded the refusal as
+     * `too_late`, which is a real signal on the curation-health screen.
+     *
+     * The route's comment says every event has at least one occurrence and it
+     * is right about the product: `POST /api/events` calls `syncOccurrences`.
+     * It was wrong about the seeded world, because this script wrote `events`
+     * rows directly and only built occurrences for the two it wanted check-ins
+     * on. So the fixture quietly disagreed with the thing it exists to
+     * represent, in the one mechanic the product cannot do without.
+     *
+     * Calling the real writer rather than inserting rows here is the point: a
+     * fixture that hand-rolls what production computes is a second
+     * implementation, and it will drift again.
+     */
+    await syncOccurrences(
+      event.id,
+      start,
+      hoursFromNow(spec.startsIn + spec.hours),
+      city.tz
+    )
 
     /*
      * The clip, as an `event_media` row rather than a column.
@@ -617,6 +721,559 @@ async function main() {
     }
   }
 
+  // ── attendees ────────────────────────────────────────────────────────────
+  /*
+   * Seeded with a profile and an age, because every gate downstream reads one.
+   * Not printed with individual passwords below -- they share the seed password
+   * and a tester needs the list, not seven credential blocks.
+   */
+  const attendeeIds: string[] = []
+  for (const a of ATTENDEES) {
+    const hashed = await bcrypt.hash(generatePassword(), HASH_COST)
+    const u = await db.user.upsert({
+      where: { email: a.email },
+      update: { role: "attendee", deletedAt: null, suspended_at: null },
+      create: {
+        email: a.email,
+        name: a.name,
+        password: hashed,
+        role: "attendee",
+        emailVerified: new Date(),
+      },
+    })
+    /*
+     * `onboarded: true`, because the activation funnel's stages are nested
+     * subsets on purpose -- "checked in" counts users who are onboarded AND
+     * RSVP'd AND checked in. Seed only the check-ins and every stage below the
+     * first reads zero, which looks like a broken funnel rather than a thin
+     * world.
+     */
+    await db.profiles.upsert({
+      where: { id: u.id },
+      update: { age: a.age, onboarded: true },
+      create: { id: u.id, name: a.name, age: a.age, onboarded: true },
+    })
+    attendeeIds.push(u.id)
+  }
+
+  // ── check-ins, so the numbers have rows to count ─────────────────────────
+  /*
+   * `event_check_ins.occurrence_id` is NOT NULL, so an occurrence has to exist
+   * first. The product creates them lazily through `resolveOccurrence`; here
+   * they are written directly, keyed on the event's own start date.
+   *
+   * Two events get them, deliberately:
+   *
+   *   founders-filter-coffee  is happening NOW  -> live occupancy, the ops tick
+   *   monsoon-flea-market     finished          -> turn-up, no-show, repeat
+   *
+   * Six people at the live one and four at the finished one, with one person in
+   * both -- so "came back for a 2nd event" has exactly one true answer, which
+   * is the figure that read wrong for the product's whole life.
+   */
+  const occurrenceFor = async (slug: string) => {
+    const ev = await db.events.findUnique({
+      where: { slug },
+      select: { id: true, start_time: true, end_time: true },
+    })
+    if (!ev) return null
+    const day = new Date(
+      Date.UTC(ev.start_time.getUTCFullYear(), ev.start_time.getUTCMonth(), ev.start_time.getUTCDate())
+    )
+    const existing = await db.event_occurrences.findFirst({
+      where: { event_id: ev.id, occurs_on: day },
+    })
+    if (existing) return { event: ev, occurrence: existing }
+    const occurrence = await db.event_occurrences.create({
+      data: { event_id: ev.id, occurs_on: day, start_time: ev.start_time, end_time: ev.end_time },
+    })
+    return { event: ev, occurrence }
+  }
+
+  const checkInto = async (slug: string, userIds: string[], status: "checked_in" | "checked_out") => {
+    const slot = await occurrenceFor(slug)
+    if (!slot) return 0
+    let n = 0
+    for (const userId of userIds) {
+      await db.event_check_ins.upsert({
+        where: {
+          occurrence_id_user_id: { occurrence_id: slot.occurrence.id, user_id: userId },
+        },
+        update: { status },
+        create: {
+          event_id: slot.event.id,
+          occurrence_id: slot.occurrence.id,
+          user_id: userId,
+          kind: "attendee",
+          status,
+          check_in_time: slot.event.start_time,
+          check_out_time: status === "checked_out" ? slot.event.end_time : null,
+        },
+      })
+      n++
+    }
+    return n
+  }
+
+  /*
+   * RSVPs before check-ins, and deliberately MORE of them.
+   *
+   * Turn-up is attended / committed, so a world where everyone who RSVP'd also
+   * came makes it permanently 100% and unfalsifiable. Two people say going and
+   * do not turn up, which is what makes no-show a number rather than a zero.
+   */
+  const rsvpTo = async (slug: string, userIds: string[], status: "going" | "maybe" = "going") => {
+    const ev = await db.events.findUnique({ where: { slug }, select: { id: true } })
+    if (!ev) return 0
+    let n = 0
+    for (const userId of userIds) {
+      await db.event_rsvps.upsert({
+        where: { event_id_user_id: { event_id: ev.id, user_id: userId } },
+        update: { status },
+        create: { event_id: ev.id, user_id: userId, status },
+      })
+      n++
+    }
+    return n
+  }
+  const _rsvps =
+    (await rsvpTo("founders-filter-coffee", attendeeIds)) +
+    (await rsvpTo("sunset-sessions-humming-tree", attendeeIds.slice(0, 4), "maybe"))
+
+  const _liveCheckIns = await checkInto("founders-filter-coffee", attendeeIds.slice(0, 6), "checked_in")
+  // Person 0 is in both, and is the only true repeat attendee in the world.
+  const _pastCheckIns = await checkInto("monsoon-flea-market", [attendeeIds[0], ...attendeeIds.slice(6)], "checked_out")
+
+  /*
+   * Somebody who attended TWO DAYS of one event.
+   *
+   * `event_check_ins` holds one row per person per day, and nine dashboard
+   * sites once counted rows and called them people — so every figure on a
+   * multi-day event was multiplied by the day count. W17 fixed it, and a
+   * fixture only *proves* it stayed fixed if somebody in it attended twice.
+   *
+   * On a single-day world `rows == people`, and every assertion about counting
+   * passes against code that counts either. `e2e/attendance-numbers.spec.ts`
+   * refuses to run without this, which is how its absence was noticed: the
+   * previous world produced two rows per person only because two write paths
+   * disagreed about which occurrence a check-in belonged to, and that artifact
+   * disappeared the moment the seed started building occurrences properly.
+   *
+   * Design Week is the only genuinely multi-day event here — a span, so
+   * `syncOccurrences` gives it a real occurrence per day rather than one
+   * invented for the fixture.
+   */
+  const multiDay = await db.events.findUnique({
+    where: { slug: "design-week-bengaluru" },
+    select: { id: true, start_time: true },
+  })
+  let _multiDayCheckIns = 0
+  if (multiDay) {
+    const days = await db.event_occurrences.findMany({
+      where: { event_id: multiDay.id },
+      orderBy: { occurs_on: "asc" },
+      take: 2,
+    })
+    // The same two people on both days: 4 rows, 2 people. Anything that
+    // reports 4 is counting rows.
+    for (const day of days) {
+      for (const userId of attendeeIds.slice(0, 2)) {
+        await db.event_check_ins.upsert({
+          where: { occurrence_id_user_id: { occurrence_id: day.id, user_id: userId } },
+          update: { status: "checked_out" },
+          create: {
+            event_id: multiDay.id,
+            occurrence_id: day.id,
+            user_id: userId,
+            kind: "attendee",
+            status: "checked_out",
+            check_in_time: day.start_time,
+            check_out_time: day.end_time,
+          },
+        })
+        _multiDayCheckIns++
+      }
+    }
+  }
+
+  // ── a room with something in it ──────────────────────────────────────────
+  const liveEvent = await db.events.findUnique({
+    where: { slug: "founders-filter-coffee" },
+    select: { id: true, title: true },
+  })
+  if (liveEvent) {
+    const room = await db.chat_groups.upsert({
+      where: { event_id: liveEvent.id },
+      update: {},
+      create: { event_id: liveEvent.id, name: liveEvent.title, type: "event" },
+    })
+    /*
+     * Pseudonyms live on `chat_group_members`, uniquely per room. Seeded
+     * explicitly rather than left to the generator, so the world is stable
+     * across runs and a screenshot in a bug report still matches.
+     */
+    const HANDLES = ["Cosmic Panda", "Quiet Otter", "Amber Fox", "Still Heron", "Vivid Moth", "Slow Comet"]
+    const lines = [
+      "anyone else here for the filter coffee or just me",
+      "the corner table is free if anyone wants it",
+      "second round is on me",
+      "who is doing the talk at 4",
+      "great turnout for a tuesday",
+      "reach me on 98450 12345 if you get lost",
+    ]
+    for (let i = 0; i < Math.min(attendeeIds.length, HANDLES.length); i++) {
+      await db.chat_group_members.upsert({
+        where: { chat_group_id_user_id: { chat_group_id: room.id, user_id: attendeeIds[i] } },
+        update: {},
+        create: { chat_group_id: room.id, user_id: attendeeIds[i], anonymous_name: HANDLES[i] },
+      })
+      const existing = await db.chat_messages.findFirst({
+        where: { chat_group_id: room.id, user_id: attendeeIds[i], content: lines[i] },
+      })
+      if (!existing) {
+        await db.chat_messages.create({
+          data: { chat_group_id: room.id, user_id: attendeeIds[i], content: lines[i] },
+        })
+      }
+    }
+    /*
+     * The last line carries a phone number on purpose. `lib/moderation
+     * /contact-info.ts` exists to spot exactly that, and a moderation queue
+     * with nothing in it cannot be tested.
+     */
+  }
+
+  // ── curated events, so the claim funnel has something to claim ───────────
+  /*
+   * `curated_at IS NOT NULL` is the discriminator, and it has to be: a null
+   * `organizer_org_id` means three different things, and offering a legacy row
+   * for claiming would let a stranger claim a real organiser's event.
+   */
+  const CURATED = [
+    { slug: "seeded-curated-open", title: "Indie Sundowner at Toit", claimed: false, dead: false,
+      why: "Curated and unclaimed. The claim funnel's happy path." },
+    { slug: "seeded-curated-dead", title: "Terrace Jazz at Bob's Bar", claimed: false, dead: true,
+      why: "Ended with nobody in, and people were turned away — a wrong pin." },
+    { slug: "seeded-curated-claimed", title: "Vinyl Night at The Permit Room", claimed: true, dead: false,
+      why: "Already claimed. A second claim must be refused." },
+  ]
+  const curatedIds: Record<string, string> = {}
+  for (const c of CURATED) {
+    const start = hoursFromNow(c.dead ? -120 : 90)
+    const ev = await db.events.upsert({
+      where: { slug: c.slug },
+      update: { deleted_at: null },
+      create: {
+        slug: c.slug,
+        title: c.title,
+        description: `${c.title} at Bengaluru. Listed by Blendn from a public listing — see the source for details and tickets.`,
+        start_time: start,
+        end_time: new Date(start.getTime() + 4 * 3_600_000),
+        timezone: CITY.bengaluru.tz,
+        status: "published",
+        visibility: "public",
+        city: CITY.bengaluru.name,
+        latitude: CITY.bengaluru.lat,
+        longitude: CITY.bengaluru.lng,
+        check_in_radius: 250,
+        venue_name: c.title.split(" at ")[1] ?? null,
+        organizer_id: users.sagar,
+        organizer_org_id: c.claimed ? orgs.events.id : null,
+        curated_at: hoursFromNow(-400),
+        claimed_at: c.claimed ? hoursFromNow(-40) : null,
+        source_url: `https://in.bookmyshow.com/events/${c.slug}`,
+      },
+    })
+
+    // Same reason as the main event loop above: without occurrences the
+    // check-in route answers "Event has already ended" for a future event, and
+    // a curated event that cannot be checked into is the one case where that
+    // silence is indistinguishable from the wrong-pin signal curation exists
+    // to measure.
+    await syncOccurrences(ev.id, start, new Date(start.getTime() + 4 * 3_600_000), CITY.bengaluru.tz)
+
+    curatedIds[c.slug] = ev.id
+  }
+
+  /*
+   * Refusals on the dead one. No coordinates are stored -- only the shortfall,
+   * which is what tells a wrong pin from a fence that is merely tight.
+   */
+  const deadId = curatedIds["seeded-curated-dead"]
+  if (deadId) {
+    for (let i = 0; i < 5; i++) {
+      const userId = attendeeIds[i % attendeeIds.length]
+      const existing = await db.check_in_refusals.findFirst({
+        where: { event_id: deadId, user_id: userId, reason: "out_of_range" },
+      })
+      if (!existing) {
+        await db.check_in_refusals.create({
+          data: {
+            event_id: deadId,
+            user_id: userId,
+            reason: "out_of_range",
+            shortfall_metres: 90 + i * 25,
+            accuracy_metres: 15,
+          },
+        })
+      }
+    }
+  }
+
+  // ── the four queues, in every state ──────────────────────────────────────
+  const openId = curatedIds["seeded-curated-open"]
+  const claimedId = curatedIds["seeded-curated-claimed"]
+
+  const eventClaimSpecs = [
+    { eventId: openId, email: "events@toit.in", status: "pending" as const,
+      flags: ["domain_matches_source"], note: "We run this every Sunday." },
+    { eventId: openId, email: "bookings@in.bookmyshow.com", status: "pending" as const,
+      flags: ["source_is_aggregator", "no_organisation_yet"], note: "Listing is ours." },
+    { eventId: claimedId, email: "hello@permitroom.in", status: "approved" as const,
+      flags: [], note: "Approved — this is what a handed-over event looks like." },
+    { eventId: claimedId, email: "someone@else.com", status: "superseded" as const,
+      flags: ["no_organisation_yet"], note: "Lost the race. Superseded, not declined." },
+    { eventId: openId, email: "chancer@gmail.com", status: "declined" as const,
+      flags: ["free_email_provider"], note: "Declined, with a reason." },
+  ]
+  for (const spec of eventClaimSpecs) {
+    if (!spec.eventId) continue
+    const existing = await db.event_claims.findFirst({
+      where: { event_id: spec.eventId, contact_email: spec.email },
+    })
+    if (existing) continue
+    /*
+     * Exactly one claimant, because the database insists.
+     *
+     * `event_claims_one_claimant` is
+     * `CHECK ((org_id IS NULL) <> (onboarding_id IS NULL))` -- a claim comes
+     * either from an organisation that already exists, or from an onboarding
+     * request filed by somebody with no account. Never both, and never
+     * neither.
+     *
+     * This seed used to set `org_id` on the approved claim and leave *both*
+     * columns null on the other four, which the constraint rejects. It never
+     * failed locally because `prisma db push` does not create CHECK
+     * constraints at all -- `schema.prisma` cannot express them, so they exist
+     * only in migration SQL. Three of them were missing from every
+     * `db push` database in this project, including the one this seed had
+     * always been tested against. CI caught it the moment that lane switched
+     * to `migrate deploy`.
+     *
+     * The fix mirrors the real funnel rather than working around the check:
+     * `/claim/[eventId]` sends a claimant with no account through
+     * `POST /api/onboarding/apply` first, then files the claim against the
+     * request that returns. So the seed does the same.
+     */
+    let onboardingId: string | null = null
+    if (spec.status !== "approved") {
+      const existingRequest = await db.organiser_onboarding_requests.findFirst({
+        where: { contact_email: spec.email },
+        select: { id: true },
+      })
+      onboardingId =
+        existingRequest?.id ??
+        (
+          await db.organiser_onboarding_requests.create({
+            data: {
+              kind: "company",
+              display_name: spec.email.split("@")[1] ?? spec.email,
+              legal_name: `${spec.email.split("@")[1] ?? spec.email} Pvt Ltd`,
+              city: CITY.bengaluru.name,
+              contact_name: "Seeded Claimant",
+              contact_email: spec.email,
+              requested_role: "organizer",
+              // A free provider or an aggregator address is exactly the
+              // needs_proof path — the tier the real gate assigns when the
+              // domain proves nothing on its own.
+              tier: "needs_proof",
+              status: "pending",
+            },
+            select: { id: true },
+          })
+        ).id
+    }
+
+    await db.event_claims.create({
+      data: {
+        event_id: spec.eventId,
+        contact_email: spec.email,
+        note: spec.note,
+        status: spec.status,
+        flags: spec.flags,
+        org_id: spec.status === "approved" ? orgs.events.id : null,
+        onboarding_id: onboardingId,
+        reviewed_by: spec.status === "pending" ? null : users.sagar,
+        reviewed_at: spec.status === "pending" ? null : hoursFromNow(-20),
+        decision_note: spec.status === "declined" ? "Personal address, no proof of connection." : null,
+      },
+    })
+  }
+
+  // Venue claim on the unclaimed venue, pending.
+  const existingVenueClaim = await db.venue_claims.findFirst({
+    where: { venue_id: unclaimed.id, org_id: orgs.venues.id },
+  })
+  if (!existingVenueClaim) {
+    await db.venue_claims.create({
+      data: { venue_id: unclaimed.id, org_id: orgs.venues.id, filed_by: users.venue, status: "pending" },
+    })
+  }
+
+  // ── sponsors and a brand claim ───────────────────────────────────────────
+  const brandName = "Blue Tokai"
+  let sponsor = await db.sponsors.findFirst({ where: { name_key: brandName.toLowerCase() } })
+  if (!sponsor) {
+    sponsor = await db.sponsors.create({
+      data: {
+        name: brandName,
+        name_key: brandName.toLowerCase(),
+        org_id: orgs.brands.id,
+        claimed_at: hoursFromNow(-300),
+        created_by: users.sagar,
+      },
+    })
+  }
+  // An unclaimed brand, so the claim queue has a target.
+  let unclaimedBrand = await db.sponsors.findFirst({ where: { name_key: "third wave" } })
+  if (!unclaimedBrand) {
+    unclaimedBrand = await db.sponsors.create({
+      data: { name: "Third Wave", name_key: "third wave", org_id: null, created_by: users.sagar },
+    })
+  }
+  const existingBrandClaim = await db.sponsor_claims.findFirst({
+    where: { sponsor_id: unclaimedBrand.id, org_id: orgs.brands.id },
+  })
+  if (!existingBrandClaim) {
+    await db.sponsor_claims.create({
+      data: {
+        sponsor_id: unclaimedBrand.id,
+        org_id: orgs.brands.id,
+        filed_by: users.sponsor,
+        status: "pending",
+      },
+    })
+  }
+
+  // ── onboarding applications, both paths and every state ──────────────────
+  /*
+   * The automatic path and the manual one, side by side. A company-domain
+   * address passes `canSubmitApplication` freely; a free provider must carry a
+   * valid GSTIN or a website, and the queue is where a human reads the
+   * difference.
+   */
+  const APPLICATIONS = [
+    { email: "founder@thehummingtree.com", display: "The Humming Tree", contact: "Priya Rao",
+      status: "pending" as const, tier: "domain" as const, website: null,
+      why: "Automatic path — company domain, passes the gate with nothing else." },
+    { email: "nights@gmail.com", display: "Basement Six", contact: "Dev Kumar",
+      status: "pending" as const, tier: "needs_proof" as const, website: "https://basementsix.in",
+      why: "Manual path — free provider, carried a website instead." },
+    { email: "unverified@toit.in", display: "Toit Brewpub", contact: "Anita Shah",
+      status: "email_pending" as const, tier: "domain" as const, website: null,
+      why: "Sent a confirmation link and is waiting on it. Never reaches a reviewer." },
+    { email: "approved@permitroom.in", display: "The Permit Room", contact: "Rahul Nayak",
+      status: "approved" as const, tier: "domain" as const, website: null,
+      why: "Approved. An org, a user and a membership should exist for it." },
+    { email: "spam@gmail.com", display: "Definitely Real Events", contact: "A Person",
+      status: "declined" as const, tier: "needs_proof" as const, website: null,
+      why: "Declined, with a reason the applicant receives." },
+  ]
+  for (const a of APPLICATIONS) {
+    const existing = await db.organiser_onboarding_requests.findFirst({
+      where: { contact_email: a.email },
+    })
+    if (existing) continue
+    await db.organiser_onboarding_requests.create({
+      data: {
+        kind: "company",
+        display_name: a.display,
+        legal_name: `${a.display} Pvt Ltd`,
+        website: a.website,
+        city: CITY.bengaluru.name,
+        contact_name: a.contact,
+        contact_email: a.email,
+        requested_role: "organizer",
+        tier: a.tier,
+        status: a.status,
+        email_verified_at: a.status === "email_pending" ? null : hoursFromNow(-50),
+        reviewed_by: a.status === "approved" || a.status === "declined" ? users.sagar : null,
+        reviewed_at: a.status === "approved" || a.status === "declined" ? hoursFromNow(-30) : null,
+        decline_reason: a.status === "declined" ? "No verifiable connection to the events listed." : null,
+      },
+    })
+  }
+
+  /*
+   * ── the notification centre, which had no rows at all ───────────────────
+   *
+   * `notifications` is the bell in the Pulse's top bar and the permanent copy
+   * that outlives every push — the row that sits outside all the controls
+   * guarding `private_messages`, and the reason `storedBodyFor` redacts
+   * content-bearing kinds at all.
+   *
+   * The seed never wrote one. `e2e/pseudonymity.spec.ts` asserts that no
+   * stored notification carries a real name, and that passed locally only
+   * because messages posted by hand during testing had left rows behind. On a
+   * fresh database there were zero, and its own vacuity guard refused:
+   * "the seed must have notifications, or this is vacuous". It was right — the
+   * property was being asserted over an empty set.
+   *
+   * Bodies go through `storedBodyFor`, exactly as the push path does, so the
+   * seeded world shows what the product actually stores rather than a
+   * hand-written approximation of it. A `group_message` therefore reads "New
+   * message in the room" here, and the pseudonymous check-in line keeps its
+   * pseudonym — which is the distinction the spec exists to police.
+   */
+  const notificationSpecs = [
+    { kind: "group_message" as const, title: "New message",
+      body: "hey, is anyone near the bar?" },
+    { kind: "private_message" as const, title: "New message",
+      body: "loved chatting earlier — same time next week?" },
+    { kind: "event_checkin" as const, title: "Someone just arrived",
+      body: "Cosmic Panda just checked in!" },
+    { kind: "match" as const, title: "It's a match",
+      body: "You and someone in the room both said yes." },
+    { kind: "announcement" as const, title: "From the organiser",
+      body: "Last orders in twenty minutes." },
+  ]
+  let _notificationsMade = 0
+  for (const [i, spec] of notificationSpecs.entries()) {
+    const userId = attendeeIds[i % attendeeIds.length]
+    const existing = await db.notifications.findFirst({
+      where: { user_id: userId, kind: spec.kind, title: spec.title },
+      select: { id: true },
+    })
+    if (existing) continue
+    await db.notifications.create({
+      data: {
+        user_id: userId,
+        kind: spec.kind,
+        title: spec.title,
+        // Through the product's own redaction, not around it.
+        body: storedBodyFor(spec.kind, spec.body),
+        read_at: i % 2 === 0 ? null : hoursFromNow(-3),
+      },
+    })
+    _notificationsMade++
+  }
+
+  // ── demand, so the Cities table has a row with no supply ─────────────────
+  /*
+   * Pune deliberately has demand and no events. `city_demand` is written on
+   * every miss and read by nothing today — and the admin Cities table is built
+   * by iterating events, so a city with demand and zero events cannot appear in
+   * it at all (C12). This row is what makes that visible.
+   */
+  for (const [i, userId] of attendeeIds.entries()) {
+    const city = i < 4 ? "Pune" : "Hyderabad"
+    const existing = await db.city_demand.findFirst({ where: { user_id: userId, city_key: city.toLowerCase() } })
+    if (existing) continue
+    await db.city_demand.create({
+      data: { user_id: userId, city, city_key: city.toLowerCase(), country: "India", opens: 3 + i },
+    })
+  }
+
   // ── retire the previous names ────────────────────────────────────────────
   if (APPLY) {
     const retired = await db.events.updateMany({
@@ -655,7 +1312,38 @@ async function main() {
   }
   console.log("Passwords are shown once and are not recoverable. Re-run to reset.")
   console.log(`\nVenues: ${circle.name} (circle), ${polygon.name} (polygon), ${unclaimed.name} (unclaimed)`)
-  console.log(`Events: ${EVENTS.length} across ${Object.keys(CITY).length} cities\n`)
+  console.log(`Events: ${EVENTS.length} across ${Object.keys(CITY).length} cities`)
+  console.log(`\nAttendees (mobile only, same password): ${ATTENDEES.map((a) => a.email).join(", ")}`)
+  console.log(`  ${ATTENDEES.find((a) => a.age < 18)?.email} is under 18 — the age gate has something to refuse.`)
+  /*
+   * Counted from the database, not from what this run happened to insert.
+   *
+   * The first version printed the number of rows CREATED, so a second run --
+   * which is the normal case, because the script is idempotent -- reported
+   * zeros across the board and read as an empty world. A summary that says
+   * nothing exists when everything does is worse than no summary.
+   */
+  const [
+    rsvpTotal, checkInTotal, msgTotal, refusalTotal, claimTotal, appTotal, demandTotal,
+  ] = await Promise.all([
+    db.event_rsvps.count(),
+    db.event_check_ins.count(),
+    db.chat_messages.count(),
+    db.check_in_refusals.count(),
+    db.event_claims.count(),
+    db.organiser_onboarding_requests.count(),
+    db.city_demand.count(),
+  ])
+
+  console.log(`\nWorld (present, not merely created by this run):`)
+  console.log(`  rsvps            ${rsvpTotal} — more than the check-ins, so no-show is a real number`)
+  console.log(`  check-ins        ${checkInTotal} (one person is in two events — the only true repeat)`)
+  console.log(`  chat             ${msgTotal} messages, one carries a phone number for the contact-info filter`)
+  console.log(`  curated events   ${CURATED.length} (open / dead / claimed), ${refusalTotal} refusals on the dead one`)
+  console.log(`  event claims     ${claimTotal} across pending, approved, declined, superseded`)
+  console.log(`  applications     ${appTotal} across pending, email_pending, approved, declined`)
+  console.log(`  demand           ${demandTotal} rows — Pune has demand and no events`)
+  console.log(`  brands           Blue Tokai (claimed), Third Wave (unclaimed, claim pending)\n`)
 }
 
 async function upsertOrg(displayName: string) {
@@ -695,7 +1383,16 @@ async function upsertVenue(input: {
     owner_org_id: input.ownerOrgId,
     owner_id: input.ownerId,
     claimed_at: input.ownerOrgId ? new Date() : null,
-    geofence: (input.geofence ?? undefined) as never,
+    /*
+     * Same reason, and one the static guard could not see: this object is built
+     * outside the `db.venues.create()` call, so a scanner looking inside Prisma
+     * call arguments walks straight past it. The runtime flag is what caught it.
+     *
+     * Omitting also happens to be right for the `update` branch below, where an
+     * absent key means "leave the existing fence alone" rather than clear it —
+     * which is what a re-runnable seed should do.
+     */
+    ...(input.geofence != null && { geofence: input.geofence as never }),
     venue_type: "banquet_hall" as never,
     capacity: 300,
     deleted_at: null,

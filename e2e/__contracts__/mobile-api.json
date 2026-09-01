@@ -1,0 +1,141 @@
+{
+  "/api/mobile/events": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "events",
+      "pagination"
+    ]
+  },
+  "/api/mobile/events/cities": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "cities"
+    ]
+  },
+  "/api/mobile/events/search?q=sessions": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "events",
+      "pagination"
+    ]
+  },
+  "/api/mobile/categories": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "categories"
+    ]
+  },
+  "/api/mobile/amenities": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "amenities"
+    ]
+  },
+  "/api/mobile/work-fields": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "expertiseByField",
+      "maxExpertise",
+      "workFields"
+    ]
+  },
+  "/api/mobile/venues": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "pagination",
+      "venues"
+    ]
+  },
+  "/api/mobile/conversations": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "conversations"
+    ]
+  },
+  "/api/mobile/chat/groups": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "groups",
+      "pagination"
+    ]
+  },
+  "/api/mobile/notifications": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "notifications",
+      "pagination",
+      "unreadCount"
+    ]
+  },
+  "/api/mobile/message-requests": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "requests",
+      "totalCount"
+    ]
+  },
+  "/api/mobile/users/blocked": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "users"
+    ]
+  },
+  "/api/mobile/checkins/active": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "checkIns"
+    ]
+  }
+}

@@ -90,9 +90,6 @@ export default function EventsPage() {
         <div className="px-4 lg:px-6">
           <div className="rounded-xl border bg-card px-6 py-6">
             <h1 className="text-3xl font-semibold text-foreground">Events</h1>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Manage event inventory, publishing status, and operational detail.
-            </p>
           </div>
         </div>
         <div className="px-4 lg:px-6">

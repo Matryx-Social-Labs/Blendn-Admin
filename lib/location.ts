@@ -73,7 +73,8 @@ export async function reverseGeocodeCity(
 }
 
 export async function normalizeLocationToCity(
-  location: string | null | undefined
+  location: string | null | undefined,
+  budget?: GeocodeBudget
 ): Promise<string | null> {
   if (!location) return null
   const trimmed = location.trim()
@@ -82,16 +83,68 @@ export async function normalizeLocationToCity(
   const coordinates = parseCoordinateLocation(trimmed)
   if (!coordinates) return trimmed
 
-  const city = await reverseGeocodeCity(coordinates.lat, coordinates.lon)
-  return city
+  /*
+   * A `city` that is literally "12.97,77.59" geocodes too, which is the second
+   * way into Nominatim from a read path -- and the one the budget missed at
+   * first, because `resolveEventCity` consults this before it reaches its own
+   * coordinate branch. Same budget, both doors.
+   */
+  const cacheKey = `${coordinates.lat.toFixed(4)},${coordinates.lon.toFixed(4)}`
+  if (coordinateCache.has(cacheKey)) return coordinateCache.get(cacheKey) ?? null
+  if (budget && !budget.take()) return null
+
+  return reverseGeocodeCity(coordinates.lat, coordinates.lon)
 }
+
+/**
+ * How many reverse-geocodes one request may make.
+ *
+ * The discovery feed called `resolveEventCity` per event, so a page of 20
+ * null-city rows fanned out **20 concurrent Nominatim requests** on a
+ * user-facing read -- against a public API with a courtesy rate limit, from a
+ * path that is polled. The cap is not a tuning knob: past it the answer is
+ * null, and the card renders without a city rather than the page waiting.
+ *
+ * Low on purpose. A null city is a row that should have been resolved at write
+ * time, so needing more than three in one page means the backfill is behind,
+ * not that the cap is wrong. `resolveEventCityPersisting` writes results back,
+ * so a hot page heals itself a few rows at a time.
+ */
+export const MAX_GEOCODES_PER_REQUEST = 3
+
+/**
+ * A per-request budget for reverse-geocoding.
+ *
+ * Made by the list route and passed down, rather than held module-level: a
+ * module-level counter is shared by every concurrent request, so one busy page
+ * would exhaust the budget for everybody else's.
+ */
+export function geocodeBudget(limit: number = MAX_GEOCODES_PER_REQUEST) {
+  let spent = 0
+  return {
+    take(): boolean {
+      if (spent >= limit) return false
+      spent++
+      return true
+    },
+    get exhausted() {
+      return spent >= limit
+    },
+    get spent() {
+      return spent
+    },
+  }
+}
+
+export type GeocodeBudget = ReturnType<typeof geocodeBudget>
 
 export async function resolveEventCity(
   city: string | null | undefined,
   latitude: number | null | undefined,
-  longitude: number | null | undefined
+  longitude: number | null | undefined,
+  budget?: GeocodeBudget
 ): Promise<string | null> {
-  const normalizedCity = await normalizeLocationToCity(city)
+  const normalizedCity = await normalizeLocationToCity(city, budget)
   if (normalizedCity) return normalizedCity
 
   if (
@@ -102,6 +155,15 @@ export async function resolveEventCity(
   ) {
     return null
   }
+
+  /*
+   * An already-cached coordinate costs nothing, so it does not spend budget --
+   * otherwise a page of twenty events at one venue would stop after three.
+   */
+  const cacheKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`
+  if (coordinateCache.has(cacheKey)) return coordinateCache.get(cacheKey) ?? null
+
+  if (budget && !budget.take()) return null
 
   return reverseGeocodeCity(latitude, longitude)
 }

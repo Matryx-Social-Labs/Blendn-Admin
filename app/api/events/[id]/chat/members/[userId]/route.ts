@@ -48,8 +48,36 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       },
       data: {
         status: statusMap[action],
-        banned_at: action === "ban" ? new Date() : action === "unban" ? null : undefined,
-        banned_by: action === "ban" ? session.user.id : action === "unban" ? null : undefined,
+        /*
+         * Three outcomes per pair, and `undefined` was carrying one of them.
+         *
+         * ban   -> set the timestamp and the actor
+         * unban -> null them, which is a real write and must not be skipped
+         * mute/unmute -> leave the ban columns entirely alone
+         *
+         * As a spread the third case is an absent key rather than an undefined
+         * value, which is what `strictUndefinedChecks` requires and what the
+         * `??` idiom could not express.
+         */
+        ...(action === "ban"
+          ? { banned_at: new Date(), banned_by: session.user.id }
+          : action === "unban"
+            ? { banned_at: null, banned_by: null }
+            : {}),
+        /*
+         * A mute records who applied it, exactly as a ban does.
+         *
+         * `muted_by` was the missing half. `checkAndAutoUnmute` clears any
+         * `muted` status from a member with fewer than three auto-hide flags in
+         * the last hour, and an organiser-applied mute has **zero** -- so
+         * `0 < 3` held and the mute lifted itself on the muted person's next
+         * message. The moderator watched the action succeed and it undid itself.
+         */
+        ...(action === "mute"
+          ? { muted_at: new Date(), muted_by: session.user.id }
+          : action === "unmute"
+            ? { muted_at: null, muted_by: null }
+            : {}),
       },
     })
 

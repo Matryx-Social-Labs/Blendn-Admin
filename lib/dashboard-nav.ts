@@ -11,6 +11,7 @@ import {
   IconListDetails,
   IconMessage2,
   IconMicrophone2,
+  IconReceipt,
   IconUsers,
 } from "@tabler/icons-react"
 
@@ -23,7 +24,7 @@ export interface DashboardNavItem {
   icon: typeof IconDashboard
   allowedRoles: DashboardRole[]
   /** Renders a count next to the item. */
-  badgeKey?: "pendingFlags" | "pendingApplications"
+  badgeKey?: "pendingFlags" | "pendingApplications" | "pendingClaims"
   isActive?: (pathname: string) => boolean
 }
 
@@ -45,7 +46,7 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Platform health: what needs attention, growth vs vanity, and supply.",
     url: "/dashboard",
     icon: IconDashboard,
-    allowedRoles: ["app_admin", "organizer", "venue_owner"],
+    allowedRoles: ["app_admin", "organizer", "venue_owner", "sponsor"],
   },
   {
     // Platform-wide, and new: moderation was previously reachable only by
@@ -84,6 +85,22 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["venue_owner"],
   },
   {
+    // Sponsor-side. A sponsor sees their own placements and campaigns and
+    // nothing else — not attendees, not moderation, not other people's events.
+    title: "Placements",
+    description: "Where your brand appears, and what is waiting on you.",
+    url: "/dashboard/placements",
+    icon: IconMicrophone2,
+    allowedRoles: ["sponsor"],
+  },
+  {
+    title: "Brand",
+    description: "Your name, logo and website, as attendees see them.",
+    url: "/dashboard/brand",
+    icon: IconBuildingStore,
+    allowedRoles: ["sponsor"],
+  },
+  {
     title: "Chatrooms",
     description: "Every room whose chat is open — live events and post-event feedback windows.",
     url: "/dashboard/chatrooms",
@@ -113,7 +130,14 @@ export const dashboardNav: DashboardNavItem[] = [
   {
     title: "Venues",
     description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
-    url: "/dashboard/venue-owners",
+    /*
+     * Was `/dashboard/venue-owners`, which is a list of venue-owner *user
+     * accounts* — so this entry described venue records and delivered people.
+     * The records screen now exists; the accounts screen stays reachable and
+     * is listed in `unlistedRoutes`, since "who owns this venue" is a question
+     * you arrive at from a venue rather than from the sidebar.
+     */
+    url: "/dashboard/venues",
     icon: IconBuildingStore,
     allowedRoles: ["app_admin"],
   },
@@ -125,11 +149,58 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["app_admin"],
   },
   {
-    title: "Venue claims",
+    /*
+     * One entry, two queues.
+     *
+     * Was "Venue claims". Claims on an event and claims on a venue are separate
+     * tables answering separate questions, and one job done by one person in one
+     * sitting -- so a second nav entry would have been a second place to
+     * remember to look, which is how a queue ends up unread.
+     *
+     * `isActive` covers both, or the sidebar would un-highlight itself the
+     * moment somebody switched tab.
+     */
+    title: "Claims",
     description:
-      "Ownership requests. Approving one hands over the events other organisers hold there.",
-    url: "/dashboard/venue-claims",
+      "Ownership requests for events and venues. Approving one hands over an attendee list.",
+    url: "/dashboard/claims",
     icon: IconFileCheck,
+    allowedRoles: ["app_admin"],
+    badgeKey: "pendingClaims",
+    isActive: (pathname) => pathname.startsWith("/dashboard/claims"),
+  },
+  {
+    title: "Brands",
+    description: "Every brand — who owns each, which are unclaimed, and possible duplicates.",
+    url: "/dashboard/sponsors",
+    icon: IconBuildingStore,
+    allowedRoles: ["app_admin"],
+  },
+  {
+    // Sponsored copy is the only content on the platform reviewed BEFORE it is
+    // published rather than after it is reported. It is paid third-party
+    // messaging in a pseudonymous room, so the flag queue is the wrong shape:
+    // by the time a flag exists an attendee has already read it.
+    title: "Creative review",
+    description: "Sponsored copy waiting to be read by a person. Oldest first.",
+    url: "/dashboard/creative-review",
+    icon: IconFlag,
+    allowedRoles: ["app_admin"],
+  },
+  {
+    title: "Brand claims",
+    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
+    url: "/dashboard/sponsor-claims",
+    icon: IconFileCheck,
+    allowedRoles: ["app_admin"],
+  },
+  {
+    // A ledger, not a checkout. It lists PLACEMENTS rather than charges, because
+    // the row that matters is the one that ran and was never priced.
+    title: "Charges",
+    description: "What each placement costs, what has been agreed, and what has been paid.",
+    url: "/dashboard/charges",
+    icon: IconReceipt,
     allowedRoles: ["app_admin"],
   },
   {
@@ -156,7 +227,7 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Your colleagues, invites, and domain verification.",
     url: "/dashboard/organisation",
     icon: IconBuilding,
-    allowedRoles: ["organizer", "venue_owner"],
+    allowedRoles: ["organizer", "venue_owner", "sponsor"],
   },
   {
     // Categories were seeded by a script and by nothing else — an admin could
@@ -196,7 +267,7 @@ export const dashboardNav: DashboardNavItem[] = [
  * route inventory stays honest — a screen with no entry in either list is one
  * nobody can find.
  */
-export const unlistedRoutes = ["/dashboard/settings"] as const
+export const unlistedRoutes = ["/dashboard/settings", "/dashboard/venue-owners"] as const
 
 /** Fails closed: an unknown or absent role sees nothing. */
 export function visibleNavFor(role: string | undefined): DashboardNavItem[] {

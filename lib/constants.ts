@@ -51,6 +51,32 @@ export const PAGINATION = {
  * The app shows the same number (`components/InterestPicker.tsx`), which until
  * now was the only thing enforcing it.
  */
+/**
+ * The check-in radius a new event's form starts at, in metres.
+ *
+ * Three files hardcoded `100` — the create form's default, the editor's
+ * rehydrate fallback, and the location section's display fallback — while
+ * `events.check_in_radius` carries a database default of **30**. Two numbers
+ * for one field, and the register counted them as three conflicting defaults.
+ *
+ * The client trio is what an organiser actually meets, so it is consolidated
+ * here rather than aligned downward: the register's own conclusion about
+ * curated pins applies to every event, in that *too tight is the more
+ * expensive error* — a fence that refuses somebody standing in the right place
+ * costs more than one that admits the pavement.
+ *
+ * **The column default is deliberately left at 30 rather than migrated.** It is
+ * reachable only by a caller that omits the field entirely, since both write
+ * paths spread it conditionally and the form always sends a value; changing a
+ * production column default to fix a value nearly nothing reads would be a
+ * migration bought for a comment. This is that comment.
+ *
+ * Mostly vestigial either way: `geofence` supersedes this column, and where a
+ * fence exists the form derives the radius from it (`extent + buffer`) rather
+ * than using any default at all.
+ */
+export const DEFAULT_CHECK_IN_RADIUS_M = 100
+
 export const MAX_INTERESTS = 10
 
 // ── Check-in ──────────────────────────────────────────
@@ -76,4 +102,43 @@ export const AUTH = {
 export const BATCH = {
   MAX_EVENT_IDS: 50,
   DEFAULT_INTERESTED_PREVIEW_LIMIT: 3,
+} as const
+
+// ── Sponsorship ───────────────────────────────────────────
+/**
+ * The policy numbers for sponsored placement.
+ *
+ * Grouped here rather than written into the sentence that needs them, matching
+ * how every other tunable in this file is handled. `MIN_REPORTABLE` in
+ * particular is a privacy control with two readers — the poll results and the
+ * sponsor report — and they must never disagree.
+ */
+export const SPONSORSHIP = {
+  /**
+   * Below this, a per-option breakdown or a sponsor-facing figure identifies
+   * people rather than describing them.
+   *
+   * `docs/DESIGN_HANDOFF.md` guarantees small rooms are normal: check-in never
+   * refuses, so capacity is a signal and not a door. In a room of six, "1 vote
+   * · Leaving early" names that person to everyone still there.
+   *
+   * Suppression is not per-cell. Hiding one option while publishing the total
+   * leaks it by subtraction, and hiding all but one leaves the survivor
+   * recoverable — see `lib/room-audience.ts` for the full rule.
+   */
+  MIN_REPORTABLE: 5,
+  /** A room people joined to talk to strangers is not an ad break. */
+  MAX_PLACEMENTS_PER_EVENT: 3,
+  /**
+   * Across ALL sponsors combined, not per campaign. Three advertisers each
+   * individually well-behaved at 30 minutes still fire something every ten, and
+   * the attendee does not care that each one behaved.
+   */
+  ROOM_MIN_GAP_MINUTES: 20,
+  /** The floor a single campaign may be set to. */
+  MIN_INTERVAL_MINUTES: 20,
+  MAX_IMAGE_BYTES: 5 * 1024 * 1024,
+  MAX_VIDEO_BYTES: 100 * 1024 * 1024,
+  /** Consecutive send failures before a campaign deactivates itself. */
+  FAILURE_LIMIT: 3,
 } as const

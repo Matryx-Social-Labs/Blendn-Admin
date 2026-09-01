@@ -56,7 +56,20 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    return successResponse(categories)
+    /*
+     * `{ categories }`, not a bare array.
+     *
+     * Eleven of the thirteen mobile list endpoints answer `data.<name>` —
+     * `data.events`, `data.venues`, `data.notifications`. This one and
+     * `/conversations` answered `data` directly, so a client had to remember
+     * which two were different, and neither could grow a `pagination` sibling
+     * without a breaking change.
+     *
+     * Changed before the client migration rather than after, which is the
+     * difference between one client release and two. The shape is recorded in
+     * `e2e/__contracts__/mobile-api.json`.
+     */
+    return successResponse({ categories })
   } catch (error) {
     logger.error("Get categories error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get categories")

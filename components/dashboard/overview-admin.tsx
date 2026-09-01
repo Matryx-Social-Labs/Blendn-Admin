@@ -50,7 +50,55 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
   ]
 
   const cityColumns: Column<CityRow & { id: string }>[] = [
-    { key: "city", label: "City", sortType: "string", primary: true },
+    {
+      key: "city",
+      label: "City",
+      sortType: "string",
+      primary: true,
+      /*
+       * The row links into the curation queue for that city, so the read
+       * surface opens the write surface.
+       *
+       * That is structural rather than tidy. `city_demand` was written on every
+       * miss for months and read by nothing, and the way a signal ends up with
+       * no reader is that seeing it and acting on it live on different screens.
+       */
+      render: (row) => (
+        <Link
+          href={`/dashboard/events/curate?city=${encodeURIComponent(row.city)}`}
+          className="hover:underline"
+        >
+          {row.city}
+          {row.launchReady ? (
+            <span
+              className="ml-2 rounded-full border border-success/40 px-1.5 py-0.5 text-[0.6875rem] text-success"
+              title={`${row.waiting} people looking here and nothing to show them`}
+            >
+              ready
+            </span>
+          ) : null}
+        </Link>
+      ),
+    },
+    {
+      key: "waiting",
+      label: "Waiting",
+      align: "right",
+      sortType: "number",
+      /*
+       * Distinct people who looked here and found nothing. The column this
+       * table existed to have and never did — it was built by iterating events,
+       * so a city with demand and no events could not appear in it at all.
+       */
+      render: (row) =>
+        row.waiting > 0 ? (
+          <b className={row.launchReady ? "font-bold text-success" : "font-bold"}>
+            {formatNumber(row.waiting)}
+          </b>
+        ) : (
+          <span className="text-faint-foreground">—</span>
+        ),
+    },
     { key: "events", label: "Events", align: "right", sortType: "number" },
     { key: "rsvps", label: "RSVPs", align: "right", sortType: "number" },
     { key: "favourites", label: "Saves", align: "right", secondary: true, sortType: "number" },
@@ -126,8 +174,25 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           hint={data.deltas.publishedEvents.hint ?? "all time"}
           href="/dashboard/events"
         />
+        {/*
+         * "Arrivals", not "Check-ins", because the funnel two panels down has
+         * a stage called "checked in" holding a different number — 8 here and
+         * 7 there against the same world. Both are right: this counts
+         * `event_check_ins` rows in range, the funnel counts distinct people,
+         * and one person at two events is two rows.
+         *
+         * Nothing on the screen said which was which, so a reader who noticed
+         * could only conclude that one was broken, and could only find out
+         * which by reading the source. Same shape as the two turn-up figures
+         * on the event page.
+         *
+         * Fixed by naming rather than by labelling: a hint cannot carry it,
+         * because `deltaHint` displaces the fallback with "new" whenever the
+         * previous window was zero — which is exactly when a number is most
+         * likely to be read for the first time.
+         */}
         <MetricTile
-          label="Check-ins"
+          label="Arrivals"
           value={formatCompact(data.checkIns)}
           {...data.deltas.checkIns}
           hint={data.deltas.checkIns.hint ?? "GPS-validated"}
@@ -151,7 +216,7 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           ]}
           empty={data.users === 0}
         />
-        <Funnel stages={data.funnel} empty={data.users === 0} />
+        <Funnel stages={data.funnel} hint="all time · distinct people" empty={data.users === 0} />
       </div>
 
       <div className="grid gap-6 @3xl/main:grid-cols-2">
@@ -172,9 +237,21 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
               />
             }
             footer={
+              /*
+               * Curated rows are absent from the table above and named here
+               * instead, because `organizer_id` on a curated event is the
+               * admin who created it — so the organiser-keyed table cannot
+               * represent one without attributing our own supply to a founder.
+               *
+               * Kept to the same line rather than given a tile: it is context
+               * for this table, and a reader who sees a total that does not
+               * reconcile needs one clause, not a section.
+               */
               <span>
                 {data.publishingHosts.publishing} of {data.publishingHosts.total} hosts have
                 published
+                {data.curated.published > 0 &&
+                  ` · ${data.curated.published} curated by us, ${data.curated.unclaimed} unclaimed`}
               </span>
             }
           />

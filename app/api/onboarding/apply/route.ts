@@ -28,7 +28,7 @@ import { sendEmail, onboardingVerifyEmail, applyUrl, emailConfigured } from "@/l
 
 const applySchema = z.object({
   kind: z.enum(["individual", "company"]).default("company"),
-  requested_role: z.enum(["organizer", "venue_owner"]).default("organizer"),
+  requested_role: z.enum(["organizer", "venue_owner", "sponsor"]).default("organizer"),
   display_name: z.string().trim().min(2).max(120),
   legal_name: z.string().trim().max(200).optional(),
   gstin: z.string().trim().max(20).optional(),
@@ -126,14 +126,30 @@ export async function POST(req: NextRequest) {
         kind,
         requested_role: input.requested_role,
         display_name: input.display_name,
-        legal_name: blankToUndefined(input.legal_name),
-        gstin,
-        website,
-        address: blankToUndefined(input.address),
-        city: blankToUndefined(input.city),
+        /*
+         * Spread, because `blankToUndefined` returns `undefined` to mean "the
+         * applicant left this blank" and `strictUndefinedChecks` refuses that
+         * as a value. Omitting the key is the same intent, stated in the way
+         * Prisma accepts.
+         *
+         * These are the sites the flag caught and a static scan could not: the
+         * source reads `address: blankToUndefined(input.address)`, which looks
+         * like any other field. Nothing here contains the token `undefined`.
+         */
+        ...(blankToUndefined(input.legal_name) != null && {
+          legal_name: blankToUndefined(input.legal_name),
+        }),
+        ...(gstin != null && { gstin }),
+        ...(website != null && { website }),
+        ...(blankToUndefined(input.address) != null && {
+          address: blankToUndefined(input.address),
+        }),
+        ...(blankToUndefined(input.city) != null && { city: blankToUndefined(input.city) }),
         contact_name: input.contact_name,
         contact_email: input.contact_email,
-        contact_phone: blankToUndefined(input.contact_phone),
+        ...(blankToUndefined(input.contact_phone) != null && {
+          contact_phone: blankToUndefined(input.contact_phone),
+        }),
         tier,
         // Without email configured there is nothing to confirm against, so the
         // application goes straight to review and the queue shows the address

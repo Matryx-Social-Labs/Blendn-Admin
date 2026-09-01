@@ -23,7 +23,17 @@ registry.registerPath({
   description: "List all direct message conversations with last message and unread count.",
   security: bearerAuth,
   responses: {
-    200: { description: "Conversations", content: { "application/json": { schema: wrap(z.array(ConversationSchema)) } } },
+    // `data.conversations`, matching every other list endpoint. It was a bare
+    // array; two exceptions to a rule is a rule nobody follows, and a bare
+    // array has nowhere to put a cursor.
+    200: {
+      description: "Conversations",
+      content: {
+        "application/json": {
+          schema: wrap(z.object({ conversations: z.array(ConversationSchema) })),
+        },
+      },
+    },
     ...standardErrors,
   },
 })

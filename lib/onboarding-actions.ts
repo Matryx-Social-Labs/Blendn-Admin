@@ -39,7 +39,7 @@ async function requireAdmin() {
 export interface OnboardingRow {
   id: string
   kind: "individual" | "company"
-  requested_role: "organizer" | "venue_owner"
+  requested_role: "organizer" | "venue_owner" | "sponsor"
   display_name: string
   legal_name: string | null
   gstin: string | null
@@ -160,6 +160,20 @@ export async function approveOnboardingRequest(
         status: "verified",
         verified_at: new Date(),
         verified_by: admin.id,
+        /*
+         * A sponsor is granted placement in the same act that approves them.
+         *
+         * Approving a sponsor application and then requiring a separate
+         * `may_sponsor` grant produces an account that is approved and still
+         * cannot sponsor — the admin thinks they are done, the sponsor cannot
+         * do the one thing they applied for, and nothing anywhere says why.
+         *
+         * An admin who wants to approve the account WITHOUT the commercial
+         * capability revokes it afterwards on the organisations screen, which
+         * records a reason. That is the rarer case and it is the one that
+         * should take the extra step.
+         */
+        may_sponsor: request.requested_role === "sponsor",
       },
       select: { id: true },
     })
@@ -321,6 +335,7 @@ export interface OrgSummary {
   legal_name: string | null
   gstin: string | null
   status: string
+  may_sponsor: boolean
   created_at: Date
   memberCount: number
   eventCount: number
@@ -352,6 +367,9 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
     legal_name: o.legal_name,
     gstin: o.gstin,
     status: o.status,
+    // The admin grant reads this; without it the control cannot render its
+    // current state and would default to "not granted" for everyone.
+    may_sponsor: o.may_sponsor,
     created_at: o.created_at,
     memberCount: o._count.members,
     eventCount: o._count.events,
@@ -388,6 +406,73 @@ export async function setOrganisationStatus(
     resource: "organisation",
     resourceId: orgId,
     details: { reason: reason?.trim() || null },
+  })
+
+  revalidatePath("/dashboard/organisations")
+}
+
+/**
+ * Grant or revoke an organisation's right to sell placement.
+ *
+ * `organisations.may_sponsor` shipped in #259 with one reader and **zero
+ * writers**. The gate was correct in the deny direction and no screen could
+ * turn it on, so the commercial model the feature was built for was
+ * unsellable — both directions wrong at once.
+ *
+ * Admin-only and deliberately not self-serve: the flag represents a commercial
+ * agreement, and "sponsored" is a claim that somebody paid. If an organiser
+ * could grant it to themselves the word stops meaning anything and becomes a
+ * styling choice.
+ *
+ * Granting asks for a reason for the same purpose suspension does — the
+ * agreement lives outside this system, and six months later the audit row is
+ * the only record of which one.
+ *
+ * Revoking does NOT stop campaigns already running. `may_sponsor` gates the
+ * WRITE path (`canBroadcast`), not the scheduler, and silently killing live
+ * placements an organiser has paid for is not a decision this toggle should
+ * make on its own. Cancel the placements to stop the sends.
+ */
+export async function setOrganisationMaySponsor(
+  orgId: string,
+  maySponsor: boolean,
+  reason?: string
+): Promise<void> {
+  const admin = await requireAdmin()
+
+  if ((reason ?? "").trim().length < 10) {
+    throw new Error(
+      maySponsor
+        ? "Record which agreement this grant is under."
+        : "Give a reason for revoking sponsorship access."
+    )
+  }
+
+  const org = await db.organisations.findUnique({
+    where: { id: orgId },
+    select: { id: true, status: true, display_name: true },
+  })
+  if (!org) throw new Error("Organisation not found")
+
+  /*
+   * A suspended organisation cannot be granted placement.
+   *
+   * Suspension is how an organisation is stopped; handing it a paid capability
+   * in that state would be the two controls contradicting each other, with
+   * whichever was clicked last winning.
+   */
+  if (maySponsor && org.status !== "verified") {
+    throw new Error("Only a verified organisation can be granted sponsorship access")
+  }
+
+  await db.organisations.update({ where: { id: orgId }, data: { may_sponsor: maySponsor } })
+
+  auditLog({
+    userId: admin.id,
+    action: maySponsor ? "organisation.may_sponsor.grant" : "organisation.may_sponsor.revoke",
+    resource: "organisation",
+    resourceId: orgId,
+    details: { reason: reason?.trim() ?? null, orgName: org.display_name },
   })
 
   revalidatePath("/dashboard/organisations")

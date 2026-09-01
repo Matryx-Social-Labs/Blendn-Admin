@@ -37,8 +37,15 @@ describe("retiring an amenity must not rewrite history", () => {
   })
 
   it("carries is_active, so withdrawal is possible at all", () => {
-    // Without it, `Restrict` would make a mistaken amenity permanent.
-    expect(SCHEMA()).toContain("is_active   Boolean  @default(true)")
+    /*
+     * Without it, `Restrict` would make a mistaken amenity permanent.
+     *
+     * Matched on the fact, not the spacing. `prisma format` re-aligns a model's
+     * columns whenever any field in it changes width, so an exact-string
+     * assertion fails on an unrelated edit somewhere else in the same block --
+     * which reads as a broken guard rather than a formatter.
+     */
+    expect(SCHEMA()).toMatch(/is_active\s+Boolean\s+@default\(true\)/)
   })
 
   it("hides retired amenities from every picker", () => {
@@ -62,7 +69,9 @@ describe("ordering is explicit, not alphabetical", () => {
      * every event card in the app. `sort_order` is the vocabulary's own
      * opinion, so two events with the same amenities list them the same way.
      */
-    expect(SCHEMA()).toContain("sort_order  Int      @default(0)")
+    // Field and default, not column alignment — see the note above.
+    // Whitespace-insensitive; see the is_active assertion above.
+    expect(SCHEMA()).toMatch(/sort_order\s+Int\s+@default\(0\)/)
     for (const f of [
       ["app", "api", "mobile", "amenities", "route.ts"],
       ["app", "dashboard", "events", "new", "page.tsx"],
@@ -111,12 +120,25 @@ describe("the organiser asserts; nothing is inherited or assumed", () => {
   it("replaces the whole set rather than diffing it", () => {
     /*
      * The payload is the full list the organiser ticked, so a diff would have
-     * to tell "unticked" from "not sent". `undefined` already means "not
+     * to tell "unticked" from "not sent". An **absent key** already means "not
      * sent", which is what leaves an event's amenities alone.
+     *
+     * The anchor moved when the route dropped `?? undefined` for conditional
+     * spreads (SCRUM-53): the shape is now
+     * `...(Array.isArray(amenity_ids) ? { amenities: { deleteMany ... } } : {})`
+     * rather than `amenities: Array.isArray(...) ? ... : undefined`. Same
+     * behaviour, and the key is omitted rather than set to undefined — which
+     * is the point of that change. Only the text this test greps for changed.
      */
     const update = read("app", "api", "events", "[id]", "route.ts")
-    const block = update.slice(update.indexOf("amenities: Array.isArray(amenity_ids)"))
-    expect(block.slice(0, block.indexOf("media:"))).toContain("deleteMany: {}")
+    const start = update.indexOf("Array.isArray(amenity_ids)")
+    // jest takes one argument; the message-as-second-arg is a Playwright idiom.
+    expect({ found: start > -1 }).toEqual({ found: true })
+    const block = update.slice(start, update.indexOf("media_items", start))
+    expect(block).toContain("deleteMany: {}")
+    // And still guarded, so a PATCH that does not mention amenities leaves
+    // them alone rather than clearing them.
+    expect(block).toContain("amenity_ids.map")
   })
 
   it("validates the ids as uuids before they reach a connect", () => {

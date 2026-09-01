@@ -36,6 +36,21 @@ export const authOptions: NextAuthOptions = {
           return null
         }
 
+        /*
+         * A suspended or deleted account cannot sign in.
+         *
+         * This read the password and nothing else, so suspension -- the one
+         * action a moderator takes to stop somebody -- did not stop them
+         * signing into the dashboard. The mobile side has checked
+         * `accountBlockReason` since it shipped; this path never did.
+         *
+         * Returning null, not a specific error: which of the two it is, is not
+         * information a failed sign-in should disclose.
+         */
+        if (user.deletedAt || user.suspended_at) {
+          return null
+        }
+
         return { id: user.id, email: user.email, name: user.name, role: user.role }
       },
     }),
@@ -75,11 +90,21 @@ export const authOptions: NextAuthOptions = {
       if (token.sub) {
         const fresh = await db.user.findUnique({
           where: { id: token.sub },
-          select: { role: true },
+          select: { role: true, suspended_at: true, deletedAt: true },
         })
-        // A deleted user keeps no privilege; `canAccessDashboard` rejects
-        // `attendee`, so this fails closed rather than throwing mid-request.
-        token.role = fresh?.role ?? ("attendee" as user_role)
+        /*
+         * A deleted user keeps no privilege; `canAccessDashboard` rejects
+         * `attendee`, so this fails closed rather than throwing mid-request.
+         *
+         * Suspension is read here too, and this is the half that actually ends
+         * a live session. Blocking `authorize()` only stops the *next* sign-in;
+         * with the JWT strategy there is no session table to clear, so a
+         * suspended admin's existing cookie stayed valid for up to thirty days.
+         * The suspend transaction called `session.deleteMany()` believing it
+         * handled this. There were no rows.
+         */
+        const blocked = !fresh || fresh.deletedAt !== null || fresh.suspended_at !== null
+        token.role = blocked ? ("attendee" as user_role) : fresh.role
       }
 
       return token

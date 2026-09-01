@@ -42,9 +42,34 @@ describe("every group-chat surface consults blocked_users", () => {
      * The block list is already on the device, so the client COULD drop the
      * message — but then the platform has still delivered it, and any client
      * bug re-exposes it. A block is a safety promise, not a mute.
+     *
+     * This used to assert against the route file. Delivery moved into
+     * `lib/room-delivery.ts`, because the event-chat POST wrote to the same
+     * table and delivered nothing at all — so the filter now lives in one place
+     * and the next test asserts both routes reach it. That is a stronger
+     * guarantee than the one this replaced: a third write path can no longer be
+     * added without either using it or failing the check below.
      */
-    const src = read("app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts")
+    const src = read("lib/room-delivery.ts")
     expect(src).toMatch(/emitChatMessage\(\s*\n?\s*chatGroupId,[\s\S]{0,600}senderBlocked\s*\n?\s*\)/)
+  })
+
+  it("every chat write path delivers through the one place that filters", () => {
+    /*
+     * `POST /events/:id/chat` persisted a message and stopped — no emit, no
+     * push — so blocks were irrelevant there because nothing was delivered at
+     * all. Fixing the delivery without sharing the filter would have created a
+     * second unfiltered fan-out.
+     */
+    for (const route of [
+      "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts",
+      "app/api/mobile/events/[eventId]/chat/route.ts",
+    ]) {
+      const src = read(route)
+      expect(src).toMatch(/await deliverToRoom\(\{/)
+      // And does not hand-roll its own fan-out beside it.
+      expect(src).not.toMatch(/notifyGroupMessage\(/)
+    }
   })
 
   it("emitChatMessage excludes by user room, so it crosses instances", () => {
@@ -56,8 +81,19 @@ describe("every group-chat surface consults blocked_users", () => {
 
   it("the group push fan-out drops blocked recipients", () => {
     // The loudest surface in the product.
-    const src = read("app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts")
+    const src = read("lib/room-delivery.ts")
     expect(src).toMatch(/user_id: \{ notIn: senderBlocked \}/)
+  })
+
+  it("skips delivery entirely if it cannot tell who blocked whom", () => {
+    /*
+     * Fails closed on delivery. If `blockCounterparties` throws, pushing to
+     * everyone would put a blocked person's message on somebody's lock screen —
+     * the exact harm the filter exists for. A skipped delivery costs a message
+     * that appears on the next poll.
+     */
+    const src = read("lib/room-delivery.ts")
+    expect(src).toMatch(/Room delivery skipped: could not resolve blocks[\s\S]{0,120}return/)
   })
 
   it("the check-in ping does not announce someone you blocked", () => {

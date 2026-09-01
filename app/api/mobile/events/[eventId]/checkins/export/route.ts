@@ -6,6 +6,7 @@ import { csvResponse, toCsv } from "@/lib/csv"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
+import { REPORT_ROW_LIMIT } from "@/lib/reports"
 import {
   unauthorizedResponse,
   notFoundResponse,
@@ -68,10 +69,44 @@ export async function GET(
      * CRLF endings this route lacked, so non-ASCII pseudonyms stop mojibaking
      * in Excel.
      */
+    /*
+     * Four columns, and the shared export cap.
+     *
+     * This had no `select`, so it loaded every column of every check-in to
+     * print an attendee, a status and two timestamps — including `latitude`,
+     * `longitude` and `device_info`. That is waste on a route whose own
+     * docblock above argues at length that a host export must return no more
+     * than the screen it backs, and it is the shape of the next leak: the
+     * moment somebody adds a column by spreading the row, GPS traces and device
+     * fingerprints go into a spreadsheet nobody meant to put them in.
+     *
+     * `REPORT_ROW_LIMIT` is the constant `lib/reports.ts` introduced saying "a
+     * fourth export cannot be written without a number to reach for -- which is
+     * how three of them came to be missing it". This is that fourth export, and
+     * it was written without reaching for it.
+     */
     const checkIns = await db.event_check_ins.findMany({
       where: { event_id: eventId },
+      select: {
+        user_id: true,
+        status: true,
+        check_in_time: true,
+        check_out_time: true,
+      },
       orderBy: { check_in_time: "asc" },
+      take: REPORT_ROW_LIMIT,
     })
+
+    if (checkIns.length === REPORT_ROW_LIMIT) {
+      /*
+       * The truncation is silent in the CSV itself, and that is a gap this
+       * route shares with all six dashboard exports rather than one it
+       * introduces — none of them tells the reader the file is short. Adding a
+       * notice row here alone would make this the only export whose column
+       * count varies, so it is logged and recorded instead.
+       */
+      logger.warn("Attendee export hit the row limit", { eventId, limit: REPORT_ROW_LIMIT })
+    }
 
     const pseudonyms = await pseudonymsForEvent(eventId)
 

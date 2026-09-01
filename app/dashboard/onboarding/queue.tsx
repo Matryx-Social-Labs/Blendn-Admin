@@ -25,6 +25,18 @@ import { approveOnboardingRequest, declineOnboardingRequest, type OnboardingRow 
  * not go out — if the applicant already received it, echoing it on screen is a
  * credential sitting in a browser tab for no reason.
  */
+/**
+ * Every role an application can request, labelled.
+ *
+ * Typed against `OnboardingRow["requested_role"]` so adding a value to the
+ * union is a compile error here rather than a wrong label in production.
+ */
+const ROLE_LABEL: Record<OnboardingRow["requested_role"], string> = {
+  organizer: "Organiser",
+  venue_owner: "Venue owner",
+  sponsor: "Sponsor",
+}
+
 export function OnboardingQueue({ rows }: { rows: OnboardingRow[] }) {
   return (
     <div className="flex flex-col gap-3">
@@ -112,9 +124,15 @@ function Row({ row }: { row: OnboardingRow }) {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {row.requested_role === "venue_owner" ? "Venue owner" : "Organiser"}
-          </Badge>
+          {/*
+            An exhaustive map, not a ternary.
+
+            This read `venue_owner ? "Venue owner" : "Organiser"`, so the moment
+            sponsor applications existed they rendered as "Organiser" — an admin
+            approving one would grant placement rights believing they were
+            approving a host, and nothing on screen would say otherwise.
+          */}
+          <Badge variant="secondary">{ROLE_LABEL[row.requested_role]}</Badge>
           {awaitingEmail ? (
             <Badge variant="outline" className="gap-1">
               <IconMailQuestion className="size-3.5" /> Email unconfirmed

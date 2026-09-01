@@ -10,8 +10,9 @@ import { formatDay, formatNumber } from "@/lib/dashboard-format"
 
 import { getLinkedEventsForOwner } from "@/lib/venue-link-actions"
 
-import { getDashboardOverview } from "../actions"
+import { getDashboardOverview, getVenueRecords } from "../actions"
 import { LinkedEvents } from "./linked-events"
+import { VenueRecords } from "./venue-records"
 
 export const dynamic = "force-dynamic"
 
@@ -31,6 +32,23 @@ const toneVariant = {
 export default async function MyVenuesPage() {
   const session = await getAuth()
   if (!session?.user) redirect("/login")
+
+  /*
+   * Admins get the record index; owners get their utilisation view.
+   *
+   * `dashboard-nav.ts` has promised admins "every venue record — who owns
+   * each, which are unclaimed" since it was written, and pointed at
+   * `/dashboard/venue-owners`, a list of *user accounts*. So the one role that
+   * can see every venue could see none of them: this route redirected them
+   * away, which also killed the venue detail page's own "← All venues" link
+   * for the only role that has a use for it.
+   *
+   * One route, two readings, because they are the same noun — and the detail
+   * page both roles land on is already shared.
+   */
+  if (session.user.role === "app_admin") {
+    return <VenueRecords venues={await getVenueRecords()} />
+  }
   if (session.user.role !== "venue_owner") redirect("/dashboard")
 
   const [overview, linkedEvents] = await Promise.all([
@@ -59,10 +77,12 @@ export default async function MyVenuesPage() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
+        {/* Only the part a reader cannot deduce from the grouping itself: some
+            events are attached to a venue record and some are still just a
+            string, and those two group differently. */}
         <p className="max-w-prose text-[0.8125rem] text-muted-foreground">
-          Events linked to one of your venues are grouped by that venue. Anything still on a
-          free-text name is grouped by the name, ignoring case and spacing. Capacity is the
-          largest any event there has declared.
+          Events still on a free-text venue name are grouped by that name, ignoring case
+          and spacing.
         </p>
         <Button asChild>
           <Link href="/dashboard/venues/new">Add a venue</Link>

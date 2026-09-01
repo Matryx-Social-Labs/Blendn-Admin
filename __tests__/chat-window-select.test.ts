@@ -57,15 +57,29 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 }
 
 /**
- * `event: { select: { ... } }` — the nested-relation shape `chatWindowState`
- * is fed from. Matched across newlines, since these are written inline.
+ * Any innermost `select: { ... }`, matched across newlines.
+ *
+ * This began as `event: { select: { ... } }`, which only sees the nested-relation
+ * shape. `lib/sponsored-scheduler.ts` reads the event directly —
+ * `db.events.findUnique({ select: { ... } })` — so the narrower pattern found no
+ * blocks at all in the one new caller and the "found a select" guard was what
+ * caught it. In a file that calls `chatWindowState`, selecting `end_time`
+ * without `start_time` is worth flagging whatever the query shape.
  */
-const EVENT_SELECT_BLOCK = /event:\s*\{\s*select:\s*\{[^{}]*\}/g
+const EVENT_SELECT_BLOCK = /select:\s*\{[^{}]*\}/g
 
 describe("chat-window callers select what the predicate reads", () => {
+  /*
+   * Files that CALL the predicate, not files that mention it.
+   *
+   * `chatWindowState` appears in prose in several comments — `lib/placement-phase.ts`
+   * explains that the scheduler consults it — and those files issue no Prisma
+   * query at all, so the "found at least one select" guard below fired on them.
+   * Matching the call parenthesis is what distinguishes a caller from a mention.
+   */
   const callers = SEARCH_DIRS.flatMap((d) => sourceFiles(join(ROOT, d))).filter((f) => {
     const src = readFileSync(f, "utf8")
-    return src.includes("chatWindowState") && !f.endsWith("lib/chat-window.ts")
+    return /chatWindowState\s*\(/.test(src) && !f.endsWith("lib/chat-window.ts")
   })
 
   it("finds the call sites at all, so a rename cannot silently empty this test", () => {

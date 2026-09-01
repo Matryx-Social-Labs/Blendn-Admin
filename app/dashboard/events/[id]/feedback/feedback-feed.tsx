@@ -84,13 +84,26 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
         {messages.map((m) => (
           <li key={m.id} className="flex flex-col gap-1">
             <span className="flex flex-wrap items-center gap-2 text-[0.75rem] text-muted-foreground">
-              <b className="font-medium text-foreground">{m.pseudonym}</b>
-              <span>
-                {new Date(m.at).toLocaleTimeString("en-GB", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
+              {/*
+                * Suppressed messages keep their label and lose their author.
+                *
+                * The organiser still learns that somebody raised this, in this
+                * category — which is the actionable half — without learning
+                * who. Below the disclosure floor the pseudonym is as
+                * identifying as a name, because it is stable for the whole
+                * room and they have seen it all night.
+                */}
+              <b className="font-medium text-foreground">
+                {m.suppressed ? "Someone" : m.pseudonym}
+              </b>
+              {m.at ? (
+                <span>
+                  {new Date(m.at).toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              ) : null}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -132,14 +145,23 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
                 </Badge>
               ) : null}
             </span>
-            <span className="text-sm leading-relaxed">{m.text}</span>
+            {m.suppressed ? (
+              <span className="text-sm leading-relaxed text-muted-foreground">
+                Held back — too few people raised this for the message to be
+                shown without identifying them.
+              </span>
+            ) : (
+              <span className="text-sm leading-relaxed">{m.text}</span>
+            )}
           </li>
         ))}
       </ul>
 
       <p className="border-t border-border px-3.5 py-2.5 text-[0.75rem] text-faint-foreground">
         Names are pseudonyms, enforced server-side — the real identity never
-        reaches this page. Corrections are saved and kept for tuning.
+        reaches this page. Messages in categories too few people raised are held
+        back entirely, because a stable pseudonym in a small room is a name.
+        Corrections are saved and kept for tuning.
       </p>
     </div>
   )

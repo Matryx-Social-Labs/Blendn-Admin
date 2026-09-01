@@ -177,14 +177,6 @@ export function createAuthRateLimit(
 }
 
 /**
- * Kept for the cron that used to call it. Redis expires its own keys and the
- * in-process fallback evicts on write, so there is nothing left to sweep.
- */
-export function cleanupRateLimitStore(): number {
-  return 0
-}
-
-/**
  * Per-user policies for authenticated mutations.
  *
  * Keyed on the user, not the IP: for an authenticated endpoint the abuse case

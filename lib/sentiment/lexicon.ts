@@ -147,3 +147,50 @@ export function classifyWithLexicon(text: string): Classification | null {
     source: "lexicon",
   }
 }
+
+/**
+ * The best guess when tier 3 is unavailable. Never null.
+ *
+ * ## The false negative this exists to stop
+ *
+ * `classifyWithLexicon` returns null for a `safety_conduct` cue **on purpose**,
+ * to force a real read — the comment above says a false negative there is
+ * unacceptable and a lexicon is not enough to clear it. Both true.
+ *
+ * But when tier 3 cannot answer, `classifyMessages` wrote a hardcoded
+ * `neutral / other / 0.2`, so the detection was computed and thrown away. And
+ * `deriveAlerts` fires the safety alert on `category === "safety_conduct"`, so
+ * **without `OPENAI_API_KEY` the safety alert could not fire at all** — while
+ * `lib/env.ts` marks that key optional and `DEPLOYMENT.md` lists it as not
+ * required. The ordinary deployment had a safety alert that was wired to
+ * nothing.
+ *
+ * A low-confidence "this looks like a safety report" is a far better answer
+ * than a confident "this is neutral chatter". Escalating on a maybe costs an
+ * organiser a glance; missing it costs what this whole screen exists for.
+ *
+ * Confidence 0.3: visibly uncertain, and deliberately below the 0.7 a matched
+ * lexicon rule claims, so the digest can present it differently.
+ */
+export function lexiconFallback(text: string): Classification {
+  const category = detectCategory(text.trim())
+
+  if (category === "safety_conduct") {
+    return {
+      sentiment: "negative",
+      category: "safety_conduct",
+      confidence: 0.3,
+      source: "lexicon",
+    }
+  }
+
+  return {
+    // Neutral rather than a guessed polarity: this path is reached because the
+    // polarity was ambiguous, negated, or absent, and inventing one would
+    // flatten the mood bar with noise.
+    sentiment: "neutral",
+    category: category ?? "other",
+    confidence: 0.3,
+    source: "lexicon",
+  }
+}

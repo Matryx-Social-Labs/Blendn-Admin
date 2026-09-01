@@ -3,6 +3,7 @@ import type { DateRange } from "./date-range"
 import type { user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
+import { distinctAttendeeCounts } from "./attendee-counts"
 
 /**
  * Report definitions.
@@ -98,7 +99,7 @@ export function canRunReport(key: string, role: user_role): boolean {
  * meaningless -- and different across organisations, so two hosts cannot
  * compare exports and discover they had the same person.
  */
-async function pseudonymScope(role: user_role, userId: string): Promise<string> {
+export async function pseudonymScope(role: user_role, userId: string): Promise<string> {
   if (role === "app_admin") return "platform"
   const memberships = await db.organisation_members.findMany({
     where: { user_id: userId },
@@ -108,7 +109,7 @@ async function pseudonymScope(role: user_role, userId: string): Promise<string> 
   return orgIds.length > 0 ? orgIds.join(",") : `user:${userId}`
 }
 
-async function eventScopeFor(role: user_role, userId: string) {
+export async function eventScopeFor(role: user_role, userId: string) {
   if (role === "app_admin") return { deleted_at: null }
 
   const memberships = await db.organisation_members.findMany({
@@ -131,6 +132,20 @@ async function eventScopeFor(role: user_role, userId: string) {
   }
 }
 
+/**
+ * The row ceiling every export shares.
+ *
+ * Three of the six had one and three did not -- `events`, `attendees` and
+ * `organisations` were unbounded `findMany`s pulled into Node and folded in
+ * memory. That is a request an admin can make from a browser that returns the
+ * whole table, and the attendees one groups the whole thing into a Map first.
+ *
+ * A shared constant rather than three more literals, so a fourth export cannot
+ * be written without a number to reach for -- which is how three of them came
+ * to be missing it.
+ */
+export const REPORT_ROW_LIMIT = 10_000
+
 /** A report's rows and its header, ready for `toCsv`. */
 export async function buildReport(
   key: ReportKey,
@@ -147,6 +162,7 @@ export async function buildReport(
       const rows = await db.events.findMany({
         where: { ...scope, start_time: inWindow },
         orderBy: { start_time: "desc" },
+        take: REPORT_ROW_LIMIT,
         select: {
           id: true,
           title: true,
@@ -159,11 +175,17 @@ export async function buildReport(
           _count: {
             select: {
               rsvps: { where: { status: "going" } },
-              check_ins: { where: { status: { in: ["checked_in", "checked_out"] } } },
             },
           },
         },
       })
+      /*
+       * Attendance is a second query rather than a `_count`, because `_count`
+       * has no DISTINCT and `event_check_ins` holds one row per person **per
+       * day**. The Attended column read three times high on a three-day
+       * conference, in the file that also promises the export is pseudonymous.
+       */
+      const attended = await distinctAttendeeCounts(rows.map((r) => r.id))
       const columns: CsvColumn<(typeof rows)[number]>[] = [
         { key: "id", label: "Event ID" },
         { key: "title", label: "Title" },
@@ -174,7 +196,7 @@ export async function buildReport(
         { key: "venue_name", label: "Venue" },
         { key: "max_capacity", label: "Capacity" },
         { key: "going", label: "Going", value: (r) => r._count.rsvps },
-        { key: "attended", label: "Attended", value: (r) => r._count.check_ins },
+        { key: "attended", label: "Attended", value: (r) => attended.get(r.id) ?? 0 },
         {
           key: "fill",
           label: "Fill %",
@@ -195,6 +217,16 @@ export async function buildReport(
           created_at: inWindow,
         },
         select: { user_id: true, event_id: true, created_at: true },
+        /*
+         * Bounded, and ordered so the bound is meaningful.
+         *
+         * This was unbounded AND folded into a Map in memory, so the cost grew
+         * with attendance-days rather than with people. Newest first, because a
+         * truncated export of the most recent window is a usable answer and a
+         * truncated export of an arbitrary slice is not.
+         */
+        orderBy: { created_at: "desc" },
+        take: REPORT_ROW_LIMIT,
       })
       const byUser = new Map<string, { events: Set<string>; last: Date }>()
       for (const ci of checkIns) {
@@ -227,7 +259,7 @@ export async function buildReport(
       const rows = await db.event_check_ins.findMany({
         where: { event: scope, created_at: inWindow },
         orderBy: { created_at: "desc" },
-        take: 10_000,
+        take: REPORT_ROW_LIMIT,
         select: {
           created_at: true,
           status: true,
@@ -252,7 +284,7 @@ export async function buildReport(
       const rows = await db.event_ratings.findMany({
         where: { event: scope, created_at: inWindow },
         orderBy: { created_at: "desc" },
-        take: 10_000,
+        take: REPORT_ROW_LIMIT,
         select: {
           created_at: true,
           rating: true,
@@ -273,6 +305,7 @@ export async function buildReport(
     case "organisations": {
       const rows = await db.organisations.findMany({
         orderBy: { created_at: "desc" },
+        take: REPORT_ROW_LIMIT,
         include: {
           domains: { select: { domain: true, verified_at: true } },
           _count: { select: { members: true, events: true, venues: true } },
@@ -308,7 +341,7 @@ export async function buildReport(
       const rows = await db.moderation_flags.findMany({
         where: { created_at: inWindow },
         orderBy: { created_at: "desc" },
-        take: 10_000,
+        take: REPORT_ROW_LIMIT,
         select: {
           created_at: true,
           status: true,

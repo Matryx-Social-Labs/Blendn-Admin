@@ -12,6 +12,9 @@
 const mockDb = {
   events: { findUnique: jest.fn() },
   event_check_ins: { findFirst: jest.fn(), count: jest.fn(), findMany: jest.fn() },
+  // The roster consults blocks now: a block is a safety promise, not a mute,
+  // and this is the one screen that answers "is he in this room".
+  blocked_users: { findMany: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -47,6 +50,42 @@ beforeEach(() => {
   mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "ci1" })
   mockDb.event_check_ins.count.mockResolvedValue(1)
   mockDb.event_check_ins.findMany.mockResolvedValue([bare])
+  mockDb.blocked_users.findMany.mockResolvedValue([])
+})
+
+describe("blocks reach the roster", () => {
+  /*
+   * `/matches` has filtered on blocks since it shipped; this endpoint never
+   * did, so the one screen that names who is physically in the room with you
+   * would still list somebody you blocked, and still count them.
+   */
+  it("excludes a blocked person from both the list and the count", async () => {
+    mockDb.blocked_users.findMany.mockResolvedValue([{ blocker_id: "u1", blocked_id: "u9" }])
+
+    await GET(req(), { params: Promise.resolve({ eventId: EVENT }) })
+
+    for (const call of [
+      mockDb.event_check_ins.count.mock.calls[0][0],
+      mockDb.event_check_ins.findMany.mock.calls[0][0],
+    ]) {
+      expect(call.where.user_id).toEqual({ notIn: ["u9"] })
+    }
+  })
+
+  it("holds whichever direction the block runs in", async () => {
+    mockDb.blocked_users.findMany.mockResolvedValue([{ blocker_id: "u9", blocked_id: "u1" }])
+
+    await GET(req(), { params: Promise.resolve({ eventId: EVENT }) })
+
+    expect(mockDb.event_check_ins.findMany.mock.calls[0][0].where.user_id).toEqual({
+      notIn: ["u9"],
+    })
+  })
+
+  it("adds no predicate when nobody is blocked", async () => {
+    await GET(req(), { params: Promise.resolve({ eventId: EVENT }) })
+    expect(mockDb.event_check_ins.findMany.mock.calls[0][0].where.user_id).toBeUndefined()
+  })
 })
 
 describe("GET /events/:id/checkins — who counts as present", () => {

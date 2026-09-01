@@ -15,27 +15,32 @@ export default async function UsersPage({
   const search = typeof params.search === "string" ? params.search : undefined
   const status = typeof params.status === "string" ? params.status : undefined
 
-  const [{ users, total }, stats, session] = await Promise.all([
-    getUsers(search, status, 50),
-    getUserStats(),
-    getAuth(),
-  ])
-
+  /*
+   * The gate runs before the fetch, not beside it.
+   *
+   * These three were in one `Promise.all` with the role check after it — so
+   * `getUsers` refused first and the refusal arrived as **"Something went
+   * wrong. The page failed to load."** An organiser opening this URL got an
+   * error boundary rather than a redirect, which reads as a broken product
+   * rather than as a closed door.
+   *
+   * Nothing leaked: `getUsers` throws Forbidden on its own, which is the
+   * defence-in-depth working. What was wrong is that a correct refusal was
+   * rendered as a crash. `/dashboard/organisers` had it in the right order
+   * already, which is what made the difference visible.
+   */
+  const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") {
     redirect("/dashboard")
   }
 
+  const [{ users, total }, stats] = await Promise.all([
+    getUsers(search, status, 50),
+    getUserStats(),
+  ])
+
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div className="px-4 lg:px-6">
-        <div className="rounded-xl border bg-card px-6 py-6">
-          <h1 className="text-3xl font-semibold">Users</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Manage user accounts, review onboarding quality, and shape the audience story behind the product.
-          </p>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

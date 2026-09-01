@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { owningOrgFor } from "@/lib/event-ownership"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions } from "@/lib/rbac"
@@ -13,6 +14,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { randomUUID } from "crypto"
+import { syncOccurrences } from "@/lib/occurrences"
 
 export async function POST(
   request: NextRequest,
@@ -91,6 +93,18 @@ export async function POST(
         visibility: event.visibility,
         max_capacity: event.max_capacity,
         organizer_id: authUser.userId,
+        /*
+         * The clone was landing org-less. A comment above this route claims
+         * "`include` returns every scalar, so `organizer_org_id` is already
+         * here" -- true of the read, and the create below never copied it. So
+         * cloning produced an event its own cloner could not edit, and which
+         * every org-scoped dashboard listing and report silently excluded.
+         *
+         * Resolved from the cloner rather than copied from the source: cloning
+         * somebody else's event makes it yours, and inheriting their org would
+         * hand them edit rights over your copy.
+         */
+        organizer_org_id: await owningOrgFor({ id: requester.id, role: requester.role }),
         cover_image_url: event.cover_image_url,
         external_link: event.external_link,
         is_featured: false,
@@ -119,9 +133,20 @@ export async function POST(
               full_description: event.details.full_description,
               house_rules: event.details.house_rules,
               cancellation_policy: event.details.cancellation_policy,
-              additional_info: event.details.additional_info ?? undefined,
-              faq: event.details.faq ?? undefined,
-              accessibility_info: event.details.accessibility_info ?? undefined,
+              /*
+               * The last three explicit-undefined sites in the tree
+               * (SCRUM-53). These are Json columns, so `null` and "absent" are
+               * genuinely different to Prisma — a spread omits the key and
+               * leaves the column at its default, which is what `?? undefined`
+               * was reaching for.
+               */
+              ...(event.details.additional_info != null && {
+                additional_info: event.details.additional_info,
+              }),
+              ...(event.details.faq != null && { faq: event.details.faq }),
+              ...(event.details.accessibility_info != null && {
+                accessibility_info: event.details.accessibility_info,
+              }),
               covid_guidelines: event.details.covid_guidelines,
             },
           },
@@ -129,6 +154,20 @@ export async function POST(
       },
       select: { id: true, slug: true, title: true, status: true },
     })
+
+    /*
+     * Occurrences, like every other write path to this table.
+     *
+     * `resolveOccurrence` answers check-in's "which day is this?" and returns
+     * `none` when an event has no occurrence rows; the check-in route reads
+     * `none` as `too_late`, so a clone refused with "Event has already ended"
+     * however far in the future it sat.
+     *
+     * A clone lands as a draft, so nobody could check into it *yet* either way
+     * — which is exactly why this was invisible. It becomes real the moment the
+     * cloner publishes, and by then nothing connects the failure to this route.
+     */
+    await syncOccurrences(cloned.id, event.start_time, event.end_time, event.timezone)
 
     return successResponse(cloned, 201)
   } catch (error) {

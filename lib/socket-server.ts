@@ -1,16 +1,13 @@
 import { logger } from "./logger"
 import { Server as HttpServer } from "http"
 import { Server, Socket } from "socket.io"
-import { verifyAccessToken } from "./mobile-auth"
+import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
-import { CHAT_WINDOW_HOURS, chatWindowState } from "./chat-window"
+import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
-import { canJoinChat, canJoinConversation, canJoinEvent } from "./socket-auth"
+import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
-import { startChatLifecycleSweeper } from "./chat-lifecycle"
-import { startPresenceSweeper } from "./presence-sweeper"
-import { startSentimentSweeper } from "./sentiment-sweeper"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -30,7 +27,20 @@ export type RoomType = "event" | "chat" | "user"
 // Socket events
 export interface ServerToClientEvents {
   // Event-related
+  /**
+   * A check-in happened. Deliberately carries no name.
+   *
+   * This is the room anyone who opened the event can join, so it drives the
+   * live counter and nothing else. `userId` stays so a client can recognise
+   * its own check-in; the pseudonym moved to `event:room:checkin`.
+   */
   "event:checkin": (data: {
+    eventId: string
+    userId: string
+    checkInTime: string
+  }) => void
+  /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. */
+  "event:room:checkin": (data: {
     eventId: string
     userId: string
     userName: string
@@ -121,6 +131,9 @@ export interface ClientToServerEvents {
   // Join/leave rooms
   "join:event": (eventId: string) => void
   "leave:event": (eventId: string) => void
+  /** The roster room. Requires a check-in; carries pseudonyms. */
+  "join:event:room": (eventId: string) => void
+  "leave:event:room": (eventId: string) => void
   /** Dashboard-only live operations room. */
   "join:eventOps": (eventId: string) => void
   "leave:eventOps": (eventId: string) => void
@@ -163,178 +176,13 @@ export type AuthenticatedSocket = Socket<
   SocketData
 >
 
-// ── Sponsored Message Scheduler ───────────────────────────────────────────────
+/*
+ * The sponsored-message scheduler used to live here, as `setInterval` handles in
+ * a `Map`. It is now `lib/sponsored-scheduler.ts`, which keeps the schedule in
+ * the database — a timer in process memory lost every campaign on deploy and
+ * duplicated every one of them the moment a second container existed.
+ */
 
-interface SponsoredMessageRecord {
-  id: string
-  event_id: string
-  content: string
-  interval_minutes: number
-  organizer_id: string
-  chat_group_id: string
-}
-
-class SponsoredMessageScheduler {
-  private timers = new Map<string, ReturnType<typeof setInterval>>()
-
-  /** Send one sponsored message into the chatroom and update last_sent_at */
-  private async send(msg: SponsoredMessageRecord): Promise<void> {
-    try {
-      /*
-       * The room has to still be open. This was the THIRD write path into
-       * `chat_messages` that did not consult `chatWindowState`, and the only
-       * one with no human behind it: a `setInterval` armed once, never checked
-       * `chat_groups.status` or `events.end_time`, and `loadAll()` re-armed
-       * every `is_active` row on every boot with no end-time filter.
-       *
-       * So an archived room that no human could post to still received a
-       * sponsored message every `interval_minutes`, forever, re-armed by each
-       * deploy — 96 a day at the 15-minute setting.
-       *
-       * Stop the timer rather than just skipping the send: a closed room never
-       * reopens, so there is nothing left for this timer to do.
-       */
-      const group = await db.chat_groups.findUnique({
-        where: { id: msg.chat_group_id },
-        select: {
-          status: true,
-          event: { select: { start_time: true, end_time: true } },
-        },
-      })
-
-      if (!group?.event) {
-        this.stop(msg.id)
-        return
-      }
-
-      const window = chatWindowState(group.event, group)
-      if (!window.open) {
-        logger.info("Stopping sponsored message: room closed", {
-          messageId: msg.id,
-          chatGroupId: msg.chat_group_id,
-          reason: window.reason,
-        })
-        this.stop(msg.id)
-        await db.event_sponsored_messages.update({
-          where: { id: msg.id },
-          data: { is_active: false },
-        })
-        return
-      }
-
-      const chatContent = `📣 [Sponsored]\n${msg.content}`
-
-      const created = await db.chat_messages.create({
-        data: {
-          chat_group_id: msg.chat_group_id,
-          user_id: msg.organizer_id,
-          type: "text",
-          content: chatContent,
-          metadata: { sponsored_message_id: msg.id },
-        },
-      })
-
-      await db.chat_groups.update({
-        where: { id: msg.chat_group_id },
-        data: { last_message_at: created.created_at },
-      })
-
-      await db.event_sponsored_messages.update({
-        where: { id: msg.id },
-        data: { last_sent_at: created.created_at },
-      })
-
-      emitChatMessage(msg.chat_group_id, {
-        id: created.id,
-        content: created.content,
-        type: "text",
-        userId: msg.organizer_id,
-        userName: "Sponsored",
-        createdAt: created.created_at.toISOString(),
-      })
-    } catch (err) {
-      logger.error("Failed to send sponsored message", { messageId: msg.id, error: err instanceof Error ? err.message : String(err) })
-    }
-  }
-
-  /** Start periodic sending for a message */
-  start(msg: SponsoredMessageRecord): void {
-    this.stop(msg.id) // clear any existing timer
-    const ms = msg.interval_minutes * 60 * 1000
-    const timer = setInterval(() => void this.send(msg), ms)
-    this.timers.set(msg.id, timer)
-    logger.info("Started sponsored message schedule", { messageId: msg.id, intervalMinutes: msg.interval_minutes })
-  }
-
-  /** Stop a specific timer */
-  stop(messageId: string): void {
-    const timer = this.timers.get(messageId)
-    if (timer) {
-      clearInterval(timer)
-      this.timers.delete(messageId)
-      logger.info("Stopped sponsored message schedule", { messageId })
-    }
-  }
-
-  /** Clear every timer. Called from the server's shutdown handler. */
-  stopAll(): void {
-    const count = this.timers.size
-    for (const timer of this.timers.values()) {
-      clearInterval(timer)
-    }
-    this.timers.clear()
-    if (count > 0) {
-      logger.info("Stopped all sponsored message schedules", { count })
-    }
-  }
-
-  /** Load all active sponsored messages from DB and start their timers */
-  async loadAll(): Promise<void> {
-    try {
-      /*
-       * Only events whose room could still be open.
-       *
-       * Without the end-time bound this re-armed a timer on every boot for
-       * every `is_active` row ever created, including events that finished
-       * months ago — so a deploy resurrected campaigns into archived rooms.
-       * `send()` now stops those on their first tick, but not arming them at
-       * all is cheaper and means a deploy does not briefly recreate the bug.
-       */
-      const windowOpensAfter = new Date(Date.now() - CHAT_WINDOW_HOURS * 60 * 60 * 1000)
-      const messages = await db.event_sponsored_messages.findMany({
-        where: {
-          is_active: true,
-          event: { end_time: { gte: windowOpensAfter } },
-        },
-        include: {
-          event: {
-            select: {
-              organizer_id: true,
-              chat_group: { select: { id: true } },
-            },
-          },
-        },
-      })
-
-      for (const msg of messages) {
-        if (!msg.event.chat_group) continue
-        this.start({
-          id: msg.id,
-          event_id: msg.event_id,
-          content: msg.content,
-          interval_minutes: msg.interval_minutes,
-          organizer_id: msg.event.organizer_id,
-          chat_group_id: msg.event.chat_group.id,
-        })
-      }
-      logger.info("Loaded active sponsored messages", { count: messages.length })
-    } catch (err) {
-      logger.error("[Scheduler] Failed to load sponsored messages", { error: err instanceof Error ? err.message : String(err) })
-    }
-  }
-}
-
-export const sponsoredMessageScheduler = new SponsoredMessageScheduler()
 
 /**
  * Join `room` only if `check` authorizes it, otherwise tell the client.
@@ -350,46 +198,103 @@ export const sponsoredMessageScheduler = new SponsoredMessageScheduler()
  * live event — burns queries for rooms nobody has open, which at 5-second
  * granularity is most of them most of the time.
  */
-const opsTimers = new Map<string, NodeJS.Timeout>()
+interface OpsLoop {
+  timer: NodeJS.Timeout | undefined
+  /** Marks the loop stopped so an in-flight pass does not schedule a successor. */
+  stop: () => void
+}
+
+const opsTimers = new Map<string, OpsLoop>()
 const OPS_INTERVAL_MS = 5000
 
 export function startOpsBroadcast(eventId: string): void {
   if (!io || opsTimers.has(eventId)) return
 
-  const timer = setInterval(() => {
-    void (async () => {
-      const room = `event:${eventId}:ops`
+  /*
+   * Self-scheduling, not `setInterval`.
+   *
+   * This was the one loop in the codebase using `setInterval` with an async
+   * body -- `lib/presence-sweeper.ts` and `lib/sentiment-sweeper.ts` both
+   * schedule the next pass from the end of the current one, and both carry a
+   * comment saying a slow pass must not overlap the next.
+   *
+   * It matters more here than there. `buildLiveSnapshot` issues around ten
+   * round trips, three of them against predicates that were unindexed until
+   * recently, and it runs every five seconds per watched event. A pass that
+   * takes longer than five seconds under load starts the next one on top of
+   * it, and each overlapping pass makes the database slower, which makes the
+   * next pass longer. The failure is not a slow screen, it is a queue that
+   * cannot drain -- and it is on the Socket.io event loop, so chat delivery
+   * queues behind it.
+   *
+   * The `stopped` flag is the re-entrancy guard's other half: `stopOpsBroadcast`
+   * can fire while a pass is awaiting, and without it the pass would schedule a
+   * successor after the timer was cleared.
+   */
+  let stopped = false
+  const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
+
+  const tick = async (): Promise<void> => {
+    const room = `event:${eventId}:ops`
+    try {
       const watchers = io ? await io.in(room).fetchSockets() : []
       if (watchers.length === 0) {
         stopOpsBroadcast(eventId)
         return
       }
-      try {
-        const snapshot = await buildLiveSnapshot(eventId)
-        if (snapshot) io?.to(room).emit("ops:snapshot", snapshot)
-      } catch (error) {
-        // A failed snapshot must not kill the timer or the process — the next
-        // tick may well succeed, and a dead timer is a silently frozen screen.
-        logger.warn("Live snapshot failed", {
-          eventId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-    })()
-  }, OPS_INTERVAL_MS)
+      const snapshot = await buildLiveSnapshot(eventId)
+      if (snapshot) io?.to(room).emit("ops:snapshot", snapshot)
+    } catch (error) {
+      // A failed pass must not kill the loop or the process — the next one may
+      // well succeed, and a dead loop is a silently frozen screen.
+      logger.warn("Live snapshot failed", {
+        eventId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    if (stopped) return
+    state.timer = setTimeout(() => void tick(), OPS_INTERVAL_MS)
+    opsTimers.set(eventId, state)
+  }
 
-  opsTimers.set(eventId, timer)
+  state.timer = setTimeout(() => void tick(), OPS_INTERVAL_MS)
+  opsTimers.set(eventId, state)
 }
 
 export function stopOpsBroadcast(eventId: string): void {
-  const timer = opsTimers.get(eventId)
-  if (timer) {
-    clearInterval(timer)
+  const loop = opsTimers.get(eventId)
+  if (loop) {
+    // Both halves: clear the pending timer, and tell any in-flight pass not to
+    // schedule a successor when it finishes.
+    loop.stop()
+    if (loop.timer) clearTimeout(loop.timer)
     opsTimers.delete(eventId)
   }
 }
 
 /** Used by tests and by shutdown so a process can exit cleanly. */
+/**
+ * How many sockets are currently in a chat room.
+ *
+ * `undefined` when the server has not booted or the adapter cannot answer —
+ * never `0`. An empty room and an unanswerable question are different facts,
+ * and `lib/room-audience.ts` renders the second by hiding the number rather
+ * than showing a zero that reads as "nobody is here".
+ */
+export async function socketsInChatRoom(chatGroupId: string): Promise<number | undefined> {
+  if (!io) return undefined
+  try {
+    const sockets = await io.in(`chat:${chatGroupId}`).fetchSockets()
+    return sockets.length
+  } catch (error) {
+    logger.warn("Could not count sockets in room", {
+      chatGroupId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return undefined
+  }
+}
+
 export function stopAllOpsBroadcasts(): void {
   for (const eventId of Array.from(opsTimers.keys())) stopOpsBroadcast(eventId)
 }
@@ -627,6 +532,29 @@ export function initSocketServer(httpServer: HttpServer): Server {
           return next(new Error("Invalid or expired token"))
         }
 
+        /*
+         * A valid token is not enough: it has to still belong to a live
+         * account.
+         *
+         * Suspending revokes refresh tokens, but an access token already in a
+         * pocket stays valid for its full fifteen minutes -- and a socket
+         * opened with it outlives the token entirely, because nothing
+         * re-checks after the handshake. So a suspended person could hold a
+         * live realtime connection well past the moment they were stopped.
+         *
+         * `authenticateDashboardSocket` has re-read this per connection since
+         * it shipped; the attendee path was the one left on the claim alone.
+         * One primary-key lookup per connection, which is what the dashboard
+         * path has been paying all along.
+         */
+        const account = await db.user.findUnique({
+          where: { id: decoded.userId },
+          select: { deletedAt: true, suspended_at: true },
+        })
+        if (accountBlockReason(account)) {
+          return next(new Error("Authentication required"))
+        }
+
         // Attach user data to socket
         socket.data.userId = decoded.userId
         socket.data.email = decoded.email
@@ -675,6 +603,29 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     authSocket.on("leave:event", (eventId) => {
       const room = `event:${eventId}`
+      authSocket.leave(room)
+      logger.debug("Socket left room", { room, userId: authSocket.data.userId })
+    })
+
+    /*
+     * The roster room, for people who are actually in the room.
+     *
+     * Separate from `event:{id}` for the same reason `event:ops:{id}` is: that
+     * room is joinable by anyone who opened the event, and it was carrying
+     * `{ real userId, pseudonym }` pairs on every check-in. Anyone could sit in
+     * every public event's room and harvest the mapping.
+     */
+    authSocket.on("join:event:room", async (eventId) => {
+      await guardJoin(
+        authSocket,
+        `event:room:${eventId}`,
+        "Check in to see who else is here",
+        () => canJoinEventRoom(authSocket.data.userId, eventId)
+      )
+    })
+
+    authSocket.on("leave:event:room", (eventId) => {
+      const room = `event:room:${eventId}`
       authSocket.leave(room)
       logger.debug("Socket left room", { room, userId: authSocket.data.userId })
     })
@@ -785,26 +736,20 @@ export function initSocketServer(httpServer: HttpServer): Server {
   })
 
   // Load and start all active sponsored message timers
-  void sponsoredMessageScheduler.loadAll()
+  startSponsoredScheduler()
 
-  // Chat rooms close themselves. No external cron to configure — and the
-  // immediate pass on boot is the important one, since deploys restart this
-  // process often enough that boot is when any backlog gets cleared.
-  startChatLifecycleSweeper()
-  // Same place, same reason: one entry point that starts every background loop.
-  startPresenceSweeper()
-  // Classifies chatroom messages into event_feedback, which is what the live
-  // screen's mood and category panels have always read and never had.
-  startSentimentSweeper()
-
+  /*
+   * The three sweepers used to start here. They are `lib/background.ts` now,
+   * called from `server.ts`.
+   *
+   * None of them emits over a socket, so attaching a websocket server was never
+   * the right trigger — and the coupling failed silently: serve the app any way
+   * that does not call this function and all three stop with no log line, which
+   * renders as occupancy climbing for ever and "the event was quiet".
+   *
+   * The sponsored scheduler stays, because it genuinely does need `io`.
+   */
   logger.info("Socket.io server initialized")
-  return io
-}
-
-/**
- * Get the Socket.io server instance
- */
-export function getIO(): Server | null {
   return io
 }
 
@@ -819,12 +764,33 @@ export function emitEventCheckIn(
 ): void {
   if (!io) return
 
+  const checkInTime = new Date().toISOString()
+
+  /*
+   * Two rooms, because two audiences want different things.
+   *
+   * `event:{id}` is joinable by anyone who opened the event, and it used to
+   * carry this whole payload — so `{ real userId, pseudonym }` went to every
+   * stranger watching. It gets the fact that a check-in happened, which is all
+   * the live counter ever needed, and `userId` so a client can recognise its
+   * own check-in.
+   *
+   * The name goes only to `event:room:{id}`, which requires a check-in — the
+   * same gate `GET /events/:id/checkins` applies when it answers "Check in to
+   * see who else is here".
+   */
   io.to(`event:${eventId}`).emit("event:checkin", {
+    eventId,
+    userId,
+    checkInTime,
+  })
+
+  io.to(`event:room:${eventId}`).emit("event:room:checkin", {
     eventId,
     userId,
     userName,
     userImage,
-    checkInTime: new Date().toISOString(),
+    checkInTime,
   })
 }
 
@@ -981,19 +947,6 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
 export function emitChatMemberMuted(chatGroupId: string, userId: string, muted: boolean, reason?: string): void {
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:memberMuted", { chatGroupId, userId, muted, reason })
-}
-
-/**
- * Send a message to a specific user
- */
-export function emitToUser(
-  userId: string,
-  event: keyof ServerToClientEvents,
-  data: unknown
-): void {
-  if (!io) return
-
-  io.to(`user:${userId}`).emit(event, data)
 }
 
 /**

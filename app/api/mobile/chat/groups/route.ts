@@ -229,10 +229,23 @@ export async function GET(request: NextRequest) {
         lastMessage: lastMessage
           ? {
               id: lastMessage.id,
+              /*
+               * The branch is about *media*, not about one enum value.
+               *
+               * It read `type === "text"`, which was fine while `text` was the
+               * only kind anything wrote. The moment announcements started
+               * storing `announcement`, this rendered a perfectly ordinary
+               * sentence as the literal string `[announcement]` in the
+               * conversation list — a kind marker leaking into copy, from a
+               * change three files away that looked purely additive.
+               *
+               * An image or a video has no text to preview. Everything else
+               * does, whoever sent it and whatever kind it is.
+               */
               content:
-                lastMessage.type === "text"
-                  ? lastMessage.content.substring(0, 100)
-                  : `[${lastMessage.type}]`,
+                lastMessage.type === "image" || lastMessage.type === "video"
+                  ? `[${lastMessage.type}]`
+                  : lastMessage.content.substring(0, 100),
               createdAt: lastMessage.created_at,
               user: {
                 id: lastMessage.user_id,

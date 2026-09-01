@@ -3,9 +3,10 @@ import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canBroadcast, eventPermissions } from "@/lib/rbac"
-import { actorFor, maySponsorFor } from "@/lib/org-membership"
-import { sponsoredMessageScheduler } from "@/lib/socket-server"
+import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
+import { firstWindow } from "@/lib/sponsored-scheduler"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
+import { canActivate, creativeEditPatch, touchesCreative } from "@/lib/sponsored-moderation"
 
 interface RouteContext {
   params: Promise<{ id: string; msgId: string }>
@@ -27,11 +28,11 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     /*
      * `canBroadcast`, not `canEdit` — and this is the handler where it matters
      * most, because setting `is_active` here is what arms
-     * `sponsoredMessageScheduler` and starts the fan-out into the room. See the
+     * the schedule and starts the fan-out into the room. See the
      * note on the POST handler in ../route.ts.
      */
     const actor = await actorFor(session.user)
-    if (!canBroadcast(actor, event, "sponsored", await maySponsorFor(actor))) {
+    if (!canBroadcast(actor, event, "sponsored", (await resolveSponsorGrant(actor, eventId)) ?? undefined)) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 
@@ -49,31 +50,105 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     })
     if (!existing) return new NextResponse("Not found", { status: 404 })
 
-    const updated = await db.event_sponsored_messages.update({
-      where: { id: msgId },
-      data: {
-        ...(content !== undefined && { content }),
-        ...(interval_minutes !== undefined && { interval_minutes }),
-        ...(is_active !== undefined && { is_active }),
-        updated_at: new Date(),
-      },
-    })
+    /*
+     * An edit to the creative is a NEW creative, and cannot inherit approval.
+     *
+     * This route re-armed the scheduler on any PATCH where `is_active` was
+     * true, reading the content it had just written. So "create clean, get
+     * approved, activate, then edit the words" put unreviewed text into the
+     * room within one interval with the approval still attached — the gate was
+     * decorative for anyone who could edit.
+     *
+     * Changing only the interval is deliberately NOT an edit: nobody has
+     * changed a word of what runs, and sending them back through review for a
+     * schedule change teaches people to route around review.
+     */
+    const editsCreative = touchesCreative({ content }, existing)
 
-    // Sync scheduler
-    if (updated.is_active) {
-      if (event.chat_group) {
-        sponsoredMessageScheduler.start({
-          id: updated.id,
-          event_id: eventId,
-          content: updated.content,
-          interval_minutes: updated.interval_minutes,
-          organizer_id: event.organizer_id,
-          chat_group_id: event.chat_group.id,
+    /*
+     * Refuse the activation rather than silently ignoring it.
+     *
+     * Previously, activating with no chat group wrote `is_active: true`,
+     * returned 200, and scheduled nothing — the switch said on, the toast said
+     * "Started sending", and no message ever went out. An impossible state
+     * should be unreachable, not reported as success.
+     */
+    if (is_active === true && !editsCreative) {
+      const placement = existing.sponsor_id
+        ? await db.event_sponsors.findFirst({
+            where: { event_id: eventId, sponsor_id: existing.sponsor_id },
+            select: { status: true },
+          })
+        : null
+
+      const decision = canActivate({
+        moderation_status: existing.moderation_status,
+        sponsor_id: existing.sponsor_id,
+        hasChatGroup: Boolean(event.chat_group),
+        placementApproved: placement?.status === "approved",
+      })
+      if (!decision.allowed) {
+        return NextResponse.json({ error: decision.reason }, { status: 409 })
+      }
+    }
+
+    /*
+     * `next_send_at` IS the schedule now — there is no timer to arm.
+     *
+     * Switching on sets it to `firstWindow()`, which is *now*: the old
+     * `setInterval` had no leading edge, so flipping the switch bought an
+     * interval of silence and read as a broken control. Switching off clears it,
+     * along with any claim a worker holds, so a pass already in flight finds
+     * nothing to finalize.
+     *
+     * `deactivated_reason` is cleared on activation. It records why the
+     * SCHEDULER gave up, and leaving a stale one on a live campaign shows the
+     * organiser a reason for a state it is no longer in.
+     */
+    const schedule =
+      is_active === true && !editsCreative
+        ? {
+            next_send_at: firstWindow(),
+            consecutive_failures: 0,
+            deactivated_reason: null,
+            claim_token: null,
+            claimed_at: null,
+          }
+        : is_active === false || editsCreative
+          ? { next_send_at: null, claim_token: null, claimed_at: null }
+          : {}
+
+    const updated = await db.$transaction(async (tx) => {
+      const row = await tx.event_sponsored_messages.update({
+        where: { id: msgId },
+        data: {
+          ...(content !== undefined && { content }),
+          ...(interval_minutes !== undefined && { interval_minutes }),
+          ...(is_active !== undefined && { is_active }),
+          // One write, not two. Applying the reset separately would leave a
+          // window where the content is new and the approval is old.
+          ...(editsCreative ? creativeEditPatch() : {}),
+          ...schedule,
+          updated_at: new Date(),
+        },
+      })
+
+      /*
+       * A new revision, not an edit in place.
+       *
+       * `sponsored_message_sends.creative_id` is `onDelete: Restrict` precisely
+       * so history survives: a send from last night must keep pointing at the
+       * words it actually delivered. Rewriting the existing creative row would
+       * retroactively change what a past send says it sent.
+       */
+      if (editsCreative) {
+        await tx.sponsored_creatives.create({
+          data: { message_id: msgId, content: row.content },
         })
       }
-    } else {
-      sponsoredMessageScheduler.stop(msgId)
-    }
+
+      return row
+    })
 
     return NextResponse.json(updated)
   } catch (err) {
@@ -103,7 +178,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     })
     if (!existing) return new NextResponse("Not found", { status: 404 })
 
-    sponsoredMessageScheduler.stop(msgId)
+    // No timer to stop — deleting the row deletes the schedule with it.
     await db.event_sponsored_messages.delete({ where: { id: msgId } })
 
     return new NextResponse(null, { status: 204 })

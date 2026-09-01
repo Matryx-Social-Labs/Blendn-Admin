@@ -3,7 +3,7 @@
 import { db } from "./db"
 import { logger } from "./logger"
 import { performCheckout } from "./checkout"
-import { validateGeofence, type Geofence } from "./geofence"
+import { resolveFence, fenceSelect } from "./geofence"
 import { evaluatePresence, type PresenceState } from "./presence"
 
 /**
@@ -35,26 +35,87 @@ export const SWEEP_INTERVAL_MS = 5 * 60 * 1000
  */
 export const MASS_CHECKOUT_THRESHOLD = 0.25
 
+/**
+ * How many departures it takes before "a lot at once" means anything.
+ *
+ * The share alone made auto-checkout **unreachable in a small room**. One
+ * person leaving a room of two is 100%; one of three is 33%; both trip a 25%
+ * threshold. So at a book club, a supper club, or the first hour of anything,
+ * nobody was ever closed out and occupancy only climbed -- and at the end of
+ * every event, when everyone leaves at once, the guard trips by construction
+ * and the room never empties.
+ *
+ * The guard is about a **venue-wide signal failure**: wifi dying, a basement
+ * swallowing GPS, a burst of out-of-fence readings that look exactly like an
+ * evacuation. That is a phenomenon of crowds, and it cannot be inferred from
+ * one person leaving a room of three.
+ *
+ * So both must hold: a large share, and enough people for a share to be
+ * evidence. Five is the smallest number where "they all went outside at the
+ * same moment" is more likely to be the venue than the people.
+ */
+export const MASS_CHECKOUT_FLOOR = 5
+
+/**
+ * How many events one pass may sweep.
+ *
+ * The query was `findMany({ where: { status: "checked_in" } })` -- **every open
+ * check-in on the platform**, with no `take` and no scope, each row dragging the
+ * event's geofence JSON and the venue's, every five minutes, on the Socket.io
+ * event loop. It cost nothing at one event and grows without limit.
+ *
+ * The bound is on **events**, not rows, and that is not arbitrary: the
+ * mass-checkout guard reasons about the share of a room that is leaving, so a
+ * half-fetched event would compute that share against a partial denominator and
+ * either trip on nothing or fail to trip on everything. A room is swept whole or
+ * not at all.
+ *
+ * Oldest open check-in first, so the backlog drains in order rather than the
+ * same rooms being swept forever while others are never reached. A swept room
+ * closes its rows and drops out of the ordering by itself.
+ *
+ * 200 events every five minutes is far above any real night and far below
+ * unbounded, which is the only property that matters here.
+ */
+export const MAX_EVENTS_PER_SWEEP = 200
+
 export interface SweepResult {
   examined: number
-  prompted: number
   checkedOut: number
   /** Events where the guard tripped and nothing was done. */
   guarded: string[]
 }
 
-/** The fence to judge against: the event's own, or the venue's if it has none. */
-function fenceFor(raw: unknown): Geofence | null {
-  if (!raw) return null
-  const parsed = validateGeofence(raw)
-  return parsed.ok ? parsed.fence : null
-}
-
 export async function sweepPresence(now: Date = new Date()): Promise<SweepResult> {
-  const result: SweepResult = { examined: 0, prompted: 0, checkedOut: 0, guarded: [] }
+  const result: SweepResult = { examined: 0, checkedOut: 0, guarded: [] }
+
+  /*
+   * Which rooms, before which rows. See MAX_EVENTS_PER_SWEEP.
+   *
+   * `groupBy` on an indexed predicate returns one row per event rather than one
+   * per attendee, so choosing the batch costs a fraction of fetching it.
+   */
+  const busiest = await db.event_check_ins.groupBy({
+    by: ["event_id"],
+    where: { status: "checked_in" },
+    _min: { created_at: true },
+    orderBy: { _min: { created_at: "asc" } },
+    take: MAX_EVENTS_PER_SWEEP,
+  })
+  if (busiest.length === 0) return result
+
+  if (busiest.length === MAX_EVENTS_PER_SWEEP) {
+    // Not an error: the next pass picks up where this one stopped. Worth saying
+    // out loud, because a permanently full batch means the sweeper is behind
+    // and somebody is staying checked in longer than they should.
+    logger.warn("Presence sweep hit its event cap", { cap: MAX_EVENTS_PER_SWEEP })
+  }
 
   const open = await db.event_check_ins.findMany({
-    where: { status: "checked_in" },
+    where: {
+      status: "checked_in",
+      event_id: { in: busiest.map((b) => b.event_id) },
+    },
     select: {
       id: true,
       event_id: true,
@@ -62,9 +123,8 @@ export async function sweepPresence(now: Date = new Date()): Promise<SweepResult
       kind: true,
       last_seen_at: true,
       left_area_at: true,
-      departure_prompted_at: true,
       occurrence: { select: { end_time: true } },
-      event: { select: { geofence: true, venue: { select: { geofence: true } } } },
+      event: { select: { ...fenceSelect } },
     },
   })
   result.examined = open.length
@@ -77,13 +137,19 @@ export async function sweepPresence(now: Date = new Date()): Promise<SweepResult
   }
 
   for (const [eventId, rows] of byEvent) {
-    const fence = fenceFor(rows[0].event.geofence) ?? fenceFor(rows[0].event.venue?.geofence)
+    /*
+     * One resolver. This consulted the event's fence and the venue's and never
+     * `legacyGeofence`, so a pre-column event -- coordinates and a radius, no
+     * geofence JSON -- was enforced at the door and by nothing afterwards. It
+     * fell through to the "no geometry" branch below, where only the day ending
+     * can close anybody out.
+     */
+    const fence = resolveFence(rows[0].event)
 
     const decisions = rows.map((row) => {
       const state: PresenceState = {
         kind: row.kind,
         leftAreaAt: row.left_area_at,
-        departurePromptedAt: row.departure_prompted_at,
         lastSeenAt: row.last_seen_at,
       }
       // The sweeper never has a ping — it runs between them. Its job is the
@@ -114,13 +180,17 @@ export async function sweepPresence(now: Date = new Date()): Promise<SweepResult
      * it would leave every attendee checked in for ever.
      */
     const departures = toCheckOut.filter((d) => d.decision.reason !== "occurrence_ended")
-    if (departures.length > 0 && departures.length / rows.length > MASS_CHECKOUT_THRESHOLD) {
+    if (
+      departures.length >= MASS_CHECKOUT_FLOOR &&
+      departures.length / rows.length > MASS_CHECKOUT_THRESHOLD
+    ) {
       result.guarded.push(eventId)
       logger.warn("Presence sweep guarded: too many departures at once", {
         eventId,
         wouldCheckOut: departures.length,
         inRoom: rows.length,
         threshold: MASS_CHECKOUT_THRESHOLD,
+        floor: MASS_CHECKOUT_FLOOR,
         hint: "venue signal loss looks identical to everyone leaving; count is unreliable",
       })
       // Still close out anyone whose day simply ended.
@@ -142,21 +212,13 @@ export async function sweepPresence(now: Date = new Date()): Promise<SweepResult
           if (done?.changed) result.checkedOut++
           break
         }
-        case "prompt": {
-          await db.event_check_ins.update({
-            where: { id: row.id },
-            data: { departure_prompted_at: now },
-          })
-          result.prompted++
-          break
-        }
         default:
           break
       }
     }
   }
 
-  if (result.checkedOut > 0 || result.prompted > 0 || result.guarded.length > 0) {
+  if (result.checkedOut > 0 || result.guarded.length > 0) {
     logger.info("Presence sweep", { ...result, guarded: result.guarded.join(",") })
   }
   return result

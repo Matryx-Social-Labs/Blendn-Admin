@@ -22,12 +22,28 @@ declare global {
  * pool each time and exhaust Postgres. In development the global also survives
  * hot reloads.
  */
+/**
+ * How many connections this process may hold.
+ *
+ * `pg` defaults to 10 and nothing set it, which is the wrong number here for a
+ * specific reason: one live-ops tick issues nine concurrent queries in a single
+ * `Promise.all`, so a single watched event took 90% of the pool for the length
+ * of a tick, twelve times a minute. Two watched events queued. That is the most
+ * likely mechanism behind the timeouts the mobile client built a request queue
+ * to work around.
+ *
+ * Five background loops, Socket.io and every request handler share this pool.
+ * Env-overridable because the right ceiling is a property of the Postgres plan,
+ * not of the code.
+ */
+const POOL_MAX = Number(process.env.DATABASE_POOL_MAX ?? 20)
+
 function createClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set")
   }
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString, max: POOL_MAX }) })
 }
 
 function getClient(): PrismaClient {

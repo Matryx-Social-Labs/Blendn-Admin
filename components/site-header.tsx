@@ -36,6 +36,20 @@ const TIMELESS = new Set([
   "/dashboard/onboarding",
   "/dashboard/categories",
   "/dashboard/events/new",
+  // A brand is four fields about a company. A date-range control over it would
+  // be a filter with nothing to filter.
+  "/dashboard/brand",
+  "/dashboard/sponsors",
+  "/dashboard/sponsor-claims",
+  "/dashboard/creative-review",
+  "/dashboard/charges",
+  // Two queues, not two reports. Curation health is "everything we ever added,
+  // and which of it is dead"; the claim queue is oldest-first by design. A
+  // range control over either would offer to hide the rows most worth seeing.
+  "/dashboard/events/curate",
+  "/dashboard/claims",
+  "/dashboard/claims/venues",
+  "/dashboard/venues/new",
 ])
 
 /** Reports read the range, so the control stays. */
@@ -53,13 +67,98 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "New event",
     description: "Publish an event. Save a draft at any point.",
   },
+  /*
+   * Both of these need an exact entry, and the reason is the fallback below.
+   *
+   * `/dashboard/events/curate` matches `startsWith("/dashboard/events/")`, so
+   * without this it inherited the event *detail* header — the curation screen
+   * announced itself as "Event · Setup, performance, and what happened on the
+   * night." `/dashboard/claims` matched nothing and fell to the generic
+   * "Overview · Live reporting across growth, attendance, and event activity."
+   *
+   * Both pages carry an `h2` and a comment saying this file owns their only
+   * `h1`, which is what made it invisible: the screens looked right, and the
+   * one element a screen reader announces first named a different screen.
+   */
+  "/dashboard/events/curate": {
+    title: "Curation",
+    description: "Events we added from public listings — and which of them nobody could get into.",
+  },
+  "/dashboard/claims": {
+    title: "Claims",
+    description: "Somebody wants ownership of an event or a venue. Decide, oldest first.",
+  },
+  /*
+   * Four more the guard found once it existed, three of them older than this
+   * screen. `/dashboard/leads` and `/dashboard/venues/new` were the worst of
+   * them: both render their own `h1`, so the page had *two* — a correct one in
+   * the body and "Overview" above it.
+   */
+  "/dashboard/claims/venues": {
+    title: "Claims",
+    description: "Somebody wants ownership of an event or a venue. Decide, oldest first.",
+  },
+  "/dashboard/moderation/reports": {
+    title: "Reports",
+    description: "What people reported about each other, and what was decided.",
+  },
+  "/dashboard/venues/new": {
+    title: "Add a venue",
+    description: "A permanent place. Events attach to it; its pin is the one they inherit.",
+  },
   "/dashboard/attendees": {
     title: "Attendees",
     description: "Who comes back, and who RSVPs but doesn't show.",
   },
+  /*
+   * "Venues", not "My venues": this route now serves two roles. An owner sees
+   * their utilisation view and an admin sees the record index, and the h1
+   * cannot say "my" to the one who owns none of them.
+   *
+   * The role-specific wording lives in `dashboard-nav.ts` instead, which is
+   * already filtered per role — so an owner still reads "My venues" in the
+   * sidebar, where saying it is both true and useful.
+   */
   "/dashboard/venues": {
-    title: "My venues",
-    description: "Utilisation, ratings and bookings — one section per venue.",
+    title: "Venues",
+    description: "Who owns each, and what runs there.",
+  },
+  // Pre-existing gaps, found by __tests__/nav-routes-exist.test.ts: both had
+  // nav entries and no title, so both rendered with the document's only h1
+  // reading "Overview". Copy taken verbatim from lib/dashboard-nav.ts so the
+  // sidebar and the heading cannot describe the same screen differently.
+  "/dashboard/leads": {
+    title: "Leads",
+    description: "Demo requests from the organiser landing page. Oldest untouched first.",
+  },
+  "/dashboard/venue-claims": {
+    title: "Venue claims",
+    description:
+      "Ownership requests. Approving one hands over the events other organisers hold there.",
+  },
+  "/dashboard/charges": {
+    title: "Charges",
+    description: "What each placement costs, what has been agreed, and what has been paid.",
+  },
+  "/dashboard/creative-review": {
+    title: "Creative review",
+    description: "Sponsored copy waiting to be read by a person. Oldest first.",
+  },
+  "/dashboard/sponsors": {
+    title: "Brands",
+    description: "Every brand — who owns each, which are unclaimed, and possible duplicates.",
+  },
+  "/dashboard/sponsor-claims": {
+    title: "Brand claims",
+    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
+  },
+  "/dashboard/placements": {
+    title: "Placements",
+    description: "Where your brand appears, and what is waiting on you.",
+  },
+  "/dashboard/brand": {
+    title: "Brand",
+    description: "Your name, logo and website, as attendees see them.",
   },
   "/dashboard/chatrooms": {
     title: "Chatrooms",
@@ -73,9 +172,17 @@ const routeContent: Record<string, { title: string; description: string }> = {
     title: "Organisers",
     description: "The supply side: who publishes, and how concentrated it is.",
   },
+  /*
+   * "Venue owners", not "Venues" — accounts, not records.
+   *
+   * This route rendered an h1 reading "Venues" over a list of *people*, and
+   * described itself as "every venue record", which is the screen that did not
+   * exist until `/dashboard/venues` grew an admin index. Two routes then shared
+   * one heading and neither matched its contents.
+   */
   "/dashboard/venue-owners": {
-    title: "Venues",
-    description: "Every venue record — who owns each, which are unclaimed, and open disputes.",
+    title: "Venue owners",
+    description: "The people who run venues — accounts, not the venue records.",
   },
   "/dashboard/onboarding": {
     title: "Applications",

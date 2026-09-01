@@ -163,19 +163,39 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Notify the original sender of the response (async, don't await)
     if (action === "accept" || action === "decline") {
-      // We need the responder's name — fetch it
-      const responder = await db.user.findUnique({
-        where: { id: authUser.userId },
-        select: { name: true },
-      })
-      const responderName = responder?.name || "Someone"
+      /*
+       * The decliner is never named.
+       *
+       * Both branches used to carry the responder's real name, so **declining a
+       * message request disclosed the identity of the person who declined it**
+       * -- to the one person they had just refused, on their lock screen, and
+       * then permanently into `notifications`. Refusing to cross into real
+       * names was the act that published them.
+       *
+       * `docs/API.md:126` makes the accept branch correct: the message request
+       * is the documented crossing from pseudonym to real name, and accepting
+       * completes it -- at which point a live conversation exists and
+       * `maySeeIdentity` returns true anyway. Declining completes nothing, so
+       * there is nothing to disclose.
+       *
+       * This is the same reasoning that produced the deliberately nameless match
+       * notifications three rows down in that table; it was never carried across
+       * to this file.
+       */
+      const responderName =
+        action === "accept"
+          ? (await db.user.findUnique({
+              where: { id: authUser.userId },
+              select: { name: true },
+            }))?.name || "Someone"
+          : null
 
       sendPushNotification({
         userId: messageRequest.sender_id,
         title: action === "accept" ? "Message request accepted 🎉" : "Message request declined",
         body: action === "accept"
           ? `${responderName} accepted your message request`
-          : `${responderName} declined your message request`,
+          : "Your message request was declined",
         data: {
           type: "message_request_response",
           requestId,

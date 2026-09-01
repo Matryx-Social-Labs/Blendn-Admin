@@ -1,0 +1,354 @@
+{
+  "$comment": [
+    "R16: every structural guard ships with a documented mutation proving it",
+    "fails against broken code. A grep guard that passes against a broken",
+    "codebase converts an unknown into a false assurance, which is worse than",
+    "having no guard — and this project has already shipped one `sed` control",
+    "that silently never matched.",
+    "",
+    "`verified` entries record a mutation that was applied, observed to fail,",
+    "and reverted. `grandfathered` is the ratchet: guards that predate this",
+    "registry and have no recorded control. That list may shrink and must never",
+    "grow — `negative-controls.test.ts` fails on a new structural guard with no",
+    "entry.",
+    "",
+    "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
+    "the guard fails, revert, and move it into `verified` with what you saw.",
+    "Never `git checkout` the file to revert if you have uncommitted work in it;",
+    "copy it aside first. That mistake has already cost this project a block of",
+    "unsaved analysis.",
+    "",
+    "Rows marked `source: transcribed-at-merge` had their control run on the",
+    "branch that introduced the guard and recorded in that commit message. They",
+    "could not be registered there because this file lives on #265. Transcribed",
+    "rather than re-run; re-running them is worth doing and is a tracked task.",
+    "",
+    "One qualification on \"behavioural tests need no entry\", learned at E8. A",
+    "behavioural test CAN pass vacuously when the thing it asserts is invisible",
+    "through the client it uses: `geofence-clear.itest.ts` could not tell",
+    "`Prisma.DbNull` from `Prisma.JsonNull`, because both read back as JS `null`",
+    "— so it agreed a fence was cleared while `geofence IS NULL` was false. It",
+    "took a raw-SQL assertion to see the difference. The rule still holds for",
+    "which tests need a registry entry; it does not mean a behavioural test is",
+    "automatically non-vacuous, only that it usually fails on its own terms."
+  ],
+  "verified": {
+    "event-notifications-reachable.test.ts": {
+      "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers, comments excluded",
+      "mutation": "Delete the `await notifyEventCancelled(...)` call in app/api/events/[id]/route.ts",
+      "observed": "1 failing: 'notifyEventCancelled is called from both cancellation paths'",
+      "date": "2026-08-20"
+    },
+    "notification-content-retention.test.ts": {
+      "guards": "notifications.body is redacted for content-bearing kinds, on both the single and bulk insert",
+      "mutation": "Replace both `body: storedBodyFor(data.type, body)` with `body,`",
+      "observed": "2 failing: 'both the single and the bulk insert redact' and 'neither insert passes the raw body through'. NOTE: before these two assertions existed the control passed green, which is what prompted adding them.",
+      "date": "2026-08-20"
+    },
+    "hot-path-indexes.test.ts": {
+      "guards": "the five hot-path indexes are declared in schema.prisma and created by a migration",
+      "mutation": "Remove `@@index([event_id, check_in_time])` from the event_check_ins model",
+      "observed": "1 failing: 'event_check_ins has @@index([event_id, check_in_time])'",
+      "date": "2026-08-20"
+    },
+    "dashboard-header-title.test.ts": {
+      "guards": "every static dashboard route has an exact routeContent entry; site-header owns the only h1",
+      "mutation": "Delete the \"/dashboard/events/curate\" entry from routeContent; separately, add an <h1> to app/dashboard/claims/venues/page.tsx; separately, demote chatrooms' h1 without pruning KNOWN_DOUBLE_H1",
+      "observed": "1 failing each of the three: the route suite, the ownership suite, and the staleness suite",
+      "date": "2026-08-24"
+    },
+    "event-claims.test.ts": {
+      "guards": "fileEventClaim never takes orgId from the caller, never returns flags, is rate-limited before the write; decideEventClaim's catch wraps the transaction; the funnel has a public entry",
+      "mutation": "Re-add orgId to FileClaimInput; return {ok,claimId,flags}; replace the overClaimLimit call with `const limited = null`; unwire fileEventClaim from claim-form.tsx; add \"/claim/:path*\" to the middleware matcher; change the migration predicate from 'approved' to 'pending'; move the catch off $transaction",
+      "observed": "1 failing per mutation, seven mutations, each reverted",
+      "date": "2026-08-25"
+    },
+    "curation.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/curation.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "14 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "admin-curation-screens.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/events/curate/page.tsx with an empty stub (`export {}`), run this suite, revert",
+      "observed": "8 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "demand.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "2 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "check-in-refusals.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/mobile/events/[eventId]/checkin/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "alerts-that-fire.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/live-snapshot.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "4 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "background-survivability.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/socket-server.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "chat-write-path.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/mobile/events/[eventId]/chat/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "count-people-boundary.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/users/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "counting-people-not-rows.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "event-ownership.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/events/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "export-caps.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/reports.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "2 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "geocode-and-sweeper-bounds.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/events/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "may-sponsor-grant.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/onboarding-actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "5 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "moderation-correctness.test.ts": {
+      "guards": "The five ways the moderation pipeline reported success while failing, plus: contact details are detected inside moderateMessage (both write paths), and the flag is not overwritten by recordExamined",
+      "mutation": "Two run: (a) replace `checkContactInfo(content)` with `null` in lib/moderation/index.ts; (b) delete the `if (contactResult) return` guard. Run this suite, revert each.",
+      "observed": "(a) 2 failing of 14; (b) 1 failing of 14 — the status-overwrite test specifically; 14 passing after each revert",
+      "date": "2026-08-26",
+      "source": "run-at-e10-chat-moderation"
+    },
+    "nav-routes-exist.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace components/site-header.tsx with an empty stub (`export {}`), run this suite, revert",
+      "observed": "23 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "no-async-setinterval.test.ts": {
+      "guards": "no setInterval in lib/ drives an async callback; the three sweepers reschedule from a path a throw cannot skip",
+      "mutation": "Append `setInterval(async () => { await Promise.resolve() }, 1000)` to lib/chat-lifecycle.ts",
+      "observed": "1 failing — but ONLY after widening the regex. The original required the arrow body to be a bare call, so `setInterval(async () => { ... })` passed. The control found the guard vacuous for the most natural way to write the bug.",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "presence-one-resolver.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/api/mobile/events/[eventId]/presence/route.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "1 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "privacy-leaks.test.ts": {
+      "guards": "see the test's own docblock; the mutations below prove it is not vacuous",
+      "mutation": "Two: (a) replace app/api/mobile/conversations/route.ts with an empty stub (`export {}`); (b) delete the reverse direction from the block predicate in lib/identity.ts",
+      "observed": "(a) 1 failing; (b) 1 failing — 'makes a block override the identity gate in both directions'; passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-scrum-52",
+      "note": "Re-verified when the identity gate became plural. G7 pinned `blocked_users.findFirst` and the literal `if (blocked || closed) return false`, both of which the refactor changed — so this guard needed rewriting to keep asserting the same property against a new shape rather than a stale one."
+    },
+    "server-actions-reachable.test.ts": {
+      "guards": "every export in lib/ has a caller, comments excluded; KNOWN_UNREACHABLE is checked in both directions",
+      "mutation": "Delete a KNOWN_UNREACHABLE entry for something still dead, and separately wire up an entry still on the list",
+      "observed": "3 failing — the integration merge ran this for real: once #265 and #268 wired canPublish, notifyEventCancelled and notifyEventDetailsChanged, all three KNOWN_UNREACHABLE entries went stale and the suite named each one.",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsor-merge-coverage.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/sponsor-actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsor-onboarding.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/onboarding-actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "2 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsor-schema.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace prisma/schema.prisma with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "sponsored-scheduler.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/sponsored-scheduler.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "21 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "suspension-blast-radius.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace lib/auth.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "3 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "what-an-organiser-sees.test.ts": {
+      "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
+      "mutation": "Replace app/dashboard/events/[id]/feedback/actions.ts with an empty stub (`export {}`), run this suite, revert",
+      "observed": "4 failing",
+      "date": "2026-08-25",
+      "source": "run-at-integration-merge"
+    },
+    "mobile-list-envelope.test.ts": {
+      "guards": "Every mobile list endpoint answers `data.<name>`, never a bare array — see the test's docblock",
+      "mutation": "In app/api/mobile/categories/route.ts revert `successResponse({ categories })` to `successResponse(categories)`, run this suite, revert",
+      "observed": "1 failing — offenders listed `app/api/mobile/categories/route.ts :: successResponse(categories)`; 2 passing after the revert",
+      "date": "2026-08-25",
+      "source": "run-at-e13-contract"
+    },
+    "host-supply-excludes-curated.test.ts": {
+      "guards": "Every organiser-keyed supply query in app/dashboard/actions.ts uses hostSupply(), so a curated event never counts its curating admin as a publishing host",
+      "mutation": "Revert the `by: [\"organizer_id\", \"status\"]` groupBy from hostSupply() to eventScope(), run this suite, revert",
+      "observed": "1 failing of 2 — the offender block was listed; 2 passing after the revert",
+      "date": "2026-08-25",
+      "source": "run-at-e3-admin-surface"
+    },
+    "dashboard-prose-budget.test.ts": {
+      "guards": "No dashboard page leads with more than 180 characters of literal explanatory prose — site-header already says what the screen is",
+      "mutation": "Prepend the header's own description back onto the paragraph in app/dashboard/leads/page.tsx, run this suite, revert",
+      "observed": "1 failing of 2 — reported leads/page.tsx at 229 chars; 2 passing after the revert",
+      "date": "2026-08-25",
+      "source": "run-at-e17-density"
+    },
+    "events-have-occurrences.test.ts": {
+      "guards": "Every write path that creates an event also calls syncOccurrences, so check-in can resolve a day for it",
+      "mutation": "Comment out the syncOccurrences call in app/dashboard/events/curate/actions.ts, run this suite, revert",
+      "observed": "1 failing of 2 — missing listed app/dashboard/events/curate/actions.ts; 2 passing after the revert",
+      "date": "2026-08-26",
+      "source": "run-at-e9-checkin"
+    },
+    "failed-fetch-is-not-empty.test.ts": {
+      "guards": "No dashboard component branches on res.ok without saying what happens when it is false, so a 403 cannot render as an empty result",
+      "mutation": "In components/chat-feed.tsx replace the `if (!res.ok) { setFailed(true); return }` early return with a bare `if (res.ok) {`, run this suite, revert",
+      "observed": "1 failing of 2 — silent listed components/chat-feed.tsx; 2 passing after the revert. NOTE: the first version of this guard did NOT fail against the same mutation, because its `!res.ok` exemption was file-scoped and chat-feed has one in deleteMessage. Rescoped to the call site.",
+      "date": "2026-08-26",
+      "source": "run-at-e16-code-quality"
+    },
+    "undefined-query-budget.test.ts": {
+      "guards": "No explicit undefined reaches a Prisma call, the counter is not vacuous now that the tree is at zero, and strictUndefinedChecks stays enabled",
+      "mutation": "Four: (a) restore `faq: event.details.faq ?? undefined` in the clone route; (b) delete the previewFeatures line from schema.prisma; (c) point the Prisma-call regex at a token that matches nothing; (d) restore `geofence: venue?.geofence ?? undefined` in scripts/seed-qa.ts",
+      "observed": "1 failing each — (a) and (d) 'finds none in the tree', (b) 'keeps strictUndefinedChecks enabled', (c) 'still counts a hazard when it sees one'; 3 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-scrum-53-completion",
+      "note": "Rewritten when the count reached zero. The old entry guarded a shrinking budget; at zero, 'found nothing' is the pass condition, so a broken counter and a clean tree became indistinguishable — control (c) is what separates them, and it needed a synthetic fixture because there is no longer a real site to find. Scope later widened to `scripts` after the flag broke `scripts/seed-qa.ts` and failed CI's e2e job at the seed step while every other job stayed green — the scan had been `app` and `lib` only. One of the two seed sites would still have escaped it, because the object is built outside the Prisma call; the flag caught what the scanner structurally cannot, which is the argument for having both."
+    },
+    "room-pseudonyms.itest.ts": {
+      "guards": "Every sender, quoted author and reaction author on a room page gets their pseudonym, and neither read route goes back to loading the whole roster to render one page",
+      "mutation": "Four: (a) drop `parent_message.user.id` from the page id set; (b) restore the unscoped `where: { chat_group_id }` member lookup; (c) blind the source marker the structural half searches for; (d) drop `r.user_id` from the event-chat id set",
+      "observed": "1 failing each — (a) 'names a quoted message's author', (b) and (c) 'does not read the whole roster', (d) 'names each sender, and each reaction's author'; 4 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-scrum-52",
+      "note": "Control (a) failed to fail on the first attempt and that is why it is worth recording. The fixture let the quoted author send a message that was itself on the page, so their id arrived through the sender path and the assertion held whatever the reply path did — the test asserted less than its own docstring claimed. Fixed with `limit=1` so the author is reachable only as a parent. The same gap was then found by inspection in the event-chat test, which had no reaction author who was not also a sender; control (d) exists because of it."
+    },
+    "select-fragment-collision.test.ts": {
+      "guards": "No object spreads two select fragments (or a fragment plus an inline key) that claim the same key, and the allowlist cannot go stale",
+      "mutation": "Three: (a) add an inline `venue: true` beside `...eventPermissionSelect` in lib/sponsor-actions.ts; (b) delete the `...curationSelect` spread from the one allowlisted file; (c) point the fragment-detector regex at a name that matches nothing",
+      "observed": "(a) 1 failing — 'has no unallowed collision'; (b) 1 failing — 'keeps the allowlist honest'; (c) 3 failing, including the two controls; 4 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-e16",
+      "note": "Written because the rule had bitten three times and `tsc` caught only two. TS objects with TS2783 when two spreads are structurally incompatible, which is luck: two fragments both selecting a relation with different nested columns are assignable to each other, so the overwrite is silent — and a relation is where it costs most. The live case this guards is latent rather than present: `eventPermissionSelect` and `fenceSelect` both claim `venue`, nothing spreads both yet, and CLAUDE.md records that a select missing `venue` silently denies a venue owner."
+    },
+    "dashboard-error-contract.test.ts": {
+      "guards": "Dashboard raw-string error responses may only decrease, no new dashboard route adds them, every mobile route stays on lib/api-response, and the budget cannot become an allowlist",
+      "mutation": "Four: (a) add a raw NextResponse to a dashboard route already at budget; (b) add one to a mobile route; (c) convert a dashboard file's raw responses to JSON without lowering its budget; (d) point the counting regex at a token that matches nothing",
+      "observed": "1 failing each for (a)-(c) — 'no dashboard file above its budget', 'keeps every mobile route on the shared envelope', 'fails on a stale entry'; (d) 2 failing including its own control; 4 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-e16",
+      "note": "A ratchet rather than the migration J9 asks for, deliberately. Two dashboard consumers read error bodies as text — `event-messaging.tsx` shows `canActivate`'s seven distinct refusal sentences verbatim, `reports/builder.tsx` calls `res.text()` — so converting routes without their consumers would put raw JSON in a toast where a sentence used to be, regressing the exact case the current shape protects. Migration is route-and-consumer in pairs; the count meanwhile may only fall."
+    },
+    "reactions-tally.test.ts": {
+      "guards": "Reactions serialise as {emoji, count, mine} and neither room read path emits a reactor's id or name",
+      "mutation": "Two: (a) restore `reactions: m.reactions.map((r) => ({ emoji, userId: r.user_id }))` in the event-chat route; (b) point the `reactions:` scan at a token that matches nothing",
+      "observed": "(a) 2 failing — 'finds the routes' and 'emits no identity'; (b) 1 failing — 'detects an identity when one is there'; 8 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-tr2",
+      "note": "Control (b) failed to fail on the first attempt: blinding the regex left the guard green, because the tree is clean and 'found no offenders' is the pass condition. Fixed with a fixture the detector runs against. The scan also needed narrowing three times, each the same mistake — a rule about what is emitted, written as a search for a string that also appears in what is read: first `user_id` in the Prisma select that feeds `mine`, then `authUser.userId` in the call computing it. snake_case is a column, camelCase is the wire, and only a `userId:` key is forbidden."
+    },
+    "baseline-resurrection.test.ts": {
+      "guards": "The baseline creates nothing that a later migration drops — so replaying the chain onto a deployed database cannot resurrect a removed object",
+      "mutation": "Two: (a) restore the `CREATE UNIQUE INDEX ... event_check_ins_event_id_user_id_key` line in the baseline; (b) point the DROP INDEX detector at a token that matches nothing",
+      "observed": "(a) 1 failing — 'creates nothing that a later migration drops'; (b) 1 failing — 'detects a resurrection when there is one'; 3 passing after each revert",
+      "date": "2026-08-28",
+      "source": "run-at-migration-audit",
+      "note": "Written after the bug was found live. The baseline sorts first by name, so on a fresh install it creates the index and `20260807_event_occurrences` drops it moments later — correct. On staging that migration was recorded months ago, so the baseline applies AFTER it and re-creates the unique it existed to remove, making a second-day check-in violate a constraint. Nothing errors and the deploy succeeds. Found only by replaying against a schema-only copy of staging; every check against an empty database was green. The guard also had to strip SQL comments, because the fix leaves a note naming the index and a raw-text scan flags the very comment that records the fix."
+    }
+  },
+  "grandfathered": [
+    "account-deletion.test.ts",
+    "amenities.test.ts",
+    "apply-theme.test.ts",
+    "authz-scoping-boundary.test.ts",
+    "block-reaches-the-room.test.ts",
+    "blur-derivative.test.ts",
+    "changelog.test.ts",
+    "chat-groups-live.test.ts",
+    "chat-window-select.test.ts",
+    "connect-request.test.ts",
+    "container-queries.test.ts",
+    "conversation-identity.test.ts",
+    "conversation-provenance.test.ts",
+    "device-preview.test.ts",
+    "leave-and-report.test.ts",
+    "match-notifications.test.ts",
+    "media-guidance.test.ts",
+    "notifications.test.ts",
+    "reveal-state.test.ts",
+    "room-write-access.test.ts",
+    "roster-age.test.ts",
+    "rsc-boundary.test.ts",
+    "server-action-authz.test.ts",
+    "server-import-boundary.test.ts",
+    "socket-handler-registration.test.ts",
+    "trust-not-exposed.test.ts"
+  ]
+}

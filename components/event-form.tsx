@@ -18,6 +18,7 @@ import { MediaSection } from "@/components/event-form/media-section"
 import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
 import { captureVideoPoster } from "@/lib/video-poster"
+import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
 
 export type { EventFormValues } from "@/components/event-form/schema"
 
@@ -49,7 +50,7 @@ export function EventForm({
       status: "draft" as const,
       visibility: "public" as const,
       is_featured: false,
-      check_in_radius: 100,
+      check_in_radius: DEFAULT_CHECK_IN_RADIUS_M,
       category_ids: [],
       amenity_ids: [],
       primary_category_id: undefined,

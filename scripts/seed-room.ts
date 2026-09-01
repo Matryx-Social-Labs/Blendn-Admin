@@ -59,6 +59,7 @@ import { generateUniqueAnonymousName } from "../lib/anonymous-names"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
+import { syncOccurrences } from "../lib/occurrences"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -368,6 +369,18 @@ async function main() {
       check_in_radius: 2000,
     },
   })
+
+  /*
+   * Occurrences, or nobody can check in.
+   *
+   * `resolveOccurrence` returns `none` for an event with no occurrence rows,
+   * and the check-in route reads `none` as `too_late` — "Event has already
+   * ended", however far in the future the event sits. Reusing the product's
+   * own writer rather than inserting rows keeps this fixture honest; a
+   * fixture that hand-rolls what production computes is a second
+   * implementation and will drift.
+   */
+  await syncOccurrences(event.id, start, end, "Asia/Kolkata")
 
   /*
    * ONE occurrence spanning the whole month — see the header.
