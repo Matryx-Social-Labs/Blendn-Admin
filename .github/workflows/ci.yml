@@ -301,7 +301,7 @@ jobs:
               # measured 2.3GB locally, leaving ~3GB unattributed. If that is
               # the Next server it is a production leak, not a CI problem, so
               # the question is worth one run to settle.
-              echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{print "used="$3"M avail="$7"M"}') load=$(cut -d" " -f1 /proc/loadavg) | top3: $(ps -eo rss,comm --sort=-rss | awk 'NR>1 && NR<=4 {printf "%s=%dM ", $2, $1/1024}')"
+              echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{print "used="$3"M avail="$7"M"}') load=$(cut -d" " -f1 /proc/loadavg) | top: $(ps -eo rss,args --sort=-rss | awk 'NR==2 {printf "%dM <- %s %s %s", $1/1024, $2, $3, $4}')"
               sleep 5
             done ) &
           SAMPLER=$!
