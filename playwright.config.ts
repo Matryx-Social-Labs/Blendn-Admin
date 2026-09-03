@@ -41,7 +41,17 @@ export default defineConfig({
   // the flake instead of reporting it. One retry in CI only, to absorb a cold
   // first compile.
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
+  /*
+   * No HTML reporter on CI. It accumulates every test's result and attachments
+   * in memory to write the report at the end — and on this lane the end is
+   * frequently never reached, because the runner is reclaimed mid-suite. The
+   * report is then not merely expensive but unreachable: the upload step is
+   * skipped along with everything else downstream of the kill.
+   *
+   * `list` streams to the step log, which is preserved up to the moment of the
+   * kill. That is the only channel that survives, so it is the one to spend on.
+   */
+  reporter: [["list"]],
   timeout: 45_000,
   expect: { timeout: 10_000 },
   use: {
@@ -52,7 +62,25 @@ export default defineConfig({
      * The point is that somebody who did not write the test can see what broke
      * without rerunning it — which is the whole staging-readiness argument.
      */
-    trace: "retain-on-failure",
+    /*
+     * `on-first-retry` on CI, measured rather than guessed.
+     *
+     * `retain-on-failure` records a trace for **every** test and throws it away
+     * when the test passes, so a green suite pays the full recording cost and
+     * keeps none of it. On a 2-core / 7.9GB runner that matters: the suite was
+     * observed climbing from 1.8GB to 7.86GB in under two minutes, with load
+     * average reaching 46.9 before the host reclaimed the machine.
+     *
+     * `on-first-retry` records nothing on the first attempt and everything on
+     * the retry, which is where a trace is actually read. `retries: 1` on CI
+     * means a genuine failure still produces one — the artefact is only lost
+     * for a test that fails twice identically, and that one has a trace from
+     * the retry anyway.
+     *
+     * Locally there is no memory pressure and no retry, so the old behaviour
+     * stays: a failure keeps its trace on the first run.
+     */
+    trace: process.env.CI ? "on-first-retry" : "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
   },

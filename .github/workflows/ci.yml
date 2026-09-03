@@ -301,7 +301,12 @@ jobs:
             done ) &
           SAMPLER=$!
           trap "kill $SAMPLER 2>/dev/null || true" EXIT
-          npm run test:e2e -- --grep-invert="$E2E_EXCLUDE"
+          # Capped so the runner cannot exhaust a 7.9GB box. Measured: Chromium
+          # alone peaks around 2.3GB, and the suite drove the machine to 73MB
+          # free with a load average of 46.9 before it was reclaimed. A heap
+          # error naming the process is a better failure than a silent SIGTERM.
+          NODE_OPTIONS="--max-old-space-size=2048" \
+            npm run test:e2e -- --grep-invert="$E2E_EXCLUDE"
 
       # Kept for the case this CAN catch — a genuine test failure or a crashed
       # server — and explicitly NOT the reclamation case. Measured: when the
