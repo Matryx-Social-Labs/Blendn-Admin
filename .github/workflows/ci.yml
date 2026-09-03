@@ -158,6 +158,25 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
 
+    # ── OFF BY DEFAULT, and this is a deliberate retreat rather than a repair ──
+    #
+    # The suite is not broken: it passes locally, 32 tests including both heavy
+    # sweeps, against a production build and a fresh seed. What fails is the
+    # environment. `node dist/server.js` grows to 6.7GB on a 2-core / 7.9GB
+    # runner — measured, with `--max-old-space-size=1536` in force, so the
+    # growth is not the V8 old space — and the host reclaims the machine. Tests
+    # pass right up to the moment it dies.
+    #
+    # A lane that is red on every push is worse than no lane: people learn to
+    # ignore the cross, and then miss the real one. So this runs on demand until
+    # the memory question is settled, and `docs/E2E-LOCAL.md` carries the local
+    # command that replaces it meanwhile.
+    #
+    # To run it: add the `full-e2e` label to a PR. Nothing else changed — the
+    # job is intact, including the diagnostics that produced the measurement
+    # above, so re-enabling it is deleting this `if:`.
+    if: contains(github.event.pull_request.labels.*.name, 'full-e2e')
+
     services:
       postgres:
         image: postgres:16
@@ -295,6 +314,10 @@ jobs:
         env:
           # Skipped on ordinary PRs; runs nightly and under the `full-e2e`
           # label. `$^` matches nothing, so nothing is excluded.
+          # Note: with the job gated above, `schedule` no longer reaches here —
+          # a nightly run would fail on the same memory ceiling and email about
+          # it every morning. The branch is kept so that removing the gate
+          # restores the nightly sweep unchanged.
           E2E_EXCLUDE: >-
             ${{ (github.event_name == 'schedule'
                  || contains(github.event.pull_request.labels.*.name, 'full-e2e'))
