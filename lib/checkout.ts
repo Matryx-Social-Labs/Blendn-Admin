@@ -4,6 +4,7 @@
 // MODULE_NOT_FOUND. This module is reachable from server.ts through the
 // presence sweeper, so everything it imports must be relative too.
 import { db } from "./db"
+import { closeSession } from "./presence-sessions"
 import { logger } from "./logger"
 import { emitEventCheckOut } from "./socket-server"
 
@@ -55,7 +56,13 @@ export async function performCheckout(
 ): Promise<CheckoutResult | null> {
   const checkIn = await db.event_check_ins.findUnique({
     where: { id: checkInId },
-    select: { id: true, event_id: true, user_id: true, status: true },
+    select: {
+      id: true,
+      event_id: true,
+      user_id: true,
+      status: true,
+      occurrence_id: true,
+    },
   })
   if (!checkIn) return null
 
@@ -73,6 +80,25 @@ export async function performCheckout(
   if (count === 0) {
     return { changed: false, eventId: checkIn.event_id, userId: checkIn.user_id }
   }
+
+  /*
+   * Close the presence session too, in the one place both callers pass through.
+   *
+   * Written here rather than in the route because the sweeper checks people out
+   * as well, and the comment above already says these two must not drift. A
+   * session left open by a checkout is somebody who counts as present forever,
+   * which is the bug the sessions model exists to make unrepresentable.
+   *
+   * `manual` is the person; everything else reached this function from the
+   * sweeper, on silence. Recording which lets the occupancy figure say how
+   * confident it is instead of presenting inference as observation.
+   */
+  await closeSession(
+    checkIn.occurrence_id,
+    checkIn.user_id,
+    reason === "manual" ? "user" : "sweeper",
+    now
+  )
 
   if (cutsChatAccess(reason)) {
     const chatGroup = await db.chat_groups.findUnique({
