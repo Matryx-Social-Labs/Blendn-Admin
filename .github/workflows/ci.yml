@@ -193,7 +193,6 @@ jobs:
     # To run it: add the `full-e2e` label to a PR. Nothing else changed — the
     # job is intact, including the diagnostics that produced the measurement
     # above, so re-enabling it is deleting this `if:`.
-    if: contains(github.event.pull_request.labels.*.name, 'full-e2e')
 
     services:
       postgres:
