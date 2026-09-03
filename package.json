@@ -27,6 +27,7 @@
     "backfill:cities": "tsx scripts/backfill-event-cities.ts",
     "seed:qa": "tsx scripts/seed-qa.ts",
     "test:e2e": "playwright test",
+    "test:e2e:local": "tsx scripts/e2e-local.ts",
     "test:e2e:ui": "playwright test --ui"
   },
   "prisma": {
@@ -126,6 +127,8 @@
     },
     "@prisma/config": {
       "deepmerge-ts": "^8.0.0"
-    }
+    },
+    "mysql2": "^3.24.3",
+    "fast-uri": "^3.1.7"
   }
 }

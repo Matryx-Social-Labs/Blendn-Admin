@@ -144,6 +144,39 @@ app.prepare().then(() => {
     `)
   })
 
+  /*
+   * Where the memory actually is, when something asks.
+   *
+   * This process reached **6.7GB RSS** on a CI runner and was killed by the
+   * host, while `--max-old-space-size=1536` was in force — so the growth is
+   * not the V8 old space, and `ps` cannot say what it is instead. The four
+   * numbers below can: `heapUsed` is JavaScript objects, `external` is memory
+   * V8 accounts for but does not own, `arrayBuffers` is the Buffer/TypedArray
+   * share of that, and the gap between `rss` and all of them is native or
+   * allocator territory — glibc's per-thread malloc arenas being the usual
+   * suspect on Linux, and invisible everywhere else.
+   *
+   * Off unless asked for, because a long-running server should not narrate
+   * itself. On stdout rather than through `logger` so it survives being piped
+   * straight into a CI step log — the only channel that outlives a reclaimed
+   * runner, since `if: always()` steps and artifact uploads are both skipped.
+   */
+  if (process.env.MEMORY_TRACE === "1") {
+    const mb = (n: number) => Math.round(n / 1024 / 1024)
+    const trace = setInterval(() => {
+      const m = process.memoryUsage()
+      console.log(
+        `[memtrace] rss=${mb(m.rss)}M heapUsed=${mb(m.heapUsed)}M ` +
+          `heapTotal=${mb(m.heapTotal)}M external=${mb(m.external)}M ` +
+          `arrayBuffers=${mb(m.arrayBuffers)}M ` +
+          `unaccounted=${mb(m.rss - m.heapTotal - m.external)}M`
+      )
+    }, 5_000)
+    // Unref'd so it never holds the process open — a diagnostic that changes
+    // when the server may exit would be measuring itself.
+    trace.unref()
+  }
+
   httpServer.on('error', (err) => {
     console.error(`[${new Date().toISOString()}] > HTTP server error:`, err)
     process.exit(1)
