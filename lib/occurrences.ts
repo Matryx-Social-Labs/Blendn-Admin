@@ -118,14 +118,45 @@ export function occurrencesForSpan(
     const key = dayKey(cursor)
     const isFirst = key === first
     const isLast = key === last
-    out.push({
-      occursOn: new Date(`${key}T00:00:00Z`),
-      // The first and last days keep the event's real times; the days between
-      // inherit the first day's clock, which is what a conference programme
-      // actually looks like.
-      startTime: isFirst ? start : atClockOf(cursor, start, timezone),
-      endTime: isLast ? end : atClockOf(cursor, end, timezone),
-    })
+
+    // The first and last days keep the event's real times; the days between
+    // inherit the first day's clock, which is what a conference programme
+    // actually looks like.
+    const startTime = isFirst ? start : atClockOf(cursor, start, timezone)
+    let endTime = isLast ? end : atClockOf(cursor, end, timezone)
+
+    /*
+     * A night that runs past local midnight ends on the NEXT date.
+     *
+     * `atClockOf` puts the end's clock time onto this day's date, which is
+     * right for a programme running 09:00–18:00 and wrong for one running
+     * 21:00–03:00: three in the morning is earlier in the day than nine at
+     * night, so the occurrence came out ending six hours before it began.
+     *
+     * Real example from the seeded world — Design Week, Asia/Kolkata, an event
+     * spanning 09-04 21:09 to 09-06 03:09 local:
+     *
+     *     occurs_on 09-04   start 09-04 15:39Z   end 09-03 21:39Z
+     *
+     * Nothing caught it because no constraint forbids it and every reader
+     * treats the pair as an interval without checking it is one. The
+     * `presence_sessions` CHECK is what surfaced it: backfilling refused rows
+     * that departed before they arrived.
+     */
+    if (endTime <= startTime) {
+      if (isLast) {
+        /*
+         * The tail of a night already covered by the previous day's occurrence.
+         * Emitting it would create a day whose whole extent is before it
+         * starts — and, on a two-night event, a third occurrence for a night
+         * nobody is holding.
+         */
+        break
+      }
+      endTime = new Date(endTime.getTime() + 24 * 3_600_000)
+    }
+
+    out.push({ occursOn: new Date(`${key}T00:00:00Z`), startTime, endTime })
     cursor.setUTCDate(cursor.getUTCDate() + 1)
   }
   return out

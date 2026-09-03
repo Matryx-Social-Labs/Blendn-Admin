@@ -207,8 +207,19 @@ export async function departureQuality(occurrenceId: string): Promise<{
     where: { occurrence_id: occurrenceId, departed_at: { not: null } },
     _count: { _all: true },
   })
-  const closed = rows.reduce((n, r) => n + r._count._all, 0)
-  const bySweeper = rows.find((r) => r.departed_source === "sweeper")?._count._all ?? 0
+  /*
+   * Unknown-source sessions are excluded from the ratio, not counted as
+   * definite signals.
+   *
+   * Backfilled history has `departed_source` NULL: the old row recorded *that*
+   * somebody left and never *how*, because with one mutable row there was
+   * nothing to attribute. Counting those as non-sweeper would make every
+   * occurrence that predates sessions look confidently measured, when it was
+   * not measured at all — which is the opposite of what this function is for.
+   */
+  const attributed = rows.filter((r) => r.departed_source !== null)
+  const closed = attributed.reduce((n, r) => n + r._count._all, 0)
+  const bySweeper = attributed.find((r) => r.departed_source === "sweeper")?._count._all ?? 0
   // Half is the line: below it the sweeper is tidying up after a few people who
   // walked out without checking out, which is normal. Above it, the figure is
   // mostly inference.
