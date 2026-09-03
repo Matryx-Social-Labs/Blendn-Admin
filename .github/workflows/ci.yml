@@ -296,7 +296,12 @@ jobs:
           # kill, so it is the only channel that survives. Interleaved with the
           # test output it also says which test was running when memory moved.
           ( while true; do
-              echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{print "used="$3"M avail="$7"M"}') load=$(cut -d" " -f1-3 /proc/loadavg)"
+              # Totals plus the three biggest processes. The totals alone said
+              # 5.4GB was being consumed and could not say by what — Chromium
+              # measured 2.3GB locally, leaving ~3GB unattributed. If that is
+              # the Next server it is a production leak, not a CI problem, so
+              # the question is worth one run to settle.
+              echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{print "used="$3"M avail="$7"M"}') load=$(cut -d" " -f1 /proc/loadavg) | top3: $(ps -eo rss,comm --sort=-rss | awk 'NR>1 && NR<=4 {printf "%s=%dM ", $2, $1/1024}')"
               sleep 5
             done ) &
           SAMPLER=$!
