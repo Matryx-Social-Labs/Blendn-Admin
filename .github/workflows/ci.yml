@@ -248,7 +248,26 @@ jobs:
           # Capped so a leak surfaces as a Node heap error naming the culprit,
           # rather than as the kernel killing whichever process it likes least
           # — which is how this failure has been presenting.
-          NODE_OPTIONS="--max-old-space-size=1536" nohup npm run start > /tmp/server.log 2>&1 &
+          # Piped into the STEP LOG, not a file, and prefixed so it can be
+          # told apart from test output. `/tmp/server.log` was captured for
+          # weeks and never once readable: the step that would have printed it
+          # is skipped when the runner is reclaimed, along with the artifact
+          # upload. The step log is the only channel that survives.
+          #
+          # `MEMORY_TRACE=1` makes the server report its own breakdown every 5s
+          # — heap, external, arrayBuffers, and the gap that is native or
+          # allocator memory. `ps` can only say the process is large.
+          #
+          # `MALLOC_ARENA_MAX=2` because this is Linux and glibc gives each
+          # thread its own malloc arena, which inflates RSS without inflating
+          # the heap and does not show up on the macOS box where this refuses
+          # to reproduce. Two arenas trades a little allocator throughput for a
+          # much smaller ceiling; if the trace shows the gap is small after
+          # all, this comes back out rather than staying as a lucky charm.
+          MEMORY_TRACE=1 \
+          MALLOC_ARENA_MAX=2 \
+          NODE_OPTIONS="--max-old-space-size=1536" \
+            npm run start 2>&1 | sed -u 's/^/[server] /' &
           echo $! > /tmp/server.pid
           # Poll the health endpoint rather than adding a dependency for it.
           for i in $(seq 1 60); do
