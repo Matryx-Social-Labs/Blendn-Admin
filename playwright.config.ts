@@ -56,5 +56,30 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "off",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: {
+          /*
+           * `--disable-dev-shm-usage` because CI containers give `/dev/shm` 64MB
+           * and Chromium puts its renderer shared memory there. When it runs
+           * out the failure is not a clean error — the browser or the runner
+           * dies, and on a hosted runner that surfaces as `exit 143` with no
+           * reason attached, which is exactly how this job has been failing.
+           *
+           * `--disable-gpu` and `--no-sandbox` are the usual headless-CI pair;
+           * there is no GPU on a runner and no second user to sandbox from.
+           *
+           * Local runs are unaffected — the flags are harmless off CI, so this
+           * does not create a "works on my machine" gap between the two.
+           */
+          args: process.env.CI
+            ? ["--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox"]
+            : [],
+        },
+      },
+    },
+  ],
 })

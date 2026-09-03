@@ -227,9 +227,28 @@ jobs:
       # sent its stdout into the step log, so a crash mid-suite produced no
       # usable record — the run that prompted this died with 25 tests green and
       # nothing to read.
+      # What the runner actually has, recorded before anything competes for it.
+      #
+      # This job is the only one that runs Postgres, a production Next server
+      # with Socket.io and six background loops, Chromium and Playwright at the
+      # same time — and it is the only one that gets killed. `exit 143` is
+      # SIGTERM, which on a hosted runner means the OOM killer or the hypervisor
+      # reclaiming the box, and GitHub reports neither with a reason.
+      #
+      # A private repository's standard runner is smaller than the public one,
+      # so the number below is the first thing to look at when this fails again.
+      - name: Runner resources
+        run: |
+          echo "--- memory ---"; free -m
+          echo "--- cpus: $(nproc) ---"
+          echo "--- disk ---"; df -h / /dev/shm | sed -n '1,4p'
+
       - name: Start the production server
         run: |
-          nohup npm run start > /tmp/server.log 2>&1 &
+          # Capped so a leak surfaces as a Node heap error naming the culprit,
+          # rather than as the kernel killing whichever process it likes least
+          # — which is how this failure has been presenting.
+          NODE_OPTIONS="--max-old-space-size=1536" nohup npm run start > /tmp/server.log 2>&1 &
           echo $! > /tmp/server.pid
           # Poll the health endpoint rather than adding a dependency for it.
           for i in $(seq 1 60); do
@@ -262,7 +281,31 @@ jobs:
                  || contains(github.event.pull_request.labels.*.name, 'full-e2e'))
                 && '$^'
                 || '@sweep' }}
-        run: npm run test:e2e -- --grep-invert="$E2E_EXCLUDE"
+        run: |
+          # Sample memory every 2s for the life of the suite. If the runner is
+          # reclaimed the step log ends mid-suite with no reason, so the trail
+          # has to be written as it goes rather than reported at the end.
+          ( while true; do
+              echo "$(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{print "used="$3"M avail="$7"M"}')"
+              sleep 2
+            done ) > /tmp/memory.log 2>&1 &
+          echo $! > /tmp/memsampler.pid
+          npm run test:e2e -- --grep-invert="$E2E_EXCLUDE"
+
+      # Always, not on failure: when the runner is reclaimed the step is marked
+      # cancelled and `if: failure()` does not fire, which is why every previous
+      # kill left nothing to read.
+      - name: Diagnostics
+        if: always()
+        run: |
+          echo "=== peak memory during the suite ==="
+          sort -t= -k2 -rn /tmp/memory.log 2>/dev/null | head -5 || echo "(no samples)"
+          echo "=== last memory samples ==="
+          tail -15 /tmp/memory.log 2>/dev/null || echo "(none)"
+          echo "=== server log tail ==="
+          tail -40 /tmp/server.log 2>/dev/null || echo "(none)"
+          echo "=== kernel OOM evidence ==="
+          sudo dmesg 2>/dev/null | grep -iE "out of memory|oom-kill|killed process" | tail -10 || echo "(none in dmesg)"
 
       # The point of the lane: somebody who did not write the test can see what
       # broke without rerunning it.
@@ -273,6 +316,8 @@ jobs:
           path: |
             playwright-report/
             test-results/
+            /tmp/memory.log
+            /tmp/server.log
           retention-days: 7
 
   build:
