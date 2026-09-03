@@ -321,14 +321,6 @@
       "date": "2026-08-28",
       "source": "run-at-migration-audit",
       "note": "Written after the bug was found live. The baseline sorts first by name, so on a fresh install it creates the index and `20260807_event_occurrences` drops it moments later — correct. On staging that migration was recorded months ago, so the baseline applies AFTER it and re-creates the unique it existed to remove, making a second-day check-in violate a constraint. Nothing errors and the deploy succeeds. Found only by replaying against a schema-only copy of staging; every check against an empty database was green. The guard also had to strip SQL comments, because the fix leaves a note naming the index and a raw-text scan flags the very comment that records the fix."
-    },
-    "presence-sessions.itest.ts": {
-      "guards": "A re-entry is a second session rather than an overwrite; occupancy counts people once and stops counting the silent; dwell excludes time outside; and at most one session is open per person per occurrence",
-      "mutation": "Three: (a) DROP the partial unique `presence_sessions_one_open_per_occurrence`; (b) `COUNT(*)` instead of `COUNT(DISTINCT user_id)` in insideNow; (c) remove the `last_seen_at > cutoff` clause",
-      "observed": "(a) 1 failing — 'refuses to hold two open sessions'; (c) 1 failing — 'stops counting somebody whose heartbeat went silent'; 7 passing after each revert",
-      "date": "2026-09-03",
-      "source": "run-at-presence-sessions",
-      "note": "Mutation (b) broke nothing, and that is the mutation being invalid rather than the test weak: while the partial unique holds, the filtered rows are already one per person, so COUNT(*) and COUNT(DISTINCT user_id) are provably equivalent. The DISTINCT stays for the case where the index does not — a `db push` database has no partial unique because schema.prisma cannot express one. The comment claiming it prevents double-counting was corrected to say this."
     }
   },
   "grandfathered": [
