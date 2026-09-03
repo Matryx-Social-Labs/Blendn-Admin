@@ -72,6 +72,7 @@ model User {
   org_join_requests      organisation_join_requests[]
   password_resets        password_reset_tokens[]
   event_check_ins        event_check_ins[]
+  presence_sessions presence_sessions[]
   match_preferences      event_match_preferences[]
   likes_sent             event_likes[]                @relation("LikesSent")
   likes_received         event_likes[]                @relation("LikesReceived")
@@ -426,6 +427,7 @@ model events {
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
   details            event_details?
   check_ins          event_check_ins[]
+  presence_sessions presence_sessions[]
   match_preferences  event_match_preferences[]
   likes              event_likes[]
   peer_ratings       peer_ratings[]
@@ -902,6 +904,7 @@ model event_occurrences {
 
   event     events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
   check_ins event_check_ins[]
+  presence_sessions presence_sessions[]
 
   @@unique([event_id, occurs_on])
   @@index([event_id, start_time])
@@ -2239,6 +2242,111 @@ enum connection_intent {
 enum check_in_kind {
   attendee
   staff
+}
+
+/// Presence as sessions, not as a status.
+///
+/// `event_check_ins` holds **one mutable row per person per occurrence** with a
+/// `status` and a `check_out_time` that can disagree with each other. Three
+/// things follow, and the third is the one that cannot be patched:
+///
+///   1. occupancy is counted three different ways across the codebase,
+///   2. nothing decrements when the sweeper is not running, and
+///   3. **stepping outside and coming back is unrepresentable** — the re-entry
+///      would have to overwrite the arrival.
+///
+/// Many sessions per person per occurrence fixes the third by construction, and
+/// makes the first two queries rather than counters:
+///
+///   inside now   departed_at IS NULL AND last_seen_at > cutoff
+///   dwell        sum(departed_at - arrived_at), excluding time outside
+///   attended     any session exists
+///   turn-up      distinct user_id, at whichever scope you ask for
+///
+/// There is no counter anywhere, so `current_capacity`-style drift is
+/// unrepresentable rather than merely fixed.
+///
+/// **Not** an append-only log of every heartbeat. That is the purer model and
+/// buys a full audit trail, but a 5-minute ping for 200 people over 5 hours is
+/// ~12,000 rows an event — 100x this — and needs a retention policy on day one.
+/// The bugs come from *one row per person*, not from the heartbeat being
+/// mutable. Transitions are rows; the heartbeat updates in place.
+model presence_sessions {
+  id            String        @id @default(uuid()) @db.Uuid
+  event_id      String        @db.Uuid
+  occurrence_id String        @db.Uuid
+  user_id       String
+  /// Same meaning as on `event_check_ins`: resolved from organisation
+  /// membership at arrival and stored, because membership changes and somebody
+  /// who leaves next month must not retroactively become a guest last month.
+  kind          check_in_kind @default(attendee)
+
+  arrived_at      DateTime          @db.Timestamptz(6)
+  /// Null means still inside. This is the state — there is no status enum to
+  /// drift out of sync with it.
+  departed_at     DateTime?         @db.Timestamptz(6)
+  /// How the session ended, which is what lets a soft number say it is soft.
+  /// An occurrence whose sessions mostly closed by `sweeper` rather than by a
+  /// definite signal is degraded, and the organiser's screen should say so.
+  departed_source departure_source?
+
+  last_seen_at  DateTime? @db.Timestamptz(6)
+  last_lat      Float?
+  last_lng      Float?
+  last_accuracy Float?
+
+  /// Which signal produced this session. The Expo client refuses background
+  /// location deliberately — iOS `Always` permission is an App Review
+  /// liability — so polling is not a degraded fallback but the ordinary case,
+  /// and storing the source is what lets a number admit how it was obtained.
+  source presence_source @default(polling)
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  event      events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Cascade)
+  user       User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  /// "Who is inside now" — the live-ops question, twelve times a minute per
+  /// watched event.
+  @@index([occurrence_id, departed_at])
+  /// The arrival curve and the entry alert.
+  @@index([event_id, arrived_at])
+  /// One person's history, for `GET /me/attendance` and the second-event rate.
+  @@index([user_id, arrived_at])
+  ///
+  /// NOTE: the invariant that matters most is **not** here, because
+  /// `schema.prisma` cannot express it: at most one OPEN session per person per
+  /// occurrence, as a partial unique on `(occurrence_id, user_id) WHERE
+  /// departed_at IS NULL`. It lives in the migration SQL.
+  ///
+  /// Without it, checking in twice without leaving creates two open sessions
+  /// and occupancy double-counts one body — which is the failure this whole
+  /// model exists to remove, reintroduced through the door marked "many
+  /// sessions are allowed". A plain `@@unique` cannot be used: many *closed*
+  /// sessions per pair is the entire point.
+}
+
+/// How a presence session ended.
+enum departure_source {
+  /// They checked out.
+  user
+  /// The sweeper closed it on silence — the soft case.
+  sweeper
+  /// They checked in somewhere else.
+  switch
+  /// The event ended.
+  ended
+  /// A time-boxed session expired. Reserved for venue Go Live, where the bound
+  /// is on the person rather than on the place.
+  expired
+}
+
+/// Which signal opened and maintained a session.
+enum presence_source {
+  os_geofence
+  polling
 }
 
 enum check_in_status {

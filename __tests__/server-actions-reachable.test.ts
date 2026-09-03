@@ -112,6 +112,24 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["formatAge", "the moderation queue has no age column, which is the SLA it formats"],
   ["cleanupExpiredTokens", "no cron sweeps mobile_refresh_tokens, so revoked and expired rows accumulate forever"],
 
+  // --- Presence sessions: the folds, shipped ahead of their readers ---------
+  //
+  // `openSession`, `closeSession`, `insideNow` and `attended` are wired — the
+  // check-in route opens a session and `performCheckout` closes one, so the
+  // table is written by the real paths rather than declared and forgotten.
+  //
+  // These two are the folds the cutover needs and nothing reads yet, because
+  // occupancy and dwell still come from `event_check_ins`. Moving those readers
+  // is a change that must ship WITH the counting fix, not before it: sessions
+  // are many-per-person, so a naive `_count` gets *worse* on the day they
+  // switch, not better. That is the plan's own correction to itself, and it is
+  // why these are recorded here rather than half-wired now.
+  //
+  // The staleness half of this ratchet is what makes the entry temporary: wire
+  // them and it will tell you to delete these lines.
+  ["dwellSeconds", "the fold occupancy/dwell readers move to; they still read event_check_ins"],
+  ["departureQuality", "the degraded-occupancy signal R31 wants on the organiser's screen; no screen reads it yet"],
+
   // --- Genuinely test-only, by design ---------------------------------------
   ["workFieldsMissingExpertise", "its own docblock says exported for the test rather than run at import"],
   ["resetSpamHistory", "test seam for module-level state; production never wants it"],

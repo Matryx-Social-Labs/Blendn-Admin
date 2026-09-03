@@ -321,6 +321,14 @@
       "date": "2026-08-28",
       "source": "run-at-migration-audit",
       "note": "Written after the bug was found live. The baseline sorts first by name, so on a fresh install it creates the index and `20260807_event_occurrences` drops it moments later — correct. On staging that migration was recorded months ago, so the baseline applies AFTER it and re-creates the unique it existed to remove, making a second-day check-in violate a constraint. Nothing errors and the deploy succeeds. Found only by replaying against a schema-only copy of staging; every check against an empty database was green. The guard also had to strip SQL comments, because the fix leaves a note naming the index and a raw-text scan flags the very comment that records the fix."
+    },
+    "workflow-yaml.test.ts": {
+      "guards": "No GitHub workflow carries a duplicate mapping key, which GitHub rejects outright while permissive YAML loaders accept silently",
+      "mutation": "Insert a second `if:` under the `e2e` job, immediately before `runs-on:` — the exact shape that shipped",
+      "observed": "1 failing — 'has no duplicate keys'; 3 passing after revert",
+      "date": "2026-09-03",
+      "source": "run-at-workflow-trigger-investigation",
+      "note": "Written after shipping the bug. Two `if:` keys on one job made every run on the branch invalid: the run is created, no job matches, and it reports as a plain red failure with zero jobs — indistinguishable from a broken test, and no `pull_request` check fires at all. It survived three commits because the check I was using was `yaml.safe_load`, which keeps the last duplicate and reports the file as clean. The detector here is line-based on purpose: every YAML parser available to it is the permissive one whose behaviour caused the bug. The first attempt at this control was also invalid — the anchor did not match, so the mutation never applied and the guard looked weak when it was not."
     }
   },
   "grandfathered": [

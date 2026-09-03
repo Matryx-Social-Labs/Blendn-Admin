@@ -4,6 +4,7 @@ import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { ageFrom, minAgeRefusal, stripDating } from "@/lib/age"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { openSession } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -322,6 +323,39 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         updated_at: now,
       },
     })
+
+    /*
+     * And open a presence session.
+     *
+     * Written beside the check-in rather than instead of it: `event_check_ins`
+     * is still the source of truth for every reader, and will be until they
+     * move. What this buys immediately is the thing the old shape cannot hold —
+     * somebody stepping outside and coming back produces a *second* session
+     * rather than overwriting their arrival.
+     *
+     * `openSession` is idempotent, so checking in twice without leaving
+     * refreshes the heartbeat instead of opening a second session. The partial
+     * unique in the migration enforces that against a race the check cannot
+     * see.
+     *
+     * Deliberately not awaited inside the check-in transaction: a failure here
+     * must not refuse somebody standing at the door. The door is the product;
+     * this is bookkeeping that runs beside it.
+     */
+    openSession({
+      eventId,
+      occurrenceId: occurrence.id,
+      userId: authUser.userId,
+      kind,
+      at: now,
+      lat: latitude,
+      lng: longitude,
+      accuracy: gpsAccuracy,
+    }).catch((err) =>
+      logger.error("Opening presence session failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    )
 
     /*
      * Seed the event preferences, once per event rather than once per day.
