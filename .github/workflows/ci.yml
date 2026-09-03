@@ -282,19 +282,32 @@ jobs:
                 && '$^'
                 || '@sweep' }}
         run: |
-          # Sample memory every 2s for the life of the suite. If the runner is
-          # reclaimed the step log ends mid-suite with no reason, so the trail
-          # has to be written as it goes rather than reported at the end.
+          # Sampled into the STEP LOG, not a file, and that distinction is the
+          # whole point.
+          #
+          # The first attempt wrote to /tmp/memory.log and read it back in a
+          # `Diagnostics` step guarded by `if: always()`. That step was
+          # **skipped** — along with the artifact upload — because a reclaimed
+          # runner does not fail the job, it takes the machine away, and
+          # `always()` only covers a step that failed. Nothing downstream of the
+          # kill can ever run.
+          #
+          # The step log is streamed and is preserved up to the moment of the
+          # kill, so it is the only channel that survives. Interleaved with the
+          # test output it also says which test was running when memory moved.
           ( while true; do
-              echo "$(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{print "used="$3"M avail="$7"M"}')"
-              sleep 2
-            done ) > /tmp/memory.log 2>&1 &
-          echo $! > /tmp/memsampler.pid
+              echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{print "used="$3"M avail="$7"M"}') load=$(cut -d" " -f1-3 /proc/loadavg)"
+              sleep 5
+            done ) &
+          SAMPLER=$!
+          trap "kill $SAMPLER 2>/dev/null || true" EXIT
           npm run test:e2e -- --grep-invert="$E2E_EXCLUDE"
 
-      # Always, not on failure: when the runner is reclaimed the step is marked
-      # cancelled and `if: failure()` does not fire, which is why every previous
-      # kill left nothing to read.
+      # Kept for the case this CAN catch — a genuine test failure or a crashed
+      # server — and explicitly NOT the reclamation case. Measured: when the
+      # runner is taken away this step is skipped even with `if: always()`, and
+      # so is the artifact upload. That is why the memory trail above streams to
+      # the step log instead of being reported here.
       - name: Diagnostics
         if: always()
         run: |

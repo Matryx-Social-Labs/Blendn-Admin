@@ -63,21 +63,22 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
         launchOptions: {
           /*
-           * `--disable-dev-shm-usage` because CI containers give `/dev/shm` 64MB
-           * and Chromium puts its renderer shared memory there. When it runs
-           * out the failure is not a clean error — the browser or the runner
-           * dies, and on a hosted runner that surfaces as `exit 143` with no
-           * reason attached, which is exactly how this job has been failing.
+           * `--disable-gpu` and `--no-sandbox` — the usual headless-CI pair.
+           * There is no GPU on a runner and no second user to sandbox from.
            *
-           * `--disable-gpu` and `--no-sandbox` are the usual headless-CI pair;
-           * there is no GPU on a runner and no second user to sandbox from.
+           * **`--disable-dev-shm-usage` was here and has been removed**, because
+           * the reason given for it was false. The standard advice is that CI
+           * containers cap `/dev/shm` at 64MB and Chromium puts renderer shared
+           * memory there; the runner was asked, and reported:
            *
-           * Local runs are unaffected — the flags are harmless off CI, so this
-           * does not create a "works on my machine" gap between the two.
+           *     tmpfs  3.9G  0  3.9G  0%  /dev/shm
+           *
+           * So shared memory was never the constraint, and the flag would have
+           * pushed Chromium onto disk to solve a problem it does not have. A
+           * mitigation carried on a disproven premise is worse than none: it
+           * looks like the cause has been addressed.
            */
-          args: process.env.CI
-            ? ["--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox"]
-            : [],
+          args: process.env.CI ? ["--disable-gpu", "--no-sandbox"] : [],
         },
       },
     },
