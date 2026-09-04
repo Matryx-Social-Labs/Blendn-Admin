@@ -50,6 +50,7 @@ const TIMELESS = new Set([
   "/dashboard/events/curate",
   "/dashboard/claims",
   "/dashboard/claims/venues",
+  "/dashboard/claims/brands",
   "/dashboard/venues/new",
 ])
 
@@ -97,7 +98,11 @@ const routeContent: Record<string, { title: string; description: string }> = {
    */
   "/dashboard/claims/venues": {
     title: "Claims",
-    description: "Somebody wants ownership of an event or a venue. Decide, oldest first.",
+    description: "Somebody wants ownership of an event, a venue or a brand. Decide, oldest first.",
+  },
+  "/dashboard/claims/brands": {
+    title: "Claims",
+    description: "Somebody wants ownership of an event, a venue or a brand. Decide, oldest first.",
   },
   "/dashboard/moderation/reports": {
     title: "Reports",

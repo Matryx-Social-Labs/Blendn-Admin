@@ -29,6 +29,7 @@ export default async function DashboardLayout({
     pendingApplications,
     eventClaims,
     venueClaims,
+    brandClaims,
   ] = isAdmin
     ? await Promise.all([
         db.moderation_flags.count({ where: { status: "pending" } }),
@@ -39,19 +40,22 @@ export default async function DashboardLayout({
         }),
         db.event_claims.count({ where: { status: "pending" } }),
         db.venue_claims.count({ where: { status: "pending" } }),
+        db.sponsor_claims.count({ where: { status: "pending" } }),
       ])
-    : [0, 0, 0, 0, 0, 0]
+    : [0, 0, 0, 0, 0, 0, 0]
   const pendingFlags = flagCount + userReportCount + messageReportCount
   /*
-   * Both claim queues in one number, for the same reason the moderation badge
-   * covers both of its queues: the nav has one entry, so a count that covered
-   * only half of it would leave somebody waiting with no number anywhere in the
-   * chrome.
+   * All THREE claim queues in one number, for the same reason the moderation
+   * badge covers both of its queues: the nav has one entry, so a count that
+   * covered only part of it would leave somebody waiting with no number
+   * anywhere in the chrome. Brands joined when they moved into the shared
+   * queue — a tab whose count was missing from the badge would be the same
+   * defect at a smaller scale.
    *
    * Counted in the server layout rather than by a client effect -- an alert
    * that pops in after paint is one the operator has already scrolled past.
    */
-  const pendingClaims = eventClaims + venueClaims
+  const pendingClaims = eventClaims + venueClaims + brandClaims
 
   return (
     <SidebarProvider

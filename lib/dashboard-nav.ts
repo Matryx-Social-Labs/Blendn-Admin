@@ -162,7 +162,7 @@ export const dashboardNav: DashboardNavItem[] = [
      */
     title: "Claims",
     description:
-      "Ownership requests for events and venues. Approving one hands over an attendee list.",
+      "Ownership requests for events, venues and brands. Approving one hands over an attendee list, a building, or a brand's reporting.",
     url: "/dashboard/claims",
     icon: IconFileCheck,
     allowedRoles: ["app_admin"],
@@ -185,13 +185,6 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Sponsored copy waiting to be read by a person. Oldest first.",
     url: "/dashboard/creative-review",
     icon: IconFlag,
-    allowedRoles: ["app_admin"],
-  },
-  {
-    title: "Brand claims",
-    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
-    url: "/dashboard/sponsor-claims",
-    icon: IconFileCheck,
     allowedRoles: ["app_admin"],
   },
   {
