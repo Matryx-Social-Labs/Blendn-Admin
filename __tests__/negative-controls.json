@@ -339,6 +339,12 @@
       "mutation": "Delete the `unreliable={occupancyMostlyInferred(snapshot)}` line from components/dashboard/live-tab.tsx",
       "observed": "1 failing: 'is actually wired to the screen' \u2014 the state the prop was genuinely in for weeks after #278 removed the mass-checkout guard it was written for",
       "date": "2026-09-04"
+    },
+    "reports-have-both-ends.test.ts": {
+      "guards": "Each of user_reports, message_reports and event_reports has a writer and a reader, with comments stripped so a table named in prose does not count",
+      "mutation": "A: replace `db.event_reports.create(` with `Promise.resolve(` in the mobile report route. B: repoint the three `db.event_reports.*` reads in the admin queue at user_reports",
+      "observed": "A: 1 failing ('event_reports can be written'). B: 1 failing ('event_reports is read by the admin queue') \u2014 the two halves of the state the table was actually in",
+      "date": "2026-09-04"
     }
   },
   "grandfathered": [

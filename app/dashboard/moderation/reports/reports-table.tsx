@@ -22,6 +22,7 @@ const TOAST: Record<ReportDecision, string> = {
   remove_message: "Message removed",
   suspend: "Account suspended and signed out",
   reinstate: "Account reinstated",
+  delist: "Event delisted — removed from the feed, search and city counts",
 }
 
 export function ReportsTable({
@@ -78,7 +79,13 @@ export function ReportsTable({
       sortType: "string",
       render: (row) => (
         <Badge variant="secondary">
-          {row.kind === "user" ? "Person" : row.messageType === "private" ? "DM" : "Room message"}
+          {row.kind === "user"
+            ? "Person"
+            : row.kind === "event"
+              ? "Event"
+              : row.messageType === "private"
+                ? "DM"
+                : "Room message"}
         </Badge>
       ),
     },
@@ -183,6 +190,21 @@ export function ReportsTable({
                 Remove message
               </Button>
             ) : null}
+            {/*
+              Delist, not cancel, and not suspend.
+              `unlisted` takes it out of the feed, search and city counts and
+              leaves check-ins, the room and RSVPs alone — so an admin who
+              delists a listing wrongly can put it back. Marking a real event
+              cancelled on a stranger's report is worse than the listing was.
+              There is no Suspend here because the subject is a listing: for a
+              curated event `organizer_id` is the admin who curated it, so
+              wiring suspension to an event report could suspend a colleague.
+            */}
+            {row.kind === "event" && row.eventId ? (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(row, "delist")}>
+                Delist
+              </Button>
+            ) : null}
             {row.subjectId && !row.subjectSuspended ? (
               <Button size="sm" variant="destructive" disabled={busy} onClick={() => decide(row, "suspend")}>
                 Suspend
@@ -216,7 +238,7 @@ export function ReportsTable({
           title={status === "pending" ? "No reports waiting" : `Nothing ${status}`}
           description={
             status === "pending"
-              ? "Reports arrive when someone uses Report on a person or a message in the app. Dismissing records that a human looked; suspending blocks sign-in, ends the current session, revokes app tokens, stops notifications, and removes them from every room."
+              ? "Reports arrive when someone uses Report on a person, a message, or an event in the app. Dismissing records that a human looked; delisting takes an event out of the feed, search and city counts while leaving its room and check-ins alone; suspending blocks sign-in, ends the current session, revokes app tokens, stops notifications, and removes them from every room."
               : "Reports land here once an admin has ruled on them. Reviewed means looked at, resolved means acted on."
           }
         />

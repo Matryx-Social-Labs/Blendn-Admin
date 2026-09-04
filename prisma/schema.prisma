@@ -804,6 +804,13 @@ model event_reports {
   reason      String
   description String?
   status      report_status @default(pending)
+  /// Who looked, and when. `user_reports` and `message_reports` have carried
+  /// these since the reports queue was built; this table did not, because it
+  /// had no queue — it had no writer and no reader at all. A report resolved
+  /// with no record of who resolved it is the question that gets asked six
+  /// weeks later and cannot be answered.
+  reviewed_by String?
+  reviewed_at DateTime?     @db.Timestamptz(6)
   created_at  DateTime      @default(now()) @db.Timestamptz(6)
   updated_at  DateTime      @default(now()) @db.Timestamptz(6)
 
