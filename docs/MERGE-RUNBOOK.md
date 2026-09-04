@@ -94,9 +94,20 @@ docker run -d --name blendn_itest \
   -p 55432:5432 postgres:16
 
 export DATABASE_URL="postgresql://postgres:postgres@localhost:55432/blendn_test"
-npm run db:push
+npm run db:migrate
 npm run test:integration
 ```
+
+**`db:migrate`, not `db:push`** — this said `db:push` and that is a weaker
+database than the one you are testing for. `schema.prisma` cannot express a
+CHECK constraint or a partial unique index, so `db push` creates none, while
+three CHECKs and `presence_sessions_one_open_per_occurrence` exist in migration
+SQL and therefore in every deployed environment.
+
+That index is what stops two concurrent check-ins opening two open sessions for
+one person, which is occupancy counting one body twice — the exact failure the
+sessions model exists to remove. A `db push` database has no such index, so the
+suite would pass while the invariant it depends on was absent.
 
 `__tests__/integration/*.itest.ts` only runs in CI otherwise, so a change that
 breaks it leaves the local 1691 green. That is how `MASS_CHECKOUT_FLOOR` shipped
