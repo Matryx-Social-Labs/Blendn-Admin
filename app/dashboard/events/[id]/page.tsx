@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation"
 
 import { LiveTab } from "@/components/dashboard/live-tab"
+import { issuesFor } from "@/lib/event-issues"
 import { Badge } from "@/components/ui/badge"
 import { getEventAttendance } from "@/lib/attendance"
 import { getConnectionMetrics } from "@/lib/connection-metrics"
@@ -132,6 +133,14 @@ export default async function EventDetailPage({
           eventId={event.id}
           startAt={event.start_time.toISOString()}
           endAt={event.end_time.toISOString()}
+          /*
+           * Server-fetched rather than socket-pushed, deliberately. The alerts
+           * above are live; this is the record of what already happened, and
+           * "the queue cleared itself twenty minutes ago" does not need to
+           * arrive within a second — it needs to exist at all, which is what
+           * a browser-only `useMemo` could never manage.
+           */
+          issues={await issuesFor(event.id)}
         />
       </div>
     )

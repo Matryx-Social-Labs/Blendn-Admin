@@ -445,6 +445,7 @@ model events {
   details            event_details?
   check_ins          event_check_ins[]
   presence_sessions presence_sessions[]
+  event_issues      event_issues[]
   match_preferences  event_match_preferences[]
   likes              event_likes[]
   peer_ratings       peer_ratings[]
@@ -2917,4 +2918,56 @@ enum lead_status {
   converted
   archived
   spam
+}
+
+/// A live-ops alert that outlives the tab it was computed in.
+///
+/// `deriveAlerts` is pure and correct and ran in a browser `useMemo`, so seven
+/// rules produced warnings that existed only while somebody had the live tab
+/// open. An `over_capacity` breach at 23:40 was gone at 23:45 with no record
+/// that it had happened — on the screen a venue's crowd-safety decisions are
+/// supposed to come from.
+///
+/// The rule function is unchanged and now has a second caller on a timer. This
+/// table is its memory.
+model event_issues {
+  id            String    @id @default(uuid()) @db.Uuid
+  event_id      String    @db.Uuid
+  /// Which day of a run. Null for an event with no resolvable occurrence,
+  /// which is the same fallback occupancy uses.
+  occurrence_id String?   @db.Uuid
+  /// A `LiveAlertKind`. Deliberately a string rather than an enum: the rules
+  /// live in `lib/live-metrics.ts` and adding one should not need a migration
+  /// before the rule can be tried.
+  kind          String
+  severity      String
+  /// The wording as it fired. Kept rather than re-derived, because the rule may
+  /// be edited afterwards and the record should say what the organiser was
+  /// actually told.
+  title         String
+  body          String
+
+  opened_at    DateTime  @default(now()) @db.Timestamptz(6)
+  /// Bumped while the condition persists, so a two-hour queue is one issue with
+  /// a duration rather than a hundred rows.
+  last_seen_at DateTime  @default(now()) @db.Timestamptz(6)
+  /// The condition stopped. Not the same as somebody dealing with it.
+  resolved_at  DateTime? @db.Timestamptz(6)
+
+  /// Somebody saw it. Distinct from resolved on purpose: an alert that cleared
+  /// itself and one a human acted on are different facts, and the second is the
+  /// one worth asking about afterwards.
+  acknowledged_at DateTime? @db.Timestamptz(6)
+  acknowledged_by String?
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  /// The live read: what is open for this event, newest first.
+  @@index([event_id, resolved_at, opened_at])
+  ///
+  /// NOTE: the invariant that matters is NOT here, because `schema.prisma`
+  /// cannot express it: at most one OPEN issue per event, occurrence and kind,
+  /// as a partial unique WHERE `resolved_at IS NULL`. It lives in the migration
+  /// SQL. Without it a sweep on a timer writes one row per pass, and a queue
+  /// lasting an hour becomes sixty identical alerts.
 }
