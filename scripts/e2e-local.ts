@@ -104,6 +104,18 @@ async function main() {
   server.stderr?.pipe(log)
 
   /*
+   * With MEMORY_TRACE on, the server's output also goes to our stdout. The
+   * whole point of that flag is to be read, and piping it into a temp file
+   * nobody opens is how it came to be switched on for a full run and produce
+   * nothing anyone saw — the same mistake as writing CI diagnostics to a file
+   * on a runner that is about to be taken away.
+   */
+  if (process.env.MEMORY_TRACE === "1") {
+    server.stdout?.pipe(process.stdout)
+    server.stderr?.pipe(process.stdout)
+  }
+
+  /*
    * Killed however this exits, Ctrl-C included. A server left holding the port
    * makes the *next* run test the previous build — the exact failure the
    * refusal above is written to catch, arriving from our own untidiness.

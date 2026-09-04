@@ -1,3 +1,4 @@
+import { readFileSync } from "fs"
 import { createServer } from "http"
 import next from "next"
 import { initSocketServer, stopAllOpsBroadcasts } from "./lib/socket-server"
@@ -165,11 +166,53 @@ app.prepare().then(() => {
     const mb = (n: number) => Math.round(n / 1024 / 1024)
     const trace = setInterval(() => {
       const m = process.memoryUsage()
+
+      /*
+       * `unaccounted` was measured at 93% of a 6.6GB RSS, so the four numbers
+       * above have said all they can: it is not the heap and it is not
+       * Buffers. These two say where to look next, and they disagree with
+       * each other by design.
+       *
+       * `handles` counts libuv handles — sockets, streams, timers. Each one
+       * that leaks holds a native read buffer that `external` never sees,
+       * because it is malloc'd rather than allocated as an ArrayBuffer. A
+       * count climbing with load is a leaked-connection story.
+       *
+       * `threads` is read from /proc because worker threads carry their own
+       * V8 isolate, and `process.memoryUsage()` reports the CALLING isolate
+       * only while `rss` covers the whole process — so a worker's heap is
+       * indistinguishable from native memory from here. A climbing thread
+       * count is an entirely different bug from a climbing handle count, and
+       * only one of them is ours.
+       */
+      const handles = (process as unknown as {
+        _getActiveHandles?: () => unknown[]
+      })._getActiveHandles?.() ?? []
+      const byType = new Map<string, number>()
+      for (const h of handles) {
+        const name = (h as { constructor?: { name?: string } })?.constructor?.name ?? "unknown"
+        byType.set(name, (byType.get(name) ?? 0) + 1)
+      }
+      const top = [...byType.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([n, c]) => `${n}:${c}`)
+        .join(",")
+
+      let threads = "?"
+      try {
+        const status = readFileSync("/proc/self/status", "utf8")
+        threads = status.match(/^Threads:\s*(\d+)/m)?.[1] ?? "?"
+      } catch {
+        // Not Linux. The CI runner is, which is where this matters.
+      }
+
       console.log(
         `[memtrace] rss=${mb(m.rss)}M heapUsed=${mb(m.heapUsed)}M ` +
           `heapTotal=${mb(m.heapTotal)}M external=${mb(m.external)}M ` +
           `arrayBuffers=${mb(m.arrayBuffers)}M ` +
-          `unaccounted=${mb(m.rss - m.heapTotal - m.external)}M`
+          `unaccounted=${mb(m.rss - m.heapTotal - m.external)}M ` +
+          `handles=${handles.length} threads=${threads} [${top}]`
       )
     }, 5_000)
     // Unref'd so it never holds the process open — a diagnostic that changes
