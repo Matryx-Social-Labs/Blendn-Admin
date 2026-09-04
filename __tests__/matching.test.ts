@@ -3,6 +3,7 @@ import {
   effectiveIntents,
   interestWeight,
   rankMatches,
+  CO_ATTENDANCE_CAP,
   type Intent,
   type MatchCandidate,
   type MatchViewer,
@@ -519,5 +520,90 @@ describe("the card names the most distinguishing overlaps", () => {
     })
     expect(interestWeight("techno", tiny, 1)).toBe(0)
     expect(match.sharedInterestIds).toEqual(["techno"])
+  })
+})
+
+describe("shared history is the signal nobody can fake", () => {
+  /*
+   * Every other term in this ranking is something a person typed about
+   * themselves. Co-attendance is the only one they had to physically do — and
+   * the only one a product without verified check-in cannot compute at all.
+   *
+   * Worth more than a shared intent (0.6) and less than being in the room
+   * (1.5): stronger than any declaration, weaker than "they are standing here".
+   */
+  it("ranks a pair with shared history above an identical pair without", () => {
+    const [a, b] = rank([
+      candidate({ userId: "history", sharedEvents: 2 }),
+      candidate({ userId: "stranger", sharedEvents: 0 }),
+    ])
+    expect(a.userId).toBe("history")
+    expect(b.userId).toBe("stranger")
+  })
+
+  it("stops counting past the cap", () => {
+    /*
+     * Three is a pattern; nine is a regular at one venue. Uncapped, this would
+     * rank the room by who goes out most rather than by who is worth walking
+     * over to — one strong signal becoming the only signal.
+     */
+    const ranked = rank([
+      candidate({ userId: "regular", sharedEvents: 30 }),
+      candidate({ userId: "capped", sharedEvents: CO_ATTENDANCE_CAP }),
+    ])
+
+    /*
+     * Both score the SAME, so the tie falls through to the stable rules and
+     * `capped` wins on `userId.localeCompare`. Without the cap, `regular` would
+     * outscore it and come first.
+     *
+     * The first version of this assertion sorted the ids and compared the
+     * sorted array, which passes in either order — a vacuous test that the
+     * control caught by failing to break it. Asserting the position is the
+     * whole point.
+     */
+    expect(ranked[0].userId).toBe("capped")
+  })
+
+  it("does not say it out loud in a small room", () => {
+    /*
+     * It looks harmless — the viewer already knows which events they attended.
+     * It is not: in a small room it narrows a card to the few people who were
+     * at those specific nights, and with the age and city the roster already
+     * gives, that is a name.
+     */
+    const small = rankMatches(viewer, [candidate({ userId: "x", sharedEvents: 3 })], {
+      interestHolders: HOLDERS,
+      population: 4,
+    })
+    expect(small[0].sharedEvents).toBe(0)
+
+    const big = rankMatches(viewer, [candidate({ userId: "x", sharedEvents: 3 })], {
+      interestHolders: HOLDERS,
+      population: 100,
+    })
+    expect(big[0].sharedEvents).toBe(3)
+  })
+
+  it("still RANKS on it in a small room, because the score is never shown", () => {
+    // Suppressing the ranking as well would make small rooms rank worse for no
+    // privacy gain — the card is what discloses, not the order.
+    const ranked = rankMatches(
+      viewer,
+      [
+        candidate({ userId: "stranger", sharedEvents: 0 }),
+        candidate({ userId: "history", sharedEvents: 3 }),
+      ],
+      { interestHolders: HOLDERS, population: 4 }
+    )
+    expect(ranked[0].userId).toBe("history")
+    expect(ranked[0].sharedEvents).toBe(0)
+  })
+
+  it("treats an absent count as no history rather than as an error", () => {
+    // `sharedEvents` is optional on the way in, so a caller that does not
+    // compute it degrades to today's ranking rather than to a wrong one.
+    const ranked = rank([candidate({ userId: "unknown" })])
+    expect(ranked[0].sharedEvents).toBe(0)
   })
 })

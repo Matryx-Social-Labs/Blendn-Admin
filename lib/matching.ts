@@ -55,6 +55,31 @@ export const INTENT_BONUS = 0.6
 export const WORK_FIELD_BONUS = 0.3
 
 /** Still in the room beats someone who has gone home. */
+/**
+ * Per event this pair has both attended before, capped.
+ *
+ * Worth more than a shared intent (0.6) and less than being in the room right
+ * now (1.5), because it is the strongest declared-independent signal available
+ * and still weaker than "they are standing here".
+ *
+ * It cannot be gamed by profile-stuffing: you cannot tick a box to have been
+ * somewhere. Every other term in this ranking is something a person typed about
+ * themselves; this one is the only thing they had to physically do — which is
+ * why it is worth having, and why no product without verified attendance can
+ * compute it.
+ */
+export const CO_ATTENDANCE_BONUS = 0.8
+
+/**
+ * Above this, more shared history stops adding score.
+ *
+ * Three is a pattern; nine is a regular at one venue, and letting it run
+ * unbounded would rank the room by who has been out most rather than by who is
+ * worth walking over to. The cap is what stops one strong signal becoming the
+ * only signal.
+ */
+export const CO_ATTENDANCE_CAP = 3
+
 export const PRESENCE_BONUS = 1.5
 
 /**
@@ -127,6 +152,12 @@ export interface MatchCandidate {
    * caller handles "not known" explicitly rather than by forgetting the field.
    */
   age?: number | null
+  /**
+   * Events this candidate and the viewer have BOTH attended before, excluding
+   * this one. Zero when unknown, so a caller that does not compute it degrades
+   * to today's ranking rather than to a wrong one.
+   */
+  sharedEvents?: number
   /** Currently checked in, as opposed to having attended earlier. */
   insideNow: boolean
   checkedInAt: Date
@@ -183,6 +214,26 @@ export interface Match {
    * with no field of their own gets, which is what makes it uninformative.
    */
   sharedWorkField: boolean
+  /**
+   * Events this pair have both attended before, excluding this one.
+   *
+   * The card line is *"you have both been to 3 of the same events"*, which is a
+   * better reason to walk over than a shared checkbox — and it is the one line
+   * here that could not be written by a product without verified attendance.
+   *
+   * ## Suppressed by the same floor as `workField`
+   *
+   * It looks harmless because the viewer already knows which events they went
+   * to. It is not: in a small room it narrows a card to the handful of people
+   * who were at those specific nights, and combined with the age and city the
+   * roster already gives, that is a name. The floor is the same one and for the
+   * same reason.
+   *
+   * The **score** still uses it below the floor, because the score is never
+   * shown. Suppressing the ranking as well would make small rooms rank worse
+   * for no privacy gain.
+   */
+  sharedEvents: number
   /**
    * Whole years.
    *
@@ -335,6 +386,13 @@ export function rankMatches(
       if (viewer.workField && candidate.workField === viewer.workField) {
         score += WORK_FIELD_BONUS
       }
+      /*
+       * History before presence, and capped. `Math.min` rather than a raw
+       * multiply: see CO_ATTENDANCE_CAP.
+       */
+      const shared = Math.min(candidate.sharedEvents ?? 0, CO_ATTENDANCE_CAP)
+      if (shared > 0) score += CO_ATTENDANCE_BONUS * shared
+
       if (candidate.insideNow) score += PRESENCE_BONUS
 
       /*
@@ -404,6 +462,11 @@ export function rankMatches(
      */
     sharedWorkField:
       roomIsBigEnough && !!viewer.workField && candidate.workField === viewer.workField,
+    /*
+     * Same floor. The ranking above already used the real number — this is only
+     * whether it may be said out loud.
+     */
+    sharedEvents: roomIsBigEnough ? (candidate.sharedEvents ?? 0) : 0,
     age: candidate.age ?? null,
     insideNow: candidate.insideNow,
   }))
