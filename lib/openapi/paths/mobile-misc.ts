@@ -629,6 +629,38 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/report",
+  tags: ["Mobile Safety"],
+  summary: "Report an event",
+  description:
+    "An unsafe venue, a misleading listing, a dangerous organiser. No check-in " +
+    "required: two of those three are visible from the listing, and the value is " +
+    "catching them before somebody travels to the venue.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            reason: z.string().min(1),
+            description: z.string().max(2000).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "Report filed",
+      content: { "application/json": { schema: wrap(z.object({ reported: z.boolean() })) } },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
   method: "get",
   path: "/api/mobile/users/blocked",
   tags: ["Mobile Safety"],

@@ -1,7 +1,8 @@
 /*
  * A report reaching a human, and what the human can do about it.
  *
- * `user_reports` and `message_reports` were written by two mobile routes and
+ * `user_reports`, `message_reports` and `event_reports` were written by mobile
+ * routes and
  * read by nothing at all — so the tests that matter here are less about
  * rendering and more about the decisions: who may take them, what they write,
  * and which ones a row is even allowed to offer.
@@ -9,6 +10,7 @@
 const tx = {
   user_reports: { update: jest.fn() },
   message_reports: { update: jest.fn() },
+  event_reports: { update: jest.fn() },
   chat_messages: { update: jest.fn() },
   user: { update: jest.fn() },
   mobile_refresh_tokens: { updateMany: jest.fn() },
@@ -19,6 +21,7 @@ const tx = {
 const mockDb = {
   user_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   message_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
+  event_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   chat_messages: { findMany: jest.fn(), findUnique: jest.fn() },
   private_messages: { findMany: jest.fn(), findUnique: jest.fn() },
   $transaction: jest.fn(),
@@ -42,8 +45,10 @@ beforeEach(() => {
   mockAuth.mockResolvedValue({ user: { id: "admin1", role: "app_admin" } })
   mockDb.user_reports.findMany.mockResolvedValue([])
   mockDb.message_reports.findMany.mockResolvedValue([])
+  mockDb.event_reports.findMany.mockResolvedValue([])
   mockDb.user_reports.groupBy.mockResolvedValue([])
   mockDb.message_reports.groupBy.mockResolvedValue([])
+  mockDb.event_reports.groupBy.mockResolvedValue([])
   mockDb.chat_messages.findMany.mockResolvedValue([])
   mockDb.private_messages.findMany.mockResolvedValue([])
   mockDb.$transaction.mockImplementation((fn: (t: typeof tx) => unknown) => fn(tx))

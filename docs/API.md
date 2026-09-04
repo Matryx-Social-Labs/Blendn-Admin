@@ -1397,16 +1397,32 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 |--------|----------|--------|
 | POST | `/users/:userId/report` | `user_reports` |
 | POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
+| POST | `/events/:eventId/report` | `event_reports` |
 
-Both return `201 { reported: true }` and are rate limited per user.
+All three return `201 { reported: true }` and are rate limited per user.
+
+**The event route takes no check-in.** Two of the three things worth reporting
+about an event — a misleading listing and a dangerous-looking organiser — are
+visible from the listing itself, and the point is catching them *before*
+somebody travels to a venue. Requiring attendance would restrict reporting to
+people who had already taken the risk.
 
 These are **not** moderation flags and are not returned by the admin flag API
 above. A flag is the pipeline's opinion about one message; a report is a person
-asking for help, and may be about a person rather than a message. They are read
-at `/dashboard/moderation/reports`, where an admin can dismiss, remove the
-message (group rooms only — `private_messages` has no `deleted_at`), or suspend
-the account. Until 0.61.0 both tables were written by these routes and read by
-nothing at all.
+asking for help, and may be about a person or an event rather than a message.
+They are read at `/dashboard/moderation/reports`, where an admin can dismiss,
+remove the message (group rooms only — `private_messages` has no `deleted_at`),
+**delist the event**, or suspend the account.
+
+Delisting sets `visibility = unlisted`: out of the feed, out of search, out of
+the city counts, with the room, the RSVPs and the check-ins untouched — so it is
+reversible in a way `cancelled` is not. There is no Suspend on an event report,
+because `organizer_id` records who *created* the row and for a curated event
+that is the admin who curated it.
+
+Until 0.61.0 `user_reports` and `message_reports` were written by these routes
+and read by nothing at all. `event_reports` had neither a writer nor a reader
+until 0.69.0 — so a person who wanted to report an unsafe venue had no path.
 
 Nothing is returned to the reporter beyond the 201. Replying to a reporter does
 not exist yet; see `docs/MODERATION_RESPONSE.md`.

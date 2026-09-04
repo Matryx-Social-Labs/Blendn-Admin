@@ -30,7 +30,7 @@ const PAGE = 100
 
 export interface ReportRow {
   id: string
-  kind: "user" | "message"
+  kind: "user" | "message" | "event"
   ageHours: number
   reason: string
   description: string | null
@@ -49,7 +49,7 @@ export interface ReportRow {
   reviewedBy: string | null
 }
 
-export type ReportDecision = "dismiss" | "remove_message" | "suspend" | "reinstate"
+export type ReportDecision = "dismiss" | "remove_message" | "suspend" | "reinstate" | "delist"
 
 /**
  * `report_status` has three values and this uses two of them.
@@ -63,6 +63,7 @@ const OUTCOME: Record<Exclude<ReportDecision, "reinstate">, report_status> = {
   dismiss: "reviewed",
   remove_message: "resolved",
   suspend: "resolved",
+  delist: "resolved",
 }
 
 function ageHours(at: Date, now: number): number {
@@ -83,7 +84,8 @@ export async function getReportQueue(status: report_status = "pending") {
 
   const now = Date.now()
 
-  const [userReports, messageReports, userCounts, messageCounts] = await Promise.all([
+  const [userReports, messageReports, eventReports, userCounts, messageCounts, eventCounts] =
+    await Promise.all([
     db.user_reports.findMany({
       where: { status },
       // Oldest first, like the flag queue: the SLA is how long somebody has
@@ -115,8 +117,31 @@ export async function getReportQueue(status: report_status = "pending") {
         reporter: { select: { name: true, email: true } },
       },
     }),
+    /*
+     * `event_reports` had zero writers and zero readers, so somebody wanting to
+     * report an unsafe venue or a misleading listing had no path at all — the
+     * one subject in the product with a table, indexes, and nothing at either
+     * end. The mobile route now writes it; this is the other half, because a
+     * report nobody sees is the same defect one step later.
+     */
+    db.event_reports.findMany({
+      where: { status },
+      orderBy: { created_at: "asc" },
+      take: PAGE,
+      select: {
+        id: true,
+        created_at: true,
+        reason: true,
+        description: true,
+        event_id: true,
+        reviewed_by: true,
+        user: { select: { name: true, email: true } },
+        event: { select: { id: true, title: true, visibility: true } },
+      },
+    }),
     db.user_reports.groupBy({ by: ["status"], _count: { _all: true } }),
     db.message_reports.groupBy({ by: ["status"], _count: { _all: true } }),
+    db.event_reports.groupBy({ by: ["status"], _count: { _all: true } }),
   ])
 
   /*
@@ -202,10 +227,39 @@ export async function getReportQueue(status: report_status = "pending") {
         reviewedBy: r.reviewed_by,
       }
     }),
+    ...eventReports.map(
+      (r): ReportRow => ({
+        id: r.id,
+        kind: "event",
+        ageHours: ageHours(r.created_at, now),
+        reason: r.reason,
+        description: r.description,
+        reporterName: displayName(r.user),
+        /*
+         * The subject is the EVENT, not a person, and `subjectId` stays null on
+         * purpose so the suspend button cannot appear.
+         *
+         * The tempting shortcut is to treat the organiser as the subject, and
+         * it is wrong here: `organizer_id` records who *created* the row, and
+         * for a curated event that is the admin who ran the curation. Wiring
+         * suspension to it would let a report about a listing suspend a
+         * colleague. Delisting is the action that fits the subject.
+         */
+        subjectId: null,
+        subjectName: r.event?.title ?? "Deleted event",
+        subjectSuspended: false,
+        excerpt: null,
+        messageType: null,
+        messageDeleted: false,
+        eventTitle: r.event?.title ?? null,
+        eventId: r.event_id,
+        reviewedBy: r.reviewed_by,
+      })
+    ),
   ].sort((a, b) => b.ageHours - a.ageHours || a.id.localeCompare(b.id))
 
   const counts: Record<string, number> = {}
-  for (const c of [...userCounts, ...messageCounts]) {
+  for (const c of [...userCounts, ...messageCounts, ...eventCounts]) {
     counts[c.status] = (counts[c.status] ?? 0) + c._count._all
   }
 
@@ -230,7 +284,7 @@ export async function getReportQueue(status: report_status = "pending") {
  *   reversible, and a screen that can only take the action is one nobody uses.
  */
 export async function resolveReport(
-  kind: "user" | "message",
+  kind: "user" | "message" | "event",
   reportId: string,
   decision: ReportDecision
 ) {
@@ -245,10 +299,15 @@ export async function resolveReport(
           where: { id: reportId },
           select: { id: true, status: true, reported_id: true },
         })
-      : await db.message_reports.findUnique({
-          where: { id: reportId },
-          select: { id: true, status: true, message_id: true, message_type: true },
-        })
+      : kind === "event"
+        ? await db.event_reports.findUnique({
+            where: { id: reportId },
+            select: { id: true, status: true, event_id: true },
+          })
+        : await db.message_reports.findUnique({
+            where: { id: reportId },
+            select: { id: true, status: true, message_id: true, message_type: true },
+          })
 
   if (!report) throw new Error("Report not found")
   // Two admins working the queue at once would otherwise both act on it.
@@ -257,7 +316,10 @@ export async function resolveReport(
   const subjectId =
     kind === "user"
       ? (report as { reported_id: string }).reported_id
-      : await messageAuthorId(report as { message_id: string; message_type: string })
+      : kind === "event"
+        ? // An event report is about a listing, not a person. See the row mapping.
+          null
+        : await messageAuthorId(report as { message_id: string; message_type: string })
 
   if ((decision === "suspend" || decision === "reinstate") && !subjectId) {
     throw new Error("The reported message no longer exists, so its author cannot be resolved")
@@ -270,6 +332,10 @@ export async function resolveReport(
     }
   }
 
+  if (decision === "delist" && kind !== "event") {
+    throw new Error("Only an event can be delisted")
+  }
+
   const reviewed = {
     status: OUTCOME[decision === "reinstate" ? "dismiss" : decision],
     reviewed_by: session.user.id,
@@ -279,8 +345,26 @@ export async function resolveReport(
   await db.$transaction(async (tx) => {
     if (kind === "user") {
       await tx.user_reports.update({ where: { id: reportId }, data: reviewed })
+    } else if (kind === "event") {
+      await tx.event_reports.update({ where: { id: reportId }, data: reviewed })
     } else {
       await tx.message_reports.update({ where: { id: reportId }, data: reviewed })
+    }
+
+    /*
+     * Delist, never cancel.
+     *
+     * `unlisted` removes it from the feed, from search and from city counts —
+     * all three filter `visibility = 'public'` — and leaves check-ins, the
+     * chatroom and RSVPs alone. Marking a real event `cancelled` on a third
+     * party's say-so is worse than the listing was, and it is not reversible in
+     * the way this is: an admin who delists wrongly can put it back.
+     */
+    if (decision === "delist") {
+      await tx.events.update({
+        where: { id: (report as { event_id: string }).event_id },
+        data: { visibility: "unlisted" },
+      })
     }
 
     if (decision === "remove_message") {
@@ -312,7 +396,7 @@ export async function resolveReport(
   auditLog({
     userId: session.user.id,
     action: `report.${decision}`,
-    resource: kind === "user" ? "user_report" : "message_report",
+    resource: kind === "user" ? "user_report" : kind === "event" ? "event_report" : "message_report",
     resourceId: reportId,
     details: { subjectId },
   })
