@@ -3,6 +3,7 @@
 // — that resolves the @/ alias for typechecking and then emits it verbatim into
 // the require(), so the build goes green and the container dies on boot.
 import { db } from "./db"
+import { headcount, cutoffFrom } from "./presence-sessions"
 import { resolveOccurrence } from "./occurrences"
 
 /**
@@ -142,19 +143,29 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
    * should report what is in the building rather than zero.
    */
   const slot = await resolveOccurrence(eventId)
-  const today = slot.occurrence ? { occurrence_id: slot.occurrence.id } : {}
 
-  const [event, inside, staffInside, uniqueGuests] = await Promise.all([
+  /*
+   * Two stores, one line between them, and it is worth stating because the
+   * cutover is only half of a migration otherwise.
+   *
+   * `presence_sessions` answers **who is here now**. It is the only store that
+   * can: a session closes, so a room empties, where a mutable `status` on one
+   * row per person only ever went up and stayed there whenever the sweeper
+   * missed somebody.
+   *
+   * `event_check_ins` still answers **who came at all**, which is a different
+   * question with a different shape — one row per person per occurrence, which
+   * is exactly right for attendance and exactly wrong for occupancy.
+   *
+   * Anything that says "now" reads sessions. Anything that says "ever" reads
+   * check-ins. A number that mixes them is the bug this model exists to remove.
+   */
+  const [event, live, uniqueGuests] = await Promise.all([
     db.events.findUnique({
       where: { id: eventId },
       select: { max_capacity: true },
     }),
-    db.event_check_ins.count({
-      where: { event_id: eventId, status: "checked_in", ...today },
-    }),
-    db.event_check_ins.count({
-      where: { event_id: eventId, status: "checked_in", kind: "staff", ...today },
-    }),
+    headcount(slot.occurrence ? { occurrenceId: slot.occurrence.id } : { eventId }),
     db.event_check_ins.findMany({
       where: { event_id: eventId, kind: "attendee", check_in_time: { not: null } },
       distinct: ["user_id"],
@@ -163,8 +174,10 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
   ])
 
   return occupancyFrom({
-    inside,
-    staffInside,
+    // Staff included: `occupancyFrom` subtracts them for the fill figure, and
+    // fire safety counts bodies.
+    inside: live.insideGuests + live.insideStaff,
+    staffInside: live.insideStaff,
     /*
      * Deliberately NOT scoped to today. "Inside" is a question about right now;
      * "how many people has this event drawn" is a question about the whole run,
@@ -188,17 +201,33 @@ export async function getOccupancies(
   const out = new Map<string, { inside: number; guestsInside: number }>()
   if (eventIds.length === 0) return out
 
-  const rows = await db.event_check_ins.groupBy({
-    by: ["event_id", "kind"],
-    where: { event_id: { in: eventIds }, status: "checked_in" },
-    _count: { _all: true },
-  })
+  /*
+   * COUNT(DISTINCT user_id), not a row count.
+   *
+   * The old query grouped `event_check_ins` rows, which was accidentally right
+   * only because one person had one row per occurrence. Sessions give a person
+   * several rows on purpose, so grouping rows here would count somebody who
+   * stepped out for a cigarette twice — the row-versus-person error arriving in
+   * the table built to remove it.
+   */
+  const rows = await db.$queryRaw<
+    { event_id: string; kind: string; people: bigint }[]
+  >`
+    SELECT event_id, kind, COUNT(DISTINCT user_id) AS people
+      FROM presence_sessions
+     WHERE event_id = ANY(${eventIds}::uuid[])
+       AND departed_at IS NULL
+       AND last_seen_at > ${cutoffFrom()}
+  GROUP BY event_id, kind
+  `
 
   for (const id of eventIds) out.set(id, { inside: 0, guestsInside: 0 })
   for (const row of rows) {
-    const entry = out.get(row.event_id)!
-    entry.inside += row._count._all
-    if (row.kind === "attendee") entry.guestsInside += row._count._all
+    const entry = out.get(row.event_id)
+    if (!entry) continue
+    const n = Number(row.people)
+    entry.inside += n
+    if (row.kind === "attendee") entry.guestsInside += n
   }
   return out
 }

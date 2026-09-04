@@ -115,9 +115,10 @@ export async function occurrenceOf(eventId: string): Promise<string> {
  * state the product cannot produce, and after the occupancy cutover it reads as
  * an empty room.
  *
- * `lastSeen` defaults to now rather than to `at`, because "inside" asks
- * `last_seen_at > cutoff` — a fixture that arrives an hour ago and never pings
- * is correctly nobody. Tests about staleness pass it explicitly.
+ * `lastSeen` defaults to now rather than to `at`. It no longer decides who is
+ * inside — that is `departed_at IS NULL`, because silence means a backgrounded
+ * app and not an empty room — but it does decide who counts as *stale*, which
+ * is how a screen says which part of its number is inference.
  */
 export async function putInRoom(opts: {
   eventId: string

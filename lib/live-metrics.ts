@@ -18,6 +18,15 @@ export interface LiveSnapshot {
   staffInside: number
   checkedInTotal: number
   checkedOutTotal: number
+  /**
+   * Of those inside, how many have not reported a position recently.
+   *
+   * Not subtracted from `inside`: silence is not evidence of leaving, because
+   * the client polls in the foreground only and a pocketed phone goes quiet
+   * within minutes. This is what lets the screen say which part of the figure
+   * is inferred rather than observed.
+   */
+  staleInside: number
   capacity: number | null
   /**
    * Guests as a percent of capacity, or null when no capacity is set.

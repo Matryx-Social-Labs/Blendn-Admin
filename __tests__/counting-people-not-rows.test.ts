@@ -171,9 +171,23 @@ describe("occupancy asks which day it is", () => {
 
   it("scopes the inside counts to the resolved occurrence", () => {
     const src = code("lib/occupancy.ts")
-    expect(src).toMatch(/const today = slot\.occurrence \? \{ occurrence_id: slot\.occurrence\.id \} : \{\}/)
-    // Both the total and the staff count carry it.
-    expect((src.match(/\.\.\.today/g) ?? []).length).toBe(2)
+
+    /*
+     * Now expressed as an argument rather than a spread. `headcount` cannot be
+     * called without a scope, so the unscoped read that caused this — a
+     * day-one attendee counted as inside on day three — stopped being
+     * something you can produce by forgetting a spread.
+     */
+    expect(src).toMatch(
+      /headcount\(slot\.occurrence \? \{ occurrenceId: slot\.occurrence\.id \} : \{ eventId \}\)/
+    )
+
+    /*
+     * And "inside" is no longer read from a mutable status at all. That column
+     * only ever went up: a row the sweeper missed stayed `checked_in` for ever,
+     * which is why the number drifted upward across a run and never came back.
+     */
+    expect(src).not.toMatch(/status: "checked_in"/)
   })
 
   it("resolves the occurrence once and shares it with the capacity", () => {

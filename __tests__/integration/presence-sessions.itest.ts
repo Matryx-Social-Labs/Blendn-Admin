@@ -5,6 +5,7 @@ import {
   dwellSeconds,
   attended,
   departureQuality,
+  headcount,
 } from "@/lib/presence-sessions"
 
 import { db, closeDb, makeUser, testId } from "./helpers"
@@ -187,12 +188,33 @@ describe("a session per visit, not a status per person", () => {
     expect(await dwellSeconds(r.occurrenceId, r.person)).toBe(30 * 60)
   })
 
-  it("stops counting somebody whose heartbeat went silent", async () => {
+  it("keeps counting somebody whose heartbeat went silent, and says the number is inferred", async () => {
     /*
-     * `departed_at IS NULL` alone is not evidence of presence — it is evidence
-     * that nothing closed the session, which is what a stalled sweeper
-     * produces. Occupancy climbing forever is the bug being replaced; asking
-     * only about departure rebuilds it in a new table.
+     * REVERSED, deliberately, and this is the one decision in the cutover
+     * worth arguing.
+     *
+     * This asserted that 45 minutes of silence empties a room, reasoning that
+     * `departed_at IS NULL` is evidence only that nothing closed the session —
+     * which is what a stalled sweeper produces, and occupancy climbing forever
+     * is the bug being replaced.
+     *
+     * The reasoning is sound and the premise is false. It requires silence to
+     * be informative. The Expo client polls in the FOREGROUND ONLY, because it
+     * refuses iOS `Always` permission on purpose as an App Review liability.
+     * A phone that goes into a pocket stops reporting within minutes, and at a
+     * real event most phones are in pockets most of the time. A ten-minute
+     * cutoff does not drain a stale room; it drains a full one.
+     *
+     * Both failure modes are real and they are not symmetric. A stalled
+     * sweeper leaves the figure VISIBLY uncertain: `stale` says how much of it
+     * is inference, and the sweeper has a cron fallback. A silence cutoff makes
+     * it SILENTLY wrong, in the direction of telling a fire officer that a room
+     * with three hundred people in it is empty.
+     *
+     * What the cutover is actually worth is unchanged and tested elsewhere:
+     * re-entry is representable, dwell excludes time outside, `departed_source`
+     * records how a session ended, and people are counted rather than rows.
+     * "Silence stops counting" was never one of those.
      */
     const r = await room()
     await arrive(r, r.person, new Date(Date.now() - 60 * MIN))
@@ -201,8 +223,17 @@ describe("a session per visit, not a status per person", () => {
       data: { last_seen_at: new Date(Date.now() - 45 * MIN) },
     })
 
+    // Still in the room: nothing has said they left.
+    expect(await insideNow(r.occurrenceId)).toBe(1)
+
+    // But the figure knows it is inferring, and can say so where it is shown.
+    const h = await headcount({ occurrenceId: r.occurrenceId })
+    expect(h.insideGuests).toBe(1)
+    expect(h.stale).toBe(1)
+
+    // A definite signal still removes them. Departure is decided, never assumed.
+    await closeSession(r.occurrenceId, r.person, "sweeper")
     expect(await insideNow(r.occurrenceId)).toBe(0)
-    // But they did attend — leaving is not the same as never having come.
     expect(await attended(r.occurrenceId, r.person)).toBe(true)
   })
 

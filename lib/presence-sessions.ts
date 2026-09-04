@@ -140,16 +140,55 @@ export async function insideNow(
   occurrenceId: string,
   opts: { now?: Date; includeStaff?: boolean } = {}
 ): Promise<number> {
-  const now = opts.now ?? new Date()
-  const [row] = await db.$queryRaw<{ people: bigint }[]>`
-    SELECT COUNT(DISTINCT user_id) AS people
-    FROM presence_sessions
-    WHERE occurrence_id = ${occurrenceId}::uuid
-      AND departed_at IS NULL
-      AND last_seen_at > ${cutoffFrom(now)}
-      ${opts.includeStaff ? Prisma.empty : Prisma.sql`AND kind = 'attendee'`}
-  `
-  return Number(row?.people ?? 0)
+  /*
+   * Delegates to `headcount` rather than running its own query.
+   *
+   * It had one, and it was the same question with the same predicates — which
+   * is how a codebase ends up with three answers to "who is inside" and an
+   * audit section about it. One SQL statement owns the definition; this is a
+   * projection of it.
+   */
+  const h = await headcount({ occurrenceId }, { now: opts.now })
+  return opts.includeStaff ? h.insideGuests + h.insideStaff : h.insideGuests
+}
+
+/**
+ * The heartbeat: move an open session's `last_seen_at` forward.
+ *
+ * `insideNow` counts a session only while `last_seen_at > cutoff`, and
+ * `openSession` sets that field exactly once, at arrival. Without this, every
+ * session goes stale PRESENCE_CUTOFF_MINUTES after check-in and occupancy
+ * reads zero for a full room — the old model's opposite failure (rows that
+ * never close) replaced by rooms that empty on a timer.
+ *
+ * Called from the same branch that persists the check-in ping, so the two
+ * stores move together and the reconciliation between them stays meaningful.
+ * `PING_INTERVAL_MINUTES` (5) throttles that branch and must stay below
+ * `PRESENCE_CUTOFF_MINUTES` (10) or a live person drops out of the room
+ * between writes; `__tests__/presence-timing.test.ts` fails the build if that
+ * ordering is ever inverted.
+ *
+ * `updateMany` rather than `update`: the partial unique guarantees at most one
+ * open session per person per occurrence, so this touches either one row or
+ * none — and none is the correct no-op for somebody whose session the sweeper
+ * has already closed.
+ */
+export async function touchSession(
+  occurrenceId: string,
+  userId: string,
+  at: Date,
+  fix?: { lat: number; lng: number; accuracy: number | null }
+): Promise<void> {
+  await db.presence_sessions.updateMany({
+    where: { occurrence_id: occurrenceId, user_id: userId, departed_at: null },
+    data: {
+      last_seen_at: at,
+      updated_at: at,
+      ...(fix
+        ? { last_lat: fix.lat, last_lng: fix.lng, last_accuracy: fix.accuracy }
+        : {}),
+    },
+  })
 }
 
 /**
@@ -243,3 +282,127 @@ export async function departureQuality(occurrenceId: string): Promise<{
  * back has several rows by design. Counting distinct users is not a
  * refinement here, it is the only correct reading.
  */
+export interface Headcount {
+  /** Distinct people inside right now, excluding staff. */
+  insideGuests: number
+  /** Distinct staff inside right now. */
+  insideStaff: number
+  /**
+   * Of those inside, how many have not reported a position since the cutoff.
+   *
+   * Not subtracted from the counts above — they are still in the room until
+   * something says otherwise. This is what lets a screen admit how much of its
+   * own figure is inference rather than observation.
+   */
+  stale: number
+  /** Distinct people who arrived at all, whether or not they are still here. */
+  arrived: number
+  /** Distinct people whose first arrival was inside the recent window. */
+  arrivedRecently: number
+}
+
+/**
+ * Every live number for one occurrence, in ONE query.
+ *
+ * The four counts below were four round trips on a screen that refreshes
+ * every five seconds per watched event. Postgres computes all of them in a
+ * single pass with `FILTER`, over one index — `@@index([occurrence_id,
+ * departed_at])` — because they differ only by predicate.
+ *
+ * COUNT(DISTINCT user_id) throughout, never COUNT(*). With sessions a person
+ * who steps out and comes back has several rows on purpose, so rows and
+ * people are different questions and only one of them is ever being asked
+ * here.
+ *
+ * `arrived` deliberately counts people who have since left: it is the
+ * denominator for turn-up and for the leaving-early alert, both of which mean
+ * "of everyone who came today". `arrivedRecently` is the arrival-rate
+ * numerator and counts a person once, at their first arrival, so somebody
+ * re-entering twice in ten minutes does not read as a queue at the door.
+ */
+export async function headcount(
+  scope: { occurrenceId: string } | { eventId: string },
+  opts: { now?: Date; recentMinutes?: number } = {}
+): Promise<Headcount> {
+  const now = opts.now ?? new Date()
+  const cutoff = cutoffFrom(now)
+  const since = new Date(now.getTime() - (opts.recentMinutes ?? 10) * 60_000)
+
+  /*
+   * Two scopes, one query. An occurrence is the live question — who is in the
+   * room tonight — and the event-wide form is the fallback for a run between
+   * days, which should report what is in the building rather than zero.
+   *
+   * A fragment rather than `(${id} IS NULL OR col = ${id})`: that form reads
+   * as one tidy statement and stops Postgres using either index, on the query
+   * that runs twelve times a minute per watched event.
+   */
+  const where =
+    "occurrenceId" in scope
+      ? Prisma.sql`occurrence_id = ${scope.occurrenceId}::uuid`
+      : Prisma.sql`event_id = ${scope.eventId}::uuid`
+
+  /*
+   * INSIDE IS `departed_at IS NULL`, AND DELIBERATELY NOT `last_seen_at > cutoff`.
+   *
+   * This is the one decision in the cutover worth arguing, because both
+   * answers are defensible and the codebase contained both:
+   * `presence-sessions.itest.ts` asserted 45 minutes of silence empties a
+   * room, and `presence-sweeper.itest.ts` asserted 240 minutes of it does not.
+   * Neither test could see the other while `insideNow` had no callers and
+   * `getOccupancy` read check-ins. Joining the two stores is what made them
+   * collide.
+   *
+   * Silence loses. The Expo client refuses background location on purpose —
+   * iOS `Always` permission is an App Review liability — so a phone in a
+   * pocket stops reporting within minutes of the screen going off. Timing that
+   * out would empty a full room, which is the original bug (occupancy that
+   * only ever climbs) inverted rather than fixed, and inverted into the more
+   * dangerous direction: a fire officer being told a full room is empty.
+   *
+   * A session ends when something DECIDES it ended — the person checks out,
+   * the sweeper applies the client's tested policy (three consecutive outside
+   * readings spanning ten minutes, then an allowance), or the occurrence
+   * closes. Never because a packet did not arrive.
+   *
+   * `last_seen_at` keeps its job and loses its veto: `stale` counts people
+   * inside whose position is older than the cutoff, so a screen can say how
+   * much of its own number is inference. That is the honest form of the
+   * liveness concern — report the doubt, do not silently resolve it by
+   * deleting people from the room.
+   */
+  const [row] = await db.$queryRaw<
+    {
+      inside_guests: bigint
+      inside_staff: bigint
+      stale: bigint
+      arrived: bigint
+      arrived_recently: bigint
+    }[]
+  >`
+    SELECT
+      COUNT(DISTINCT user_id) FILTER (
+        WHERE departed_at IS NULL AND kind = 'attendee'
+      ) AS inside_guests,
+      COUNT(DISTINCT user_id) FILTER (
+        WHERE departed_at IS NULL AND kind = 'staff'
+      ) AS inside_staff,
+      COUNT(DISTINCT user_id) FILTER (
+        WHERE departed_at IS NULL
+          AND (last_seen_at IS NULL OR last_seen_at <= ${cutoff})
+      ) AS stale,
+      COUNT(DISTINCT user_id) AS arrived,
+      COUNT(DISTINCT user_id) FILTER (WHERE arrived_at >= ${since}) AS arrived_recently
+    FROM presence_sessions
+    WHERE ${where}
+  `
+
+  return {
+    insideGuests: Number(row?.inside_guests ?? 0),
+    insideStaff: Number(row?.inside_staff ?? 0),
+    stale: Number(row?.stale ?? 0),
+    arrived: Number(row?.arrived ?? 0),
+    arrivedRecently: Number(row?.arrived_recently ?? 0),
+  }
+}
+
