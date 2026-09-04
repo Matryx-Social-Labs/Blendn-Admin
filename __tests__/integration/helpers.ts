@@ -105,3 +105,51 @@ export async function occurrenceOf(eventId: string): Promise<string> {
   if (!o) throw new Error(`fixture event ${eventId} has no occurrence`)
   return o.id
 }
+
+/**
+ * Put somebody in the room, through both writers.
+ *
+ * Production writes both while `event_check_ins` and `presence_sessions`
+ * coexist: the check-in route creates the row and opens the session, and
+ * `performCheckout` closes both. A fixture that writes only one is modelling a
+ * state the product cannot produce, and after the occupancy cutover it reads as
+ * an empty room.
+ *
+ * `lastSeen` defaults to now rather than to `at`, because "inside" asks
+ * `last_seen_at > cutoff` — a fixture that arrives an hour ago and never pings
+ * is correctly nobody. Tests about staleness pass it explicitly.
+ */
+export async function putInRoom(opts: {
+  eventId: string
+  occurrenceId: string
+  userId: string
+  kind?: "attendee" | "staff"
+  at?: Date
+  lastSeen?: Date
+}) {
+  const at = opts.at ?? new Date()
+  const lastSeen = opts.lastSeen ?? new Date()
+  const kind = opts.kind ?? "attendee"
+
+  await db.event_check_ins.create({
+    data: {
+      event_id: opts.eventId,
+      occurrence_id: opts.occurrenceId,
+      user_id: opts.userId,
+      kind,
+      status: "checked_in",
+      check_in_time: at,
+      last_seen_at: lastSeen,
+    },
+  })
+  await db.presence_sessions.create({
+    data: {
+      event_id: opts.eventId,
+      occurrence_id: opts.occurrenceId,
+      user_id: opts.userId,
+      kind,
+      arrived_at: at,
+      last_seen_at: lastSeen,
+    },
+  })
+}

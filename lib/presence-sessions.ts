@@ -225,3 +225,21 @@ export async function departureQuality(occurrenceId: string): Promise<{
   // mostly inference.
   return { closed, bySweeper, degraded: closed > 0 && bySweeper / closed > 0.5 }
 }
+
+/**
+ * Inside now, split into guests and staff, for one occurrence or a whole run.
+ *
+ * The shape `getOccupancy` needs, and the reason the cutover cannot be done
+ * without the counting fix in the same change.
+ *
+ * The old query was `event_check_ins.count(...)` — **rows**, not people. That
+ * was accidentally right while scoped to one occurrence, because
+ * `@@unique([occurrence_id, user_id])` made a row and a person the same thing.
+ * It was already wrong in the event-wide fallback, where a multi-day run holds
+ * a row per person per day and counting them told an organiser a three-day
+ * conference had three times its attendance.
+ *
+ * Sessions remove the coincidence entirely: somebody who stepped out and came
+ * back has several rows by design. Counting distinct users is not a
+ * refinement here, it is the only correct reading.
+ */
