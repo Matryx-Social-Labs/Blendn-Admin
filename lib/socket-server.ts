@@ -895,18 +895,30 @@ export function emitChatMessage(
 export function emitChatReaction(
   chatGroupId: string,
   messageId: string,
-  userId: string,
-  emoji: string,
-  action: "add" | "remove"
+  tally: Array<{ emoji: string; count: number }>
 ): void {
   if (!io) return
 
+  /*
+   * Counts, never who.
+   *
+   * This shipped `userId` to every member of the room, which is exactly what
+   * `CHAT.md` says a pseudonymous room must never disclose — and it had no
+   * callers, so the leak was latent rather than live. Wiring the write path on
+   * top of it would have made it real, in the one payload nobody had reviewed
+   * because nothing sent it.
+   *
+   * The whole tally rather than a delta: two reactions landing in the same tick
+   * would otherwise race, and a client that missed one packet would be wrong
+   * until it re-fetched. A count is small and idempotent; a delta is neither.
+   *
+   * `mine` is deliberately absent. It is per-viewer, and each client already
+   * knows its own reaction from its own request.
+   */
   io.to(`chat:${chatGroupId}`).emit("chat:reaction", {
     chatGroupId,
     messageId,
-    userId,
-    emoji,
-    action,
+    tally,
   })
 }
 

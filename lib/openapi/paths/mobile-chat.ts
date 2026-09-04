@@ -14,6 +14,49 @@ const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data
 
 // GET /api/mobile/chat/groups
 registry.registerPath({
+  method: "post",
+  path: "/api/mobile/chat/groups/{chatGroupId}/messages/{messageId}/reactions",
+  tags: ["Mobile Chat"],
+  summary: "React to a message (toggles)",
+  description:
+    "One toggling call rather than add/remove: a tap is a toggle, and splitting " +
+    "it puts the client in charge of knowing which state it is in — which it gets " +
+    "wrong exactly when two devices disagree. The response carries `mine`; the " +
+    "socket broadcast carries counts only, because the room never discloses who " +
+    "reacted.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ chatGroupId: z.string(), messageId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ emoji: z.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"]) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "The message's reactions after the toggle",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              messageId: z.string(),
+              added: z.boolean(),
+              reactions: z.array(
+                z.object({ emoji: z.string(), count: z.number(), mine: z.boolean() })
+              ),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
   method: "get",
   path: "/api/mobile/chat/groups",
   tags: ["Mobile Chat"],

@@ -1399,6 +1399,29 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
 | POST | `/events/:eventId/report` | `event_reports` |
 
+### Reactions
+
+| Method | Endpoint | Behaviour |
+|--------|----------|-----------|
+| POST | `/chat/groups/:chatGroupId/messages/:messageId/reactions` | Toggles `{ emoji }` |
+
+One toggling call rather than add and remove. A tap is a toggle, and splitting
+it makes the client responsible for knowing which state it is in — which it gets
+wrong exactly when two devices disagree, and the recovery is a duplicate-key
+error or a silent no-op depending on which way it guessed.
+
+The emoji is an allow-list of six. `message_reactions.emoji` is an unbounded
+`String` keyed by `(message_id, user_id, emoji)`, so free text would be both an
+unbounded write and a channel of arbitrary text under somebody's post that the
+moderation pipeline never sees.
+
+The response carries `{ emoji, count, mine }`. The socket broadcast
+(`chat:reaction`) carries `{ emoji, count }` and **never who reacted** — each
+client already knows its own reaction from its own request. Gated by
+`mayWriteToRoom`, the same rule as the two message write paths: a reaction is
+participation, so a muted member cannot post a smaller version of what they were
+muted for.
+
 All three return `201 { reported: true }` and are rate limited per user.
 
 **The event route takes no check-in.** Two of the three things worth reporting

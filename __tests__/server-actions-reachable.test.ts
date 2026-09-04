@@ -102,8 +102,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["canSendSystemMessages", "named in CLAUDE.md as caller-less; kept as the written rule until something needs it"],
   ["canSendPushNotifications", "same — the rule exists, the caller does not"],
 
-  // --- Notifications and real-time: the client contract outruns the server --
-  ["emitChatReaction", "docs/SOCKET_EVENTS.md publishes chat:reaction to clients; nothing emits it, and there is no reaction write path to emit from"],
 
   // --- Half-wired flows ------------------------------------------------------
   ["isRoleAddressFor", "the domain-verification email fallback; only the DNS TXT path is wired"],

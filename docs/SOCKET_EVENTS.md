@@ -84,7 +84,7 @@ state without being disconnected.
 |-------|---------|-------------|
 | `chat:message` | `{ id, chatGroupId, userId, userName, userImage, content, type, parentId, createdAt }` | New message in chat |
 | `chat:typing` | `{ chatGroupId, userId, userName, isTyping }` | Typing state changed. `userName` is the sender's anonymous name, never their real identity. |
-| `chat:reaction` | `{ chatGroupId, messageId, userId, emoji, action }` | Reaction added/removed |
+| `chat:reaction` | `{ chatGroupId, messageId, tally: [{ emoji, count }] }` | Reactions changed on a message. **Counts only — never who reacted**, which the room must not disclose. The whole tally rather than a delta, so two reactions in the same tick cannot race and a dropped packet self-corrects. `mine` is per-viewer and absent by design: a client knows its own reaction from its own request. |
 | `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message deleted. When `moderation: true`, it was auto-hidden by moderation — `userId` identifies the sender so the client can show a placeholder to them instead of removing. |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Member ban status changed |
 | `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Member mute status changed. `muted: true` = auto-muted (3+ violations in 1hr) or admin-muted. `muted: false` = auto-unmute expired or admin-unmuted. |

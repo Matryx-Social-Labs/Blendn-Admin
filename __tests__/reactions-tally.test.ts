@@ -1,7 +1,12 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 
-import { tallyReactions } from "@/lib/reactions"
+import {
+  tallyReactions,
+  publicTally,
+  isAllowedReaction,
+  ALLOWED_REACTIONS,
+} from "@/lib/reactions"
 
 /**
  * Reactions are a count, never a roster.
@@ -141,5 +146,99 @@ describe("neither read path can name a reactor again", () => {
           "viewer's own fact about themselves and is the only disclosure allowed."
         : "",
     }).toEqual({ offenders: [], hint: "" })
+  })
+})
+
+/**
+ * The write path, and the disclosure it could have shipped.
+ *
+ * Both read paths were fixed above. The SOCKET was not: `emitChatReaction`
+ * broadcast `userId` to every member of the room, and the leak was latent only
+ * because nothing called it — the table had a unique index, an emitter, a
+ * client bubble and a test, and no writer at all, so every message shipped
+ * `reactions: []` for ever.
+ *
+ * That made the emitter the most dangerous thing to build on: a payload nobody
+ * had reviewed *because* nothing sent it. Wiring the writer without changing it
+ * would have turned the one remaining disclosure live, in the same change that
+ * made the feature work.
+ */
+describe("the room broadcast carries counts, never a reactor", () => {
+  const reactions = [r("\u{1F44D}", "alice"), r("\u{1F44D}", "bob"), r("\u{1F525}", "alice")]
+
+  it("emits counts with no user id and no mine", () => {
+    expect(publicTally(reactions)).toEqual([
+      { emoji: "\u{1F44D}", count: 2 },
+      { emoji: "\u{1F525}", count: 1 },
+    ])
+
+    /*
+     * Serialised whole rather than checked key by key. A NEW field carrying an
+     * identifier is the regression, and asserting on the keys we thought of
+     * would not see it.
+     */
+    const wire = JSON.stringify(publicTally(reactions))
+    for (const forbidden of ["alice", "bob", "mine", "user_id", "userId"]) {
+      expect(wire).not.toContain(forbidden)
+    }
+  })
+
+  it("cannot mark the broadcast as somebody's own", () => {
+    /*
+     * `publicTally` folds with a sentinel viewer. If a real id could equal it,
+     * one person would receive the room's broadcast as their own reaction.
+     */
+    expect(publicTally([r("\u{1F44D}", "\u0000never-a-user-id")])).toEqual([
+      { emoji: "\u{1F44D}", count: 1 },
+    ])
+  })
+
+  it("accepts only the room's vocabulary", () => {
+    for (const e of ALLOWED_REACTIONS) expect(isAllowedReaction(e)).toBe(true)
+
+    /*
+     * `emoji` is an unbounded String, keyed by (message, user, emoji). Free
+     * text is therefore both an unbounded write and a message — arbitrary
+     * characters under somebody's post is a channel that bypasses moderation
+     * entirely, which is the one thing a room like this cannot have.
+     */
+    expect(isAllowedReaction("not an emoji")).toBe(false)
+    expect(isAllowedReaction("")).toBe(false)
+    expect(isAllowedReaction("\u{1F921}")).toBe(false)
+  })
+
+  it("has an emitter that no longer takes a reactor", () => {
+    const socket = readFileSync(join(ROOT, "lib", "socket-server.ts"), "utf8")
+    const from = socket.indexOf("export function emitChatReaction")
+    expect(from).toBeGreaterThan(-1)
+    /*
+     * Comments stripped first. The docstring explains what the payload used to
+     * carry, so a raw match finds `userId` in the prose that records its
+     * removal — a guard that fails on its own explanation is the mirror of one
+     * that passes on a mention, and both are the same mistake.
+     */
+    const fn = socket
+      .slice(from, socket.indexOf("\n}", from))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+    expect(fn).not.toMatch(/userId/)
+    expect(fn).toMatch(/tally/)
+  })
+
+  it("has a writer at all", () => {
+    /*
+     * The state this table was in: everything except the one thing that puts a
+     * row in it.
+     */
+    const route = readFileSync(
+      join(
+        ROOT,
+        "app/api/mobile/chat/groups/[chatGroupId]/messages/[messageId]/reactions/route.ts"
+      ),
+      "utf8"
+    )
+    expect(route).toMatch(/db\.message_reactions\.create\(/)
+    // Gated by the same rule as the two message write paths, not a new one.
+    expect(route).toMatch(/mayWriteToRoom\(/)
   })
 })

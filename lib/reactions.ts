@@ -44,3 +44,46 @@ export function tallyReactions(
     .map(([emoji, v]) => ({ emoji, count: v.count, mine: v.mine }))
     .sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji))
 }
+
+/**
+ * The emoji a room may use.
+ *
+ * An allow-list rather than free text, for two reasons that are not taste.
+ * `emoji` is a `String` with no length bound, so an open field is an
+ * unbounded write keyed by `(message_id, user_id, emoji)` — one person can
+ * mint rows for ever. And a free field is a message: arbitrary text under
+ * somebody's post is a channel that bypasses moderation entirely, in the one
+ * place the pipeline never looks.
+ *
+ * Six, deliberately small. `CHAT.md` settles reactions as a light signal, not
+ * a vocabulary, and every addition is another column of tally under a message
+ * on a phone screen.
+ */
+export const ALLOWED_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"] as const
+
+export type AllowedReaction = (typeof ALLOWED_REACTIONS)[number]
+
+export function isAllowedReaction(emoji: string): emoji is AllowedReaction {
+  return (ALLOWED_REACTIONS as readonly string[]).includes(emoji)
+}
+
+/**
+ * The room-wide view: counts, and never who.
+ *
+ * `tallyReactions` needs a viewer because it answers "did *you* react". This
+ * one is what goes over the socket to everybody, so it cannot carry `mine` and
+ * must not carry a user id — `CHAT.md` is explicit that the room never
+ * discloses who reacted, and the socket emitter shipped `userId` to every
+ * member of the room until this existed.
+ *
+ * Each client already knows its own reaction from its own request, so nothing
+ * is lost by leaving `mine` out of the broadcast.
+ */
+export function publicTally(
+  reactions: Array<{ emoji: string; user_id: string }>
+): Array<{ emoji: string; count: number }> {
+  return tallyReactions(reactions, "\u0000never-a-user-id").map(({ emoji, count }) => ({
+    emoji,
+    count,
+  }))
+}
