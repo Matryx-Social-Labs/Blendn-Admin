@@ -353,6 +353,25 @@ jobs:
           # to reproduce. Two arenas trades a little allocator throughput for a
           # much smaller ceiling; if the trace shows the gap is small after
           # all, this comes back out rather than staying as a lucky charm.
+          # NODE_ENV=production, and this is the whole bug.
+          #
+          # `npm run` does not set it and nothing else here did, so the server
+          # started in DEVELOPMENT mode — `NODE_ENV: undefined` in its own
+          # startup log, run 33865086700 — while the step calls itself "Start
+          # the production server" and the job header says it runs against the
+          # production server. Next.js dev compiles routes on demand and keeps
+          # the module graphs; the sweeps make 231 navigations over 27 pages,
+          # and that is what 6.5GB looks like. The tell was 167 FSWatcher
+          # handles in a server that should watch nothing.
+          #
+          # It never reproduced locally because scripts/e2e-local.ts passes
+          # NODE_ENV: "production" explicitly. The two paths differed by the
+          # one variable that mattered.
+          #
+          # Set HERE and not in the workflow env block: at job level it would
+          # also apply to `npm ci`, which then skips devDependencies and takes
+          # the build and test lanes down with it.
+          NODE_ENV=production \
           MEMORY_TRACE=1 \
           MALLOC_ARENA_MAX=2 \
           NODE_OPTIONS="--max-old-space-size=1536" \
