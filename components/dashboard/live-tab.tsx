@@ -13,7 +13,7 @@ import {
 import { ArrivalCurve, CategoryBars, type ArrivalPoint } from "@/components/dashboard/charts"
 import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
-import { deriveAlerts, type LiveAlert } from "@/lib/live-metrics"
+import { deriveAlerts, occupancyMostlyInferred, type LiveAlert } from "@/lib/live-metrics"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { cn } from "@/lib/utils"
@@ -151,11 +151,16 @@ export function LiveTab({
         <div className="flex flex-col gap-4">
           <OccupancyHero
             occupancy={snapshot}
+            unreliable={occupancyMostlyInferred(snapshot)}
             time={new Date(snapshot.at).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })}
             description={`${formatNumber(snapshot.checkedInTotal)} checked in, ${formatNumber(snapshot.checkedOutTotal)} left${
+              snapshot.staleInside > 0
+                ? `. ${formatNumber(snapshot.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted.`
+                : ""
+            }${
               snapshot.medianRate10m > 0
                 ? `. Arrival rate ${snapshot.checkInRate10m}/10min — ×${(snapshot.checkInRate10m / snapshot.medianRate10m).toFixed(1)} tonight's median.`
                 : "."

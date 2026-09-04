@@ -44,10 +44,21 @@ export function OccupancyHero({
   /** Rendered as given — the caller owns the event's timezone, not this. */
   time: string
   /**
-   * The presence sweeper refused to act because one pass would have checked out
-   * more than a quarter of the room. A venue whose wifi dies produces readings
-   * identical to everyone leaving at once, and the organiser is far better
-   * served by "this count is unreliable" than by a confidently wrong number.
+   * The headcount is mostly inference rather than observation.
+   *
+   * Written for the mass-checkout guard — the sweeper refusing to act because
+   * one pass would have removed a quarter of the room — which #278 deleted,
+   * leaving this prop with no caller and no cause for weeks.
+   *
+   * The cause it was actually needed for is the other side of the same coin.
+   * Nobody is checked out for going quiet, because the client polls in the
+   * foreground only and a pocketed phone stops reporting within minutes; the
+   * price of not emptying a full room is admitting when most of the figure is
+   * carried by sessions nobody has confirmed. `occupancyMostlyInferred` in
+   * lib/live-metrics decides, at the same half share `departureQuality` uses.
+   *
+   * The organiser is far better served by "this count is roughly right" than
+   * by a confidently wrong number.
    */
   unreliable?: boolean
   lastGood?: string
