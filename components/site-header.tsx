@@ -35,6 +35,7 @@ const TIMELESS = new Set([
   "/dashboard/organisations",
   "/dashboard/onboarding",
   "/dashboard/categories",
+  "/dashboard/amenities",
   "/dashboard/events/new",
   // A brand is four fields about a company. A date-range control over it would
   // be a filter with nothing to filter.
@@ -199,6 +200,11 @@ const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard/categories": {
     title: "Categories",
     description: "The two-level taxonomy events are filtered by on the app.",
+  },
+  "/dashboard/amenities": {
+    title: "Amenities",
+    description:
+      "What an event offers. Retiring one stops it being offered for new events without rewriting the ones that already list it.",
   },
   "/dashboard/reports": {
     title: "Reports",
