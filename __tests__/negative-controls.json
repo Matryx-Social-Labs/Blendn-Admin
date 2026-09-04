@@ -335,6 +335,12 @@
       "mutation": "Delete the `NODE_ENV=production \\` line from the server-start step in .github/workflows/ci.yml, leaving the comment that names it",
       "observed": "1 failing: 'starts in production mode' \u2014 and it failed with NODE_ENV=production still present in the comment block, which is the point",
       "date": "2026-09-04"
+    },
+    "presence-timing.test.ts": {
+      "guards": "PING_INTERVAL_MINUTES (how often a heartbeat is written) stays below PRESENCE_CUTOFF_MINUTES (how long one counts), with room for one missed cycle",
+      "mutation": "Set PING_INTERVAL_MINUTES to 15 in lib/presence.ts, then separately to 9",
+      "observed": "15: 2 failing ('writes a heartbeat more often than it expires one', 'leaves room for a missed ping'). 9: 1 failing ('leaves room for a missed ping') \u2014 the case a strict less-than would have passed",
+      "date": "2026-09-04"
     }
   },
   "grandfathered": [
