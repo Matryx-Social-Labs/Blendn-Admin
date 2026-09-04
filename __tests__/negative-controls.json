@@ -345,6 +345,12 @@
       "mutation": "A: replace `db.event_reports.create(` with `Promise.resolve(` in the mobile report route. B: repoint the three `db.event_reports.*` reads in the admin queue at user_reports",
       "observed": "A: 1 failing ('event_reports can be written'). B: 1 failing ('event_reports is read by the admin queue') \u2014 the two halves of the state the table was actually in",
       "date": "2026-09-04"
+    },
+    "read-receipts.test.ts": {
+      "guards": "emitPrivateRead persists the read BEFORE consulting read_receipts and only for messages the reader did not send; the conversation list feeds isReadForViewer the OTHER party's setting",
+      "mutation": "A: delete the `if (reader?.read_receipts === false) return` line in lib/socket-server.ts. B: replace `otherPartyAllowsReceipts: otherUser.profile?.read_receipts` with a literal `true`",
+      "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') \u2014 the case a negative match on the old shape could not catch, because that expression is now the helper's argument",
+      "date": "2026-09-04"
     }
   },
   "grandfathered": [

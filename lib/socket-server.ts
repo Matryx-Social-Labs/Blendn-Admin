@@ -433,6 +433,15 @@ export async function emitPrivateTyping(
  * `emitPrivateTyping` — read receipts are only meaningful between the two
  * participants, and must not be forgeable by a third party.
  */
+/**
+ * How many message ids one read receipt may carry.
+ *
+ * The list arrives from the client, so without a cap a single socket frame is
+ * an unbounded `IN (…)`. Two hundred is far more than a screenful and far less
+ * than a query worth worrying about.
+ */
+const READ_RECEIPT_BATCH = 200
+
 export async function emitPrivateRead(
   socket: AuthenticatedSocket,
   conversationId: string,
@@ -441,9 +450,45 @@ export async function emitPrivateRead(
   try {
     if (!(await canJoinConversation(socket.data.userId, conversationId))) return
 
+    /*
+     * Persist, then decide whether to say so. This function did neither.
+     *
+     * It relayed `private:read` and wrote nothing, so the sender's ✓✓ was a
+     * live broadcast that reverted to ✓ on reload — the only writer of
+     * `is_read` was a side effect of the messages GET, which fires on a
+     * different trigger. Two ways to become read, one of which forgot.
+     *
+     * Bounded and scoped: ids come from the client, so an unbounded `IN` is an
+     * unbounded query, and `sender_id: { not: … }` stops somebody marking
+     * their OWN messages read to fake a receipt on the other side.
+     */
+    const ids = messageIds.slice(0, READ_RECEIPT_BATCH)
+    if (ids.length === 0) return
+
+    await db.private_messages.updateMany({
+      where: {
+        id: { in: ids },
+        conversation_id: conversationId,
+        sender_id: { not: socket.data.userId },
+        is_read: false,
+      },
+      data: { is_read: true },
+    })
+
+    /*
+     * The setting governs disclosure, never the record above. Somebody with
+     * read receipts off still clears their own unread badge; they simply do
+     * not tell the sender.
+     */
+    const reader = await db.profiles.findUnique({
+      where: { id: socket.data.userId },
+      select: { read_receipts: true },
+    })
+    if (reader?.read_receipts === false) return
+
     socket.to(`conversation:${conversationId}`).emit("private:read", {
       conversationId,
-      messageIds,
+      messageIds: ids,
       readBy: socket.data.userId,
     })
   } catch (error) {
