@@ -14,6 +14,8 @@ import { ArrivalCurve, CategoryBars, type ArrivalPoint } from "@/components/dash
 import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
 import { deriveAlerts, occupancyMostlyInferred, type LiveAlert } from "@/lib/live-metrics"
+import type { IssueRow } from "@/lib/event-issues"
+import { IssueLog } from "@/components/dashboard/issue-log"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { cn } from "@/lib/utils"
@@ -64,10 +66,19 @@ export function LiveTab({
   eventId,
   startAt,
   endAt,
+  issues = [],
 }: {
   eventId: string
   startAt: string
   endAt: string
+  /**
+   * What has already happened tonight, from `event_issues`.
+   *
+   * The alerts below are derived live from the socket snapshot and vanish with
+   * the tab. These persist, which is the whole point: an over-capacity breach
+   * at 23:40 used to be gone at 23:45 unless somebody was looking at it.
+   */
+  issues?: IssueRow[]
 }) {
   const phase = livePhaseFor(startAt, endAt)
   // Only hold a socket while there is something to watch. The server runs its
@@ -217,6 +228,17 @@ export function LiveTab({
             ) : (
               alerts.map((alert) => <AlertCard key={alert.kind} alert={alert} />)
             )}
+          </div>
+
+          {/*
+            The same rules, recorded. Everything above is derived from the live
+            snapshot and disappears with the tab; this is what a server sweep
+            wrote down while nobody was looking — which is the only version that
+            can answer "did anything go wrong tonight" the morning after.
+          */}
+          <div className="flex flex-col gap-2">
+            <h3 className="text-sm font-bold">Tonight&apos;s issues</h3>
+            <IssueLog issues={issues} />
           </div>
 
           <SentimentBar snapshot={snapshot} />

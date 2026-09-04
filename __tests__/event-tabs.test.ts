@@ -1,5 +1,13 @@
 import { eventTabsFor } from "@/app/dashboard/events/[id]/event-tabs"
-import { livePhaseFor } from "@/components/dashboard/live-tab"
+/*
+ * From the module that owns it, not through the component that re-exports it.
+ *
+ * Importing a pure function via a client component drags that component's
+ * whole graph into the test — which broke the moment the live tab gained a
+ * panel whose action imports NextAuth, an ESM package Jest cannot parse. The
+ * function never moved; the import was always incidental.
+ */
+import { livePhaseFor } from "@/lib/event-phase"
 
 /**
  * Event detail tabs are lifecycle-aware, and getting that wrong is worse than

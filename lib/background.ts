@@ -9,6 +9,7 @@ import {
   startNotificationRetentionSweeper,
   stopNotificationRetentionSweeper,
 } from "./notification-retention"
+import { startIssueSweeper, stopIssueSweeper } from "./event-issues"
 import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
 import { startSentimentSweeper, stopSentimentSweeper } from "./sentiment-sweeper"
 
@@ -49,9 +50,18 @@ export function startBackgroundWork(): void {
   // Classifies chatroom messages into event_feedback, which is what the live
   // screen's mood and category panels have always read and never had.
   startSentimentSweeper()
+  /*
+   * Records what `deriveAlerts` says into `event_issues`. That rule ran only
+   * in a browser `useMemo`, so an over-capacity breach existed for as long as
+   * somebody had the tab open and no longer — which is precisely the alert
+   * that matters when nobody is watching.
+   */
+  startIssueSweeper()
 
   logger.info("Background work started", {
-    loops: ["chat-lifecycle", "presence", "sentiment"],
+    // Listed exhaustively: this said three while starting four, so the log
+    // could not be used to tell whether a loop had been dropped.
+    loops: ["chat-lifecycle", "notification-retention", "presence", "sentiment", "issues"],
   })
 }
 
@@ -67,4 +77,5 @@ export function stopBackgroundWork(): void {
   stopNotificationRetentionSweeper()
   stopPresenceSweeper()
   stopSentimentSweeper()
+  stopIssueSweeper()
 }
