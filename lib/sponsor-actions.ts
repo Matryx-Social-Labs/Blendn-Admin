@@ -111,9 +111,31 @@ export async function findSponsors(query: string): Promise<SponsorMatch[]> {
  * Near-matches are NOT refused: "AT&T" and "ATT" collapse to the same key, and
  * blocking on that would make a real second brand uncreatable.
  */
-export async function createUnclaimedSponsor(input: unknown) {
+export async function createUnclaimedSponsor(eventId: string, input: unknown) {
   const session = await getAuth()
   if (!session?.user) throw new Error("Unauthorized")
+
+  /*
+   * Authorised against the EVENT this is being created for, not by role.
+   *
+   * This checked authentication and nothing else, so any signed-in dashboard
+   * user could mint a `sponsors` row — and because the name check below is
+   * global, one account could take a brand name and every other organisation
+   * would be told to "pick it from the list instead" for a row they do not own.
+   *
+   * Organisation-shaped rather than role-shaped, per CLAUDE.md: `canEdit` is
+   * exactly the grant `attachSponsorToEvent` requires, and creating the brand
+   * is a step inside attaching one. A role check would have let an organiser
+   * with no claim on this event create brands against it.
+   */
+  const event = await db.events.findUnique({
+    where: { id: eventId, deleted_at: null },
+    select: { id: true, ...eventPermissionSelect },
+  })
+  if (!event) throw new Error("Event not found")
+
+  const actor = await actorFor(session.user)
+  if (!eventPermissions(actor, event).canEdit) throw new Error("Forbidden")
 
   const parsed = brandSchema.safeParse(input)
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid brand")
@@ -203,17 +225,61 @@ export async function attachSponsorToEvent(eventId: string, sponsorId: string) {
 
   const status = sponsor.org_id ? "proposed" : "approved"
 
-  const placement = await db.event_sponsors.create({
-    data: {
+  /*
+   * `upsert`, because `cancelled` was a trap with no way out.
+   *
+   * `@@unique([event_id, sponsor_id])` means a cancelled placement still
+   * occupies the pair, and this was a bare `create` — so removing a sponsor
+   * from an event and then changing your mind threw a raw P2002 at whoever
+   * tried, with a message about a constraint rather than about the brand. The
+   * only escape was an admin deleting the row by hand.
+   *
+   * Reviving the existing row rather than deleting and recreating keeps the
+   * history: `created_by` still records who first brought this brand to this
+   * event, and the audit trail does not gain a second creation that did not
+   * happen.
+   */
+  const decided =
+    status === "approved" ? { decided_by: session.user.id, decided_at: new Date() } : {}
+
+  /*
+   * Only a finished placement may be revived.
+   *
+   * Without this the upsert would silently reset a LIVE one: re-attaching an
+   * already-approved brand would push it back to `proposed`, undoing a decision
+   * nobody asked to undo. `draft` is included because it has no writer — the
+   * column defaults to it and every path sets a status explicitly — so any row
+   * in that state predates this code and is safe to move on.
+   */
+  const prior = await db.event_sponsors.findUnique({
+    where: { event_id_sponsor_id: { event_id: eventId, sponsor_id: sponsorId } },
+    select: { status: true },
+  })
+  if (prior && prior.status !== "cancelled" && prior.status !== "draft") {
+    throw new Error(`“${sponsor.name}” is already on this event`)
+  }
+
+  const placement = await db.event_sponsors.upsert({
+    where: { event_id_sponsor_id: { event_id: eventId, sponsor_id: sponsorId } },
+    create: {
       event_id: eventId,
       sponsor_id: sponsorId,
       status,
       created_by: session.user.id,
       // An unclaimed brand is approved by the host in the same act, so the
       // decision is recorded rather than left looking unattributed.
-      ...(status === "approved"
-        ? { decided_by: session.user.id, decided_at: new Date() }
-        : {}),
+      ...decided,
+    },
+    update: {
+      status,
+      /*
+       * Cleared unless this revival is itself a decision. A proposed placement
+       * carrying the previous cancellation's `decided_by` would read as though
+       * somebody had already approved it.
+       */
+      decided_by: null,
+      decided_at: null,
+      ...decided,
     },
     select: { id: true, status: true },
   })
@@ -800,11 +866,24 @@ export async function removePlacement(placementId: string) {
   const actor = await actorFor(session.user)
   if (!eventPermissions(actor, placement.event).canEdit) throw new Error("Forbidden")
 
-  const campaigns = await db.event_sponsored_messages.count({
-    where: { event_id: placement.event_id, sponsor_id: placement.sponsor_id },
-  })
+  /*
+   * Charges count as history too, and this only counted campaigns.
+   *
+   * `placement_charges.placement` is `onDelete: Restrict` — deliberately, so an
+   * orphan charge pointing at nothing is impossible. So a placement that was
+   * PRICED but never had a campaign written took the delete branch below and
+   * died on the foreign key: a raw Prisma error in an admin's face, on the
+   * ordinary case the charge ledger exists to surface. Agreeing a fee before
+   * anybody writes the copy is the normal order of events.
+   */
+  const [campaigns, charges] = await Promise.all([
+    db.event_sponsored_messages.count({
+      where: { event_id: placement.event_id, sponsor_id: placement.sponsor_id },
+    }),
+    db.placement_charges.count({ where: { placement_id: placementId } }),
+  ])
 
-  if (campaigns > 0) {
+  if (campaigns > 0 || charges > 0) {
     await db.event_sponsors.update({
       where: { id: placementId },
       data: { status: "cancelled", decided_by: session.user.id, decided_at: new Date() },
@@ -815,10 +894,10 @@ export async function removePlacement(placementId: string) {
 
   auditLog({
     userId: session.user.id,
-    action: campaigns > 0 ? "placement.cancel" : "placement.delete",
+    action: campaigns > 0 || charges > 0 ? "placement.cancel" : "placement.delete",
     resource: "event_sponsors",
     resourceId: placementId,
-    details: { eventId: placement.event_id, sponsorId: placement.sponsor_id, campaigns },
+    details: { eventId: placement.event_id, sponsorId: placement.sponsor_id, campaigns, charges },
   })
 
   revalidatePath(`/dashboard/events/${placement.event_id}/messaging`)
