@@ -131,3 +131,85 @@ describe("materialEventChanges only fires for facts people act on", () => {
     expect(materialEventChanges(base, after)).toEqual(["start time", "venue"])
   })
 })
+
+describe("the reminder is sent once, and by something", () => {
+  /*
+   * `sendEventReminders` was correct about its audience, had a cron route in
+   * front of it, and **nothing called that route** — no cron block in
+   * railway.json, no scheduled workflow. The one notification the product tells
+   * people it sends was never sent by anything.
+   *
+   * It was also not idempotent, and the two defects were hiding each other: the
+   * window is fifteen minutes wide, so the moment anything DID schedule it more
+   * often than that, everyone would have received the same reminder on every
+   * pass. Fixing the scheduler alone would have shipped the duplicate.
+   */
+  const code = (rel: string) =>
+    readFileSync(join(__dirname, "..", rel), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+
+  it("claims the event before sending, not after", () => {
+    const src = code("lib/services/event-notifications.service.ts")
+
+    // A conditional update on `reminded_at` is an atomic compare-and-set:
+    // exactly one caller sees count === 1, including across replicas.
+    expect(src).toMatch(/updateMany\(\{\s*where:\s*\{\s*id:\s*event\.id,\s*reminded_at:\s*null/)
+
+    /*
+     * Order matters and is asserted. The two ways to be wrong are not
+     * symmetric: claim-then-fail costs one person one reminder, send-then-fail
+     * sends the whole room a second one.
+     */
+    /*
+     * Scoped to the function body. Comparing positions across the whole file
+     * matched the `notifyEventUpdate` IMPORT at the top — so the assertion was
+     * about import order, and passed or failed for reasons unrelated to the
+     * thing it names.
+     */
+    const fn = src.slice(src.indexOf("export async function sendEventReminders"))
+    const body = fn.slice(0, fn.indexOf("\nexport "))
+    const claim = body.indexOf("reminded_at: null")
+    const send = body.indexOf("notifyEventUpdate(")
+    expect(claim).toBeGreaterThan(-1)
+    expect(send).toBeGreaterThan(claim)
+  })
+
+  it("only selects events nobody has reminded", () => {
+    const src = code("lib/services/event-notifications.service.ts")
+    expect(src).toMatch(/reminded_at: null/)
+  })
+
+  it("is actually scheduled", () => {
+    /*
+     * The half that was missing entirely. In-process, matching the loops
+     * already in lib/background.ts — a job that runs only if somebody
+     * remembers to configure a scheduler is one that stops silently the first
+     * time an environment is created without one.
+     */
+    const bg = code("lib/background.ts")
+    expect(bg).toMatch(/startReminderSweeper\(\)/)
+    expect(bg).toMatch(/stopReminderSweeper\(\)/)
+  })
+
+  it("prunes expired refresh tokens on the same pass", () => {
+    // `cleanupExpiredTokens` had zero callers since it was written. A loop per
+    // prune is how a process ends up with timers nobody can account for.
+    expect(code("lib/reminder-sweeper.ts")).toMatch(/cleanupExpiredTokens\(\)/)
+  })
+
+  it("reaches server.ts without an @/ alias", () => {
+    /*
+     * This file only just became reachable from `server.ts`, and
+     * `build:server` compiles with plain tsc — which emits `@/` verbatim into
+     * the require() and fails at boot, in production only. The import-graph
+     * guard caught it; this pins the specific file so it cannot drift back.
+     */
+    const src = readFileSync(
+      join(__dirname, "..", "lib/services/event-notifications.service.ts"),
+      "utf8"
+    )
+    const imports = src.split("\n").filter((l) => /^import /.test(l))
+    expect(imports.some((l) => l.includes('"@/'))).toBe(false)
+  })
+})

@@ -11,6 +11,7 @@ import {
 } from "./notification-retention"
 import { startIssueSweeper, stopIssueSweeper } from "./event-issues"
 import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
+import { startReminderSweeper, stopReminderSweeper } from "./reminder-sweeper"
 import { startSentimentSweeper, stopSentimentSweeper } from "./sentiment-sweeper"
 
 /**
@@ -57,11 +58,26 @@ export function startBackgroundWork(): void {
    * that matters when nobody is watching.
    */
   startIssueSweeper()
+  /*
+   * The reminder the product tells people it sends. `sendEventReminders` was
+   * correct and had a cron route in front of it, and nothing called that route
+   * — no cron block in railway.json, no scheduled workflow. It also prunes
+   * expired refresh tokens, which `cleanupExpiredTokens` has been ready to do
+   * since it was written and never been asked to.
+   */
+  startReminderSweeper()
 
   logger.info("Background work started", {
     // Listed exhaustively: this said three while starting four, so the log
     // could not be used to tell whether a loop had been dropped.
-    loops: ["chat-lifecycle", "notification-retention", "presence", "sentiment", "issues"],
+    loops: [
+      "chat-lifecycle",
+      "notification-retention",
+      "presence",
+      "sentiment",
+      "issues",
+      "reminders",
+    ],
   })
 }
 
@@ -78,4 +94,5 @@ export function stopBackgroundWork(): void {
   stopPresenceSweeper()
   stopSentimentSweeper()
   stopIssueSweeper()
+  stopReminderSweeper()
 }

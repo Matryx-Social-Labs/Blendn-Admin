@@ -445,6 +445,18 @@ model events {
   details            event_details?
   check_ins          event_check_ins[]
   presence_sessions presence_sessions[]
+  /// When the "starting soon" reminder was sent, and the reason it exists.
+  ///
+  /// The reminder selects events starting inside a 15-minute window, so any
+  /// scheduler firing more often than that sent the same reminder again on
+  /// every pass — three pushes for a five-minute cron. Claiming this column
+  /// with a conditional update makes the send once-per-event and safe across
+  /// replicas, without a lock or a queue.
+  ///
+  /// Null means not yet reminded. Never reset: an event that moves is a
+  /// details-changed notification, which is a different message.
+  reminded_at       DateTime?         @db.Timestamptz(6)
+
   event_issues      event_issues[]
   match_preferences  event_match_preferences[]
   likes              event_likes[]

@@ -1,6 +1,16 @@
-import { logger } from "@/lib/logger"
-import { db } from "@/lib/db"
-import { notifyEventUpdate } from "@/lib/push-notifications"
+// Relative, not "@/lib/…", and this file only just started needing to be.
+//
+// It is now reachable from `server.ts` via lib/background.ts →
+// lib/reminder-sweeper.ts, and `build:server` compiles with plain tsc, which
+// emits the `@/` alias verbatim into the require() — MODULE_NOT_FOUND at boot,
+// in production only. `lib/checkout.ts`, `lib/occupancy.ts` and
+// `lib/presence-sessions.ts` all carry the same note for the same reason.
+//
+// Caught by the import-graph guard rather than by a deploy, which is the whole
+// point of that test.
+import { logger } from "../logger"
+import { db } from "../db"
+import { notifyEventUpdate } from "../push-notifications"
 import type { rsvp_status } from "@prisma/client"
 
 /**
@@ -116,6 +126,8 @@ export async function sendEventReminders(minutesBefore: number = 60): Promise<nu
           gte: reminderWindow,
           lt: windowEnd,
         },
+        // Only ones nobody has reminded. Matches the partial index.
+        reminded_at: null,
       },
       select: {
         id: true,
@@ -128,6 +140,27 @@ export async function sendEventReminders(minutesBefore: number = 60): Promise<nu
     let totalNotified = 0
 
     for (const event of events) {
+      /*
+       * Claim the event before sending, not after.
+       *
+       * The window is fifteen minutes wide, so any scheduler running more
+       * often than that re-selected the same event on every pass — three
+       * pushes for a five-minute cron, saying the same thing. A conditional
+       * update on `reminded_at` is an atomic compare-and-set: exactly one
+       * caller sees `count === 1`, including across replicas, with no lock and
+       * no queue.
+       *
+       * Claimed before the push rather than after, deliberately. The two ways
+       * to be wrong are not symmetric: a claim that succeeds and a push that
+       * fails costs one person one missed reminder, while a push that succeeds
+       * and a claim that fails sends the whole room a second one.
+       */
+      const { count: claimed } = await db.events.updateMany({
+        where: { id: event.id, reminded_at: null },
+        data: { reminded_at: now },
+      })
+      if (claimed === 0) continue
+
       const userIds = await interestedUserIds(event.id)
       if (userIds.length === 0) continue
 

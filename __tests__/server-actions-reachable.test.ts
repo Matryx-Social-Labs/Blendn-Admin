@@ -108,7 +108,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["domainVerifyEmail", "the template that fallback would send"],
   ["expertiseFor", "nothing serves the expertise options for a chosen work field"],
   ["formatAge", "the moderation queue has no age column, which is the SLA it formats"],
-  ["cleanupExpiredTokens", "no cron sweeps mobile_refresh_tokens, so revoked and expired rows accumulate forever"],
 
   // --- Presence sessions: the folds, shipped ahead of their readers ---------
   //
