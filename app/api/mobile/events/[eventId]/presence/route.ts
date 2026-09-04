@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 
 import { db } from "@/lib/db"
+import { touchSession } from "@/lib/presence-sessions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { successResponse, errorResponse, unauthorizedResponse } from "@/lib/api-response"
@@ -65,7 +66,10 @@ export async function POST(
       last_seen_at: true,
       left_area_at: true,
       departure_prompted_at: true,
-      occurrence: { select: { end_time: true } },
+      // `id` is needed to move the presence session's heartbeat. Without it
+      // the session goes stale PRESENCE_CUTOFF_MINUTES after arrival and the
+      // room reads empty while everyone is still in it.
+      occurrence: { select: { id: true, end_time: true } },
       // Spread, not hand-picked: a select missing `check_in_radius` reads as
       // "no legacy fence" and silently fails open for every pre-column event.
       event: { select: { ...fenceSelect } },
@@ -121,6 +125,13 @@ export async function POST(
   }
 
   if (shouldPersistPing(decision, state, now)) {
+    // The session's heartbeat rides the same branch as the check-in's, so the
+    // two stores cannot drift apart between pings.
+    await touchSession(checkIn.occurrence.id, authUser.userId, now, {
+      lat: latitude,
+      lng: longitude,
+      accuracy: body.accuracy ?? null,
+    })
     await db.event_check_ins.update({
       where: { id: checkIn.id },
       data: {

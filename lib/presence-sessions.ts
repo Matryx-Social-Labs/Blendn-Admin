@@ -153,6 +153,45 @@ export async function insideNow(
 }
 
 /**
+ * The heartbeat: move an open session's `last_seen_at` forward.
+ *
+ * `insideNow` counts a session only while `last_seen_at > cutoff`, and
+ * `openSession` sets that field exactly once, at arrival. Without this, every
+ * session goes stale PRESENCE_CUTOFF_MINUTES after check-in and occupancy
+ * reads zero for a full room — the old model's opposite failure (rows that
+ * never close) replaced by rooms that empty on a timer.
+ *
+ * Called from the same branch that persists the check-in ping, so the two
+ * stores move together and the reconciliation between them stays meaningful.
+ * `PING_INTERVAL_MINUTES` (5) throttles that branch and must stay below
+ * `PRESENCE_CUTOFF_MINUTES` (10) or a live person drops out of the room
+ * between writes; `__tests__/presence-timing.test.ts` fails the build if that
+ * ordering is ever inverted.
+ *
+ * `updateMany` rather than `update`: the partial unique guarantees at most one
+ * open session per person per occurrence, so this touches either one row or
+ * none — and none is the correct no-op for somebody whose session the sweeper
+ * has already closed.
+ */
+export async function touchSession(
+  occurrenceId: string,
+  userId: string,
+  at: Date,
+  fix?: { lat: number; lng: number; accuracy: number | null }
+): Promise<void> {
+  await db.presence_sessions.updateMany({
+    where: { occurrence_id: occurrenceId, user_id: userId, departed_at: null },
+    data: {
+      last_seen_at: at,
+      updated_at: at,
+      ...(fix
+        ? { last_lat: fix.lat, last_lng: fix.lng, last_accuracy: fix.accuracy }
+        : {}),
+    },
+  })
+}
+
+/**
  * Total time inside, excluding time spent outside.
  *
  * The reason dwell needs sessions at all: with one mutable row, "how long were
