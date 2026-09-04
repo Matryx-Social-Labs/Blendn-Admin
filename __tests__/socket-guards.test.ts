@@ -2,6 +2,9 @@ const mockDb = {
   chat_group_members: { findUnique: jest.fn() },
   private_conversations: { findUnique: jest.fn() },
   profiles: { findUnique: jest.fn() },
+  // `emitPrivateRead` persists before it relays: the receipt used to be a live
+  // broadcast that reverted to a single tick on reload.
+  private_messages: { updateMany: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -252,17 +255,47 @@ describe("emitPrivateTyping / emitPrivateRead", () => {
     expect(roomEmit).not.toHaveBeenCalled()
   })
 
-  it("relays read receipts for a participant", async () => {
+  it("records the read, then relays it, for a participant", async () => {
     asParticipant()
+    mockDb.profiles.findUnique.mockResolvedValue({ read_receipts: true })
     const { socket, roomEmit } = makeSocket()
 
     await emitPrivateRead(socket, CONVO_ID, ["m1", "m2"])
+
+    // Persisted, and only for messages the reader did not send — otherwise
+    // somebody can mark their own and manufacture a receipt on the other side.
+    expect(mockDb.private_messages.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: ["m1", "m2"] },
+          conversation_id: CONVO_ID,
+          sender_id: { not: USER },
+        }),
+        data: { is_read: true },
+      })
+    )
 
     expect(roomEmit).toHaveBeenCalledWith("private:read", {
       conversationId: CONVO_ID,
       messageIds: ["m1", "m2"],
       readBy: USER,
     })
+  })
+
+  it("records the read but says nothing when the reader has receipts off", async () => {
+    /*
+     * The setting governs disclosure, never the record. Somebody with read
+     * receipts off still clears their own unread badge — suppressing the write
+     * would be a privacy toggle silently breaking an unrelated feature.
+     */
+    asParticipant()
+    mockDb.profiles.findUnique.mockResolvedValue({ read_receipts: false })
+    const { socket, roomEmit } = makeSocket()
+
+    await emitPrivateRead(socket, CONVO_ID, ["m1"])
+
+    expect(mockDb.private_messages.updateMany).toHaveBeenCalled()
+    expect(roomEmit).not.toHaveBeenCalled()
   })
 
   it("drops forged read receipts from a non-participant", async () => {

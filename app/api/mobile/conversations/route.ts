@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { isReadForViewer } from "@/lib/read-receipts"
 import { NextRequest } from "next/server"
 import { blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
 import { cameFromMatch, displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
@@ -39,11 +40,18 @@ export async function GET(request: NextRequest) {
         ],
       },
       include: {
+        /*
+         * `profile.read_receipts` rides along because the list reports
+         * `lastMessage.isRead`, and when the last message is the caller's own
+         * that field IS a read receipt. Fetching it per row afterwards would be
+         * an N+1 on the conversations screen.
+         */
         user1: {
           select: {
             id: true,
             name: true,
             image: true,
+            profile: { select: { read_receipts: true } },
           },
         },
         user2: {
@@ -51,6 +59,7 @@ export async function GET(request: NextRequest) {
             id: true,
             name: true,
             image: true,
+            profile: { select: { read_receipts: true } },
           },
         },
         messages: {
@@ -122,7 +131,16 @@ export async function GET(request: NextRequest) {
               text: lastMessage.message_text,
               senderId: lastMessage.sender_id,
               createdAt: lastMessage.created_at,
-              isRead: lastMessage.is_read,
+              /*
+               * Withheld when the caller sent it and the other party has read
+               * receipts off. Honouring the setting on the socket alone would
+               * leak the same fact one screen away.
+               */
+              isRead: isReadForViewer({
+                senderIsViewer: lastMessage.sender_id === authUser.userId,
+                isRead: lastMessage.is_read,
+                otherPartyAllowsReceipts: otherUser.profile?.read_receipts,
+              }),
             }
           : null,
         unreadCount: conv._count.messages,
