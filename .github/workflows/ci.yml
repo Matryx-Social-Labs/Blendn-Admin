@@ -87,7 +87,43 @@ jobs:
       # dependencies would make this noisy, and a check people learn to ignore
       # is worse than no check.
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        # Fails on a vulnerability, not on npm being unreachable.
+        #
+        # `npm audit` calls an external service on every run, and the first time
+        # that service was slow this step hung for 8m44s and failed the job —
+        # with no vulnerability involved. A check that goes red because of
+        # somebody else's outage is a check people learn to ignore, which is the
+        # argument already made for gating the e2e lane and applies just as well
+        # to a step that cries wolf.
+        #
+        # So: one retry, a bounded wait, and an explicit split. A real advisory
+        # still fails the build loudly; an unreachable registry warns and moves
+        # on, because a dependency audit is advisory by nature and no advisory
+        # is better than a false one.
+        run: |
+          set +e
+          for attempt in 1 2; do
+            out=$(timeout 120 npm audit --audit-level=high 2>&1)
+            code=$?
+            if [ "$code" -eq 0 ]; then
+              echo "$out" | tail -3
+              echo "audit clean"
+              exit 0
+            fi
+            # npm reports both "cannot reach the endpoint" and "found
+            # vulnerabilities" as a non-zero exit, so the text is the only way
+            # to tell an outage from a finding.
+            if echo "$out" | grep -qiE "network timeout|audit endpoint returned an error|ENOTFOUND|ECONNRESET|EAI_AGAIN"; then
+              echo "::warning::npm advisory endpoint unreachable (attempt $attempt) — not a vulnerability"
+              sleep 10
+              continue
+            fi
+            echo "$out"
+            echo "::error::npm audit reported a high-severity vulnerability"
+            exit 1
+          done
+          echo "::warning::Skipping the audit — npm's advisory endpoint was unreachable twice."
+          exit 0
 
   test:
     runs-on: ubuntu-latest
