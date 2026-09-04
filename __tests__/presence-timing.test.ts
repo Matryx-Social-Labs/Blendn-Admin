@@ -18,6 +18,14 @@ import { PRESENCE_CUTOFF_MINUTES } from "@/lib/presence-sessions"
  * report an error: every individual write succeeds and every individual read
  * is correct, which is precisely the shape of failure that survives review.
  *
+ * Not in `negative-controls.json`: that registry tracks STRUCTURAL guards —
+ * the ones that scan source text and can pass vacuously against broken code.
+ * This asserts on two imported values, so it cannot silently match nothing.
+ * The controls were still run, because a test nobody has broken on purpose is
+ * a test nobody has checked: PING_INTERVAL_MINUTES at 15 fails two of the
+ * assertions below, and at 9 fails one — the case a strict less-than alone
+ * would have let through.
+ *
  * The two constants live in different files, are edited for unrelated reasons
  * — one to save writes, the other to make occupancy more live — and neither
  * file mentions the other's number. This is the only thing that connects them.
