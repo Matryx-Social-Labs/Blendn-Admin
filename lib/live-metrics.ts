@@ -77,6 +77,40 @@ export interface LiveAlert {
  *
  * Pure so it can be tested without a database or a clock.
  */
+/**
+ * Above this share of the room unseen recently, the headcount is mostly
+ * inference and should say so.
+ *
+ * Half, matching `departureQuality`'s line for the same judgement: below it the
+ * gaps are a few people whose phones are asleep, above it the figure is being
+ * carried by sessions nobody has confirmed.
+ */
+export const MOSTLY_INFERRED_SHARE = 0.5
+
+/**
+ * Is the headcount mostly inferred rather than observed?
+ *
+ * Nobody is removed from the room for going quiet — the client polls in the
+ * foreground only, so a pocketed phone stops reporting within minutes and
+ * timing that out would empty a full room. The cost of that choice is that the
+ * figure can drift upward if the sweeper stalls, and the price of keeping
+ * people in the room is saying plainly when the number is inference.
+ *
+ * `OccupancyHero` already renders this: a "count unreliable" badge, a `~`
+ * prefix, "in the room, roughly", and the over-capacity flag suppressed —
+ * because flagging a breach off numbers we have just said we do not trust is
+ * how a false evacuation starts. It had no caller until now. The prop was
+ * added for the mass-checkout guard, which #278 deleted; the affordance
+ * outlived its cause and this is the cause it was actually needed for.
+ */
+export function occupancyMostlyInferred(snapshot: {
+  inside: number
+  staleInside: number
+}): boolean {
+  if (snapshot.inside <= 0) return false
+  return snapshot.staleInside / snapshot.inside > MOSTLY_INFERRED_SHARE
+}
+
 export function deriveAlerts(
   snapshot: LiveSnapshot,
   opts: { scheduledEnd: Date; scheduledStart?: Date; now?: Date }
