@@ -63,6 +63,16 @@ const ROW_MARKER: Record<string, string> = {
    * page can be asserted rather than excused.
    */
   "/dashboard/venues": "Church Street Social",
+  /*
+   * The subtitle, not the name. "Open Bar" is plausible markup on any screen
+   * that lists what an event offers, and a marker that appears on a second
+   * page is what made the previous version of this check useless. "Premium
+   * spirits" is rendered by the amenity manager and nothing else.
+   *
+   * Seeded by the migration rather than by seed-qa, so it is present in any
+   * migrated database — including a fresh CI one.
+   */
+  "/dashboard/amenities": "Premium spirits",
 }
 
 /**
