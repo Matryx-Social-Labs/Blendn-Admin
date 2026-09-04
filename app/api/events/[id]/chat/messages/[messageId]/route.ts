@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -13,7 +14,7 @@ interface RouteContext {
 export async function DELETE(_: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, messageId } = await params
 
@@ -21,16 +22,16 @@ export async function DELETE(_: Request, { params }: RouteContext) {
       where: { id: eventId, deleted_at: null },
       select: { organizer_org_id: true, venue: { select: { owner_org_id: true } }, chat_group: { select: { id: true } } },
     })
-    if (!event) return new NextResponse("Not found", { status: 404 })
+    if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canOperate) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
-    if (!event.chat_group) return new NextResponse("No chat group", { status: 404 })
+    if (!event.chat_group) return errorResponse("No chat group", 404)
 
     const message = await db.chat_messages.findFirst({
       where: { id: messageId, chat_group_id: event.chat_group.id, deleted_at: null },
     })
-    if (!message) return new NextResponse("Message not found", { status: 404 })
+    if (!message) return errorResponse("Message not found", 404)
 
     await db.chat_messages.update({
       where: { id: messageId },
@@ -42,6 +43,6 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     return NextResponse.json({ success: true })
   } catch (err) {
     logger.error("Delete message error", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal Server Error", { status: 500 })
+    return errorResponse("Internal Server Error", 500)
   }
 }

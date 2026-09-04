@@ -299,12 +299,10 @@
       "note": "Written because the rule had bitten three times and `tsc` caught only two. TS objects with TS2783 when two spreads are structurally incompatible, which is luck: two fragments both selecting a relation with different nested columns are assignable to each other, so the overwrite is silent \u2014 and a relation is where it costs most. The live case this guards is latent rather than present: `eventPermissionSelect` and `fenceSelect` both claim `venue`, nothing spreads both yet, and CLAUDE.md records that a select missing `venue` silently denies a venue owner."
     },
     "dashboard-error-contract.test.ts": {
-      "guards": "Dashboard raw-string error responses may only decrease, no new dashboard route adds them, every mobile route stays on lib/api-response, and the budget cannot become an allowlist",
-      "mutation": "Four: (a) add a raw NextResponse to a dashboard route already at budget; (b) add one to a mobile route; (c) convert a dashboard file's raw responses to JSON without lowering its budget; (d) point the counting regex at a token that matches nothing",
-      "observed": "1 failing each for (a)-(c) \u2014 'no dashboard file above its budget', 'keeps every mobile route on the shared envelope', 'fails on a stale entry'; (d) 2 failing including its own control; 4 passing after each revert",
-      "date": "2026-08-28",
-      "source": "run-at-e16",
-      "note": "A ratchet rather than the migration J9 asks for, deliberately. Two dashboard consumers read error bodies as text \u2014 `event-messaging.tsx` shows `canActivate`'s seven distinct refusal sentences verbatim, `reports/builder.tsx` calls `res.text()` \u2014 so converting routes without their consumers would put raw JSON in a toast where a sentence used to be, regressing the exact case the current shape protects. Migration is route-and-consumer in pairs; the count meanwhile may only fall."
+      "guards": "No route on either surface returns a bare-string error, and both refusal-reading consumers go through lib/refusal.ts",
+      "mutation": "A: restore `new NextResponse(\"Unauthorized\", { status: 401 })` in app/api/search/route.ts. B: restore `await res.text()` in app/dashboard/reports/builder.tsx",
+      "observed": "A: 1 failing ('has no raw-string response in any route'). B: 1 failing ('keeps the consumers reading refusals through the shared reader') \u2014 the half the offender count cannot see",
+      "date": "2026-09-04"
     },
     "reactions-tally.test.ts": {
       "guards": "Reactions serialise as {emoji, count, mine} and neither room read path emits a reactor's id or name",

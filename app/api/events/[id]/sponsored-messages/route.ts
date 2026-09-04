@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -16,11 +17,11 @@ export async function GET(_: Request, { params }: RouteContext) {
   try {
     const { id: eventId } = await params
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
     const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } } })
-    if (!event) return new NextResponse("Not found", { status: 404 })
+    if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     const messages = await db.event_sponsored_messages.findMany({
@@ -48,19 +49,19 @@ export async function GET(_: Request, { params }: RouteContext) {
     )
   } catch (err) {
     logger.error("Error fetching sponsored messages", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }
 
 export async function POST(req: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
 
     const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } } })
-    if (!event) return new NextResponse("Not found", { status: 404 })
+    if (!event) return errorResponse("Not found", 404)
 
     /*
      * `canBroadcast`, not `canEdit`.
@@ -81,7 +82,7 @@ export async function POST(req: Request, { params }: RouteContext) {
     const actor = await actorFor(session.user)
     const grant = await resolveSponsorGrant(actor, eventId)
     if (!canBroadcast(actor, event, "sponsored", grant ?? undefined)) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     // Every sponsored message fans out to the whole event chat, so bound how
@@ -123,7 +124,7 @@ export async function POST(req: Request, { params }: RouteContext) {
       },
       select: { id: true },
     })
-    if (!placement) return new NextResponse("Forbidden", { status: 403 })
+    if (!placement) return errorResponse("Forbidden", 403)
 
     /*
      * Campaign and first creative together.
@@ -152,6 +153,6 @@ export async function POST(req: Request, { params }: RouteContext) {
     return NextResponse.json(message, { status: 201 })
   } catch (err) {
     logger.error("Error creating sponsored message", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }

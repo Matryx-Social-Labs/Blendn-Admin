@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -13,24 +14,24 @@ interface RouteContext {
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, userId: targetUserId } = await params
     const { action } = await request.json() as { action: "ban" | "unban" | "mute" | "unmute" }
 
     if (!["ban", "unban", "mute", "unmute"].includes(action)) {
-      return new NextResponse("Invalid action. Must be ban, unban, mute, or unmute.", { status: 400 })
+      return errorResponse("Invalid action. Must be ban, unban, mute, or unmute.", 400)
     }
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       select: { organizer_org_id: true, venue: { select: { owner_org_id: true } }, chat_group: { select: { id: true } } },
     })
-    if (!event) return new NextResponse("Not found", { status: 404 })
+    if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canOperate) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
-    if (!event.chat_group) return new NextResponse("No chat group", { status: 404 })
+    if (!event.chat_group) return errorResponse("No chat group", 404)
 
     const statusMap = {
       ban: "banned" as const,
@@ -91,6 +92,6 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ success: true, action, status: statusMap[action] })
   } catch (err) {
     logger.error("Ban member error", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal Server Error", { status: 500 })
+    return errorResponse("Internal Server Error", 500)
   }
 }

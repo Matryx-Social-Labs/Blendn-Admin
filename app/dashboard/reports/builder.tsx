@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { refusalText } from "@/lib/refusal"
 import { IconDownload, IconFileSpreadsheet } from "@tabler/icons-react"
 import { toast } from "sonner"
 
@@ -37,7 +38,7 @@ export function ReportBuilder({
       // are already looking at.
       const res = await fetch(`/api/reports/${selected.key}?${query}`)
       if (!res.ok) {
-        toast.error(await res.text().catch(() => "Could not build that report."))
+        toast.error(await refusalText(res, "Could not build that report."))
         return
       }
       const blob = await res.blob()
