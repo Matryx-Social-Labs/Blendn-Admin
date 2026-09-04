@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -19,14 +20,14 @@ interface RouteContext {
 export async function GET(_: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
 
     const eventForGet = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } } })
-    if (!eventForGet) return new NextResponse("Not found", { status: 404 })
+    if (!eventForGet) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), eventForGet).canEdit) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     const announcements = await db.event_announcements.findMany({
@@ -70,14 +71,14 @@ export async function GET(_: Request, { params }: RouteContext) {
     return NextResponse.json({ announcements, audience })
   } catch (err) {
     logger.error("Error fetching announcements", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }
 
 export async function POST(req: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
 
@@ -105,12 +106,12 @@ export async function POST(req: Request, { params }: RouteContext) {
       },
     })
 
-    if (!event) return new NextResponse("Event not found", { status: 404 })
+    if (!event) return errorResponse("Event not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
     if (!event.chat_group) {
-      return new NextResponse("Event has no chatroom yet", { status: 422 })
+      return errorResponse("Event has no chatroom yet", 422)
     }
 
     const chatGroupId = event.chat_group.id
@@ -187,6 +188,6 @@ export async function POST(req: Request, { params }: RouteContext) {
     return NextResponse.json(announcement, { status: 201 })
   } catch (err) {
     logger.error("Error sending announcement", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }

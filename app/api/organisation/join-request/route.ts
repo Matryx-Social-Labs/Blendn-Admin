@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { errorResponse } from "@/lib/api-response"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
@@ -23,7 +24,7 @@ import { emailDomain } from "@/lib/org-invites"
 
 export async function GET() {
   const session = await getAuth()
-  if (!session?.user?.email) return new NextResponse("Unauthorized", { status: 401 })
+  if (!session?.user?.email) return errorResponse("Unauthorized", 401)
 
   const domain = emailDomain(session.user.email)
   if (!domain) return NextResponse.json({ matches: [], domain: null })
@@ -57,7 +58,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await getAuth()
-    if (!session?.user?.email) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user?.email) return errorResponse("Unauthorized", 401)
 
     const limited = await rateLimit(req, userLimit("heavy", "org:join-request", session.user.id))
     if (limited) return limited

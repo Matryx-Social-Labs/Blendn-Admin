@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
@@ -26,7 +27,7 @@ const parseJsonField = (value: unknown) => {
 export async function GET(req: NextRequest) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     /*
      * Scoped on ORGANISATION MEMBERSHIP, not on who created the row.
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
     )
   } catch (error) {
     logger.error("Error fetching events", { error: error instanceof Error ? error.message : String(error) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }
 
@@ -90,12 +91,12 @@ export async function POST(req: Request) {
     const session = await getAuth()
 
     if (!session?.user) {
-      return new NextResponse("Unauthorized", { status: 401 })
+      return errorResponse("Unauthorized", 401)
     }
 
     const { role } = session.user
     if (role !== "app_admin" && role !== "organizer") {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     const body = await req.json()
@@ -187,22 +188,22 @@ export async function POST(req: Request) {
     logger.info("Creating event - cover_image_url", { coverImageUrl: cover_image_url ?? null })
 
     if (!title || !description || !start_time || !end_time || !timezone) {
-      return new NextResponse("Missing required fields", { status: 400 })
+      return errorResponse("Missing required fields", 400)
     }
 
     // Fix #31: Validate capacity fields
     if (max_capacity !== undefined && max_capacity !== null) {
       if (!Number.isInteger(max_capacity) || max_capacity < 1) {
-        return new NextResponse("max_capacity must be a positive integer", { status: 400 })
+        return errorResponse("max_capacity must be a positive integer", 400)
       }
       if (max_capacity > 100_000) {
-        return new NextResponse("max_capacity cannot exceed 100,000", { status: 400 })
+        return errorResponse("max_capacity cannot exceed 100,000", 400)
       }
     }
 
     const resolvedFullDescription = full_description || description
     if (!resolvedFullDescription) {
-      return new NextResponse("Missing full description", { status: 400 })
+      return errorResponse("Missing full description", 400)
     }
 
     // Derived, never taken from the body — see lib/venue-link.ts.
@@ -362,6 +363,6 @@ export async function POST(req: Request) {
     return NextResponse.json(event)
   } catch (error) {
     logger.error("Error creating event", { error: error instanceof Error ? error.message : String(error) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }

@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest } from "next/server"
+import { errorResponse } from "@/lib/api-response"
 import { getAuth } from "@/lib/auth"
 import { logger } from "@/lib/logger"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -21,14 +22,14 @@ import { buildReport, canRunReport, type ReportKey } from "@/lib/reports"
 export async function GET(req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { key } = await params
 
     // Authorization is the report's own declaration, not a check written here —
     // a report added later cannot forget to gate itself.
     if (!canRunReport(key, session.user.role)) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     // Generating a report is a full table scan with joins. Ten a minute is far
@@ -58,6 +59,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
     logger.error("Report export failed", {
       error: err instanceof Error ? err.message : String(err),
     })
-    return new NextResponse("Could not build that report.", { status: 500 })
+    return errorResponse("Could not build that report.", 500)
   }
 }

@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -12,7 +13,7 @@ interface RouteContext {
 export async function GET(_: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
 
@@ -20,9 +21,9 @@ export async function GET(_: Request, { params }: RouteContext) {
       where: { id: eventId, deleted_at: null },
       select: { organizer_org_id: true, venue: { select: { owner_org_id: true } }, chat_group: { select: { id: true } } },
     })
-    if (!event) return new NextResponse("Not found", { status: 404 })
+    if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canOperate) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
     if (!event.chat_group) return NextResponse.json({ messages: [] })
 
@@ -159,6 +160,6 @@ export async function GET(_: Request, { params }: RouteContext) {
     })
   } catch (err) {
     logger.error("Chat messages fetch error", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal Server Error", { status: 500 })
+    return errorResponse("Internal Server Error", 500)
   }
 }

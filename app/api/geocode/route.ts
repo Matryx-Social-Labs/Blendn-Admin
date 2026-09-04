@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { errorResponse } from "@/lib/api-response"
 
 import { getAuth } from "@/lib/auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -36,7 +37,7 @@ const CACHE_SECONDS = 86_400
 
 export async function GET(req: NextRequest) {
   const session = await getAuth()
-  if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+  if (!session?.user) return errorResponse("Unauthorized", 401)
 
   const limited = await rateLimit(req, userLimit("write", "geocode", session.user.id))
   if (limited) return limited

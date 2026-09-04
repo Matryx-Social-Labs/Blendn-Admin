@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { refusalText } from "@/lib/refusal"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -64,22 +65,6 @@ const QUICK_TEMPLATES = [
   "Event wrapping up in 15 minutes. Thank you for joining us!",
 ]
 
-/**
- * The server's own words for a refusal.
- *
- * These handlers answer with `{ error }` for anything a person can act on, and
- * plain text for the rest. Falling back to a generic string loses the seven
- * distinct reasons `canActivate` distinguishes, each with a different fix.
- */
-async function refusal(res: Response): Promise<string> {
-  try {
-    const body = await res.json()
-    if (typeof body?.error === "string") return body.error
-  } catch {
-    // Not JSON — a bare 401/403/500.
-  }
-  return ""
-}
 
 // ── Sponsored Messages Panel ──────────────────────────────────────────────────
 
@@ -173,7 +158,7 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
           ...(editingId ? {} : { sponsor_id: formSponsor }),
         }),
       })
-      if (!res.ok) throw new Error(await refusal(res))
+      if (!res.ok) throw new Error(await refusalText(res, "That did not go through"))
       toast.success(
         editingId
           ? "Edited — it goes back for review before it can run again"
@@ -201,7 +186,7 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
        * and every one of them was previously flattened to "Failed to update",
        * which names none of the seven fixes.
        */
-      if (!res.ok) throw new Error(await refusal(res))
+      if (!res.ok) throw new Error(await refusalText(res, "That did not go through"))
       // Re-read rather than assuming the flip landed: the server may have
       // written other fields with it.
       await fetchMessages()
@@ -454,10 +439,7 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
       })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text)
-      }
+      if (!res.ok) throw new Error(await refusalText(res, "Failed to send announcement"))
       const created: Announcement = await res.json()
       setAnnouncements((prev) => [created, ...prev])
       setContent("")

@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
@@ -54,7 +55,7 @@ export async function GET(_: Request, { params }: RouteContext) {
      */
     const session = await getAuth()
     if (!session?.user) {
-      return new NextResponse("Unauthorized", { status: 401 })
+      return errorResponse("Unauthorized", 401)
     }
 
     const event = await db.events.findFirst({
@@ -68,17 +69,17 @@ export async function GET(_: Request, { params }: RouteContext) {
     })
 
     if (!event) {
-      return new NextResponse("Event not found", { status: 404 })
+      return errorResponse("Event not found", 404)
     }
 
     if (!eventPermissions(await actorFor(session.user), event).canOperate) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     return NextResponse.json(event)
   } catch (error) {
     logger.error("Error fetching event", { error: error instanceof Error ? error.message : String(error) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }
 
@@ -87,7 +88,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const session = await getAuth()
 
     if (!session?.user) {
-      return new NextResponse("Unauthorized", { status: 401 })
+      return errorResponse("Unauthorized", 401)
     }
 
     const resolvedParams = await params
@@ -166,20 +167,20 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     })
 
     if (!event) {
-      return new NextResponse("Event not found", { status: 404 })
+      return errorResponse("Event not found", 404)
     }
 
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     // Fix #31: Validate capacity fields on update
     if (max_capacity !== undefined && max_capacity !== null) {
       if (!Number.isInteger(max_capacity) || max_capacity < 1) {
-        return new NextResponse("max_capacity must be a positive integer", { status: 400 })
+        return errorResponse("max_capacity must be a positive integer", 400)
       }
       if (max_capacity > 100_000) {
-        return new NextResponse("max_capacity cannot exceed 100,000", { status: 400 })
+        return errorResponse("max_capacity cannot exceed 100,000", 400)
       }
     }
 
@@ -480,7 +481,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     return NextResponse.json(updatedEvent)
   } catch (error) {
     logger.error("Error updating event", { error: error instanceof Error ? error.message : String(error) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }
 
@@ -489,7 +490,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     const session = await getAuth()
 
     if (!session?.user) {
-      return new NextResponse("Unauthorized", { status: 401 })
+      return errorResponse("Unauthorized", 401)
     }
 
     const resolvedParams = await params
@@ -504,11 +505,11 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     })
 
     if (!event) {
-      return new NextResponse("Event not found", { status: 404 })
+      return errorResponse("Event not found", 404)
     }
 
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     await db.events.update({
@@ -529,6 +530,6 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     return new NextResponse(null, { status: 204 })
   } catch (error) {
     logger.error("Error deleting event", { error: error instanceof Error ? error.message : String(error) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }

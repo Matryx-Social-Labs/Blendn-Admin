@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -15,7 +16,7 @@ interface RouteContext {
 export async function PATCH(req: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, msgId } = await params
 
@@ -23,7 +24,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       where: { id: eventId },
       select: { organizer_id: true, organizer_org_id: true, venue: { select: { owner_org_id: true } }, chat_group: { select: { id: true } } },
     })
-    if (!event) return new NextResponse("Not found", { status: 404 })
+    if (!event) return errorResponse("Not found", 404)
 
     /*
      * `canBroadcast`, not `canEdit` — and this is the handler where it matters
@@ -33,7 +34,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
      */
     const actor = await actorFor(session.user)
     if (!canBroadcast(actor, event, "sponsored", (await resolveSponsorGrant(actor, eventId)) ?? undefined)) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     const parsed = sponsoredMessageUpdateSchema.safeParse(await req.json())
@@ -48,7 +49,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const existing = await db.event_sponsored_messages.findFirst({
       where: { id: msgId, event_id: eventId },
     })
-    if (!existing) return new NextResponse("Not found", { status: 404 })
+    if (!existing) return errorResponse("Not found", 404)
 
     /*
      * An edit to the creative is a NEW creative, and cannot inherit approval.
@@ -153,14 +154,14 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     return NextResponse.json(updated)
   } catch (err) {
     logger.error("Error updating sponsored message", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }
 
 export async function DELETE(_: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
-    if (!session?.user) return new NextResponse("Unauthorized", { status: 401 })
+    if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, msgId } = await params
 
@@ -168,15 +169,15 @@ export async function DELETE(_: Request, { params }: RouteContext) {
       where: { id: eventId },
       select: { organizer_id: true, organizer_org_id: true, venue: { select: { owner_org_id: true } } },
     })
-    if (!event) return new NextResponse("Not found", { status: 404 })
+    if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {
-      return new NextResponse("Forbidden", { status: 403 })
+      return errorResponse("Forbidden", 403)
     }
 
     const existing = await db.event_sponsored_messages.findFirst({
       where: { id: msgId, event_id: eventId },
     })
-    if (!existing) return new NextResponse("Not found", { status: 404 })
+    if (!existing) return errorResponse("Not found", 404)
 
     // No timer to stop — deleting the row deletes the schedule with it.
     await db.event_sponsored_messages.delete({ where: { id: msgId } })
@@ -184,6 +185,6 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     return new NextResponse(null, { status: 204 })
   } catch (err) {
     logger.error("Error deleting sponsored message", { error: err instanceof Error ? err.message : String(err) })
-    return new NextResponse("Internal error", { status: 500 })
+    return errorResponse("Internal error", 500)
   }
 }
