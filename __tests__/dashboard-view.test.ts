@@ -1,5 +1,7 @@
+import { readFileSync } from "fs"
+import { join } from "path"
 import { barWidth } from "@/lib/dashboard-view"
-import { visibleNavFor } from "@/lib/dashboard-nav"
+import { mayReachRoute, visibleNavFor } from "@/lib/dashboard-nav"
 import { formatAge, formatPct, formatSince } from "@/lib/dashboard-format"
 
 describe("barWidth", () => {
@@ -84,7 +86,6 @@ describe("visibleNavFor", () => {
       "Claims",
       "Brands",
       "Creative review",
-      "Brand claims",
       "Charges",
       "Applications",
       "Organisations",
@@ -221,5 +222,79 @@ describe("nav active matching", () => {
     expect(item("Events").isActive!("/dashboard/events")).toBe(true)
     expect(item("Events").isActive!("/dashboard/events/new")).toBe(true)
     expect(item("Events").isActive!("/dashboard/events/abc")).toBe(true)
+  })
+})
+
+describe("mayReachRoute", () => {
+  /*
+   * The gate and the menu come from one list now.
+   *
+   * `/dashboard/brand` and `/dashboard/placements` gated on
+   * `canAccessDashboard` — true for all four dashboard roles — while the nav
+   * declared them sponsor-only. So the link was hidden from the people who
+   * should use it and the URL worked for everybody else, which is the worst
+   * combination of the two mistakes.
+   */
+  it("lets a sponsor reach the sponsor screens", () => {
+    expect(mayReachRoute("sponsor", "/dashboard/brand")).toBe(true)
+    expect(mayReachRoute("sponsor", "/dashboard/placements")).toBe(true)
+  })
+
+  it("keeps everybody else out of them", () => {
+    for (const role of ["organizer", "venue_owner", "app_admin"]) {
+      expect(mayReachRoute(role, "/dashboard/brand")).toBe(false)
+      expect(mayReachRoute(role, "/dashboard/placements")).toBe(false)
+    }
+  })
+
+  it("agrees with the menu for every role and every item", () => {
+    /*
+     * The property that matters, rather than a handful of cases: whatever the
+     * nav shows a role is exactly what that role may reach. Drift between the
+     * two is the defect, so the test is the equivalence itself.
+     */
+    for (const role of ["app_admin", "organizer", "venue_owner", "sponsor"]) {
+      const shown = new Set(visibleNavFor(role).map((i) => i.url))
+      for (const item of visibleNavFor("app_admin").concat(visibleNavFor("sponsor"))) {
+        expect(mayReachRoute(role, item.url)).toBe(shown.has(item.url))
+      }
+    }
+  })
+
+  it("fails closed on an unknown role and an undeclared route", () => {
+    expect(mayReachRoute(undefined, "/dashboard/brand")).toBe(false)
+    expect(mayReachRoute("attendee", "/dashboard/brand")).toBe(false)
+    // A page nobody declared is a page nobody reasoned about.
+    expect(mayReachRoute("app_admin", "/dashboard/not-a-real-page")).toBe(false)
+  })
+
+  it("still allows the unlisted routes, which carry their own gates", () => {
+    expect(mayReachRoute("organizer", "/dashboard/settings")).toBe(true)
+  })
+})
+
+describe("every dashboard role has an overview", () => {
+  /*
+   * `getDashboardOverview` branched on `app_admin` and `venue_owner` and fell
+   * through to the organiser build for everything else — so a sponsor got an
+   * organiser dashboard scoped to `organizer_id = <their own user id>`, a
+   * column that is never theirs. Permanently all zeros, and it read as a quiet
+   * month rather than as the wrong question.
+   *
+   * The hole was in the type union too: three members for four roles, with
+   * nothing making the fourth a type error.
+   */
+  it("has a discriminant for each role the shell admits", () => {
+    const src = readFileSync(join(__dirname, "..", "lib", "dashboard-types.ts"), "utf8")
+    for (const role of ["app_admin", "organizer", "venue_owner", "sponsor"]) {
+      expect(src).toContain(`role: "${role}"`)
+    }
+  })
+
+  it("routes the sponsor to its own builder", () => {
+    const src = readFileSync(join(__dirname, "..", "app", "dashboard", "actions.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+    expect(src).toMatch(/role === "sponsor"\s*\)\s*return await buildSponsorOverview\(\)/)
   })
 })

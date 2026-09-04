@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { EmptyState, HeroMetric, MetricTile } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
-import { canAccessDashboard } from "@/lib/rbac"
+import { mayReachRoute } from "@/lib/dashboard-nav"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 
 import { PlacementDecision } from "./decision"
@@ -58,7 +58,10 @@ const PHASE_LABEL: Record<string, string> = {
 export default async function PlacementsPage() {
   const session = await getAuth()
   if (!session?.user) redirect("/login")
-  if (!canAccessDashboard(session.user.role)) redirect("/dashboard")
+  // From the nav's own `allowedRoles`, so the menu and the gate cannot
+  // disagree. This called `canAccessDashboard`, which is true for all four
+  // dashboard roles, while the nav has always presented this as sponsor-only.
+  if (!mayReachRoute(session.user.role, "/dashboard/placements")) redirect("/dashboard")
 
   const overview = await getSponsorOverview()
   const now = new Date()

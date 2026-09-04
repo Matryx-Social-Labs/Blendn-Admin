@@ -416,6 +416,15 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
 
   const brand = await db.sponsors.findFirst({
     where: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
+    /*
+     * Ordered, because this decides EVERY number on the screen.
+     *
+     * `findFirst` with no order returns whichever row Postgres reaches first,
+     * so a two-brand org's entire dashboard could change between refreshes —
+     * with nothing on the screen saying which brand it was showing. Oldest
+     * first is arbitrary but stable, which is the property that matters.
+     */
+    orderBy: [{ created_at: "asc" }, { id: "asc" }],
     select: { id: true, name: true },
   })
   if (!brand) {
@@ -627,11 +636,27 @@ export async function saveMyBrand(input: unknown) {
   const session = await getAuth()
   if (!session?.user) throw new Error("Unauthorized")
 
+  /*
+   * A role check, which this had none of.
+   *
+   * A server action is a POST endpoint dispatched by action id — the page's
+   * redirect guards the view, not this. So any dashboard user could mint a
+   * `sponsors` row for their organisation without ever seeing the screen, and
+   * the brand-name uniqueness check made that worse: one account could squat a
+   * name globally and block every other org from creating a colliding one.
+   */
+  if (session.user.role !== "sponsor") throw new Error("Only sponsors can edit a brand")
+
   const parsed = brandSchema.safeParse(input)
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid brand")
 
   const actor = await actorFor(session.user)
-  const orgId = actor.orgIds[0]
+  /*
+   * Sorted, not `[0]`. `actorFor` makes no ordering promise, so a multi-org
+   * user's brand could attach to a different organisation between calls — and
+   * nothing on the screen would say which one it had chosen.
+   */
+  const orgId = [...actor.orgIds].sort()[0]
   if (!orgId) throw new Error("You are not a member of an organisation")
 
   const { name, website, logo_url } = parsed.data

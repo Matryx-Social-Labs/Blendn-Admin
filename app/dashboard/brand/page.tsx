@@ -2,7 +2,7 @@ import { redirect } from "next/navigation"
 
 import { ClaimBrand } from "@/components/claim-brand"
 import { getAuth } from "@/lib/auth"
-import { canAccessDashboard } from "@/lib/rbac"
+import { mayReachRoute } from "@/lib/dashboard-nav"
 import { getMyBrand } from "@/lib/sponsor-actions"
 import { getMyClaims } from "@/lib/sponsor-claim-actions"
 
@@ -20,7 +20,10 @@ export const dynamic = "force-dynamic"
 export default async function BrandPage() {
   const session = await getAuth()
   if (!session?.user) redirect("/login")
-  if (!canAccessDashboard(session.user.role)) redirect("/dashboard")
+  // From the nav's own `allowedRoles`, so the menu and the gate cannot
+  // disagree. This called `canAccessDashboard`, which is true for all four
+  // dashboard roles, while the nav has always presented this as sponsor-only.
+  if (!mayReachRoute(session.user.role, "/dashboard/brand")) redirect("/dashboard")
 
   const [brand, claims] = await Promise.all([getMyBrand(), getMyClaims()])
   const claimPending = !brand && claims.some((c) => c.status === "pending")

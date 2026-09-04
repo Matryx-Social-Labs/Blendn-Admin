@@ -351,6 +351,12 @@
       "mutation": "A: delete the `if (reader?.read_receipts === false) return` line in lib/socket-server.ts. B: replace `otherPartyAllowsReceipts: otherUser.profile?.read_receipts` with a literal `true`",
       "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') \u2014 the case a negative match on the old shape could not catch, because that expression is now the helper's argument",
       "date": "2026-09-04"
+    },
+    "dashboard-view.test.ts": {
+      "guards": "mayReachRoute agrees with visibleNavFor for every role and every nav item, fails closed on unknown roles and undeclared routes, and the sponsor has both a discriminant in DashboardOverview and its own branch in getDashboardOverview",
+      "mutation": "A: make mayReachRoute return true instead of checking allowedRoles. B: delete the `role === \"sponsor\"` branch from getDashboardOverview so sponsors fall through to the organiser build",
+      "observed": "A: 3 failing (keeps everybody else out, agrees with the menu, fails closed). B: 1 failing ('routes the sponsor to its own builder'). The equivalence assertion also caught two real defects while being written \u2014 an unlisted-route short-circuit that bypassed a declared gate, and /dashboard/venues having two nav entries so `find` denied admins their own index",
+      "date": "2026-09-05"
     }
   },
   "grandfathered": [

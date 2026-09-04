@@ -1,5 +1,6 @@
 import { OverviewAdmin } from "@/components/dashboard/overview-admin"
 import { OverviewOrganizer } from "@/components/dashboard/overview-organizer"
+import { OverviewSponsor } from "@/components/dashboard/overview-sponsor"
 import { OverviewVenue } from "@/components/dashboard/overview-venue"
 import { resolveRange } from "@/lib/date-range"
 
@@ -24,5 +25,6 @@ export default async function Page({
   // cannot be handed a payload built for a different one.
   if (overview.role === "app_admin") return <OverviewAdmin data={overview} />
   if (overview.role === "venue_owner") return <OverviewVenue data={overview} />
+  if (overview.role === "sponsor") return <OverviewSponsor data={overview} />
   return <OverviewOrganizer data={overview} />
 }

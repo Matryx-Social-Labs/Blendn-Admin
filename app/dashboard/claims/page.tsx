@@ -24,14 +24,20 @@ export default async function ClaimsPage() {
   if (!session?.user) redirect("/login")
   if (session.user.role !== "app_admin") redirect("/dashboard")
 
-  const [{ rows, total }, venueCount] = await Promise.all([
+  const [{ rows, total }, venueCount, brandCount] = await Promise.all([
     getEventClaimQueue(),
     db.venue_claims.count({ where: { status: "pending" } }),
+    db.sponsor_claims.count({ where: { status: "pending" } }),
   ])
 
   return (
     <div className="flex flex-col gap-5">
-      <ClaimSwitch active="events" eventCount={total} venueCount={venueCount} />
+      <ClaimSwitch
+        active="events"
+        eventCount={total}
+        venueCount={venueCount}
+        brandCount={brandCount}
+      />
       {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
       <div className="flex flex-col gap-1">
         <h2 className="text-sm font-bold">Event claims</h2>

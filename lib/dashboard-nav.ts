@@ -162,7 +162,7 @@ export const dashboardNav: DashboardNavItem[] = [
      */
     title: "Claims",
     description:
-      "Ownership requests for events and venues. Approving one hands over an attendee list.",
+      "Ownership requests for events, venues and brands. Approving one hands over an attendee list, a building, or a brand's reporting.",
     url: "/dashboard/claims",
     icon: IconFileCheck,
     allowedRoles: ["app_admin"],
@@ -185,13 +185,6 @@ export const dashboardNav: DashboardNavItem[] = [
     description: "Sponsored copy waiting to be read by a person. Oldest first.",
     url: "/dashboard/creative-review",
     icon: IconFlag,
-    allowedRoles: ["app_admin"],
-  },
-  {
-    title: "Brand claims",
-    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
-    url: "/dashboard/sponsor-claims",
-    icon: IconFileCheck,
     allowedRoles: ["app_admin"],
   },
   {
@@ -281,4 +274,49 @@ export const unlistedRoutes = ["/dashboard/settings", "/dashboard/venue-owners"]
 export function visibleNavFor(role: string | undefined): DashboardNavItem[] {
   if (!role) return []
   return dashboardNav.filter((item) => item.allowedRoles.includes(role as DashboardRole))
+}
+
+/**
+ * May this role reach this route at all?
+ *
+ * The nav already declares `allowedRoles` per item, and the pages gated
+ * themselves separately — so `/dashboard/brand` and `/dashboard/placements`
+ * called `canAccessDashboard`, which is true for all four dashboard roles,
+ * while the nav presented both as sponsor-only. The link was hidden and the
+ * URL worked, which is the worst combination: invisible to the people who
+ * should use it and open to everyone else.
+ *
+ * Deriving the gate from the same list that draws the menu means the two
+ * cannot disagree again. Fails closed for an unknown role and for a route with
+ * no nav entry, because a page nobody declared is a page nobody reasoned about.
+ *
+ * Unlisted routes are deliberately not covered: `/dashboard/settings` and
+ * `/dashboard/venue-owners` are reachable without appearing in the menu, so
+ * they carry their own gates.
+ */
+export function mayReachRoute(role: string | undefined, url: string): boolean {
+  if (!role) return false
+  /*
+   * A declared entry always wins, and it is checked FIRST.
+   *
+   * `/dashboard/venue-owners` is both unlisted and in the nav, so testing the
+   * unlisted set first let it bypass its own `allowedRoles` for every role —
+   * a gate that opened the one route it was asked about. The equivalence test
+   * caught it immediately, which is the argument for asserting the property
+   * rather than a handful of cases.
+   */
+  /*
+   * `some`, not `find`. `/dashboard/venues` has TWO entries — one for
+   * `venue_owner` and one for `app_admin` — because it is one URL that frames
+   * itself differently per role, and the menu deliberately describes it
+   * differently to each. Taking the first match denied the admin their own
+   * venue index while the menu was still offering it.
+   */
+  const declared = dashboardNav.filter((i) => i.url === url)
+  if (declared.length > 0) {
+    return declared.some((i) => i.allowedRoles.includes(role as DashboardRole))
+  }
+  // No entry: reachable only if it is deliberately unlisted and carries its own
+  // gate. Anything else is a page nobody declared, and so nobody reasoned about.
+  return (unlistedRoutes as readonly string[]).includes(url)
 }

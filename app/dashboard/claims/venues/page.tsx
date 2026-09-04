@@ -21,14 +21,20 @@ export default async function VenueClaimsPage() {
   if (!session?.user) redirect("/login")
   if (session.user.role !== "app_admin") redirect("/dashboard")
 
-  const [claims, eventCount] = await Promise.all([
+  const [claims, eventCount, brandCount] = await Promise.all([
     getVenueClaimQueue(),
     db.event_claims.count({ where: { status: "pending" } }),
+    db.sponsor_claims.count({ where: { status: "pending" } }),
   ])
 
   return (
     <div className="flex flex-col gap-5">
-      <ClaimSwitch active="venues" eventCount={eventCount} venueCount={claims.length} />
+      <ClaimSwitch
+        active="venues"
+        eventCount={eventCount}
+        venueCount={claims.length}
+        brandCount={brandCount}
+      />
       <VenueClaimQueue claims={claims} />
     </div>
   )

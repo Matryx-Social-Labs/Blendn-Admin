@@ -21,14 +21,23 @@ export function ClaimSwitch({
   active,
   eventCount,
   venueCount,
+  brandCount,
 }: {
-  active: "events" | "venues"
+  active: "events" | "venues" | "brands"
   eventCount: number
   venueCount: number
+  brandCount: number
 }) {
   const tabs = [
     { key: "events" as const, href: "/dashboard/claims", label: "Events", count: eventCount },
     { key: "venues" as const, href: "/dashboard/claims/venues", label: "Venues", count: venueCount },
+    /*
+     * The third queue, folded in. It asks the same question the other two do —
+     * somebody wants ownership of something, and approving hands it over — and
+     * it lived on its own URL with its own nav entry purely because it was
+     * built last.
+     */
+    { key: "brands" as const, href: "/dashboard/claims/brands", label: "Brands", count: brandCount },
   ]
 
   return (
