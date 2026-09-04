@@ -34,10 +34,10 @@
   ],
   "verified": {
     "event-notifications-reachable.test.ts": {
-      "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers, comments excluded",
-      "mutation": "Delete the `await notifyEventCancelled(...)` call in app/api/events/[id]/route.ts",
-      "observed": "1 failing: 'notifyEventCancelled is called from both cancellation paths'",
-      "date": "2026-08-20"
+      "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers; the audience is RSVP union favourites; the reminder claims `reminded_at` BEFORE sending, is scheduled by lib/background.ts, and the service reaches server.ts with no @/ alias",
+      "mutation": "A: delete the `reminded_at` claim from sendEventReminders. B: remove startReminderSweeper() from lib/background.ts. (original) delete the notifyEventCancelled call in the cancellation route",
+      "observed": "A: 1 failing ('claims the event before sending, not after'). B: 1 failing ('is actually scheduled'). The @/ assertion was itself added after the import-graph guard caught this service entering server.ts's graph with alias imports, which would have been MODULE_NOT_FOUND at boot in production only.",
+      "date": "2026-09-05"
     },
     "notification-content-retention.test.ts": {
       "guards": "notifications.body is redacted for content-bearing kinds, on both the single and bulk insert",
