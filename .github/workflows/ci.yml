@@ -105,6 +105,15 @@ jobs:
           for attempt in 1 2; do
             out=$(timeout 120 npm audit --audit-level=high 2>&1)
             code=$?
+            # 124 is `timeout` killing it — an outage with no output at all,
+            # which the text match below cannot see. Classifying that as a
+            # vulnerability is what the first version of this step did, and it
+            # reported a high-severity finding that did not exist.
+            if [ "$code" -eq 124 ]; then
+              echo "::warning::npm audit timed out after 120s (attempt $attempt) — not a vulnerability"
+              sleep 10
+              continue
+            fi
             if [ "$code" -eq 0 ]; then
               echo "$out" | tail -3
               echo "audit clean"
@@ -118,6 +127,7 @@ jobs:
               sleep 10
               continue
             fi
+            echo "--- npm audit output (exit $code) ---"
             echo "$out"
             echo "::error::npm audit reported a high-severity vulnerability"
             exit 1
