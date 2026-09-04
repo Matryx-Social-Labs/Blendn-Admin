@@ -333,6 +333,12 @@
       "mutation": "Delete the `NODE_ENV=production \\` line from the server-start step in .github/workflows/ci.yml, leaving the comment that names it",
       "observed": "1 failing: 'starts in production mode' \u2014 and it failed with NODE_ENV=production still present in the comment block, which is the point",
       "date": "2026-09-04"
+    },
+    "occupancy-inferred.test.ts": {
+      "guards": "The live tab actually passes occupancyMostlyInferred to OccupancyHero's `unreliable` prop, rather than computing the rule and never rendering it",
+      "mutation": "Delete the `unreliable={occupancyMostlyInferred(snapshot)}` line from components/dashboard/live-tab.tsx",
+      "observed": "1 failing: 'is actually wired to the screen' \u2014 the state the prop was genuinely in for weeks after #278 removed the mass-checkout guard it was written for",
+      "date": "2026-09-04"
     }
   },
   "grandfathered": [
