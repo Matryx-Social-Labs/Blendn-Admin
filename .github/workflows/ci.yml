@@ -1,3 +1,18 @@
+    # Runs on every PR again, sweeps excluded; nightly and `full-e2e` run the
+    # lot. It was off by default for one reason, and the reason was wrong.
+    #
+    # The lane was killed by the runner at ~6.7GB RSS and that was written up
+    # as an unexplained leak that production probably shared. It was neither:
+    # `npm run` does not set NODE_ENV, so the server started in DEVELOPMENT
+    # mode and Next.js compiled routes on demand for 231 navigations. Fixing
+    # that one assignment took peak RSS from 6,904M to 458M and the suite from
+    # reclaimed-mid-run to 29 passed in 15.7s.
+    #
+    # Kept from that episode, because both were real: the memory trace is
+    # tailed live by this step rather than piped into a step that exits, and
+    # the sweeps stay off ordinary PRs because 231 navigations is still most
+    # of this lane's cost.
+
 name: CI
 
 on:
@@ -216,10 +231,6 @@ jobs:
     # Meanwhile the suite runs locally against a production build and a fresh
     # seed — 32 passing including both sweeps — and that is where it is being
     # relied on until the memory finding is closed.
-    if: >-
-      github.event_name == 'schedule'
-      || github.event_name == 'workflow_dispatch'
-      || contains(github.event.pull_request.labels.*.name, 'full-e2e')
     runs-on: ubuntu-latest
 
     # ── OFF BY DEFAULT, and this is a deliberate retreat rather than a repair ──
@@ -409,6 +420,7 @@ jobs:
           # restores the nightly sweep unchanged.
           E2E_EXCLUDE: >-
             ${{ (github.event_name == 'schedule'
+                 || github.event_name == 'workflow_dispatch'
                  || contains(github.event.pull_request.labels.*.name, 'full-e2e'))
                 && '$^'
                 || '@sweep' }}
