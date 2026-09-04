@@ -1,6 +1,7 @@
 import { getOccupancy, getOccupancies } from "@/lib/occupancy"
 import { buildLiveSnapshot } from "@/lib/live-snapshot"
 
+import { closeSession, openSession } from "@/lib/presence-sessions"
 import { db, closeDb, makeUser, makeEvent, occurrenceOf, testId, putInRoom } from "./helpers"
 
 /**
@@ -74,17 +75,36 @@ describe("occupancy is derived", () => {
 
     expect((await getOccupancy(eventId)).inside).toBe(1)
 
+    /*
+     * Through the real writers, not by editing rows.
+     *
+     * This used to flip `event_check_ins.status` directly, which was faithful
+     * while that column was what "inside" meant. It no longer is: a session
+     * closes and a new one opens, and hand-editing the old column would have
+     * let this pass while the thing it describes was broken.
+     */
+    await closeSession(occurrenceId, userId, "user")
     await db.event_check_ins.updateMany({
       where: { event_id: eventId, user_id: userId },
       data: { status: "checked_out", check_out_time: new Date() },
     })
     expect((await getOccupancy(eventId)).inside).toBe(0)
 
+    await openSession({ eventId, occurrenceId, userId })
     await db.event_check_ins.updateMany({
       where: { event_id: eventId, user_id: userId },
       data: { status: "checked_in", check_out_time: null },
     })
     expect((await getOccupancy(eventId)).inside).toBe(1)
+
+    /*
+     * Two sessions now exist for one person, which is the entire point: the
+     * old model overwrote the arrival and could not represent a smoke break at
+     * all.
+     */
+    expect(
+      await db.presence_sessions.count({ where: { occurrence_id: occurrenceId, user_id: userId } })
+    ).toBe(2)
 
     // And they are one person, however many times they went in and out.
     expect((await getOccupancy(eventId)).uniqueAttendance).toBe(1)
@@ -213,15 +233,9 @@ describe("per-occurrence capacity", () => {
     for (let i = 0; i < 12; i++) {
       const u = await makeUser(`poc-g${i}`)
       users.push(u)
-      await db.event_check_ins.create({
-        data: {
-          user_id: u,
-          event_id: eventId,
-          occurrence_id: occurrenceId,
-          check_in_time: new Date(),
-          status: "checked_in",
-        },
-      })
+      // `putInRoom`, not a bare check-in row: occupancy reads sessions now, and
+      // a fixture that writes one store describes a room that cannot exist.
+      await putInRoom({ eventId, occurrenceId, userId: u })
     }
 
     const o = await getOccupancy(eventId)

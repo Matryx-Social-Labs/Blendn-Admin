@@ -5,6 +5,7 @@
 // paths.
 import { db } from "./db"
 import { occupancyFrom } from "./occupancy"
+import { headcount } from "./presence-sessions"
 import { escalates } from "./sentiment/taxonomy"
 import { resolveOccurrence } from "./occurrences"
 
@@ -87,30 +88,26 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
    * single-day event and is the honest answer for an event between days.
    */
   const slot = await resolveOccurrence(eventId, now)
-  const today = slot.occurrence ? { occurrence_id: slot.occurrence.id } : {}
 
   const [
-    checkedInTotal,
-    checkedOutTotal,
-    staffInside,
-    checkInRate10m,
+    live,
     arrivalBuckets,
     recentMessages,
     activeChatters,
     openFlags,
     feedback,
   ] = await Promise.all([
-    db.event_check_ins.count({
-      where: { event_id: eventId, status: { in: ["checked_in", "checked_out"] }, ...today },
-    }),
-    db.event_check_ins.count({
-      where: { event_id: eventId, check_out_time: { not: null }, ...today },
-    }),
-    db.event_check_ins.count({
-      where: { event_id: eventId, status: "checked_in", kind: "staff", ...today },
-    }),
-    db.event_check_ins.count({
-      where: { event_id: eventId, check_in_time: { gte: tenMinutesAgo }, ...today },
+    /*
+     * One query where there were four.
+     *
+     * This screen refreshes every five seconds per watched event, and these
+     * counts differ only by predicate — so Postgres computes all of them in a
+     * single pass over one index rather than four round trips on the socket
+     * server's event loop.
+     */
+    headcount(slot.occurrence ? { occurrenceId: slot.occurrence.id } : { eventId }, {
+      now,
+      recentMinutes: 10,
     }),
     /*
      * The arrival histogram, bucketed by Postgres rather than by a loop.
@@ -120,14 +117,26 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
      * buckets forever, dragging the median toward zero and making the
      * arrival-rate alert progressively less able to fire.
      */
+    /*
+     * Bucketed on each person's FIRST arrival, not on every session.
+     *
+     * Sessions make re-entry a new row by design, so counting rows here would
+     * turn one person stepping out for a cigarette and coming back into a
+     * second arrival — and the entry alert reads this curve to decide whether
+     * a queue is building at the door.
+     */
     db.$queryRaw<Array<{ bucket: Date; n: bigint }>>`
-      SELECT to_timestamp(floor(extract(epoch FROM check_in_time) / 600) * 600) AS bucket,
+      WITH first_arrival AS (
+        SELECT user_id, MIN(arrived_at) AS at
+          FROM presence_sessions
+         WHERE event_id = ${eventId}::uuid
+      GROUP BY user_id
+      )
+      SELECT to_timestamp(floor(extract(epoch FROM at) / 600) * 600) AS bucket,
              count(*) AS n
-        FROM event_check_ins
-       WHERE event_id = ${eventId}::uuid
-         AND check_in_time IS NOT NULL
-         AND check_in_time >= ${event.start_time}
-         AND check_in_time < ${new Date(Math.min(now.getTime(), event.end_time.getTime()))}
+        FROM first_arrival
+       WHERE at >= ${event.start_time}
+         AND at < ${new Date(Math.min(now.getTime(), event.end_time.getTime()))}
     GROUP BY 1
     ORDER BY 1
     `,
@@ -162,7 +171,18 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     }),
   ])
 
-  const inside = Math.max(0, checkedInTotal - checkedOutTotal)
+  /*
+   * Read, not derived. `checkedInTotal - checkedOutTotal` was the only way to
+   * ask this of a mutable status column, and it went wrong in both directions:
+   * a row the sweeper missed never decremented, and a `checked_out` row from
+   * day one made day three's arithmetic negative — hence the `Math.max(0, …)`
+   * that was hiding it.
+   */
+  const inside = live.insideGuests + live.insideStaff
+  const staffInside = live.insideStaff
+  const checkedInTotal = live.arrived
+  const checkedOutTotal = Math.max(0, live.arrived - inside)
+  const checkInRate10m = live.arrivedRecently
 
   /*
    * Shared with `getOccupancy`, not recomputed. This screen used to cap fill at
@@ -244,6 +264,16 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     staffInside: occupancy.staffInside,
     checkedInTotal,
     checkedOutTotal,
+    /*
+     * How much of `inside` is inference rather than observation.
+     *
+     * Nobody is removed from the room for going quiet — a pocketed phone stops
+     * reporting within minutes, because the client polls in the foreground
+     * only. But a figure that cannot distinguish "seen thirty seconds ago" from
+     * "seen an hour ago" is one an organiser has no way to calibrate, and R31
+     * is explicit that a soft number should say it is soft where it is shown.
+     */
+    staleInside: live.stale,
     capacity: occupancy.capacity,
     fillPct: occupancy.fillPct,
     overCapacity: occupancy.overCapacity,

@@ -227,18 +227,19 @@ describe("sessions and check-ins agree about who is inside", () => {
     expect(await insideNow(r.occurrenceId, { includeStaff: true })).toBe(2)
   })
 
-  it("is where the two DISAGREE, and says so deliberately", async () => {
+  it("agrees about silence, because silence is not evidence of leaving", async () => {
     /*
-     * The one case they differ, recorded rather than smoothed over — it is the
-     * reason to move, not a defect.
+     * This asserted the opposite, and called the gap "the cutover's value":
+     * check-ins said one, sessions said none, because sessions asked
+     * `last_seen_at > cutoff` and silence stopped counting on its own.
      *
-     * A check-in row goes stale: the sweeper closes people on a timer and
-     * anyone it misses stays `checked_in` forever, which is how occupancy
-     * drifts upward across a multi-day run and never comes back down. Sessions
-     * ask `last_seen_at > cutoff`, so silence stops counting on its own.
+     * The premise was that silence is informative. It is not — the Expo client
+     * polls in the foreground only, having refused iOS `Always` permission as
+     * an App Review liability, so a pocketed phone goes quiet within minutes.
+     * The gap was not the cutover's value; it was a room being emptied of
+     * people who were standing in it.
      *
-     * The old fold still says one; the new one says none. That gap IS the
-     * cutover's value, so it is asserted rather than reconciled away.
+     * So the two agree here, and that agreement is the assertion.
      */
     const r = await liveRoom()
     const stale = new Date(Date.now() - 60 * MIN)
@@ -251,6 +252,41 @@ describe("sessions and check-ins agree about who is inside", () => {
     })
 
     expect(await insideByCheckIns(r.occurrenceId)).toBe(1)
-    expect(await insideNow(r.occurrenceId)).toBe(0)
+    expect(await insideNow(r.occurrenceId)).toBe(1)
+  })
+
+  it("is where the two DISAGREE — re-entry, which one row per person cannot hold", async () => {
+    /*
+     * The real difference, and the one that justifies the move.
+     *
+     * `@@unique([occurrence_id, user_id])` gives a person exactly one check-in
+     * row, so coming back overwrites the arrival: dwell then bills the hour
+     * spent at the pub as time in the room, and the second visit leaves no
+     * trace at all. Sessions hold both visits because holding both is the
+     * point.
+     */
+    const r = await liveRoom()
+    const u = await makeUser(testId("rc_return"))
+    users.push(u)
+    const t = (m: number) => new Date(Date.now() - m * MIN)
+
+    await arriveBoth(r, u, t(120))
+    await closeSession(r.occurrenceId, u, "user", t(90))
+    await openSession({ eventId: r.eventId, occurrenceId: r.occurrenceId, userId: u, at: t(30) })
+
+    // One row over there, two visits over here.
+    expect(
+      await db.event_check_ins.count({
+        where: { occurrence_id: r.occurrenceId, user_id: u },
+      })
+    ).toBe(1)
+    expect(
+      await db.presence_sessions.count({
+        where: { occurrence_id: r.occurrenceId, user_id: u },
+      })
+    ).toBe(2)
+
+    // And still one person inside, not two.
+    expect(await insideNow(r.occurrenceId)).toBe(1)
   })
 })

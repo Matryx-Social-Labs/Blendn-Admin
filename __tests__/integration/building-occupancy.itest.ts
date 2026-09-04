@@ -1,6 +1,6 @@
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom } from "./helpers"
 
 /**
  * How many people are in the building.
@@ -47,16 +47,9 @@ async function inside(eventId: string, kind: "attendee" | "staff", count: number
   for (let i = 0; i < count; i++) {
     const u = await makeUser(`bo-${kind}`)
     users.push(u)
-    await db.event_check_ins.create({
-      data: {
-        user_id: u,
-        event_id: eventId,
-        occurrence_id: occurrenceId,
-        check_in_time: new Date(),
-        status: "checked_in",
-        kind,
-      },
-    })
+    // Both stores, as production does. Building occupancy sums `getOccupancies`,
+    // which reads sessions now, so a check-in row on its own is an empty room.
+    await putInRoom({ eventId, occurrenceId, userId: u, kind })
   }
 }
 

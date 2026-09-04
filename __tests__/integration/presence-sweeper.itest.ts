@@ -81,19 +81,42 @@ async function present(
 ) {
   const userId = await makeUser(testId(label))
   users.push(userId)
-  return db.event_check_ins.create({
+  const kind = over.kind ?? "attendee"
+  const lastSeen = over.last_seen_at ?? ago(5)
+
+  const row = await db.event_check_ins.create({
     data: {
       event_id: eventId,
       occurrence_id: occurrenceId,
       user_id: userId,
       status: "checked_in",
       check_in_time: ago(60),
-      kind: over.kind ?? "attendee",
+      kind,
       left_area_at: over.left_area_at ?? null,
       departure_prompted_at: over.departure_prompted_at ?? null,
-      last_seen_at: over.last_seen_at ?? ago(5),
+      last_seen_at: lastSeen,
     },
   })
+
+  /*
+   * And the session, because production opens one at check-in and
+   * `performCheckout` closes both. This fixture wrote the check-in alone, which
+   * was invisible while occupancy read that table and became eight failures the
+   * moment it read sessions — every one of them "expected 3, received 0",
+   * describing a room the product cannot actually produce.
+   */
+  await db.presence_sessions.create({
+    data: {
+      event_id: eventId,
+      occurrence_id: occurrenceId,
+      user_id: userId,
+      kind,
+      arrived_at: ago(60),
+      last_seen_at: lastSeen,
+    },
+  })
+
+  return row
 }
 
 describe("the sweeper acts on time passing", () => {

@@ -60,9 +60,22 @@ describe("I6 — leaving_early fired permanently from day two", () => {
      */
     const src = code("lib/live-snapshot.ts")
     expect(src).toMatch(/const slot = await resolveOccurrence\(eventId, now\)/)
-    expect(src).toMatch(/const today = slot\.occurrence \? \{ occurrence_id: slot\.occurrence\.id \} : \{\}/)
-    // All four check-in counts carry it.
-    expect((src.match(/\.\.\.today/g) ?? []).length).toBe(4)
+
+    /*
+     * The scoping moved rather than went away. The four `...today` spreads are
+     * gone because the four counts are gone: `headcount` answers all of them
+     * in one query and takes the scope as an argument, so an unscoped read is
+     * no longer something you can write by omission — it is a different call.
+     *
+     * That is a stronger guarantee than the spread was, and the invariant is
+     * unchanged: the live counts are the resolved occurrence's, falling back
+     * to event-wide only when no occurrence resolves.
+     */
+    expect(src).toMatch(
+      /headcount\(slot\.occurrence \? \{ occurrenceId: slot\.occurrence\.id \} : \{ eventId \}/
+    )
+    // And no count slipped back in beside it, unscoped.
+    expect(src).not.toMatch(/db\.event_check_ins\.count\(/)
   })
 })
 

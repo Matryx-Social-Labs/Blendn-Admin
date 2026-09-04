@@ -21,6 +21,8 @@ const base: LiveSnapshot = {
   staffInside: 2,
   checkedInTotal: 45,
   checkedOutTotal: 5,
+  // Nobody inferred: these fixtures are all direct observation.
+  staleInside: 0,
   capacity: 80,
   fillPct: 48,
   overCapacity: false,
