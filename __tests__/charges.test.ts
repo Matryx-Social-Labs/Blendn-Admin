@@ -290,3 +290,65 @@ describe("the ledger", () => {
     expect(ledger.totals).toEqual([{ currency: "INR", settledMinor: 0, agreedMinor: 0 }])
   })
 })
+
+describe("the ledger counts each brand's own sends", () => {
+  /*
+   * Two readers of one relation gave two answers, and this is the one used to
+   * decide what to bill.
+   *
+   * `getChargeLedger` selected `event.sponsored_messages` with no filter, so a
+   * row for brand A showed the sends of every sponsor at that event. Two brands
+   * at one night and both rows read double. `getSponsorOverview` has always
+   * filtered the same relation by `sponsor_id`.
+   *
+   * Control run, not registered: this is behavioural rather than structural, so
+   * it cannot pass vacuously against broken code the way a source-scanning
+   * guard can. Removing the `.filter((m) => m.sponsor_id === r.sponsor.id)`
+   * from the sends sum fails both assertions below.
+   */
+  const brandA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  const brandB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+  const rowFor = (sponsorId: string, name: string) => ({
+    id: `p-${name}`,
+    status: "approved",
+    sponsor: { id: sponsorId, name, org: { display_name: "Org" } },
+    event: {
+      id: "evt-1",
+      title: "One night",
+      start_time: new Date("2026-08-05T19:00:00Z"),
+      end_time: new Date("2026-08-05T23:00:00Z"),
+      // BOTH brands' campaigns come back on the event, which is the point.
+      sponsored_messages: [
+        { sponsor_id: brandA, _count: { sends: 3 } },
+        { sponsor_id: brandB, _count: { sends: 7 } },
+      ],
+    },
+    charges: [],
+  })
+
+  it("attributes sends to the brand whose placement the row is", async () => {
+    mockAuth.mockResolvedValue({ user: { id: ADMIN, role: "app_admin" } })
+    mockDb.event_sponsors.findMany.mockResolvedValue([
+      rowFor(brandA, "Alpha"),
+      rowFor(brandB, "Beta"),
+    ])
+
+    const { placements } = await getChargeLedger()
+
+    expect(placements.find((r) => r.brandName === "Alpha")!.sends).toBe(3)
+    expect(placements.find((r) => r.brandName === "Beta")!.sends).toBe(7)
+    // The old behaviour: both rows reading the event's total.
+    expect(placements.every((r) => r.sends !== 10)).toBe(true)
+  })
+
+  it("reports zero for a brand that sent nothing, not the event's total", async () => {
+    mockAuth.mockResolvedValue({ user: { id: ADMIN, role: "app_admin" } })
+    const row = rowFor(brandA, "Alpha")
+    row.event.sponsored_messages = [{ sponsor_id: brandB, _count: { sends: 7 } }]
+    mockDb.event_sponsors.findMany.mockResolvedValue([row])
+
+    const { placements } = await getChargeLedger()
+    expect(placements[0].sends).toBe(0)
+  })
+})

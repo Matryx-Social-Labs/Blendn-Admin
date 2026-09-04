@@ -118,7 +118,7 @@ export function SponsorPicker({
   function createAndAttach() {
     start(async () => {
       try {
-        const sponsor = await createUnclaimedSponsor({ name: q, website })
+        const sponsor = await createUnclaimedSponsor(eventId, { name: q, website })
         await attachSponsorToEvent(eventId, sponsor.id)
         toast.success(`${sponsor.name} created and added`)
         setQuery("")

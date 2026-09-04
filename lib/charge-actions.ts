@@ -105,7 +105,7 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
       id: true,
       status: true,
       sponsor: {
-        select: { name: true, org: { select: { display_name: true } } },
+        select: { id: true, name: true, org: { select: { display_name: true } } },
       },
       event: {
         select: {
@@ -113,7 +113,23 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
           title: true,
           start_time: true,
           end_time: true,
-          sponsored_messages: { select: { _count: { select: { sends: true } } } },
+          /*
+           * `sponsor_id` comes back so the sum below can be scoped to THIS
+           * placement's brand.
+           *
+           * This selected the count alone, so every brand's row on this screen
+           * showed the total sends by every sponsor at that event — two brands
+           * at one night and both rows read double. `getSponsorOverview` filters
+           * the same relation by `sponsor_id` and always has; two readers of one
+           * relation gave two answers, and this is the one used to decide what
+           * to bill.
+           *
+           * Filtered here rather than in the query because a nested `where`
+           * cannot reference the parent row's `sponsor_id`.
+           */
+          sponsored_messages: {
+            select: { sponsor_id: true, _count: { select: { sends: true } } },
+          },
         },
       },
       charges: {
@@ -148,7 +164,9 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
       brandName: r.sponsor.name,
       ownerName: r.sponsor.org?.display_name ?? null,
       phase: placementPhase({ status: r.status }, r.event, now),
-      sends: r.event.sponsored_messages.reduce((n, m) => n + m._count.sends, 0),
+      sends: r.event.sponsored_messages
+        .filter((m) => m.sponsor_id === r.sponsor.id)
+        .reduce((n, m) => n + m._count.sends, 0),
       charge: charge
         ? {
             id: charge.id,
