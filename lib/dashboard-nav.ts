@@ -239,6 +239,14 @@ export const dashboardNav: DashboardNavItem[] = [
     allowedRoles: ["app_admin"],
   },
   {
+    title: "Amenities",
+    description:
+      "What an event offers. Retiring one stops it being offered without rewriting the events that already list it.",
+    url: "/dashboard/amenities",
+    icon: IconCategory,
+    allowedRoles: ["app_admin"],
+  },
+  {
     // The login page has always advertised "Exportable reporting". Until now
     // nothing in the product exported anything.
     title: "Reports",
