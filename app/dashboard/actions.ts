@@ -5,6 +5,7 @@ import type { check_in_status, rsvp_status } from "@prisma/client"
 import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
+import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
 import { cityDemand } from "@/lib/demand"
@@ -28,6 +29,7 @@ import type {
   VenueOverview,
   VenueRecordRow,
   VenueRow,
+  SponsorOverview,
 } from "@/lib/dashboard-types"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -897,11 +899,50 @@ async function dashboardActor(): Promise<{ role: DashboardRole; userId: string }
   return { role, userId: session.user.id }
 }
 
+
+/**
+ * The sponsor's landing page.
+ *
+ * Delegates to `getSponsorOverview`, which already assembles exactly this and
+ * is already rendered by `/dashboard/placements`. Building a second set of
+ * sponsor numbers here is how one question comes to have two answers — the
+ * failure this codebase has an audit section about.
+ *
+ * Dates are serialised because this crosses to a client component, and the
+ * other three overviews do the same.
+ */
+async function buildSponsorOverview(): Promise<SponsorOverview> {
+  const o = await getSponsorOverview()
+  return {
+    role: "sponsor",
+    brandName: o.brandName,
+    next: o.next
+      ? {
+          eventTitle: o.next.eventTitle,
+          startTime: o.next.startTime.toISOString(),
+          ready: o.next.ready,
+          blocker: o.next.blocker,
+        }
+      : null,
+    liveNow: o.liveNow,
+    awaitingYou: o.awaitingYou,
+    reach30d: o.reach30d,
+    reach30dSuppressed: o.reach30dSuppressed,
+  }
+}
+
 export async function getDashboardOverview(range: DateRange = resolveRange({})) {
   const { role, userId } = await dashboardActor()
   try {
     if (role === "app_admin") return await buildAdminOverview(range)
     if (role === "venue_owner") return await buildVenueOverview(userId)
+    /*
+     * Sponsors used to fall through to the line below — an organiser overview
+     * scoped to `organizer_id = <their own user id>`, which is never theirs. So
+     * every sponsor's landing page read all zeros, permanently, and looked like
+     * a quiet month rather than a screen asking the wrong question.
+     */
+    if (role === "sponsor") return await buildSponsorOverview()
     return await buildOrganizerOverview(userId)
   } catch (error) {
     logger.error("Failed to build dashboard overview", {

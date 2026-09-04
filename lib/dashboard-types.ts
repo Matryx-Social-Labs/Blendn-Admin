@@ -203,7 +203,44 @@ export interface VenueOverview {
   eventsNext14d: number
 }
 
-export type DashboardOverview = OrganizerOverview | AdminOverview | VenueOverview
+/**
+ * The sponsor's home screen.
+ *
+ * There wasn't one. `getDashboardOverview` branched on `app_admin` and
+ * `venue_owner` and fell through to `buildOrganizerOverview(userId)` — scoped
+ * to `organizer_id = <the sponsor's own user id>`, which is never theirs. So a
+ * sponsor's landing page was an organiser dashboard reading all zeros, for
+ * every sponsor, permanently.
+ *
+ * The hole was in this union as much as in the branch: three members for four
+ * roles, and nothing to make the fourth a type error.
+ *
+ * Deliberately thin. `getSponsorOverview` already assembles what this role
+ * needs and `/dashboard/placements` already renders it well; the defect was
+ * that the landing page never asked. This carries the same payload rather than
+ * inventing a second set of sponsor numbers — two answers to "how is my
+ * campaign doing" is the shape of bug this codebase keeps finding.
+ */
+export interface SponsorOverview {
+  role: "sponsor"
+  brandName: string | null
+  next: {
+    eventTitle: string
+    startTime: string
+    ready: boolean
+    blocker: string | null
+  } | null
+  liveNow: number
+  awaitingYou: number
+  reach30d: number | null
+  reach30dSuppressed: boolean
+}
+
+export type DashboardOverview =
+  | OrganizerOverview
+  | AdminOverview
+  | VenueOverview
+  | SponsorOverview
 
 /**
  * One venue *record*, for the admin index.
