@@ -1,7 +1,7 @@
 import { getOccupancy, getOccupancies } from "@/lib/occupancy"
 import { buildLiveSnapshot } from "@/lib/live-snapshot"
 
-import { db, closeDb, makeUser, makeEvent, occurrenceOf, testId } from "./helpers"
+import { db, closeDb, makeUser, makeEvent, occurrenceOf, testId, putInRoom } from "./helpers"
 
 /**
  * Occupancy is counted, never stored.
@@ -46,16 +46,11 @@ async function checkIn(
 ) {
   const userId = await makeUser(testId(label))
   users.push(userId)
-  await db.event_check_ins.create({
-    data: {
-      event_id: eventId,
-      occurrence_id: occurrenceId,
-      user_id: userId,
-      kind,
-      status: "checked_in",
-      check_in_time: new Date(),
-    },
-  })
+  // Both writers, because production writes both: the check-in route creates
+  // the row and opens the session. A fixture that writes only the row models a
+  // state the product cannot produce, and reads as an empty room now that
+  // occupancy comes from sessions.
+  await putInRoom({ eventId, occurrenceId, userId, kind })
   return userId
 }
 

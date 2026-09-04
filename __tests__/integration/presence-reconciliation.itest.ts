@@ -15,6 +15,21 @@ import { db, closeDb, makeUser, testId } from "./helpers"
  * a reconciliation test added *after* a cutover only documents whatever the new
  * code happens to do.
  *
+ * ## What the cutover actually costs, measured
+ *
+ * `getOccupancy` was switched to sessions as an experiment and reverted.
+ * `occupancy.itest.ts` has a test called "live snapshot and occupancy report
+ * the same number", and it failed at once: `lib/live-snapshot.ts` reads
+ * `event_check_ins` in five places — the arrival curve, the entry alert, the
+ * leaving-early ratio — so moving occupancy **alone** produces two screens
+ * disagreeing about one room, which is the failure the sessions model exists to
+ * remove.
+ *
+ * So the cutover is occupancy + live-snapshot + the presence sweeper, in one
+ * change, with the counting fix, verified against these tests. Not occupancy on
+ * its own. `putInRoom` in the helpers already writes both sources the way
+ * production does, which is what those fixtures need.
+ *
  * ## Why "distinct people" is the whole assertion
  *
  * The plan's own correction: sessions make a naive `_count` **worse**, not
