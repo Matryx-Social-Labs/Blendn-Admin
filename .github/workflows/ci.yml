@@ -330,11 +330,18 @@ jobs:
           # Capped so a leak surfaces as a Node heap error naming the culprit,
           # rather than as the kernel killing whichever process it likes least
           # — which is how this failure has been presenting.
-          # Piped into the STEP LOG, not a file, and prefixed so it can be
-          # told apart from test output. `/tmp/server.log` was captured for
-          # weeks and never once readable: the step that would have printed it
-          # is skipped when the runner is reclaimed, along with the artifact
-          # upload. The step log is the only channel that survives.
+          # Written to a file, and TAILED LIVE by the E2E step below.
+          #
+          # This was previously piped straight into this step's log, on the
+          # reasoning that a file is unreadable after a reclaimed runner. That
+          # is true of reading a file *afterwards* and it picked the wrong
+          # channel: a background process's output is only collected while the
+          # step that owns the pipe is alive, and this step exits the moment
+          # the health check passes. A twelve-minute run produced exactly ONE
+          # sample — measured, run 33863336501.
+          #
+          # A file plus a live `tail -f` from the long-running step is both:
+          # durable, and streamed into a log that is open for the whole run.
           #
           # `MEMORY_TRACE=1` makes the server report its own breakdown every 5s
           # — heap, external, arrayBuffers, and the gap that is native or
@@ -349,7 +356,7 @@ jobs:
           MEMORY_TRACE=1 \
           MALLOC_ARENA_MAX=2 \
           NODE_OPTIONS="--max-old-space-size=1536" \
-            npm run start 2>&1 | sed -u 's/^/[server] /' &
+            npm run start > /tmp/server.log 2>&1 &
           echo $! > /tmp/server.pid
           # Poll the health endpoint rather than adding a dependency for it.
           for i in $(seq 1 60); do
@@ -400,6 +407,13 @@ jobs:
           # The step log is streamed and is preserved up to the moment of the
           # kill, so it is the only channel that survives. Interleaved with the
           # test output it also says which test was running when memory moved.
+          # The server's own heap/external/arrayBuffers/unaccounted breakdown,
+          # followed live. `ps` can only say the process is large; this is the
+          # only thing that can say which pool is growing, and therefore
+          # whether it is Buffers, native memory, or allocator arenas.
+          tail -n +1 -f /tmp/server.log 2>/dev/null | sed -u 's/^/[server] /' &
+          TAILER=$!
+
           ( while true; do
               # Totals plus the three biggest processes. The totals alone said
               # 5.4GB was being consumed and could not say by what — Chromium
@@ -410,7 +424,7 @@ jobs:
               sleep 5
             done ) &
           SAMPLER=$!
-          trap "kill $SAMPLER 2>/dev/null || true" EXIT
+          trap "kill $SAMPLER $TAILER 2>/dev/null || true" EXIT
           # Capped so the runner cannot exhaust a 7.9GB box. Measured: Chromium
           # alone peaks around 2.3GB, and the suite drove the machine to 73MB
           # free with a load average of 46.9 before it was reclaimed. A heap
