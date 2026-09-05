@@ -73,6 +73,9 @@ export interface OnboardingRow {
  */
 const ONBOARDING_PAGE = 200
 
+/** One page of owner candidates. The screen says how many there are. */
+const ORG_OPTIONS_PAGE = 200
+
 export async function getOnboardingRequests(
   status: "pending" | "approved" | "declined" | "all" = "pending"
 ): Promise<{ rows: OnboardingRow[]; total: number }> {
@@ -369,6 +372,34 @@ export interface OrgSummary {
   venueCount: number
   domains: { domain: string; verified: boolean }[]
   primaryContact: { name: string | null; email: string } | null
+}
+
+/**
+ * Just enough to fill a picker: id and name.
+ *
+ * Separate from `getOrganisations`, which loads domains, members and three
+ * counts per row for the organisations screen. A select element needs none of
+ * that, and reusing the heavy one would make choosing an owner cost the same as
+ * rendering the whole directory.
+ *
+ * Capped, and the total comes back with it, so the screen can say the list is a
+ * page rather than implying it is the platform.
+ */
+export async function organisationOptions(): Promise<{
+  rows: { id: string; name: string }[]
+  total: number
+}> {
+  await requireAdmin()
+
+  const [rows, total] = await Promise.all([
+    db.organisations.findMany({
+      orderBy: { display_name: "asc" },
+      take: ORG_OPTIONS_PAGE,
+      select: { id: true, display_name: true },
+    }),
+    db.organisations.count(),
+  ])
+  return { rows: rows.map((o) => ({ id: o.id, name: o.display_name })), total }
 }
 
 export async function getOrganisations(): Promise<OrgSummary[]> {

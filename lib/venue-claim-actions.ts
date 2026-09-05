@@ -29,6 +29,12 @@ import { venueTypeLabel } from "@/lib/venue-types"
  * An organiser can unlink any event from a venue, with a reason, audited. A
  * wrong approval is recoverable, so the queue can be careful without being
  * paranoid.
+ *
+ * That sentence was false for as long as it has been written. `unlinkEventVenue`
+ * existed, was tested and audited, and had **no caller** — so the recovery this
+ * review bar was relaxed on the strength of could not be performed by anybody.
+ * The control is on the event detail page now, gated on `canEdit`, and
+ * `server-actions-reachable.test.ts` is what will notice if it goes away again.
  */
 
 export interface ClaimEvidence {
