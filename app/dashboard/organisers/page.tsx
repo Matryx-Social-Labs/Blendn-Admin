@@ -17,12 +17,6 @@ export default async function OrganisersPage() {
 
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div className="px-4 lg:px-6">
-        <div className="rounded-xl border bg-card px-6 py-6">
-          <h1 className="text-3xl font-semibold">Organisers</h1>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

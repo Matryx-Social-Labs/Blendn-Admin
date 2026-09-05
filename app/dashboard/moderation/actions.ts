@@ -44,6 +44,9 @@ function topCategory(categories: unknown, fallback: string): string {
   return entries.sort((a, b) => b[1] - a[1])[0][0]
 }
 
+/** One page of the queue. The screen says how many there are; see `total`. */
+const QUEUE_PAGE = 100
+
 export async function getModerationQueue(status: moderation_status_type = "pending") {
   // The screen this feeds is app_admin-only and `resolveFlag` below checks for
   // it. The read half did not, and it is the half that returns the sensitive
@@ -55,13 +58,13 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
 
   const now = Date.now()
 
-  const [flags, counts, uncheckedLastHour] = await Promise.all([
+  const [flags, counts, uncheckedLastHour, highConfidence] = await Promise.all([
     db.moderation_flags.findMany({
       where: { status },
       // Oldest first: the queue's SLA is how long something has been waiting,
       // so newest-first would bury exactly the items that matter most.
       orderBy: { created_at: "asc" },
-      take: 100,
+      take: QUEUE_PAGE,
       select: {
         id: true,
         created_at: true,
@@ -99,6 +102,18 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
         created_at: { gte: new Date(now - 60 * 60 * 1000) },
       },
     }),
+
+    /*
+     * Counted in the database, not over the page.
+     *
+     * This was `rows.filter(...).length` — the high-confidence count of the
+     * first hundred flags, rendered as the high-confidence count of the queue.
+     * With more than a page waiting it under-reports exactly when the queue is
+     * busiest, which is when the number is read.
+     */
+    db.moderation_flags.count({
+      where: { status, confidence: { gte: HIGH_CONFIDENCE } },
+    }),
   ])
 
   const rows: ModerationRow[] = flags.map((flag) => ({
@@ -121,8 +136,15 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
       string,
       number
     >,
-    highConfidence: rows.filter((r) => (r.confidence ?? 0) >= HIGH_CONFIDENCE).length,
+    highConfidence,
     uncheckedLastHour,
+    /*
+     * How many are actually waiting, so the page can say the list is a page.
+     *
+     * Free: `counts` is already a per-status count for the tabs, so the total
+     * for the active tab is one lookup rather than another query.
+     */
+    total: Object.fromEntries(counts.map((c) => [c.status, c._count._all]))[status] ?? rows.length,
   }
 }
 

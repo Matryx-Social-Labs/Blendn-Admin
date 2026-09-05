@@ -20,7 +20,6 @@ import type {
   AdminOverview,
   CityRow,
   DashboardRole,
-  EventRow,
   NextEvent,
   OrganizerOverview,
   OrganiserSupplyRow,
@@ -951,58 +950,6 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
     })
     throw error
   }
-}
-
-/**
- * Shared by the events screen for all three roles, scoped by the session.
- *
- * It used to take an optional `userId` and scope to it -- so omitting the
- * argument widened the query to every event on the platform, drafts included.
- * "Scoped by the caller" is not a scope when the caller is whoever sent the
- * POST.
- */
-export async function getEventRows(): Promise<EventRow[]> {
-  const { role, userId } = await dashboardActor()
-  const now = new Date()
-  const events = await db.events.findMany({
-    where: eventScope(role === "app_admin" ? undefined : userId),
-    orderBy: { start_time: "desc" },
-    take: 100,
-    select: {
-      id: true,
-      title: true,
-      start_time: true,
-      city: true,
-      venue_name: true,
-      status: true,
-      max_capacity: true,
-      _count: {
-        select: {
-          rsvps: { where: { status: "going" } },
-        },
-      },
-    },
-  })
-
-  const attendedPerEvent = await distinctAttendeeCounts(events.map((e) => e.id))
-
-  return events.map((event) => ({
-    id: event.id,
-    name: event.title,
-    startAt: event.start_time.toISOString(),
-    city: event.city ?? "",
-    venue: event.venue_name ?? "—",
-    status: event.status,
-    going: event._count.rsvps,
-    fillPct:
-      event.max_capacity && event.max_capacity > 0
-        ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
-        : null,
-    turnUpPct:
-      event.start_time >= now
-        ? null
-        : turnUpPct(attendedPerEvent.get(event.id) ?? 0, event._count.rsvps),
-  }))
 }
 
 /**

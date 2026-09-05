@@ -156,7 +156,34 @@ const callerFiles = [
 
 /** Comment-stripped, once. Every match below runs against these, never the raw file. */
 const sources = new Map(callerFiles.map((f) => [f, stripComments(readFileSync(f, "utf8"))]))
-const libFiles = callerFiles.filter((f) => f.startsWith(join(ROOT, "lib")))
+/**
+ * What is scanned for dead exports: all of `lib/`, plus every server action
+ * under `app/`.
+ *
+ * ## Why `app/` was added
+ *
+ * The check used to look at `lib/` alone, and `getEventRows` in
+ * `app/dashboard/actions.ts` was a fully-built, role-scoped events query with
+ * **zero callers** — the events screen is a client component that fetches
+ * `/api/events` instead. A second answer to "which events", reachable by
+ * nobody, sitting in the file the register already names as where two of its
+ * worst findings live. Invisible here purely because of the directory it was
+ * in.
+ *
+ * Scoped to files that declare `"use server"`, which is exactly the server
+ * action surface. Widening further would sweep in every exported React
+ * component, and "is this component rendered" is a different question that
+ * needs JSX resolution rather than a word match.
+ */
+const declaresUseServer = (file: string) =>
+  /^\s*["']use server["']/.test(readFileSync(file, "utf8"))
+
+const scannedFiles = callerFiles.filter(
+  (f) =>
+    f.startsWith(join(ROOT, "lib")) ||
+    (f.startsWith(join(ROOT, "app")) && declaresUseServer(f))
+)
+const libFiles = scannedFiles
 const rel = (f: string) => f.slice(ROOT.length + 1)
 
 /**

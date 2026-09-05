@@ -3,6 +3,9 @@
 import crypto from "crypto"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
+// Type-only: a `"use server"` file may export nothing but async functions,
+// and a type import is erased.
+import type { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
@@ -61,20 +64,42 @@ export interface OnboardingRow {
   relatedCount: number
 }
 
+/**
+ * One page of applications, and how many there are.
+ *
+ * A cap the screen does not mention is the same defect as a count that ignores
+ * its filter: the number on screen is not the number that exists, and nothing
+ * says so.
+ */
+const ONBOARDING_PAGE = 200
+
 export async function getOnboardingRequests(
   status: "pending" | "approved" | "declined" | "all" = "pending"
-): Promise<OnboardingRow[]> {
+): Promise<{ rows: OnboardingRow[]; total: number }> {
   await requireAdmin()
 
+  const where: Prisma.organiser_onboarding_requestsWhereInput =
+    status === "all"
+      ? {}
+      : status === "pending"
+        ? { status: { in: ["pending", "email_pending"] } }
+        : { status }
+
+  /*
+   * The total, alongside the page.
+   *
+   * `take: 200` with nothing saying so is a silent cap: an admin who reads two
+   * hundred applications and believes that is all of them stops looking, and
+   * the ones past the cap are never decided. Same "no silent caps" rule this
+   * codebase applies to every bounded backend query, applied to the screen that
+   * shows the result.
+   */
+  const total = await db.organiser_onboarding_requests.count({ where })
+
   const rows = await db.organiser_onboarding_requests.findMany({
-    where:
-      status === "all"
-        ? {}
-        : status === "pending"
-          ? { status: { in: ["pending", "email_pending"] } }
-          : { status },
+    where,
     orderBy: { created_at: "desc" },
-    take: 200,
+    take: ONBOARDING_PAGE,
   })
 
   // One grouped query rather than a count per row.
@@ -88,7 +113,7 @@ export async function getOnboardingRequests(
     : []
   const relatedMap = new Map(related.map((r) => [r.contact_email, r._count.id]))
 
-  return rows.map((r) => {
+  const mapped = rows.map((r) => {
     const domain = emailDomain(r.contact_email)
     return {
       id: r.id,
@@ -114,6 +139,8 @@ export async function getOnboardingRequests(
       relatedCount: (relatedMap.get(r.contact_email) ?? 1) - 1,
     }
   })
+
+  return { rows: mapped, total }
 }
 
 export interface ApprovalResult {

@@ -48,23 +48,41 @@ export interface VenueLinkedEvent {
  * Reads `events.venue_id` rather than grouping by `venue_name` string, so two
  * spellings of one room cannot read as two venues here.
  */
-export async function getLinkedEventsForOwner(): Promise<VenueLinkedEvent[]> {
+/** One page of linked events. The screen says how many there are. */
+const LINKED_EVENTS_PAGE = 200
+
+export async function getLinkedEventsForOwner(): Promise<{
+  rows: VenueLinkedEvent[]
+  total: number
+}> {
   const session = await getAuth()
   if (!session?.user) throw new Error("Unauthorized")
 
   const actor = await actorFor(session.user)
-  if (actor.role !== "venue_owner" && actor.role !== "app_admin") return []
+  if (actor.role !== "venue_owner" && actor.role !== "app_admin") return { rows: [], total: 0 }
+
+  const where = {
+    deleted_at: null,
+    venue_id: { not: null },
+    ...(actor.role === "app_admin"
+      ? {}
+      : { venue: { owner_org_id: { in: actor.orgIds } } }),
+  }
+
+  /*
+   * The total, alongside the page.
+   *
+   * `take: 200` with nothing saying so is a silent cap, and this is the list a
+   * venue owner uses to find an event wrongly linked to their building — the
+   * one they need to dispute. A cap that hides it is a dispute that never
+   * happens.
+   */
+  const total = await db.events.count({ where })
 
   const events = await db.events.findMany({
-    where: {
-      deleted_at: null,
-      venue_id: { not: null },
-      ...(actor.role === "app_admin"
-        ? {}
-        : { venue: { owner_org_id: { in: actor.orgIds } } }),
-    },
+    where,
     orderBy: { start_time: "desc" },
-    take: 200,
+    take: LINKED_EVENTS_PAGE,
     select: {
       id: true,
       title: true,
@@ -76,7 +94,7 @@ export async function getLinkedEventsForOwner(): Promise<VenueLinkedEvent[]> {
     },
   })
 
-  return events.map((e) => ({
+  const rows = events.map((e) => ({
     id: e.id,
     title: e.title,
     startAt: e.start_time.toISOString(),
@@ -85,6 +103,8 @@ export async function getLinkedEventsForOwner(): Promise<VenueLinkedEvent[]> {
     linkStatus: e.venue_link_status,
     venueName: e.venue?.name ?? "—",
   }))
+
+  return { rows, total }
 }
 
 /**

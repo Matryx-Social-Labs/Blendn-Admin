@@ -118,52 +118,6 @@ export async function getUsers(
   }
 }
 
-export async function getUserById(id: string): Promise<UserWithProfile | null> {
-  try {
-    // Every other export in this file checks this; this one was missed. It
-    // takes an arbitrary user id and returns that person's email, phone, age,
-    // location and role, so it was the one worth having.
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Error("Not authorised")
-    }
-
-    const user = await db.user.findUnique({
-      where: { id },
-      include: {
-        profile: {
-          select: {
-            id: true,
-            phone: true,
-            age: true,
-            location: true,
-            interests: true,
-            onboarded: true,
-            created_at: true,
-          },
-        },
-        _count: {
-          select: {
-            organized_events: true,
-            event_check_ins: true,
-            event_favorites: true,
-            chat_messages: true,
-          },
-        },
-      },
-    })
-
-    if (user?.profile?.location) {
-      user.profile.location = await normalizeLocationToCity(user.profile.location)
-    }
-
-    return user as unknown as UserWithProfile | null
-  } catch (error) {
-    logger.error("Error fetching user", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to fetch user")
-  }
-}
-
 export async function updateUser(
   id: string,
   data: {
@@ -256,26 +210,6 @@ export async function updateUserRole(id: string, role: user_role) {
  * If a GDPR erasure request arrives, use the second. Do not reintroduce a hard
  * delete: there is no undo and it takes other users' data with it.
  */
-
-export async function toggleUserOnboarded(id: string, onboarded: boolean) {
-  try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Error("Forbidden")
-    }
-
-    await db.profiles.updateMany({
-      where: { id },
-      data: { onboarded },
-    })
-
-    revalidatePath("/dashboard/users")
-    return { success: true }
-  } catch (error) {
-    logger.error("Error updating user onboarding status", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to update user onboarding status")
-  }
-}
 
 export async function getUserStats() {
   try {

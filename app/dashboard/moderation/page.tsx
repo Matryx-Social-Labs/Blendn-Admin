@@ -32,7 +32,7 @@ export default async function ModerationPage({
   const active = (TABS.find((tab) => tab.value === status)?.value ??
     "pending") as moderation_status_type
 
-  const [{ rows, counts, highConfidence, uncheckedLastHour }, pendingReports] = await Promise.all([
+  const [{ rows, counts, highConfidence, uncheckedLastHour, total }, pendingReports] = await Promise.all([
     getModerationQueue(active),
     // Two cheap counts rather than the whole reports query: this page only
     // needs the number on the tab.
@@ -93,6 +93,14 @@ export default async function ModerationPage({
       </div>
 
       <ModerationTable rows={rows} status={active as "pending" | "approved" | "rejected"} />
+
+      {total > rows.length ? (
+        /* The queue is capped at a page. An admin who works through it and
+           believes the queue is empty is the failure this line prevents. */
+        <p className="text-[0.8125rem] text-muted-foreground">
+          Showing the {rows.length} oldest of {total}.
+        </p>
+      ) : null}
     </div>
   )
 }
