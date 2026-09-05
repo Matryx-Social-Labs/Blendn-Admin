@@ -87,6 +87,14 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "DELETED",
     why: "The link to the identity provider, and the email it carried.",
   },
+  board_posts: {
+    how: "DELETED",
+    why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence.",
+  },
+  board_requests: {
+    how: "SCRUBBED",
+    why: "Same as message_requests: the row survives so the recipient's board does not develop holes, and only the words they SENT are theirs to erase.",
+  },
   chat_messages: {
     how: "RETAINED",
     why: "The room's conversation is other people's history. A thread that loses half its turns is unreadable for everyone still in it, and the author is already pseudonymous there. Moderation and reports still reach it.",

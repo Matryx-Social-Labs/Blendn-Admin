@@ -35,6 +35,8 @@ const mockDb = {
   notifications: { deleteMany: jest.fn() },
   password_reset_tokens: { deleteMany: jest.fn() },
   message_requests: { updateMany: jest.fn() },
+  board_posts: { deleteMany: jest.fn() },
+  board_requests: { updateMany: jest.fn() },
   $transaction: jest.fn().mockResolvedValue([]),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))

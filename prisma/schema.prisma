@@ -73,6 +73,9 @@ model User {
   password_resets        password_reset_tokens[]
   event_check_ins        event_check_ins[]
   presence_sessions presence_sessions[]
+  board_posts       board_posts[]    @relation("BoardAuthor")
+  board_requests_sent     board_requests[] @relation("BoardRequestFrom")
+  board_requests_received board_requests[] @relation("BoardRequestTo")
   match_preferences      event_match_preferences[]
   likes_sent             event_likes[]                @relation("LikesSent")
   likes_received         event_likes[]                @relation("LikesReceived")
@@ -472,6 +475,8 @@ model events {
   reminded_at       DateTime?         @db.Timestamptz(6)
 
   event_issues      event_issues[]
+  board_posts       board_posts[]
+  board_requests    board_requests[]
   match_preferences  event_match_preferences[]
   likes              event_likes[]
   peer_ratings       peer_ratings[]
@@ -3001,4 +3006,121 @@ model event_issues {
   /// as a partial unique WHERE `resolved_at IS NULL`. It lives in the migration
   /// SQL. Without it a sweep on a timer writes one row per pass, and a queue
   /// lasting an hour becomes sixty identical alerts.
+}
+
+/// Going alone, and looking for somebody to go with.
+///
+/// The board is the fifth primitive — INTENT — and it is what gives
+/// `event_rsvps` a job. Today an RSVP is a dead-end signal that exists as a
+/// dashboard number; under the board it is the gate that makes intent mean
+/// something, and the front half of the group mechanic the roadmap calls the
+/// most important unbuilt thing: the board is where groups form, so that there
+/// is something to mix at the event.
+///
+/// ## Why this is not the chatroom
+///
+/// The room is gated on PRESENCE — you are here. The board is gated on INTENT —
+/// you are going. They answer different questions at different times, and the
+/// board is archived at doors so the live room starts clean rather than opening
+/// onto three weeks of "anyone got a spare ticket".
+model board_posts {
+  id       String @id @default(uuid()) @db.Uuid
+  event_id String @db.Uuid
+  author_id String
+
+  /// `offer` has spaces to give — a car, a table, a spare ticket. `seeking`
+  /// wants one. `chat` is neither and asks nothing of anybody, which is the
+  /// common case and must stay cheap.
+  kind board_post_kind
+  body String
+
+  /// Only meaningful on an `offer`. Null elsewhere rather than zero: "no spaces
+  /// left" and "this post was never about spaces" are different states, and a
+  /// zero would render as a full car.
+  spaces_left Int?
+
+  /// Same nullable String as `chat_messages.moderation_status`, deliberately.
+  ///
+  /// The board reuses the existing moderation pipeline, which writes strings —
+  /// giving this table an enum would make the pipeline branch on which table it
+  /// is writing to. The two migrate together when the message-kind work lands;
+  /// see the Phase 2 note in the plan. One migration, not two.
+  moderation_status String?
+
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime  @default(now()) @db.Timestamptz(6)
+  /// Soft, because a post with requests against it cannot vanish from under
+  /// them.
+  deleted_at DateTime?
+
+  event    events          @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  author   User            @relation("BoardAuthor", fields: [author_id], references: [id], onDelete: Cascade)
+  requests board_requests[]
+
+  /// The board itself: this event's live posts, newest first.
+  @@index([event_id, deleted_at, created_at])
+  /// "What have I posted", and the cap on posting.
+  @@index([author_id, created_at])
+}
+
+/// Asking one person, rather than answering an open post.
+///
+/// Both directions exist on purpose: an open post anybody may answer, and a
+/// direct request to somebody who has posted. **You cannot cold-request a
+/// person who has not posted** — that is the whole difference between a board
+/// and a cold-message inbox, and it is enforced by the `post_id` requirement
+/// rather than by convention.
+model board_requests {
+  id       String  @id @default(uuid()) @db.Uuid
+  event_id String  @db.Uuid
+  /// The post being answered. Required: a request always answers something.
+  post_id  String  @db.Uuid
+
+  from_user_id String
+  to_user_id   String
+
+  status  board_request_status @default(pending)
+  /// What they said when asking. Optional — "can I join?" needs no essay, and
+  /// requiring one would make the ask heavier than the thing being asked for.
+  message String?
+
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  decided_at DateTime? @db.Timestamptz(6)
+
+  event events      @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  post  board_posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  from  User        @relation("BoardRequestFrom", fields: [from_user_id], references: [id], onDelete: Cascade)
+  to    User        @relation("BoardRequestTo", fields: [to_user_id], references: [id], onDelete: Cascade)
+
+  /// "Who is waiting on me", oldest first.
+  @@index([to_user_id, status, created_at])
+  /// The outstanding-request cap, and "what am I waiting on".
+  @@index([from_user_id, status, created_at])
+  @@index([post_id])
+  /// The cascade path. `events` deletion fans out through here, and an
+  /// unindexed foreign key makes that a sequential scan — which is what
+  /// `fk-indexes.itest.ts` exists to catch, and did.
+  @@index([event_id])
+  ///
+  /// NOTE: the invariant that matters is NOT here, because `schema.prisma`
+  /// cannot express it: at most ONE PENDING request per direction per post, as
+  /// a partial unique WHERE `status = 'pending'`. It lives in the migration
+  /// SQL. Without it, tapping twice on a slow connection asks the same person
+  /// the same question twice, which is exactly the pestering the cap exists to
+  /// prevent.
+}
+
+enum board_post_kind {
+  offer
+  seeking
+  chat
+}
+
+enum board_request_status {
+  pending
+  accepted
+  declined
+  /// Withdrawn by the asker. Distinct from `declined` because who ended it is
+  /// the thing worth knowing afterwards.
+  withdrawn
 }
