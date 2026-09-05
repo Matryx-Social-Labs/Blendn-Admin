@@ -16,6 +16,7 @@ import { Overview } from "./overview"
 import { curationSelect, curationState } from "@/lib/curation"
 import { refusalSummary } from "@/lib/check-in-refusals"
 import { CurationHealth } from "./curation-health"
+import { EventVenueLink } from "./venue-link"
 
 export const dynamic = "force-dynamic"
 
@@ -119,6 +120,15 @@ export default async function EventDetailPage({
             {venueName ? ` · ${venueName}` : ""}
             {event.city ? `, ${event.city}` : ""}
           </p>
+          {/*
+            Only when a venue RECORD is linked, and only for somebody who may
+            edit. `venue_name` alone is free text the organiser typed — there is
+            nothing to unlink from — and a venue owner reading this page has the
+            dispute flow instead, which is the other side of the same question.
+          */}
+          {event.venue && permissions.canEdit ? (
+            <EventVenueLink eventId={event.id} venueName={venueName ?? "this venue"} />
+          ) : null}
         </div>
       </div>
       <EventTabs eventId={event.id} active={activeTab} tabs={tabs} />

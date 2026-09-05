@@ -4,6 +4,7 @@ import { IconMapPin } from "@tabler/icons-react"
 
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
 import { EmptyState, MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
+import { organisationOptions } from "@/lib/onboarding-actions"
 import { VenueManage } from "./venue-manage"
 import { Badge } from "@/components/ui/badge"
 import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
@@ -82,6 +83,16 @@ export default async function VenueDetailPage({
   }
 
   const building = await getBuildingOccupancy(id)
+
+  /*
+   * Only fetched when it can be used: an admin, looking at a venue nobody owns.
+   * Loading the directory to render a control that will not be shown is the
+   * kind of cost that is invisible until the directory is large.
+   */
+  const ownerOptions =
+    isAdmin && !venue.owner_org && !venue.deleted_at
+      ? await organisationOptions()
+      : { rows: [], total: 0 }
 
   const [events, ratingRows] = await Promise.all([
     db.events.findMany({
@@ -182,6 +193,7 @@ export default async function VenueDetailPage({
       <BuildingOccupancyPanel occupancy={building} />
 
       <VenueManage
+        orgs={ownerOptions}
         venue={{
           id: venue.id,
           name: venue.name,

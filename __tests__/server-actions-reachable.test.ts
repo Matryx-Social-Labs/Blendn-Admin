@@ -90,8 +90,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["isSameSponsorName", "re-exported by lib/sponsor-merge.ts and called through neither path; H-section item"],
 
   // --- Venues: rows can be created and then never corrected -----------------
-  ["assignVenueOwner", "no admin control on /dashboard/venue-owners/[id]; owner org is set at creation and never after"],
-  ["unlinkEventVenue", "the reversibility lib/venue-claim-actions.ts cites to justify its review bar"],
 
   // --- Safety and moderation: built, documented, never on screen ------------
   ["fencesOverlap", "the two-events-one-building warning; the geofence editor never asks for it"],

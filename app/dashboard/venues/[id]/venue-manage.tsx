@@ -8,7 +8,7 @@ import { SectionTitle } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
+import { assignVenueOwner, restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
 
 /**
  * The controls a venue record never had.
@@ -26,6 +26,7 @@ import { restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
 export function VenueManage({
   venue,
   isAdmin,
+  orgs,
 }: {
   venue: {
     id: string
@@ -40,9 +41,12 @@ export function VenueManage({
     ownerOrg: string | null
   }
   isAdmin: boolean
+  /** Owner candidates. Empty for a non-admin, and for an already-owned venue. */
+  orgs: { rows: { id: string; name: string }[]; total: number }
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
+  const [org, setOrg] = useState("")
   const [form, setForm] = useState({
     name: venue.name,
     address: venue.address ?? "",
@@ -111,6 +115,19 @@ export function VenueManage({
       }
     })
 
+  const assign = () =>
+    start(async () => {
+      try {
+        await assignVenueOwner(venue.id, org)
+        toast.success("Owner assigned")
+        router.refresh()
+      } catch (error) {
+        // Re-assigning an owned venue is refused by the action — that is a
+        // dispute, and a dispute has a person in it.
+        toast.error(error instanceof Error ? error.message : "Could not assign")
+      }
+    })
+
   return (
     <section className="flex flex-col gap-3">
       <SectionTitle hint={venue.ownerOrg ?? "unclaimed"}>Record</SectionTitle>
@@ -140,6 +157,41 @@ export function VenueManage({
           <Label htmlFor="lng">Longitude</Label>
           <Input {...field("lng")} inputMode="decimal" />
         </div>
+
+        {/*
+          Assigning an owner is the admin-side counterpart to a claim, for when
+          ownership is settled over email rather than through the queue. Only
+          for an unclaimed venue: re-assigning an owned one is a dispute, and
+          the action refuses it.
+        */}
+        {isAdmin && !venue.ownerOrg && !venue.retired ? (
+          <div className="flex flex-col gap-1.5 @2xl/main:col-span-3">
+            <Label htmlFor="owner">Owner</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                id="owner"
+                value={org}
+                onChange={(e) => setOrg(e.target.value)}
+                className="h-9 min-w-56 rounded-md border border-input bg-transparent px-3 text-sm"
+              >
+                <option value="">Choose an organisation…</option>
+                {orgs.rows.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" variant="outline" onClick={assign} disabled={pending || !org}>
+                Assign
+              </Button>
+              {orgs.total > orgs.rows.length ? (
+                <span className="text-[0.75rem] text-muted-foreground">
+                  Showing {orgs.rows.length} of {orgs.total}.
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2 @2xl/main:col-span-3">
           <Button size="sm" onClick={save} disabled={pending || venue.retired}>
