@@ -99,8 +99,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
 
 
   // --- Half-wired flows ------------------------------------------------------
-  ["isRoleAddressFor", "the domain-verification email fallback; only the DNS TXT path is wired"],
-  ["domainVerifyEmail", "the template that fallback would send"],
   ["expertiseFor", "nothing serves the expertise options for a chosen work field"],
 
   // --- Presence sessions: the folds, shipped ahead of their readers ---------

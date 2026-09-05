@@ -1465,7 +1465,8 @@ model organisation_domains {
   verified_by        String?
   created_at         DateTime             @default(now()) @db.Timestamptz(6)
 
-  org organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  org          organisations         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  email_tokens domain_email_tokens[]
 
   @@unique([domain])
   @@index([org_id])
@@ -3225,4 +3226,33 @@ model product_events {
   @@index([name, occurred_at])
   /// One person's activity, for cohorts and retention curves.
   @@index([user_id, occurred_at])
+}
+
+/// A link sent to a role address, proving control of the mailbox.
+///
+/// ## Why this is not `organisation_domains.verification_token`
+///
+/// That column is the value published in the domain's **TXT record** — it is
+/// public by design, and it is deliberately kept after verification so a
+/// periodic re-check can confirm the record is still there. Reusing it for an
+/// emailed link would mean anybody who can read the DNS record can verify the
+/// domain without controlling any mailbox, and the token never rotates. Two
+/// proofs of two different things need two secrets.
+///
+/// Hashed, single-use and expiring, exactly like `onboarding_email_tokens`: a
+/// leaked database yields nothing usable, and a link sitting in an inbox for
+/// ever is a way in for whoever inherits the mailbox.
+model domain_email_tokens {
+  token_hash String    @id
+  domain_id  String    @db.Uuid
+  /// The role address it went to. Recorded so an audit can say which mailbox
+  /// answered — "somebody at the company" is not an audit trail.
+  sent_to    String
+  expires_at DateTime  @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  domain organisation_domains @relation(fields: [domain_id], references: [id], onDelete: Cascade)
+
+  @@index([domain_id])
 }
