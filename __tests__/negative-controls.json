@@ -375,6 +375,12 @@
       "mutation": "A: delete `boardRequestId: requestId` from the `openConversation` call. B: delete the `if (preferred && !existingNames.has(preferred)) return preferred` short-circuit. C: add `toUserId` to the send route's zod schema. D: delete the `updateMany` that reverts the request to pending when `openConversation` throws",
       "observed": "A: 1 failing ('passes the board request as the conversation's origin') — the one that matters, because dropping it typechecks (the argument is optional; two of three callers have no board request) and every behavioural assertion still passes, while `cameFromMatch` starts answering true for a board conversation. B: 1 failing ('is a preference at check-in, not an override'). C: 1 failing ('takes the recipient from the post, never from the request body'). D: 2 failing ('puts the request back...' and 'claims the request with the status in the predicate', the latter because the revert is one of the three claims it counts). First run of all four reported zero failures: the harness grepped for `✕` and this reporter prints `●`, so a passing control was indistinguishable from a silent one — the exact failure R16 exists to catch, arriving in the control rather than in the guard",
       "date": "2026-09-05"
+    },
+    "dm-moderation.test.ts": {
+      "guards": "The DM visibility predicate matches a NULL verdict explicitly rather than with a bare `not`, and all three participant-facing reads carry it — the thread, the inbox preview and the unread count — while the two moderation reads deliberately do not",
+      "mutation": "A: delete `moderation_status: null` from `VISIBLE_DM`, leaving the bare `{ not: \"hidden\" }`. B: delete the spread from the unread `_count` filter. C: delete `where: VISIBLE_DM` from the inbox preview. D: delete the spread from the thread's where clause",
+      "observed": "A: the structural assertion fails, and against real Postgres two cases in `dm-gating.itest.ts` fail — an ordinary message with a NULL verdict disappears, because `moderation_status <> 'hidden'` is NULL for a NULL row and NULL is the ordinary case here. That mutation hides the entire message history of every conversation in the product. B, C, D: 1 failing each ('is carried by every participant-facing read of a DM'). The first version of that guard asserted the file merely *contained* `VISIBLE_DM`, and control B passed against it — the preview's copy kept it green while the unread count had lost it. Now brace-matched per query block",
+      "date": "2026-09-05"
     }
   },
   "grandfathered": [

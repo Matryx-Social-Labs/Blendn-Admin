@@ -6,6 +6,8 @@ import {
   openConversation,
 } from "@/lib/conversations"
 
+import { VISIBLE_DM } from "@/lib/dm-moderation"
+
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpers"
 
 /**
@@ -202,5 +204,112 @@ describe("a conversation needs an accepted request", () => {
 
     await openConversation(a, b)
     expect(await mayConverse(a, b)).toBe(true)
+  })
+})
+
+describe("a hidden message is invisible to every reader", () => {
+  async function thread() {
+    const a = await makeUser("dm_vis_a")
+    const b = await makeUser("dm_vis_b")
+    users.push(a, b)
+    const conversation = await openConversation(a, b)
+    const say = (sender: string, message_text: string, moderation_status: string | null) =>
+      db.private_messages.create({
+        data: {
+          conversation_id: conversation.id,
+          sender_id: sender,
+          message_text,
+          moderation_status,
+        },
+        select: { id: true },
+      })
+    return { a, b, conversation, say }
+  }
+
+  it("keeps an ordinary message, which has no verdict at all", async () => {
+    /*
+     * THE assertion on this predicate, and the reason it is written as an
+     * explicit OR rather than `{ not: "hidden" }`.
+     *
+     * In SQL `moderation_status <> 'hidden'` is NULL for a NULL row and
+     * therefore false, and NULL is the ordinary case — almost every message has
+     * no verdict, because DMs get the deterministic checks and no model, so
+     * nothing is ever recorded as `clean`. A `not` that did not expand to
+     * include NULL would hide **the entire message history of every
+     * conversation in the product**, and it would do it silently.
+     *
+     * Against real Postgres, because that is the only place the difference
+     * exists: `geofence-clear.itest.ts` is the precedent, where a nullability
+     * distinction read correctly through the client and was false in the
+     * database.
+     */
+    const { a, conversation, say } = await thread()
+    await say(a, "ordinary", null)
+
+    const visible = await db.private_messages.findMany({
+      where: { conversation_id: conversation.id, ...VISIBLE_DM },
+      select: { message_text: true },
+    })
+    expect(visible.map((m) => m.message_text)).toEqual(["ordinary"])
+  })
+
+  it("keeps a flagged message, because flagging never hides", async () => {
+    /*
+     * Contact details are flagged and delivered. Refusing would teach the
+     * sender exactly where the boundary is and the next attempt would be
+     * spelled out with nothing behind it — the group path's argument, and it
+     * applies here more strongly, since a DM is where moving off-platform
+     * actually lands.
+     */
+    const { a, conversation, say } = await thread()
+    await say(a, "reach me on 9876543210", "flagged")
+
+    const visible = await db.private_messages.findMany({
+      where: { conversation_id: conversation.id, ...VISIBLE_DM },
+      select: { message_text: true },
+    })
+    expect(visible).toHaveLength(1)
+  })
+
+  it("drops a hidden one, from the thread and from the unread count", async () => {
+    /*
+     * The unread count is the reader that gets forgotten. A hidden message is
+     * never delivered, so it is never marked read — leaving it in the count is
+     * a badge nobody can clear, on a thread with nothing in it to clear.
+     */
+    const { a, b, conversation, say } = await thread()
+    await say(a, "ordinary", null)
+    await say(a, "slur", "hidden")
+
+    const visible = await db.private_messages.findMany({
+      where: { conversation_id: conversation.id, ...VISIBLE_DM },
+      select: { message_text: true },
+    })
+    expect(visible.map((m) => m.message_text)).toEqual(["ordinary"])
+
+    const unread = await db.private_messages.count({
+      where: {
+        conversation_id: conversation.id,
+        is_read: false,
+        sender_id: { not: b },
+        ...VISIBLE_DM,
+      },
+    })
+    expect(unread).toBe(1)
+  })
+
+  it("still stores it, because a report has nothing else to rest on", async () => {
+    /*
+     * `moderation_flags.message_id` is a NOT NULL foreign key to
+     * `chat_messages`, so a flag against a DM is structurally impossible and
+     * the row itself is the only record. Hiding must not mean deleting.
+     */
+    const { a, conversation, say } = await thread()
+    await say(a, "slur", "hidden")
+
+    const all = await db.private_messages.count({
+      where: { conversation_id: conversation.id },
+    })
+    expect(all).toBe(1)
   })
 })

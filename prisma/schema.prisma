@@ -1285,6 +1285,21 @@ model private_messages {
   media_url       String?
   media_type      media_type?
   is_read         Boolean     @default(false)
+
+  /// What the deterministic checks made of this message, when they made
+  /// anything of it.
+  ///
+  /// NULL means no verdict was recorded, and that is deliberately **not**
+  /// "clean". DMs get keyword, spam and contact-info checks and no model —
+  /// `TR5`, because the alternative is a human reading private messages
+  /// nobody reported. Writing `clean` would claim a bill of health the
+  /// pipeline never issued, which is `G3` in a new table: an unchecked
+  /// message recorded as checked.
+  ///
+  /// Same nullable String as `chat_messages.moderation_status` and
+  /// `board_posts`, deliberately, so all three migrate to the enum together
+  /// rather than the pipeline branching on which table it is writing to.
+  moderation_status String?
   created_at      DateTime    @default(now()) @db.Timestamptz(6)
   updated_at      DateTime    @default(now()) @db.Timestamptz(6)
 
