@@ -1,4 +1,4 @@
-import { getTrustSignal, MIN_RATINGS, ratablePeers } from "@/lib/trust"
+import { MIN_RATINGS, ratablePeers, trustSignalsFor } from "@/lib/trust"
 
 import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
 
@@ -44,6 +44,18 @@ afterAll(async () => {
   await cleanup(users, events)
   await closeDb()
 })
+
+/**
+ * `trustSignalsFor` is plural — the only production reader is the moderation
+ * queue, which shows up to a hundred flagged messages at a time, and a singular
+ * lookup there is a hundred round trips. These cases are about one person, so
+ * they ask for one and unwrap it.
+ */
+async function signalFor(userId: string) {
+  const signal = (await trustSignalsFor([userId])).get(userId)
+  if (!signal) throw new Error("every id asked about must get an answer")
+  return signal
+}
 
 describe("who you may rate", () => {
   it("only someone you connected with", async () => {
@@ -112,7 +124,7 @@ describe("the signal", () => {
   it("withholds an average below the floor", async () => {
     const who = await guest("tr-j")
     await rate(who, [5, 5])
-    const t = await getTrustSignal(who)
+    const t = await signalFor(who)
     expect(t.ratings).toBe(2)
     expect(t.average).toBeNull()
     expect(t.band).toBe("unrated")
@@ -121,7 +133,7 @@ describe("the signal", () => {
   it("bands once there is enough", async () => {
     const who = await guest("tr-k")
     await rate(who, Array(MIN_RATINGS).fill(5))
-    const t = await getTrustSignal(who)
+    const t = await signalFor(who)
     expect(t.average).toBe(5)
     expect(t.band).toBe("good")
   })
@@ -132,7 +144,7 @@ describe("the signal", () => {
     const who = await guest("tr-l")
     await rate(who, [5, 5, 5, 5, 5], "harassment")
 
-    const t = await getTrustSignal(who)
+    const t = await signalFor(who)
     expect(t.band).toBe("good")
     expect(t.hasHarassmentReport).toBe(true)
     expect(t.issues.harassment).toBe(1)
@@ -144,13 +156,13 @@ describe("the signal", () => {
     const who = await guest("tr-m")
     await rate(who, [2], "uncomfortable")
 
-    const t = await getTrustSignal(who)
+    const t = await signalFor(who)
     expect(t.band).toBe("unrated")
     expect(t.issues.uncomfortable).toBe(1)
   })
 
   it("is empty for someone nobody has rated", async () => {
-    const t = await getTrustSignal(await guest("tr-n"))
+    const t = await signalFor(await guest("tr-n"))
     expect(t).toMatchObject({ ratings: 0, average: null, band: "unrated", hasHarassmentReport: false })
   })
 })

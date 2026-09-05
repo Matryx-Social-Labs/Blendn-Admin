@@ -4,6 +4,7 @@ import type { moderation_status_type } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { unmoderatedPhotos } from "@/lib/photo-checks"
 import { cn } from "@/lib/utils"
 
 import { getModerationQueue } from "./actions"
@@ -32,7 +33,11 @@ export default async function ModerationPage({
   const active = (TABS.find((tab) => tab.value === status)?.value ??
     "pending") as moderation_status_type
 
-  const [{ rows, counts, highConfidence, uncheckedLastHour, total }, pendingReports] = await Promise.all([
+  const [
+    { rows, counts, highConfidence, uncheckedLastHour, total },
+    pendingReports,
+    photoBacklog,
+  ] = await Promise.all([
     getModerationQueue(active),
     // Two cheap counts rather than the whole reports query: this page only
     // needs the number on the tab.
@@ -40,6 +45,12 @@ export default async function ModerationPage({
       db.user_reports.count({ where: { status: "pending" } }),
       db.message_reports.count({ where: { status: "pending" } }),
     ]).then(([u, m]) => u + m),
+    /*
+     * A count, not the list. The decision this drives is "is photo moderation
+     * running", which is a number; the images themselves are somebody's face
+     * and do not belong on a queue screen that is about messages.
+     */
+    unmoderatedPhotos().then((rows) => rows.length),
   ])
 
   return (
@@ -87,6 +98,26 @@ export default async function ModerationPage({
               title="Delivered without reaching the moderation model — check OPENAI_API_KEY and the provider's status"
             >
               {uncheckedLastHour} unchecked in the last hour
+            </span>
+          ) : null}
+
+          {/*
+            The same argument, for photos.
+            *
+            * Photo moderation degrades OPEN by design — a vendor outage must
+            * not stop somebody having a profile picture — and records
+            * `checked: false` for a later sweep. There was no later sweep, and
+            * no reader: `unmoderatedPhotos` was written, the index comment
+            * called it "the sweeper's query", and the backlog was invisible.
+            * An unchecked pile nobody can see is the same defect as an
+            * unchecked message recorded as clean.
+          */}
+          {photoBacklog > 0 ? (
+            <span
+              className="rounded-full border border-amber-500/40 px-2.5 py-1 text-[0.75rem] text-amber-600 dark:text-amber-400"
+              title="Uploaded while photo moderation could not run. They are live on profiles."
+            >
+              {photoBacklog} photo{photoBacklog === 1 ? "" : "s"} unchecked
             </span>
           ) : null}
         </div>

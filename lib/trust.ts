@@ -77,28 +77,69 @@ export function trustBand(count: number, average: number | null): TrustBand {
   return "poor"
 }
 
-export async function getTrustSignal(userId: string): Promise<TrustSignal> {
-  const rows = await db.peer_ratings.findMany({
-    where: { rated_id: userId },
-    select: { rating: true, issue: true },
+/**
+ * Trust signals for a page of people, in one query.
+ *
+ * Plural, and that is not a convenience. The only production reader is the
+ * moderation queue, which shows up to a hundred flagged messages at a time — a
+ * singular lookup there is a hundred round trips, and the singular version is
+ * what invites the loop whose every iteration looks correct in review. Same
+ * argument as `present(subjects[], viewer)` for identity.
+ *
+ * It replaces a `getTrustSignal(userId)` that had **no caller at all**, while
+ * `trust-not-exposed.test.ts` stated in prose that "moderation reads it through
+ * the dashboard". Peer ratings are the early-warning signal — somebody rated
+ * badly by several people who actually met them, before anybody files a formal
+ * report — and they were written to a table nobody queried.
+ *
+ * Grouped in the database rather than folded in JS, so the rows crossing the
+ * wire are one per (person, issue) instead of one per rating.
+ */
+export async function trustSignalsFor(
+  userIds: readonly string[]
+): Promise<Map<string, TrustSignal>> {
+  const ids = [...new Set(userIds)]
+  if (ids.length === 0) return new Map()
+
+  const rows = await db.peer_ratings.groupBy({
+    by: ["rated_id", "issue"],
+    where: { rated_id: { in: ids } },
+    _count: { _all: true },
+    _sum: { rating: true },
   })
 
-  const issues: Record<string, number> = {}
-  let total = 0
+  const acc = new Map<string, { ratings: number; total: number; issues: Record<string, number> }>()
   for (const r of rows) {
-    total += r.rating
-    if (r.issue !== "none") issues[r.issue] = (issues[r.issue] ?? 0) + 1
+    const entry = acc.get(r.rated_id) ?? { ratings: 0, total: 0, issues: {} }
+    entry.ratings += r._count._all
+    entry.total += r._sum.rating ?? 0
+    if (r.issue !== "none") entry.issues[r.issue] = (entry.issues[r.issue] ?? 0) + r._count._all
+    acc.set(r.rated_id, entry)
   }
 
-  const average = rows.length >= MIN_RATINGS ? Math.round((total / rows.length) * 10) / 10 : null
-
-  return {
-    ratings: rows.length,
-    average,
-    band: trustBand(rows.length, average),
-    issues,
-    hasHarassmentReport: (issues.harassment ?? 0) > 0,
-  }
+  /*
+   * Every id asked about gets an answer, including the ones with no ratings.
+   * A missing key would make the caller decide what absence means, and it means
+   * `unrated` — which is not the same as `poor` and must never render as it.
+   */
+  return new Map(
+    ids.map((id) => {
+      const entry = acc.get(id)
+      const ratings = entry?.ratings ?? 0
+      const average =
+        entry && ratings >= MIN_RATINGS ? Math.round((entry.total / ratings) * 10) / 10 : null
+      return [
+        id,
+        {
+          ratings,
+          average,
+          band: trustBand(ratings, average),
+          issues: entry?.issues ?? {},
+          hasHarassmentReport: (entry?.issues.harassment ?? 0) > 0,
+        },
+      ]
+    })
+  )
 }
 
 /**

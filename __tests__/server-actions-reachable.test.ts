@@ -93,9 +93,7 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
 
   // --- Safety and moderation: built, documented, never on screen ------------
   ["fencesOverlap", "the two-events-one-building warning; the geofence editor never asks for it"],
-  ["getTrustSignal", "trust-not-exposed.test.ts says moderation reads this through the dashboard — no dashboard screen does"],
   ["contactInfoWarning", "the sentence shown above the composer; the chat route returns checkContactInfo's bare hint instead"],
-  ["unmoderatedPhotos", "the read side of the photo audit recordPhotoCheck writes; no admin screen queries the backlog"],
   ["canSendSystemMessages", "named in CLAUDE.md as caller-less; kept as the written rule until something needs it"],
   ["canSendPushNotifications", "same — the rule exists, the caller does not"],
 
@@ -104,7 +102,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["isRoleAddressFor", "the domain-verification email fallback; only the DNS TXT path is wired"],
   ["domainVerifyEmail", "the template that fallback would send"],
   ["expertiseFor", "nothing serves the expertise options for a chosen work field"],
-  ["formatAge", "the moderation queue has no age column, which is the SLA it formats"],
 
   // --- Presence sessions: the folds, shipped ahead of their readers ---------
   //
