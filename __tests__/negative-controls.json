@@ -369,12 +369,6 @@
       "mutation": "A: remove the `metadata ->> 'sponsored_message_id' IS NULL` predicate. B: remove `id: { in: eligibleIds }` from the Prisma where, so the raw selection stops scoping the fetch",
       "observed": "A: 1 failing ('excludes paid messages by their marker'). B: 1 failing ('does it in the query, not after the fetch') \u2014 the half that matters, because the sweep selects only messages with no feedback row, so an ad filtered in JS would be re-selected every pass for ever",
       "date": "2026-09-05"
-    },
-    "board-gates.test.ts": {
-      "guards": "Reading the board takes a favourite or any committed RSVP; posting takes 'going' specifically, a complete profile (name, age, 2 interests, 1 intent, no photo), and room under both request caps; each refusal names its own fix",
-      "mutation": "A: widen the post gate from `rsvp !== 'going'` to any committed status. B: drop the MIN_INTERESTS_TO_RANK floor from profileIsComplete",
-      "observed": "A: 1 failing ('takes going, not merely committed'). B: 1 failing ('takes a profile somebody can judge')",
-      "date": "2026-09-05"
     }
   },
   "grandfathered": [

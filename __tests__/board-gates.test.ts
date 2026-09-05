@@ -17,6 +17,18 @@ import { MIN_INTERESTS_TO_RANK } from "@/lib/interest-coverage"
  * with me — is materially riskier than a message in a crowded room, and it is
  * the one place on this product where two people arrange to meet away from a
  * venue full of witnesses.
+ *
+ * Not in `negative-controls.json`: that registry tracks STRUCTURAL guards — the
+ * ones that scan source text and can pass vacuously against broken code. These
+ * call the functions, so they cannot silently match nothing. The controls were
+ * run anyway, because a test nobody has broken on purpose is a test nobody has
+ * checked: widening the post gate from `going` to any committed RSVP fails
+ * "takes going, not merely committed", and dropping the interest floor fails
+ * "takes a profile somebody can judge".
+ *
+ * This is the third time I have added a behavioural test to that registry and
+ * been refused. The rule is simple and I keep reaching for the registry out of
+ * habit: if the test does not read a file, it does not belong there.
  */
 const complete: BoardProfile = { name: "Ada", age: 29, interestCount: 3, intentCount: 1 }
 const going: BoardEntitlement = { rsvp: "going", favourited: false }
