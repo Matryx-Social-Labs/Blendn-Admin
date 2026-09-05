@@ -1,6 +1,6 @@
 "use server"
 
-import type { check_in_status, rsvp_status } from "@prisma/client"
+import type { rsvp_status } from "@prisma/client"
 
 import type { user_role } from "@prisma/client"
 
@@ -8,6 +8,8 @@ import { getAuth } from "@/lib/auth"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
+import { ATTENDED } from "@/lib/counting"
+import { loopClosure } from "@/lib/loop-closure"
 import { cityDemand } from "@/lib/demand"
 import { cityKey } from "@/lib/address"
 import { logger } from "@/lib/logger"
@@ -32,7 +34,8 @@ import type {
 } from "@/lib/dashboard-types"
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const ATTENDED: check_in_status[] = ["checked_in", "checked_out"]
+// One definition of "they turned up", shared with lib/loop-closure.ts and the
+// turn-up numbers. A local copy is how two screens end up disagreeing.
 /** going and maybe are intent; not_going is a decline and never counts. */
 const COMMITTED: rsvp_status[] = ["going", "maybe"]
 /** Trailing window for venue utilisation and per-venue rates. */
@@ -355,9 +358,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     publishingHosts,
     curatedPublished,
     curatedUnclaimed,
-    onboarded,
-    rsvpUsers,
-    checkedInUsers,
+    funnel,
     signupsBeforeWindow,
     signupBuckets,
     activeBuckets,
@@ -423,27 +424,15 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
       },
     }),
     /*
-     * Funnel stages must be nested subsets, or the shape lies.
+     * The whole loop in one pass — see lib/loop-closure.ts.
      *
-     * The first version counted four independent populations — every onboarded
-     * profile, every user with an RSVP, every user with a check-in — and drew
-     * them as a funnel. Staging had 7 onboarded and 10 RSVP'd, because a user
-     * can RSVP without ever completing onboarding, so stage 3 was wider than
-     * stage 2 and the chart showed a funnel widening downward.
-     *
-     * Each stage now filters on the one above it.
+     * Three counts became one because the funnel gained three stages, and seven
+     * superset scans on a screen that already fires ~28 round trips is the
+     * wrong direction. The nested-subset rule those three counts existed to
+     * enforce moved with them: it is the reason a funnel can be drawn at all,
+     * and it is stated where the query is.
      */
-    db.user.count({ where: { profile: { onboarded: true } } }),
-    db.user.count({
-      where: { profile: { onboarded: true }, event_rsvps: { some: {} } },
-    }),
-    db.user.count({
-      where: {
-        profile: { onboarded: true },
-        event_rsvps: { some: {} },
-        event_check_ins: { some: { status: { in: ATTENDED } } },
-      },
-    }),
+    loopClosure(),
     /*
      * A baseline count, not every user row.
      *
@@ -636,12 +625,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     publishingHosts: { publishing: publishingHosts, total: hostAccounts },
     curated: { published: curatedPublished, unclaimed: curatedUnclaimed },
     growth,
-    funnel: [
-      { label: "signed up", value: users },
-      { label: "onboarded", value: onboarded },
-      { label: "RSVP'd", value: rsvpUsers },
-      { label: "checked in", value: checkedInUsers },
-    ],
+    funnel,
     supply,
     cities: Array.from(cityMap.values()).sort((a, b) => b.events - a.events),
   }

@@ -191,7 +191,7 @@ export type FunnelStage = { label: string; value: number; detail?: string }
  */
 export function Funnel({
   stages,
-  title = "Activation funnel",
+  title = "The loop",
   hint = "all time",
   empty,
 }: {
@@ -207,7 +207,7 @@ export function Funnel({
       title={title}
       hint={hint}
       empty={empty}
-      emptyText="Fills as people sign up, onboard, and check in to events."
+      emptyText="Fills as people sign up, turn up, match, talk, and come back."
     >
       <div className="flex flex-col gap-2">
         {stages.map((stage, index) => {

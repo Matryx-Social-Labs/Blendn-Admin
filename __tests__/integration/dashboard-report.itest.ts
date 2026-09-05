@@ -279,12 +279,27 @@ describe("admin overview", () => {
     if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
     expect(overview.growth).toHaveLength(8)
+    /*
+     * The whole loop, not the first four stages.
+     *
+     * It used to stop at "checked in" — which every events app can measure. The
+     * last three require verified physical attendance, which is the thing no
+     * competitor has, and they are the only figures that say whether the
+     * product's one sentence is true.
+     */
     expect(overview.funnel.map((s) => s.label)).toEqual([
       "signed up",
       "onboarded",
       "RSVP'd",
       "checked in",
+      "matched",
+      "conversed",
+      "came back",
     ])
+
+    // Nested subsets, or the shape lies: no stage may exceed the one above it.
+    const values = overview.funnel.map((s) => s.value)
+    expect(values).toEqual([...values].sort((a, b) => b - a))
     expect(overview.attention.pending).toBeGreaterThanOrEqual(0)
     expect(overview.publishingHosts.publishing).toBeLessThanOrEqual(
       overview.publishingHosts.total + overview.publishingHosts.publishing
