@@ -357,6 +357,12 @@
       "mutation": "A: make mayReachRoute return true instead of checking allowedRoles. B: delete the `role === \"sponsor\"` branch from getDashboardOverview so sponsors fall through to the organiser build",
       "observed": "A: 3 failing (keeps everybody else out, agrees with the menu, fails closed). B: 1 failing ('routes the sponsor to its own builder'). The equivalence assertion also caught two real defects while being written \u2014 an unlisted-route short-circuit that bypassed a declared gate, and /dashboard/venues having two nav entries so `find` denied admins their own index",
       "date": "2026-09-05"
+    },
+    "deletion-contract.test.ts": {
+      "guards": "Every model that belongs to a user and carries personal scalar columns has a recorded disposition (SCRUBBED/DELETED/RETAINED), the code does what the contract claims, and every RETAINED entry states a reason",
+      "mutation": "A: append a `visit_traces` model with user_id + latitude/longitude to schema.prisma and declare nothing. B: delete the presence_sessions scrub from the deletion path while leaving its SCRUBBED entry in the contract",
+      "observed": "A: 1 failing ('has a decision recorded for every one') \u2014 the exact scenario that let presence_sessions ship with GPS the deletion path never touched. B: 1 failing ('does the scrubbing and deleting it claims to')",
+      "date": "2026-09-05"
     }
   },
   "grandfathered": [
