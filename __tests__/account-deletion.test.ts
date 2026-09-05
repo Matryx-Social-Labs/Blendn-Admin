@@ -28,6 +28,13 @@ const mockDb = {
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },
+  // Rows that deliberately SURVIVE the deletion and are scrubbed in place —
+  // attendance is somebody else's history, the coordinates are not.
+  event_check_ins: { updateMany: jest.fn() },
+  presence_sessions: { updateMany: jest.fn() },
+  notifications: { deleteMany: jest.fn() },
+  password_reset_tokens: { deleteMany: jest.fn() },
+  message_requests: { updateMany: jest.fn() },
   $transaction: jest.fn().mockResolvedValue([]),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -111,7 +118,15 @@ describe("deleting an account scrubs the matching inputs", () => {
     expect(mockDb.event_match_preferences.deleteMany).toHaveBeenCalledWith({
       where: { user_id: USER },
     })
-    expect(mockDb).not.toHaveProperty("event_check_ins")
+
+    /*
+     * This asserted the mock had no `event_check_ins` key at all, which proved
+     * the table was never touched. It is touched now — scrubbed of its GPS fix
+     * and device fingerprint — so the assertion is the more precise one it
+     * always meant: the attendance row is never DELETED, because deleting it
+     * would take the organiser's headcount with it.
+     */
+    expect((mockDb.event_check_ins as { deleteMany?: unknown }).deleteMany).toBeUndefined()
   })
 
   it("does it all in one transaction", async () => {
@@ -178,5 +193,65 @@ describe("no field on the profile survives deletion unnoticed", () => {
 
     // Named rather than counted, so a failure says which column to think about.
     expect(unaccounted).toEqual([])
+  })
+})
+
+describe("what survives a deletion, and what must not", () => {
+  /*
+   * The transaction scrubbed nineteen profile fields and left a trail of
+   * exactly where somebody had been, on which nights, to within a few metres.
+   *
+   * `event_check_ins` is deliberately kept — attendance is the organiser's
+   * headcount and the co-presence that lets people who met them still hold a
+   * conversation. None of those readers needs the GPS fix that validated the
+   * check-in, or the device fingerprint beside it. So the FACT stays and the
+   * COORDINATES go.
+   *
+   * `presence_sessions` is the same shape and was introduced after this
+   * transaction was last reviewed, so the deletion path silently stopped being
+   * complete the day that model landed. That is the failure mode worth naming:
+   * erasure is not a thing you write once.
+   */
+  it("keeps the attendance and drops the position", async () => {
+    await del()
+
+    expect(mockDb.event_check_ins.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ latitude: null, longitude: null }),
+      })
+    )
+    expect(mockDb.presence_sessions.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ last_lat: null, last_lng: null, last_accuracy: null }),
+      })
+    )
+    // Never deleted: that would take the organiser's numbers with it.
+    expect((mockDb.event_check_ins as { deleteMany?: unknown }).deleteMany).toBeUndefined()
+  })
+
+  it("removes the notification copies of message previews", async () => {
+    // `title` and `body` are a permanent copy of push previews — counterparty
+    // names and message text — outside every control that guards the messages.
+    await del()
+    expect(mockDb.notifications.deleteMany).toHaveBeenCalled()
+  })
+
+  it("kills any live password reset token", async () => {
+    // A live token for an account that no longer exists is a way back into it.
+    await del()
+    expect(mockDb.password_reset_tokens.deleteMany).toHaveBeenCalled()
+  })
+
+  it("scrubs only the requests they sent, not the ones they received", async () => {
+    /*
+     * The row is a two-party artifact and stays, or the recipient's inbox
+     * develops holes. The `message` is one party's words — theirs to erase
+     * when they wrote it, and not theirs when they did not.
+     */
+    await del()
+    const call = mockDb.message_requests.updateMany.mock.calls[0][0]
+    expect(call.where).toEqual(expect.objectContaining({ sender_id: expect.any(String) }))
+    expect(call.where).not.toHaveProperty("recipient_id")
+    expect(call.data).toEqual({ message: null })
   })
 })
