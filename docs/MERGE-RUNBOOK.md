@@ -89,14 +89,20 @@ The integration suite needs a real Postgres and is the half that caught the one
 genuine regression in this stack:
 
 ```bash
-docker run -d --name blendn_itest \
+docker run -d --name blendn-pg17 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=blendn_test \
-  -p 55432:5432 postgres:16
+  -p 55433:5432 postgres:17
 
-export DATABASE_URL="postgresql://postgres:postgres@localhost:55432/blendn_test"
+export DATABASE_URL="postgresql://postgres:postgres@localhost:55433/blendn_test"
 npm run db:migrate
 npm run test:integration
 ```
+
+**Postgres 17, not 16.** Staging and production run 17.11, and the mismatch is
+not cosmetic: `pg_dump` refuses outright to dump a newer server, so a 16 client
+cannot clone staging to check a migration against it — which is exactly the
+check worth doing before a promotion. One container, because a second one is a
+second thing to remember to start and a few hundred megabytes to keep resident.
 
 **`db:migrate`, not `db:push`** — this said `db:push` and that is a weaker
 database than the one you are testing for. `schema.prisma` cannot express a
