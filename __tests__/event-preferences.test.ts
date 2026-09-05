@@ -12,6 +12,11 @@
  * every version of this code agrees and the bug is invisible.
  */
 const mockDb = {
+  // `matchesForEvent` runs the co-attendance count as one raw query for the
+  // whole room rather than a query per candidate. Returns nothing here: these
+  // tests are about day-folding and preferences, and a pair with no shared
+  // history is the case that must keep ranking exactly as it did.
+  $queryRaw: jest.fn().mockResolvedValue([]),
   event_check_ins: { findFirst: jest.fn(), findMany: jest.fn() },
   event_match_preferences: { findMany: jest.fn() },
   profiles: { findUnique: jest.fn() },

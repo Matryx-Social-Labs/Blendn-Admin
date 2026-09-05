@@ -237,8 +237,49 @@ export async function matchesForEvent(
   })
   const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
 
+  /*
+   * Shared history, in ONE query for the whole room.
+   *
+   * Two hops over indexes that already exist — `@@index([user_id, status])` to
+   * find the viewer's past events, `@@index([event_id, status])` to find who
+   * else was at them — rather than a query per candidate, which on a
+   * two-hundred-person room would be two hundred round trips on the deck's
+   * first paint.
+   *
+   * Bounded to 90 days (R21). Beyond that it stops being "we keep ending up in
+   * the same rooms" and becomes a lifetime tally, which ranks the room by who
+   * has been out most.
+   *
+   * `kind = 'attendee'`: staff are at everything, so counting them would give
+   * every regular attendee a strong bond with the door team.
+   */
+  const CO_ATTENDANCE_DAYS = 90
+  const since = new Date(Date.now() - CO_ATTENDANCE_DAYS * 24 * 60 * 60 * 1000)
+  const candidateIds = eligible.map((c) => c.user_id)
+
+  const sharedRows =
+    candidateIds.length > 0
+      ? await db.$queryRaw<{ user_id: string; shared: bigint }[]>`
+          SELECT user_id, COUNT(DISTINCT event_id) AS shared
+            FROM event_check_ins
+           WHERE user_id = ANY(${candidateIds})
+             AND kind = 'attendee'
+             AND event_id <> ${eventId}::uuid
+             AND event_id IN (
+               SELECT event_id FROM event_check_ins
+                WHERE user_id = ${viewerId}
+                  AND kind = 'attendee'
+                  AND event_id <> ${eventId}::uuid
+                  AND check_in_time >= ${since}
+             )
+        GROUP BY user_id
+        `
+      : []
+  const sharedOf = new Map(sharedRows.map((r) => [r.user_id, Number(r.shared)]))
+
   const candidates: MatchCandidate[] = eligible.map((c) => ({
     userId: c.user_id,
+    sharedEvents: sharedOf.get(c.user_id) ?? 0,
     pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
     interestIds: expand(c.user.user_interests.map((i) => i.category_id)),
     intents: effectiveIntents(
