@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { Prisma } from "@prisma/client"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -121,6 +122,67 @@ export async function DELETE(request: NextRequest) {
       db.user_oauth_accounts.deleteMany({ where: { user_id: authUser.userId } }),
       db.account.deleteMany({ where: { userId: authUser.userId } }),
       db.session.deleteMany({ where: { userId: authUser.userId } }),
+
+      /*
+       * WHERE THEY STOOD, on the rows that deliberately stay.
+       *
+       * `event_check_ins` is kept because attendance is somebody else's history
+       * too — the organiser's headcount, and the co-presence that lets people
+       * who met them still hold a conversation. But the row also carries the
+       * GPS fix that validated the check-in and a device fingerprint, and
+       * neither is needed by any of those readers. A headcount needs a count.
+       *
+       * So the fact stays and the coordinates go. This is the gap that made the
+       * rest of this transaction misleading: it scrubbed nineteen profile
+       * fields and left a trail of exactly where somebody was, on which nights,
+       * to within a few metres.
+       */
+      db.event_check_ins.updateMany({
+        where: { user_id: authUser.userId },
+        data: { latitude: null, longitude: null, device_info: Prisma.DbNull },
+      }),
+
+      /*
+       * The same, for presence sessions — and this one was introduced by the
+       * presence work itself. `last_lat`, `last_lng` and `last_accuracy` are a
+       * position, on a table added after this transaction was last reviewed,
+       * so the deletion path silently stopped being complete the day the model
+       * landed. Sessions stay for the same reason check-ins do: dwell and
+       * occupancy are the organiser's numbers, not the attendee's.
+       */
+      db.presence_sessions.updateMany({
+        where: { user_id: authUser.userId },
+        data: { last_lat: null, last_lng: null, last_accuracy: null },
+      }),
+
+      /*
+       * Every notification they were ever sent.
+       *
+       * `title` and `body` are a permanent copy of push previews — counterparty
+       * names and message text — sitting outside every access control that
+       * guards the messages themselves. Deleted rather than redacted: these are
+       * this person's own notifications, nobody else reads them, and a redacted
+       * shell of a notification serves no one.
+       */
+      db.notifications.deleteMany({ where: { user_id: authUser.userId } }),
+
+      // A live reset token for an account that no longer exists is a way back
+      // into it. Cascades on the FK too; listed so this path enumerates what it
+      // removes rather than trusting a constraint to be read.
+      db.password_reset_tokens.deleteMany({ where: { user_id: authUser.userId } }),
+
+      /*
+       * What they wrote to strangers, and only what THEY wrote.
+       *
+       * The request row is a two-party artifact and stays — the recipient's
+       * inbox should not develop holes. The `message` is one party's words, so
+       * only the ones they SENT are scrubbed. Requests they received are
+       * somebody else's sentence and are not theirs to erase.
+       */
+      db.message_requests.updateMany({
+        where: { sender_id: authUser.userId },
+        data: { message: null },
+      }),
     ])
 
     return successResponse({ deleted: true })
