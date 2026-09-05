@@ -690,6 +690,11 @@ model event_check_ins {
   /// `lib/live-snapshot.ts` claimed "the queries are all indexed"; these two
   /// were not.
   @@index([event_id, check_in_time])
+  /// The window scans that are NOT per-event — "who checked in anywhere in the
+  /// last 7 days", which the polled health probe asks. Every other index on
+  /// this column starts with `event_id`, so that question could only sequential
+  /// scan.
+  @@index([check_in_time])
   /// Drives the sweeper: everyone still inside with a departure pending.
   @@index([status, left_area_at])
   @@index([occurrence_id, status])

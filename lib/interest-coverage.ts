@@ -54,18 +54,42 @@ export async function interestCoverage(): Promise<InterestCoverage> {
 
   /*
    * One aggregate rather than two round trips, because this runs on a health
-   * endpoint that gets polled. The join is against a grouped subquery so a user
-   * with 30 interests counts once, not 30 times.
+   * endpoint that gets POLLED — which is exactly why the shape below matters.
+   *
+   * The previous form joined against `SELECT user_id, COUNT(*) FROM
+   * user_interests GROUP BY user_id`: an unscoped aggregate over the ENTIRE
+   * interests table, computed in full on every poll, and then thrown away
+   * except for the handful of users who checked in this week. `EXPLAIN`
+   * confirmed it — `Seq Scan on user_interests` under a `HashAggregate`,
+   * regardless of how narrow the window was.
+   *
+   * Scoping the interest lookup to those users first turns a whole-table
+   * aggregate into an index probe per recent attendee, via
+   * `user_interests_user_id_category_id_key`. The answer is identical; only
+   * the work is different.
+   *
+   * `COUNT(ui.user_id)` rather than `COUNT(*)` in the inner query: the LEFT
+   * JOIN produces one all-null row for somebody with no interests, and
+   * `COUNT(*)` would count that row as one interest — quietly making every
+   * profile look one interest richer than it is, which on a coverage metric is
+   * the worst possible direction to be wrong in.
    */
   const [row] = await db.$queryRaw<{ checked_in: bigint; rankable: bigint }[]>`
+    WITH recent AS (
+      SELECT DISTINCT user_id
+        FROM event_check_ins
+       WHERE check_in_time >= ${since}
+    ),
+    held AS (
+      SELECT r.user_id, COUNT(ui.user_id) AS n
+        FROM recent r
+        LEFT JOIN user_interests ui ON ui.user_id = r.user_id
+    GROUP BY r.user_id
+    )
     SELECT
-      COUNT(DISTINCT ci.user_id) AS checked_in,
-      COUNT(DISTINCT ci.user_id) FILTER (WHERE ui.held >= ${MIN_INTERESTS_TO_RANK}) AS rankable
-    FROM event_check_ins ci
-    LEFT JOIN (
-      SELECT user_id, COUNT(*) AS held FROM user_interests GROUP BY user_id
-    ) ui ON ui.user_id = ci.user_id
-    WHERE ci.check_in_time >= ${since}
+      COUNT(*) AS checked_in,
+      COUNT(*) FILTER (WHERE n >= ${MIN_INTERESTS_TO_RANK}) AS rankable
+    FROM held
   `
 
   const checkedIn = Number(row?.checked_in ?? 0)
