@@ -7,6 +7,7 @@ import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
 import { CLAIM_LIMITS, CLAIM_PAGE, claimRefusal, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
+import { violatedConstraint } from "@/lib/prisma-errors"
 import { owningOrgFor } from "@/lib/event-ownership"
 import { logger } from "@/lib/logger"
 import { hit } from "@/lib/rate-limit-store"
@@ -199,8 +200,13 @@ export async function fileEventClaim(
      * that is the count a reviewer needs -- so this is only ever "you already
      * asked and we have not answered yet".
      */
+    /*
+     * `violatedConstraint`, not `message.includes(...)`. Prisma's message names
+     * the violated fields and never the index, so the obvious check never
+     * matched and this returned the generic failure below for every duplicate.
+     */
     const message = error instanceof Error ? error.message : String(error)
-    if (message.includes("event_claims_one_pending")) {
+    if (violatedConstraint(error, "event_claims_one_pending")) {
       return { ok: false, error: "You already have a claim on this event waiting for review" }
     }
     logger.error("File event claim failed", { error: message })
@@ -315,8 +321,7 @@ export async function decideEventClaim(
       })
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (message.includes("event_claims_one_approved_per_event")) {
+    if (violatedConstraint(error, "event_claims_one_approved_per_event")) {
       throw new Error("Somebody else's claim was approved first.")
     }
     throw error
