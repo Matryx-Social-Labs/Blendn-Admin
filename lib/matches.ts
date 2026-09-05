@@ -1,4 +1,5 @@
 import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
+import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { notifyMatch } from "@/lib/push-notifications"
 import {
@@ -321,10 +322,32 @@ export async function matchesForEvent(
       : []
   const plansOf = new Map(planRows.map((r) => [r.user_id, Number(r.shared)]))
 
+  /*
+   * Attention already received, so the room's remaining attention can be spent
+   * on somebody else.
+   *
+   * Likes come from Postgres — `@@index([event_id, liked_id])` already exists
+   * for the mutual check — and impressions from Redis, because they are written
+   * on the hottest read in the product and are a heuristic rather than data.
+   * Both degrade to zero rather than throwing: a deck that ranks as it did
+   * before this existed is worse, not broken.
+   */
+  const [likeRows, exposures] = await Promise.all([
+    db.event_likes.groupBy({
+      by: ["liked_id"],
+      where: { event_id: eventId, liked_id: { in: candidateIds } },
+      _count: { _all: true },
+    }),
+    exposuresFor(eventId, candidateIds),
+  ])
+  const likesOf = new Map(likeRows.map((r) => [r.liked_id, r._count._all]))
+
   const candidates: MatchCandidate[] = eligible.map((c) => ({
     userId: c.user_id,
     sharedEvents: sharedOf.get(c.user_id) ?? 0,
     sharedPlans: plansOf.get(c.user_id) ?? 0,
+    exposures: exposures.get(c.user_id) ?? 0,
+    likesReceived: likesOf.get(c.user_id) ?? 0,
     pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
     interestIds: expand(c.user.user_interests.map((i) => i.category_id)),
     intents: effectiveIntents(
@@ -381,6 +404,25 @@ export async function matchesForEvent(
     : []
   const nameOf = new Map(categories.map((c) => [c.id, c.name]))
 
+  /*
+   * Record that these were shown, and do NOT await it.
+   *
+   * The deck must not wait on a counter, and it must not fail on one: an
+   * impression that goes unrecorded costs a little balancing accuracy, while a
+   * deck that fails to render costs the feature. `recordImpressions` already
+   * swallows its own errors; the `catch` here is belt and braces against an
+   * unhandled rejection taking the process down.
+   *
+   * Only the page actually returned. Counting the whole ranked room would
+   * penalise everybody equally on every request, which is the same as counting
+   * nobody — and would make the damping a function of how often the deck is
+   * opened rather than of who was seen.
+   */
+  void recordImpressions(
+    eventId,
+    ranked.map((m) => m.userId)
+  ).catch(() => {})
+
   return ranked.map((m) => ({
     userId: m.userId,
     displayName: m.displayName,
@@ -393,6 +435,9 @@ export async function matchesForEvent(
     sharedWorkField: m.sharedWorkField,
     age: m.age,
     insideNow: m.insideNow,
+    // Already floored by `rankMatches` — this only carries it to the card.
+    sharedEvents: m.sharedEvents,
+    sharedPlans: m.sharedPlans,
     youLiked: liked.has(m.userId),
   }))
 }

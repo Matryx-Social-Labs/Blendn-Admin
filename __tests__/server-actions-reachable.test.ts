@@ -132,6 +132,7 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["resetSpamHistory", "test seam for module-level state; production never wants it"],
   ["clearAllSpamHistory", "same"],
   ["resetMemoryStore", "same, for the in-process rate-limit fallback"],
+  ["resetExposureMemory", "same again, for the in-process impression counters — module state a test has to be able to clear between cases"],
 ])
 
 function walk(dir: string, out: string[] = []): string[] {

@@ -101,6 +101,35 @@ export const SHARED_PLAN_BONUS = 0.7
  */
 export const SHARED_PLAN_CAP = 2
 
+/**
+ * How hard attention already received pushes a candidate down.
+ *
+ * Ranking is deterministic, so without this the highest-scoring person in a
+ * room is shown first to EVERYONE, collects every like, and nobody else gets
+ * any. That is winner-take-all — and worse here than on a dating app, because
+ * the pool is one room on one night and does not refill. Someone ranked fourth
+ * at 9pm is still ranked fourth at 11pm, to the same people, and then the event
+ * ends.
+ *
+ * The objective is not ranking accuracy, it is PAIRS MADE. Some inversion is
+ * the point rather than a side effect: turning one popular person into several
+ * matched pairs is the number the product is judged on.
+ *
+ * Harmonic rather than linear — `1 / (1 + k·attention)` — so the first few
+ * impressions barely matter and the twentieth does. A linear penalty would push
+ * a well-matched candidate below a badly-matched one after a handful of views.
+ */
+export const EXPOSURE_DAMPING = 0.08
+
+/**
+ * A like saturates more than a view.
+ *
+ * Being shown to somebody is an opportunity; being liked is the opportunity
+ * taken. Somebody with five likes at this event is already well served, and the
+ * room's remaining attention is better spent elsewhere.
+ */
+export const LIKE_SATURATION = 3
+
 export const PRESENCE_BONUS = 1.5
 
 /**
@@ -184,6 +213,10 @@ export interface MatchCandidate {
    * excluding this one. Zero when unknown, same as `sharedEvents`.
    */
   sharedPlans?: number
+  /** Times shown in this event's deck. Zero when unknown. */
+  exposures?: number
+  /** Likes received at this event. Zero when unknown. */
+  likesReceived?: number
   /** Currently checked in, as opposed to having attended earlier. */
   insideNow: boolean
   checkedInAt: Date
@@ -453,6 +486,17 @@ export function rankMatches(
        */
       const onlyJustHere = candidate.intents.every((i) => i === "just_here")
       if (onlyJustHere) score *= JUST_HERE_DAMPING
+
+      /*
+       * Attention already received, applied LAST.
+       *
+       * After every bonus and after the just-here damping, because it scales
+       * the final score rather than competing with any single term. Applying it
+       * earlier would let a later bonus undo it.
+       */
+      const attention =
+        (candidate.exposures ?? 0) + LIKE_SATURATION * (candidate.likesReceived ?? 0)
+      if (attention > 0) score /= 1 + EXPOSURE_DAMPING * attention
 
       /*
        * Scored on every overlap, labelled with the best two. The score uses the

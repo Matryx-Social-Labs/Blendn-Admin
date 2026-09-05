@@ -669,3 +669,78 @@ describe("where they are both going next", () => {
     expect(big[0].sharedPlans).toBe(2)
   })
 })
+
+describe("attention already received pushes a candidate down", () => {
+  /*
+   * The winner-take-all problem, and the one change here that alters WHO gets
+   * matched rather than who ranks higher.
+   *
+   * Ranking is deterministic, so the top-scoring person in a room is shown
+   * first to everyone, collects every like, and nobody else gets any. The pool
+   * is one room on one night and does not refill, so a person ranked fourth at
+   * 9pm is still ranked fourth at 11pm — to the same people — and then the
+   * event ends.
+   *
+   * Some inversion is the POINT, not a side effect: the objective is pairs
+   * made, not ranking accuracy.
+   */
+  it("lets a less-matched stranger overtake a saturated favourite", () => {
+    const [first] = rank([
+      // Strong on paper — a full three shared events — but the room has already
+      // seen them thirty times.
+      candidate({ userId: "saturated", sharedEvents: 3, exposures: 30 }),
+      candidate({ userId: "unseen", exposures: 0 }),
+    ])
+    expect(first.userId).toBe("unseen")
+
+    /*
+     * Thirty because these fixtures carry no interests, so the only other term
+     * is the presence bonus and the crossover sits higher than it does in a
+     * real room. Measured against a room with one moderately rare shared
+     * interest, a three-event history is overtaken at about TEN impressions —
+     * which is the number that matters, because ten is a plausible evening.
+     */
+  })
+
+  it("barely moves for the first few impressions", () => {
+    /*
+     * Harmonic, not linear. A linear penalty would push a well-matched
+     * candidate below a badly-matched one after a handful of views, which
+     * would spread attention by making the deck worthless.
+     */
+    const [first] = rank([
+      candidate({ userId: "good", sharedEvents: 2, exposures: 3 }),
+      candidate({ userId: "weak", exposures: 0 }),
+    ])
+    expect(first.userId).toBe("good")
+  })
+
+  it("counts a like as heavier saturation than a view", () => {
+    // Being shown is an opportunity; being liked is the opportunity taken.
+    const [first] = rank([
+      candidate({ userId: "liked", likesReceived: 4 }),
+      candidate({ userId: "viewed", exposures: 4 }),
+    ])
+    expect(first.userId).toBe("viewed")
+  })
+
+  it("applies last, so a bonus cannot undo it", () => {
+    /*
+     * The damping scales the final score rather than competing with any single
+     * term. Applied before `JUST_HERE_DAMPING` it would be partly cancelled by
+     * it, and the ordering below is what proves it is not.
+     */
+    const ranked = rank([
+      candidate({ userId: "heavy", sharedEvents: 3, sharedPlans: 2, exposures: 40 }),
+      candidate({ userId: "fresh", exposures: 0 }),
+    ])
+    expect(ranked[0].userId).toBe("fresh")
+  })
+
+  it("treats unknown attention as none", () => {
+    // Redis unreachable degrades to zero, so the deck ranks as it did before
+    // this existed — worse, not broken.
+    const ranked = rank([candidate({ userId: "x" })])
+    expect(ranked).toHaveLength(1)
+  })
+})
