@@ -93,7 +93,7 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
 
   // --- Safety and moderation: built, documented, never on screen ------------
   ["fencesOverlap", "the two-events-one-building warning; the geofence editor never asks for it"],
-  ["contactInfoWarning", "the sentence shown above the composer; the chat route returns checkContactInfo's bare hint instead"],
+  ["contactInfoWarning", "CLIENT-BLOCKED: it is a *pre-send* confirm — \"everyone here sees it. Send anyway?\" — so it needs the API to return a warning and the client to offer a second step. Both server paths flag silently today, which is correct until that exists"],
   ["canSendSystemMessages", "named in CLAUDE.md as caller-less; kept as the written rule until something needs it"],
   ["canSendPushNotifications", "same — the rule exists, the caller does not"],
 
