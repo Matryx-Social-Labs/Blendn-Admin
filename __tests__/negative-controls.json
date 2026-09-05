@@ -46,10 +46,10 @@
       "date": "2026-08-20"
     },
     "hot-path-indexes.test.ts": {
-      "guards": "the five hot-path indexes are declared in schema.prisma and created by a migration",
-      "mutation": "Remove `@@index([event_id, check_in_time])` from the event_check_ins model",
-      "observed": "1 failing: 'event_check_ins has @@index([event_id, check_in_time])'",
-      "date": "2026-08-20"
+      "guards": "The hot-path indexes are declared in the datamodel AND created by a migration, and the polled health probe scopes its interest lookup to recent attendees instead of aggregating the whole user_interests table",
+      "mutation": "A: restore COUNT(*) in the interest-coverage inner aggregate. B: delete @@index([check_in_time]) from the events check-in model",
+      "observed": "A: 1 failing ('counts the joined column, not the row'). B: 1 failing on the declaration assertion. EXPLAIN before/after confirmed the whole-table HashAggregate is gone.",
+      "date": "2026-09-05"
     },
     "dashboard-header-title.test.ts": {
       "guards": "every static dashboard route has an exact routeContent entry; site-header owns the only h1",
@@ -362,6 +362,12 @@
       "guards": "Every model that belongs to a user and carries personal scalar columns has a recorded disposition (SCRUBBED/DELETED/RETAINED), the code does what the contract claims, and every RETAINED entry states a reason",
       "mutation": "A: append a `visit_traces` model with user_id + latitude/longitude to schema.prisma and declare nothing. B: delete the presence_sessions scrub from the deletion path while leaving its SCRUBBED entry in the contract",
       "observed": "A: 1 failing ('has a decision recorded for every one') \u2014 the exact scenario that let presence_sessions ship with GPS the deletion path never touched. B: 1 failing ('does the scrubbing and deleting it claims to')",
+      "date": "2026-09-05"
+    },
+    "sentiment.test.ts": {
+      "guards": "Paid messages are excluded from the sentiment corpus by their metadata marker, in the QUERY rather than after the fetch, and the exclusion is bounded by the sweep limit",
+      "mutation": "A: remove the `metadata ->> 'sponsored_message_id' IS NULL` predicate. B: remove `id: { in: eligibleIds }` from the Prisma where, so the raw selection stops scoping the fetch",
+      "observed": "A: 1 failing ('excludes paid messages by their marker'). B: 1 failing ('does it in the query, not after the fetch') \u2014 the half that matters, because the sweep selects only messages with no feedback row, so an ad filtered in JS would be re-selected every pass for ever",
       "date": "2026-09-05"
     }
   },

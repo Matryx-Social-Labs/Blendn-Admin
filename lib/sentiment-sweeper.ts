@@ -56,6 +56,34 @@ export interface SentimentSweepResult {
 }
 
 export async function sweepSentiment(): Promise<SentimentSweepResult> {
+  /*
+   * The paid-message exclusion, in SQL, because Prisma cannot say it.
+   *
+   * The predicate is "the key is absent OR its value is null", and Prisma's
+   * JSON filters express neither cleanly: `equals: DbNull` matches a JSON null
+   * and not an absent key, which is the common case here since most messages
+   * carry no metadata at all. `->>` returns NULL for both, which is exactly the
+   * question — verified against Postgres rather than assumed.
+   *
+   * Bounded by the same limit as the fetch below, so this cannot become an
+   * unbounded id list on a busy night.
+   */
+  const eligible = await db.$queryRaw<{ id: string }[]>`
+    SELECT m.id
+      FROM chat_messages m
+      JOIN chat_groups g ON g.id = m.chat_group_id
+     WHERE g.status = 'active'
+       AND m.type = 'text'
+       AND m.deleted_at IS NULL
+       AND (m.moderation_status IS NULL OR m.moderation_status <> 'hidden')
+       AND m.metadata ->> 'sponsored_message_id' IS NULL
+       AND NOT EXISTS (SELECT 1 FROM event_feedback f WHERE f.message_id = m.id)
+     ORDER BY m.created_at ASC
+     LIMIT ${MAX_MESSAGES_PER_SWEEP + 1}
+  `
+  const eligibleIds = eligible.map((r) => r.id)
+  if (eligibleIds.length === 0) return { classified: 0, hasMore: false }
+
   const messages = await db.chat_messages.findMany({
     where: {
       // `status: "active"` is already the state machine for "this room is open"
@@ -79,6 +107,27 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
       // `{ is: null }`, not `null` — the bare form does not filter a to-one
       // relation and quietly matches everything.
       feedback: { is: null },
+      /*
+       * NOT A PAID MESSAGE.
+       *
+       * A sponsored send is written as `type: "text"` — deliberately, because
+       * `type` also carries the media kind and a sponsored send is the one
+       * broadcast that may be an image, so spending it on the message kind
+       * would lose that. `lib/sponsored-scheduler.ts` records the decision and
+       * the marker it leaves instead: `metadata.sponsored_message_id`.
+       *
+       * The consequence, until now, was that an advertiser's copy was
+       * classified as somebody's feeling about the event — feeding the live
+       * Mood bar and appearing in the post-event digest under "what people
+       * said", attributed to a pseudonym. Announcements stopped doing this when
+       * they got their own `type`; ads could not follow.
+       *
+       * Excluded in the QUERY, never after the fetch. This selects only
+       * messages with no `feedback` row, so an ad skipped in JavaScript would
+       * be re-selected on every pass for ever — a batch that slowly fills with
+       * work nobody can do.
+       */
+      id: { in: eligibleIds },
     },
     select: {
       id: true,
