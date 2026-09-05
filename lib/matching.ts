@@ -80,6 +80,27 @@ export const CO_ATTENDANCE_BONUS = 0.8
  */
 export const CO_ATTENDANCE_CAP = 3
 
+/**
+ * Per FUTURE event this pair have both said they want to be at, capped.
+ *
+ * Above a shared intent tag (0.6) because it is specific — "we both want to be
+ * at this gig on the 14th" is a reason to talk, where "we both ticked
+ * networking" is a category. Below co-attendance (0.8) because it is a tap
+ * rather than a trip: nobody has verified anything yet.
+ */
+export const SHARED_PLAN_BONUS = 0.7
+
+/**
+ * A tighter cap than co-attendance, and the reason is gaming.
+ *
+ * Favouriting is free and unlimited. Somebody who favourites every event in the
+ * city would otherwise share a plan with everyone in every room — the profile-
+ * stuffing attack that co-attendance is immune to, arriving through the one
+ * signal here that costs nothing to produce. Two is enough to say "you are both
+ * going to the same things" and too few to be worth farming.
+ */
+export const SHARED_PLAN_CAP = 2
+
 export const PRESENCE_BONUS = 1.5
 
 /**
@@ -158,6 +179,11 @@ export interface MatchCandidate {
    * to today's ranking rather than to a wrong one.
    */
   sharedEvents?: number
+  /**
+   * Future events both have signalled intent for — RSVP or favourite —
+   * excluding this one. Zero when unknown, same as `sharedEvents`.
+   */
+  sharedPlans?: number
   /** Currently checked in, as opposed to having attended earlier. */
   insideNow: boolean
   checkedInAt: Date
@@ -234,6 +260,20 @@ export interface Match {
    * for no privacy gain.
    */
   sharedEvents: number
+  /**
+   * Future events they are both going to, excluding this one.
+   *
+   * The card line is *"you are both going to 2 of the same things"*, which is
+   * the rarest thing a room can offer: a reason to talk that has somewhere to
+   * go afterwards.
+   *
+   * Suppressed by the same floor, and for a sharper reason than the others. A
+   * future event is a small, public, nameable set — "also going to the Blue
+   * Tokai thing on the 14th" in a room of six is closer to an introduction than
+   * a hint. The score still uses it below the floor, because the score is never
+   * shown.
+   */
+  sharedPlans: number
   /**
    * Whole years.
    *
@@ -393,6 +433,10 @@ export function rankMatches(
       const shared = Math.min(candidate.sharedEvents ?? 0, CO_ATTENDANCE_CAP)
       if (shared > 0) score += CO_ATTENDANCE_BONUS * shared
 
+      // Where they are both going next, capped harder because a favourite is free.
+      const plans = Math.min(candidate.sharedPlans ?? 0, SHARED_PLAN_CAP)
+      if (plans > 0) score += SHARED_PLAN_BONUS * plans
+
       if (candidate.insideNow) score += PRESENCE_BONUS
 
       /*
@@ -467,6 +511,7 @@ export function rankMatches(
      * whether it may be said out loud.
      */
     sharedEvents: roomIsBigEnough ? (candidate.sharedEvents ?? 0) : 0,
+    sharedPlans: roomIsBigEnough ? (candidate.sharedPlans ?? 0) : 0,
     age: candidate.age ?? null,
     insideNow: candidate.insideNow,
   }))

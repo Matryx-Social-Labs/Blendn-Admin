@@ -277,9 +277,54 @@ export async function matchesForEvent(
       : []
   const sharedOf = new Map(sharedRows.map((r) => [r.user_id, Number(r.shared)]))
 
+  /*
+   * Where they are both going NEXT, in one more query.
+   *
+   * `event_favorites` and `event_rsvps` fed nothing until now — RSVP was a
+   * dead-end signal that existed only as a dashboard number, which is what
+   * made "we both want to be at this" invisible to the one screen where it is
+   * a reason to talk.
+   *
+   * Intent is the union of the two tables: an RSVP is the stronger statement
+   * and a favourite is the commoner one, and somebody in both should count
+   * once. `COMMITTED` excludes `not_going`, which is a decline and the
+   * opposite of a shared plan.
+   *
+   * Future only, and never this event — everyone in the room shares this one,
+   * so counting it would add a constant to every candidate and change nothing
+   * except to make the number look bigger.
+   */
+  const planRows =
+    candidateIds.length > 0
+      ? await db.$queryRaw<{ user_id: string; shared: bigint }[]>`
+          WITH mine AS (
+            SELECT event_id FROM event_rsvps
+              WHERE user_id = ${viewerId} AND status IN ('going', 'maybe', 'waitlisted')
+            UNION
+            SELECT event_id FROM event_favorites WHERE user_id = ${viewerId}
+          ),
+          theirs AS (
+            SELECT user_id, event_id FROM event_rsvps
+              WHERE user_id = ANY(${candidateIds}) AND status IN ('going', 'maybe', 'waitlisted')
+            UNION
+            SELECT user_id, event_id FROM event_favorites WHERE user_id = ANY(${candidateIds})
+          )
+          SELECT t.user_id, COUNT(DISTINCT t.event_id) AS shared
+            FROM theirs t
+            JOIN events e ON e.id = t.event_id
+           WHERE t.event_id IN (SELECT event_id FROM mine)
+             AND t.event_id <> ${eventId}::uuid
+             AND e.start_time > now()
+             AND e.deleted_at IS NULL
+        GROUP BY t.user_id
+        `
+      : []
+  const plansOf = new Map(planRows.map((r) => [r.user_id, Number(r.shared)]))
+
   const candidates: MatchCandidate[] = eligible.map((c) => ({
     userId: c.user_id,
     sharedEvents: sharedOf.get(c.user_id) ?? 0,
+    sharedPlans: plansOf.get(c.user_id) ?? 0,
     pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
     interestIds: expand(c.user.user_interests.map((i) => i.category_id)),
     intents: effectiveIntents(

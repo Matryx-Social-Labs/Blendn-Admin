@@ -4,6 +4,7 @@ import {
   interestWeight,
   rankMatches,
   CO_ATTENDANCE_CAP,
+  SHARED_PLAN_CAP,
   type Intent,
   type MatchCandidate,
   type MatchViewer,
@@ -605,5 +606,66 @@ describe("shared history is the signal nobody can fake", () => {
     // compute it degrades to today's ranking rather than to a wrong one.
     const ranked = rank([candidate({ userId: "unknown" })])
     expect(ranked[0].sharedEvents).toBe(0)
+  })
+})
+
+describe("where they are both going next", () => {
+  /*
+   * `event_favorites` and `event_rsvps` fed nothing. RSVP was a dead-end
+   * signal that existed only as a dashboard number, so "we both want to be at
+   * this" — the rarest thing a room can offer, a reason to talk that has
+   * somewhere to go afterwards — was invisible to the one screen where it
+   * matters.
+   */
+  it("ranks a shared plan above nothing", () => {
+    const [a] = rank([
+      candidate({ userId: "plans", sharedPlans: 1 }),
+      candidate({ userId: "none", sharedPlans: 0 }),
+    ])
+    expect(a.userId).toBe("plans")
+  })
+
+  it("is worth less than having actually been somewhere together", () => {
+    /*
+     * A tap is not a trip. One shared plan (0.7) must not outrank one shared
+     * past event (0.8), or the signal somebody can produce for free would beat
+     * the one they had to physically show up for.
+     */
+    const [first] = rank([
+      candidate({ userId: "went", sharedEvents: 1 }),
+      candidate({ userId: "intends", sharedPlans: 1 }),
+    ])
+    expect(first.userId).toBe("went")
+  })
+
+  it("caps harder than co-attendance, because a favourite is free", () => {
+    /*
+     * Somebody who favourites every event in the city would otherwise share a
+     * plan with everyone in every room — profile-stuffing arriving through the
+     * one signal that costs nothing to produce.
+     */
+    const ranked = rank([
+      candidate({ userId: "farmer", sharedPlans: 50 }),
+      candidate({ userId: "capped", sharedPlans: SHARED_PLAN_CAP }),
+    ])
+    // Equal scores, so the tie falls to userId — "capped" sorts first.
+    expect(ranked[0].userId).toBe("capped")
+    expect(SHARED_PLAN_CAP).toBeLessThan(CO_ATTENDANCE_CAP)
+  })
+
+  it("is withheld in a small room but still ranks", () => {
+    // A future event is a small, public, nameable set: "also going to the Blue
+    // Tokai thing on the 14th" in a room of six is closer to an introduction.
+    const small = rankMatches(viewer, [candidate({ userId: "x", sharedPlans: 2 })], {
+      interestHolders: HOLDERS,
+      population: 4,
+    })
+    expect(small[0].sharedPlans).toBe(0)
+
+    const big = rankMatches(viewer, [candidate({ userId: "x", sharedPlans: 2 })], {
+      interestHolders: HOLDERS,
+      population: 100,
+    })
+    expect(big[0].sharedPlans).toBe(2)
   })
 })
