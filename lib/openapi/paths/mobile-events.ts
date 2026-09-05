@@ -42,6 +42,92 @@ const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data
 // GET /api/mobile/events
 registry.registerPath({
   method: "get",
+  path: "/api/mobile/events/{eventId}/board",
+  tags: ["Mobile Events"],
+  summary: "The pre-event board",
+  description:
+    "Going alone, and looking for somebody to go with. Readable by anyone who " +
+    "RSVP'd or favourited — somebody deciding whether to go is exactly who it is " +
+    "for. Authors are pseudonyms, the same handle the room uses; the request " +
+    "count is a number and never a list of who asked.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string() }) },
+  responses: {
+    200: {
+      description: "Live posts, newest first",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              posts: z.array(
+                z.object({
+                  id: z.string(),
+                  kind: z.enum(["offer", "seeking", "chat"]),
+                  body: z.string(),
+                  spacesLeft: z.number().nullable(),
+                  createdAt: z.string(),
+                  author: z.string(),
+                  mine: z.boolean(),
+                  requestCount: z.number(),
+                })
+              ),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/board",
+  tags: ["Mobile Events"],
+  summary: "Post to the board",
+  description:
+    "Requires RSVP 'going' (not merely committed — offering a seat in a car you " +
+    "may not be driving to is worse than not offering), a complete profile, and " +
+    "room under both request caps. Closes when the doors open: after that the " +
+    "room is the place, and it is gated on presence rather than intent.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            kind: z.enum(["offer", "seeking", "chat"]),
+            body: z.string().min(1).max(500),
+            spacesLeft: z.number().int().min(0).max(20).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "Posted",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              id: z.string(),
+              kind: z.string(),
+              body: z.string(),
+              spacesLeft: z.number().nullable(),
+              createdAt: z.string(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
   path: "/api/mobile/events",
   tags: ["Mobile Events"],
   summary: "List events",

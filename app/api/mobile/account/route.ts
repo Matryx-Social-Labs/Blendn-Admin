@@ -183,6 +183,32 @@ export async function DELETE(request: NextRequest) {
         where: { sender_id: authUser.userId },
         data: { message: null },
       }),
+
+      /*
+       * Their board posts go, and the requests against them go with them.
+       *
+       * An offer of a spare seat whose author has deleted their account cannot
+       * be accepted — the entire point of answering it is to meet that person.
+       * Keeping it would leave an offer nobody can take, and a `seeking` post
+       * asking for help that can no longer be given.
+       *
+       * The cascade on `post_id` takes other people's requests to those posts
+       * with it, and that is right rather than merely unavoidable: a request to
+       * a post that no longer exists is not a request, it is a dangling
+       * sentence.
+       */
+      db.board_posts.deleteMany({ where: { author_id: authUser.userId } }),
+
+      /*
+       * Requests they SENT to other people's posts: the row survives — the
+       * recipient's board should not develop holes — and only their words go.
+       * The same rule as `message_requests`, for the same reason: a request
+       * they received is somebody else's sentence.
+       */
+      db.board_requests.updateMany({
+        where: { from_user_id: authUser.userId },
+        data: { message: null },
+      }),
     ])
 
     return successResponse({ deleted: true })

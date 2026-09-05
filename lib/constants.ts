@@ -142,3 +142,40 @@ export const SPONSORSHIP = {
   /** Consecutive send failures before a campaign deactivates itself. */
   FAILURE_LIMIT: 3,
 } as const
+
+/**
+ * The pre-event board.
+ *
+ * The two caps below bound different abuses and are deliberately different
+ * numbers: the first bounds a spray, the second bounds persistence. Somebody
+ * can be under the first all evening by waiting for answers, and the second is
+ * what stops them working through the whole board a week at a time.
+ *
+ * Here rather than inline because they are product decisions somebody will
+ * want to argue with, and a number buried in a route is a number nobody
+ * revisits.
+ */
+export const BOARD = {
+  /**
+   * Unanswered requests one person may have out at once.
+   *
+   * Five is enough to ask everybody plausibly worth asking at one event and
+   * few enough that a spray is obvious. It clears as people answer, so an
+   * active user is never blocked by their own patience.
+   */
+  MAX_OUTSTANDING_REQUESTS: 5,
+  /**
+   * Requests sent per rolling week, across every board.
+   *
+   * The outstanding cap alone is defeatable by persistence: withdraw, re-send,
+   * withdraw, re-send. This bounds the total regardless of how quickly they
+   * are answered.
+   */
+  MAX_REQUESTS_PER_WEEK: 20,
+  /** The window the weekly cap counts over. */
+  REQUEST_WEEK_DAYS: 7,
+  /** Longest a post may be. Long enough for a plan, short enough to scan. */
+  MAX_POST_LENGTH: 500,
+  /** Longest an ask may be. "Can I join?" needs no essay. */
+  MAX_REQUEST_LENGTH: 300,
+} as const

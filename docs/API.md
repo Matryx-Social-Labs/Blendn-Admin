@@ -1399,6 +1399,47 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
 | POST | `/events/:eventId/report` | `event_reports` |
 
+### The pre-event board
+
+| Method | Endpoint | Gate |
+|--------|----------|------|
+| GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited |
+| POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps |
+
+Going alone, and looking for somebody to go with. This is what gives
+`event_rsvps` a job — it has been a dead-end signal that existed only as a
+dashboard number.
+
+**Reading is cheap and posting is not, deliberately.** A favourite is one tap,
+and somebody deciding whether to go is exactly who the board is for: *"is anyone
+else going alone"* is a reason to commit, and requiring the commitment first
+inverts it. Posting takes `going`, because offering a seat in a car you may not
+be driving to is worse than not offering.
+
+The ask here — travel with me, share a car — is materially riskier than a
+message in a crowded room, and it is the one place in the product where two
+people arrange to meet away from a venue full of witnesses. So posting also
+requires a **complete profile**: name, age, two structured interests, one
+intent. Server-enforced, and deliberately not `profiles.onboarded`, which is a
+client-set boolean no API has ever checked.
+
+**No photo.** The board is pseudonymous, so a photo would be collected and never
+shown.
+
+Two caps, bounding different abuses: **5 unanswered requests at once** bounds a
+spray, and **20 per rolling week** bounds persistence — the first alone is
+defeatable by withdrawing and re-sending.
+
+Authors are pseudonyms, the same handle the room uses, so somebody who posts and
+then talks in the room is recognisably the same person *at that event* and
+nowhere else. `requestCount` is a number and never a list: how many have asked
+is useful, naming them would disclose who is looking for company to everyone
+browsing.
+
+**The board closes at doors.** After that the room is the place, and it is gated
+on presence rather than intent — a board that stayed open would be a second room
+with a weaker gate running beside the real one.
+
 ### Reactions
 
 | Method | Endpoint | Behaviour |
