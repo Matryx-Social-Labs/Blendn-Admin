@@ -22,7 +22,10 @@ const mockDb = {
   profiles: { findUnique: jest.fn() },
   user_interests: { findMany: jest.fn() },
   blocked_users: { findMany: jest.fn() },
-  event_likes: { findMany: jest.fn() },
+  // `groupBy` counts likes received, which feeds the exposure damping. A later
+  // duplicate key would silently win, so it is extended here rather than added
+  // again above.
+  event_likes: { findMany: jest.fn(), groupBy: jest.fn() },
   chat_group_members: { findMany: jest.fn() },
   categories: { findMany: jest.fn() },
 }
@@ -76,6 +79,7 @@ beforeEach(() => {
   mockDb.event_match_preferences.findMany.mockResolvedValue([])
   mockDb.blocked_users.findMany.mockResolvedValue([])
   mockDb.event_likes.findMany.mockResolvedValue([])
+  mockDb.event_likes.groupBy.mockResolvedValue([])
   mockDb.chat_group_members.findMany.mockResolvedValue([])
   mockDb.categories.findMany.mockResolvedValue([])
 })
