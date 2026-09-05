@@ -194,6 +194,35 @@ And one structural rule: **funnel stages must be nested subsets**, each filterin
 the one above. An earlier version drew four independent populations as a funnel
 and it widened downward.
 
+### The loop
+
+The admin funnel is seven stages, not four:
+
+    signed up → onboarded → RSVP'd → checked in → matched → conversed → came back
+
+The first four are measurable by any events app. **The last three are not**,
+because they require verified physical attendance, and that is the one thing
+this product has that a competitor does not. It is the only figure that says
+whether *"a way to approach someone without risking rejection"* is true, so it
+is the headline and not a footnote.
+
+Three definitions carry the weight, and each is a mistake somebody will make
+again:
+
+- **matched** is a *mutual* pair of likes at one event. There is no `matches`
+  table — the mutual check runs on every like and is never stored — so it is a
+  self-join. Counting a single like would report an approach as a connection.
+- **conversed** is a message *sent*, not a conversation existing. Every match
+  opens a conversation, so counting rows would make this stage a copy of the
+  one above it.
+- **came back** is `COUNT(DISTINCT event_id) >= 2`, never a row count. One
+  person at one three-day conference has three check-in rows, and counting
+  those made them a returning attendee — the defect W17 fixed in nine places.
+
+`lib/loop-closure.ts` computes all seven in one pass, and
+`__tests__/integration/loop-closure.itest.ts` pins them against a hand-verified
+fixture where every person lands on exactly one stage.
+
 ---
 
 ## PART 2 — Screens that do not exist yet
