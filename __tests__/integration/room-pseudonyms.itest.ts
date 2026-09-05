@@ -13,6 +13,8 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 import { signAccessToken } from "@/lib/mobile-auth"
 
+import { claimAnonymousName } from "@/lib/anonymous-names"
+
 import { db, closeDb, makeUser, testId } from "./helpers"
 
 /**
@@ -354,5 +356,56 @@ describe("a room page carries every sender's pseudonym", () => {
           "member makes the cost grow with the room while the need does not."
         : "",
     }).toEqual({ unscoped: [], hint: "" })
+  })
+})
+
+describe("everybody arriving at once still gets a name", () => {
+  it("survives eight concurrent claims that all want the same handle", async () => {
+    /*
+     * Doors, against the real unique index.
+     *
+     * `generateUniqueAnonymousName` reads the taken names and picks a free one;
+     * the write is a separate statement, and
+     * `@@unique([chat_group_id, anonymous_name])` is what actually enforces it.
+     * Uncaught, the loser's `P2002` is a **500 on check-in** — the product's
+     * core action, failing at the one minute of the night when every attendee
+     * performs it. With ~6,480 combinations, the chance some pair in a
+     * 200-person room collides is about 95%.
+     *
+     * **Concurrent, and that is the whole fixture.** A first version ran the
+     * claims sequentially and passed against the broken code, because the
+     * second claim's read already saw the first name taken and never collided.
+     * `Promise.all` issues all eight reads before any write lands, and a shared
+     * `preferFor` makes all eight derive the identical first choice — so seven
+     * collisions are produced rather than waited for.
+     *
+     * The retry logic itself is unit-tested in `pseudonym-collision.test.ts`,
+     * where the attempt count is observable. This asserts the thing only a real
+     * database can: that the index exists and the wiring survives it.
+     */
+    const { groupId } = await room(0)
+    const people = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => member(`rp_race${i}`))
+    )
+    const preferFor = { eventId: "race-fixture", userId: "race-user" }
+
+    const claimed = await Promise.all(
+      people.map((p) =>
+        claimAnonymousName(
+          groupId,
+          (anonymous_name) =>
+            db.chat_group_members.create({
+              data: { chat_group_id: groupId, user_id: p.id, anonymous_name },
+              select: { anonymous_name: true },
+            }),
+          preferFor
+        )
+      )
+    )
+
+    const names = claimed.map((c) => c.anonymous_name)
+    expect(names).toHaveLength(8)
+    expect(new Set(names).size).toBe(8)
+    expect(names.every((n) => n && n.length > 0)).toBe(true)
   })
 })

@@ -26,7 +26,7 @@ import {
   type RoomEntitlement,
 } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
-import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
+import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
@@ -181,31 +181,38 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         )
       }
 
-      const anonName = await generateUniqueAnonymousName(
+      await claimAnonymousName(
         chatGroup.id,
+        (anonymous_name) =>
+          db.chat_group_members.upsert({
+            where: {
+              chat_group_id_user_id: {
+                chat_group_id: chatGroup.id,
+                user_id: authUser.userId,
+              },
+            },
+            create: {
+              chat_group_id: chatGroup.id,
+              user_id: authUser.userId,
+              role: "member",
+              status: "active",
+              last_allowed_at: null,
+              anonymous_name,
+            },
+            /*
+             * The update branch deliberately leaves the name alone: an existing
+             * member rejoining keeps the handle people know them by, and it
+             * also means this branch can never raise the collision the retry is
+             * here for.
+             */
+            update: {
+              status: "active",
+              last_allowed_at: null,
+              updated_at: new Date(),
+            },
+          }),
         { eventId, userId: authUser.userId }
       )
-      await db.chat_group_members.upsert({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroup.id,
-            user_id: authUser.userId,
-          },
-        },
-        create: {
-          chat_group_id: chatGroup.id,
-          user_id: authUser.userId,
-          role: "member",
-          status: "active",
-          last_allowed_at: null,
-          anonymous_name: anonName,
-        },
-        update: {
-          status: "active",
-          last_allowed_at: null,
-          updated_at: new Date(),
-        },
-      })
 
       await db.chat_groups.update({
         where: { id: chatGroup.id },
@@ -557,20 +564,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         )
       }
 
-      const postAnonName = await generateUniqueAnonymousName(
+      await claimAnonymousName(
         chatGroup.id,
+        (anonymous_name) =>
+          db.chat_group_members.create({
+            data: {
+              chat_group_id: chatGroup.id,
+              user_id: authUser.userId,
+              role: "member",
+              status: "active",
+              last_allowed_at: null,
+              anonymous_name,
+            },
+          }),
         { eventId, userId: authUser.userId }
       )
-      await db.chat_group_members.create({
-        data: {
-          chat_group_id: chatGroup.id,
-          user_id: authUser.userId,
-          role: "member",
-          status: "active",
-          last_allowed_at: null,
-          anonymous_name: postAnonName,
-        },
-      })
 
       await db.chat_groups.update({
         where: { id: chatGroup.id },
