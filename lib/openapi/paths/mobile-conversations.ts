@@ -197,13 +197,24 @@ registry.registerPath({
   path: "/api/mobile/conversations/{conversationId}/messages",
   tags: ["Mobile Conversations"],
   summary: "Send direct message",
+  description:
+    "Screened by the deterministic checks -- keyword, spam and contact details -- and by no model. A model check would send an unreviewed private message to a third party and, on a hit, make it something a human may read; nothing here is read by anybody unless the recipient reports it.\n\nSpam is REFUSED with 429 `SPAM_BLOCKED`, because a flood is the one failure the recipient feels immediately: every message is a push. It is counted per conversation, so messaging ten people is not throttled as flooding one.\n\nA message the keyword filter catches is stored, never delivered, and the response carries `moderation_hidden: true` with `text: null`. The sender is told rather than left to conclude they were ignored. It is excluded from the thread, the inbox preview and the unread count, and it is still stored -- `moderation_flags.message_id` is a NOT NULL foreign key to `chat_messages`, so a flag against a DM is impossible and the row is the only record a report can rest on.\n\nContact details are flagged and DELIVERED. Refusing teaches the sender where the boundary is, and the next attempt is spelled out with nothing behind it.",
   security: bearerAuth,
   request: {
     params: z.object({ conversationId: z.string().uuid() }),
     body: { content: { "application/json": { schema: SendDMRequestSchema } } },
   },
   responses: {
-    200: { description: "Message sent", content: { "application/json": { schema: wrap(DMMessageSchema) } } },
+    200: {
+      description: "Sent, or stored and hidden (`moderation_hidden: true`, `text: null`)",
+      content: {
+        "application/json": {
+          schema: wrap(
+            DMMessageSchema.and(z.object({ moderation_hidden: z.boolean().optional() }))
+          ),
+        },
+      },
+    },
     ...standardErrors,
   },
 })

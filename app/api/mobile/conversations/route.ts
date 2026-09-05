@@ -3,6 +3,7 @@ import { isReadForViewer } from "@/lib/read-receipts"
 import { NextRequest } from "next/server"
 import { blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
 import { cameFromMatch, displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
+import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -63,6 +64,9 @@ export async function GET(request: NextRequest) {
           },
         },
         messages: {
+          // The preview. A hidden message here would put words on the inbox row
+          // that the thread refuses to show.
+          where: VISIBLE_DM,
           orderBy: { created_at: "desc" },
           take: 1,
           select: {
@@ -79,6 +83,13 @@ export async function GET(request: NextRequest) {
               where: {
                 is_read: false,
                 sender_id: { not: authUser.userId },
+                /*
+                 * The reader that gets forgotten. A hidden message is never
+                 * delivered, so it is never marked read — leaving it in this
+                 * count is a badge that cannot be cleared, on a thread with
+                 * nothing in it to clear.
+                 */
+                ...VISIBLE_DM,
               },
             },
           },

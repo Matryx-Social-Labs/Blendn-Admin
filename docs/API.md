@@ -653,6 +653,38 @@ accepted message request between the two people, or a conversation that already
 exists — otherwise `400`. A block in **either** direction makes both this and
 sending return as though the other person were not there.
 
+#### What checks a direct message
+
+**Deterministic checks only: keyword, spam, contact details. No model, and that
+is a decision rather than a gap.** A model check sends an unreviewed private
+message to a third party and, on a hit, turns it into something a human may
+read. Nothing here is read by anybody unless the recipient reports it.
+
+Until this landed, a DM was checked by **nothing at all**. `lib/moderation` was
+imported by exactly two files and both were group chat — so the one channel
+where somebody is alone with a stranger was the one channel nobody was watching,
+and `contact-info.ts`'s own docstring names the DM as where the harm it targets
+lands.
+
+| Check | What happens |
+|---|---|
+| **Spam** | Refused, `429 SPAM_BLOCKED`. A flood is the one failure the recipient feels immediately, because every message is a push — so it is stopped at the door and the sender is told. Counted per conversation, so messaging ten people is not throttled as flooding one |
+| **Keyword** | Stored hidden, never delivered, and the sender is told (`moderation_hidden: true`). Not a silent drop — somebody who thinks a message arrived and gets no reply concludes they were ignored |
+| **Contact details** | Flagged and **delivered**. Refusing teaches the sender exactly where the boundary is, and the next attempt is spelled out with nothing behind it |
+
+A hidden message is stored and not sent. It has to be stored:
+`moderation_flags.message_id` is a `NOT NULL` foreign key to `chat_messages`, so
+a flag against a DM is structurally impossible and the row itself is the only
+record a later report can rest on. It is excluded from the thread, from the
+inbox preview, and from the unread count — the last is the one that gets
+forgotten, and leaving it in is a badge nobody can clear on a thread with
+nothing in it to clear.
+
+**`private_messages.moderation_status` is NULL for an ordinary message, and NULL
+is not "clean".** No model runs here, so there is no clean bill to record;
+writing one would store an unchecked message as checked, which is exactly the
+defect `G3` describes in the group pipeline.
+
 ### Profile photos
 
 Every photo added through `PUT /profiles/:userId` is checked before it is

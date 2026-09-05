@@ -7,6 +7,8 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
+  errorResponse,
+  ErrorCode,
   validationErrorResponse,
   unauthorizedResponse,
   forbiddenResponse,
@@ -15,6 +17,7 @@ import {
 } from "@/lib/api-response"
 import { z } from "zod"
 import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
+import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
 
@@ -67,7 +70,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // Build query
-    const whereClause: Record<string, unknown> = { conversation_id: conversationId }
+    /*
+     * `VISIBLE_DM` excludes a message the deterministic checks hid. It is
+     * excluded for the sender too, which is the same answer the group route
+     * gives: a hidden message is stored as evidence for a later report, not
+     * kept readable by the person who sent it.
+     */
+    const whereClause: Record<string, unknown> = {
+      conversation_id: conversationId,
+      ...VISIBLE_DM,
+    }
     if (before) {
       whereClause.created_at = { lt: new Date(before) }
     }
@@ -195,6 +207,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("You cannot send messages to this user")
     }
 
+    /*
+     * The deterministic checks, which this path had none of.
+     *
+     * `lib/moderation` was imported by exactly two files and both were group
+     * chat, so a DM got no keyword check, no spam check and no contact-info
+     * check — in the one channel where somebody is alone with a stranger, and
+     * the one `contact-info.ts` names as where the harm it targets lands.
+     *
+     * No model, deliberately (TR5): a model check sends an unreviewed private
+     * message to a third party and, on a hit, turns it into something a human
+     * may read. Nothing here is read by anybody unless it is reported.
+     */
+    const screen = await screenDirectMessage({
+      senderId: authUser.userId,
+      conversationId,
+      text,
+    })
+    if (screen.verdict === "refuse") {
+      return errorResponse(screen.reason, 429, ErrorCode.SPAM_BLOCKED)
+    }
+    const hidden = screen.verdict === "hide"
+
     // Create the message
     const message = await db.private_messages.create({
       data: {
@@ -203,6 +237,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         message_text: text,
         media_url: mediaUrl,
         media_type: mediaType as media_type | null,
+        moderation_status: screen.status,
       },
       include: {
         sender: {
@@ -215,11 +250,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Update conversation's last message time
-    await db.private_conversations.update({
-      where: { id: conversationId },
-      data: { last_message_at: new Date(), updated_at: new Date() },
-    })
+    /*
+     * A hidden message does not touch the conversation's clock.
+     *
+     * `last_message_at` drives the inbox ordering and the "new message" dot, so
+     * bumping it would surface a thread the recipient has nothing to read in —
+     * telling them somebody wrote, which is most of what the sender wanted.
+     */
+    if (!hidden) {
+      await db.private_conversations.update({
+        where: { id: conversationId },
+        data: { last_message_at: new Date(), updated_at: new Date() },
+      })
+    }
 
     // Emit via Socket.io
     const messageData = {
@@ -238,7 +281,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       createdAt: message.created_at,
     }
 
-    emitPrivateMessage(conversationId, recipientId, messageData)
+    /*
+     * Neither delivered nor announced.
+     *
+     * The row exists so a later report has something to rest on —
+     * `moderation_flags.message_id` is a NOT NULL foreign key to
+     * `chat_messages`, so a flag against a DM is structurally impossible and
+     * the message itself is the only record. It is stored, and it is not sent.
+     */
+    if (!hidden) {
+      emitPrivateMessage(conversationId, recipientId, messageData)
+    }
 
     /*
      * The push TITLE, resolved through the conversation.
@@ -255,9 +308,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       message.sender.name
     )
     const messagePreview = text || (mediaType === "image" ? "📷 Photo" : "🎥 Video")
-    notifyPrivateMessage(recipientId, senderName, messagePreview, conversationId).catch((err) =>
-      logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) })
-    )
+    if (!hidden) {
+      notifyPrivateMessage(recipientId, senderName, messagePreview, conversationId).catch((err) =>
+        logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) })
+      )
+    }
+
+    /*
+     * The sender is told, rather than left to conclude they were ignored.
+     *
+     * Same shape as the group route's `moderation_hidden`, and the same
+     * argument: a silent drop teaches nothing and reads as the recipient not
+     * replying, which is worse for the person who was not at fault.
+     */
+    if (hidden) {
+      return successResponse({ ...messageData, text: null, moderation_hidden: true })
+    }
 
     return successResponse(messageData)
   } catch (error) {
