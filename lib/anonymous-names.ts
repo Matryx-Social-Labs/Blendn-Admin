@@ -156,3 +156,88 @@ export async function pseudonymsForEvent(eventId: string): Promise<Map<string, s
   })
   return new Map(members.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
 }
+
+/**
+ * Mint a handle and persist it, retrying when somebody else took it first.
+ *
+ * ## The read is not a lock, and doors are when everyone arrives at once
+ *
+ * `generateUniqueAnonymousName` reads the names already in the group and picks
+ * one that is free. The write happens afterwards, in a separate statement, and
+ * `@@unique([chat_group_id, anonymous_name])` is what actually enforces it — so
+ * two people checking in at the same moment can both read "Cosmic Panda is
+ * free", and the second write raises `P2002` and comes back as a **500 on
+ * check-in**: the product's core action, failing at the one minute of the night
+ * when every attendee performs it.
+ *
+ * With ~6,480 combinations, the probability that *some* pair in a 200-person
+ * room draws the same name is about 95%. This is not a rare race.
+ *
+ * The retry treats the constraint as the source of truth rather than the read,
+ * which is the only ordering that is correct without a lock.
+ *
+ * ## Why a collision on the OTHER unique must not retry
+ *
+ * `chat_group_members` also has `@@unique([chat_group_id, user_id])`, and that
+ * one means "you are already a member" — a state no amount of re-rolling a
+ * name will resolve. Retrying it would spin five times and then throw the
+ * wrong error. So the retry is scoped by inspecting which constraint failed,
+ * and anything else is rethrown untouched.
+ */
+export async function claimAnonymousName<T>(
+  chatGroupId: string,
+  write: (anonymousName: string) => Promise<T>,
+  preferFor?: { eventId: string; userId: string }
+): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const name = await generateUniqueAnonymousName(chatGroupId, preferFor)
+    try {
+      return await write(name)
+    } catch (error) {
+      if (!isAnonymousNameCollision(error)) throw error
+      lastError = error
+      /*
+       * Drop the preference after the first miss. It is deterministic, so
+       * re-deriving it would hand back the same taken name every time and burn
+       * all five attempts on one collision.
+       */
+      preferFor = undefined
+    }
+  }
+  throw lastError
+}
+
+/**
+ * A `P2002` on the name, and specifically not on the membership pair.
+ *
+ * ## Read the whole `meta`, because `meta.target` is not always there
+ *
+ * The first version of this read `meta.target`, which is what Prisma's own
+ * documentation describes and what every example shows. **This deployment never
+ * populates it.** Running against a real database produced:
+ *
+ *     meta: { modelName, driverAdapterError: { cause: {
+ *       kind: "UniqueConstraintViolation",
+ *       constraint: { fields: ["chat_group_id", "anonymous_name"] } } } }
+ *
+ * — the constraint nested two levels inside a driver-adapter error, with
+ * `target` absent. So the check answered `false` for every real collision and
+ * rethrew it, and the retry never ran: the fix was inert while its unit tests
+ * were green, because those tests built the error object from the documented
+ * shape rather than from one this stack emits.
+ *
+ * Matching against the serialised `meta` rather than a path through it is
+ * deliberately shape-agnostic. It is a looser check than reaching for a field,
+ * and that is the point — the field moved once already, between two Prisma
+ * configurations of the same project.
+ *
+ * The other unique on this table is `(chat_group_id, user_id)`, whose fields
+ * and constraint name both lack `anonymous_name`, so it is still told apart.
+ */
+function isAnonymousNameCollision(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  if ((error as { code?: string }).code !== "P2002") return false
+  const meta = (error as { meta?: unknown }).meta
+  return JSON.stringify(meta ?? "").includes("anonymous_name")
+}

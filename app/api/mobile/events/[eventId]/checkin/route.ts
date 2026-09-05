@@ -19,7 +19,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
-import { generateUniqueAnonymousName } from "@/lib/anonymous-names"
+import { claimAnonymousName } from "@/lib/anonymous-names"
 import { recordRefusal } from "@/lib/check-in-refusals"
 import { resolveOccurrence } from "@/lib/occurrences"
 import { checkInKindFor } from "@/lib/checkin-kind"
@@ -423,42 +423,49 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (existingMembership) {
       if (existingMembership.status !== "active" || existingMembership.last_allowed_at || !existingMembership.anonymous_name) {
-        const anonName =
-          existingMembership.anonymous_name ||
-          (await generateUniqueAnonymousName(
-            chatGroup.id,
-            { eventId, userId: authUser.userId }
-          ))
-        await db.chat_group_members.update({
-          where: {
-            chat_group_id_user_id: {
-              chat_group_id: chatGroup.id,
-              user_id: authUser.userId,
+        const rejoin = (anonymous_name: string) =>
+          db.chat_group_members.update({
+            where: {
+              chat_group_id_user_id: {
+                chat_group_id: chatGroup.id,
+                user_id: authUser.userId,
+              },
             },
-          },
-          data: {
-            status: "active",
-            last_allowed_at: null,
-            anonymous_name: anonName,
-            updated_at: now,
-          },
-        })
+            data: {
+              status: "active",
+              last_allowed_at: null,
+              anonymous_name,
+              updated_at: now,
+            },
+          })
+
+        if (existingMembership.anonymous_name) {
+          // They already have a handle; keep it. Re-minting would rename
+          // somebody rejoining a room where people know them by that name.
+          await rejoin(existingMembership.anonymous_name)
+        } else {
+          await claimAnonymousName(chatGroup.id, rejoin, {
+            eventId,
+            userId: authUser.userId,
+          })
+        }
       }
     } else {
-      const anonName = await generateUniqueAnonymousName(
+      await claimAnonymousName(
         chatGroup.id,
+        (anonymous_name) =>
+          db.chat_group_members.create({
+            data: {
+              chat_group_id: chatGroup.id,
+              user_id: authUser.userId,
+              role: "member",
+              status: "active",
+              last_allowed_at: null,
+              anonymous_name,
+            },
+          }),
         { eventId, userId: authUser.userId }
       )
-      await db.chat_group_members.create({
-        data: {
-          chat_group_id: chatGroup.id,
-          user_id: authUser.userId,
-          role: "member",
-          status: "active",
-          last_allowed_at: null,
-          anonymous_name: anonName,
-        },
-      })
 
       await db.chat_groups.update({
         where: { id: chatGroup.id },
