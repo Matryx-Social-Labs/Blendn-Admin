@@ -74,6 +74,12 @@ const REQUIRED: Array<{ model: string; index: string; sqlName: string; why: stri
     sqlName: "profiles_onboarded_idx",
     why: "the admin funnel semi-joins into profiles three times per load",
   },
+  {
+    model: "event_check_ins",
+    index: "@@index([check_in_time])",
+    sqlName: "event_check_ins_check_in_time_idx",
+    why: "the polled health probe asks who checked in ANYWHERE in seven days, and every other index on this column starts with event_id",
+  },
 ]
 
 describe("the datamodel declares the hot-path indexes", () => {
@@ -120,5 +126,46 @@ describe("expression indexes stay out of the migration until drift is settled", 
     )
     expect(mine).not.toMatch(/USING\s+gin/i)
     expect(mine).not.toMatch(/CREATE INDEX[^;]*lower\s*\(/i)
+  })
+})
+
+describe("the polled health probe does not aggregate the whole interests table", () => {
+  /*
+   * `/api/health` gets polled, and its matching-coverage figure joined against
+   * `SELECT user_id, COUNT(*) FROM user_interests GROUP BY user_id` — an
+   * unscoped aggregate over EVERY user's interests, computed in full on every
+   * poll and then discarded except for the handful of people who checked in
+   * that week.
+   *
+   * `EXPLAIN` showed it plainly: `Seq Scan on user_interests` under a
+   * `HashAggregate`, no matter how narrow the window. Scoping the lookup to
+   * recent attendees first turns that into an index-only scan per attendee.
+   *
+   * Asserted structurally because the cost is invisible in a test: on an empty
+   * database both forms are instant, and the difference only appears at the
+   * size where it matters.
+   */
+  const src = readFileSync(join(ROOT, "lib", "interest-coverage.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "")
+
+  it("scopes the interest lookup to recent attendees", () => {
+    expect(src).toMatch(/WITH recent AS/)
+    expect(src).toMatch(/LEFT JOIN user_interests ui ON ui\.user_id = r\.user_id/)
+  })
+
+  it("does not group the whole table", () => {
+    // The shape that scanned: an unqualified GROUP BY over user_interests.
+    expect(src).not.toMatch(/FROM user_interests GROUP BY user_id/)
+  })
+
+  it("counts the joined column, not the row", () => {
+    /*
+     * A LEFT JOIN yields one all-null row for somebody with no interests, and
+     * `COUNT(*)` would score that as one — making every profile look one
+     * interest richer than it is. On a coverage metric that is the worst
+     * direction to be wrong in, because it hides the problem it exists to find.
+     */
+    expect(src).toMatch(/COUNT\(ui\.user_id\)/)
   })
 })
