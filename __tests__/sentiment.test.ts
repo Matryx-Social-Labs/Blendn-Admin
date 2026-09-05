@@ -1,3 +1,5 @@
+import { readFileSync } from "fs"
+import { join } from "path"
 import { classifyWithLexicon } from "@/lib/sentiment/lexicon"
 import { classifyMessages } from "@/lib/sentiment/classify"
 import { escalates, ISSUE_CATEGORIES, isIssueCategory } from "@/lib/sentiment/taxonomy"
@@ -134,5 +136,56 @@ describe("taxonomy", () => {
     // A thirty-label taxonomy gets applied inconsistently by both the
     // classifier and the humans correcting it.
     expect(ISSUE_CATEGORIES.length).toBeLessThanOrEqual(12)
+  })
+})
+
+describe("an advertiser's copy is not the room's mood", () => {
+  /*
+   * A sponsored send is written as `type: "text"` — deliberately, because
+   * `type` also carries the media kind and a sponsored send is the one
+   * broadcast that may be an image. `lib/sponsored-scheduler.ts` records that
+   * decision and the marker it leaves instead: `metadata.sponsored_message_id`.
+   *
+   * The consequence was that an advertiser's copy was classified as somebody's
+   * feeling about the event — feeding the live Mood bar and appearing in the
+   * post-event digest under "what people said", attributed to a pseudonym.
+   * Announcements stopped doing this when they got their own `type`; ads could
+   * not follow, so they needed the marker instead.
+   */
+  const src = readFileSync(join(__dirname, "..", "lib", "sentiment-sweeper.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "")
+
+  it("excludes paid messages by their marker", () => {
+    expect(src).toMatch(/metadata ->> 'sponsored_message_id' IS NULL/)
+  })
+
+  it("does it in the query, not after the fetch", () => {
+    /*
+     * The sweep selects only messages with no `feedback` row. An ad filtered
+     * out in JavaScript would therefore be re-selected on every pass for ever
+     * — a batch that slowly fills with work nobody can do, and a backlog that
+     * never drains.
+     */
+    expect(src).toMatch(/SELECT m\.id/)
+    // The id list is what the fetch is scoped to, so the exclusion cannot be
+    // bypassed by a later change to the Prisma `where`.
+    expect(src).toMatch(/id: \{ in: eligibleIds \}/)
+  })
+
+  it("keeps messages that carry no metadata at all", () => {
+    /*
+     * The common case, and the one a naive filter breaks: most messages have
+     * NULL metadata. `->>` returns NULL for an absent key AND for a null
+     * column, which is why the predicate is written that way rather than with
+     * a Prisma JSON filter — `equals: DbNull` matches a JSON null and not an
+     * absent key, so it would have dropped every ordinary message.
+     */
+    expect(src).not.toMatch(/equals:\s*Prisma\.DbNull/)
+  })
+
+  it("is bounded by the same limit as the fetch", () => {
+    // Otherwise a busy night turns the exclusion into an unbounded id list.
+    expect(src).toMatch(/LIMIT \$\{MAX_MESSAGES_PER_SWEEP \+ 1\}/)
   })
 })
