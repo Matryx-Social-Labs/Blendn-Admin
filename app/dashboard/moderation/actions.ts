@@ -6,6 +6,7 @@ import type { moderation_status_type } from "@prisma/client"
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { trustSignalsFor } from "@/lib/trust"
 
 export interface ModerationRow {
   id: string
@@ -19,6 +20,16 @@ export interface ModerationRow {
   autoAction: string | null
   authorName: string
   messageDeleted: boolean
+  /**
+   * What is known about the person, not just the message.
+   *
+   * `ROADMAP.md` names accountability as the differentiator — a GPS-verified
+   * human behind every pseudonym — and a moderator was shown neither. The band
+   * and the harassment count are the two facts that change a decision; the
+   * average is deliberately absent, because a moderator does not need a score
+   * and a score invites one to be shown to somebody else later.
+   */
+  trust: { band: string; ratings: number; harassment: number }
 }
 
 /** The pipeline's own act-without-a-human threshold. */
@@ -72,6 +83,9 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
         confidence: true,
         categories: true,
         auto_action: true,
+        // The id as well as the name: the trust lookup groups by it, and a name
+        // is not a key.
+        user_id: true,
         user: { select: { name: true, email: true } },
         message: {
           select: {
@@ -116,6 +130,27 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
     }),
   ])
 
+  /*
+   * What the moderator is actually deciding about.
+   *
+   * A queue row is a message and a name. The plan's argument for peer ratings
+   * is that the substrate exists and is unused: a moderator could see that this
+   * person has been rated by four people who physically met them, and that one
+   * of them reported harassment. `getTrustSignal` was written for exactly this,
+   * and `trust-not-exposed.test.ts` states in prose that "moderation reads it
+   * through the dashboard" — which was false, because it had no caller at all.
+   *
+   * One query for the whole page, not one per row: `peer_ratings` is grouped by
+   * the people appearing on this page rather than fetched per flag, so a
+   * hundred-row queue costs one round trip.
+   *
+   * Staff-only by construction — this is a dashboard action behind an
+   * `app_admin` check, and the mobile surface is forbidden from touching the
+   * module by a test that scans every file under `app/api/mobile`.
+   */
+  const authorIds = flags.map((f) => f.user_id)
+  const trustOf = await trustSignalsFor(authorIds)
+
   const rows: ModerationRow[] = flags.map((flag) => ({
     id: flag.id,
     ageHours: Math.floor((now - flag.created_at.getTime()) / (60 * 60 * 1000)),
@@ -128,6 +163,19 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
     autoAction: flag.auto_action,
     authorName: flag.user.name ?? flag.user.email,
     messageDeleted: flag.message.deleted_at !== null,
+    /*
+     * The band, never the average, and the count so the band can be weighed.
+     *
+     * `trustBand` returns `unrated` below `MIN_RATINGS`, which is what stops a
+     * single bad night from reading as a pattern. A harassment report is
+     * surfaced on its own regardless of volume — the schema's own rule, and the
+     * reason it is a separate field rather than folded into the score.
+     */
+    trust: {
+      band: trustOf.get(flag.user_id)?.band ?? "unrated",
+      ratings: trustOf.get(flag.user_id)?.ratings ?? 0,
+      harassment: trustOf.get(flag.user_id)?.issues.harassment ?? 0,
+    },
   }))
 
   return {

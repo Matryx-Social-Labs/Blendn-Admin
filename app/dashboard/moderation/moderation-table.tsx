@@ -10,6 +10,7 @@ import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { formatAge } from "@/lib/dashboard-format"
 import { cn } from "@/lib/utils"
 
 import { resolveFlag, type ModerationRow } from "./actions"
@@ -61,7 +62,13 @@ export function ModerationTable({
             status === "pending" && row.ageHours >= SLA_HOURS && "font-bold text-destructive"
           )}
         >
-          {row.ageHours < 1 ? "<1h" : row.ageHours < 48 ? `${row.ageHours}h` : `${Math.floor(row.ageHours / 24)}d`}
+          {/*
+            `formatAge`, not a second copy of it. This rendered its own age
+            string with a 48-hour cutover while `lib/dashboard-view.ts` had one
+            with a 24-hour cutover and no caller — two answers to "how old is
+            this", on the one screen whose SLA is age.
+          */}
+          {formatAge(row.ageHours)}
         </span>
       ),
     },
@@ -103,7 +110,33 @@ export function ModerationTable({
         </Badge>
       ),
     },
-    { key: "authorName", label: "Author", secondary: true, sortType: "string" },
+    {
+      key: "authorName",
+      label: "Author",
+      secondary: true,
+      sortType: "string",
+      /*
+       * The person, beside the name. A harassment report shows on its own at
+       * any volume — the schema's rule, and the reason it is not folded into
+       * the score. `poor` needs four ratings before it can say anything, which
+       * is what stops one bad night reading as a pattern.
+       */
+      render: (row) => (
+        <span className="flex flex-wrap items-center gap-1.5">
+          {row.authorName}
+          {row.trust.harassment > 0 ? (
+            <Badge variant="destructive">
+              {row.trust.harassment} harassment
+            </Badge>
+          ) : null}
+          {row.trust.band === "poor" || row.trust.band === "mixed" ? (
+            <Badge variant="secondary">
+              {row.trust.band} · {row.trust.ratings}
+            </Badge>
+          ) : null}
+        </span>
+      ),
+    },
     { key: "source", label: "Source", secondary: true, sortType: "string" },
     {
       key: "confidence",
