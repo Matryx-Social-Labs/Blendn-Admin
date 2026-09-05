@@ -14,8 +14,20 @@ import {
   emailDomain,
   isFreeProvider,
 } from "@/lib/org-invites"
-import { checkDomainTxt, newDomainToken, txtInstructions, roleAddressesFor } from "@/lib/domain-verify"
-import { sendEmail, inviteEmail, appUrl, emailConfigured } from "@/lib/email"
+import {
+  checkDomainTxt,
+  isRoleAddressFor,
+  newDomainToken,
+  txtInstructions,
+  roleAddressesFor,
+} from "@/lib/domain-verify"
+import {
+  sendEmail,
+  inviteEmail,
+  appUrl,
+  domainVerifyEmail,
+  emailConfigured,
+} from "@/lib/email"
 import type { org_role } from "@prisma/client"
 
 /**
@@ -52,7 +64,21 @@ export interface MyOrg {
   kind: string
   status: string
   myRole: org_role
-  domains: { id: string; domain: string; verified: boolean; method: string; token: string }[]
+  domains: {
+    id: string
+    domain: string
+    verified: boolean
+    method: string
+    token: string
+    /**
+     * Computed here, not in the browser. `roleAddressesFor` lives in
+     * `lib/domain-verify.ts`, which imports `dns/promises` — importing it from
+     * a client component pulls a Node module into the bundle and fails the
+     * build. The addresses are a property of the domain, so the server that
+     * already knows the domain is the right place to derive them.
+     */
+    roleAddresses: string[]
+  }[]
 }
 
 /**
@@ -98,6 +124,7 @@ export async function getMyOrgs(): Promise<MyOrg[]> {
       domain: d.domain,
       verified: !!d.verified_at,
       method: d.method,
+      roleAddresses: roleAddressesFor(d.domain),
       token: d.verification_token,
     })),
   }))
@@ -427,6 +454,9 @@ export interface DomainClaimResult {
   roleAddresses?: string[]
 }
 
+/** A link in an inbox for ever is a way in for whoever inherits it. */
+const DOMAIN_EMAIL_TTL_MS = 24 * 60 * 60 * 1000
+
 export async function claimDomain(orgId: string, raw: string): Promise<DomainClaimResult> {
   const { user } = await requireOrgRole(orgId, (p) => p.canVerifyDomain)
 
@@ -515,6 +545,97 @@ export async function verifyDomain(orgId: string, domainId: string): Promise<{ o
   revalidatePath("/dashboard/organisation")
 
   return { ok: true, message: `${row.domain} verified. Invites are now restricted to it by default.` }
+}
+
+/**
+ * Verify a domain by emailing one of its role addresses.
+ *
+ * ## The path that did not exist
+ *
+ * `claimDomain` hardcodes `dns_txt`, and until now that was the only route.
+ * `isRoleAddressFor` and `domainVerifyEmail` were written, tested and called by
+ * nothing; the only writer of `email_role` was the onboarding approval, which
+ * set it with an empty token and an immediate `verified_at` — a method recorded
+ * for a check that never ran.
+ *
+ * So an organisation whose claimant is not the DNS administrator had **no route
+ * to a verified domain**, and that is the ordinary case: the person setting up
+ * the account is rarely the person with access to the zone file. A verified
+ * domain is what gates auto-approval on event claims, so the gap was a funnel
+ * blocker, not a nicety.
+ *
+ * ## Only a role address
+ *
+ * `postmaster@`, `admin@` and their siblings are addresses an individual
+ * employee does not get to own — that is the whole basis of this proof. Sending
+ * to `sagar@acme.com` would verify that Sagar works at Acme, which is not the
+ * same claim, and is the claim an attacker with any mailbox at a large company
+ * would like to make.
+ *
+ * ## What it does not reveal
+ *
+ * The same answer whether or not the mailbox exists. Telling a caller that
+ * `security@` bounced and `admin@` did not is an enumeration oracle over
+ * somebody else's mail setup.
+ */
+export async function sendDomainVerifyEmail(
+  orgId: string,
+  domainId: string,
+  address: string
+): Promise<{ ok: boolean; message: string }> {
+  const { user } = await requireOrgRole(orgId, (p) => p.canVerifyDomain)
+
+  const row = await db.organisation_domains.findFirst({
+    where: { id: domainId, org_id: orgId },
+    select: { id: true, domain: true, verified_at: true },
+  })
+  if (!row) throw new Error("Domain not found")
+  if (row.verified_at) return { ok: true, message: "Already verified." }
+
+  if (!isRoleAddressFor(address, row.domain)) {
+    return {
+      ok: false,
+      message: `Pick one of the role addresses at ${row.domain} — a personal address proves the wrong thing.`,
+    }
+  }
+
+  if (!emailConfigured()) {
+    return { ok: false, message: "Email is not configured. Use the DNS record instead." }
+  }
+
+  /*
+   * A fresh secret, never the TXT value.
+   *
+   * `organisation_domains.verification_token` is published in DNS and kept
+   * after verification for re-checks. An emailed link built from it would be
+   * verifiable by anybody who can read the record.
+   */
+  const token = newDomainToken()
+  await db.domain_email_tokens.create({
+    data: {
+      token_hash: hashInviteToken(token),
+      domain_id: row.id,
+      sent_to: address.trim().toLowerCase(),
+      expires_at: new Date(Date.now() + DOMAIN_EMAIL_TTL_MS),
+    },
+  })
+
+  const link = `${process.env.NEXTAUTH_URL ?? ""}/verify-domain?token=${token}`
+  const result = await sendEmail({ to: address, ...domainVerifyEmail(row.domain, link) })
+  if (!result.sent) {
+    logger.error("Domain verify email failed", { domainId, reason: result.reason })
+    return { ok: false, message: "Could not send just now. Try again, or use the DNS record." }
+  }
+
+  auditLog({
+    userId: user.id,
+    action: "org.domain.email_sent",
+    resource: "organisation",
+    resourceId: orgId,
+    details: { domain: row.domain, sentTo: address.trim().toLowerCase() },
+  })
+
+  return { ok: true, message: `Sent to ${address}. The link expires in 24 hours.` }
 }
 
 export async function removeDomain(orgId: string, domainId: string): Promise<void> {

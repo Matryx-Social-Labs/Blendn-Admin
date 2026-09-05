@@ -29,6 +29,7 @@ import {
   removeMember,
   revokeInvite,
   setMemberRole,
+  sendDomainVerifyEmail,
   verifyDomain,
   type MyOrg,
   type OrgInviteRow,
@@ -466,6 +467,8 @@ function Domains({ orgId, domains }: { orgId: string; domains: MyOrg["domains"] 
 
 function DomainRow({ orgId, domain }: { orgId: string; domain: MyOrg["domains"][number] }) {
   const [pending, start] = useTransition()
+  const [byEmail, setByEmail] = useState(false)
+  const [address, setAddress] = useState("")
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
@@ -499,6 +502,20 @@ function DomainRow({ orgId, domain }: { orgId: string; domain: MyOrg["domains"][
             Check now
           </Button>
         ) : null}
+        {/*
+          The other half of the proof, which did not exist.
+          *
+          * Only the DNS TXT path was ever wired, and the person setting up the
+          * account is rarely the person with access to the zone file — so an
+          * organisation whose claimant is not the DNS administrator had no
+          * route to a verified domain at all. A verified domain is what gates
+          * auto-approval on event claims.
+        */}
+        {!domain.verified ? (
+          <Button size="sm" variant="ghost" disabled={pending} onClick={() => setByEmail((v) => !v)}>
+            Email instead
+          </Button>
+        ) : null}
         <Button
           size="icon"
           variant="ghost"
@@ -514,6 +531,48 @@ function DomainRow({ orgId, domain }: { orgId: string; domain: MyOrg["domains"][
           <IconTrash className="size-4" />
         </Button>
       </div>
+
+      {byEmail && !domain.verified ? (
+        <div className="flex w-full flex-wrap items-center gap-2">
+          {/*
+            Role addresses only, and offered as a list rather than a free field.
+            A personal address would prove that one employee works there, which
+            is a different claim — and the one an attacker with any mailbox at a
+            large company would like to make.
+          */}
+          <select
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            aria-label={`Role address at ${domain.domain}`}
+            className="h-9 min-w-56 rounded-md border border-input bg-transparent px-3 text-sm"
+          >
+            <option value="">Choose an address…</option>
+            {domain.roleAddresses.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending || !address}
+            onClick={() =>
+              start(async () => {
+                const result = await sendDomainVerifyEmail(orgId, domain.id, address)
+                if (result.ok) {
+                  toast.success(result.message)
+                  setByEmail(false)
+                } else {
+                  toast.error(result.message)
+                }
+              })
+            }
+          >
+            Send link
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
