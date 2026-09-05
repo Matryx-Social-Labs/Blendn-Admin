@@ -1,5 +1,5 @@
 const mockDb = {
-  events: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  events: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn() },
   organisation_members: { findMany: jest.fn() },
 }
 const mockAuth = jest.fn()
@@ -212,6 +212,7 @@ describe("getLinkedEventsForOwner", () => {
 
   it("scopes to venues the caller's org owns", async () => {
     signIn("venue_owner")
+    mockDb.events.count.mockResolvedValue(0)
     await getLinkedEventsForOwner()
     expect(mockDb.events.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -225,6 +226,7 @@ describe("getLinkedEventsForOwner", () => {
 
   it("does not scope for an admin", async () => {
     signIn("app_admin", [])
+    mockDb.events.count.mockResolvedValue(0)
     await getLinkedEventsForOwner()
     expect(mockDb.events.findMany.mock.calls[0][0].where.venue).toBeUndefined()
   })
@@ -233,8 +235,10 @@ describe("getLinkedEventsForOwner", () => {
     // This feeds a screen an organiser can reach; an empty list is the right
     // answer, not an error page.
     signIn("organizer")
-    expect(await getLinkedEventsForOwner()).toEqual([])
+    expect(await getLinkedEventsForOwner()).toEqual({ rows: [], total: 0 })
     expect(mockDb.events.findMany).not.toHaveBeenCalled()
+    // And no count either: an organiser is refused before either query runs.
+    expect(mockDb.events.count).not.toHaveBeenCalled()
   })
 
   it("refuses a signed-out caller", async () => {

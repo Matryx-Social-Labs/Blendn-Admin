@@ -59,7 +59,7 @@ export default async function MyVenuesPage() {
   ])
   if (overview.role !== "venue_owner") redirect("/dashboard")
 
-  if (overview.venues.length === 0 && linkedEvents.length === 0) {
+  if (overview.venues.length === 0 && linkedEvents.rows.length === 0) {
     return (
       <EmptyState
         icon={<IconBuildingStore />}
@@ -89,7 +89,14 @@ export default async function MyVenuesPage() {
         </Button>
       </div>
 
-      <LinkedEvents events={linkedEvents} />
+      <LinkedEvents events={linkedEvents.rows} />
+      {linkedEvents.total > linkedEvents.rows.length ? (
+        /* A venue owner reads this list to find an event wrongly linked to
+           their building. A cap that hides one is a dispute never filed. */
+        <p className="text-[0.8125rem] text-muted-foreground">
+          Showing {linkedEvents.rows.length} of {linkedEvents.total}.
+        </p>
+      ) : null}
 
       {overview.venues.map((venue) => {
         const lowSkew = venue.ratings[0] + venue.ratings[1] > venue.ratings[3] + venue.ratings[4]

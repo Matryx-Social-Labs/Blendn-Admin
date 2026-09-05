@@ -111,12 +111,16 @@ describe("site-header owns the only h1", () => {
    * them a header entry, because a page with a wrong `h1` *and* a right one is
    * the confusing case, not merely the untidy one.
    */
-  const KNOWN_DOUBLE_H1 = [
-    "/dashboard/chatrooms",
-    "/dashboard/events",
-    "/dashboard/organisers",
-      "/dashboard/venue-owners",
-  ]
+  /*
+   * Empty, and the staleness assertion below is what keeps it that way.
+   *
+   * All four were the same shape: a header card rendering the title
+   * `site-header.tsx` already renders, so a screen reader announced the page
+   * twice. Removing them also took a line of prose off the events screen
+   * describing what the screen is for, which is the density this dashboard was
+   * asked to stop adding.
+   */
+  const KNOWN_DOUBLE_H1: string[] = []
 
   const pages = staticRoutes(DASHBOARD)
 
@@ -128,10 +132,19 @@ describe("site-header owns the only h1", () => {
     }
   )
 
-  it.each(KNOWN_DOUBLE_H1)("%s is still on the list for a reason", (route) => {
-    // Delete the entry when you fix the page. A ratchet nobody prunes becomes
-    // an allowlist, and this repo has already paid for one of those in a merge.
-    const file = join(ROOT, "app", route.slice(1), "page.tsx")
-    expect(readFileSync(file, "utf8")).toMatch(/<h1[\s>]/)
+  it("lists no route that has since been fixed", () => {
+    /*
+     * Delete the entry when you fix the page. A ratchet nobody prunes becomes
+     * an allowlist, and this repo has already paid for one of those in a merge.
+     *
+     * Written as one assertion over the list rather than `it.each`, which
+     * throws on an empty array — so the moment the list was finally emptied,
+     * the test that guards it became the only failure. A ratchet should not
+     * break when it reaches zero; that is the state it exists to reach.
+     */
+    const stale = KNOWN_DOUBLE_H1.filter(
+      (route) => !/<h1[\s>]/.test(readFileSync(join(ROOT, "app", route.slice(1), "page.tsx"), "utf8"))
+    )
+    expect(stale).toEqual([])
   })
 })

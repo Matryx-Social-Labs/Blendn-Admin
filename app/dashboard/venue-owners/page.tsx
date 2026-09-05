@@ -21,9 +21,6 @@ export default async function VenueOwnersPage() {
     <div className="flex flex-col gap-6 py-6">
       <div className="px-4 lg:px-6">
         <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border bg-card px-6 py-6">
-          <div>
-            <h1 className="text-3xl font-semibold">Venue Owners</h1>
-          </div>
           <div className="flex gap-2">
             <Button asChild variant="outline">
               <Link href="/dashboard/venue-claims">Review claims</Link>

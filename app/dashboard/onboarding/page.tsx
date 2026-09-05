@@ -18,6 +18,13 @@ export const dynamic = "force-dynamic"
  * screen exists to make that look cheap: everything the reviewer needs is on
  * the row, so approving is one read and one click.
  */
+/**
+ * Declined applications are history, not a queue, so only the recent ones are
+ * drawn — but the screen says how many there are, because a list that stops at
+ * twenty and looks complete is the same lie as an uncapped one that is not.
+ */
+const DECLINED_SHOWN = 20
+
 export default async function OnboardingPage() {
   const session = await getAuth()
   if (!session?.user) redirect("/login")
@@ -47,21 +54,30 @@ export default async function OnboardingPage() {
         </div>
       ) : null}
 
-      {pending.length === 0 ? (
+      {pending.rows.length === 0 ? (
         <EmptyState
           icon={<IconInbox />}
           title="Nothing to review"
           description="New host applications land here. Anyone can apply at /apply — no account is created until you approve one."
         />
       ) : (
-        <OnboardingQueue rows={pending} />
+        <>
+          <OnboardingQueue rows={pending.rows} />
+          {pending.total > pending.rows.length ? (
+            /* A cap the screen does not mention is an admin who reads the page,
+               believes it is the queue, and stops looking. */
+            <p className="text-[0.8125rem] text-muted-foreground">
+              Showing {pending.rows.length} of {pending.total}.
+            </p>
+          ) : null}
+        </>
       )}
 
-      {decided.length > 0 ? (
+      {decided.rows.length > 0 ? (
         <section className="flex flex-col gap-3">
           <h2 className="text-[length:var(--text-h2)] font-bold">Declined</h2>
           <div className="flex flex-col gap-2">
-            {decided.slice(0, 20).map((r) => (
+            {decided.rows.slice(0, DECLINED_SHOWN).map((r) => (
               <div
                 key={r.id}
                 className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg border border-border bg-card px-4 py-3 text-[0.8125rem]"
@@ -71,6 +87,11 @@ export default async function OnboardingPage() {
               </div>
             ))}
           </div>
+          {decided.total > DECLINED_SHOWN ? (
+            <p className="text-[0.8125rem] text-muted-foreground">
+              Showing {Math.min(DECLINED_SHOWN, decided.rows.length)} of {decided.total}.
+            </p>
+          ) : null}
         </section>
       ) : null}
     </div>

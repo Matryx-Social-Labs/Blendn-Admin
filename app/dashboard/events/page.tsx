@@ -88,11 +88,6 @@ export default function EventsPage() {
     return (
       <div className="flex flex-col gap-6 py-6">
         <div className="px-4 lg:px-6">
-          <div className="rounded-xl border bg-card px-6 py-6">
-            <h1 className="text-3xl font-semibold text-foreground">Events</h1>
-          </div>
-        </div>
-        <div className="px-4 lg:px-6">
           <div className="flex h-64 items-center justify-center rounded-xl border bg-muted/50">
             <div className="text-muted-foreground">Loading events...</div>
           </div>
@@ -107,12 +102,6 @@ export default function EventsPage() {
     <div className="flex flex-col gap-6 py-6">
       <div className="px-4 lg:px-6">
         <div className="flex flex-col gap-4 rounded-xl border bg-card px-6 py-6 @2xl/main:flex-row @2xl/main:items-end @2xl/main:justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold text-foreground">Events</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              View event inventory, update publishing state, and keep operator workflows moving.
-            </p>
-          </div>
           {canCreate && (
             <Button
               onClick={() => router.push("/dashboard/events/new")}

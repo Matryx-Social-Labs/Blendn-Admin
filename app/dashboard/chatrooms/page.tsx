@@ -153,9 +153,6 @@ export default async function ChatroomsPage() {
             Live event messaging
           </Badge>
           <div className="mt-4 flex flex-col gap-6 @2xl/main:flex-row @2xl/main:items-end @2xl/main:justify-between">
-            <div>
-              <h1 className="text-3xl font-semibold text-foreground">Chatrooms</h1>
-            </div>
             <div className="grid gap-3 @xl/main:grid-cols-3">
               <div className="rounded-lg border bg-muted px-4 py-4">
                 <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-muted-foreground">

@@ -444,6 +444,20 @@ all — both are read from the session inside the action, so there is no argumen
 left to lie in. The other two gained the `app_admin` check their siblings
 already had.
 
+**Since superseded for three of the four: they were deleted.** `getEventRows`,
+`getUserById` and `toggleUserOnboarded` turned out to have **zero callers** —
+the events screen fetches `/api/events`, the users table already carries the
+fields `getUserById` returned, and `updateUser` already writes `onboarded`. So
+each was a second answer to a question something else was already answering,
+and the session-scoping fix above was hardening a path nobody could reach.
+Recorded rather than quietly dropped, because a security note describing a
+control on a function that no longer exists is the lying-comment pattern this
+audit has now counted eighteen times.
+
+They were invisible until `server-actions-reachable.test.ts` was widened to
+scan `"use server"` files under `app/`, having previously scanned `lib/` alone
+— which is the blind spot W16 already recorded and did not close.
+
 **Guarded by `__tests__/server-action-authz.test.ts`**, which asserts the *shape*
 — every `"use server"` file must read the session — rather than the four
 instances. Verified to fail when a session read is removed. It cannot prove a
