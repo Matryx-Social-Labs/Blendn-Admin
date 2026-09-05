@@ -30,7 +30,7 @@ interface EventRow {
   end_time: Date
   venue_name: string | null
   city: string | null
-  current_capacity: number
+  attendeeCount: number
   max_capacity: number | null
 }
 
@@ -104,9 +104,11 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
                 {event.venue_name ?? event.city ?? "—"}
               </TableCell>
               <TableCell className="text-sm">
+                {/* Real attendance, counted. `current_capacity` was a stored
+                    counter no code has ever written. */}
                 {event.max_capacity
-                  ? `${event.current_capacity} / ${event.max_capacity}`
-                  : event.current_capacity}
+                  ? `${event.attendeeCount} / ${event.max_capacity}`
+                  : event.attendeeCount}
               </TableCell>
               {isAdmin && (
                 <TableCell>

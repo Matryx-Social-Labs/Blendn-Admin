@@ -172,7 +172,20 @@ async function transformEvent(
      * figures and neither identifies anybody.
      */
     maxCapacity: event.max_capacity,
-    currentCapacity: event.current_capacity,
+    /*
+     * The real count, not the stored column.
+     *
+     * `events.current_capacity` has NO WRITER anywhere in the codebase, so this
+     * served whatever the row was seeded with — for every event, for ever —
+     * beside `checkInCount` on the same object, which is correct. Two fields,
+     * one question, and the wrong one was the one named like the answer.
+     *
+     * Kept as a field rather than removed: an older client build may read it,
+     * and a shipped app is not something this repo can update. Serving the true
+     * number is strictly better than serving a stale one and cannot break a
+     * caller that was already handling an integer.
+     */
+    currentCapacity: attended.get(event.id) ?? 0,
     /*
      * The organiser's description of the door — "GUEST LIST ONLY" and the
      * like. Informational: nothing here gates an RSVP, exactly as with

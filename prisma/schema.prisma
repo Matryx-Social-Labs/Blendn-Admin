@@ -397,6 +397,20 @@ model events {
   /// `open` is the default and draws nothing; the client falls back to a
   /// computed "N SPOTS LEFT" from real remaining capacity.
   door_policy       door_policy        @default(open)
+  /// NO WRITER, ANYWHERE — and it was rendered as if it were live.
+  ///
+  /// A stored counter doing three jobs at once: what the room holds, who is in
+  /// it, and how many came. Every write path would have had to maintain it and
+  /// none ever did, so it served whatever each row was seeded with — on the
+  /// admin events table as "N / capacity", and in the mobile API as
+  /// `currentCapacity`, beside a `checkInCount` that was correct.
+  ///
+  /// Both readers now count instead: `lib/attendee-counts.ts` for how many
+  /// people came, `lib/occupancy.ts` for who is inside right now. Neither can
+  /// drift, because neither is stored.
+  ///
+  /// The column stays for one release so a rollback has somewhere to land, and
+  /// is dropped after. Do not add a writer.
   current_capacity  Int                @default(0)
   created_at        DateTime           @default(now()) @db.Timestamptz(6)
   updated_at        DateTime           @default(now()) @db.Timestamptz(6)
