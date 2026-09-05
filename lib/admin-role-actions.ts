@@ -1,6 +1,7 @@
 "use server"
 
 import crypto from "crypto"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
@@ -34,7 +35,14 @@ export interface RoleUserWithEvents {
     end_time: Date
     venue_name: string | null
     city: string | null
-    current_capacity: number
+    /**
+     * Distinct people who actually attended.
+     *
+     * This was `current_capacity` — a stored counter with **no writer
+     * anywhere**, rendered on this screen as "N / capacity". It said whatever
+     * it was seeded as, for ever, beside a number that was real.
+     */
+    attendeeCount: number
     max_capacity: number | null
     cover_image_url: string | null
     created_at: Date
@@ -92,7 +100,6 @@ export async function getRoleUserById(id: string): Promise<RoleUserWithEvents | 
           end_time: true,
           venue_name: true,
           city: true,
-          current_capacity: true,
           max_capacity: true,
           cover_image_url: true,
           created_at: true,
@@ -101,7 +108,23 @@ export async function getRoleUserById(id: string): Promise<RoleUserWithEvents | 
     },
   })
 
-  return user
+  if (!user) return null
+
+  /*
+   * Counted, never stored. `lib/attendee-counts.ts` owns "how many people",
+   * and it folds distinct users per occurrence — so a three-day event does not
+   * read three times high, which a stored counter could never get right anyway
+   * because nothing maintained it.
+   */
+  const counts = await distinctAttendeeCounts(user.organized_events.map((e) => e.id))
+
+  return {
+    ...user,
+    organized_events: user.organized_events.map((e) => ({
+      ...e,
+      attendeeCount: counts.get(e.id) ?? 0,
+    })),
+  }
 }
 
 export async function createRoleUser(

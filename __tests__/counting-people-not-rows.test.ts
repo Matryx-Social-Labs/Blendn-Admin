@@ -213,3 +213,56 @@ describe("occupancy asks which day it is", () => {
     expect(uniqueQuery![0]).not.toContain("today")
   })
 })
+
+describe("the stored capacity counter has no readers left", () => {
+  /*
+   * `events.current_capacity` is a stored number with NO WRITER anywhere in the
+   * codebase — and it was rendered as if it were live: on the admin events
+   * table as "N / capacity", and in the mobile API as `currentCapacity`,
+   * sitting beside a `checkInCount` on the same object that was correct.
+   *
+   * It is the counting bug in its purest form: not a wrong fold, but a number
+   * nobody computes at all, displayed next to one somebody does.
+   */
+  const src = (rel: string) =>
+    readFileSync(join(__dirname, "..", rel), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+
+  it("is not selected by the admin events query", () => {
+    expect(src("lib/admin-role-actions.ts")).not.toMatch(/current_capacity:\s*true/)
+    // Counted instead, through the module that owns the question.
+    expect(src("lib/admin-role-actions.ts")).toMatch(/distinctAttendeeCounts\(/)
+  })
+
+  it("is not rendered on the admin events table", () => {
+    expect(src("components/user-events-table.tsx")).not.toMatch(/current_capacity/)
+  })
+
+  it("does not reach the mobile API", () => {
+    /*
+     * The field survives in the response — an older client build may read it,
+     * and a shipped app is not something this repo can update — but it carries
+     * the counted value now. Serving the true number cannot break a caller that
+     * was already handling an integer.
+     */
+    const events = src("lib/services/events.service.ts")
+    expect(events).not.toMatch(/currentCapacity:\s*event\.current_capacity/)
+    expect(events).toMatch(/currentCapacity:\s*attended\.get\(/)
+  })
+
+  it("still has no writer", () => {
+    /*
+     * The state that made it a lie. A writer appearing would not fix it — it
+     * would recreate the drift the counting module exists to remove, since
+     * every write path would then have to maintain it correctly.
+     */
+    for (const f of [
+      "lib/admin-role-actions.ts",
+      "lib/services/events.service.ts",
+      "app/api/events/route.ts",
+    ]) {
+      expect(src(f)).not.toMatch(/current_capacity:\s*\{?\s*(increment|decrement|set)/)
+    }
+  })
+})
