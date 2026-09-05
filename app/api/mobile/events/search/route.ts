@@ -4,6 +4,7 @@ import { z } from "zod"
 import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import {
   successResponse,
   unauthorizedResponse,
@@ -29,6 +30,16 @@ const searchSchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request)
+
+    /*
+     * That somebody searched, and never what for.
+     *
+     * The query text is a statement about the person, on a surface whose whole
+     * premise is that it does not build a directory of you — so it is not
+     * recorded, and `props` stays null. The useful figure is what share of
+     * people search at all, which needs no words.
+     */
+    record({ name: PRODUCT_EVENTS.searched, userId: authUser?.userId })
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }

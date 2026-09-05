@@ -219,6 +219,46 @@ again:
   person at one three-day conference has three check-in rows, and counting
   those made them a returning attendee — the defect W17 fixed in nine places.
 
+### The event stream, and why it has no dispatcher
+
+`browsed` is the one stage of the loop with no table behind it, and DAU had no
+signal at all — `activeThisWeek` was distinct refresh-token holders in seven
+days, which its own tile called a *session proxy* and which really answered
+*whose token happened to be issued this week*.
+
+`product_events` carries **only** the signals with nothing behind them: opening
+the app, reading the feed, viewing an event, searching. Everything the funnel
+counts is already a row somewhere and is counted from it; copying those here
+would give one question two answers.
+
+**The rebuild plan specified a transactional outbox with retry and dead-letter,
+and it is deliberately not built.** An outbox makes an *external* side effect
+exactly-once with respect to a *state change*. Neither half applies: an app-open
+is not a state change, so there is nothing to co-commit with, and this table is
+in the same database, so there is nothing external to dispatch to. The plan also
+left that dispatcher's own failure mode open — *"needs a job-lag metric, or DB
+changed, nobody notified returns in a new form"* — so building it would have
+created the gap it was meant to close.
+
+The requirement that actually exists is exactly-once **counting**, and a unique
+`dedupe_key` gives that in the database rather than in a worker nobody watches.
+Losing a write is then safe by construction: the next request that person makes
+today records it.
+
+Three rules follow, and each was learned by getting it wrong first:
+
+- **Never on the request path.** `record` buffers and returns. Writing
+  immediately relied on a per-process cache for the steady state, and a cold
+  cache has no steady state — after a deploy every request from every user fires
+  a write at once. Measured: the integration suite went to `sorry, too many
+  clients already`, with real routes returning 500 because analytics had taken
+  the connections.
+- **Bounded, twice.** The buffer and the dedupe cache both have ceilings and
+  both drop rather than grow. Correctness lives in the database.
+- **Never what somebody typed.** A search records *that* a person searched, not
+  what for. The query text is a statement about them, on a surface whose premise
+  is that it does not build a directory of you.
+
 `lib/loop-closure.ts` computes all seven in one pass, and
 `__tests__/integration/loop-closure.itest.ts` pins them against a hand-verified
 fixture where every person lands on exactly one stage.

@@ -119,6 +119,18 @@ export async function DELETE(request: NextRequest) {
       // on the foreign key too; this is explicit so the deletion path lists
       // everything it removes rather than relying on a constraint to be read.
       db.city_demand.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * DELETED, not scrubbed, and the consequence is stated because it is
+       * visible: every historical "active this week" figure drops by the days
+       * this person contributed.
+       *
+       * A scrubbed row cannot be counted as a distinct person anyway, so
+       * nulling `user_id` would keep a row that no longer answers anything
+       * while still holding when somebody was awake and looking. Behavioural
+       * data about a person, kept after they asked to be erased, in order to
+       * make a chart smoother, is not a trade this product should make.
+       */
+      db.product_events.deleteMany({ where: { user_id: authUser.userId } }),
       db.user_oauth_accounts.deleteMany({ where: { user_id: authUser.userId } }),
       db.account.deleteMany({ where: { userId: authUser.userId } }),
       db.session.deleteMany({ where: { userId: authUser.userId } }),

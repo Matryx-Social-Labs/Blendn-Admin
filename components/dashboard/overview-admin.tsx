@@ -163,8 +163,11 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
         />
         <MetricTile
           label="Active this week"
-          value={formatCompact(data.activeThisWeek)}
-          hint="session proxy"
+          value={formatCompact(data.activeThisWeek.count)}
+          /* The hint IS the number's provenance. It read "session proxy"
+             unconditionally; it now says which of the two signals produced
+             this, because a figure that can come from either has to. */
+          hint={data.activeThisWeek.source === "app_opens" ? "opened the app" : "session proxy"}
           href="/dashboard/users"
         />
         <MetricTile

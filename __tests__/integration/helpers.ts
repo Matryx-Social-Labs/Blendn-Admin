@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
+import { closeDb as closeAppDb } from "@/lib/db"
 import { Pool } from "pg"
 
 /**
@@ -22,6 +23,17 @@ export const db = new PrismaClient({ adapter: new PrismaPg(pool) })
 export async function closeDb() {
   await db.$disconnect()
   await pool.end()
+  /*
+   * And the APP's pool, which is a different one.
+   *
+   * Suites that drive a route go through `lib/db`, and its pool is created
+   * inside the adapter — so `$disconnect()` does not close it, exactly as the
+   * docblock above says for this one. Nothing closed it, so every such suite
+   * leaked up to twenty connections for the length of the run and the 35th
+   * suite met `sorry, too many clients already`, with real routes returning
+   * 500 because the pool was gone.
+   */
+  await closeAppDb()
 }
 
 /** Namespace every fixture so a failed run can never collide with the next. */

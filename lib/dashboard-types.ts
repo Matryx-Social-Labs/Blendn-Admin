@@ -140,7 +140,17 @@ export interface AdminOverview {
   role: "app_admin"
   attention: ModerationAttention
   users: number
-  activeThisWeek: number
+  /**
+   * Distinct people who opened the app in the last seven days, and which
+   * signal produced that number.
+   *
+   * `source` is rendered on the tile. It used to be distinct refresh-token
+   * holders unconditionally — a "session proxy" by its own label — and it is
+   * now real app-opens wherever `product_events` has any, falling back only
+   * while the table is still filling. A number that can come from two sources
+   * has to say which, or it is two numbers wearing one label.
+   */
+  activeThisWeek: { count: number; source: "app_opens" | "proxy" }
   publishedEvents: number
   checkIns: number
   /** Period-over-period change for the tiles that carry one. */

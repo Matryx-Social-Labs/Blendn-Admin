@@ -29,6 +29,22 @@ import { db } from "./db"
 export const READ_RETENTION_DAYS = 30
 export const UNREAD_RETENTION_DAYS = 90
 
+/**
+ * How long a behavioural signal is kept.
+ *
+ * Long enough for a six-month cohort, which is the longest retention curve
+ * anybody will ask for before there is a year of data to draw one from — and
+ * short enough that the highest-volume table in the product has a lifecycle
+ * from the day it is created, rather than acquiring one after somebody notices
+ * it is the largest thing in the database.
+ *
+ * Swept here rather than in a loop of its own: this is already the retention
+ * sweeper, it already runs on the right cadence, and a second timer for a
+ * second table is how six background loops became something nobody could
+ * enumerate.
+ */
+export const PRODUCT_EVENT_RETENTION_DAYS = 180
+
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
 const BATCH_LIMIT = 5_000
 
@@ -69,6 +85,21 @@ export async function pruneNotifications(now: Date = new Date()): Promise<number
   return count
 }
 
+/** Behavioural signals past their window. Same batching, same bound. */
+export async function pruneProductEvents(now: Date = new Date()): Promise<number> {
+  const stale = await db.product_events.findMany({
+    where: { occurred_at: { lt: daysAgo(PRODUCT_EVENT_RETENTION_DAYS, now) } },
+    select: { id: true },
+    take: BATCH_LIMIT,
+  })
+  if (stale.length === 0) return 0
+
+  const { count } = await db.product_events.deleteMany({
+    where: { id: { in: stale.map((e) => e.id) } },
+  })
+  return count
+}
+
 async function runSweep(): Promise<void> {
   try {
     const deleted = await pruneNotifications()
@@ -77,6 +108,19 @@ async function runSweep(): Promise<void> {
     }
   } catch (error) {
     logger.error("Notification prune failed", { error: String(error) })
+  }
+
+  /*
+   * Its own try, so one table's failure does not skip the other's sweep. They
+   * are unrelated and share only a cadence.
+   */
+  try {
+    const deleted = await pruneProductEvents()
+    if (deleted > 0) {
+      logger.info("Pruned product events", { deleted, hadMore: deleted === BATCH_LIMIT })
+    }
+  } catch (error) {
+    logger.error("Product event prune failed", { error: String(error) })
   }
 }
 

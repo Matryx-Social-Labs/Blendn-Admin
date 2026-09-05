@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
+import { Pool } from "pg"
 
 declare global {
   var prisma: PrismaClient | undefined
@@ -38,12 +39,48 @@ declare global {
  */
 const POOL_MAX = Number(process.env.DATABASE_POOL_MAX ?? 20)
 
+/**
+ * The pool, held rather than handed to the adapter and forgotten.
+ *
+ * `prisma.$disconnect()` does **not** close a pool the adapter created. The
+ * integration helper's own docblock says so in as many words, and closes both
+ * its client and its pool for exactly this reason — but nothing did the same
+ * for this one. Two consequences, and the second is not a test problem:
+ *
+ *   1. Every jest suite that touched `lib/db` leaked up to `POOL_MAX`
+ *      connections for the length of the run. Sequential suites are supposed
+ *      to be cheap; 35 of them at twenty apiece is `sorry, too many clients
+ *      already`, with real routes returning 500 because the pool was gone.
+ *   2. `server.ts` calls `db.$disconnect()` on SIGTERM under a comment saying
+ *      "Drain the connection pool", and it does not. Connections are dropped
+ *      when the process exits rather than closed, which on a rolling deploy is
+ *      the old container's sockets lingering while the new one is opening its
+ *      own.
+ */
+let pool: Pool | null = null
+
 function createClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set")
   }
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString, max: POOL_MAX }) })
+  pool = new Pool({ connectionString, max: POOL_MAX })
+  return new PrismaClient({ adapter: new PrismaPg(pool) })
+}
+
+/**
+ * Disconnect the client AND end the pool it is using.
+ *
+ * Both, in that order: `$disconnect` lets in-flight queries settle, `pool.end`
+ * is what actually closes the sockets.
+ */
+export async function closeDb(): Promise<void> {
+  const client = globalThis.prisma
+  globalThis.prisma = undefined
+  const owned = pool
+  pool = null
+  if (client) await client.$disconnect().catch(() => {})
+  if (owned) await owned.end().catch(() => {})
 }
 
 function getClient(): PrismaClient {

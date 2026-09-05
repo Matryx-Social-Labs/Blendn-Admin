@@ -10,6 +10,7 @@ import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
+import { activeSince } from "@/lib/product-events"
 import { cityDemand } from "@/lib/demand"
 import { cityKey } from "@/lib/address"
 import { logger } from "@/lib/logger"
@@ -380,13 +381,29 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
       distinct: ["chat_group_id"],
     }),
     db.user.count(),
-    db.mobile_refresh_tokens
-      .findMany({
+    /*
+     * Real app-opens where there are any, the old proxy where there are not.
+     *
+     * This was distinct refresh-token holders in seven days — a number whose
+     * own tile called it a "session proxy" and which really answered *whose
+     * token happened to be issued this week*. `product_events` records an
+     * app-open per person per day, so the true figure is now available.
+     *
+     * The fallback exists only for the transition: the table starts empty, and
+     * a tile reading zero over a live product is worse than a proxy that at
+     * least moves. Which source produced the number is returned with it and
+     * rendered on the tile, so the screen never shows one while implying the
+     * other.
+     */
+    activeSince(weekStart).then(async (real) => {
+      if (real.source === "app_opens") return real
+      const rows = await db.mobile_refresh_tokens.findMany({
         where: { revoked_at: null, created_at: { gte: weekStart } },
         select: { user_id: true },
         distinct: ["user_id"],
       })
-      .then((rows) => rows.length),
+      return { count: rows.length, source: "proxy" as const }
+    }) as Promise<{ count: number; source: "app_opens" | "proxy" }>,
     db.events.count({ where: { ...eventScope(), status: "published" } }),
     /*
      * Window-scoped, matching its own delta.

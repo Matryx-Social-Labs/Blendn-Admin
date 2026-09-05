@@ -76,6 +76,7 @@ model User {
   board_posts       board_posts[]    @relation("BoardAuthor")
   board_requests_sent     board_requests[] @relation("BoardRequestFrom")
   board_requests_received board_requests[] @relation("BoardRequestTo")
+  product_events         product_events[]
   match_preferences      event_match_preferences[]
   likes_sent             event_likes[]                @relation("LikesSent")
   likes_received         event_likes[]                @relation("LikesReceived")
@@ -3155,4 +3156,73 @@ enum board_request_status {
   /// Withdrawn by the asker. Distinct from `declined` because who ended it is
   /// the thing worth knowing afterwards.
   withdrawn
+}
+
+/// One behavioural event. The signals that have no table behind them.
+///
+/// ## What belongs here, and what emphatically does not
+///
+/// Everything the loop-closure funnel counts — signed up, onboarded, RSVP'd,
+/// checked in, matched, conversed, came back — is already a row somewhere and
+/// is queried directly. Copying those here would create a second answer to a
+/// question the database already answers, which is this codebase's dominant
+/// defect.
+///
+/// What has no table is **browsing, searching, viewing and opening the app**.
+/// Those are the only things this stream carries, and the last of them is why
+/// it exists: `activeThisWeek` is distinct refresh-token holders, documented
+/// in-repo as a proxy, and publishing D1/D7/D30 on top of it would be wrong in
+/// a way a diligent investor finds.
+///
+/// ## No dispatcher, and that is a decision
+///
+/// The rebuild plan specified a transactional outbox with retry and
+/// dead-letter, and left its own failure mode open: "the outbox dispatcher
+/// needs a job-lag metric, or *DB changed, nobody notified* returns in a new
+/// form." An outbox exists to make an **external** side effect exactly-once
+/// with respect to a **state change**. Neither half applies here: an app-open
+/// is not a state change, so there is nothing to co-commit with, and this table
+/// is in the same database, so there is nothing external to dispatch to.
+///
+/// The real requirement is that a retry, a double-tap or two replicas do not
+/// count one person twice. That is `dedupe_key`, and it is enforced by the
+/// database rather than by a worker nobody is watching.
+model product_events {
+  id          String   @id @default(uuid()) @db.Uuid
+  occurred_at DateTime @default(now()) @db.Timestamptz(6)
+
+  /// Null for a signal from somebody not signed in. Kept nullable rather than
+  /// dropping the row: "how many people browsed before signing up" is a real
+  /// question and the answer is not zero.
+  user_id String?
+
+  /// From `lib/product-events.ts`, never free text. A free-text event name is
+  /// how an analytics schema becomes unqueryable within a quarter.
+  name String
+
+  /// What it was about, when that is meaningful. An event id for a view; null
+  /// for an app-open.
+  entity_kind String?
+  entity_id   String? @db.Uuid
+
+  /// Deliberately sparse, and it never carries what somebody typed. A search
+  /// records THAT a person searched and not what for: the query text is a
+  /// statement about them, on a surface whose whole premise is that it does not
+  /// build a directory of you.
+  props Json?
+
+  /// Idempotency, in place of a dispatcher.
+  ///
+  /// `user:day:name` for the daily signals, so a person opening the app forty
+  /// times is one row and two replicas racing produce one row. `ON CONFLICT DO
+  /// NOTHING` then makes every write safe to repeat, which is what makes losing
+  /// one recoverable: the next request that day writes it.
+  dedupe_key String @unique
+
+  user User? @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  /// DAU, WAU and MAU: one name over a date range.
+  @@index([name, occurred_at])
+  /// One person's activity, for cohorts and retention curves.
+  @@index([user_id, occurred_at])
 }
