@@ -4,6 +4,7 @@ import { IconMapPin } from "@tabler/icons-react"
 
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
 import { EmptyState, MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
+import { VenueManage } from "./venue-manage"
 import { Badge } from "@/components/ui/badge"
 import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
@@ -42,8 +43,16 @@ export default async function VenueDetailPage({
   const { id } = await params
   const range = resolveRange(await searchParams)
 
+  /*
+   * Retired venues load here, and nowhere else.
+   *
+   * Every other read filters `deleted_at: null` and should — a retired venue is
+   * gone from the feed, the search and the pickers. But this is the screen the
+   * restore control lives on, so filtering it here would make retirement
+   * one-way by accident: the row would exist, be correct, and be unreachable.
+   */
   const venue = await db.venues.findUnique({
-    where: { id, deleted_at: null },
+    where: { id },
     select: {
       id: true,
       name: true,
@@ -52,6 +61,10 @@ export default async function VenueDetailPage({
       capacity: true,
       status: true,
       claimed_at: true,
+      deleted_at: true,
+      latitude: true,
+      longitude: true,
+      venue_type: true,
       owner_org: { select: { id: true, display_name: true } },
     },
   })
@@ -151,6 +164,7 @@ export default async function VenueDetailPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={venue.status === "active" ? "default" : "secondary"}>{venue.status}</Badge>
+          {venue.deleted_at ? <Badge variant="destructive">Retired</Badge> : null}
           {venue.claimed_at ? (
             isAdmin && venue.owner_org ? (
               <Badge variant="outline">{venue.owner_org.display_name}</Badge>
@@ -166,6 +180,22 @@ export default async function VenueDetailPage({
       {/* Above the window metrics, deliberately: everything below is about a
           date range someone chose, and this is about right now. */}
       <BuildingOccupancyPanel occupancy={building} />
+
+      <VenueManage
+        venue={{
+          id: venue.id,
+          name: venue.name,
+          venueType: venue.venue_type,
+          address: venue.address,
+          city: venue.city,
+          capacity: venue.capacity,
+          lat: venue.latitude,
+          lng: venue.longitude,
+          retired: venue.deleted_at !== null,
+          ownerOrg: venue.owner_org?.display_name ?? null,
+        }}
+        isAdmin={isAdmin}
+      />
 
       <div className="flex flex-wrap gap-1">
         <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />

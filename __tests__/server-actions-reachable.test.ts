@@ -91,7 +91,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
 
   // --- Venues: rows can be created and then never corrected -----------------
   ["assignVenueOwner", "no admin control on /dashboard/venue-owners/[id]; owner org is set at creation and never after"],
-  ["updateVenue", "no edit form anywhere; a venue can be created and never corrected"],
   ["unlinkEventVenue", "the reversibility lib/venue-claim-actions.ts cites to justify its review bar"],
 
   // --- Safety and moderation: built, documented, never on screen ------------

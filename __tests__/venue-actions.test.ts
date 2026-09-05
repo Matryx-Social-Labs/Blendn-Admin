@@ -1,6 +1,13 @@
 const mockDb = {
-  venues: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+  venues: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
   organisation_members: { findFirst: jest.fn() },
+  events: { count: jest.fn() },
 }
 
 const mockAuth = jest.fn()
@@ -10,7 +17,14 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
-import { venuesNear, createVenue, assignVenueOwner } from "@/lib/venue-actions"
+import {
+  venuesNear,
+  createVenue,
+  assignVenueOwner,
+  retireVenue,
+  restoreVenue,
+  updateVenue,
+} from "@/lib/venue-actions"
 
 const MY_ORG = "org_mine"
 /** Toit, Indiranagar — a real pin, so the distances below are real distances. */
@@ -26,6 +40,13 @@ beforeEach(() => {
   mockDb.organisation_members.findFirst.mockResolvedValue({ org_id: MY_ORG })
   mockDb.venues.create.mockResolvedValue({ id: "venue_new" })
   mockDb.venues.findMany.mockResolvedValue([])
+  mockDb.venues.findUnique.mockResolvedValue({
+    id: "venue_1",
+    name: "Toit",
+    owner_org_id: MY_ORG,
+  })
+  mockDb.venues.updateMany.mockResolvedValue({ count: 1 })
+  mockDb.events.count.mockResolvedValue(0)
 })
 
 /**
@@ -190,5 +211,116 @@ describe("assignVenueOwner", () => {
   it("refuses a non-admin", async () => {
     signIn("venue_owner")
     await expect(assignVenueOwner("venue_1", MY_ORG)).rejects.toThrow(/forbidden/i)
+  })
+})
+
+describe("retiring a venue", () => {
+  /*
+   * `venues.status` and `venues.deleted_at` had no writer at all. A venue, once
+   * created, was permanent — the inverse of what a place is supposed to be.
+   */
+  it("refuses while an event is still booked there", async () => {
+    /*
+     * The refusal that matters. Retiring a venue with a future event booked
+     * leaves that event pointing at a place no screen will show, and the
+     * organiser finds out at the door. Moving the event is a decision with a
+     * person in it, so it cannot be done implicitly here.
+     */
+    signIn("app_admin")
+    mockDb.events.count.mockResolvedValue(2)
+
+    await expect(retireVenue("venue_1")).rejects.toThrow(/still booked/)
+    expect(mockDb.venues.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("counts only events that have not finished", async () => {
+    // Past events at a retired venue are its history, not a reason to refuse.
+    signIn("app_admin")
+    await retireVenue("venue_1")
+
+    const where = mockDb.events.count.mock.calls[0][0].where
+    expect(where.end_time).toEqual({ gte: expect.any(Date) })
+    expect(where.deleted_at).toBeNull()
+  })
+
+  it("writes both columns, because one without the other is a contradiction", async () => {
+    signIn("app_admin")
+    await retireVenue("venue_1")
+
+    const call = mockDb.venues.updateMany.mock.calls[0][0]
+    expect(call.data.status).toBe("archived")
+    expect(call.data.deleted_at).toBeInstanceOf(Date)
+    // Guarded on still being live, so a double submit does not rewrite when.
+    expect(call.where.deleted_at).toBeNull()
+  })
+
+  it("tells the second click the truth rather than rewriting the first", async () => {
+    signIn("app_admin")
+    mockDb.venues.updateMany.mockResolvedValue({ count: 0 })
+    await expect(retireVenue("venue_1")).rejects.toThrow(/already retired/)
+  })
+
+  it("lets an owner retire their own", async () => {
+    signIn("venue_owner")
+    await expect(retireVenue("venue_1")).resolves.toBeUndefined()
+  })
+
+  it("refuses a stranger", async () => {
+    signIn("venue_owner")
+    mockDb.organisation_members.findFirst.mockResolvedValue(null)
+    await expect(retireVenue("venue_1")).rejects.toThrow(/Forbidden/)
+  })
+})
+
+describe("restoring a venue", () => {
+  it("is admin only, because it is a statement about the catalogue", async () => {
+    /*
+     * Asymmetric on purpose: an owner may retire their own venue, and only an
+     * admin may bring one back. "This place is open again" is a claim about
+     * what the product offers, not about one organisation.
+     */
+    signIn("venue_owner")
+    await expect(restoreVenue("venue_1")).rejects.toThrow(/Forbidden/)
+
+    signIn("app_admin")
+    await expect(restoreVenue("venue_1")).resolves.toBeUndefined()
+    expect(mockDb.venues.updateMany.mock.calls[0][0].where.deleted_at).toEqual({ not: null })
+  })
+})
+
+describe("correcting the pin", () => {
+  it("refuses half a coordinate pair", async () => {
+    /*
+     * Half a pair would move the venue to the equator or the prime meridian
+     * rather than failing — a wrong answer that looks like a working save.
+     */
+    signIn("app_admin")
+    await expect(updateVenue("venue_1", { lat: 12.97 })).rejects.toThrow(/both/)
+    await expect(updateVenue("venue_1", { lng: 77.59 })).rejects.toThrow(/both/)
+    expect(mockDb.venues.update).not.toHaveBeenCalled()
+  })
+
+  it("refuses coordinates off the globe", async () => {
+    signIn("app_admin")
+    await expect(updateVenue("venue_1", { lat: 91, lng: 0 })).rejects.toThrow(/Latitude/)
+    await expect(updateVenue("venue_1", { lat: 0, lng: 181 })).rejects.toThrow(/Longitude/)
+  })
+
+  it("writes both when both are given", async () => {
+    signIn("app_admin")
+    await updateVenue("venue_1", { lat: 19.076, lng: 72.877 })
+
+    const data = mockDb.venues.update.mock.calls[0][0].data
+    expect(data.latitude).toBe(19.076)
+    expect(data.longitude).toBe(72.877)
+  })
+
+  it("leaves the pin alone when neither is given", async () => {
+    signIn("app_admin")
+    await updateVenue("venue_1", { name: "New name" })
+
+    const data = mockDb.venues.update.mock.calls[0][0].data
+    expect(data).not.toHaveProperty("latitude")
+    expect(data).not.toHaveProperty("longitude")
   })
 })
