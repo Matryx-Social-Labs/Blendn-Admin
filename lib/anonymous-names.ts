@@ -1,4 +1,5 @@
 import { db } from "./db"
+import { violatedConstraint } from "./prisma-errors"
 
 const ADJECTIVES = [
   "Cosmic", "Neon", "Electric", "Golden", "Silver", "Crystal", "Mystic",
@@ -209,35 +210,20 @@ export async function claimAnonymousName<T>(
 }
 
 /**
- * A `P2002` on the name, and specifically not on the membership pair.
+ * A unique violation on the name, and specifically not on the membership pair.
  *
- * ## Read the whole `meta`, because `meta.target` is not always there
+ * `(chat_group_id, user_id)` means "you are already a member" — a state no
+ * amount of re-rolling a name resolves — so retrying it would burn five rolls
+ * and then throw the wrong error. The two are told apart by which constraint
+ * the database named.
  *
- * The first version of this read `meta.target`, which is what Prisma's own
- * documentation describes and what every example shows. **This deployment never
- * populates it.** Running against a real database produced:
- *
- *     meta: { modelName, driverAdapterError: { cause: {
- *       kind: "UniqueConstraintViolation",
- *       constraint: { fields: ["chat_group_id", "anonymous_name"] } } } }
- *
- * — the constraint nested two levels inside a driver-adapter error, with
- * `target` absent. So the check answered `false` for every real collision and
- * rethrew it, and the retry never ran: the fix was inert while its unit tests
- * were green, because those tests built the error object from the documented
- * shape rather than from one this stack emits.
- *
- * Matching against the serialised `meta` rather than a path through it is
- * deliberately shape-agnostic. It is a looser check than reaching for a field,
- * and that is the point — the field moved once already, between two Prisma
- * configurations of the same project.
- *
- * The other unique on this table is `(chat_group_id, user_id)`, whose fields
- * and constraint name both lack `anonymous_name`, so it is still told apart.
+ * `violatedConstraint` rather than a path into the error: this deployment's
+ * Prisma reports the violated *fields* in `error.message` and the constraint
+ * name only inside the driver adapter's nested cause, and that field has
+ * already moved once between two configurations of this project. See
+ * `lib/prisma-errors.ts`, where two handlers written the obvious way are
+ * recorded as never having fired.
  */
 function isAnonymousNameCollision(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false
-  if ((error as { code?: string }).code !== "P2002") return false
-  const meta = (error as { meta?: unknown }).meta
-  return JSON.stringify(meta ?? "").includes("anonymous_name")
+  return violatedConstraint(error, "anonymous_name")
 }
