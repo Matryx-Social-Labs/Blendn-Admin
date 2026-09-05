@@ -92,6 +92,9 @@ export async function GET(req: NextRequest) {
         : Promise.resolve([]),
       db.venues.findMany({
         where: {
+          // The one venue read in the codebase that was missing this. A retired
+          // venue is gone from every list and was still reachable from ⌘K.
+          deleted_at: null,
           OR: [{ name: contains }, { city: contains }],
           ...(isAdmin ? {} : { owner_org_id: { in: orgIds } }),
         },

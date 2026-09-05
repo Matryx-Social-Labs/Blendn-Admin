@@ -229,12 +229,36 @@ export interface UpdateVenueInput {
   city?: string | null
   capacity?: number | null
   geofence?: unknown
+  /**
+   * The pin. Both or neither — a latitude without a longitude is not a place.
+   *
+   * These were write-once at creation, so **a venue's coordinates could never
+   * be corrected**. That matters more for a venue than for an event: an event's
+   * wrong pin is wrong for one night, and a venue's is wrong for every event
+   * ever held there, permanently, because nothing ages it out. It is also the
+   * thing a curated place gets wrong most often, since whoever added it has
+   * never stood there.
+   */
+  lat?: number
+  lng?: number
 }
 
-/** Edit a venue. Owners edit their own; admins edit any. */
-export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
-  const user = await requireUser()
-
+/**
+ * Load a live venue the caller is allowed to change, or throw.
+ *
+ * Not exported: a `"use server"` file may export nothing but async server
+ * actions, and this is neither. Extracted because two writers now ask the same
+ * question, and "may this actor change this venue" having two implementations
+ * is how the two come to disagree — which is the defect this whole audit is
+ * about.
+ *
+ * Organisation-shaped, per CLAUDE.md: membership of the owning org, never
+ * `owner_id`, which has no writer at all.
+ */
+async function venueForWrite(
+  id: string,
+  user: { id: string; role: string }
+): Promise<{ id: string; name: string; owner_org_id: string | null }> {
   const venue = await db.venues.findUnique({
     where: { id, deleted_at: null },
     select: { id: true, name: true, owner_org_id: true },
@@ -249,6 +273,32 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
         })
       : null
     if (!member) throw new Error("Forbidden")
+  }
+  return venue
+}
+
+/** Edit a venue. Owners edit their own; admins edit any. */
+export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
+  const user = await requireUser()
+  await venueForWrite(id, user)
+
+  /*
+   * Both or neither, checked before anything is written. Half a coordinate pair
+   * would move the venue to the equator or the prime meridian rather than
+   * failing, which is a wrong answer that looks like a working save.
+   */
+  const movingPin = input.lat !== undefined || input.lng !== undefined
+  if (movingPin && (input.lat === undefined || input.lng === undefined)) {
+    throw new Error("Give both a latitude and a longitude, or neither.")
+  }
+  if (movingPin) {
+    const { lat, lng } = input as { lat: number; lng: number }
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      throw new Error("Latitude must be between -90 and 90.")
+    }
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      throw new Error("Longitude must be between -180 and 180.")
+    }
   }
 
   let geofence: Geofence | undefined
@@ -269,6 +319,7 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
         ? { capacity: input.capacity && input.capacity > 0 ? Math.round(input.capacity) : null }
         : {}),
       ...(geofence ? { geofence: geofence as object } : {}),
+      ...(movingPin ? { latitude: input.lat, longitude: input.lng } : {}),
     },
   })
 
@@ -278,6 +329,95 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
     resource: "venue",
     resourceId: id,
     details: { fields: Object.keys(input) },
+  })
+  revalidatePath("/dashboard/venues")
+  revalidatePath(`/dashboard/venues/${id}`)
+}
+
+/**
+ * Retire a venue. Owners retire their own; admins retire any.
+ *
+ * ## The column that had no writer
+ *
+ * `venues.status` and `venues.deleted_at` have existed since the table did.
+ * Every read filters `deleted_at: null`, `venue_status.archived` was declared,
+ * and `@@index([status])` indexed a column that never changed — because
+ * **nothing ever wrote either one**. There was no `deleteVenue`, no
+ * `archiveVenue`, no retirement path of any kind: a venue, once created, was
+ * permanent, which is the literal inverse of what a place is supposed to be.
+ *
+ * ## Soft, and both columns
+ *
+ * `deleted_at` is what every existing read already filters on, so setting it is
+ * what actually removes the venue from the feed, the search and the pickers.
+ * `status` is set alongside it because the two would otherwise disagree, and a
+ * row saying `active` that no query returns is worse than either state alone.
+ *
+ * Soft rather than hard, because `events.venue_id` points here: a hard delete
+ * either cascades away the history of everything that happened at the place or
+ * is refused by the constraint. Retiring a venue must not retire its past.
+ */
+export async function retireVenue(id: string, reason?: string): Promise<void> {
+  const user = await requireUser()
+  const venue = await venueForWrite(id, user)
+
+  /*
+   * Refused while an event is still to come there.
+   *
+   * Retiring a venue with a future event booked leaves that event pointing at a
+   * place no screen will show, and the organiser finds out at the door. The
+   * event has to move first, which is a decision with a person in it.
+   */
+  const upcoming = await db.events.count({
+    where: { venue_id: id, deleted_at: null, end_time: { gte: new Date() } },
+  })
+  if (upcoming > 0) {
+    throw new Error(
+      `${upcoming} event${upcoming === 1 ? " is" : "s are"} still booked here. Move or cancel ${upcoming === 1 ? "it" : "them"} first.`
+    )
+  }
+
+  const { count } = await db.venues.updateMany({
+    // Guarded on still being live, so a double submit does not rewrite when.
+    where: { id, deleted_at: null },
+    data: { deleted_at: new Date(), status: "archived" },
+  })
+  if (count === 0) throw new Error("That venue is already retired")
+
+  auditLog({
+    userId: user.id,
+    action: "venue.retired",
+    resource: "venue",
+    resourceId: id,
+    details: { name: venue.name, reason: reason?.trim() || null },
+  })
+  revalidatePath("/dashboard/venues")
+  revalidatePath(`/dashboard/venues/${id}`)
+}
+
+/**
+ * Put a retired venue back. Admin only.
+ *
+ * Retiring is reversible and claiming is not, which is why this exists and why
+ * it is narrower: an owner can retire their own venue, and only an admin can
+ * bring one back, because "this place is open again" is a statement about the
+ * catalogue rather than about one organisation.
+ */
+export async function restoreVenue(id: string): Promise<void> {
+  const user = await requireUser()
+  if (user.role !== "app_admin") throw new Error("Forbidden")
+
+  const { count } = await db.venues.updateMany({
+    where: { id, deleted_at: { not: null } },
+    data: { deleted_at: null, status: "active" },
+  })
+  if (count === 0) throw new Error("That venue is not retired")
+
+  auditLog({
+    userId: user.id,
+    action: "venue.restored",
+    resource: "venue",
+    resourceId: id,
   })
   revalidatePath("/dashboard/venues")
   revalidatePath(`/dashboard/venues/${id}`)
