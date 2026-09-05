@@ -2,17 +2,12 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import {
-  boardDenialMessage,
-  mayPostToBoard,
-  mayReadBoard,
-  type BoardEntitlement,
-} from "@/lib/board"
+import { boardDenialMessage, mayReadBoard } from "@/lib/board"
+import { boardPseudonyms, boardWriteDenial, entitlementFor } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { ageFrom } from "@/lib/age"
 import {
   successResponse,
   errorResponse,
@@ -38,24 +33,6 @@ interface RouteParams {
  * travel somewhere with a stranger, and a name on it would be the one place in
  * the product where identity is handed over before anybody consented to it.
  */
-
-/** What the viewer has done about this event, for both gates. */
-async function entitlementFor(eventId: string, userId: string): Promise<BoardEntitlement> {
-  const [rsvp, favourite] = await Promise.all([
-    db.event_rsvps.findFirst({
-      where: { event_id: eventId, user_id: userId },
-      select: { status: true },
-    }),
-    db.event_favorites.findFirst({
-      where: { event_id: eventId, user_id: userId },
-      select: { id: true },
-    }),
-  ])
-  return {
-    rsvp: (rsvp?.status as BoardEntitlement["rsvp"]) ?? null,
-    favourited: favourite !== null,
-  }
-}
 
 // GET /api/mobile/events/[eventId]/board
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -98,14 +75,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    const names = await db.chat_group_members.findMany({
-      where: {
-        chat_group: { event_id: eventId },
-        user_id: { in: posts.map((p) => p.author_id) },
-      },
-      select: { user_id: true, anonymous_name: true },
-    })
-    const pseudonymOf = new Map(names.map((n) => [n.user_id, n.anonymous_name || "Attendee"]))
+    const pseudonymOf = await boardPseudonyms(
+      eventId,
+      posts.map((p) => p.author_id)
+    )
 
     return successResponse({
       posts: posts.map((p) => ({
@@ -176,35 +149,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("The board closes when the doors open — the room is open instead", 403)
     }
 
-    const [entitlement, profile, interests, outstanding, thisWeek] = await Promise.all([
-      entitlementFor(eventId, user.userId),
-      db.profiles.findUnique({
-        where: { id: user.userId },
-        select: { name: true, age: true, date_of_birth: true, intent_default: true },
-      }),
-      db.user_interests.count({ where: { user_id: user.userId } }),
-      db.board_requests.count({ where: { from_user_id: user.userId, status: "pending" } }),
-      db.board_requests.count({
-        where: {
-          from_user_id: user.userId,
-          created_at: {
-            gte: new Date(Date.now() - BOARD.REQUEST_WEEK_DAYS * 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
-    ])
-
-    const denial = mayPostToBoard(
-      entitlement,
-      {
-        name: profile?.name ?? null,
-        // Derived, never the stored column — see lib/age.ts.
-        age: ageFrom(profile ?? null),
-        interestCount: interests,
-        intentCount: profile?.intent_default?.length ?? 0,
-      },
-      { outstandingRequests: outstanding, requestsThisWeek: thisWeek }
-    )
+    const denial = await boardWriteDenial(eventId, user.userId)
     if (denial) return forbiddenResponse(boardDenialMessage(denial))
 
     const created = await db.board_posts.create({

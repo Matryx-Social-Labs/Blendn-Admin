@@ -745,3 +745,136 @@ registry.registerPath({
     ...standardErrors,
   },
 })
+
+// === The board's requests ===
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/board/{postId}/requests",
+  tags: ["Mobile Events"],
+  summary: "Ask to come with somebody",
+  description:
+    "A request is always filed against a post, and the recipient is read off " +
+    "that post — so somebody who has not put themselves forward cannot be " +
+    "asked at all. Same gates as posting: RSVP 'going', a complete profile, " +
+    "and room under both caps. Refused if they have already declined you on " +
+    "this post, if one of you has blocked the other, or if the doors have " +
+    "opened. A second pending request to the same post is a 409.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string(), postId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            message: z.string().max(300).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "Sent, and waiting on them",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              id: z.string(),
+              status: z.enum(["pending", "accepted", "declined", "withdrawn"]),
+              createdAt: z.string(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+const boardRequest = z.object({
+  id: z.string(),
+  status: z.enum(["pending", "accepted", "declined", "withdrawn"]),
+  message: z.string().nullable(),
+  createdAt: z.string(),
+  decidedAt: z.string().nullable(),
+  /** The pseudonym at that event, never the name. Accepting exchanges those. */
+  counterpart: z.string(),
+  event: z.object({ id: z.string(), title: z.string(), startTime: z.string() }),
+  post: z.object({
+    id: z.string(),
+    kind: z.enum(["offer", "seeking", "chat"]),
+    body: z.string(),
+  }),
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/board/requests",
+  tags: ["Mobile Events"],
+  summary: "Your board requests, both directions",
+  description:
+    "Not scoped to an event: a request is answered from a notification days " +
+    "after the board was last opened. Pending first, then newest — a decided " +
+    "request is history and an undecided one is a person waiting.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "What is waiting on you, and what you are waiting on",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              incoming: z.array(boardRequest),
+              outgoing: z.array(boardRequest),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/mobile/board/requests/{requestId}",
+  tags: ["Mobile Events"],
+  summary: "Answer a board request",
+  description:
+    "Accept or decline if you were asked; withdraw if you did the asking — " +
+    "'withdrawn' is a separate status from 'declined' because afterwards, " +
+    "which of the two people ended it is the thing worth knowing. Accepting " +
+    "opens a pseudonymous conversation scoped to the event, marked with its " +
+    "board request so the client can tell it from a match. Still possible " +
+    "after the doors open: a pending request holds a slot in the asker's cap, " +
+    "so an unanswerable one would consume it for ever.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ requestId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ action: z.enum(["accept", "decline", "withdraw"]) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Answered. `conversationId` is present only on accept.",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              id: z.string(),
+              status: z.enum(["accepted", "declined", "withdrawn"]),
+              conversationId: z.string().optional(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})

@@ -1,4 +1,4 @@
-import { readFileSync } from "fs"
+import { existsSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
 
 /**
@@ -12,8 +12,27 @@ import { join } from "path"
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 const SCHEMA = () => read("prisma", "schema.prisma")
 const SENDER = () => read("lib", "push-notifications.ts")
+/** The migration that created the centre. Its own shape is asserted below. */
 const MIGRATION = () =>
   read("prisma", "migrations", "20260816010000_notifications_centre", "migration.sql")
+
+/**
+ * Every migration, because an enum is not created once.
+ *
+ * This used to read the one file that has the `CREATE TYPE`, which was right
+ * until the first `ALTER TYPE ... ADD VALUE` — after which the guard reported
+ * the deployed database as missing values it has, and the honest reading of
+ * its own premise (the deployed set is what the SQL produces) requires
+ * replaying both statements rather than only the first.
+ */
+const MIGRATION_SQL = (): string =>
+  readdirSync(join(__dirname, "..", "prisma", "migrations"))
+    .sort()
+    .flatMap((dir) => {
+      const file = join(__dirname, "..", "prisma", "migrations", dir, "migration.sql")
+      return existsSync(file) ? [readFileSync(file, "utf8")] : []
+    })
+    .join("\n")
 
 /** The `type` union on `NotificationData`, parsed out of the source. */
 function senderKinds(): string[] {
@@ -50,10 +69,19 @@ describe("the kind enum and the sender agree", () => {
     // `prisma migrate deploy` runs the SQL, not the schema. If they disagree
     // the deployed database accepts a different set from the one the client
     // believes in, and the mismatch only shows up as a runtime insert error.
-    const sql = /CREATE TYPE "notification_kind" AS ENUM \(([^)]*)\)/.exec(MIGRATION())
-    expect(sql).not.toBeNull()
-    const fromSql = [...sql![1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort()
-    expect(fromSql).toEqual(schemaKinds())
+    const all = MIGRATION_SQL()
+    const created = /CREATE TYPE "notification_kind" AS ENUM \(([^)]*)\)/.exec(all)
+    expect(created).not.toBeNull()
+    const fromSql = new Set(
+      [...created![1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
+    )
+    // Then every value added since, in migration order.
+    for (const [, value] of all.matchAll(
+      /ALTER TYPE "notification_kind" ADD VALUE (?:IF NOT EXISTS )?'([a-z_]+)'/g
+    )) {
+      fromSql.add(value)
+    }
+    expect([...fromSql].sort()).toEqual(schemaKinds())
   })
 })
 

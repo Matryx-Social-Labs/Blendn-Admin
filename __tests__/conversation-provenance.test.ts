@@ -21,7 +21,7 @@ const codeOnly = (src: string) =>
 
 describe("fromMatch — the app cannot derive this", () => {
   it("is true when either pseudonym was snapshotted", () => {
-    expect(cameFromMatch({ user1_pseudonym: "Cosmic Panda", user2_pseudonym: "Wry Otter" })).toBe(true)
+    expect(cameFromMatch({ user1_pseudonym: "Cosmic Panda", user2_pseudonym: "Wry Otter", origin_board_request_id: null })).toBe(true)
   })
 
   it("is false for a conversation that never had one", () => {
@@ -29,7 +29,7 @@ describe("fromMatch — the app cannot derive this", () => {
      * An accepted message request. It has shown real names since it existed and
      * must never be greeted as a new match.
      */
-    expect(cameFromMatch({ user1_pseudonym: null, user2_pseudonym: null })).toBe(false)
+    expect(cameFromMatch({ user1_pseudonym: null, user2_pseudonym: null, origin_board_request_id: null })).toBe(false)
   })
 
   it("is true when only one side has one", () => {
@@ -38,8 +38,47 @@ describe("fromMatch — the app cannot derive this", () => {
      * before the match can leave a side null in older rows. One pseudonym is
      * still proof the conversation was born of a match, so `||` not `&&`.
      */
-    expect(cameFromMatch({ user1_pseudonym: "Cosmic Panda", user2_pseudonym: null })).toBe(true)
-    expect(cameFromMatch({ user1_pseudonym: null, user2_pseudonym: "Wry Otter" })).toBe(true)
+    expect(cameFromMatch({ user1_pseudonym: "Cosmic Panda", user2_pseudonym: null, origin_board_request_id: null })).toBe(true)
+    expect(cameFromMatch({ user1_pseudonym: null, user2_pseudonym: "Wry Otter", origin_board_request_id: null })).toBe(true)
+  })
+
+  it("is false for a board conversation, which is pseudonymous but not a match", () => {
+    /*
+     * The reason this column exists.
+     *
+     * A board conversation snapshots pseudonyms exactly like a match does --
+     * it has to, because `displayNameInConversation` falls back to the real
+     * name without one. So the pseudonym test alone answers `true`, and the
+     * client draws the match opener on anything this returns true for. Two
+     * people who agreed to share a car would be told they liked each other.
+     *
+     * Checked before the pseudonyms, because a stored id beats an inference.
+     */
+    expect(
+      cameFromMatch({
+        user1_pseudonym: "Cosmic Panda",
+        user2_pseudonym: "Wry Otter",
+        origin_board_request_id: "3f1c...",
+      })
+    ).toBe(false)
+  })
+
+  it("makes the origin required, so a missed select cannot answer wrongly", () => {
+    /*
+     * NEGATIVE CONTROL (structural, so it is registered): making the field
+     * optional -- `origin_board_request_id?: string | null` -- keeps every
+     * caller compiling and silently reintroduces the bug for any caller whose
+     * select omits it. That is CLAUDE.md's `venue` trap: a select missing a
+     * field reads as the field being absent.
+     *
+     * Required, the same mistake is a compile error at every call site, which
+     * is why this asserts the absence of the `?`.
+     */
+    const src = codeOnly(read("lib", "conversation-identity.ts"))
+    const fn = src.slice(src.indexOf("export function cameFromMatch"))
+    const signature = fn.slice(0, fn.indexOf("): boolean"))
+    expect(signature).toContain("origin_board_request_id: string | null")
+    expect(signature).not.toContain("origin_board_request_id?")
   })
 
   it("cannot be replaced by theyRevealed, which is why it exists", () => {

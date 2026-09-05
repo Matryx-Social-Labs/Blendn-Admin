@@ -181,7 +181,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         )
       }
 
-      const anonName = await generateUniqueAnonymousName(chatGroup.id)
+      const anonName = await generateUniqueAnonymousName(
+        chatGroup.id,
+        { eventId, userId: authUser.userId }
+      )
       await db.chat_group_members.upsert({
         where: {
           chat_group_id_user_id: {
@@ -554,7 +557,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         )
       }
 
-      const postAnonName = await generateUniqueAnonymousName(chatGroup.id)
+      const postAnonName = await generateUniqueAnonymousName(
+        chatGroup.id,
+        { eventId, userId: authUser.userId }
+      )
       await db.chat_group_members.create({
         data: {
           chat_group_id: chatGroup.id,

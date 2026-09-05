@@ -138,6 +138,29 @@ export function mayShowRealName(
 export function cameFromMatch(conversation: {
   user1_pseudonym: string | null
   user2_pseudonym: string | null
+  /**
+   * REQUIRED, not optional, and that is the whole safety of this function.
+   *
+   * Optional, a caller who forgot to select it would pass `undefined`, fall
+   * through to the pseudonym test below, and get `true` for a board
+   * conversation — a wrong answer that typechecks. That is the trap CLAUDE.md
+   * describes for `venue` in `eventPermissionSelect`: a select missing a field
+   * reads as the field being absent, and silently denies or mislabels.
+   *
+   * Required, the same mistake is a compile error at every call site.
+   */
+  origin_board_request_id: string | null
 }): boolean {
+  /*
+   * A board conversation is pseudonymous too, so the pseudonym test alone
+   * calls it a match — and the client draws the match opener on anything this
+   * returns true for, which would tell two people who agreed to share a car
+   * that they liked each other.
+   *
+   * Checked FIRST, because it is the definite signal: a stored id beats an
+   * inference from a side effect. The pseudonym test stays for the two origins
+   * that predate this column and have nothing else to tell them apart.
+   */
+  if (conversation.origin_board_request_id) return false
   return conversation.user1_pseudonym !== null || conversation.user2_pseudonym !== null
 }

@@ -12,7 +12,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -469,6 +469,48 @@ export async function notifyReveal(
     title: "A match revealed",
     body: "Someone you matched with showed you who they are.",
     data: { type: "reveal", conversationId },
+    channelId: "messages",
+  })
+}
+
+/**
+ * Somebody answered your board post and wants to come with you.
+ *
+ * Carries neither the pseudonym nor a word of what they wrote, which is
+ * deliberate and matches `notifyMatch` rather than `notifyPrivateMessage`. A
+ * board request is the one message in this product sent to somebody who has
+ * not agreed to hear from the sender at all, and the whole of it renders on a
+ * lock screen that other people can see. The finding this avoids is already in
+ * the register: DM and group pushes carry verbatim text at 100 and 80
+ * characters, in a product whose match copy was stripped of even a pseudonym
+ * for exactly this reason.
+ *
+ * So the push says that something happened and the board says what.
+ */
+export async function notifyBoardRequest(
+  recipientId: string,
+  eventId: string,
+  requestId: string
+): Promise<boolean> {
+  return sendPushNotification({
+    userId: recipientId,
+    title: "Someone answered your post",
+    body: "Open the board to see who is asking.",
+    data: { type: "board_request", eventId, requestId },
+    channelId: "messages",
+  })
+}
+
+/** They said yes. There is a conversation now, and no decline to send back. */
+export async function notifyBoardRequestAccepted(
+  recipientId: string,
+  conversationId: string
+): Promise<boolean> {
+  return sendPushNotification({
+    userId: recipientId,
+    title: "Your ask was accepted",
+    body: "You can message them now.",
+    data: { type: "board_request_accepted", conversationId },
     channelId: "messages",
   })
 }

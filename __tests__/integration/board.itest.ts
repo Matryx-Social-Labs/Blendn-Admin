@@ -1,4 +1,6 @@
 import { db, closeDb, makeUser, makeEvent, testId } from "./helpers"
+import { cameFromMatch } from "@/lib/conversation-identity"
+import { openConversation, conversationPair } from "@/lib/conversations"
 
 /**
  * The board's invariants, against a real Postgres.
@@ -20,7 +22,12 @@ afterAll(async () => {
     await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
     await db.events.deleteMany({ where: { id: { in: events } } })
   }
-  if (users.length) await db.user.deleteMany({ where: { id: { in: users } } })
+  if (users.length) {
+    await db.private_conversations.deleteMany({
+      where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] },
+    })
+    await db.user.deleteMany({ where: { id: { in: users } } })
+  }
   await closeDb()
 })
 
@@ -181,5 +188,94 @@ describe("a decision has a time", () => {
         },
       })
     ).rejects.toThrow()
+  })
+})
+
+describe("accepting opens a conversation the app can tell from a match", () => {
+  it("stores the origin, so a board conversation is not read as a match", async () => {
+    /*
+     * The bug this column exists for, end to end.
+     *
+     * A board conversation has to be pseudonymous — see below — and so does a
+     * match, so `cameFromMatch`'s pseudonym test answers `true` for both. The
+     * client draws the match opener on anything it answers true for, so two
+     * people who agreed to share a car would be told they liked each other.
+     *
+     * Against real Postgres rather than a mock, because the whole assertion is
+     * that a column written by one module is read correctly by another.
+     */
+    const { eventId, author, asker, postId } = await board()
+
+    const request = await db.board_requests.create({
+      data: {
+        event_id: eventId,
+        post_id: postId,
+        from_user_id: asker,
+        to_user_id: author,
+        status: "accepted",
+        decided_at: new Date(),
+      },
+      select: { id: true },
+    })
+
+    await openConversation(asker, author, {
+      eventId,
+      pseudonyms: { [asker]: "Wry Otter", [author]: "Cosmic Panda" },
+      boardRequestId: request.id,
+    })
+
+    const [user1_id, user2_id] = conversationPair(asker, author)
+    const conversation = await db.private_conversations.findUniqueOrThrow({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+    })
+
+    expect(conversation.origin_board_request_id).toBe(request.id)
+    expect(conversation.origin_event_id).toBe(eventId)
+
+    // Both pseudonyms present -- so the old rule would have said "match".
+    expect(conversation.user1_pseudonym).not.toBeNull()
+    expect(conversation.user2_pseudonym).not.toBeNull()
+    expect(cameFromMatch(conversation)).toBe(false)
+  })
+
+  it("is pseudonymous, because the fallback is the real name", async () => {
+    /*
+     * NEGATIVE CONTROL (behavioural, recorded here rather than in the registry):
+     * dropping `pseudonyms` from the accept path leaves both columns null, and
+     * `displayNameInConversation` returns the real name when there is no
+     * pseudonym -- so the two people see each other's names at the moment of
+     * acceptance. Observed: this assertion fails, and `cameFromMatch` starts
+     * answering `false` for the wrong reason, which is why both are asserted
+     * above rather than only the second.
+     */
+    const { eventId, author, asker, postId } = await board()
+
+    const request = await db.board_requests.create({
+      data: {
+        event_id: eventId,
+        post_id: postId,
+        from_user_id: asker,
+        to_user_id: author,
+        status: "accepted",
+        decided_at: new Date(),
+      },
+      select: { id: true },
+    })
+
+    await openConversation(asker, author, {
+      eventId,
+      pseudonyms: { [asker]: "Wry Otter", [author]: "Cosmic Panda" },
+      boardRequestId: request.id,
+    })
+
+    const [user1_id, user2_id] = conversationPair(asker, author)
+    const conversation = await db.private_conversations.findUniqueOrThrow({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+    })
+
+    expect([conversation.user1_pseudonym, conversation.user2_pseudonym].sort()).toEqual([
+      "Cosmic Panda",
+      "Wry Otter",
+    ])
   })
 })
