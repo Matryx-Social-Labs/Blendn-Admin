@@ -3,15 +3,18 @@
  *
  * ## Why this exists
  *
- * The CI lane is gated off. Not because the suite is broken — it passes here,
- * 32 tests including both heavy sweeps — but because `node dist/server.js`
- * grows to 6.7GB on a 2-core / 7.9GB hosted runner and the host reclaims the
- * machine. Tests pass right up to the moment it dies. A lane that is red on
- * every push is worse than no lane, so the coverage moved here until that is
- * settled.
+ * **The CI lane runs on every PR again** — this paragraph used to say it was
+ * gated off, and that stopped being true the day the cause was found. Recorded
+ * rather than deleted, because the diagnosis is the useful part: the suite was
+ * not leaking. `npm run start` does not set `NODE_ENV`, so `node dist/server.js`
+ * ran Next.js in **development mode** and compiled every route on demand —
+ * 6,904MB against 458MB with it set. Three earlier diagnoses (Actions quota
+ * twice, then an external memory leak) were all wrong.
  *
- * Which makes this the only thing standing between a change and an unnoticed
- * regression in 32 browser tests, so it has to be *one command*. The sequence
+ * What still runs only here is the two exhaustive sweeps, which the PR lane
+ * excludes for time; nightly and the `full-e2e` label run everything.
+ *
+ * It has to be *one command* either way. The sequence
  * it replaces — migrate, seed, build, start a production server, poll health,
  * run Playwright against the right port, then remember to kill the server — is
  * six steps with two easy mistakes in it: testing a stale build, and leaving a

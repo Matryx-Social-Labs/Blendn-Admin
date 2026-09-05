@@ -52,6 +52,13 @@ const ROUTES = [
   "/api/mobile/message-requests",
   "/api/mobile/users/blocked",
   "/api/mobile/checkins/active",
+  /*
+   * The board's two reads. Both are new client surfaces with no caller yet, so
+   * this is the shape the Phase 2 migration will be written against — recorded
+   * now, while it is fresh, rather than reconstructed from `git log` in six
+   * weeks.
+   */
+  "/api/mobile/board/requests",
 ]
 
 /**

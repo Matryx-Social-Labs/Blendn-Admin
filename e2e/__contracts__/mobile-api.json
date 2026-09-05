@@ -137,5 +137,16 @@
     "data": [
       "checkIns"
     ]
+  },
+  "/api/mobile/board/requests": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "incoming",
+      "outgoing"
+    ]
   }
 }
