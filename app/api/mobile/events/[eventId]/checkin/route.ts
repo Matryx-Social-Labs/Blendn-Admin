@@ -423,7 +423,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (existingMembership) {
       if (existingMembership.status !== "active" || existingMembership.last_allowed_at || !existingMembership.anonymous_name) {
-        const anonName = existingMembership.anonymous_name || await generateUniqueAnonymousName(chatGroup.id)
+        const anonName =
+          existingMembership.anonymous_name ||
+          (await generateUniqueAnonymousName(
+            chatGroup.id,
+            { eventId, userId: authUser.userId }
+          ))
         await db.chat_group_members.update({
           where: {
             chat_group_id_user_id: {
@@ -440,7 +445,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         })
       }
     } else {
-      const anonName = await generateUniqueAnonymousName(chatGroup.id)
+      const anonName = await generateUniqueAnonymousName(
+        chatGroup.id,
+        { eventId, userId: authUser.userId }
+      )
       await db.chat_group_members.create({
         data: {
           chat_group_id: chatGroup.id,

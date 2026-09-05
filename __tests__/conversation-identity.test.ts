@@ -210,7 +210,19 @@ describe("pseudonyms are never derived from identity", () => {
     const gen = readFileSync(join(process.cwd(), "lib/anonymous-names.ts"), "utf8")
     expect(gen).toMatch(/const ADJECTIVES = \[/)
     expect(gen).toMatch(/const NOUNS = \[/)
-    // It takes a chat group, never a user or a name.
-    expect(gen).toMatch(/generateUniqueAnonymousName\(chatGroupId: string\)/)
+    /*
+     * It takes a chat group and, optionally, WHO to derive a preference for —
+     * never the preferred name as text.
+     *
+     * This assertion used to pin the single-argument signature. The board needs
+     * a person to keep the handle they posted under when they check in, so a
+     * second parameter is legitimate; what is not legitimate is it being a
+     * string. A free string hands this function's one guarantee — that it can
+     * only emit `Adjective Noun` — to every caller, and a caller will
+     * eventually pass `profile.name`. That is exactly what the first draft of
+     * the board work did, and this test caught it.
+     */
+    expect(gen).toMatch(/preferFor\?: \{ eventId: string; userId: string \}/)
+    expect(gen).not.toMatch(/preferred\?: string/)
   })
 })

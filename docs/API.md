@@ -1405,6 +1405,9 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 |--------|----------|------|
 | GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited |
 | POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps |
+| POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked and not already declined |
+| GET | `/board/requests` | Yours, both directions |
+| PATCH | `/board/requests/:requestId` | `{ action: accept \| decline \| withdraw }` |
 
 Going alone, and looking for somebody to go with. This is what gives
 `event_rsvps` a job — it has been a dead-end signal that existed only as a
@@ -1439,6 +1442,75 @@ browsing.
 **The board closes at doors.** After that the room is the place, and it is gated
 on presence rather than intent — a board that stayed open would be a second room
 with a weaker gate running beside the real one.
+
+#### Asking somebody
+
+**You cannot cold-request a person who has not posted**, and that is structural
+rather than a check: a request is filed against a post, `board_requests.post_id`
+is required, and the recipient is read off the post. There is no field in which
+to name somebody, so there is no path that forgets the rule.
+
+Refused if they have already **declined** you on that post — the partial unique
+index only stops a second *pending* request, so without it a decline is followed
+by an identical ask a second later, for ever. `withdrawn` is deliberately not
+treated the same way: withdrawing is the asker changing their own mind, and it
+has told the other person nothing.
+
+Blocks are consulted **in both directions**, and the refusal is the same sentence
+as a deleted post. Telling the asker they have been blocked tells them a fact
+about somebody else's decision, which is the one thing a block should not leak.
+
+#### Answering
+
+`accept`, `decline` and `withdraw`. The last is the asker's alone, and
+`withdrawn` is a separate status from `declined` because afterwards, which of the
+two people ended it is the thing worth knowing.
+
+**A decision is still possible after the doors open**, unlike everything else on
+this surface. A pending request holds a slot in the asker's outstanding cap, so
+refusing to let it be answered would leave one unanswered ask on a Tuesday
+costing a fifth of every future board, for ever.
+
+**Accepting opens a conversation**, pseudonymous and scoped to the event, and it
+needs no exception to the co-presence rule. `mayConverse` requires having been in
+the same room *and* returns true when a conversation already exists — so opening
+one is enough and every later check passes on the strength of the row. The plan
+anticipated a distinct conversation kind that graduates; it is not needed.
+
+The conversation carries `origin_board_request_id`, and the reason is worth
+stating. `fromMatch` used to be **inferred**: a match snapshots both pseudonyms
+and a message-request conversation snapshots neither, so the presence of one told
+you which. A board conversation is pseudonymous too — it has to be, because a
+conversation without pseudonyms shows real names — so the inference would call it
+a match, and the client draws the match opener on anything it calls a match. Two
+origins can be told apart by a side effect; three cannot.
+
+#### The handle before the room exists
+
+A pseudonym and a room membership are the same row: `chat_group_members` carries
+`anonymous_name`, and socket room access is granted to any member who is not
+banned. So there is no way to give somebody a handle without also giving them the
+live room — which is gated on presence deliberately, because doors close on
+people who did not come.
+
+The board therefore **derives** a handle from `(event_id, user_id)`: stable for
+that person at that event, different at the next one, no row and no table. Before
+this every board post rendered as the literal string `"Attendee"` — a wall of one
+name, on the surface whose whole job is letting people tell each other apart well
+enough to agree to travel together.
+
+Check-in then **prefers** that handle when it is free, so the name someone
+answered on the board is the name they carry into the room. Preference, not
+override: uniqueness is enforced per chat group, and ~6,480 combinations means a
+large room collides.
+
+#### What the push says
+
+`board_request` and `board_request_accepted` carry neither the pseudonym nor a
+word of what was written. A board request is the one message in this product sent
+to somebody who has not agreed to hear from the sender at all, and all of it
+renders on a lock screen other people can see. The push says that something
+happened; the board says what.
 
 ### Reactions
 

@@ -1046,6 +1046,10 @@ enum notification_kind {
   match
   reveal_request
   reveal
+  /// Somebody answered your board post and wants to come with you.
+  board_request
+  /// The person you asked said yes; there is a conversation now.
+  board_request_accepted
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.
@@ -1161,6 +1165,19 @@ model private_conversations {
   /// conversations. FK-free on purpose: `events` outlives `chat_groups`, but a
   /// hard FK would still cascade a deleted event into losing the conversation.
   origin_event_id String? @db.Uuid
+
+  /// The board request this conversation came out of, if any.
+  ///
+  /// Provenance had been INFERRED: `cameFromMatch` returns true when either
+  /// pseudonym is set, because a match snapshots both and a message-request
+  /// conversation snapshots neither. A board conversation is pseudonymous too —
+  /// it has to be, since `displayNameInConversation` falls back to the real name
+  /// without one — so that inference would call it a match, and the client draws
+  /// a match opener on anything it calls a match.
+  ///
+  /// Two origins could be told apart by a side effect. Three cannot, so this is
+  /// explicit rather than derived.
+  origin_board_request_id String? @db.Uuid
 
   /// Null while the conversation is live.
   ///

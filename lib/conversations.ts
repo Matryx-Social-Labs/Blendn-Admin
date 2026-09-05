@@ -53,6 +53,14 @@ export async function openConversation(
     pseudonyms?: Record<string, string | null>
     /** User ids already revealed in the originating room. */
     revealed?: readonly string[]
+    /**
+     * The board request this came out of.
+     *
+     * Recorded so `cameFromMatch` can tell a board conversation from a match:
+     * both are pseudonymous, and without this the client would draw a match
+     * opener on two people who agreed to share a car.
+     */
+    boardRequestId?: string
   }
 ) {
   const [user1_id, user2_id] = conversationPair(a, b)
@@ -82,6 +90,7 @@ export async function openConversation(
       user1_id,
       user2_id,
       origin_event_id: ctx?.eventId ?? null,
+      origin_board_request_id: ctx?.boardRequestId ?? null,
       user1_pseudonym: ctx?.pseudonyms?.[user1_id] ?? null,
       user2_pseudonym: ctx?.pseudonyms?.[user2_id] ?? null,
       // Someone already public in the room has nothing left to reveal to a
