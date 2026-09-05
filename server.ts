@@ -2,10 +2,11 @@ import { readFileSync } from "fs"
 import { createServer } from "http"
 import next from "next"
 import { initSocketServer, stopAllOpsBroadcasts } from "./lib/socket-server"
+import { flushProductEvents } from "./lib/product-events"
 import { stopSponsoredScheduler } from "./lib/sponsored-scheduler"
 // #265's import, kept deliberately: the naive resolution drops it and
 // `$disconnect()` on shutdown breaks. See docs/MERGE-RUNBOOK.md.
-import { db } from "./lib/db"
+import { closeDb } from "./lib/db"
 // The four sweepers are started and stopped as one unit now (#276). Importing
 // them individually here is what coupled them to Socket.io in the first place.
 import { startBackgroundWork, stopBackgroundWork } from "./lib/background"
@@ -108,9 +109,29 @@ app.prepare().then(() => {
     // the event loop open for the full 10s forced-exit timeout and exited 1.
     stopAllOpsBroadcasts()
 
-    // Drain the connection pool. Without this, in-flight queries are abandoned
-    // at the forced-exit timeout rather than finished or cleanly cancelled.
-    void db.$disconnect().catch(() => {})
+    /*
+     * Write out the buffered signals BEFORE the pool closes.
+     *
+     * `product_events` batches for ten seconds, so a deploy discards up to one
+     * window of first-opens — which is exactly the moment a deploy happens, and
+     * exactly the population (people using the app right now) whose loss would
+     * bias the number most. Draining costs one statement.
+     *
+     * Ordered before `$disconnect`, and the disconnect chained after it, or the
+     * pool closes underneath the flush and the drain silently does nothing.
+     */
+    void flushProductEvents()
+      .catch(() => {})
+      /*
+       * Drain the connection pool -- `closeDb`, not `$disconnect`.
+       *
+       * This called `db.$disconnect()` under this comment, and that does not
+       * close a pool the driver adapter created. So the sockets were dropped
+       * when the process exited rather than closed, which on a rolling deploy
+       * is the old container still holding connections while the new one opens
+       * its own. `closeDb` does both, in order.
+       */
+      .then(() => closeDb().catch(() => {}))
 
     io?.close(() => {
       console.log(`[${new Date().toISOString()}] > Socket.io closed`)

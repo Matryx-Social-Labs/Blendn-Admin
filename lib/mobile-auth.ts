@@ -4,6 +4,7 @@ import { randomUUID } from "crypto"
 import bcrypt from "bcryptjs"
 import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
+import { PRODUCT_EVENTS, record } from "./product-events"
 import { Prisma } from "@prisma/client"
 
 function getJwtSecret(): string {
@@ -301,6 +302,25 @@ export async function getAuthenticatedUser(
   if (!decoded) {
     return null
   }
+
+  /*
+   * An authenticated request IS the app being open.
+   *
+   * DAU had no signal at all: `activeThisWeek` counts distinct refresh-token
+   * holders in seven days, which is documented in-repo as a proxy and is really
+   * "whose token happened to expire this week". Publishing D1/D7/D30 on top of
+   * it would be wrong in a way a diligent investor finds.
+   *
+   * Recorded here rather than at a new endpoint, because every mobile route
+   * already funnels through this function — so the signal needs no client
+   * release, cannot be forgotten by a route added later, and cannot disagree
+   * with itself. Deduped to one row per person per day and cached per process,
+   * so the ordinary cost is a Set lookup.
+   *
+   * Deliberately not awaited: counting somebody must never delay serving them,
+   * and `record` swallows its own failures.
+   */
+  record({ name: PRODUCT_EVENTS.app_opened, userId: decoded.userId })
 
   return {
     userId: decoded.userId,

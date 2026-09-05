@@ -25,6 +25,7 @@ const mockDb = {
   push_tokens: { deleteMany: jest.fn() },
   photo_checks: { deleteMany: jest.fn() },
   city_demand: { deleteMany: jest.fn() },
+  product_events: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },
@@ -108,6 +109,12 @@ describe("deleting an account scrubs the matching inputs", () => {
     // well; asserted here so the deletion path stays a readable list of
     // everything it removes rather than a set of constraints to go and check.
     expect(mockDb.city_demand.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    /*
+     * DELETED, not scrubbed. A scrubbed row cannot be counted as a distinct
+     * person, so nulling `user_id` would keep a record of when somebody was
+     * awake and looking while no longer answering anything.
+     */
+    expect(mockDb.product_events.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
   })
 
   it("removes their per-event choices but not their attendance", async () => {

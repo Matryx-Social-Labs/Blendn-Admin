@@ -376,6 +376,26 @@ describe("the feed's cost does not grow with the catalogue", () => {
     for (let i = 0; i < 2; i++) await make(smallTag)
     for (let i = 0; i < 10; i++) await make(largeTag)
 
+    /*
+     * Warm first, then measure twice.
+     *
+     * `product_events` records an app-open and a feed-browse **once per person
+     * per day**, so the first request of the day pays two writes the second
+     * does not — and without this the two measurements differed by exactly
+     * that, reporting cost as having "grown" when it had fallen. The question
+     * this test asks is whether cost grows with the number of events; a
+     * constant paid once a day is not that, and warming excludes it honestly
+     * rather than by pretending it is not there.
+     *
+     * Warmed with a THIRD term, never one of the two being measured. `GET
+     * /events` memoises on its filter inputs, so warming with `smallTag` would
+     * put that term in the route's own cache and the measured call would barely
+     * reach the database — which is precisely the trap the two-term design
+     * above exists to avoid, and which this warm-up walked straight into on the
+     * first attempt.
+     */
+    await feed(`qbwarm${Date.now().toString(36).replace(/\d/g, "")}z`)
+
     const two = await measure(() => feed(smallTag))
     const ten = await measure(() => feed(largeTag))
 

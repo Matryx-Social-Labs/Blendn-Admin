@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
 import { ageFrom } from "@/lib/age"
 import { selfProfileEnvelope } from "@/lib/self-profile"
@@ -56,6 +57,16 @@ export async function GET(request: NextRequest) {
   try {
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
+
+    /*
+     * The funnel's missing stage.
+     *
+     * Every other stage of the loop is a row in a table; `browsed` is the one
+     * with nothing behind it, so it could not be counted at all. Deduped per
+     * person per day — "did they look today" is the question, and a person who
+     * scrolls the feed nine times has not browsed nine times.
+     */
+    record({ name: PRODUCT_EVENTS.feed_browsed, userId: authUser?.userId })
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }

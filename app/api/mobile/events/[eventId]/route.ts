@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import { cancelEventCheckIns, isCancellingEvent } from "@/lib/event-cancellation"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import { actorFor } from "@/lib/org-membership"
@@ -33,6 +34,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
+
+    /*
+     * Per person per event per day, so the count answers "how many people
+     * looked at this event" rather than "how many times was it rendered" — the
+     * second is a measure of the client's re-fetching, not of interest.
+     */
+    record({
+      name: PRODUCT_EVENTS.event_viewed,
+      userId: authUser?.userId,
+      entityKind: "event",
+      entityId: eventId,
+    })
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }

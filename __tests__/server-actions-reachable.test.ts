@@ -133,6 +133,7 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["clearAllSpamHistory", "same"],
   ["resetMemoryStore", "same, for the in-process rate-limit fallback"],
   ["resetExposureMemory", "same again, for the in-process impression counters — module state a test has to be able to clear between cases"],
+  ["resetProductEventCache", "same again, for the per-process day cache in front of `product_events` — a test that records twice must be able to prove the second write is a no-op rather than a cache hit"],
 ])
 
 function walk(dir: string, out: string[] = []): string[] {
