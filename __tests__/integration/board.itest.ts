@@ -1,4 +1,6 @@
 import { db, closeDb, makeUser, makeEvent, testId } from "./helpers"
+import { boardWriteDenial, liveRequest, isLiveRequest } from "@/lib/board-access"
+import { BOARD } from "@/lib/constants"
 import { cameFromMatch } from "@/lib/conversation-identity"
 import { openConversation, conversationPair } from "@/lib/conversations"
 
@@ -14,6 +16,7 @@ import { openConversation, conversationPair } from "@/lib/conversations"
  */
 const users: string[] = []
 const events: string[] = []
+const categories: string[] = []
 
 afterAll(async () => {
   if (events.length) {
@@ -27,6 +30,9 @@ afterAll(async () => {
       where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] },
     })
     await db.user.deleteMany({ where: { id: { in: users } } })
+  }
+  if (categories.length) {
+    await db.categories.deleteMany({ where: { id: { in: categories } } })
   }
   await closeDb()
 })
@@ -277,5 +283,183 @@ describe("accepting opens a conversation the app can tell from a match", () => {
       "Cosmic Panda",
       "Wry Otter",
     ])
+  })
+})
+
+describe("the outstanding cap counts live asks, not every pending row", () => {
+  /*
+   * The defect this closes, in one sentence: nothing writes `status` when an
+   * event ends, so five unanswered asks about evenings that already happened
+   * used to stop somebody asking anybody anything, for ever.
+   *
+   * Both directions are asserted off ONE fixture, flipped by moving a single
+   * `end_time`. That is deliberate. A test that only proves the cap releases
+   * would pass just as well against a cap that had been deleted — and the cap
+   * is the anti-spray control on the surface where two people arrange to be
+   * alone together, so disabling it is the more expensive way to be wrong.
+   */
+  it("releases when the asks are dead, and still bites when they are not", async () => {
+    const host = await makeUser(testId("cap-host"), "organizer")
+    users.push(host)
+
+    // Where they want to ask next. Live, and they are going.
+    const target = await makeEvent(host)
+    events.push(target)
+
+    // Where their outstanding asks already live.
+    const source = await makeEvent(host)
+    events.push(source)
+
+    const author = await makeUser(testId("cap-author"))
+    const asker = await makeUser(testId("cap-asker"))
+    users.push(author, asker)
+
+    /*
+     * A profile the board will accept. Without this every call below denies for
+     * an incomplete profile instead, and the test would pass while proving
+     * nothing about the cap — the vacuous-assertion failure this project keeps
+     * paying for.
+     */
+    const picks = await Promise.all(
+      [0, 1].map((n) =>
+        db.categories.create({
+          data: { name: `Cap fixture ${n}`, slug: testId(`cap-cat-${n}`) },
+          select: { id: true },
+        })
+      )
+    )
+    categories.push(...picks.map((c) => c.id))
+    await db.profiles.create({
+      data: {
+        id: asker,
+        name: "Ada",
+        date_of_birth: new Date("1995-01-01"),
+        intent_default: ["networking"],
+      },
+    })
+    await db.user_interests.createMany({
+      data: picks.map((c) => ({ user_id: asker, category_id: c.id })),
+    })
+    await db.event_rsvps.create({
+      data: { event_id: target, user_id: asker, status: "going" },
+    })
+
+    /*
+     * Exactly the cap's worth of unanswered asks — one per post, because the
+     * partial unique forbids two pending requests down the same direction on
+     * one post, which is the pestering the cap exists to prevent arriving by
+     * accident.
+     */
+    for (let n = 0; n < BOARD.MAX_OUTSTANDING_REQUESTS; n++) {
+      const post = await db.board_posts.create({
+        data: {
+          event_id: source,
+          author_id: author,
+          kind: "offer",
+          body: `Two seats, car ${n}`,
+          spaces_left: 2,
+        },
+        select: { id: true },
+      })
+      await db.board_requests.create({
+        data: {
+          event_id: source,
+          post_id: post.id,
+          from_user_id: asker,
+          to_user_id: author,
+        },
+      })
+    }
+
+    // While that event is still running, the cap is the whole point.
+    expect(await boardWriteDenial(target, asker)).toBe("too_many_outstanding")
+
+    // The night ends. Nothing touches the requests — that is the premise.
+    await db.events.update({
+      where: { id: source },
+      data: { end_time: new Date(Date.now() - 60 * 60 * 1000) },
+    })
+
+    const stillPending = await db.board_requests.count({
+      where: { from_user_id: asker, status: "pending" },
+    })
+    expect(stillPending).toBe(BOARD.MAX_OUTSTANDING_REQUESTS)
+
+    // ...and yet they may ask again, because none of those asks is answerable.
+    expect(await boardWriteDenial(target, asker)).toBeNull()
+  })
+
+  it("answers the same whether it is asked as a query or as a predicate", async () => {
+    /*
+     * One rule, two forms — a where clause for the cap, a function for a row
+     * the list route has already read. Two forms of one answer is the shape of
+     * every bug in this codebase's register, so they are run over the same
+     * fixtures here and required to agree. The alternative is the list route
+     * inlining `end_time > now` itself, which is how the drift starts.
+     */
+    const host = await makeUser(testId("agree-host"), "organizer")
+    users.push(host)
+    const live = await makeEvent(host)
+    const ended = await makeEvent(host)
+    events.push(live, ended)
+    await db.events.update({
+      where: { id: ended },
+      data: { end_time: new Date(Date.now() - 60 * 60 * 1000) },
+    })
+
+    const author = await makeUser(testId("agree-author"))
+    const asker = await makeUser(testId("agree-asker"))
+    users.push(author, asker)
+
+    // Every combination that can reach the list: live, ended, deleted, decided.
+    for (const [eventId, status, gone] of [
+      [live, "pending", false],
+      [ended, "pending", false],
+      [live, "pending", true],
+      [live, "accepted", false],
+      [ended, "declined", false],
+    ] as const) {
+      const post = await db.board_posts.create({
+        data: {
+          event_id: eventId,
+          author_id: author,
+          kind: "seeking",
+          body: "Anyone heading east after?",
+          deleted_at: gone ? new Date() : null,
+        },
+        select: { id: true },
+      })
+      await db.board_requests.create({
+        data: {
+          event_id: eventId,
+          post_id: post.id,
+          from_user_id: asker,
+          to_user_id: author,
+          status,
+          decided_at: status === "pending" ? null : new Date(),
+        },
+      })
+    }
+
+    const now = new Date()
+    const byQuery = await db.board_requests.findMany({
+      where: { from_user_id: asker, ...liveRequest(now) },
+      select: { id: true },
+    })
+    const rows = await db.board_requests.findMany({
+      where: { from_user_id: asker },
+      select: {
+        id: true,
+        status: true,
+        event: { select: { end_time: true } },
+        post: { select: { deleted_at: true } },
+      },
+    })
+    const byPredicate = rows.filter((r) => isLiveRequest(r, now))
+
+    expect(rows).toHaveLength(5)
+    expect(byQuery.map((r) => r.id).sort()).toEqual(byPredicate.map((r) => r.id).sort())
+    // And it is not agreeing on the empty set, which would prove nothing.
+    expect(byQuery).toHaveLength(1)
   })
 })
