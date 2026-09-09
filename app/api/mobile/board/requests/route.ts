@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 
-import { boardPseudonyms } from "@/lib/board-access"
+import { boardPseudonyms, isLiveRequest } from "@/lib/board-access"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
@@ -43,8 +43,8 @@ export async function GET(request: NextRequest) {
       from_user_id: true,
       to_user_id: true,
       event_id: true,
-      event: { select: { id: true, title: true, start_time: true } },
-      post: { select: { id: true, kind: true, body: true } },
+      event: { select: { id: true, title: true, start_time: true, end_time: true } },
+      post: { select: { id: true, kind: true, body: true, deleted_at: true } },
     } as const
 
     const [incoming, outgoing] = await Promise.all([
@@ -92,6 +92,13 @@ export async function GET(request: NextRequest) {
       )
     )
 
+    /*
+     * One clock for the page. Calling `new Date()` per row would let the top of
+     * a list and the bottom of it answer differently about an event ending
+     * mid-render — rare, and the kind of rare that is impossible to reproduce.
+     */
+    const now = new Date()
+
     const shape = (r: (typeof rows)[number]) => {
       const counterpart = r.from_user_id === user.userId ? r.to_user_id : r.from_user_id
       return {
@@ -100,6 +107,15 @@ export async function GET(request: NextRequest) {
         message: r.message,
         createdAt: r.created_at,
         decidedAt: r.decided_at,
+        /*
+         * Whether there is still anything to answer. `pending` outlives its
+         * event — nothing closes a request at the end of the night — so a card
+         * rendered on `status` alone waits for ever on an evening that already
+         * happened. A declined ask and a lapsed one both stop being pending
+         * here, quietly, which is the same answer the reveal flow gives: no
+         * verdict is delivered, because both mean move on.
+         */
+        live: isLiveRequest(r, now),
         /** The pseudonym, never the name. Accepting is what exchanges those. */
         counterpart: resolved.get(r.event_id)?.get(counterpart) ?? "Attendee",
         event: { id: r.event.id, title: r.event.title, startTime: r.event.start_time },
