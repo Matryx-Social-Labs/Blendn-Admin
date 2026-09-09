@@ -101,7 +101,27 @@ jobs:
       # High and above only. Moderate advisories in build-time transitive
       # dependencies would make this noisy, and a check people learn to ignore
       # is worse than no check.
+      #
+      # WHICH QUESTION THIS ASKS DEPENDS ON WHERE IT RUNS, and that is the
+      # whole design. On a pull request it asks "did THIS PR introduce a
+      # vulnerability"; on the nightly and on the push to dev it asks "does the
+      # tree contain one".
+      #
+      # They were the same question until 2026-09-09, when four advisories were
+      # published overnight — `next` (critical, RCE in the Image Optimization
+      # API), `sharp`, `js-yaml` — and every open PR went red at once for a
+      # finding none of them had introduced or could fix. A gate that fails on
+      # somebody else's news is the same "learn to ignore it" failure the
+      # timeout handling below was written for, arriving by a different route:
+      # there, red meant npm was down; here, red meant the world moved.
+      #
+      # The tree-level question still has to be answered loudly, so it is NOT
+      # softened — the nightly and the push to dev keep failing hard, and are
+      # now the only things that answer it.
       - name: Audit dependencies
+        env:
+          # For the changed-files lookup below.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Fails on a vulnerability, not on npm being unreachable.
         #
         # `npm audit` calls an external service on every run, and the first time
@@ -117,6 +137,20 @@ jobs:
         # is better than a false one.
         run: |
           set +e
+
+          # Fail-closed: anything we cannot determine still blocks. A gh outage
+          # must not quietly downgrade a security gate — that is how the two
+          # stale Dependabot alerts above went unanswered for a week.
+          blocking=1
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files=$(gh pr view "${{ github.event.pull_request.number }}" \
+                      --json files -q '.files[].path' 2>/dev/null)
+            if [ -n "$files" ] && ! printf '%s\n' "$files" \
+                 | grep -qxE 'package\.json|package-lock\.json'; then
+              blocking=0
+            fi
+          fi
+
           for attempt in 1 2; do
             out=$(timeout 120 npm audit --audit-level=high 2>&1)
             code=$?
@@ -144,6 +178,10 @@ jobs:
             fi
             echo "--- npm audit output (exit $code) ---"
             echo "$out"
+            if [ "$blocking" -eq 0 ]; then
+              echo "::warning::High-severity advisory present, but this PR touches no package.json or package-lock.json, so it did not introduce it and cannot be the place it is fixed. The nightly run and the push to dev still fail on this."
+              exit 0
+            fi
             echo "::error::npm audit reported a high-severity vulnerability"
             exit 1
           done
