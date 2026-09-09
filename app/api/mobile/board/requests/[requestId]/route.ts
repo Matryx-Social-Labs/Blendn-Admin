@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { boardPseudonyms } from "@/lib/board-access"
+import { boardPseudonyms, isLiveRequest } from "@/lib/board-access"
 import {
   blockCounterparties,
   conversationPair,
@@ -80,6 +80,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         event_id: true,
         from_user_id: true,
         to_user_id: true,
+        event: { select: { end_time: true } },
+        post: { select: { deleted_at: true } },
       },
     })
     if (!boardRequest) return notFoundResponse("Request not found")
@@ -103,6 +105,25 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
     if (boardRequest.status !== "pending") {
       return conflictResponse("That request has already been answered")
+    }
+
+    /*
+     * Pending, but there is nothing left to answer.
+     *
+     * Accepting opens a conversation, and a conversation about an evening that
+     * already happened is a channel obtained by sitting on a request rather
+     * than by agreeing to anything. The client renders these as closed — same
+     * `isLiveRequest`, so the screen and the server cannot give two answers to
+     * one question, which is the failure this codebase is mostly made of.
+     *
+     * Declining and withdrawing stay open. They are record-keeping, they cost
+     * nothing, and the cap no longer depends on them: it counts live requests,
+     * so a lapsed ask has already stopped occupying a slot.
+     */
+    if (action === "accept" && !isLiveRequest(boardRequest)) {
+      return conflictResponse(
+        boardRequest.post.deleted_at ? "That post was taken down" : "That event has ended"
+      )
     }
 
     const nextStatus = action === "accept" ? "accepted" : action === "decline" ? "declined" : "withdrawn"

@@ -21,6 +21,63 @@ import { db } from "./db"
  * enough to not have it yet.
  */
 
+/**
+ * A request that is still worth answering.
+ *
+ * `pending` is not that on its own. A request is an ask about one event, and
+ * once the event has ended — or the post it answers has been taken down —
+ * there is nothing left to answer. The row stays `pending` for ever anyway,
+ * because the only writers of `status` are a human deciding and account
+ * deletion: nothing closes a request when its event ends.
+ *
+ * That matters because of the cap. Counting bare `pending` meant five
+ * unanswered asks about events from last year permanently stopped somebody
+ * asking again — the cap bounds a spray, and instead it bounded a lifetime.
+ *
+ * So liveness is **derived, not swept**: the same reason "inside now" is a
+ * query and never a counter. There is no job to forget to run, no new enum
+ * value, and no status to drift out of agreement with the event.
+ *
+ * A function rather than a constant: a module-level `new Date()` freezes at
+ * import, so the answer would be wrong by however long the process has been up
+ * — which on a long-lived server is the whole bug again, quieter.
+ */
+export function liveRequest(now: Date = new Date()): {
+  status: "pending"
+  event: { end_time: { gt: Date } }
+  post: { deleted_at: null }
+} {
+  return {
+    status: "pending",
+    event: { end_time: { gt: now } },
+    post: { deleted_at: null },
+  }
+}
+
+/**
+ * The same rule as `liveRequest()`, applied to a row already read.
+ *
+ * Two forms of one rule is a thing this codebase is right to be suspicious of.
+ * They are adjacent and pinned against each other by a test that runs both over
+ * the same fixtures, because the alternative — a second query per rendered row,
+ * or the list route inlining `end_time > now` itself — is the drift this module
+ * exists to prevent.
+ */
+export function isLiveRequest(
+  request: {
+    status: string
+    event: { end_time: Date }
+    post: { deleted_at: Date | null }
+  },
+  now: Date = new Date()
+): boolean {
+  return (
+    request.status === "pending" &&
+    request.event.end_time > now &&
+    request.post.deleted_at === null
+  )
+}
+
 /** What the viewer has done about this event. Both gates read it. */
 export async function entitlementFor(
   eventId: string,
@@ -62,7 +119,7 @@ export async function boardWriteDenial(
       select: { name: true, age: true, date_of_birth: true, intent_default: true },
     }),
     db.user_interests.count({ where: { user_id: userId } }),
-    db.board_requests.count({ where: { from_user_id: userId, status: "pending" } }),
+    db.board_requests.count({ where: { from_user_id: userId, ...liveRequest() } }),
     db.board_requests.count({
       where: {
         from_user_id: userId,

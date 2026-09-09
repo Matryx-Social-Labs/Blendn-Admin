@@ -185,15 +185,42 @@ describe("accepting opens a conversation that can be told apart from a match", (
     expect(handler).toContain("decided_at: null")
   })
 
-  it("lets a decision happen after doors, so a cap is never stuck", () => {
+  it("lets a decision happen after doors", () => {
     /*
-     * The board closes at doors; answering it does not. A pending request holds
-     * a slot in the asker's outstanding cap, so refusing decisions after doors
-     * would leave one unanswered ask costing a fifth of every future board, for
-     * ever. Asserted as the absence of the check that would do it.
+     * The board closes at doors; answering it does not. Somebody asked five
+     * minutes before the doors opened and is owed an answer during the evening,
+     * not a closed screen. Asserted as the absence of the check that would do
+     * it.
+     *
+     * This used to be argued from the cap — that an undecided request would
+     * hold a slot for ever. That reason is gone: the cap counts live requests,
+     * so a lapsed ask releases its slot on its own. The behaviour is unchanged
+     * and the premise was not, which is how this file would have acquired the
+     * twenty-first comment in this project that argues for something true from
+     * something that stopped being true.
      */
     const src = codeOnly(read(...DECIDE))
     expect(src).not.toContain("start_time")
+  })
+
+  it("refuses to accept an ask with nothing left to answer", () => {
+    /*
+     * The event ends and nothing writes `status` — so the request is `pending`
+     * for ever, and without this the server would accept months later what the
+     * client draws as closed. One question, two answers, which is the disease
+     * this codebase's register is mostly a list of.
+     *
+     * Pinned on the PRODUCER, not the consumer: asserting only that some error
+     * copy exists would stay green if the guard's condition were replaced with
+     * a constant. `isLiveRequest` is the shared rule the list route and the cap
+     * both read, so this fails if the route starts answering for itself.
+     */
+    const src = codeOnly(read(...DECIDE))
+    expect(src).toContain("isLiveRequest")
+    expect(src).toMatch(/action === "accept" && !isLiveRequest\(/)
+    // ...and it must read the row, not a value it invented.
+    expect(src).toContain("event: { select: { end_time: true } }")
+    expect(src).toContain("post: { select: { deleted_at: true } }")
   })
 })
 
