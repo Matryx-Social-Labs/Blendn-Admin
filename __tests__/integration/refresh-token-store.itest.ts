@@ -37,7 +37,7 @@ describe("storing a refresh token", () => {
     const id = await makeUser(testId("rt-none"))
     users.push(id)
 
-    const token = signRefreshToken(id)
+    const token = signRefreshToken(id, `${id}@itest.invalid`)
     await expect(storeRefreshToken(id, token)).resolves.not.toThrow()
 
     const rows = await db.mobile_refresh_tokens.findMany({ where: { user_id: id } })
@@ -49,7 +49,7 @@ describe("storing a refresh token", () => {
     const id = await makeUser(testId("rt-some"))
     users.push(id)
 
-    const token = signRefreshToken(id)
+    const token = signRefreshToken(id, `${id}@itest.invalid`)
     await storeRefreshToken(id, token, { platform: "ios" })
 
     const rows = await db.mobile_refresh_tokens.findMany({ where: { user_id: id } })
