@@ -119,6 +119,56 @@ describe("creating an event", () => {
     expect(event.max_capacity).toBe(120)
   })
 
+  it("edits an event whose optional details are blank", async () => {
+    /*
+     * The `upsert` variant, and the one that broke editing.
+     *
+     * `PATCH /api/events/[id]` sends `details: { upsert: { create, update } }`.
+     * The `update` branch was correct and narrow; the `create` branch passed
+     * `house_rules`, `cancellation_policy` and `covid_guidelines` bare. **Prisma
+     * validates both branches before running either**, so every edit of an
+     * event that already had a details row failed on a branch that would never
+     * have executed — the same lesson `profiles` learned in #329, in a second
+     * file.
+     *
+     * The event is created first *with* a details row, so the update branch is
+     * the one that would run. If the guard ever stops covering the create
+     * branch, this is the case that notices.
+     */
+    const organizerId = await makeUser(testId("evt-org4"), "organizer")
+    users.push(organizerId)
+
+    const event = await createEvent(organizerId, {})
+    events.push(event.id)
+
+    const blank: { house_rules?: string; cancellation_policy?: string; covid_guidelines?: string } = {}
+
+    await expect(
+      db.events.update({
+        where: { id: event.id },
+        data: {
+          title: "Sagar Kishore Test Night",
+          details: {
+            upsert: {
+              create: {
+                full_description: "Edited.",
+                ...(blank.house_rules !== undefined && { house_rules: blank.house_rules }),
+                ...(blank.cancellation_policy !== undefined && {
+                  cancellation_policy: blank.cancellation_policy,
+                }),
+                ...(blank.covid_guidelines !== undefined && { covid_guidelines: blank.covid_guidelines }),
+              },
+              update: { full_description: "Edited." },
+            },
+          },
+        },
+      })
+    ).resolves.toBeTruthy()
+
+    const details = await db.event_details.findFirst({ where: { event_id: event.id } })
+    expect(details?.full_description).toBe("Edited.")
+  })
+
   it("writes the nested details row either way", async () => {
     /*
      * `details` is a nested create, and the six fields inside it were undefined
