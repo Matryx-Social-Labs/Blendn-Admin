@@ -14,8 +14,11 @@ import { cn } from "@/lib/utils"
  * A one-line strip counting `moderation_flags` and nothing else. On staging it
  * rendered *"Moderation queue is clear. Flags land here the moment the pipeline
  * or a user report raises one"* — true, complete, and beside a sidebar showing
- * `Claims 4` and `Applications 7`, with one report open 29 days. The single
- * panel whose job is *is anything waiting* said no while twelve things waited.
+ * `Claims 4` and `Applications 7`, with one report open 29 days.
+ *
+ * Four plus seven plus one: the single panel whose job is *is anything waiting*
+ * said no while twelve things waited. It said no honestly — `moderation_flags`
+ * really was empty, and a user report is not a flag.
  *
  * The fix is `lib/attention-queues.ts`, not this file: both this and the
  * sidebar badges now read one list, so a queue cannot appear in one and not the

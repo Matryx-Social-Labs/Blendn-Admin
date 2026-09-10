@@ -6,8 +6,9 @@
  * The nav badges and the overview's attention strip answered the same question
  * from different code, and they disagreed on screen: the sidebar showed
  * `Claims 4` and `Applications 7` while the strip directly beside it read
- * *"Moderation queue is clear."* Eleven things were waiting and the one panel
- * whose entire job is "is anything waiting" said no.
+ * *"Moderation queue is clear."* Four claims, seven applications and one report
+ * open 29 days were waiting, and the one panel whose entire job is "is anything
+ * waiting" said no.
  *
  * It said no honestly — it only ever counted `moderation_flags`. That is the
  * shape of the bug: not a wrong number, a **partial** one, rendered with the

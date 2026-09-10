@@ -442,6 +442,12 @@
       "mutation": "A: `total: rows.length`. B: per-reason `people` computed as `rows.filter(r => r.reason === reason).length`.",
       "observed": "A and B each: 1 failing ('counts distinct people per reason, and distinct people overall'). The fixture is the load-bearing part: one person refused twice for the same reason AND once for a second reason is the only row shape that tells attempts from people, and it is why total (2) is deliberately lower than the sum of its own rows (3).",
       "date": "2026-09-10"
+    },
+    "role-user-supply.itest.ts": {
+      "guards": "getRoleUsers separates PUBLISHED supply from drafts, dates the last published event (not the last draft), and computes sharePct against the platform's published total",
+      "mutation": "A: `const target = published` -- fold every status into the published count, which is what `_count.organized_events` did. B: drop `status: 'published'` from the lastEventAt groupBy.",
+      "observed": "A: 2 failing ('counts published as supply and drafts separately' and the share-sums-to-100 case). B: 2 failing ('dates the last PUBLISHED event, not the last draft' and 'gives a host with nothing published a null date'). The fixture is what makes A visible: two hosts with the SAME total of three events, one 2-published-1-draft and one 3-draft, so the old count and the new one disagree on which is the busiest supplier while agreeing on the total.",
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [

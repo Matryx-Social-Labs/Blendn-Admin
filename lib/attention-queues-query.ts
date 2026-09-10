@@ -72,9 +72,10 @@ export async function attentionQueues(): Promise<AttentionQueue[]> {
      *
      * An application whose email is unverified is still an organiser who
      * applied and is still waiting — the reviewer can see it and act on it.
-     * `app/dashboard/layout.tsx` has always counted both for the badge, so
-     * narrowing here would have made the strip quieter than the badge beside it
-     * in precisely the case this module exists to prevent.
+     * The badge in `app/dashboard/layout.tsx` counted both before this module
+     * existed (see the diff that replaced it), so narrowing here would have
+     * made the strip quieter than the badge beside it — precisely the failure
+     * this module exists to prevent, reintroduced by the fix for it.
      */
     pendingIn(db.organiser_onboarding_requests as never, {
       status: { in: ["pending", "email_pending"] },
