@@ -359,8 +359,23 @@ export async function PATCH(req: Request, { params }: RouteContext) {
                 upsert: {
                   create: {
                     full_description: full_description || event.description,
-                    house_rules,
-                    cancellation_policy,
+                    /*
+                     * Spread, never shorthand — and note this is the `create`
+                     * branch of an `upsert`, which is where it bites hardest.
+                     *
+                     * **Prisma validates both branches before running either**,
+                     * so these three undefined values failed every *edit* of an
+                     * event that already had a details row, even though the
+                     * `update` branch below is correct and is the only one that
+                     * would ever have run. Exactly the lesson `profiles`
+                     * learned in #329, in a second file.
+                     *
+                     * The JSON fields beside them were converted and these were
+                     * not, which is the same half-done conversion the POST
+                     * route had.
+                     */
+                    ...(house_rules !== undefined && { house_rules }),
+                    ...(cancellation_policy !== undefined && { cancellation_policy }),
                     ...(parseJsonField(additional_info) !== undefined && {
                       additional_info: parseJsonField(additional_info),
                     }),
@@ -368,7 +383,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
                     ...(parseJsonField(accessibility_info) !== undefined && {
                       accessibility_info: parseJsonField(accessibility_info),
                     }),
-                    covid_guidelines,
+                    ...(covid_guidelines !== undefined && { covid_guidelines }),
                   },
                   update: {
                     ...(full_description != null && { full_description }),
