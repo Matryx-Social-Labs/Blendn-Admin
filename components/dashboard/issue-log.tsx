@@ -6,6 +6,7 @@ import { acknowledgeIssue } from "@/app/dashboard/events/[id]/issue-actions"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/dashboard/primitives"
 import type { IssueRow } from "@/lib/event-issues"
+import { issueOpenedLabel } from "@/lib/issue-timestamp"
 import { cn } from "@/lib/utils"
 
 /**
@@ -21,10 +22,6 @@ import { cn } from "@/lib/utils"
  * twenty minutes ago" is the most useful thing this panel can tell somebody who
  * has just walked in.
  */
-function when(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
-}
-
 function duration(from: string, to: string): string {
   const mins = Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60000))
   if (mins < 60) return `${mins} min`
@@ -66,7 +63,7 @@ export function IssueLog({ issues }: { issues: IssueRow[] }) {
               <span className="text-[0.8125rem] text-muted-foreground tabular-nums">
                 {/* Opened, and how long it lasted — a five-minute queue and a
                     two-hour one are different nights. */}
-                {when(i.openedAt)}
+                {issueOpenedLabel(i.openedAt)}
                 {open
                   ? ` · ongoing ${duration(i.openedAt, i.lastSeenAt)}`
                   : ` · lasted ${duration(i.openedAt, i.resolvedAt!)}`}

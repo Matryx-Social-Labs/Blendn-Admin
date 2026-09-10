@@ -15,6 +15,7 @@ import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
 import { deriveAlerts, occupancyMostlyInferred, type LiveAlert } from "@/lib/live-metrics"
 import type { IssueRow } from "@/lib/event-issues"
+import { earlierIssues } from "@/lib/issue-timestamp"
 import { IssueLog } from "@/components/dashboard/issue-log"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
@@ -95,6 +96,12 @@ export function LiveTab({
           })
         : [],
     [snapshot, endAt, startAt]
+  )
+
+  // The log drops whatever Alerts is already showing — see `earlierIssues`.
+  const earlier = useMemo(
+    () => earlierIssues(issues, alerts.map((a) => a.kind)),
+    [issues, alerts]
   )
 
   const arrival: ArrivalPoint[] = useMemo(() => {
@@ -233,12 +240,19 @@ export function LiveTab({
           {/*
             The same rules, recorded. Everything above is derived from the live
             snapshot and disappears with the tab; this is what a server sweep
-            wrote down while nobody was looking — which is the only version that
-            can answer "did anything go wrong tonight" the morning after.
+            wrote down while nobody was looking — the only version that can
+            answer "did anything go wrong" the morning after.
+
+            "Tonight's" was wrong twice over: `issuesFor` is not scoped to
+            tonight — it returns the event's whole history — and a run can span
+            days, so on staging this heading sat above an issue from six days
+            earlier. "Earlier" is what the list is once the duplicates below are
+            removed, and it is true for a one-night event and a month-long one
+            alike.
           */}
           <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-bold">Tonight&apos;s issues</h3>
-            <IssueLog issues={issues} />
+            <h3 className="text-sm font-bold">Earlier</h3>
+            <IssueLog issues={earlier} />
           </div>
 
           <SentimentBar snapshot={snapshot} />
