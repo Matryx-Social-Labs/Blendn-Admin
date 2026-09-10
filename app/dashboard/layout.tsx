@@ -3,8 +3,9 @@ import { redirect } from "next/navigation"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { attentionQueues } from "@/lib/attention-queues-query"
+import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
-import { db } from "@/lib/db"
 import { canAccessDashboard } from "@/lib/rbac"
 
 export default async function DashboardLayout({
@@ -17,45 +18,20 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
-  // Only admins have these nav items, so only they pay for the counts.
-  const isAdmin = session.user.role === "app_admin"
-  // The badge covers both moderation queues. Counting only flags would leave a
-  // harassment report with no number anywhere in the chrome — and a report is
-  // the one of the two with a person waiting on the other end.
-  const [
-    flagCount,
-    userReportCount,
-    messageReportCount,
-    pendingApplications,
-    eventClaims,
-    venueClaims,
-    brandClaims,
-  ] = isAdmin
-    ? await Promise.all([
-        db.moderation_flags.count({ where: { status: "pending" } }),
-        db.user_reports.count({ where: { status: "pending" } }),
-        db.message_reports.count({ where: { status: "pending" } }),
-        db.organiser_onboarding_requests.count({
-          where: { status: { in: ["pending", "email_pending"] } },
-        }),
-        db.event_claims.count({ where: { status: "pending" } }),
-        db.venue_claims.count({ where: { status: "pending" } }),
-        db.sponsor_claims.count({ where: { status: "pending" } }),
-      ])
-    : [0, 0, 0, 0, 0, 0, 0]
-  const pendingFlags = flagCount + userReportCount + messageReportCount
   /*
-   * All THREE claim queues in one number, for the same reason the moderation
-   * badge covers both of its queues: the nav has one entry, so a count that
-   * covered only part of it would leave somebody waiting with no number
-   * anywhere in the chrome. Brands joined when they moved into the shared
-   * queue — a tab whose count was missing from the badge would be the same
-   * defect at a smaller scale.
+   * Only admins have these nav items, so only they pay for the counts.
    *
-   * Counted in the server layout rather than by a client effect -- an alert
-   * that pops in after paint is one the operator has already scrolled past.
+   * Read from `lib/attention-queues.ts` rather than counted here, because these
+   * badges and the overview's attention strip are the same question and used to
+   * be two implementations of it. The strip counted `moderation_flags` alone
+   * and printed "Moderation queue is clear" next to this sidebar showing
+   * `Claims 4` and `Applications 7`.
+   *
+   * Counted in the server layout rather than by a client effect — an alert that
+   * pops in after paint is one the operator has already scrolled past.
    */
-  const pendingClaims = eventClaims + venueClaims + brandClaims
+  const isAdmin = session.user.role === "app_admin"
+  const badges = isAdmin ? queueBadges(await attentionQueues()) : {}
 
   return (
     <SidebarProvider
@@ -66,7 +42,7 @@ export default async function DashboardLayout({
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" badges={{ pendingFlags, pendingApplications, pendingClaims }} />
+      <AppSidebar variant="inset" badges={badges} />
       <SidebarInset className="overflow-hidden border border-border bg-background">
         <SiteHeader />
         {/*

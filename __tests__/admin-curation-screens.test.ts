@@ -94,14 +94,23 @@ describe("one nav entry, two queues", () => {
     expect(moved).toMatch(/redirect\("\/dashboard\/claims\/venues"\)/)
   })
 
-  it("counts both queues in the badge", () => {
+  it("counts every claim queue in the badge", () => {
     /*
      * One entry with a count for half of it leaves somebody waiting with no
      * number anywhere in the chrome — the reason the moderation badge covers
      * flags AND reports.
+     *
+     * The sum moved out of `app/dashboard/layout.tsx` and into
+     * `lib/attention-queues.ts`, because the overview's attention strip needed
+     * the same answer and had been computing a different one. The guard moved
+     * with it rather than being deleted: what matters is that all three tables
+     * reach one number, not which file adds them up.
      */
-    const layout = code("app/dashboard/layout.tsx")
-    expect(layout).toMatch(/const pendingClaims = eventClaims \+ venueClaims/)
+    const queues = code("lib/attention-queues-query.ts")
+    for (const table of ["event_claims", "venue_claims", "sponsor_claims"]) {
+      expect(queues).toMatch(new RegExp(`db\\.${table}\\.count`))
+    }
+    expect(queues).toMatch(/count: eventClaims \+ venueClaims \+ brandClaims/)
   })
 
   it("counts the badge in the server layout, not a client effect", () => {

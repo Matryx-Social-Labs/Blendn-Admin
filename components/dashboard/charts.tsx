@@ -240,12 +240,38 @@ export function Funnel({
               <span className="w-24 shrink-0 text-right text-[0.75rem] text-muted-foreground">
                 {stage.label}
               </span>
-              <div className="h-5 flex-1 overflow-hidden rounded bg-surface-raised">
+              {/*
+                A stage nobody has reached is drawn at FULL width, in outline.
+
+                Every other funnel in the world renders a zero stage as a sliver
+                or as nothing, and `barWidth` correctly returns 0 for it — so
+                three consecutive zeroes were three empty tracks the eye slid
+                straight past. On this product that is the wrong reading twice
+                over: `matched`, `conversed` and `came back` are the only three
+                stages no competitor can measure, and they are the whole thesis.
+                Nobody meeting anybody is the most important fact the dashboard
+                can carry, and it was the quietest thing on the screen.
+
+                Full-width and dashed makes the absence as wide as the 113 above
+                it. It is a shape difference rather than a colour one, so it
+                survives greyscale and colour-blindness without a legend.
+              */}
+              {stage.value === 0 ? (
                 <div
-                  className="h-full rounded bg-chart-1"
-                  style={{ width: `${barWidth(stage.value, max)}%` }}
+                  className="h-5 flex-1 rounded border border-dashed border-border-strong"
+                  aria-hidden
                 />
-              </div>
+              ) : (
+                <div className="h-5 flex-1 overflow-hidden rounded bg-surface-raised">
+                  <div
+                    className="h-full rounded"
+                    style={{
+                      width: `${barWidth(stage.value, max)}%`,
+                      background: stageFill(index, stages.length),
+                    }}
+                  />
+                </div>
+              )}
               <span className="w-10 text-right text-[0.8125rem] font-bold tabular-nums">
                 {stage.value}
               </span>
@@ -258,6 +284,28 @@ export function Funnel({
       </div>
     </ChartFrame>
   )
+}
+
+/**
+ * Stages walk `--chart-1` to `--chart-3`, which `app/globals.css` documents as
+ * the brand's orange-to-purple ramp sampled at three points.
+ *
+ * The screen was almost entirely `--chart-1` while 2 and 3 went unused, which
+ * the design direction calls a one-note palette. Walking the ramp also carries
+ * meaning for free: a stage's colour says how deep into the loop it is.
+ *
+ * **An earlier version of this gave stage 0 `--gradient-brand` itself, and the
+ * comment above it claimed that did not collide with `HeroMetric`.** It did.
+ * `DESIGN_SYSTEM.md` allows exactly one gradient element per screen, on the
+ * grounds that a second one means the screen has two priorities and one of them
+ * is wrong — and driving the page showed precisely that: the widest bar on the
+ * screen competing with the hero beside it. The comment defended the bug, which
+ * is worse than not having one.
+ */
+function stageFill(index: number, count: number): string {
+  if (count < 2) return "var(--chart-1)"
+  const step = Math.round((index / (count - 1)) * 2)
+  return `var(--chart-${step + 1})`
 }
 
 /* -------------------------------------------------------------------------- */

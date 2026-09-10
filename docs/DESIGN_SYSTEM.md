@@ -126,6 +126,18 @@ Three rules, enforced in `components/dashboard/charts.tsx`:
    one.
 3. **Empty says what will fill it**, rather than rendering a bare grid that
    reads as a broken chart.
+4. **No cumulative series.** A running total can only go up, so it cannot show
+   the one thing a growth chart is for. The admin overview plotted cumulative
+   signups against weekly actives for months; staging read 42, 42, 45, 82, 95,
+   95, 95, 121 and drew three flat weeks as a plateau at the ceiling,
+   indistinguishable from health. The chart is gone rather than rescaled — the
+   honest version is a weekly series off `product_events`, and half of an
+   honest chart is worse than none.
+5. **A stage nobody reached is drawn full width, in outline.** `barWidth`
+   correctly returns 0 for a zero, which made the three stages that carry the
+   entire product thesis — matched, conversed, came back — the quietest marks
+   on the screen. Outline at full width makes the absence as loud as the
+   population above it, and it is a shape difference, so it survives greyscale.
 
 **Funnel stages must be nested subsets.** The first implementation counted four
 independent populations — onboarded profiles, users with an RSVP, users with a
@@ -142,9 +154,10 @@ we do" and never "what needs attention now".
 
 | | app_admin | organizer | venue_owner |
 |---|---|---|---|
-| Leads with | moderation attention strip | next event's fill %, in 40px type | per-venue comparison table |
-| Primary chart | signups vs active (the gap is the vanity) | RSVP pacing vs capacity | utilisation heatmap, day x slot |
-| Secondary | activation funnel | rating distribution | rating distribution, busiest venue |
+| Leads with | attention strip: every queue, oldest breach first | next event's fill %, in 40px type | per-venue comparison table |
+| Primary chart | the loop, seven stages | RSVP pacing vs capacity | utilisation heatmap, day x slot |
+| Hero | people who came back for a second event | next event's fill % | — |
+| Secondary | turn-up and refusals; supply concentration | rating distribution | rating distribution, busiest venue |
 | Own screens | Moderation, Users, Organisers, Venues, Applications, Organisations | Attendees, My organisation | My venues, My organisation |
 
 **Applications / Organisations vs My organisation.** Two screens, not one with a

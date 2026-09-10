@@ -63,7 +63,7 @@ export interface DashboardNavItem {
   /** Which heading it sits under. Absent means "above the first heading". */
   group?: NavGroup
   /** Renders a count next to the item. */
-  badgeKey?: "pendingFlags" | "pendingApplications" | "pendingClaims"
+  badgeKey?: "pendingFlags" | "pendingApplications" | "pendingClaims" | "pendingCreative"
   isActive?: (pathname: string) => boolean
 }
 
@@ -239,6 +239,10 @@ export const dashboardNav: DashboardNavItem[] = [
     icon: IconFlag,
     allowedRoles: ["app_admin"],
     group: "decisions",
+    // The only entry in this group that had no badge, so the one queue where
+    // a waiting sponsor was invisible from every other screen. It came free
+    // with `lib/attention-queues.ts` counting all four.
+    badgeKey: "pendingCreative",
   },
   {
     // A ledger, not a checkout. It lists PLACEMENTS rather than charges, because

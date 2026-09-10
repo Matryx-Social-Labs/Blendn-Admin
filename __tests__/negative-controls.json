@@ -424,6 +424,12 @@
       "observed": "A: 1 failing ('lets canOperate into the page those tabs lead to'). B: 2 failing — the composer guard, and the assertion that ChatFeed and ModerationQueue sit outside it, because an always-true guard swallows the whole column. The vacuity guard stayed green in both",
       "reverted": true,
       "date": "2026-09-10"
+    },
+    "attention-queues.test.ts": {
+      "guards": "the sidebar badges and the overview's attention strip read one module: app/dashboard/layout.tsx counts no queue table itself, every badgeKey in dashboardNav is one queueBadges actually produces, and the pure half stays free of `db` so a client component can import it without dragging `pg` into the browser bundle",
+      "mutation": "A: add `db.moderation_flags.count({ where: { status: 'pending' } })` back into app/dashboard/layout.tsx. B: delete the `pendingCreative` line from queueBadges(). C: add `import { db } from './db'` to lib/attention-queues.ts.",
+      "observed": "A: 1 failing ('the layout counts nothing itself'). B: 1 failing ('every badgeKey the nav asks for is one queueBadges produces'), reporting [\"pendingCreative\"] where [] was expected — exactly the silent failure the guard exists for, since a nav item asking for a badge nothing supplies renders no badge and no error. C: 1 failing ('the pure half never imports the database'). C is the one that matters: the real defect it stands for was found by `npm run build`, not by tsc and not by 2418 unit tests, because Jest resolves the import and never asks which bundle it lands in.",
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [

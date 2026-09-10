@@ -5,6 +5,8 @@ import type { rsvp_status } from "@prisma/client"
 import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
+import { attentionQueues } from "@/lib/attention-queues-query"
+import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
@@ -347,40 +349,29 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
   const inPrior = { gte: prior.from, lt: prior.to }
 
   const [
-    pendingFlags,
-    oldestFlag,
-    highConfidence,
-    flagRooms,
-    users,
+    attention,
     activeThisWeek,
-    publishedEvents,
     checkIns,
+    refusals,
+    upcomingEvents,
     hostAccounts,
     publishingHosts,
     curatedPublished,
     curatedUnclaimed,
     funnel,
-    signupsBeforeWindow,
-    signupBuckets,
-    activeBuckets,
     supplyRows,
     cityRows,
   ] = await Promise.all([
-    db.moderation_flags.count({ where: { status: "pending" } }),
-    db.moderation_flags.findFirst({
-      where: { status: "pending" },
-      orderBy: { created_at: "asc" },
-      select: { created_at: true },
-    }),
-    // 0.9 is the pipeline's own "act without a human" threshold; above it a
-    // flag is very likely real, which is what makes it the queue's priority.
-    db.moderation_flags.count({ where: { status: "pending", confidence: { gte: 0.9 } } }),
-    db.moderation_flags.findMany({
-      where: { status: "pending" },
-      select: { chat_group_id: true },
-      distinct: ["chat_group_id"],
-    }),
-    db.user.count(),
+    /*
+     * All four queues, from the module the sidebar badges also read.
+     *
+     * This replaced four `moderation_flags` reads that produced a count, an
+     * age, a high-confidence subset and a room count — a rich description of
+     * ONE queue on a strip whose job is "is anything waiting", while three
+     * other queues went uncounted. Depth on one queue was the wrong axis;
+     * breadth across all of them is the question.
+     */
+    attentionQueues(),
     /*
      * Real app-opens where there are any, the old proxy where there are not.
      *
@@ -404,7 +395,6 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
       })
       return { count: rows.length, source: "proxy" as const }
     }) as Promise<{ count: number; source: "app_opens" | "proxy" }>,
-    db.events.count({ where: { ...eventScope(), status: "published" } }),
     /*
      * Window-scoped, matching its own delta.
      *
@@ -420,6 +410,26 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
      */
     db.event_check_ins.count({
       where: { status: { in: ATTENDED }, event: eventScope(), created_at: inRange },
+    }),
+    /*
+     * The other half of the same door.
+     *
+     * Arrivals alone cannot tell a quiet week from a week where the fence was
+     * wrong, and `check_in_refusals` has been recording the difference with no
+     * platform-wide reader since it was added — the per-event screen was the
+     * only place it surfaced, which means you had to already suspect an event
+     * to find out anything was wrong with it.
+     */
+    refusalsByReason(range),
+    /*
+     * Published and not yet over.
+     *
+     * Replaces an all-time count of published events, which only ever went up
+     * and answered a question nobody has. What an admin wants from supply is
+     * whether there is anything to send people to *next week*.
+     */
+    db.events.count({
+      where: { ...eventScope(), status: "published", end_time: { gte: now } },
     }),
     db.user.count({ where: { role: { in: ["organizer", "venue_owner"] } } }),
     db.events
@@ -450,31 +460,6 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
      * and it is stated where the query is.
      */
     loopClosure(),
-    /*
-     * A baseline count, not every user row.
-     *
-     * The `signups` line is CUMULATIVE — each of the eight points is "every
-     * user created up to this bucket" — so the old query loaded the entire
-     * `user` table to compute it, ordered, for eight numbers. It is invisible
-     * under ~20k users and then it is not, and the sibling
-     * `mobile_refresh_tokens` query on the next line already shows the bounded
-     * pattern.
-     *
-     * Split in two: one count for everything before the window, and only the
-     * rows inside it. Cumulative semantics are preserved exactly —
-     * `baseline + (rows up to bucketEnd)` — while transfer is bounded by
-     * signups in the last eight weeks rather than by all history.
-     */
-    db.user.count({ where: { createdAt: { lt: new Date(now.getTime() - 8 * 7 * DAY_MS) } } }),
-    db.user.findMany({
-      where: { createdAt: { gte: new Date(now.getTime() - 8 * 7 * DAY_MS) } },
-      select: { createdAt: true },
-      orderBy: { createdAt: "asc" },
-    }),
-    db.mobile_refresh_tokens.findMany({
-      where: { created_at: { gte: new Date(now.getTime() - 8 * 7 * DAY_MS) } },
-      select: { created_at: true, user_id: true },
-    }),
     db.events.groupBy({
       by: ["organizer_id", "status"],
       where: hostSupply(),
@@ -489,26 +474,20 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }),
   ])
 
-  /* Weekly growth: cumulative signups against distinct users with a session
-     that week. Plotted together deliberately — the gap between the two lines
-     is the vanity, and a signups line alone hides it entirely. */
-  const growth: AdminOverview["growth"] = []
-  for (let week = 7; week >= 0; week--) {
-    const bucketEnd = new Date(now.getTime() - week * 7 * DAY_MS)
-    const bucketStart = new Date(bucketEnd.getTime() - 7 * DAY_MS)
-    growth.push({
-      label: week === 0 ? "now" : `−${week}w`,
-      // Cumulative: everything before the window, plus what landed inside it
-      // up to this bucket. Identical to the old all-rows filter.
-      signups:
-        signupsBeforeWindow + signupBuckets.filter((u) => u.createdAt <= bucketEnd).length,
-      active: new Set(
-        activeBuckets
-          .filter((t) => t.created_at > bucketStart && t.created_at <= bucketEnd)
-          .map((t) => t.user_id)
-      ).size,
-    })
-  }
+  /*
+   * The signups-vs-active chart is gone, and so are its three queries.
+   *
+   * It was CUMULATIVE, which K4.7 has had on the register since the first
+   * audit: a cumulative series can only go up, so it cannot show the one thing
+   * a growth chart is for. Staging plotted 42, 42, 45, 82, 95, 95, 95, 121 —
+   * three flat weeks in the middle that the chart drew as a plateau at the
+   * ceiling, indistinguishable from healthy.
+   *
+   * The honest version is a weekly (non-cumulative) signup series, and that is
+   * a build rather than a deletion: it wants `product_events`, which now
+   * exists. Recorded as the next metric rather than shipped half-done, because
+   * a chart that flatters is worse than no chart.
+   */
 
   const publishedByOrganiser = new Map<string, number>()
   const draftsByOrganiser = new Map<string, number>()
@@ -595,25 +574,19 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
   }
 
   /*
-   * Two shapes of comparison, because the metrics are two shapes.
+   * One comparison left, and it is the naturally windowed one.
    *
-   * `users` and `publishedEvents` are cumulative totals, so the honest question
-   * is "how much did the total grow across this window" — the baseline is the
-   * total as it stood at `range.from`. `checkIns` is naturally window-scoped, so
-   * it compares this window's count against the previous window's.
+   * The cumulative-total deltas went with their tiles. They compared a
+   * running total against its own value at `range.from`, which is correct
+   * arithmetic in service of a question nobody has — "the number that only
+   * goes up went up" — and it cost two extra counts on a screen that already
+   * fires more round trips than it should.
    *
-   * Comparing a cumulative total against a windowed count would be the classic
-   * version of this bug: an all-time figure divided by 30 days of activity,
-   * rendering a delta in the thousands of percent.
+   * Arrivals are different: the count IS the window, so this window against
+   * the previous one is a real comparison and the tile can honestly carry an
+   * arrow.
    */
-  const [usersAtStart, eventsAtStart, checkInsNow, checkInsPrior] = await Promise.all([
-    db.user.count({ where: { createdAt: { lt: range.from } } }),
-    db.events.count({
-      where: { ...eventScope(), status: "published", created_at: { lt: range.from } },
-    }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inRange },
-    }),
+  const [checkInsPrior] = await Promise.all([
     db.event_check_ins.count({
       where: { status: { in: ATTENDED }, event: eventScope(), created_at: inPrior },
     }),
@@ -621,27 +594,17 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
 
   return {
     role: "app_admin",
-    attention: {
-      pending: pendingFlags,
-      oldestHours: oldestFlag
-        ? Math.floor((now.getTime() - oldestFlag.created_at.getTime()) / (60 * 60 * 1000))
-        : null,
-      highConfidence,
-      affectedRooms: flagRooms.length,
-    },
-    users,
+    attention,
+    // Server time, so the client renders the same ages the server did.
+    generatedAt: now.toISOString(),
     activeThisWeek,
-    publishedEvents,
     checkIns,
-    deltas: {
-      users: tileDelta({ current: users, previous: usersAtStart }),
-      publishedEvents: tileDelta({ current: publishedEvents, previous: eventsAtStart }),
-      checkIns: tileDelta({ current: checkInsNow, previous: checkInsPrior }),
-    },
+    refusals,
+    deltas: { checkIns: tileDelta({ current: checkIns, previous: checkInsPrior }) },
     rangeLabel: rangeLabel(range),
     publishingHosts: { publishing: publishingHosts, total: hostAccounts },
+    upcomingEvents,
     curated: { published: curatedPublished, unclaimed: curatedUnclaimed },
-    growth,
     funnel,
     supply,
     cities: Array.from(cityMap.values()).sort((a, b) => b.events - a.events),

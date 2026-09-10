@@ -238,7 +238,7 @@ export function SiteHeader() {
         title: "Overview",
         description:
           role === "app_admin"
-            ? "Platform health: what needs attention, growth vs vanity, and supply."
+            ? "What is waiting on you, whether the loop closes, and who is supplying it."
             : role === "organizer"
               ? "Your next event first — pacing, then what your past events say."
               : "Each venue on its own terms — utilisation, ratings, bookings.",
