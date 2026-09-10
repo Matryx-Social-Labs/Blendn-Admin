@@ -97,8 +97,15 @@ export async function POST(request: NextRequest) {
            * eight onboarding screens that used to ask are being deleted, and
            * the roster displays it. Undefined until the app sends it, which is
            * why the field is optional for now.
+           *
+           * **Spread, never shorthand.** `age` is optional in `signupSchema`,
+           * so `age,` passes an explicit `undefined` whenever the caller omits
+           * it — and `strictUndefinedChecks` makes that a runtime error, not a
+           * no-op. Every sign-up that did not send an age 500'd: the app's own
+           * form (the field is optional), and Google and Apple, which never
+           * send one. The third instance of this class to reach staging.
            */
-          age,
+          ...(age !== undefined && { age }),
           onboarded: false,
         },
       })
