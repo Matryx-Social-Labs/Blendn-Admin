@@ -346,6 +346,32 @@ export function GeofenceEditor({
     if (containerRef.current) {
       containerRef.current.style.cursor = editable && drawing ? "crosshair" : ""
     }
+
+    /*
+     * Follow the fence when it leaves the view.
+     *
+     * The view is set once, at mount. That is right while somebody is dragging
+     * a corner, and wrong the moment the fence moves somewhere else entirely —
+     * which is exactly what picking a listed venue does: `inherit` copies the
+     * venue's geofence, the shape is redrawn faithfully, and it is redrawn
+     * off-screen. The organiser is left looking at a check-in area over the
+     * wrong part of the city, on a form whose whole job is getting that area
+     * right.
+     *
+     * Only when it is outside the current bounds, so nudging a shape near the
+     * edge does not yank the map out from under the cursor.
+     */
+    const map = mapRef.current
+    if (map) {
+      const centre =
+        fence.type === "circle"
+          ? ([fence.lat, fence.lng] as [number, number])
+          : centroid(fence.ring)
+      if (!map.getBounds().contains(L.latLng(centre[0], centre[1]))) {
+        const wide = fence.type === "circle" ? fence.radius > 100 : spanOf(fence.ring) > 150
+        map.setView(centre, wide ? 16 : 18)
+      }
+    }
   }, [fence, showAccuracy, overlap, editable, drawing, crossed, onChange])
 
   /* ------------------------------------------------------ OSM footprint --- */
