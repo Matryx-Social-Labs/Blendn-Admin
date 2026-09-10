@@ -29,32 +29,31 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
  */
 
 /** Pages whose content has no time dimension hide the range control. */
-const TIMELESS = new Set([
-  "/dashboard/settings",
-  "/dashboard/organisation",
-  "/dashboard/organisations",
-  "/dashboard/onboarding",
-  "/dashboard/categories",
-  "/dashboard/amenities",
-  "/dashboard/events/new",
-  // A brand is four fields about a company. A date-range control over it would
-  // be a filter with nothing to filter.
-  "/dashboard/brand",
-  "/dashboard/sponsors",
-  "/dashboard/sponsor-claims",
-  "/dashboard/creative-review",
-  "/dashboard/charges",
-  // Two queues, not two reports. Curation health is "everything we ever added,
-  // and which of it is dead"; the claim queue is oldest-first by design. A
-  // range control over either would offer to hide the rows most worth seeing.
-  "/dashboard/events/curate",
-  "/dashboard/claims",
-  "/dashboard/claims/venues",
-  "/dashboard/claims/brands",
-  "/dashboard/venues/new",
-])
+/**
+ * The routes whose numbers actually change when the range does.
+ *
+ * An allow-list, because the deny-list it replaces defaulted the wrong way.
+ * `TIMELESS` named twenty screens with nothing to filter and showed the control
+ * everywhere else — so a five-button control rendered on **19 routes that read
+ * no range at all**, including `/dashboard/users`, `/dashboard/events`,
+ * `/dashboard/moderation` and every `[id]` page, none of which could be in an
+ * exact-match Set anyway.
+ *
+ * Measured by driving it: `/dashboard/users` at `?range=today` and
+ * `?range=90d` renders four byte-identical tiles, each already labelled with
+ * its own fixed window — "26 new this month", "vs last month". Clicking 90d
+ * there does nothing and says nothing, which leaves an admin to conclude either
+ * that the numbers are wrong or that the click missed.
+ *
+ * Three pages call `resolveRange`. Inverting the default means a new screen
+ * starts without the control rather than with a broken one, and
+ * `__tests__/range-control-scope.test.ts` fails the build when this list and
+ * the pages that read a range stop agreeing.
+ */
+const RANGED = new Set(["/dashboard", "/dashboard/reports"])
 
-/** Reports read the range, so the control stays. */
+/** `/dashboard/venues/<id>`, which scopes its event list to the range. */
+const RANGED_VENUE_DETAIL = /^\/dashboard\/venues\/[^/]+$/
 
 const routeContent: Record<string, { title: string; description: string }> = {
   "/dashboard/moderation": {
@@ -268,7 +267,10 @@ export function SiteHeader() {
     }
   }, [pathname, role])
 
-  const showRange = !TIMELESS.has(pathname) && !pathname.endsWith("/edit")
+  const showRange =
+    RANGED.has(pathname) ||
+    // `/dashboard/venues/new` matches the shape and is a form, not a report.
+    (RANGED_VENUE_DETAIL.test(pathname) && pathname !== "/dashboard/venues/new")
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-xl transition-[width,height] ease-linear">

@@ -410,6 +410,13 @@
       "reverted": true,
       "date": "2026-09-10",
       "note": "The FIRST version of this guard was vacuous and mutation C is why it exists in this shape: it asserted the source contained `data.length < total`, and `{false && data.length < total}` still contains that text. The sentence was extracted to a pure function so the test could vary arguments rather than match characters — R18's pattern, earned again."
+    },
+    "range-control-scope.test.ts": {
+      "guards": "that the date-range control renders on exactly the dashboard pages whose `page.tsx` calls `resolveRange` — checked in both directions, so a page that gains a range without being listed fails, and a listed page that stops reading one fails too",
+      "mutation": "A: add a `resolveRange` call to app/dashboard/users/page.tsx without listing the route. B: add \"/dashboard/users\" to RANGED without the page reading a range",
+      "observed": "A: 1 failing ('shows it on every page that reads a range'), naming /dashboard/users. B: 1 failing ('shows it on no page that ignores one'), naming the same route. The vacuity guard stayed green in both",
+      "reverted": true,
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [
