@@ -430,6 +430,18 @@
       "mutation": "A: add `db.moderation_flags.count({ where: { status: 'pending' } })` back into app/dashboard/layout.tsx. B: delete the `pendingCreative` line from queueBadges(). C: add `import { db } from './db'` to lib/attention-queues.ts.",
       "observed": "A: 1 failing ('the layout counts nothing itself'). B: 1 failing ('every badgeKey the nav asks for is one queueBadges produces'), reporting [\"pendingCreative\"] where [] was expected — exactly the silent failure the guard exists for, since a nav item asking for a badge nothing supplies renders no badge and no error. C: 1 failing ('the pure half never imports the database'). C is the one that matters: the real defect it stands for was found by `npm run build`, not by tsc and not by 2418 unit tests, because Jest resolves the import and never asks which bundle it lands in.",
       "date": "2026-09-10"
+    },
+    "attention-queues.itest.ts": {
+      "guards": "three moderation tables fold into ONE strip row, and the oldest item across all three wins -- with rows actually in the tables",
+      "mutation": "A: `oldest: earliest([flags])` instead of `earliest(moderation)`. B: `count: sum([flags])` instead of `sum(moderation)`.",
+      "observed": "A and B each: 1 failing ('folds three moderation tables into one row and takes the oldest of them'). Behavioural, so no entry is strictly required -- registered because it REPLACES a vacuous one. dashboard-report.itest.ts asserted the same invariants against tables the fixture never wrote to, so every assertion ran as 0 >= 0 and would have passed against both mutations above.",
+      "date": "2026-09-10"
+    },
+    "refusals-by-reason.itest.ts": {
+      "guards": "refusalsByReason counts distinct PEOPLE per reason and distinct people overall, not check-in-refusal rows",
+      "mutation": "A: `total: rows.length`. B: per-reason `people` computed as `rows.filter(r => r.reason === reason).length`.",
+      "observed": "A and B each: 1 failing ('counts distinct people per reason, and distinct people overall'). The fixture is the load-bearing part: one person refused twice for the same reason AND once for a second reason is the only row shape that tells attempts from people, and it is why total (2) is deliberately lower than the sum of its own rows (3).",
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [

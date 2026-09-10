@@ -14,22 +14,39 @@ import { db } from "./db"
  * build is the only layer that notices, which makes this exactly the class of
  * defect that reaches a deploy.
  */
-/** The oldest of several `created_at` reads, ignoring the empty ones. */
-function earliest(dates: Array<{ created_at: Date } | null>): string | null {
-  const times = dates.filter((d): d is { created_at: Date } => d !== null).map((d) => d.created_at)
+/**
+ * One round trip per source table, not two.
+ *
+ * The first version ran a `count` and a `findFirst(orderBy created_at)` per
+ * table — sixteen queries for eight questions, all drawn from the same
+ * connection pool on every admin page load. `aggregate` answers both at once,
+ * and six of the eight tables already carry a `(status, created_at)` index that
+ * covers it.
+ */
+async function pendingIn(
+  model: { aggregate: (args: unknown) => Promise<{ _count: number; _min: { created_at: Date | null } }> },
+  where: unknown
+): Promise<{ count: number; oldest: Date | null }> {
+  const row = await model.aggregate({ where, _count: true, _min: { created_at: true } })
+  return { count: row._count, oldest: row._min.created_at }
+}
+
+/** The oldest of several aggregates, ignoring the empty ones. */
+function earliest(parts: Array<{ oldest: Date | null }>): string | null {
+  const times = parts.map((p) => p.oldest).filter((d): d is Date => d !== null)
   if (!times.length) return null
   return new Date(Math.min(...times.map((t) => t.getTime()))).toISOString()
 }
 
-const oldestOf = { orderBy: { created_at: "asc" }, select: { created_at: true } } as const
+const sum = (parts: Array<{ count: number }>) => parts.reduce((n, p) => n + p.count, 0)
 
 /**
  * Every queue, always all four rows — including the empty ones.
  *
- * An empty queue is a fact worth rendering: "0 flagged messages, nothing since
- * 2 Sep" is what makes the strip's silence trustworthy. Dropping empty rows
- * would make a clear queue and a queue nobody counted look identical, which is
- * exactly the failure this module exists to close.
+ * An empty queue is a fact worth rendering: "0 flags and reports, clear" is what
+ * makes the strip's silence trustworthy. Dropping empty rows would make a clear
+ * queue and a queue nobody counted look identical, which is exactly the failure
+ * this module exists to close.
  */
 export async function attentionQueues(): Promise<AttentionQueue[]> {
   const pending = { status: "pending" as const }
@@ -38,32 +55,18 @@ export async function attentionQueues(): Promise<AttentionQueue[]> {
     flags,
     userReports,
     messageReports,
-    oldestFlag,
-    oldestUserReport,
-    oldestMessageReport,
     eventClaims,
     venueClaims,
     brandClaims,
-    oldestEventClaim,
-    oldestVenueClaim,
-    oldestBrandClaim,
     applications,
-    oldestApplication,
     creatives,
-    oldestCreative,
   ] = await Promise.all([
-    db.moderation_flags.count({ where: pending }),
-    db.user_reports.count({ where: pending }),
-    db.message_reports.count({ where: pending }),
-    db.moderation_flags.findFirst({ where: pending, ...oldestOf }),
-    db.user_reports.findFirst({ where: pending, ...oldestOf }),
-    db.message_reports.findFirst({ where: pending, ...oldestOf }),
-    db.event_claims.count({ where: pending }),
-    db.venue_claims.count({ where: pending }),
-    db.sponsor_claims.count({ where: pending }),
-    db.event_claims.findFirst({ where: pending, ...oldestOf }),
-    db.venue_claims.findFirst({ where: pending, ...oldestOf }),
-    db.sponsor_claims.findFirst({ where: pending, ...oldestOf }),
+    pendingIn(db.moderation_flags as never, pending),
+    pendingIn(db.user_reports as never, pending),
+    pendingIn(db.message_reports as never, pending),
+    pendingIn(db.event_claims as never, pending),
+    pendingIn(db.venue_claims as never, pending),
+    pendingIn(db.sponsor_claims as never, pending),
     /*
      * `email_pending` counts, and that is not an oversight.
      *
@@ -73,30 +76,19 @@ export async function attentionQueues(): Promise<AttentionQueue[]> {
      * narrowing here would have made the strip quieter than the badge beside it
      * in precisely the case this module exists to prevent.
      */
-    db.organiser_onboarding_requests.count({
-      where: { status: { in: ["pending", "email_pending"] } },
+    pendingIn(db.organiser_onboarding_requests as never, {
+      status: { in: ["pending", "email_pending"] },
     }),
-    db.organiser_onboarding_requests.findFirst({
-      where: { status: { in: ["pending", "email_pending"] } },
-      ...oldestOf,
-    }),
-    db.sponsored_creatives.count({ where: { moderation_status: "pending" } }),
-    db.sponsored_creatives.findFirst({ where: { moderation_status: "pending" }, ...oldestOf }),
+    pendingIn(db.sponsored_creatives as never, { moderation_status: "pending" }),
   ])
 
+  const moderation = [flags, userReports, messageReports]
+  const claims = [eventClaims, venueClaims, brandClaims]
+
   return [
-    {
-      ...SHAPE.moderation,
-      count: flags + userReports + messageReports,
-      oldest: earliest([oldestFlag, oldestUserReport, oldestMessageReport]),
-    },
-    {
-      ...SHAPE.claims,
-      count: eventClaims + venueClaims + brandClaims,
-      oldest: earliest([oldestEventClaim, oldestVenueClaim, oldestBrandClaim]),
-    },
-    { ...SHAPE.applications, count: applications, oldest: earliest([oldestApplication]) },
-    { ...SHAPE.creative, count: creatives, oldest: earliest([oldestCreative]) },
+    { ...SHAPE.moderation, count: sum(moderation), oldest: earliest(moderation) },
+    { ...SHAPE.claims, count: sum(claims), oldest: earliest(claims) },
+    { ...SHAPE.applications, count: applications.count, oldest: earliest([applications]) },
+    { ...SHAPE.creative, count: creatives.count, oldest: earliest([creatives]) },
   ]
 }
-

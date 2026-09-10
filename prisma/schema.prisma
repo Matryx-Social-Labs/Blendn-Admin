@@ -2000,6 +2000,14 @@ model check_in_refusals {
 
   /// The curation-health read: refusals per event, newest first.
   @@index([event_id, created_at])
+  /// The platform-wide read: every refusal in a window, whatever the event.
+  ///
+  /// A bare date index beside a composite one that starts with `event_id`, for
+  /// the same reason `event_check_ins` carries one: `refusalsByReason` filters
+  /// on `created_at` ALONE, so the composite's leading column is unconstrained
+  /// and cannot be seeked -- the whole table gets scanned on every admin
+  /// overview render. Same shape of gap, same fix, one table later.
+  @@index([created_at])
   @@index([user_id])
 }
 
@@ -2620,6 +2628,13 @@ model sponsored_creatives {
   sends   sponsored_message_sends[]
 
   @@index([message_id, created_at])
+  /// The review queue: what is pending, oldest first.
+  ///
+  /// Every other table `attentionQueues()` reads has at least a bare status
+  /// index and three have this exact pair; `sponsored_creatives` was the one
+  /// with none, so the only queue whose SLA is commercial rather than safety
+  /// was also the only one doing a sequential scan on every admin page load.
+  @@index([moderation_status, created_at])
 }
 
 /// One fan-out. What the sponsor's report reads.

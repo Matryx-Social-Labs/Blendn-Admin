@@ -108,9 +108,14 @@ describe("one nav entry, two queues", () => {
      */
     const queues = code("lib/attention-queues-query.ts")
     for (const table of ["event_claims", "venue_claims", "sponsor_claims"]) {
-      expect(queues).toMatch(new RegExp(`db\\.${table}\\.count`))
+      expect(queues).toMatch(new RegExp(`db\\.${table}\\b`))
     }
-    expect(queues).toMatch(/count: eventClaims \+ venueClaims \+ brandClaims/)
+    // All three reach ONE row on the strip. Pinned on the fold rather than on
+    // the read, because how they are read changed once already — sixteen
+    // count/findFirst pairs became eight aggregates — and the guard is about
+    // the three queues sharing a badge, not about which Prisma verb does it.
+    expect(queues).toMatch(/const claims = \[eventClaims, venueClaims, brandClaims\]/)
+    expect(queues).toMatch(/count: sum\(claims\)/)
   })
 
   it("counts the badge in the server layout, not a client effect", () => {

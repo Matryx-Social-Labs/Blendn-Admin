@@ -247,6 +247,35 @@ export async function updateUserRole(id: string, role: user_role) {
  * delete: there is no undo and it takes other users' data with it.
  */
 
+/**
+ * The four numbers worth putting above a list of people.
+ *
+ * ## What went, and why
+ *
+ * This screen had four bordered KPI cards at identical visual weight — the
+ * exact "eleven things, nothing primary" arrangement `DESIGN_SYSTEM.md` records
+ * as the failure the redesign existed to fix, still standing on one page. Three
+ * of the four also answered questions this screen is not for:
+ *
+ *   - **Onboarding rate** is stage two of the loop, drawn properly on the
+ *     overview with the six stages either side of it that give it meaning.
+ *   - **"N new this month"** sat under a total that was mostly the same number.
+ *   - **Growth, "% vs last month"**, computed `usersLastMonth > 0 ? … : 0`, so a
+ *     month with no prior signups rendered **0%** — and on staging that is
+ *     exactly what it showed: *"Growth 0%"* beside *"35 new this month"*. An
+ *     invented +500% would at least look wrong. An invented 0% looks plausible
+ *     and says the opposite of the truth. `lib/metric-delta.ts` returns null for
+ *     this case and the overview's tiles have honoured it for months.
+ *
+ * Both month queries also used `new Date().setDate(1)`, which keeps the current
+ * time of day — so "this month" began on the 1st at whatever o'clock it happens
+ * to be, and the counts moved as the afternoon wore on.
+ *
+ * ## What replaced them
+ *
+ * `suspended`, which none of the four carried. It is the only figure on a list
+ * of accounts that means somebody should look at something.
+ */
 export async function getUserStats() {
   try {
     const session = await getAuth()
@@ -254,44 +283,18 @@ export async function getUserStats() {
       throw new Error("Forbidden")
     }
 
-    const [
-      totalUsers,
-      onboardedUsers,
-      verifiedUsers,
-      usersThisMonth,
-      usersLastMonth,
-    ] = await Promise.all([
+    const [total, onboarded, verified, suspended] = await Promise.all([
       db.user.count(),
       db.profiles.count({ where: { onboarded: true } }),
       db.user.count({ where: { emailVerified: { not: null } } }),
-      db.user.count({
-        where: {
-          createdAt: {
-            gte: new Date(new Date().setDate(1)),
-          },
-        },
-      }),
-      db.user.count({
-        where: {
-          createdAt: {
-            gte: new Date(new Date().setMonth(new Date().getMonth() - 1, 1)),
-            lt: new Date(new Date().setDate(1)),
-          },
-        },
-      }),
+      db.user.count({ where: { suspended_at: { not: null } } }),
     ])
 
-    return {
-      totalUsers,
-      onboardedUsers,
-      verifiedUsers,
-      usersThisMonth,
-      usersLastMonth,
-      onboardingRate: totalUsers > 0 ? Math.round((onboardedUsers / totalUsers) * 100) : 0,
-      verificationRate: totalUsers > 0 ? Math.round((verifiedUsers / totalUsers) * 100) : 0,
-    }
+    return { total, onboarded, verified, suspended }
   } catch (error) {
-    logger.error("Error fetching user stats", { error: error instanceof Error ? error.message : String(error) })
+    logger.error("Error fetching user stats", {
+      error: error instanceof Error ? error.message : String(error),
+    })
     throw new Error("Failed to fetch user stats")
   }
 }

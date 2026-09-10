@@ -298,12 +298,30 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Activity",
     cell: ({ row }) => {
       const counts = row.original._count
-      return (
-        <div className="flex flex-col gap-0.5 text-xs">
-          <span>{counts.organized_events} events organized</span>
-          <span>{counts.event_check_ins} check-ins</span>
-          <span>{counts.event_favorites} favorites</span>
-        </div>
+      /*
+       * One line, and nothing at all when there is nothing.
+       *
+       * This rendered three stacked lines per row unconditionally, so ten rows
+       * of accounts that have done nothing yet — most of them, on a product
+       * with 121 users — were thirty lines reading "0 events organized / 0
+       * check-ins / 0 favorites". Thirty lines of zero is not information; it
+       * is the column asserting itself over the two beside it that decide
+       * whether an account is a problem.
+       *
+       * `check-ins` stays attendance-DAYS and stays labelled that way. It is
+       * the one allowlisted row count in `count-people-boundary.test.ts`,
+       * because "12 check-ins" is exactly what the number is.
+       */
+      const parts = [
+        counts.organized_events > 0 ? `${counts.organized_events} organised` : null,
+        counts.event_check_ins > 0 ? `${counts.event_check_ins} check-ins` : null,
+        counts.event_favorites > 0 ? `${counts.event_favorites} saved` : null,
+      ].filter(Boolean)
+
+      return parts.length === 0 ? (
+        <span className="text-xs text-faint-foreground">—</span>
+      ) : (
+        <span className="text-xs">{parts.join(" · ")}</span>
       )
     },
   },
@@ -522,7 +540,9 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [pagination, setPagination] = React.useState({
     pageIndex: 0,
-    pageSize: 10,
+    // 20, not 10. Thirty-five accounts over four pages made paging the primary
+    // interaction on a screen whose job is finding one person.
+    pageSize: 20,
   })
 
   const table = useReactTable({

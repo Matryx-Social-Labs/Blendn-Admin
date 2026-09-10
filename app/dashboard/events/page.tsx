@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { EventsTable, type EventRow } from "./events-table"
 import { getAuth } from "@/lib/auth"
 import { curationState } from "@/lib/curation"
+import { whenLabel } from "@/lib/dashboard-format"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { db } from "@/lib/db"
 import { visibleEventsWhere } from "@/lib/event-visibility"
@@ -10,71 +11,22 @@ import { canAccessDashboard } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 
-/**
- * One column for when, not two.
- *
- * Start and end were separate columns each rendering the full
- * "Sep 9, 2026, 11:57 AM" — the year twice and the date twice on every row, for
- * a fact that is one date and a duration. At seventeen rows that is a quarter
- * of the table's width spent repeating 2026.
- *
- * Formatted here rather than in the client component for two reasons that are
- * really one: `new Date()` inside a render is an impure call (the React
- * Compiler says so), and server and client can disagree about the year across
- * a New Year boundary, which is a hydration mismatch nobody will ever
- * reproduce. Same fix as `generatedAt` on the overview — compute it once, on
- * the server, and send the string.
- */
-function whenLabel(start: Date, end: Date, now: Date): string {
-  const sameDay = start.toDateString() === end.toDateString()
-  const date = start.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    // The year only when it is not this one. A list of 2026 events read on a
-    // 2026 afternoon does not need telling.
-    ...(start.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
-  })
-  if (!sameDay) {
-    return `${date} → ${end.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
-  }
-  const from = start.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" })
-  return `${date}, ${from}`
-}
-
-/**
- * Every event this person may see.
- *
- * ## Why this is a server component now
- *
- * It was the last screen in the dashboard that fetched its own data from a
- * client `useEffect`, and that one decision produced most of what was wrong
- * with it: a **"Loading events…" spinner inside a bordered card**, on a
- * codebase whose design system says skeletons rather than spinners and which
- * already had `app/dashboard/events/loading.tsx` sitting unused — the boundary
- * can never fire for a component that does not suspend.
- *
- * It also meant a second copy of the row shape, and a second answer to "which
- * events may I see": the route it called had careful organisation-membership
- * scoping with a comment explaining the colleague-sees-an-empty-list bug, and
- * nothing held the dashboard to it. `lib/event-visibility.ts` is now the only
- * answer, used by both.
- *
- * ## What the columns are for
- *
- * An admin opens this to find one event, or to see what is broken. So: when,
- * where, whose, and whether it can actually be checked into. **Capacity is
- * gone** — it rendered `current_capacity`, which has no application writer and
- * was `0` on every row for every event ever created (K4.12). A column of zeroes
- * is not a neutral omission; it is a metric asserting that nobody came.
- */
 export default async function EventsPage() {
   const session = await getAuth()
   if (!session?.user || !canAccessDashboard(session.user.role)) redirect("/login")
 
   const now = new Date()
 
+  /*
+   * Resolved once and reused by both the page and the total. Both used to
+   * resolve it separately, and for any non-admin viewer that means `actorFor`
+   * fires its `organisation_members` lookup twice per render for an answer that
+   * cannot have changed in between.
+   */
+  const where = await visibleEventsWhere(session.user)
+
   const events = await db.events.findMany({
-    where: await visibleEventsWhere(session.user),
+    where,
     orderBy: { start_time: "desc" },
     // Bounded, and the count below says so rather than letting a truncated
     // list read as the whole list — the no-silent-caps rule, applied to the UI.
@@ -110,7 +62,7 @@ export default async function EventsPage() {
    * W17 shipped.
    */
   const [total, arrivals] = await Promise.all([
-    db.events.count({ where: await visibleEventsWhere(session.user) }),
+    db.events.count({ where }),
     distinctAttendeeCounts(events.map((event) => event.id)),
   ])
 

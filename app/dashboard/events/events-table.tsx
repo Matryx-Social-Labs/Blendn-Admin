@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { CurationState } from "@/lib/curation"
+import { bulkDeleteMessage } from "@/lib/dashboard-format"
 import { logger } from "@/lib/logger"
 
 export interface EventRow {
@@ -75,16 +76,14 @@ export function EventsTable({
       })
     )
     const failed = results.filter((r) => r.status === "rejected").length
-    if (failed) {
-      logger.error("Error deleting events", { failed, attempted: ids.length })
-      toast.error(
-        failed === ids.length
-          ? "Could not delete those events"
-          : `Deleted ${ids.length - failed}, but ${failed} could not be removed`
-      )
-    } else {
-      toast.success(`Deleted ${ids.length} event${ids.length === 1 ? "" : "s"}`)
-    }
+    if (failed) logger.error("Error deleting events", { failed, attempted: ids.length })
+
+    const { tone, text } = bulkDeleteMessage(ids.length, failed)
+    if (tone === "success") toast.success(text)
+    else toast.error(text)
+
+    // Refreshed either way: a partial success has changed the list, and leaving
+    // deleted rows on screen invites deleting them again.
     router.refresh()
   }
 

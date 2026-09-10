@@ -1,7 +1,4 @@
 import { redirect } from "next/navigation"
-import { IconUsers, IconUserCheck, IconMail, IconTrendingUp } from "@tabler/icons-react"
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getUsers, getUserStats } from "./actions"
 import { UsersTable } from "./users-table"
 import { getAuth } from "@/lib/auth"
@@ -40,71 +37,43 @@ export default async function UsersPage({
   ])
 
   return (
-    <div className="flex flex-col gap-6 py-6">
-      <div className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-            <IconUsers className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalUsers.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.usersThisMonth} new this month
-            </p>
-          </CardContent>
-        </Card>
+    <div className="flex flex-col gap-4">
+      {/*
+        Four numbers on one line, where four bordered cards used to be.
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Onboarded</CardTitle>
-            <IconUserCheck className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.onboardedUsers.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.onboardingRate}% completion rate
-            </p>
-          </CardContent>
-        </Card>
+        This screen is a finding tool, not a metrics screen: an admin opens it
+        to locate one person and see whether anything is wrong with them. Four
+        cards at identical weight answered none of that and pushed the search
+        box — the actual control — below the fold on a laptop.
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Verified</CardTitle>
-            <IconMail className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.verifiedUsers.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.verificationRate}% of total users
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Growth</CardTitle>
-            <IconTrendingUp className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {stats.usersLastMonth > 0
-                ? Math.round(
-                    ((stats.usersThisMonth - stats.usersLastMonth) / stats.usersLastMonth) * 100
-                  )
-                : 0}
-              %
-            </div>
-            <p className="text-xs text-muted-foreground">vs last month</p>
-          </CardContent>
-        </Card>
+        `suspended` is the only one that means somebody should look, so it is
+        the only one that gets a colour, and only when it is not zero.
+      */}
+      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground">
+        <span>
+          <b className="font-bold text-foreground tabular-nums">
+            {stats.total.toLocaleString()}
+          </b>{" "}
+          account{stats.total === 1 ? "" : "s"}
+        </span>
+        <span>
+          <span className="tabular-nums">{stats.onboarded.toLocaleString()}</span> onboarded
+        </span>
+        <span>
+          <span className="tabular-nums">{stats.verified.toLocaleString()}</span> verified
+        </span>
+        {stats.suspended > 0 ? (
+          <span className="font-medium text-destructive">
+            <span className="tabular-nums">{stats.suspended.toLocaleString()}</span> suspended
+          </span>
+        ) : null}
       </div>
 
-      <div className="px-4 lg:px-6">
-        <div className="rounded-xl border bg-card p-5">
-          <UsersTable data={users} total={total} currentUserRole={session?.user?.role ?? "attendee"} />
-        </div>
-      </div>
+      <UsersTable
+        data={users}
+        total={total}
+        currentUserRole={session?.user?.role ?? "attendee"}
+      />
     </div>
   )
 }

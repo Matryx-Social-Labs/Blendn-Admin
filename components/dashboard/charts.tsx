@@ -302,7 +302,7 @@ export function Funnel({
  * screen competing with the hero beside it. The comment defended the bug, which
  * is worse than not having one.
  */
-function stageFill(index: number, count: number): string {
+export function stageFill(index: number, count: number): string {
   if (count < 2) return "var(--chart-1)"
   const step = Math.round((index / (count - 1)) * 2)
   return `var(--chart-${step + 1})`
