@@ -16,7 +16,16 @@ const config: Config = {
   testEnvironment: "node",
   roots: ["<rootDir>/__tests__/integration"],
   testMatch: ["**/*.itest.ts"],
-  moduleNameMapper: { "^@/(.*)$": "<rootDir>/$1" },
+  moduleNameMapper: {
+    "^@/(.*)$": "<rootDir>/$1",
+    /*
+     * `jose` is ESM-only and `transform` covers TypeScript, not `node_modules`,
+     * so any suite importing `lib/mobile-auth.ts` for real dies at parse time.
+     * The unit runner never hits this because it mocks that module wholesale.
+     * See the stub for why it throws rather than returning a fake verification.
+     */
+    "^jose$": "<rootDir>/__tests__/integration/jose-stub.ts",
+  },
   transform: { "^.+\\.tsx?$": ["ts-jest", { tsconfig: "tsconfig.json" }] },
   // Real DB work is slower than mocked unit tests, and they share one database,
   // so run serially to keep truncation between suites deterministic.

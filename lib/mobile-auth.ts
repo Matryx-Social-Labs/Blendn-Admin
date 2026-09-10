@@ -162,7 +162,21 @@ export async function storeRefreshToken(
       id: decoded.jti,
       user_id: userId,
       token_hash: tokenHash,
-      device_info: deviceInfo,
+      /*
+       * Spread, not `device_info: deviceInfo`.
+       *
+       * `strictUndefinedChecks` makes an explicit `undefined` a runtime error
+       * rather than "leave this field alone", and `deviceInfo` is optional —
+       * every caller that omits it was sending `undefined`. That took down
+       * **every authentication path at once**: signup, signin and refresh all
+       * store a refresh token through here, so nobody could get a token at all.
+       *
+       * It is invisible to `tsc` (the field is optional) and to the unit suite
+       * (which mocks `@/lib/db`), which is exactly the failure mode the flag's
+       * own rollout note predicted: "do not enable the flag alone — it
+       * typechecks and tests green while being broken in production".
+       */
+      ...(deviceInfo !== undefined ? { device_info: deviceInfo } : {}),
       expires_at: expiresAt,
     },
   })
