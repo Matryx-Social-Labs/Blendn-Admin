@@ -116,12 +116,23 @@ export function CapacitySettingsSection({
                   <SelectItem value="invite_only">Invite only</SelectItem>
                 </SelectContent>
               </Select>
+              {/*
+                This used to read "it does not stop anyone joining or checking
+                in, exactly like the minimum age", which was wrong in the one
+                direction that matters. `min_age` IS enforced — twice: discovery
+                filters it out (`min_age: null OR min_age <= viewerAge`) and
+                check-in returns 403 AGE_RESTRICTED and records an `under_age`
+                refusal. Door policy is enforced by nobody.
+
+                The claim was borrowed from `events.service.ts`, which says
+                "nothing here gates *an RSVP*, exactly as with min_age" — true,
+                and narrow. Dropping "an RSVP" turned an accurate comparison
+                into one that could persuade an organiser their 18+ night is not
+                actually age-gated.
+              */}
               <p className="text-xs text-muted-foreground">
-                Shown on your event as a badge, so people know what to expect at
-                the door. <strong>Blendn does not enforce this</strong> — it
-                does not stop anyone joining or checking in, exactly like the
-                minimum age. Your door does.
-                <br />
+                Shown as a badge so people know what to expect at the door.{" "}
+                <strong>Blendn does not enforce it</strong> — your door does.
                 Leave it as &ldquo;anyone can turn up&rdquo; and we show how many
                 places are left instead, once the event is nearly full.
               </p>
@@ -178,9 +189,8 @@ export function CapacitySettingsSection({
                 label on a listing — an organiser setting this needs to know it
                 turns people away rather than warning them.
               */}
-              Leave blank unless the event has one. Anyone below this age cannot
-              check in, and the event is hidden from them. Attendees who have not
-              given us an age are refused too.
+              Leave blank unless the event has one. Anyone younger — or who has
+              not told us their age — cannot see the event or check in.
             </div>
             <FormMessage />
           </FormItem>

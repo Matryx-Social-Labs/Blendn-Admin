@@ -156,6 +156,25 @@ function SortableMediaItem({
                   e.target.value = ""
                 }}
               />
+              {/*
+                The spec for the type actually chosen, next to the control that
+                needs it. It used to sit at the top of the section — both specs,
+                before the first control, which is where a form starts reading
+                like a manual. `faststart` keeps its reason because that reason
+                is the whole point of the requirement.
+              */}
+              {mediaType === "image" && (
+                <p className="text-xs text-muted-foreground">
+                  Square, 2048 × 2048 (1600 × 1600 minimum) · JPEG or PNG · up to 8 MB
+                </p>
+              )}
+              {mediaType === "video" && (
+                <p className="text-xs text-muted-foreground">
+                  Square, 1080 × 1080 · 15 seconds · MP4 (H.264 + AAC) · up to 12 MB.
+                  Export with <strong>faststart</strong>, or the clip waits for the
+                  whole file before it plays.
+                </p>
+              )}
               {isUploading && (
                 <div className="flex items-center gap-2">
                   <Progress value={uploadProgress} className="h-2 flex-1" />
@@ -296,18 +315,9 @@ export function MediaSection({
       */}
       <div className="space-y-2 text-sm text-muted-foreground">
         <p>
-          Images and clips for this event. The card on the home feed cycles
-          through them while it is on screen, so <strong>order matters</strong> —
-          drag to reorder.
-        </p>
-        <p className="text-xs">
-          <strong>Images</strong> — square, 2048 × 2048 recommended (1600 × 1600
-          minimum), JPEG or PNG, up to 8 MB. The cards crop to squares, so
-          anything landscape loses its edges.
-          <br />
-          <strong>Video</strong> — square, 1080 × 1080, 15 seconds or less, MP4
-          (H.264 + AAC) with <strong>faststart</strong>, up to 12 MB. Without
-          faststart the clip will not begin until the whole file has downloaded.
+          Images and clips for this event. The home feed cycles through them
+          while the card is on screen, so <strong>order matters</strong> — drag
+          to reorder. Square works best: every card crops to a square.
         </p>
       </div>
       <DndContext
