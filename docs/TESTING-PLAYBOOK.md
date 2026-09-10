@@ -124,13 +124,17 @@ runs **every time**, not at the end.
 | **Always** | `ecc:pr-test-analyzer` | — |
 | Prisma query or schema | `ecc:database-reviewer` | `postgres-patterns`, `prisma-patterns` |
 | A hot path — the ops tick, the feed, check-in, any `force-dynamic` page | `ecc:performance-optimizer` | `latency-critical-systems`, `react-performance` |
-| An endpoint or a response shape | `ecc:security-reviewer` (does both jobs) | `api-design` |
+| An endpoint or a response shape | `ecc:security-reviewer` (does both jobs) | `api-design`, and `contract-first` when it has a consumer |
 | Auth, PII, moderation, identity | `ecc:security-reviewer` | `security-review` |
 | Any comment claiming a guarantee | `ecc:comment-analyzer` | — |
 | An error path or a fallback | `ecc:silent-failure-hunter` | `error-handling` |
 | Any UI | `ecc:a11y-architect` | `frontend-a11y`, `accessibility` |
 | A user journey | `ecc:e2e-runner` | `e2e-testing`, `browser-qa` |
+| A schema change | `ecc:database-reviewer` | `database-migrations` |
+| A perf change | `ecc:performance-optimizer` | `benchmark` before AND after |
+| Anything in the Expo client | — | `react-native-patterns` |
 | Before a PR | — | `verification-loop`, then `/review` |
+| Before a promotion | — | `production-audit` |
 | React/TS specifics | `ecc:react-reviewer`, `ecc:typescript-reviewer` | `react-patterns` |
 | Dead code after a refactor | `ecc:refactor-cleaner` | — |
 
@@ -354,6 +358,72 @@ without rerunning it.
 | Does the journey work on a phone? | Maestro MCP |
 | Will this journey still work next month? | Playwright in `e2e/` |
 | Is the number on the screen the right number? | integration test against real Postgres |
+
+---
+
+## 4c · The rest of the toolbox
+
+§4 is the fan-out that runs against a diff. These are the ones to reach for when
+the *shape* of the problem calls for them, rather than on every change.
+
+### API and contracts
+
+| Skill | Reach for it when | Why here specifically |
+|---|---|---|
+| `api-design` | designing or reviewing any endpoint | Conventions: resource naming, status codes, pagination, error envelopes, versioning. Already in §4 as part of the security pass. |
+| **`contract-first`** | a response shape changes, or a new endpoint gets a consumer | **The strongest fit in the catalogue for this product and the least used.** The Expo client is a separate repo on a separate release cycle, so field drift is not caught by a build — it is caught by an app in the store breaking. `e2e/__contracts__/mobile-api.json` is already the artefact this skill formalises. The rebuild plan's `RoomMember { memberId }` change is a breaking rewrite of every match, roster and reveal screen; that migration should be run through this. |
+| `backend-patterns` | writing or reviewing a Next.js route and its data access | Route-layer patterns rather than schema. Pairs with `ecc:database-reviewer`, which looks below it. |
+
+### Performance, beyond the latency pass
+
+| Skill | Reach for it when | Why here specifically |
+|---|---|---|
+| **`benchmark`** | before and after any perf change | **Closes a gap SCRUM-40 (E15) has been carrying.** That epic asked for *"a repeatable benchmark rather than a one-off measurement"*, and every number this project has is a one-off. A baseline that a PR can regress against is the difference between "we measured it once" and "we would know". |
+| `benchmark-methodology` | designing what to measure | Warm-up, variance, what a p95 on 17 seed rows is worth. Read it before trusting a number from this seed. |
+| `benchmark-optimization-loop` | trying several implementations of one hot path | Recursive: measure, vary, measure. For the `buildAdminOverview` cache (SCRUM-73), where the question is which of three shapes is fastest, not whether to cache. |
+| **`redis-patterns`** | touching the cache, the rate limiter, or a distributed counter | Redis already holds the spam windows and the rate limiter — both moved there because a per-process `Map` is per-replica and lost on deploy. The rebuild plan's R20 puts **impression counters** there next, on the hottest read in the product, so key design and TTL choice stop being incidental. |
+| **`database-migrations`** | any schema change | Zero-downtime, rollback, and the Prisma specifics. This repo has a documented trap — `db:push` and `db:migrate` produce *different* schemas because `schema.prisma` cannot express a CHECK constraint, and three exist only in migration SQL — plus Railway applying migrations on boot, so a bad one takes the deploy down rather than failing a job. |
+| `nextjs-turbopack` | dev-loop speed | Marginal, and real: the dev server's first compile of a heavy route is 8–10s, which is most of the wall-clock cost of driving a page. |
+| `production-audit` | before a promotion, or "what breaks in prod?" | Pre-launch, local evidence only, nothing sent out. The natural companion to `verification-loop`: that one asks "does this work", this one asks "does this survive". |
+
+### The mobile half
+
+| Skill | Reach for it when |
+|---|---|
+| **`react-native-patterns`** | anything in `blendn/ashgabat` — Expo Router, state separation, list performance, NativeWind vs StyleSheet, secure storage |
+
+The client's problems are structural rather than missing features (no primitives
+layer, ~400 raw colour values, 73 files calling `StyleSheet.create`), so this is
+the skill that governs the whole phase-2 plan, not one screen of it.
+
+### Two that target failures this codebase actually has
+
+| Skill | Reach for it when | The failure it names |
+|---|---|---|
+| **`click-path-audit`** | a control does something in more than one step | *"Functions individually work but cancel each other out."* That is K1.1 exactly — picking a venue moves the fence and the coordinates and not the pin, because two correct effects disagree. It is also G5: `checkAndAutoUnmute` clearing an organiser's manual mute, where two correct rules compose into a wrong one. |
+| **`living-docs-governance`** | the docs and the code have drifted | Eighteen recorded comments describing behaviour the code does not have, a 200KB plan register measured at **one stale entry in eight**, and two documents that had to be merged because they covered the same thing. `ecc:comment-analyzer` finds instances; this is the systemic answer. |
+
+### Cost
+
+`cost-aware-llm-pipeline` — OpenAI moderation runs on the message path, so spend
+scales with room activity rather than with users. Worth a pass before launch:
+model routing by severity, and whether the deterministic checks can shed load
+before the model sees it.
+
+### Deliberately not here
+
+Naming them so the list stays a list rather than becoming the catalogue:
+
+- `data-throughput-accelerator` — no ingestion, backfill or ETL at a size where
+  it pays. Revisit if the `product_events` rollups grow one.
+- `content-hash-cache-pattern` — nothing here reprocesses files repeatedly. The
+  cover-image thumbnail work is the one candidate, and it is not built.
+- `kubernetes-patterns`, `docker-patterns` — Railway. `docker-patterns` matters
+  only for the local Postgres, which is four lines in §5.
+- Every `django-*`, `laravel-*`, `springboot-*`, `quarkus-*`, `kotlin-*`,
+  `swift-*`, `rust-*`, `golang-*` — wrong stack.
+- `eval-harness`, `mle-workflow`, `rag-pipeline-reviewer` — no model being
+  trained or retrieved against. The OpenAI call is a single classification.
 
 ---
 
