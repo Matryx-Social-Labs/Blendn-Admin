@@ -104,11 +104,28 @@ export function Overview({
             )}
           </div>
 
-          {blockers.length === 0 ? (
+          {/*
+            Say where to publish whenever nothing is blocking — not only when
+            the list is empty.
+            
+            `blockers` holds advisory items too, so an event that is genuinely
+            ready but is still missing, say, a cover image showed the list and
+            swallowed this sentence. The badge beside it said "Nothing
+            blocking", the hero said "Ready to publish: Yes", and the one line
+            telling the organiser where the control lives never rendered — on
+            the screen whose heading is "What is stopping this from being
+            published?".
+            
+            Publishing living in the editor is deliberate. Saying so is what
+            makes it navigable rather than hidden.
+          */}
+          {publishable ? (
             <p className="text-[0.8125rem] text-muted-foreground">
-              Everything is filled in. Publish from the editor when you are ready.
+              Nothing is blocking it — publish from the editor when you are ready.
             </p>
-          ) : (
+          ) : null}
+
+          {blockers.length === 0 ? null : (
             <ul className="flex flex-col gap-2.5">
               {[...blocking, ...advisory].map((b) => (
                 <li key={b.key} className="flex items-start gap-2.5">
