@@ -36,10 +36,23 @@ async function interest(userId: string, categoryId: string) {
   await db.user_interests.create({ data: { user_id: userId, category_id: categoryId } })
 }
 
+/*
+ * Tracked, because nothing else deletes these.
+ *
+ * `cleanup(users, events)` takes users and events; categories were created and
+ * left behind by every run. CI never notices — each job gets a fresh database —
+ * but a local Postgres reused across a day accumulates them, and 58 rows named
+ * "Techno" is what the admin taxonomy screen was rendering when it was opened
+ * to be redesigned. A fixture that only tidies up in the environment where
+ * tidiness does not matter is not tidying up.
+ */
+const categories: string[] = []
+
 async function makeCategory(name: string) {
   const c = await db.categories.create({
     data: { name, slug: `${name}-${Math.random().toString(36).slice(2, 8)}` },
   })
+  categories.push(c.id)
   return c.id
 }
 
@@ -54,6 +67,13 @@ async function room() {
 
 afterAll(async () => {
   await cleanup(users, events)
+  // Interests first: `user_interests.category` is `onDelete: Cascade`, but the
+  // users are already gone by here, so this is belt and braces against a run
+  // that failed part-way through.
+  if (categories.length) {
+    await db.user_interests.deleteMany({ where: { category_id: { in: categories } } })
+    await db.categories.deleteMany({ where: { id: { in: categories } } })
+  }
   await closeDb()
 })
 
