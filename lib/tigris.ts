@@ -290,7 +290,22 @@ export function validateContentType(contentType: string, folder: UploadFolder): 
       "audio/mpeg",
       "audio/mp4",
     ],
-    events: ["image/jpeg", "image/png", "image/webp"],
+    /*
+     * `video/mp4` because an event gallery has always been able to hold a clip
+     * and could never receive one.
+     *
+     * The Gallery offers Type = Video, its file input accepts `video/mp4`, the
+     * help text specifies the encode down to faststart, `media-section.tsx`
+     * says "video has always been supported here", the seed attaches clips to
+     * two events, and the app's feed card cycles them. The only thing that said
+     * otherwise was this list, which had no comment — the one below it is about
+     * `sponsored`. So every organiser upload 400'd at the presigned-url step
+     * and the clip could only ever arrive by pasting a URL.
+     *
+     * The 20MB ceiling in `getMaxFileSize` was already sized for video; images
+     * are capped at 8MB by the form's own copy.
+     */
+    events: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
     /*
      * Deliberately narrower than `chat`, which allows GIF, QuickTime and audio.
      *

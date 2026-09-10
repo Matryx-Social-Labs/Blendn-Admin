@@ -388,6 +388,13 @@
       "observed": "1 failing ('renders a Toaster somewhere in the tree'); the vacuity guard stayed green, which is the point of having both",
       "reverted": true,
       "date": "2026-09-10"
+    },
+    "upload-accept-matches-gate.test.ts": {
+      "guards": "every content type the event form's ACCEPT map offers is accepted by validateContentType('events'), that the ACCEPT map was actually found (so the regex cannot go vacuous), and that the documented exclusion (application/pdf) stays excluded",
+      "mutation": "remove \"video/mp4\" from the events allowlist in lib/tigris.ts — the exact state the codebase was in when this was found",
+      "observed": "1 failing ('the events folder accepts every content type offered for video'); the vacuity guard and the pdf-exclusion guard stayed green",
+      "reverted": true,
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [
