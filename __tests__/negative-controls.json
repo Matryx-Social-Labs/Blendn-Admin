@@ -397,9 +397,9 @@
       "date": "2026-09-10"
     },
     "prisma-shorthand-ratchet.test.ts": {
-      "guards": "no NEW bare shorthand appears inside a Prisma `data:` block anywhere in app/ or lib/, that the baseline has no stale entries so shrinking stays deliberate, and that the scan found the known ones so the ratchet cannot go vacuous",
-      "mutation": "A: add a bare `ratchet_probe_field,` to the data block in app/api/mobile/message-requests/route.ts. B: convert `message,` there to a conditional spread WITHOUT pruning the baseline",
-      "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both",
+      "guards": "no NEW bare shorthand appears inside a Prisma `data:` block anywhere in app/ or lib/, that the baseline has no stale entries so shrinking stays deliberate, and that the scan found the known ones so the ratchet cannot go vacuous; and, added 2026-09-10, that no NEW Prisma write assembles its `data:` object in a variable — the blind spot that let the sixth outage through, because the shorthand scan only sees literal `data: {` blocks",
+      "mutation": "A: add a bare `ratchet_probe_field,` to the data block in app/api/mobile/message-requests/route.ts. B: convert `message,` there to a conditional spread WITHOUT pruning the baseline; C: add a `db.check_in_refusals.create({ data: sneakyPayload })` to lib/check-in-refusals.ts, a file not in INDIRECT_DATA. D: add a `lib/gone.ts` entry to INDIRECT_DATA for a file that does not exist",
+      "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both; C: 1 failing ('has not grown'), naming lib/check-in-refusals.ts. D: 1 failing ('has no stale entries'), naming lib/gone.ts. Both vacuity guards stayed green",
       "reverted": true,
       "date": "2026-09-10"
     }

@@ -272,7 +272,7 @@ const columns: ColumnDef<UserWithProfile>[] = [
     accessorKey: "interests",
     header: "Interests",
     cell: ({ row }) => {
-      const interests = row.original.profile?.interests || []
+      const interests = row.original.interests || []
       if (interests.length === 0) return <span className="text-muted-foreground">-</span>
 
       return (

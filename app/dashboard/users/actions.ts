@@ -21,10 +21,27 @@ export interface UserWithProfile {
     phone: string | null
     age: number | null
     location: string | null
-    interests: string[]
     onboarded: boolean
     created_at: Date
   } | null
+  /**
+   * The structured graph, not `profiles.interests`.
+   *
+   * Two columns have carried this name. `profiles.interests` is free text and
+   * is read by nothing the product does — matching ranks on `user_interests`,
+   * and the app has written only that since the edit-profile screen was fixed.
+   * So the free-text column froze at whatever a pre-change client last wrote.
+   *
+   * Measured on staging the day this changed: 37 profiles had a non-empty
+   * free-text column, 30 had a real graph, and **one** had both. This screen
+   * was rendering a dash for 29 people who have interests and a list for 36
+   * whose list matching cannot see.
+   *
+   * Top-level rather than under `profile`, matching the mobile payload, where
+   * the same split exists and the same naming caused the same bug in the
+   * client (`edit-profile.tsx` used to write the wrong one).
+   */
+  interests: string[]
   _count: {
     organized_events: number
     event_check_ins: number
@@ -85,11 +102,11 @@ export async function getUsers(
               phone: true,
               age: true,
               location: true,
-              interests: true,
               onboarded: true,
               created_at: true,
             },
           },
+          user_interests: { select: { category: { select: { name: true } } } },
           _count: {
             select: {
               organized_events: true,
@@ -111,7 +128,12 @@ export async function getUsers(
       })
     )
 
-    return { users: users as unknown as UserWithProfile[], total }
+    const shaped = users.map((user) => ({
+      ...user,
+      interests: user.user_interests.map((ui) => ui.category.name),
+    }))
+
+    return { users: shaped as unknown as UserWithProfile[], total }
   } catch (error) {
     logger.error("Error fetching users", { error: error instanceof Error ? error.message : String(error) })
     throw new Error("Failed to fetch users")
@@ -158,7 +180,21 @@ export async function updateUser(
             phone: data.profile.phone,
             age: data.profile.age,
             location: normalizedLocation,
-            interests: data.profile.interests,
+            /*
+             * Conditional, because the only caller never sends it.
+             *
+             * The Edit User dialog collects name, email, phone, age, location
+             * and onboarded — not interests — so this expression was always
+             * `undefined`, and under `strictUndefinedChecks` that is a runtime
+             * error rather than "leave the column alone". Every admin edit of
+             * a user with an existing profile row returned 500 and the toast
+             * read "Failed to update user".
+             *
+             * Sixth instance of this class, and the first the shorthand
+             * ratchet could not see: it scans literal `data: {` blocks and
+             * this write is assembled in `updateData` first.
+             */
+            ...(data.profile.interests !== undefined && { interests: data.profile.interests }),
             onboarded: data.profile.onboarded,
           },
         },

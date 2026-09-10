@@ -37,8 +37,28 @@ import { join } from "path"
  *
  * Comments are stripped first, so a field named in prose is not a hit — the
  * mistake `event-notifications-reachable.test.ts` was written to avoid. Only
- * `data: {` blocks are scanned, brace-matched, because that is the object every
- * Prisma write takes; a bare `create:` elsewhere is an ordinary literal.
+ * literal `data: {` blocks are scanned, brace-matched; a bare `create:`
+ * elsewhere is an ordinary literal.
+ *
+ * ## What this does NOT see, which is how the sixth one got through
+ *
+ * This file used to claim `data: {` "is the object every Prisma write takes".
+ * **That is false.** A write may assemble its object in a variable first —
+ * `const updateData = {...}; db.user.update({ data: updateData })` — and then
+ * nothing inside it is scanned at all.
+ *
+ * `app/dashboard/users/actions.ts` did exactly that, and its `profile.upsert`
+ * update branch passed `interests: data.profile.interests` where the only
+ * caller never sends `interests`. **Every admin edit of any user returned
+ * 500.** Found by pressing Save Changes on the staging dashboard, not by any
+ * test — this one included.
+ *
+ * So the second guard below enumerates the writes that build their object
+ * indirectly. It is a list of five, each checked by hand; a new one fails the
+ * build and the author decides then whether the object is safe. That is a
+ * smaller and sharper instrument than widening the scan to every member
+ * expression, which measured **220 hits across 50 files** and would have been
+ * noise a reviewer learns to skip.
  */
 const ROOT = join(__dirname, "..")
 
@@ -154,6 +174,83 @@ describe("bare shorthand in a Prisma data block", () => {
       const now = found[file] ?? []
       for (const f of fields) if (!now.includes(f)) stale.push(`${file} -> ${f}`)
     }
+    expect(stale).toEqual([])
+  })
+})
+
+/**
+ * Prisma writes whose `data:` is a variable, so the scan above cannot see them.
+ *
+ * Each was read by hand on 2026-09-10 and the reason it is safe is recorded.
+ * The value here is not the audit — it is that a **new** entry fails the build,
+ * because a variable-built `data` object is exactly where the sixth outage hid.
+ */
+const INDIRECT_DATA: Record<string, string> = {
+  "app/api/mobile/profiles/[userId]/route.ts":
+    "userUpdate — every field behind an explicit `!== undefined` guard",
+  "app/dashboard/moderation/reports/actions.ts":
+    "reviewed — three concrete values, no optional source",
+  "app/dashboard/users/actions.ts":
+    "updateData — the sixth outage lived here; interests is now a conditional spread",
+  "lib/mobile-auth.ts":
+    "unproven — a boolean picking between two literal blocks, both concrete",
+  "lib/product-events.ts":
+    "batch — a typed array of rows, built by recordProductEvent",
+}
+
+/**
+ * `data: <identifier>` on a Prisma call.
+ *
+ * Deliberately narrow: `lib/openapi/**` and `lib/api-response.ts` also write
+ * `data:` and neither is Prisma, so they are excluded by path rather than by
+ * trying to prove call sites from text.
+ */
+function scanIndirect(): Record<string, string[]> {
+  const found: Record<string, string[]> = {}
+  for (const abs of sourceFiles()) {
+    const rel = abs.slice(ROOT.length + 1).split(/[\\/]/).join("/")
+    if (rel.startsWith("lib/openapi/") || rel === "lib/api-response.ts") continue
+    const src = stripComments(readFileSync(abs, "utf8"))
+    const names = new Set<string>()
+    for (const line of src.split("\n")) {
+      // `const { data: session } = useSession()` is a destructuring rename.
+      if (/\b(?:const|let|var)\s*\{/.test(line)) continue
+      /*
+       * The leading class excludes `(data: LiveSnapshot)` — a parameter's type
+       * annotation, not a write. `data: true` is a select, not a write either.
+       */
+      for (const [, , name] of line.matchAll(
+        /(^|[^(\w$])data:\s*([A-Za-z_$][\w$]*)\s*(?=[,})]|$)/g
+      )) {
+        if (name === "true" || name === "false") continue
+        names.add(name)
+      }
+    }
+    if (names.size) found[rel] = [...names].sort()
+  }
+  return found
+}
+
+describe("Prisma writes that build their data object in a variable", () => {
+  const found = scanIndirect()
+
+  it("finds the known ones, so this guard is not scanning nothing", () => {
+    expect(Object.keys(found).length).toBeGreaterThan(2)
+  })
+
+  it("has not grown", () => {
+    /*
+     * A new file here is not automatically a bug — it is a write this file's
+     * main scan is structurally blind to, which is the state the sixth outage
+     * shipped in. Read the object, then add it to `INDIRECT_DATA` with why it
+     * is safe, or inline the literal so the scan above covers it.
+     */
+    const added = Object.keys(found).filter((f) => !(f in INDIRECT_DATA))
+    expect(added).toEqual([])
+  })
+
+  it("has no stale entries", () => {
+    const stale = Object.keys(INDIRECT_DATA).filter((f) => !(f in found))
     expect(stale).toEqual([])
   })
 })
