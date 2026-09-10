@@ -8,7 +8,10 @@ import { Form } from "@/components/ui/form"
 import { toast } from "sonner"
 import type { LocationData } from "@/components/location-picker"
 import { eventFormSchema, type EventFormValues } from "@/components/event-form/schema"
-import { BasicInfoSection } from "@/components/event-form/basic-info-section"
+import {
+  BasicInfoSection,
+  type CategoryOption,
+} from "@/components/event-form/basic-info-section"
 import { LocationSection } from "@/components/event-form/location-section"
 import { ScheduleSection } from "@/components/event-form/schedule-section"
 import { AmenitiesSection, type AmenityOption } from "@/components/event-form/amenities-section"
@@ -30,7 +33,7 @@ interface EventFormProps {
   submitLabel?: string
   isSubmitting?: boolean
   isEditing?: boolean
-  categories?: Array<{ id: string; name: string }>
+  categories?: CategoryOption[]
   /** The seeded amenity vocabulary. Empty is a valid state: no picker drawn. */
   amenities?: AmenityOption[]
 }

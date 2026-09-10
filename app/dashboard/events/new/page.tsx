@@ -25,14 +25,23 @@ export default async function NewEventPage() {
     redirect("/dashboard/events")
   }
 
+  /*
+   * With the parent, because the picker groups by it.
+   *
+   * The taxonomy is two levels — `Sports` with children like `IPL screening`,
+   * separated deliberately because they draw different crowds — and the form
+   * rendered all 89 as one alphabetised wall of checkboxes, so `Sports` and
+   * `IPL screening` sat as peers ~1000px apart. `/dashboard/categories` has
+   * grouped them by parent all along.
+   */
   const categories = await db.categories.findMany({
     select: {
       id: true,
       name: true,
+      parent_id: true,
+      parent: { select: { name: true } },
     },
-    orderBy: {
-      name: "asc",
-    },
+    orderBy: [{ parent: { name: "asc" } }, { name: "asc" }],
   })
 
   /*

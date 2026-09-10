@@ -11,6 +11,19 @@ Next.js 15 (App Router) web admin dashboard + REST API backend for **Blendn**, a
 
 Both surfaces share one PostgreSQL database via Prisma.
 
+## Testing and review — read this first
+
+`docs/TESTING-PLAYBOOK.md` is the chain every page, path and fix goes through:
+the design chain (`ecc dashboard-builder` → `ecc frontend-design-direction` →
+`/design-html`), driving the screen in a browser and measuring it, the six gates,
+the specialist fan-out (coverage EVERY time, plus schema, latency, API, security,
+comment-rot, a11y by trigger), how to brief a specialist so it returns findings
+rather than advice, and the local loop.
+
+It is not a menu. The expensive failures on this project have all been one shape
+— a check that was available and was not run — and the playbook's last section
+lists what each check has already caught.
+
 ## Common Commands
 
 ```bash
