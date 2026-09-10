@@ -54,7 +54,18 @@ function ChartFrame({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-bold">{title}</h3>
+        {/*
+          `h2`, not `h3`.
+
+          `site-header` owns the page's only `h1` and bodies start at `h2`, per
+          the design system. Every chart panel rendered an `h3` — and on the
+          admin overview those panels sit in the row *above* the `h2` tables, so
+          the document outline read h1 → h3 → h3 → h2 → h2. A reader navigating
+          by heading meets two subsections before their parent exists.
+
+          They are siblings on screen; they are siblings in the outline now.
+        */}
+        <h2 className="text-sm font-bold">{title}</h2>
         <span className="flex items-baseline gap-3">
           {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
           {action}
