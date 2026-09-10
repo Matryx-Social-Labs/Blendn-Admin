@@ -165,7 +165,7 @@ function SortableMediaItem({
               */}
               {mediaType === "image" && (
                 <p className="text-xs text-muted-foreground">
-                  Square, 2048 × 2048 (1600 minimum) · JPEG or PNG · up to 8 MB
+                  Square, 2048 × 2048 (1600 × 1600 minimum) · JPEG or PNG · up to 8 MB
                 </p>
               )}
               {mediaType === "video" && (
