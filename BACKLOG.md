@@ -111,25 +111,21 @@ list-and-scan workaround around it.
 - **Suggested Fix**: Add a `stop()`/`stopAll()` method and call it from `server.ts`'s shutdown handler.
 - **Estimated Effort**: S
 
-### 1.3 Unused, fully-built `data-table.tsx` component
-- **Priority**: Low
+### 1.3 Unused, fully-built `data-table.tsx` component — FIXED
+- **Priority**: Low (was)
 - **Category**: Missing Features / Code Quality
 - **File(s)**: `components/data-table.tsx` (807 lines)
-- **Evidence**: A complex drag-and-drop, multi-tab table component exists but is never imported anywhere in the app — either dead weight or an unfinished feature that was scaffolded and abandoned.
-- **Suggested Fix**: Confirm intent with the team; either wire it into a screen that needs it or delete it.
-- **Estimated Effort**: S (Needs Verification)
+- **Resolved (2026-06-27, see `SHADCN_MIGRATION.md`)**: confirmed dead (zero importers), deleted alongside `app/dashboard/events-table.tsx` (see 3.1). `@dnd-kit/*` deps were **not** removed — `components/event-form/media-section.tsx` still uses them for drag-reorder.
 
 ---
 
 ## 2. Broken Logic
 
-### 2.1 Socket room joins have no membership/authorization check
-- **Priority**: Critical
+### 2.1 Socket room joins have no membership/authorization check — FIXED
+- **Priority**: Critical (was)
 - **Category**: Broken Logic / Backend-API
-- **File(s)**: `lib/socket-server.ts:303-363` (`join:chat`, `join:event`, `join:conversation` handlers)
-- **Evidence**: Any authenticated socket can join any chat group, event room, or private conversation room by ID — there's no DB check that the joining user is actually a member/participant. This allows cross-group message eavesdropping by any authenticated user who can guess/enumerate an ID.
-- **Suggested Fix**: Before completing a `join:*`, query membership (chat_group_members / event participant / conversation participant) and reject with an error event if unauthorized.
-- **Estimated Effort**: L
+- **File(s)**: `lib/socket-server.ts` — `guardJoin()` (~line 302) plus `canJoinChat`/`canJoinEvent`/`canJoinConversation`, called from the `join:chat`/`join:event`/`join:conversation` handlers.
+- **Resolved (verified 2026-09-10)**: every `join:*` handler now awaits a DB-backed membership check via `guardJoin()` before calling `socket.join()`, and denies with a `FORBIDDEN` error event (fail-closed, including on a thrown/malformed-ID check). Also independently confirmed as "Verified clean" in `SECURITY_RELIABILITY_BACKLOG.md`. This entry was stale — kept for history; do not re-open without re-reading the current code.
 
 ### 2.2 Socket.io CORS allows wildcard origin
 - **Priority**: High
@@ -191,13 +187,11 @@ list-and-scan workaround around it.
 
 ## 3. UI Issues
 
-### 3.1 Duplicate events-table implementations
-- **Priority**: Medium
+### 3.1 Duplicate events-table implementations — FIXED
+- **Priority**: Medium (was)
 - **Category**: UI / Code Quality
 - **File(s)**: `components/events-table.tsx` (272 lines) vs `app/dashboard/events-table.tsx` (500 lines)
-- **Evidence**: Two separate table components for the same entity, one simpler and one with sorting/filtering/column visibility/row selection — divergent behavior depending on which page is touched next.
-- **Suggested Fix**: Consolidate into a single reusable `EventsTable`.
-- **Estimated Effort**: M/L
+- **Resolved (2026-06-27, see `SHADCN_MIGRATION.md`)**: investigation found `app/dashboard/events-table.tsx` and `components/data-table.tsx` had zero importers anywhere — both were dead, not a true divergent-behavior risk. Deleted both; `components/events-table.tsx` is the sole `EventsTable`.
 
 ### 3.2 Missing empty-state UI on organisers/venue-owners tables
 - **Priority**: Medium
@@ -247,13 +241,11 @@ list-and-scan workaround around it.
 - **Suggested Fix**: Standardize on the shared `Tabs` component.
 - **Estimated Effort**: XS
 
-### 3.8 No upload progress indicator on event form
-- **Priority**: Low
+### 3.8 No upload progress indicator on event form — FIXED
+- **Priority**: Low (was)
 - **Category**: UI
-- **File(s)**: `components/event-form.tsx`
-- **Evidence**: Cover image upload only disables the submit button — no percentage/progress bar, so large uploads look frozen.
-- **Suggested Fix**: Surface upload progress (S3/Tigris presigned upload already supports progress events via XHR/fetch).
-- **Estimated Effort**: S
+- **File(s)**: `components/event-form/upload.ts`
+- **Resolved (2026-06-27, see `SHADCN_MIGRATION.md`)**: added alongside the event-form split, not skipped. The Tigris/S3 PUT moved from `fetch()` to `XMLHttpRequest` to get real `onprogress` events, rendered via shadcn `Progress` with percentage on both cover-image and gallery uploads.
 
 ### 3.9 No list virtualization on large tables
 - **Priority**: Low
@@ -278,9 +270,10 @@ list-and-scan workaround around it.
 ### 4.1 Oversized components mixing data, logic, and rendering
 - **Priority**: Medium
 - **Category**: Code Quality
-- **File(s)**: `components/event-form.tsx` (1,248 lines); `app/dashboard/actions.ts` (1,150 lines); `components/chat-feed.tsx` (622 lines); `app/dashboard/users/users-table.tsx` (729 lines)
+- **File(s)**: `app/dashboard/actions.ts` (~1,002 lines, current); `components/chat-feed.tsx`; `app/dashboard/users/users-table.tsx` (~689 lines, current)
 - **Evidence**: Each combines form/validation/state/async logic and rendering in one file, making changes risky and hard to test in isolation.
-- **Suggested Fix**: Split into smaller sub-components/hooks (e.g. event-form sections, server actions grouped by entity).
+- **Resolved for `components/event-form.tsx`** (2026-06-27, see `SHADCN_MIGRATION.md`): split into `components/event-form/*` (`schema.ts`, `form-section.tsx`, `timezone-select.tsx`, `upload.ts`, and per-section components); `event-form.tsx` itself is now a ~160-line orchestrator. Removed from this file list.
+- **Suggested Fix**: Split into smaller sub-components/hooks (e.g. server actions grouped by entity).
 - **Estimated Effort**: L/XL
 
 ### 4.2 console.error/console.log used instead of `lib/logger.ts` throughout API routes
@@ -323,13 +316,11 @@ list-and-scan workaround around it.
 - **Suggested Fix**: Replace literals with named constants from `lib/constants.ts`.
 - **Estimated Effort**: S
 
-### 4.7 Unused dependencies (needs verification)
-- **Priority**: Low
+### 4.7 Unused dependencies (needs verification) — RESOLVED, kept
+- **Priority**: Low (was)
 - **Category**: Code Quality
 - **File(s)**: `package.json` — `@dnd-kit/*`, `leaflet`/`@types/leaflet`
-- **Evidence**: Grep across `app/`/`lib/` shows usage only in `components/event-form.tsx`, `components/data-table.tsx`, `components/location-picker.tsx`. If `data-table.tsx` (4.x / 1.3 above) is genuinely dead, `@dnd-kit/*` may be removable too.
-- **Suggested Fix**: Confirm actual usage post-decision on 1.3, then prune `package.json`.
-- **Estimated Effort**: XS (Needs Verification)
+- **Resolved (2026-06-27, see `SHADCN_MIGRATION.md`)**: `data-table.tsx` was confirmed dead and deleted (1.3), but `@dnd-kit/*` is still genuinely used by `components/event-form/media-section.tsx` for drag-reorder — kept, not removable. `leaflet` usage in `location-picker.tsx` untouched/unverified.
 
 ---
 
@@ -439,7 +430,7 @@ list-and-scan workaround around it.
 # Feature Completion Checklist
 
 - [ ] Real-time / Socket.io
-    - [ ] Room authorization on join (chat/event/conversation) — **Critical, unimplemented**
+    - [x] Room authorization on join (chat/event/conversation) — fixed, see 2.1
     - [ ] CORS origin restriction (currently wildcard)
     - [ ] Scheduler graceful shutdown
     - [ ] Typing-indicator membership re-check
@@ -454,19 +445,19 @@ list-and-scan workaround around it.
 - [ ] Moderation
     - [ ] Test coverage for auto-mute/unmute logic
     - [ ] Doc/config threshold reconciliation
-    - [ ] OPENAI_API_KEY documented in env example
+    - [x] OPENAI_API_KEY documented in env example — already present in `.env.example`
 
 - [ ] Dashboard — Events
-    - [ ] Consolidate duplicate events-table components
-    - [ ] Split `event-form.tsx` into sub-components
-    - [ ] Upload progress indicator
+    - [x] Consolidate duplicate events-table components — fixed, see 3.1
+    - [x] Split `event-form.tsx` into sub-components — fixed, see 4.1
+    - [x] Upload progress indicator — fixed, see 3.8
     - [ ] Pagination on sponsored-messages list
 
 - [ ] Dashboard — Users / Organisers / Venue Owners
     - [ ] Loading skeletons on users page
     - [ ] Empty states on organisers/venue-owners tables
-    - [ ] Split `users-table.tsx`
-    - [ ] Split `app/dashboard/actions.ts`
+    - [ ] Split `users-table.tsx` (~689 lines, current)
+    - [ ] Split `app/dashboard/actions.ts` (~1,002 lines, current)
 
 - [ ] Dashboard — Chat / Moderation Queue
     - [ ] Fix race condition on filter/page fetch (AbortController)
@@ -474,10 +465,10 @@ list-and-scan workaround around it.
     - [ ] Accessible labels on icon buttons
 
 - [ ] Cross-cutting UI
-    - [ ] Design tokens for hardcoded brand colors
-    - [ ] Consistent spacing scale
-    - [ ] Standardize on shared `Tabs` component
-    - [ ] Decide fate of unused `data-table.tsx` (+ possibly `@dnd-kit/*` deps)
+    - [x] Design tokens for hardcoded brand colors — fixed, see `SHADCN_MIGRATION.md` project-wide sweep
+    - [ ] Consistent spacing scale — last item remaining from the shadcn migration, not started
+    - [x] Standardize on shared `Tabs` component — fixed (`event-messaging.tsx`), see `SHADCN_MIGRATION.md`
+    - [x] Decide fate of unused `data-table.tsx` (+ possibly `@dnd-kit/*` deps) — fixed, see 1.3/4.7
 
 - [ ] Backend API Hygiene
     - [ ] Replace console.* with logger.* repo-wide
@@ -497,7 +488,7 @@ list-and-scan workaround around it.
 # Execution Order
 
 **Phase 1 — Critical security/crash risk**
-- Socket room authorization on join (2.1)
+- ~~Socket room authorization on join (2.1)~~ — done
 - Socket CORS wildcard (2.2)
 - CRON endpoint fail-closed (2.4)
 - RBAC enforcement audit on moderation routes (5.5)
@@ -514,18 +505,18 @@ list-and-scan workaround around it.
 - Hardcoded limits → constants (4.6)
 
 **Phase 3 — Dashboard UI completeness**
-- Consolidate duplicate events-table (3.1)
+- ~~Consolidate duplicate events-table (3.1)~~ — done
 - Empty states (3.2), loading skeletons (3.3)
 - Accessibility labels (3.4)
 - Race condition in moderation queue (2.7)
 - Optional-chain guard on chat_group (2.8)
 - Clipboard error handling (3.10)
-- Upload progress indicator (3.8)
+- ~~Upload progress indicator (3.8)~~ — done
 
 **Phase 4 — Code quality / structural cleanup**
-- Split oversized components (4.1)
-- Resolve unused `data-table.tsx` and dependent deps (1.3, 4.7)
-- Design tokens for colors (3.5), spacing scale (3.6), Tabs standardization (3.7)
+- Split remaining oversized components (4.1) — `event-form.tsx` already done; `actions.ts`/`users-table.tsx` still open
+- ~~Resolve unused `data-table.tsx` and dependent deps (1.3, 4.7)~~ — done
+- ~~Design tokens for colors (3.5)~~ — done; spacing scale (3.6) still open; ~~Tabs standardization (3.7)~~ — done
 - Scheduler graceful shutdown (1.2)
 - Typing indicator membership check (2.3)
 

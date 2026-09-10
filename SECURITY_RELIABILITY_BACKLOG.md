@@ -40,10 +40,10 @@ Scope: `blendn-admin/` findings from an end-to-end flow audit (backend authoriza
   - **Issue**: Push `body` is set to `"${senderName}: ${message.slice(0,80)}"` — renders on a locked device.
   - **Suggested fix**: Generic body ("New message request from X"); show real content only in-app after unlock.
 
-- [ ] **Rate limiting is in-memory per-process, not shared across replicas**
-  - **File**: `lib/rate-limit.ts:13-16`
-  - **Issue**: Uses a plain in-process `Map`. Railway can run multiple replicas — rate limits (including on `/api/mobile/auth/signin`) reset/bypass per instance, making brute-force/credential-stuffing protection unreliable at scale.
-  - **Suggested fix**: Move to a shared store (Redis, or Railway's equivalent) for rate-limit counters.
+- [ ] **Rate limiting silently degrades to in-memory per-process without `REDIS_URL`**
+  - **File**: `lib/rate-limit-store.ts`
+  - **Update (2026-09-10)**: this item originally described `lib/rate-limit.ts` as using only a plain in-process `Map` with no shared-store option. That's stale — `lib/rate-limit-store.ts`'s `hit()` now backs onto Redis when `REDIS_URL` is set (fixed window via `INCR`/`PEXPIRE`), falling back to the in-process `Map` only when Redis is unset or unreachable. The residual gap is operational, not code: `REDIS_URL` is documented as "optional" in `CLAUDE.md`'s env list and is **missing entirely from `.env.example`**, so a fresh deploy gets the weaker per-replica behavior with no signal that a stronger mode exists.
+  - **Suggested fix**: Add `REDIS_URL` to `.env.example` (done alongside this note) and confirm it's actually set in every Railway environment that runs more than one replica — check, don't assume.
 
 ### Low priority
 
