@@ -116,9 +116,19 @@ export function PacingChart({
       >
         <LineChart data={data} margin={{ left: 4, right: 12, top: 8 }}>
           <defs>
+            {/*
+              The brand gradient, from the tokens rather than from two literals.
+
+              `#8F49AA` is the purple at its *light-theme* lightness. The design
+              system pins the dark theme's `--chart-3` higher (L 0.62 against
+              0.532) precisely because "the brand purple at its true lightness
+              does not carry against #0D0C0C" — and this app is dark-pinned, so
+              the hardcoded pair was drawing the one value the doc says is too
+              dark to read here.
+            */}
             <linearGradient id="pacing-brand" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#F05423" />
-              <stop offset="100%" stopColor="#8F49AA" />
+              <stop offset="0%" stopColor="var(--chart-1)" />
+              <stop offset="100%" stopColor="var(--chart-3)" />
             </linearGradient>
           </defs>
           <CartesianGrid vertical={false} stroke="var(--chart-grid)" />

@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+
+import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, LayerGroup, TileLayer } from "leaflet"
 import {
   IconBuildingCommunity,
@@ -48,13 +50,28 @@ import {
 
 const ACCURACY_CAP = DEFAULT_ACCURACY_POLICY.cap
 
-const COLOURS = {
-  extent: "#F05423",
-  buffer: "#BE5C71",
-  accuracy: "#9a948f",
-  other: "#8F49AA",
-  bad: "#e5484d",
-} as const
+/*
+ * Read from the tokens rather than copied from them.
+ *
+ * These were the light-theme hexes, hardcoded, on a dark-pinned app — and three
+ * of the five are brand values that already exist in `globals.css` twice, with
+ * the dark pair deliberately lifted so the purple carries against `#0D0C0C`.
+ *
+ * A function rather than a constant because `getComputedStyle` needs a
+ * document: at module scope this would run during SSR and bake the fallback in.
+ */
+function colours() {
+  return {
+    extent: themeColour("--chart-1", "#F05423"),
+    buffer: themeColour("--chart-2", "#BE5C71"),
+    accuracy: themeColour("--muted-foreground", "#9a948f"),
+    other: themeColour("--chart-3", "#8F49AA"),
+    bad: themeColour("--destructive", "#e5484d"),
+    // The handle outline. `--background` is the app's ink, so it tracks the theme
+    // rather than assuming the dark one.
+    ink: themeColour("--background", "#0D0C0C"),
+  }
+}
 
 export interface GeofenceEditorProps {
   value: Geofence | null
@@ -75,6 +92,13 @@ export function GeofenceEditor({
   editable = true,
   height = 420,
 }: GeofenceEditorProps) {
+  /*
+   * Resolved in the body rather than at module scope: `getComputedStyle` needs a
+   * document, and at module scope this would evaluate once during SSR and bake
+   * the fallbacks in for the life of the process.
+   */
+  const COLOURS = colours()
+
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<LeafletMap | null>(null)
   const layerRef = useRef<LayerGroup | null>(null)
@@ -261,7 +285,7 @@ export function GeofenceEditor({
         const edge = destination(centre, 90, fence.radius)
         const radiusMarker = L.marker(edge, {
           draggable: true,
-          icon: handle(13, "#fff", "#0D0C0C"),
+          icon: handle(13, "#fff", COLOURS.ink),
         }).addTo(group)
         radiusMarker.bindTooltip("Drag to set the radius", { direction: "right" })
         radiusMarker.on("dragend", (e) => {
@@ -316,7 +340,7 @@ export function GeofenceEditor({
           const first = i === 0 && drawing && fence.ring.length >= 3
           const marker = L.marker(point, {
             draggable: true,
-            icon: handle(first ? 16 : 12, "#fff", crossed ? COLOURS.bad : "#0D0C0C"),
+            icon: handle(first ? 16 : 12, "#fff", crossed ? COLOURS.bad : COLOURS.ink),
           }).addTo(group)
           if (first) marker.bindTooltip("Click to close the outline", { direction: "top" })
 
@@ -477,6 +501,12 @@ export function GeofenceEditor({
       ) : null}
 
       <div className="relative overflow-hidden rounded-xl border border-border-strong">
+        {/*
+          OpenStreetMap's own unloaded-tile colour, deliberately not a brand
+          token: this is what the map looks like before tiles arrive, and
+          matching the app's surface would make a loading map read as a broken
+          one. The literal is the map's, not the design system's.
+        */}
         <div ref={containerRef} style={{ height }} className="bg-[#e8e4de]" />
 
         <div className="absolute right-2.5 top-2.5 z-[800] flex overflow-hidden rounded-lg border border-border-strong bg-background/90 p-0.5 backdrop-blur">

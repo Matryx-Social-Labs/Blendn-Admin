@@ -17,12 +17,51 @@ import {
 
 import type { DashboardRole } from "@/lib/dashboard-types"
 
+/**
+ * What a destination is *for*, which is what a heading over it should say.
+ *
+ * An admin sees eighteen destinations. Flat, under one label, that is a list
+ * you read rather than scan — and the design system's own rule is that
+ * "hierarchy comes from type, not boxes", which the nav had none of either way.
+ *
+ * Grouped by the question each item answers, not by table name:
+ *
+ *   decisions  something is waiting on a human. Every badge lives here.
+ *   supply     what is on the platform to go to, and who put it there
+ *   people     who is on it
+ *   commercial money
+ *   setup      vocabulary and settings that change rarely
+ *   record     what already happened
+ *
+ * `Overview` has no group on purpose: it is the landing page, and a heading
+ * over a single item is a heading that says nothing.
+ */
+export type NavGroup = "decisions" | "supply" | "people" | "commercial" | "setup" | "record"
+
+/**
+ * Render order and headings.
+ *
+ * Decisions first because they are the only ones with an SLA — the moderation
+ * queue is ordered oldest-first for the same reason. Record last because it is
+ * the only group nobody opens unless something has already gone wrong.
+ */
+export const NAV_GROUPS: { key: NavGroup; label: string }[] = [
+  { key: "decisions", label: "Needs a decision" },
+  { key: "supply", label: "Supply" },
+  { key: "people", label: "People" },
+  { key: "commercial", label: "Commercial" },
+  { key: "setup", label: "Setup" },
+  { key: "record", label: "Record" },
+]
+
 export interface DashboardNavItem {
   title: string
   description: string
   url: string
   icon: typeof IconDashboard
   allowedRoles: DashboardRole[]
+  /** Which heading it sits under. Absent means "above the first heading". */
+  group?: NavGroup
   /** Renders a count next to the item. */
   badgeKey?: "pendingFlags" | "pendingApplications" | "pendingClaims"
   isActive?: (pathname: string) => boolean
@@ -57,6 +96,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/moderation",
     icon: IconFlag,
     allowedRoles: ["app_admin"],
+    group: "decisions",
     badgeKey: "pendingFlags",
   },
   {
@@ -65,6 +105,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/events",
     icon: IconListDetails,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
+    group: "supply",
     isActive: (pathname) =>
       pathname === "/dashboard/events" ||
       pathname === "/dashboard/events/new" ||
@@ -76,6 +117,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/attendees",
     icon: IconUsers,
     allowedRoles: ["organizer"],
+    group: "people",
   },
   {
     title: "My venues",
@@ -83,6 +125,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/venues",
     icon: IconBuildingStore,
     allowedRoles: ["venue_owner"],
+    group: "supply",
   },
   {
     // Sponsor-side. A sponsor sees their own placements and campaigns and
@@ -92,6 +135,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/placements",
     icon: IconMicrophone2,
     allowedRoles: ["sponsor"],
+    group: "commercial",
   },
   {
     title: "Brand",
@@ -99,6 +143,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/brand",
     icon: IconBuildingStore,
     allowedRoles: ["sponsor"],
+    group: "commercial",
   },
   {
     title: "Chatrooms",
@@ -110,6 +155,7 @@ export const dashboardNav: DashboardNavItem[] = [
     // themselves. Every screen behind this item gates on the same resolver, so
     // the nav and the pages cannot disagree the way they did before.
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
+    group: "people",
     isActive: (pathname) =>
       pathname === "/dashboard/chatrooms" || pathname.endsWith("/messaging"),
   },
@@ -119,6 +165,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/users",
     icon: IconUsers,
     allowedRoles: ["app_admin"],
+    group: "people",
   },
   {
     title: "Organisers",
@@ -126,6 +173,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/organisers",
     icon: IconMicrophone2,
     allowedRoles: ["app_admin"],
+    group: "supply",
   },
   {
     title: "Venues",
@@ -140,6 +188,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/venues",
     icon: IconBuildingStore,
     allowedRoles: ["app_admin"],
+    group: "supply",
   },
   {
     title: "Leads",
@@ -147,6 +196,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/leads",
     icon: IconInbox,
     allowedRoles: ["app_admin"],
+    group: "commercial",
   },
   {
     /*
@@ -166,6 +216,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/claims",
     icon: IconFileCheck,
     allowedRoles: ["app_admin"],
+    group: "decisions",
     badgeKey: "pendingClaims",
     isActive: (pathname) => pathname.startsWith("/dashboard/claims"),
   },
@@ -175,6 +226,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/sponsors",
     icon: IconBuildingStore,
     allowedRoles: ["app_admin"],
+    group: "commercial",
   },
   {
     // Sponsored copy is the only content on the platform reviewed BEFORE it is
@@ -186,6 +238,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/creative-review",
     icon: IconFlag,
     allowedRoles: ["app_admin"],
+    group: "decisions",
   },
   {
     // A ledger, not a checkout. It lists PLACEMENTS rather than charges, because
@@ -195,6 +248,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/charges",
     icon: IconReceipt,
     allowedRoles: ["app_admin"],
+    group: "commercial",
   },
   {
     title: "Applications",
@@ -202,6 +256,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/onboarding",
     icon: IconInbox,
     allowedRoles: ["app_admin"],
+    group: "decisions",
     badgeKey: "pendingApplications",
   },
   {
@@ -210,6 +265,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/organisations",
     icon: IconBuilding,
     allowedRoles: ["app_admin"],
+    group: "supply",
   },
   {
     // The host's own copy of the above. Two screens rather than one with a
@@ -221,6 +277,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/organisation",
     icon: IconBuilding,
     allowedRoles: ["organizer", "venue_owner", "sponsor"],
+    group: "setup",
   },
   {
     // Categories were seeded by a script and by nothing else — an admin could
@@ -230,6 +287,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/categories",
     icon: IconCategory,
     allowedRoles: ["app_admin"],
+    group: "setup",
   },
   {
     title: "Amenities",
@@ -238,6 +296,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/amenities",
     icon: IconCategory,
     allowedRoles: ["app_admin"],
+    group: "setup",
   },
   {
     // The login page has always advertised "Exportable reporting". Until now
@@ -247,6 +306,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/reports",
     icon: IconFileSpreadsheet,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
+    group: "record",
   },
   {
     // `audit_logs` was written by every sensitive action and read by nothing.
@@ -257,6 +317,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/audit",
     icon: IconHistory,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
+    group: "record",
   },
 ]
 
@@ -274,6 +335,29 @@ export const unlistedRoutes = ["/dashboard/settings", "/dashboard/venue-owners"]
 export function visibleNavFor(role: string | undefined): DashboardNavItem[] {
   if (!role) return []
   return dashboardNav.filter((item) => item.allowedRoles.includes(role as DashboardRole))
+}
+
+/**
+ * The same items, under their headings, with empty groups dropped.
+ *
+ * Dropping is the part that matters. A sponsor sees three destinations; four
+ * empty headings above them would be worse than no headings at all, and it is
+ * exactly what a static group list produces once the role gate has run.
+ */
+export function groupedNavFor(
+  role: string | undefined
+): { label: string | null; items: DashboardNavItem[] }[] {
+  const visible = visibleNavFor(role)
+  const out: { label: string | null; items: DashboardNavItem[] }[] = []
+
+  const ungrouped = visible.filter((i) => !i.group)
+  if (ungrouped.length) out.push({ label: null, items: ungrouped })
+
+  for (const { key, label } of NAV_GROUPS) {
+    const items = visible.filter((i) => i.group === key)
+    if (items.length) out.push({ label, items })
+  }
+  return out
 }
 
 /**

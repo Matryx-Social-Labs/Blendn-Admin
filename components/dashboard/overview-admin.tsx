@@ -272,7 +272,17 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
                 description="Aggregates from each event's city — the expansion signal once volume exists."
               />
             }
-            footer={<span>saves = demand ahead of RSVP</span>}
+            /*
+              Hidden with the column it explains.
+
+              `Saves` is `secondary: true`, so `data-table` drops it below the
+              container's 2xl — and at 375 this caption sat under a table with
+              no Saves column in it, defining a word the reader could not see.
+              The same class on both keeps the legend and its column together.
+            */
+            footer={
+              <span className="hidden @2xl/main:inline">saves = demand ahead of RSVP</span>
+            }
           />
         </div>
       </div>
