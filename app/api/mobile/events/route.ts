@@ -494,14 +494,21 @@ export async function GET(request: NextRequest) {
       const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
       events = pageIds.map((id) => eventMap.get(id)!).filter(Boolean)
     } else {
-      events = await db.events.findMany({
-        where,
-        select: eventListSelect,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-      })
-      totalCount = await db.events.count({ where })
+      /*
+       * Both at once. `count` needs only `where`, so awaiting the page first
+       * added a full sequential round trip to every cache miss on the
+       * discovery feed — the highest-traffic read in the product.
+       */
+      ;[events, totalCount] = await Promise.all([
+        db.events.findMany({
+          where,
+          select: eventListSelect,
+          orderBy,
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        db.events.count({ where }),
+      ])
     }
 
     setCache(cacheKey, {

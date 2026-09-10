@@ -25,7 +25,17 @@ export default async function EventsPage() {
    */
   const where = await visibleEventsWhere(session.user)
 
-  const events = await db.events.findMany({
+  /*
+   * The rows and the total start together; only the attendance counts wait.
+   *
+   * `count({ where })` needs nothing but `where`, so awaiting the page of rows
+   * first cost a full sequential round trip for no reason —
+   * `distinctAttendeeCounts` is the only one of the three that genuinely needs
+   * the ids. Measured by a latency pass, which found the same shape in
+   * `app/api/mobile/events/route.ts`.
+   */
+  const [events, total] = await Promise.all([
+    db.events.findMany({
     where,
     orderBy: { start_time: "desc" },
     // Bounded, and the count below says so rather than letting a truncated
@@ -48,7 +58,9 @@ export default async function EventsPage() {
       organizer: { select: { name: true, email: true } },
       _count: { select: { rsvps: true } },
     },
-  })
+    }),
+    db.events.count({ where }),
+  ])
 
   /*
    * Arrivals are DISTINCT PEOPLE, from the module that owns the question.
@@ -61,10 +73,7 @@ export default async function EventsPage() {
    * counted them once. That is W17 in a tenth place, on a screen built after
    * W17 shipped.
    */
-  const [total, arrivals] = await Promise.all([
-    db.events.count({ where }),
-    distinctAttendeeCounts(events.map((event) => event.id)),
-  ])
+  const arrivals = await distinctAttendeeCounts(events.map((event) => event.id))
 
   const rows: EventRow[] = events.map((event) => ({
     id: event.id,

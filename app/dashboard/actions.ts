@@ -15,6 +15,7 @@ import { loopClosure } from "@/lib/loop-closure"
 import { activeSince } from "@/lib/product-events"
 import { cityDemand } from "@/lib/demand"
 import { cityKey } from "@/lib/address"
+import { VENUE_INDEX_PAGE } from "@/lib/constants"
 import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
@@ -361,6 +362,8 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     funnel,
     supplyRows,
     cityRows,
+    demandRows,
+    checkInsPrior,
   ] = await Promise.all([
     /*
      * All four queues, from the module the sidebar badges also read.
@@ -472,6 +475,25 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
         _count: { select: { rsvps: true, favorites: true } },
       },
     }),
+    /*
+     * Moved up from the tail, where it was costing two sequential round trips
+     * for nothing.
+     *
+     * It ran after wave 2 (`organisers`/`lastEvents`), which really does depend
+     * on `supplyRows`. `cityDemand` depends on neither — it reads `city_demand`
+     * and `events` directly — so it sat behind a wave it has no relationship
+     * with, purely because of where the `await` happened to be written.
+     * Measured by a latency pass; the fix is moving two lines.
+     */
+    cityDemand(50),
+    /*
+     * Same: the previous window's arrivals need only `range`, which wave 1
+     * already has. It was the LAST thing the function did, in a single-item
+     * `Promise.all`, after waves 1, 2 and 3.
+     */
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inPrior },
+    }),
   ])
 
   /*
@@ -556,7 +578,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
    * appear at all -- which is exactly the city the number is for: somewhere
    * people are looking and nobody is supplying.
    */
-  for (const row of await cityDemand(50)) {
+  for (const row of demandRows) {
     const existing = cityMap.get(row.cityKey)
     if (existing) {
       existing.waiting = row.waiting
@@ -572,25 +594,6 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
       })
     }
   }
-
-  /*
-   * One comparison left, and it is the naturally windowed one.
-   *
-   * The cumulative-total deltas went with their tiles. They compared a
-   * running total against its own value at `range.from`, which is correct
-   * arithmetic in service of a question nobody has — "the number that only
-   * goes up went up" — and it cost two extra counts on a screen that already
-   * fires more round trips than it should.
-   *
-   * Arrivals are different: the count IS the window, so this window against
-   * the previous one is a real comparison and the tile can honestly carry an
-   * arrow.
-   */
-  const [checkInsPrior] = await Promise.all([
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inPrior },
-    }),
-  ])
 
   return {
     role: "app_admin",
@@ -931,35 +934,73 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
  * doing"; this answers "what exists and who owns it", which is an operational
  * question with a different shape and a different sort order.
  */
-export async function getVenueRecords(): Promise<VenueRecordRow[]> {
+/**
+ * The admin venue index.
+ *
+ * ## Bounded, and the screen says so
+ *
+ * This was an unbounded `findMany` with two correlated counts per row, and the
+ * screen rendered every row it returned with no pagination. On the local seed
+ * that is **395 rows and a 15,812px document**; in production it is however
+ * many venues exist, all of them, every time an admin opens the page. Nothing
+ * on the screen offered a search box to avoid it.
+ *
+ * The cap is returned with the rows rather than applied silently — the same
+ * *no silent caps* rule the exports follow. A truncated list that presents
+ * itself as the whole list is how an operator concludes a venue is missing.
+ *
+ * The page size lives in `lib/constants.ts`, NOT beside the query. A
+ * `"use server"` module may only export async functions, and an `export const`
+ * here is a build error that neither `tsc` nor the unit suite sees — only
+ * `next build` does. That has now happened twice; the guard below it has been
+ * widened so there is not a third.
+ */
+export async function getVenueRecords(): Promise<{ venues: VenueRecordRow[]; total: number }> {
   const session = await getAuth()
   if (session?.user?.role !== "app_admin") throw new Error("Forbidden")
 
-  const venues = await db.venues.findMany({
-    where: { deleted_at: null },
-    select: {
-      id: true,
-      name: true,
-      city: true,
-      status: true,
-      owner_org: { select: { display_name: true } },
-      _count: {
-        select: {
-          events: { where: { deleted_at: null } },
-          claims: { where: { status: "pending" } },
+  const where = { deleted_at: null }
+  const [venues, total] = await Promise.all([
+    db.venues.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        city: true,
+        status: true,
+        owner_org: { select: { display_name: true } },
+        _count: {
+          select: {
+            events: { where: { deleted_at: null } },
+            claims: { where: { status: "pending" } },
+          },
         },
       },
-    },
-    orderBy: { name: "asc" },
-  })
+      /*
+       * Unclaimed first, then by name.
+       *
+       * Alphabetical put "Aashirwad Bar" at the top of 395 rows and the venues
+       * with a pending claim wherever their name fell. Unclaimed is the queue —
+       * this file's own component docstring says so — and a queue sorted by
+       * name is not a queue.
+       */
+      orderBy: [{ owner_org_id: { sort: "asc", nulls: "first" } }, { name: "asc" }],
+      take: VENUE_INDEX_PAGE,
+    }),
+    db.venues.count({ where }),
+  ])
 
-  return venues.map((venue) => ({
-    id: venue.id,
-    name: venue.name,
-    city: venue.city,
-    owner: venue.owner_org?.display_name ?? null,
-    events: venue._count.events,
-    pendingClaims: venue._count.claims,
-    status: venue.status,
-  }))
+  return {
+    venues: venues.map((venue) => ({
+      id: venue.id,
+      name: venue.name,
+      city: venue.city,
+      owner: venue.owner_org?.display_name ?? null,
+      ownership: venue.owner_org ? ("claimed" as const) : ("unclaimed" as const),
+      events: venue._count.events,
+      pendingClaims: venue._count.claims,
+      status: venue.status,
+    })),
+    total,
+  }
 }

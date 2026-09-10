@@ -218,9 +218,15 @@ export function startOpsBroadcast(eventId: string): void {
    * schedule the next pass from the end of the current one, and both carry a
    * comment saying a slow pass must not overlap the next.
    *
-   * It matters more here than there. `buildLiveSnapshot` issues around ten
-   * round trips, three of them against predicates that were unindexed until
-   * recently, and it runs every five seconds per watched event. A pass that
+   * It matters more here than there. `buildLiveSnapshot` issues **eight** round
+   * trips per pass -- two sequential (the event, then its occurrence) and six
+   * held concurrently -- every five seconds per watched event.
+   *
+   * That count and the indexing were re-measured on 2026-09-10: every one of
+   * the six concurrent predicates now has a matching index, so the "three of
+   * them unindexed" this comment used to claim is closed. The number is stated
+   * because it is the input to the pool arithmetic below, and a stale one sends
+   * the next reader to reopen a solved problem. A pass that
    * takes longer than five seconds under load starts the next one on top of
    * it, and each overlapping pass makes the database slower, which makes the
    * next pass longer. The failure is not a slow screen, it is a queue that

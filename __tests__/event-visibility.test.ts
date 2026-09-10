@@ -95,6 +95,29 @@ describe("visibleEventsWhere", () => {
     expect(where.OR).toEqual([{ organizer_id: "lonely-1" }])
   })
 
+  it("gives a sponsor nothing but their own authorship, even inside an organising org", async () => {
+    /*
+     * Found by a security pass, in code I had written that afternoon — and the
+     * test above walked straight past it, because it iterated `sponsor` and
+     * asserted only `deleted_at`.
+     *
+     * `eventPermissions` denies a sponsor outright, whatever their memberships.
+     * `organisation_members` has no notion of a "sponsor org" versus an
+     * "organiser org" — one row can both run events and hold `may_sponsor` — so
+     * scoping this list on membership alone showed a sponsor every event their
+     * org runs, on a screen the resolver would refuse them row by row.
+     *
+     * The nav hides Events from sponsors. A nav filter is not an authorization
+     * check.
+     */
+    mockActorFor.mockResolvedValue({ id: "sponsor-1", role: "sponsor", orgIds: ["org-1"] })
+
+    const where = await visibleEventsWhere({ id: "sponsor-1", role: "sponsor" })
+
+    expect(where.OR).toEqual([{ organizer_id: "sponsor-1" }])
+    expect(JSON.stringify(where)).not.toContain("organizer_org_id")
+  })
+
   it("never drops the deleted_at filter, whatever the role", async () => {
     mockActorFor.mockResolvedValue({ id: "u", role: "organizer", orgIds: ["o"] })
 

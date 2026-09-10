@@ -448,6 +448,12 @@
       "mutation": "A: `const target = published` -- fold every status into the published count, which is what `_count.organized_events` did. B: drop `status: 'published'` from the lastEventAt groupBy.",
       "observed": "A: 2 failing ('counts published as supply and drafts separately' and the share-sums-to-100 case). B: 2 failing ('dates the last PUBLISHED event, not the last draft' and 'gives a host with nothing published a null date'). The fixture is what makes A visible: two hosts with the SAME total of three events, one 2-published-1-draft and one 3-draft, so the old count and the new one disagree on which is the busiest supplier while agreeing on the total.",
       "date": "2026-09-10"
+    },
+    "venue-index-filters.test.ts": {
+      "guards": "the venue index's Ownership filter is keyed on a field the row actually carries with values the server actually produces, and the query is bounded with the cap stated on screen",
+      "mutation": "A: key the filter back on `owner` with `__unclaimed__` option values -- the dead control as first written. B: delete `take: VENUE_INDEX_PAGE` from getVenueRecords.",
+      "observed": "A: 1 failing ('keys Ownership on a field the row carries, with matching values'). B: 1 failing ('bounds the query and hands the total back so the cap can be stated'). A is the one worth having: `DataTable` filters with String(row[key]) === value, so a filter keyed on `owner` renders a working-looking dropdown that selects nothing -- a control with nothing behind it, which is worse than a missing feature because it looks present.",
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [

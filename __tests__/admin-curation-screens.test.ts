@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "fs"
+import { readdirSync, readFileSync, existsSync, statSync } from "fs"
 import { dirname, join } from "path"
 
 /**
@@ -12,6 +12,18 @@ import { dirname, join } from "path"
 
 const ROOT = join(__dirname, "..")
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8")
+
+/** Every .ts/.tsx under a directory. */
+function sourceFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    if (entry === "node_modules" || entry === ".next") continue
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) out.push(...sourceFiles(full))
+    else if (/\.tsx?$/.test(entry)) out.push(full)
+  }
+  return out
+}
 const code = (rel: string) =>
   read(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
 
@@ -366,27 +378,36 @@ describe("what the design review found", () => {
 })
 
 describe('"use server" files export only async functions', () => {
-  it("keeps the page-size constants out of them", () => {
+  it("keeps value exports out of every one of them", () => {
     /*
      * A `"use server"` module may only export async functions. An
      * `export const` there is a build error that NEITHER tsc NOR the unit suite
      * sees — only `next build` does, which is why this guard exists.
      *
-     * Found by running the real build after the design-review fixes, having
-     * put `CURATION_PAGE` and `CLAIM_PAGE` beside their queries.
+     * **It was a hardcoded list of three files, and it did not catch the second
+     * instance.** `VENUE_INDEX_PAGE` went into `app/dashboard/actions.ts`,
+     * which was not on the list, and the failure surfaced as a blank screen in
+     * a browser after tsc, eslint and 2440 unit tests were all green.
+     *
+     * A guard that only looks where the last bug was is not a ratchet. It walks
+     * the tree now: every `"use server"` file, found by reading them, so a new
+     * one is covered the moment it exists.
      */
-    for (const rel of [
-      "app/dashboard/events/curate/queue-actions.ts",
-      "app/dashboard/events/curate/actions.ts",
-      "lib/event-claim-actions.ts",
-    ]) {
-      const src = code(rel)
-      expect(src).toMatch(/"use server"/)
-      // No exported value bindings — only `export async function` and types.
-      expect(src).not.toMatch(/^export (const|let|var|class) /m)
-      for (const m of src.matchAll(/^export (?!async function|interface|type )(\w+)/gm)) {
-        throw new Error(`${rel} exports a non-async binding: ${m[0]}`)
+    const files = [...sourceFiles(join(ROOT, "app")), ...sourceFiles(join(ROOT, "lib"))].filter(
+      (f) => /^\s*["']use server["']/.test(readFileSync(f, "utf8"))
+    )
+
+    // Guards the guard: an empty list would pass vacuously, and the detection
+    // is a regex over the first line of a file.
+    expect(files.length).toBeGreaterThan(5)
+
+    const offenders: string[] = []
+    for (const file of files) {
+      const src = readFileSync(file, "utf8")
+      for (const m of src.matchAll(/^export (?!async function|interface|type |default )(\w+)/gm)) {
+        offenders.push(`${file.slice(ROOT.length + 1)} exports \`${m[1]}\``)
       }
     }
+    expect(offenders).toEqual([])
   })
 })

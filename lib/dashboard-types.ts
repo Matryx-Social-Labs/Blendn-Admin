@@ -290,4 +290,14 @@ export interface VenueRecordRow {
   /** Claims waiting on a decision. A venue can attract more than one. */
   pendingClaims: number
   status: string
+  /**
+   * `owner` as a filterable value.
+   *
+   * `DataTable` filters with `String(row[key]) === value`, so a filter keyed on
+   * `owner` can only ever match a literal organisation name — an "Unclaimed"
+   * option would be a control that selects nothing, which is the
+   * ship-the-UI-without-the-logic anti-pattern the roadmap names explicitly.
+   * Derived on the server so the control has something to match.
+   */
+  ownership: "claimed" | "unclaimed"
 }

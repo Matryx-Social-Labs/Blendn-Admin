@@ -47,7 +47,8 @@ export default async function MyVenuesPage() {
    * page both roles land on is already shared.
    */
   if (session.user.role === "app_admin") {
-    return <VenueRecords venues={await getVenueRecords()} />
+    const { venues, total } = await getVenueRecords()
+    return <VenueRecords venues={venues} total={total} />
   }
   if (session.user.role !== "venue_owner") redirect("/dashboard")
 
