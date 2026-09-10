@@ -1,5 +1,19 @@
 import type { Config } from "jest"
 
+/*
+ * Every run is in UTC, so a date assertion means the same thing everywhere.
+ *
+ * Nothing pinned this: tests ran in whatever timezone the machine had, so a
+ * suite could be green on a laptop in Europe/Berlin and red in CI purely
+ * because a local date rolled over. That is not hypothetical here — a
+ * `date_of_birth` was once read as off by one for exactly this reason, and the
+ * answer was the driver rendering a `date` column in Berlin.
+ *
+ * UTC rather than the product's Asia/Kolkata: CI already runs in UTC, so this
+ * makes local runs match CI rather than introducing a third timezone.
+ */
+process.env.TZ = "UTC"
+
 const config: Config = {
   preset: "ts-jest",
   testEnvironment: "node",
