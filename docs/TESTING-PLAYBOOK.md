@@ -28,7 +28,9 @@ a local `dev`.
 mechanism, because "I considered the direction" is not checkable and "here is
 the direction I wrote" is.
 
-### The gate
+### Two gates
+
+**Gate A — before writing code.**
 
 > **You may not edit an implementation file until steps 1, 2 and 3 have each
 > produced their artefact for the screen you are about to change.**
@@ -38,6 +40,20 @@ screen renders through. Tests, docs and fixtures are not implementation files.
 
 Before the first `Edit`, state the three artefacts. In full, in the response, so
 they can be read. Not "ran the chain" — the artefacts themselves.
+
+**Gate B — before calling it done.**
+
+> **A flow is not tested until it has been driven end to end on the surface a
+> real person uses, and the row it should have written has been read back.**
+
+Green unit tests, green integration tests and a screenshot are not that. Every
+defect this project has shipped passed all three: the interest graph nobody
+wrote, the preference that recorded `true` when somebody said no, the push token
+that survived sign-out. Each was found by driving the product and reading the
+database, and each would have been missed by any amount of test-suite green.
+
+So step 8 is not the victory lap. **It is the step that decides whether the work
+counts**, and a ticket does not close until it produces its artefact — see §8.
 
 ### The steps
 
@@ -49,7 +65,8 @@ they can be read. Not "ran the chain" — the artefacts themselves.
 | 4 | Drive the real screen | `browse` at 375 / 768 / 1440 | Screenshots, read. |
 | 5 | Measure it | §3's snippet | Numbers: contrast, overflow, `h1` count, DOM size. |
 | 6 | Gates | §2 | All six green. |
-| 7 | Specialists | §4 | Launched in the background, in parallel with the work. |
+| 7 | Specialists | §4 | Launched in the background, in parallel with the work. Findings triaged: fix what this change caused, file the rest. |
+| 8 | **Drive the journey** | §8 | Maestro flow + run for the client, a driven journey for the dashboard, **and the database row read back**. |
 
 ### Step 2 when the direction is already set
 
@@ -102,6 +119,16 @@ Screen: /dashboard/<x>
 Three lines. If any is missing, go back and get it rather than proceeding —
 noticing at step 6 that step 2 never happened is noticing after the code is
 written, which is the same as not noticing.
+
+**And before saying it is done:**
+
+```
+8 · Driven:     <maestro flow path + result>  |  <dashboard journey driven>
+    Read back:  <the SELECT, and what it returned>
+    Or:         not driven — <the specific reason>, and the ticket stays open
+```
+
+"Not driven" is an allowed answer. Silently not driving is not.
 
 ## 2 · The gates — every change, no exceptions
 
@@ -489,6 +516,91 @@ Naming them so the list stays a list rather than becoming the catalogue:
   `swift-*`, `rust-*`, `golang-*` — wrong stack.
 - `eval-harness`, `mle-workflow`, `rag-pipeline-reviewer` — no model being
   trained or retrieved against. The OpenAI call is a single classification.
+
+---
+
+## 8 · Driving the journey — the step that decides whether it counts
+
+**This runs after the specialists, on both surfaces, and it is what closes a
+ticket.** Not because it is ceremony: because it is the only step that has ever
+caught the defects this product actually shipped.
+
+| Shipped defect | Caught by |
+|---|---|
+| Onboarding never wrote `user_interests`, so finishing it left you unable to post on the board | driving the app, then `SELECT count(*) FROM user_interests` |
+| "Maybe later" left `push_enabled` at `true` for somebody who said no | driving the app, then reading the column |
+| Push tokens survived sign-out, so the next person on the phone got the previous user's DM previews | driving two sign-ins on one device |
+| A curated event's host was the founder who curated it | opening the event on a phone |
+
+Every one passed `tsc`, the unit suite, the integration suite and a screenshot.
+
+### What it is, per surface
+
+**Client (`blendn/ashgabat`) — Maestro MCP.**
+
+```
+list_devices     → ALWAYS first; every other local call needs its device_id
+inspect_screen   → the view hierarchy, before targeting anything
+run              → one full flow as inline YAML, not a string of single commands
+```
+
+Two facts that have each cost a run: the bundle id is
+**`com.matryxsociallabs.blendn`** (not `com.blendn.app`), and Maestro **text
+selectors are full-string regex** — `"Check in"` does not match "Check in now".
+Mobile flows declare `appId` and open with `launchApp`. Read `cheat_sheet`
+before authoring anything unfamiliar. `run_on_cloud` when a real device matters;
+`list_cloud_devices` returns valid `{device_model, device_os}` pairs and they
+must be passed verbatim, never reformatted.
+
+**Dashboard (`blendn-admin/seville`) — driven, then Playwright.**
+
+Drive it first with `browse` or Chrome DevTools MCP, signed in, against the seed.
+Once a journey works by hand and matters, it goes into `e2e/` as a Playwright
+spec so CI runs it on every PR — use the `e2e-testing` skill for page objects and
+flake strategy.
+
+**Both — read the database back.**
+
+```bash
+docker exec blendn-pg17 psql -U postgres -d blendn_test -c "SELECT …"
+```
+
+An API 200 proves the route returned. It does not prove the row was written, and
+it does not prove the number an admin is sold moved. That gap is where
+`profiles.onboarded` lived for months: the column existed, the funnel counted it,
+and nothing had ever set it.
+
+### The journeys, and which surfaces each crosses
+
+| Journey | Client | Dashboard | Read back |
+|---|---|---|---|
+| Signup → onboarding → profile | Maestro | Users list, funnel | `profiles`, **`user_interests`**, `push_enabled`, `share_location` |
+| Apply → queue → decide | — | `/apply`, `/dashboard/onboarding` | `organiser_onboarding_requests`, `organisations`, `User`, `organisation_members` |
+| Curated event → claim → decide | — | `/claim/[id]`, `/dashboard/claims` | `event_claims`, `events.organizer_org_id` |
+| Publish → check in → room → chat → moderation | Maestro, mocked location | `/dashboard/events/[id]` live tab, `/dashboard/moderation` | `event_check_ins`, `check_in_refusals`, `chat_messages`, `moderation_flags` |
+| Another city | Maestro | `/dashboard` Cities | `city_demand` |
+
+The seed is built for these — see §4b's fixture table. It already carries the
+under-18 tester, the dead curated event with five refusals, the multi-day event,
+the second city and the second country, and the draft that must never reach an
+attendee.
+
+### The rule about negative cases
+
+Drive the refusal, not only the happy path. Both onboarding bugs were found by
+**taking the decline branch** — "Maybe later" on a permission screen, which is
+the path nobody demos. A field that always writes `true` passes a truthy check
+either way, which is why the standard here is asserting the specific value.
+
+### When it genuinely cannot run
+
+Say so, name what is missing, and **leave the ticket open**. SCRUM-54 does this
+properly: it records that the Expo client UI could not be driven because the
+session had no device, and every child ticket states which layers it covered, so
+a green board is never mistaken for more coverage than was taken.
+
+"Not driven" is a result. Silently not driving is how a ticket closes on a fix
+nobody watched work.
 
 ---
 

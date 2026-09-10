@@ -39,6 +39,21 @@ An earlier version of §3 said `/design-html` was "only for a NEW composition".
 That clause was used to skip it every time, because any change can be argued
 not-new-enough. It is now a test with no judgement in it — see §1.
 
+**And a second gate, before calling anything done.** A flow is not tested until
+it has been driven end to end on the surface a real person uses, and the row it
+should have written has been read back. State it:
+
+```
+8 · Driven:     <maestro flow + result>  |  <dashboard journey driven>
+    Read back:  <the SELECT, and what it returned>
+    Or:         not driven — <the specific reason>, and the ticket stays open
+```
+
+Green unit, integration and a screenshot are not that. Every defect this project
+has shipped passed all three — the interest graph nobody wrote, the preference
+that stored `true` when somebody said no, the push token that survived sign-out.
+Each was caught by driving the product and reading the database. See §8.
+
 ## Common Commands
 
 ```bash
