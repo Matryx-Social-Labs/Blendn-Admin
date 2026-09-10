@@ -402,6 +402,14 @@
       "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both; C: 1 failing ('has not grown'), naming lib/check-in-refusals.ts. D: 1 failing ('has no stale entries'), naming lib/gone.ts. Both vacuity guards stayed green",
       "reverted": true,
       "date": "2026-09-10"
+    },
+    "users-search-server-side.test.ts": {
+      "guards": "that the users search box drives `?search=` on the URL — which `page.tsx` reads and passes to `getUsers` — rather than filtering the 50 rows already fetched, and that the footer discloses the cap instead of implying the page is the whole set",
+      "mutation": "C: `if (false && shown < total)` in `rowCountLabel`, so the cap goes undisclosed. D: revert the input to `table.getColumn(\"user\").setFilterValue(...)`",
+      "observed": "C: 2 failing, both naming the exact sentence expected against the selection-count fallback received. D: 1 failing ('does not filter the fetched page instead'). The vacuity guard stayed green in both",
+      "reverted": true,
+      "date": "2026-09-10",
+      "note": "The FIRST version of this guard was vacuous and mutation C is why it exists in this shape: it asserted the source contained `data.length < total`, and `{false && data.length < total}` still contains that text. The sentence was extracted to a pure function so the test could vary arguments rather than match characters — R18's pattern, earned again."
     }
   },
   "grandfathered": [

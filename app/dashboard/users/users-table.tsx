@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -66,6 +67,7 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 
+import { rowCountLabel } from "@/lib/row-count-label"
 import { UserWithProfile, updateUser, updateUserRole } from "./actions"
 import type { user_role } from "@prisma/client"
 
@@ -468,7 +470,49 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
   )
 }
 
-export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps) {
+export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTableProps) {
+  const router = useRouter()
+  const params = useSearchParams()
+
+  /*
+   * The search box searches the server, not the page.
+   *
+   * `getUsers` has always taken a `search` argument and built an insensitive
+   * `contains` over name and email, and `page.tsx` has always read `?search=`
+   * off the URL and passed it through. Nothing ever set that param: the input
+   * called `table.getColumn("user").setFilterValue(...)`, a TanStack filter
+   * over the rows already fetched — and the fetch is capped at 50.
+   *
+   * So with 120 accounts on staging, searching for a real user who happened to
+   * sit outside the newest 50 returned **"No users found."** A correct
+   * server-side search with no caller, and a box that quietly answered a
+   * narrower question than the one it was asked.
+   *
+   * URL rather than local state, following `leads-inbox.tsx`: a filtered view
+   * is then shareable, and it survives the refresh that follows every edit.
+   */
+  const urlSearch = params.get("search") ?? ""
+  const [searchText, setSearchText] = React.useState(urlSearch)
+
+  // Keep the box in step when the URL changes underneath it — back button,
+  // a shared link, or the refresh after an edit.
+  React.useEffect(() => setSearchText(urlSearch), [urlSearch])
+
+  React.useEffect(() => {
+    if (searchText === urlSearch) return
+    /*
+     * Debounced, because this is a round trip per keystroke otherwise. 300ms is
+     * the pause that reads as "finished typing" without feeling laggy.
+     */
+    const t = setTimeout(() => {
+      const next = new URLSearchParams(params.toString())
+      if (searchText) next.set("search", searchText)
+      else next.delete("search")
+      router.replace(`/dashboard/users?${next.toString()}`)
+    }, 300)
+    return () => clearTimeout(t)
+  }, [searchText, urlSearch, params, router])
+
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>({})
@@ -515,10 +559,9 @@ export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps
           <IconSearch className="text-muted-foreground size-4" />
           <Input
             placeholder="Search users..."
-            value={(table.getColumn("user")?.getFilterValue() as string) ?? ""}
-            onChange={(event) =>
-              table.getColumn("user")?.setFilterValue(event.target.value)
-            }
+            aria-label="Search users by name or email"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
             className="max-w-sm"
           />
         </div>
@@ -609,8 +652,13 @@ export function UsersTable({ data, currentUserRole, onRefresh }: UsersTableProps
       </div>
       <div className="flex items-center justify-between px-4">
         <div className="text-muted-foreground hidden flex-1 text-sm @2xl/main:flex">
-          {table.getFilteredSelectedRowModel().rows.length} of{" "}
-          {table.getFilteredRowModel().rows.length} row(s) selected.
+          {rowCountLabel({
+            shown: data.length,
+            total,
+            searching: urlSearch.length > 0,
+            selected: table.getFilteredSelectedRowModel().rows.length,
+            onPage: table.getFilteredRowModel().rows.length,
+          })}
         </div>
         <div className="flex w-full items-center gap-8 @2xl/main:w-fit">
           <div className="hidden items-center gap-2 @2xl/main:flex">
