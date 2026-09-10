@@ -23,20 +23,85 @@ a local `dev`.
 
 ## 1 · The chain, for every page or path
 
-Run it in this order. Steps 1–3 are the *design* chain; 4–6 are *verification*;
-7 is the specialist fan-out. None is optional.
+**This is a procedure, not a description.** Each step produces a named
+**artefact**. No artefact means the step did not happen — that is the whole
+mechanism, because "I considered the direction" is not checkable and "here is
+the direction I wrote" is.
 
-| # | Step | Skill / command | What it is for |
+### The gate
+
+> **You may not edit an implementation file until steps 1, 2 and 3 have each
+> produced their artefact for the screen you are about to change.**
+
+Implementation file = anything under `app/`, `components/` or `lib/` that the
+screen renders through. Tests, docs and fixtures are not implementation files.
+
+Before the first `Edit`, state the three artefacts. In full, in the response, so
+they can be read. Not "ran the chain" — the artefacts themselves.
+
+### The steps
+
+| # | Step | How | **Artefact — what must exist before the next step** |
 |---|---|---|---|
-| 1 | **Operator questions** | `ecc dashboard-builder` | Derive the screen from *what does this person need answered, in what order* — never from the columns the table happens to have. Cut vanity panels here, before drawing anything. |
-| 2 | **Direction** | `ecc frontend-design-direction` | Purpose, audience, tone, **one memorable detail**, constraints. A SaaS ops tool is dense, quiet, scannable. |
-| 3 | **Build at fidelity** | `/design-html` | Only for a NEW composition. A strip added to an existing screen does not need a mockup; say so rather than skipping it silently. |
-| 4 | **Drive it** | `browse` at 375 / 768 / 1440 | Screenshot and *look*. Half the findings on this project came from opening the page, not from reading it. |
-| 5 | **Measure it** | contrast, overflow, heading order, DOM size | See §3. `--faint-foreground` failed AA on nearly every screen for months because nobody measured. |
-| 6 | **Gates** | see §2 | tsc · lint · unit · integration · real build · server build. |
-| 7 | **Specialists** | see §4 | Fan out in the background while you keep working. |
+| 1 | Operator questions | invoke `ecc dashboard-builder` | The **numbered list of questions in priority order**, plus the **cut list**: which existing panels are going and why. |
+| 2 | Direction | invoke `ecc frontend-design-direction` | Five named things: **purpose · audience · tone · the one memorable detail · constraints**. Written out, not referenced. |
+| 3 | Build it | invoke `/design-html` | A **file on disk** under `~/.gstack/projects/$SLUG/designs/<screen>-<date>/`, and a **screenshot of it read back**. |
+| 4 | Drive the real screen | `browse` at 375 / 768 / 1440 | Screenshots, read. |
+| 5 | Measure it | §3's snippet | Numbers: contrast, overflow, `h1` count, DOM size. |
+| 6 | Gates | §2 | All six green. |
+| 7 | Specialists | §4 | Launched in the background, in parallel with the work. |
 
----
+### Step 2 when the direction is already set
+
+**This is where it goes wrong, so it is written out rather than left to
+judgement.** The dashboard's direction *is* settled — dense, quiet, scannable,
+hierarchy from type, no card-in-card, one `HeroMetric`, one gradient element.
+
+That is not permission to skip step 2. **Restate the five, for this screen, in
+one line each, and name the one memorable detail — which is per-screen and
+cannot be inherited.** On the overview it was the unreached funnel stages drawn
+full width in outline. On the applications queue it was the evidence ranking. If
+you cannot name a memorable detail for the screen you are on, you have not done
+step 2, and the screen will come out generic.
+
+Invoke the skill anyway. It costs one call and it is what stops "the direction is
+locked" becoming "I skipped the direction".
+
+### Step 3 — the rule, with no judgement in it
+
+The earlier version of this file said `/design-html` was "only for a NEW
+composition" and told you to "say so rather than skipping it silently". **That
+escape clause was used to skip it every single time**, because any change can be
+argued not-new-enough. It is replaced with a test that has no opinion in it:
+
+**Run `/design-html` if the change does ANY of:**
+
+- adds, removes or reorders an element on the screen
+- changes a layout, a grid, or the order of anything
+- changes what an element *means* — a badge's tone, a number's label, an
+  action's prominence
+- changes more than one file the screen renders through
+
+**Skip it ONLY for:** a copy edit with no layout change, a token value, or a
+pure bug fix that alters nothing a person sees.
+
+If you are deciding which side of the line you are on, you are on the run-it
+side. The mockup is cheap; going back is not.
+
+### Say it out loud before implementing
+
+Before the first edit, in the response:
+
+```
+Screen: /dashboard/<x>
+1 · Questions:  1. …  2. …  3. …    Cutting: … because …
+2 · Direction:  purpose … · audience … · tone … · memorable detail … · constraints …
+3 · Mockup:     <path>  (or: skipped — copy-only change, no layout effect)
+```
+
+Three lines. If any is missing, go back and get it rather than proceeding —
+noticing at step 6 that step 2 never happened is noticing after the code is
+written, which is the same as not noticing.
 
 ## 2 · The gates — every change, no exceptions
 
@@ -504,6 +569,29 @@ whatever diff happened to find it:
 - `/dashboard/events/new` reports a **hydration mismatch** from its two Leaflet
   maps. Confirmed pre-existing by removing the newest component and watching it
   survive — which is the cheap way to tell "mine" from "was already there".
+
+### The chain itself, skipped three times
+
+Recorded because it is the same failure as the rest of this section, and the
+worst one: the check was available, and it was not run.
+
+`ecc dashboard-builder` ran on the overview, the create-event form and the
+applications queue. `ecc frontend-design-direction` and `/design-html` ran on the
+overview **only**. On the other two the reasoning was "the direction is already
+locked" and "this is not a new composition" — both true, and neither a reason.
+
+The cost is measurable rather than theoretical. Step 1 alone, run properly on the
+applications queue, found that the strongest disqualifier in the queue (a
+ticketing-platform email domain) and the strongest credential (the applicant's
+own domain) were rendering in the same filled badge. Steps 2 and 3 were skipped
+on that screen, so whatever they would have found is unknown — which is the
+point. A skipped check produces no evidence that it was safe to skip.
+
+§1 is now written as a procedure with an artefact per step and a gate before the
+first edit, because the previous version was a description and descriptions are
+negotiable.
+
+---
 
 And three guards that did not catch what they existed for, because each looked
 only where the last bug was: the `"use server"` guard (hardcoded three

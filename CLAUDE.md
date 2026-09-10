@@ -24,6 +24,21 @@ It is not a menu. The expensive failures on this project have all been one shape
 — a check that was available and was not run — and the playbook's last section
 lists what each check has already caught.
 
+**The chain in §1 is gated.** Do not edit a file under `app/`, `components/` or
+`lib/` for a screen until steps 1, 2 and 3 have produced their artefacts, and
+state those artefacts in the response before the first edit:
+
+```
+Screen: /dashboard/<x>
+1 · Questions:  1. …  2. …  3. …    Cutting: … because …
+2 · Direction:  purpose · audience · tone · memorable detail · constraints
+3 · Mockup:     <path>  (or: skipped — copy-only change, no layout effect)
+```
+
+An earlier version of §3 said `/design-html` was "only for a NEW composition".
+That clause was used to skip it every time, because any change can be argued
+not-new-enough. It is now a test with no judgement in it — see §1.
+
 ## Common Commands
 
 ```bash
