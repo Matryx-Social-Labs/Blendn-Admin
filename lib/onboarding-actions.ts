@@ -11,6 +11,7 @@ import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { logger } from "@/lib/logger"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
+import { isAggregatorDomain } from "@/lib/curation-sources"
 import { emailDomain, isFreeProvider } from "@/lib/org-invites"
 import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/email"
 
@@ -60,6 +61,19 @@ export interface OnboardingRow {
   gstinCheck: string | null
   emailDomain: string | null
   freeProvider: boolean
+  /**
+   * The applicant's address is at a ticketing aggregator.
+   *
+   * The single most important flag in this queue and it had no rendering at
+   * all: `bookings@in.bookmyshow.com` came through in the same filled badge as
+   * `founder@thehummingtree.com`, so the strongest negative signal looked
+   * identical to the strongest positive one.
+   *
+   * The curated-events design states the stake plainly — without this check,
+   * one address at a ticketing platform could claim every event on the
+   * platform.
+   */
+  aggregatorDomain: boolean
   /** Other applications from the same person or company name. */
   relatedCount: number
 }
@@ -138,6 +152,7 @@ export async function getOnboardingRequests(
       gstinCheck: r.gstin ? gstinMessage(validateGstin(r.gstin)) : null,
       emailDomain: domain,
       freeProvider: domain ? isFreeProvider(domain) : true,
+      aggregatorDomain: isAggregatorDomain(domain),
       // Minus itself. More than one is worth a second look, not a refusal.
       relatedCount: (relatedMap.get(r.contact_email) ?? 1) - 1,
     }

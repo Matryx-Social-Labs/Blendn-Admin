@@ -466,6 +466,12 @@
       "mutation": "In components/geofence-editor.tsx's Legend, put `${COLOURS.extent}` back in the style prop where `var(${token})` now is.",
       "observed": "1 failing ('puts no resolved colour into a style prop in the map components'). The real defect was a hydration mismatch on every load of /dashboard/events/new -- rgb(240,84,35) server-side against lab(61.25% 57.01 57.75) client-side, from three legend swatches. Invisible to tsc, to 2456 unit tests and to `next build`; the page renders correctly and the only symptom is a console warning. Found with Chrome DevTools MCP, which named the component and the exact style diff -- `browse` could only report that a mismatch existed.",
       "date": "2026-09-10"
+    },
+    "applications-queue-evidence.test.ts": {
+      "guards": "the applications queue ranks its evidence -- an aggregator email domain renders as a warning and not as a credential -- and its age comes from lib/attention-queues.ts rather than a second local calculation",
+      "mutation": "A: render the aggregator badge with `variant=\"default\"` (the credential badge) instead of destructive. B: drop the `queueAgeLabel` import and compute the age locally from Date.now().",
+      "observed": "A: 1 failing ('draws an aggregator domain as a warning, not as a credential'). B: 1 failing ('carries the age on the collapsed row, from the shared rule'). A is the one worth having: a filled brand badge reads as positive, and the queue drew `thehummingtree.com` (the applicant's own domain, the strongest credential) and `in.bookmyshow.com` (a ticketing aggregator, the strongest disqualifier) identically -- so the two extremes looked the same while the middle, 'Personal email', looked different.",
+      "date": "2026-09-11"
     }
   },
   "grandfathered": [

@@ -10,6 +10,8 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { queueAgeLabel, queueBreached } from "@/lib/attention-queues"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -37,17 +39,33 @@ const ROLE_LABEL: Record<OnboardingRow["requested_role"], string> = {
   sponsor: "Sponsor",
 }
 
-export function OnboardingQueue({ rows }: { rows: OnboardingRow[] }) {
+export function OnboardingQueue({
+  rows,
+  generatedAt,
+}: {
+  rows: OnboardingRow[]
+  /**
+   * Server time, ISO.
+   *
+   * The ages are rendered in a client component, so a `new Date()` taken during
+   * hydration is a different now from the one the server rendered with — an
+   * application sitting at 71h59m crosses the SLA boundary between the two and
+   * React reports a mismatch on a screen that was correct both times. Same fix
+   * as the overview's `generatedAt`.
+   */
+  generatedAt: string
+}) {
+  const now = new Date(generatedAt)
   return (
     <div className="flex flex-col gap-3">
       {rows.map((row) => (
-        <Row key={row.id} row={row} />
+        <Row key={row.id} row={row} now={now} />
       ))}
     </div>
   )
 }
 
-function Row({ row }: { row: OnboardingRow }) {
+function Row({ row, now }: { row: OnboardingRow; now: Date }) {
   const [open, setOpen] = useState(false)
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState("")
@@ -55,6 +73,20 @@ function Row({ row }: { row: OnboardingRow }) {
   const [pending, start] = useTransition()
 
   const awaitingEmail = row.status === "email_pending"
+
+  /*
+   * The same age rule the attention strip uses, not a second one.
+   *
+   * `lib/attention-queues.ts` gives applications a 72-hour window and the
+   * overview's strip renders "oldest 12 days" from it. This queue showed
+   * `Applied` as a bare date inside the collapsed panel, so the SLA was
+   * invisible on the screen where the decision is taken. Two answers to "is
+   * this late" is the shape this codebase keeps paying for; one function, read
+   * twice.
+   */
+  const queue = { count: 1, oldest: row.created_at.toISOString(), slaHours: 72 }
+  const age = queueAgeLabel(queue, now)
+  const breached = queueBreached(queue, now)
 
   function approve() {
     start(async () => {
@@ -142,20 +174,63 @@ function Row({ row }: { row: OnboardingRow }) {
               <IconCircleCheck className="size-3.5" /> Email confirmed
             </Badge>
           )}
-          <Badge variant={row.freeProvider ? "outline" : "default"}>
-            {row.freeProvider ? "Personal email" : row.emailDomain}
-          </Badge>
+          {/*
+            An aggregator domain is a warning, not a credential.
+
+            A company address is accepted as-is precisely because it is evidence
+            the applicant belongs to the organisation. That argument inverts at
+            a ticketing platform: `bookings@in.bookmyshow.com` proves somebody
+            works at BookMyShow, and the events they would be claiming are not
+            BookMyShow's. Rendering it in the same filled badge as
+            `thehummingtree.com` said the opposite of what it means.
+          */}
+          {row.aggregatorDomain ? (
+            <Badge variant="destructive" className="gap-1">
+              <IconAlertTriangle className="size-3.5" />
+              Ticketing platform · {row.emailDomain}
+            </Badge>
+          ) : (
+            <Badge variant={row.freeProvider ? "outline" : "default"}>
+              {row.freeProvider ? "Personal email" : row.emailDomain}
+            </Badge>
+          )}
+          {/*
+            The age, on the collapsed row.
+
+            It was `Applied` inside the expanded panel, as a bare date — so the
+            queue's SLA was invisible until you opened a row, and the overview
+            could say "oldest 12 days" while this screen said nothing about
+            which. Same functions the attention strip uses, so the two cannot
+            disagree about what "late" means.
+          */}
+          {age ? (
+            <span
+              className={cn(
+                "text-[0.75rem] tabular-nums",
+                breached ? "font-medium text-destructive" : "text-muted-foreground"
+              )}
+            >
+              {age}
+            </span>
+          ) : null}
         </div>
       </button>
 
       {open ? (
         <dl className="grid gap-2 border-t border-border pt-3 text-[0.8125rem] @2xl/main:grid-cols-2">
+          {/*
+            Evidence only. `Kind`, `Phone` and `Address` were here and none of
+            them changes a decision — an admin does not approve or refuse an
+            application on the strength of a phone number. Legal name, website
+            and GSTIN are what the gate actually weighs, so they are what is
+            left.
+
+            `Applied` went too: it was a bare date in a panel you had to open,
+            on the one screen where age IS the ordering. It is on the collapsed
+            row now, against the same 72-hour window the attention strip uses.
+          */}
           <Detail label="Legal name" value={row.legal_name} />
-          <Detail label="Kind" value={row.kind} />
           <Detail label="Website" value={row.website} />
-          <Detail label="Phone" value={row.contact_phone} />
-          <Detail label="Address" value={row.address} />
-          <Detail label="Applied" value={row.created_at.toLocaleDateString()} />
           {row.gstin ? (
             <div className="flex flex-col gap-0.5 @2xl/main:col-span-2">
               <dt className="text-muted-foreground">GSTIN</dt>
@@ -199,9 +274,23 @@ function Row({ row }: { row: OnboardingRow }) {
           </div>
         </div>
       ) : (
-        <div className="flex gap-2">
-          <Button size="sm" onClick={approve} disabled={pending}>
-            <IconCheck className="size-4" /> Approve
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            Approve is the near-irreversible one, and it was the filled brand
+            button on all seven rows.
+
+            It creates an organisation, a user and a membership in one
+            transaction, and hands over publishing and the attendee list. Seven
+            of them at full saturation made the consequential action the
+            screen's background — the same inversion as the events list, where
+            `published` was a filled pill on fifteen of seventeen rows.
+
+            Both actions are outline now, because on this screen neither is the
+            default: the whole point is that a person weighs the evidence first.
+            The consequence is named on the button rather than left implicit.
+          */}
+          <Button size="sm" variant="outline" onClick={approve} disabled={pending}>
+            <IconCheck className="size-4" /> Approve &amp; create the account
           </Button>
           <Button size="sm" variant="outline" onClick={() => setDeclining(true)} disabled={pending}>
             <IconX className="size-4" /> Decline
