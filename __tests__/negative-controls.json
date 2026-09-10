@@ -395,6 +395,13 @@
       "observed": "1 failing ('the events folder accepts every content type offered for video'); the vacuity guard and the pdf-exclusion guard stayed green",
       "reverted": true,
       "date": "2026-09-10"
+    },
+    "prisma-shorthand-ratchet.test.ts": {
+      "guards": "no NEW bare shorthand appears inside a Prisma `data:` block anywhere in app/ or lib/, that the baseline has no stale entries so shrinking stays deliberate, and that the scan found the known ones so the ratchet cannot go vacuous",
+      "mutation": "A: add a bare `ratchet_probe_field,` to the data block in app/api/mobile/message-requests/route.ts. B: convert `message,` there to a conditional spread WITHOUT pruning the baseline",
+      "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both",
+      "reverted": true,
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [
