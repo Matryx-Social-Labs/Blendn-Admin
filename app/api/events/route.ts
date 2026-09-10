@@ -252,34 +252,44 @@ export async function POST(req: Request) {
         // Sessions" into a P2002 the organiser saw as an internal error.
         slug: await uniqueEventSlug(title),
         description,
-        short_description,
-        venue_name,
-        address,
-        city: resolvedCity,
-        state,
-        country,
-        postal_code,
+        ...(short_description !== undefined && { short_description }),
+        ...(venue_name !== undefined && { venue_name }),
+        ...(address !== undefined && { address }),
+        ...(resolvedCity !== undefined && { city: resolvedCity }),
+        ...(state !== undefined && { state }),
+        ...(country !== undefined && { country }),
+        ...(postal_code !== undefined && { postal_code }),
         start_time: new Date(start_time),
         end_time: new Date(end_time),
         timezone,
         status: status ?? "draft",
         visibility: visibility ?? "public",
-        max_capacity,
+        ...(max_capacity !== undefined && { max_capacity }),
         /*
-         * Conditional spreads, not `?? undefined` — the same conversion as the
-         * sibling PATCH route, for the same reason: Prisma strips an undefined
+         * Conditional spreads, not `?? undefined` — Prisma strips an undefined
          * value rather than writing nothing, and that is the idiom
-         * `strictUndefinedChecks` exists to outlaw. `!= null` throughout, so
-         * `false` survives for the booleans and `0` for the radius.
+         * `strictUndefinedChecks` exists to outlaw.
+         *
+         * **This conversion was here and was only half done.** Five fields had
+         * it; eleven did not, and the comment above them said the block was
+         * converted — so the next reader had no reason to look. Every event
+         * creation on staging 500'd: `short_description`, `venue_name`,
+         * `max_capacity`, `cover_image_url`, `external_link` and all six
+         * `details` fields arrived as explicit `undefined` from a form that
+         * simply left them blank.
+         *
+         * `!== undefined` rather than `!= null`, so an explicit `null` still
+         * clears a column; `!= null` is kept only where `false` or `0` must
+         * survive and null and absent mean the same thing.
          */
         ...(door_policy != null && { door_policy }),
         // Null for almost every event. The organiser is the only party who
         // knows a club night is 18+, and check-in is where it is enforced.
-        min_age,
-        latitude,
-        longitude,
-        cover_image_url,
-        external_link,
+        ...(min_age !== undefined && { min_age }),
+        ...(latitude !== undefined && { latitude }),
+        ...(longitude !== undefined && { longitude }),
+        ...(cover_image_url !== undefined && { cover_image_url }),
+        ...(external_link !== undefined && { external_link }),
         ...(is_featured != null && { is_featured }),
         ...(is_recurring != null && { is_recurring }),
         ...(location.values.check_in_radius != null && {
@@ -298,12 +308,16 @@ export async function POST(req: Request) {
         details: {
           create: {
             full_description: resolvedFullDescription,
-            house_rules,
-            cancellation_policy,
-            additional_info: parseJsonField(additional_info),
-            faq: parseJsonField(faq),
-            accessibility_info: parseJsonField(accessibility_info),
-            covid_guidelines,
+            ...(house_rules !== undefined && { house_rules }),
+            ...(cancellation_policy !== undefined && { cancellation_policy }),
+            ...(parseJsonField(additional_info) !== undefined && {
+              additional_info: parseJsonField(additional_info),
+            }),
+            ...(parseJsonField(faq) !== undefined && { faq: parseJsonField(faq) }),
+            ...(parseJsonField(accessibility_info) !== undefined && {
+              accessibility_info: parseJsonField(accessibility_info),
+            }),
+            ...(covid_guidelines !== undefined && { covid_guidelines }),
           },
         },
         ...(Array.isArray(category_ids) && category_ids.length > 0
