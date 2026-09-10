@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useFieldArray, useForm } from "react-hook-form"
+import { useFieldArray, useForm, useWatch } from "react-hook-form"
 import { Button } from "@/components/ui/button"
 import { Form } from "@/components/ui/form"
 import { toast } from "sonner"
@@ -18,6 +18,8 @@ import { AmenitiesSection, type AmenityOption } from "@/components/event-form/am
 import { CapacitySettingsSection } from "@/components/event-form/capacity-settings-section"
 import { CoverImageSection } from "@/components/event-form/cover-image-section"
 import { MediaSection } from "@/components/event-form/media-section"
+import { ReadinessStrip } from "@/components/event-form/readiness-strip"
+import { eventReadiness } from "@/lib/event-readiness"
 import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
 import { captureVideoPoster } from "@/lib/video-poster"
@@ -159,11 +161,71 @@ export function EventForm({
     form.setValue("postal_code", data.postal_code)
   }
 
+  /*
+   * Recomputed as they type.
+   *
+   * `useWatch` rather than `form.watch()` in the body: the latter re-renders
+   * this whole component — eight sections and two Leaflet maps — on every
+   * keystroke in any field. This subscribes to the eight fields the rule reads,
+   * so typing a title does not redraw a map.
+   */
+  const watched = useWatch({
+    control: form.control,
+    name: [
+      "title",
+      "start_time",
+      "end_time",
+      "timezone",
+      "latitude",
+      "longitude",
+      "geofence",
+      "check_in_radius",
+      "category_ids",
+      "cover_image_url",
+    ],
+  })
+  const readiness = useMemo(() => {
+    const [
+      title,
+      start_time,
+      end_time,
+      timezone,
+      latitude,
+      longitude,
+      geofence,
+      check_in_radius,
+      category_ids,
+      cover_image_url,
+    ] = watched
+    return eventReadiness({
+      title,
+      start_time,
+      end_time,
+      timezone,
+      latitude,
+      longitude,
+      geofence,
+      check_in_radius,
+      category_ids,
+      cover_image_url,
+    })
+  }, [watched])
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {/*
+          First, because it answers the first question: can this be published?
+
+          `canPublish()` refuses an event with no coordinates and no fence, and
+          the organiser used to meet that refusal as a toast after filling in
+          5,683px of form — having already scrolled past the map that fixes it.
+          The form knew all along.
+        */}
+        <ReadinessStrip readiness={readiness} />
+
         <BasicInfoSection form={form} categories={categories} />
 
         <LocationSection form={form} onLocationChange={handleLocationChange} />

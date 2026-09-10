@@ -544,17 +544,17 @@ export function GeofenceEditor({
         ) : null}
 
         <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
-          <Legend colour={COLOURS.extent} dash="solid" label="Extent — the venue itself" />
-          <Legend colour={COLOURS.buffer} dash="dashed" label={`Buffer — your tolerance (${fence.buffer} m)`} />
+          <Legend token="--chart-1" dash="solid" label="Extent — the venue itself" />
+          <Legend token="--chart-2" dash="dashed" label={`Buffer — your tolerance (${fence.buffer} m)`} />
           {showAccuracy ? (
             <Legend
-              colour={COLOURS.accuracy}
+              token="--muted-foreground"
               dash="dotted"
               label={`GPS allowance — automatic, up to ${ACCURACY_CAP} m`}
             />
           ) : null}
           {overlap ? (
-            <Legend colour={COLOURS.other} dash="dashed" label={`${overlap.name} (concurrent)`} />
+            <Legend token="--chart-3" dash="dashed" label={`${overlap.name} (concurrent)`} />
           ) : null}
         </div>
       </div>
@@ -627,13 +627,34 @@ export function GeofenceEditor({
   )
 }
 
-function Legend({ colour, dash, label }: { colour: string; dash: string; label: string }) {
+/**
+ * A swatch, drawn from the CSS variable rather than from a resolved colour.
+ *
+ * ## Why this takes a token and not a colour
+ *
+ * It used to take `COLOURS.extent` — a string from `themeColour()`, which reads
+ * `getComputedStyle` on the client and returns its hex FALLBACK on the server,
+ * because there is no document to compute against. React then rendered
+ * `border-top-color: rgb(240, 84, 35)` on the server and
+ * `borderTop: 2.5px solid lab(61.25% 57.01 57.75)` on the client, and reported a
+ * **hydration mismatch** on every load of `/dashboard/events/new`.
+ *
+ * `themeColour` is right where it is used: Leaflet takes colours as JS strings
+ * on its layer options, at runtime, after mount, where `var(--chart-1)` means
+ * nothing. It is wrong the moment its result reaches an inline style that is
+ * server-rendered — and nothing said so, because the mismatch is a console
+ * warning on a page nobody reads the console of.
+ *
+ * A swatch is plain DOM. It can just have the variable, which serialises
+ * identically on both sides and tracks the theme for free.
+ */
+function Legend({ token, dash, label }: { token: string; dash: string; label: string }) {
   return (
     <span className="flex items-center gap-2">
       <span
         aria-hidden
         className="w-4 shrink-0"
-        style={{ borderTop: `2.5px ${dash} ${colour}` }}
+        style={{ borderTop: `2.5px ${dash} var(${token})` }}
       />
       <span>{label}</span>
     </span>

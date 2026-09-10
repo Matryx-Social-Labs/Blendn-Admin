@@ -454,6 +454,18 @@
       "mutation": "A: key the filter back on `owner` with `__unclaimed__` option values -- the dead control as first written. B: delete `take: VENUE_INDEX_PAGE` from getVenueRecords.",
       "observed": "A: 1 failing ('keys Ownership on a field the row carries, with matching values'). B: 1 failing ('bounds the query and hands the total back so the cap can be stated'). A is the one worth having: `DataTable` filters with String(row[key]) === value, so a filter keyed on `owner` renders a working-looking dropdown that selects nothing -- a control with nothing behind it, which is worse than a missing feature because it looks present.",
       "date": "2026-09-10"
+    },
+    "event-readiness.test.ts": {
+      "guards": "the create-event form's readiness rule says the same thing as the server's canPublish -- a valid geofence alone is enough, coordinates are checked explicitly against null rather than truthily",
+      "mutation": "In lib/geofence-input.ts, delete the `if (event.geofence && validateGeofence(event.geofence).ok) return { ok: true }` early return so the server requires coordinates even with a fence.",
+      "observed": "1 failing ('mirrors canPublish's two conditions'). The duplication between form and server is deliberate -- the server cannot trust a form, and the mobile clone route creates events without touching the form at all -- so what has to be guarded is that the two say the SAME thing. A form that nags about something the server allows trains people to ignore it; one that stays quiet about a refusal is the bug the strip was written to fix, restored.",
+      "date": "2026-09-10"
+    },
+    "theme-colour-hydration.test.ts": {
+      "guards": "themeColour() -- which returns a hex fallback on the server and a computed token on the client -- is only imported by map components, and never reaches a server-rendered `style` prop",
+      "mutation": "In components/geofence-editor.tsx's Legend, put `${COLOURS.extent}` back in the style prop where `var(${token})` now is.",
+      "observed": "1 failing ('puts no resolved colour into a style prop in the map components'). The real defect was a hydration mismatch on every load of /dashboard/events/new -- rgb(240,84,35) server-side against lab(61.25% 57.01 57.75) client-side, from three legend swatches. Invisible to tsc, to 2456 unit tests and to `next build`; the page renders correctly and the only symptom is a console warning. Found with Chrome DevTools MCP, which named the component and the exact style diff -- `browse` could only report that a mismatch existed.",
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [
