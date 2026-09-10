@@ -5,7 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { resolveEventCity } from "@/lib/location"
-import { actorFor } from "@/lib/org-membership"
+import { visibleEventsWhere } from "@/lib/event-visibility"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
 import { uniqueEventSlug } from "@/lib/event-slug"
@@ -39,25 +39,11 @@ export async function GET(req: NextRequest) {
      * despite `eventPermissions` granting them operational access to every
      * event in their building.
      *
-     * The three clauses mirror `eventPermissions.canOperate` exactly.
+     * The clauses live in `lib/event-visibility.ts` because the dashboard list
+     * screen asks the same question, and used to ask it through this route and
+     * then answer it differently in its own actions. One module, one answer.
      */
-    const where: Record<string, unknown> = { deleted_at: null }
-    if (session.user.role !== "app_admin") {
-      const actor = await actorFor(session.user)
-      where.OR = [
-        ...(actor.orgIds.length
-          ? [
-              { organizer_org_id: { in: actor.orgIds } },
-              ...(session.user.role === "venue_owner"
-                ? [{ venue: { owner_org_id: { in: actor.orgIds } } }]
-                : []),
-            ]
-          : []),
-        // Kept so an event created before organisations existed, or by someone
-        // whose org link is missing, stays visible to its creator.
-        { organizer_id: session.user.id },
-      ]
-    }
+    const where = await visibleEventsWhere(session.user)
 
     // Bounded so the payload can't grow without limit as events accumulate.
     // Response stays a plain array — callers can raise the window with ?limit.

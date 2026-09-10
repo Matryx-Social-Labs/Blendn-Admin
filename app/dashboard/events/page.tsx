@@ -1,129 +1,143 @@
-"use client"
+import { redirect } from "next/navigation"
 
-import { logger } from "@/lib/logger"
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
-import { useSession } from "next-auth/react"
-import { Button } from "@/components/ui/button"
-import { EventsTable } from "@/components/events-table"
-import { PlusIcon } from "@radix-ui/react-icons"
-import { toast } from "sonner"
+import { EventsTable, type EventRow } from "./events-table"
+import { getAuth } from "@/lib/auth"
+import { curationState } from "@/lib/curation"
+import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { db } from "@/lib/db"
+import { visibleEventsWhere } from "@/lib/event-visibility"
+import { canAccessDashboard } from "@/lib/rbac"
 
-interface Event {
-  id: string
-  title: string
-  description: string
-  short_description?: string | null
-  start_time: string | Date
-  end_time: string | Date
-  venue_name?: string | null
-  address?: string | null
-  city?: string | null
-  state?: string | null
-  country?: string | null
-  postal_code?: string | null
-  timezone: string
-  status: "draft" | "published" | "cancelled" | "completed"
-  max_capacity?: number | null
-  /** Counted from check-in rows. See lib/occupancy.ts. */
-  occupancy: number
-  external_link?: string | null
-  organizer_id: string
+export const dynamic = "force-dynamic"
+
+/**
+ * One column for when, not two.
+ *
+ * Start and end were separate columns each rendering the full
+ * "Sep 9, 2026, 11:57 AM" — the year twice and the date twice on every row, for
+ * a fact that is one date and a duration. At seventeen rows that is a quarter
+ * of the table's width spent repeating 2026.
+ *
+ * Formatted here rather than in the client component for two reasons that are
+ * really one: `new Date()` inside a render is an impure call (the React
+ * Compiler says so), and server and client can disagree about the year across
+ * a New Year boundary, which is a hydration mismatch nobody will ever
+ * reproduce. Same fix as `generatedAt` on the overview — compute it once, on
+ * the server, and send the string.
+ */
+function whenLabel(start: Date, end: Date, now: Date): string {
+  const sameDay = start.toDateString() === end.toDateString()
+  const date = start.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    // The year only when it is not this one. A list of 2026 events read on a
+    // 2026 afternoon does not need telling.
+    ...(start.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  })
+  if (!sameDay) {
+    return `${date} → ${end.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
+  }
+  const from = start.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" })
+  return `${date}, ${from}`
 }
 
-export default function EventsPage() {
-  const router = useRouter()
-  const { data: session } = useSession()
-  const [events, setEvents] = useState<Event[]>([])
-  const [loading, setLoading] = useState(true)
+/**
+ * Every event this person may see.
+ *
+ * ## Why this is a server component now
+ *
+ * It was the last screen in the dashboard that fetched its own data from a
+ * client `useEffect`, and that one decision produced most of what was wrong
+ * with it: a **"Loading events…" spinner inside a bordered card**, on a
+ * codebase whose design system says skeletons rather than spinners and which
+ * already had `app/dashboard/events/loading.tsx` sitting unused — the boundary
+ * can never fire for a component that does not suspend.
+ *
+ * It also meant a second copy of the row shape, and a second answer to "which
+ * events may I see": the route it called had careful organisation-membership
+ * scoping with a comment explaining the colleague-sees-an-empty-list bug, and
+ * nothing held the dashboard to it. `lib/event-visibility.ts` is now the only
+ * answer, used by both.
+ *
+ * ## What the columns are for
+ *
+ * An admin opens this to find one event, or to see what is broken. So: when,
+ * where, whose, and whether it can actually be checked into. **Capacity is
+ * gone** — it rendered `current_capacity`, which has no application writer and
+ * was `0` on every row for every event ever created (K4.12). A column of zeroes
+ * is not a neutral omission; it is a metric asserting that nobody came.
+ */
+export default async function EventsPage() {
+  const session = await getAuth()
+  if (!session?.user || !canAccessDashboard(session.user.role)) redirect("/login")
 
-  const currentUserId = session?.user?.id
-  const currentUserRole = session?.user?.role
+  const now = new Date()
 
-  useEffect(() => {
-    fetchEvents()
-  }, [])
+  const events = await db.events.findMany({
+    where: await visibleEventsWhere(session.user),
+    orderBy: { start_time: "desc" },
+    // Bounded, and the count below says so rather than letting a truncated
+    // list read as the whole list — the no-silent-caps rule, applied to the UI.
+    take: 200,
+    select: {
+      id: true,
+      title: true,
+      slug: true,
+      status: true,
+      start_time: true,
+      end_time: true,
+      city: true,
+      venue_name: true,
+      latitude: true,
+      geofence: true,
+      curated_at: true,
+      claimed_at: true,
+      organizer_org_id: true,
+      organizer: { select: { name: true, email: true } },
+      _count: { select: { rsvps: true } },
+    },
+  })
 
-  const fetchEvents = async () => {
-    try {
-      const response = await fetch("/api/events")
-      if (!response.ok) {
-        throw new Error("Failed to fetch events")
-      }
-      const data = await response.json()
-      setEvents(data)
-    } catch (error) {
-      logger.error("Error fetching events", { error: error instanceof Error ? error.message : String(error) })
-      toast.error("Failed to load events")
-    } finally {
-      setLoading(false)
-    }
-  }
+  /*
+   * Arrivals are DISTINCT PEOPLE, from the module that owns the question.
+   *
+   * The first version of this select had `_count: { check_ins: true }` and
+   * `__tests__/count-people-boundary.test.ts` failed the build on it, which is
+   * exactly what that guard is for. A check-in row is a person-day: one
+   * attendee at "Design Week Bengaluru" — three days, in the seed — would have
+   * rendered as 3 arrivals on this list while the funnel one screen away
+   * counted them once. That is W17 in a tenth place, on a screen built after
+   * W17 shipped.
+   */
+  const [total, arrivals] = await Promise.all([
+    db.events.count({ where: await visibleEventsWhere(session.user) }),
+    distinctAttendeeCounts(events.map((event) => event.id)),
+  ])
 
-  const handleDeleteEvent = async (event: Event) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${event.title}"? This cannot be undone.`
-    )
-    if (!confirmed) return
+  const rows: EventRow[] = events.map((event) => ({
+    id: event.id,
+    title: event.title,
+    status: event.status,
+    startTime: event.start_time.toISOString(),
+    when: whenLabel(event.start_time, event.end_time, now),
+    where: event.venue_name ?? event.city ?? null,
+    city: event.city,
+    host: event.organizer?.name ?? null,
+    rsvps: event._count.rsvps,
+    arrivals: arrivals.get(event.id) ?? 0,
+    curation: curationState(event),
+    /*
+     * The one thing that decides whether the door works.
+     *
+     * `canPublish` refuses an event with no coordinates and no fence, and it
+     * only reached a caller recently — so published events predating that exist
+     * and 400 at the door with nothing on any screen saying why. Surfacing it
+     * on the list is how you find them without opening 200 events.
+     */
+    checkInReady: event.latitude !== null || event.geofence !== null,
+  }))
 
-    try {
-      const response = await fetch(`/api/events/${event.id}`, {
-        method: "DELETE",
-      })
+  const canCreate = session.user.role === "app_admin" || session.user.role === "organizer"
 
-      if (!response.ok) {
-        throw new Error("Failed to delete event")
-      }
-
-      setEvents((prev) => prev.filter((item) => item.id !== event.id))
-      toast.success("Event deleted successfully")
-      router.refresh()
-    } catch (error) {
-      logger.error("Error deleting event", { error: error instanceof Error ? error.message : String(error) })
-      toast.error("Failed to delete event")
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-6 py-6">
-        <div className="px-4 lg:px-6">
-          <div className="flex h-64 items-center justify-center rounded-xl border bg-muted/50">
-            <div className="text-muted-foreground">Loading events...</div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  const canCreate = currentUserRole === "app_admin" || currentUserRole === "organizer"
-
-  return (
-    <div className="flex flex-col gap-6 py-6">
-      <div className="px-4 lg:px-6">
-        <div className="flex flex-col gap-4 rounded-xl border bg-card px-6 py-6 @2xl/main:flex-row @2xl/main:items-end @2xl/main:justify-between">
-          {canCreate && (
-            <Button
-              onClick={() => router.push("/dashboard/events/new")}
-              className="rounded-full"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Create Event
-            </Button>
-          )}
-        </div>
-      </div>
-      <div className="px-4 lg:px-6">
-        <div className="rounded-xl border bg-card p-5">
-          <EventsTable
-            events={events}
-            onEdit={(event) => router.push(`/dashboard/events/${event.id}/edit`)}
-            onDelete={handleDeleteEvent}
-            currentUserId={currentUserId}
-            currentUserRole={currentUserRole}
-          />
-        </div>
-      </div>
-    </div>
-  )
+  return <EventsTable rows={rows} total={total} canCreate={canCreate} />
 }
