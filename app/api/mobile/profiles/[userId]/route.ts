@@ -436,16 +436,31 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       where: { id: userId },
       create: {
         id: userId,
-        name,
-        phone,
+        /*
+         * Spread, like every field below it.
+         *
+         * These seven were the only ones in this object still passing a bare
+         * optional, and under `strictUndefinedChecks` an explicit `undefined`
+         * is a runtime error rather than "use the column default". The `update`
+         * branch was fully converted and this one was not.
+         *
+         * That broke **every** profile write, not just the ones creating a row:
+         * Prisma validates both branches of an `upsert` before it runs, so an
+         * invalid `create` fails an update that would never have touched it.
+         * The effect was that onboarding could not be completed and no profile
+         * could be edited — signup worked, and then the account was stuck.
+         */
+        ...(name !== undefined && { name }),
+        ...(phone !== undefined && { phone }),
         // The derived number when a date came with the request, so the stored
         // column stays a usable fallback and the dashboard keeps reading true.
-        age: parsedDob ? effectiveAge : age,
-        ...(parsedDob && { date_of_birth: parsedDob }),
-        location: normalizedLocation,
-        bio,
-        occupation,
-        education,
+        ...(parsedDob
+          ? { age: effectiveAge, date_of_birth: parsedDob }
+          : age !== undefined && { age }),
+        ...(normalizedLocation !== undefined && { location: normalizedLocation }),
+        ...(bio !== undefined && { bio }),
+        ...(occupation !== undefined && { occupation }),
+        ...(education !== undefined && { education }),
         interests: interests || [],
         photos: photos || [],
         goals: goals || [],
