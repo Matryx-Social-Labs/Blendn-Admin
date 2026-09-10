@@ -381,6 +381,13 @@
       "mutation": "A: delete `moderation_status: null` from `VISIBLE_DM`, leaving the bare `{ not: \"hidden\" }`. B: delete the spread from the unread `_count` filter. C: delete `where: VISIBLE_DM` from the inbox preview. D: delete the spread from the thread's where clause",
       "observed": "A: the structural assertion fails, and against real Postgres two cases in `dm-gating.itest.ts` fail — an ordinary message with a NULL verdict disappears, because `moderation_status <> 'hidden'` is NULL for a NULL row and NULL is the ordinary case here. That mutation hides the entire message history of every conversation in the product. B, C, D: 1 failing each ('is carried by every participant-facing read of a DM'). The first version of that guard asserted the file merely *contained* `VISIBLE_DM`, and control B passed against it — the preview's copy kept it green while the unread count had lost it. Now brace-matched per query block",
       "date": "2026-09-05"
+    },
+    "toaster-mounted.test.ts": {
+      "guards": "a <Toaster /> is rendered somewhere in the app tree whenever any file calls toast.*, and that there are callers at all so the mount assertion cannot go vacuous",
+      "mutation": "remove `<Toaster theme=\"dark\" richColors />` from app/layout.tsx, which is exactly the state the codebase was in when this was found",
+      "observed": "1 failing ('renders a Toaster somewhere in the tree'); the vacuity guard stayed green, which is the point of having both",
+      "reverted": true,
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [
