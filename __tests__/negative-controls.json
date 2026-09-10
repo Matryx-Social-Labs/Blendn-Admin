@@ -417,6 +417,13 @@
       "observed": "A: 1 failing ('shows it on every page that reads a range'), naming /dashboard/users. B: 1 failing ('shows it on no page that ignores one'), naming the same route. The vacuity guard stayed green in both",
       "reverted": true,
       "date": "2026-09-10"
+    },
+    "event-tab-destinations.test.ts": {
+      "guards": "that the Chat and Attendees tabs, which `eventTabsFor` offers on `canOperate`, lead to a page that admits `canOperate` — and that the broadcast composer and sponsor panel on that page stay behind `canEdit`, so widening the gate does not hand a venue owner a broadcast into an event they do not run",
+      "mutation": "A: put the page gate back to `canEdit`. B: replace the `permissions.canEdit ?` guard around the left column with `true ?`",
+      "observed": "A: 1 failing ('lets canOperate into the page those tabs lead to'). B: 2 failing — the composer guard, and the assertion that ChatFeed and ModerationQueue sit outside it, because an always-true guard swallows the whole column. The vacuity guard stayed green in both",
+      "reverted": true,
+      "date": "2026-09-10"
     }
   },
   "grandfathered": [
