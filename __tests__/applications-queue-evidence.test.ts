@@ -1,6 +1,7 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 
+import { evidenceMarks } from "@/lib/application-evidence"
 import { isAggregatorDomain } from "@/lib/curation-sources"
 
 const ROOT = join(__dirname, "..")
@@ -51,9 +52,60 @@ describe("isAggregatorDomain", () => {
 
 describe("the queue renders the ranking", () => {
   it("draws an aggregator domain as a warning, not as a credential", () => {
-    const src = read("app/dashboard/onboarding/queue.tsx")
-    expect(src).toMatch(/row\.aggregatorDomain \? \(/)
-    expect(src).toMatch(/variant="destructive"[\s\S]{0,200}Ticketing platform/)
+    const [first] = evidenceMarks(
+      {
+        roleLabel: "Organiser",
+        emailDomain: "in.bookmyshow.com",
+        freeProvider: false,
+        aggregatorDomain: true,
+      },
+      false
+    )
+    expect(first.weight).toBe("against")
+    expect(first.variant).toBe("destructive")
+    expect(first.label).toContain("Ticketing platform")
+  })
+
+  it("puts the heaviest mark leftmost, which is the whole mechanism", () => {
+    /*
+     * The badges rendered in a fixed sequence — role, email state, domain — so
+     * the strongest mark on a row could sit third. Every individual badge still
+     * looked right; the COLUMN read the wrong thing, which is why this is
+     * ordering and not colour.
+     *
+     * Found by building the screen in HTML first. The colour fix alone left the
+     * aggregator warning third.
+     */
+    const aggregator = evidenceMarks(
+      { roleLabel: "Organiser", emailDomain: "in.bookmyshow.com", freeProvider: false, aggregatorDomain: true },
+      false
+    )
+    expect(aggregator[0].key).toBe("aggregator")
+
+    const credentialled = evidenceMarks(
+      { roleLabel: "Organiser", emailDomain: "thehummingtree.com", freeProvider: false, aggregatorDomain: false },
+      false
+    )
+    expect(credentialled[0].key).toBe("domain")
+    expect(credentialled[0].weight).toBe("for")
+
+    // A row with nothing either way leads with context, not with a blank.
+    const plain = evidenceMarks(
+      { roleLabel: "Organiser", emailDomain: "gmail.com", freeProvider: true, aggregatorDomain: false },
+      false
+    )
+    expect(plain[0].weight).not.toBe("against")
+    expect(plain.map((m) => m.key)).toContain("provider")
+  })
+
+  it("never shows a credential badge and an aggregator warning at once", () => {
+    // They are the same fact read two ways. Showing both would be the screen
+    // arguing with itself on one row.
+    const marks = evidenceMarks(
+      { roleLabel: "Organiser", emailDomain: "in.bookmyshow.com", freeProvider: false, aggregatorDomain: true },
+      false
+    )
+    expect(marks.filter((m) => m.weight === "for")).toEqual([])
   })
 
   it("carries the age on the collapsed row, from the shared rule", () => {

@@ -468,9 +468,9 @@
       "date": "2026-09-10"
     },
     "applications-queue-evidence.test.ts": {
-      "guards": "the applications queue ranks its evidence -- an aggregator email domain renders as a warning and not as a credential -- and its age comes from lib/attention-queues.ts rather than a second local calculation",
-      "mutation": "A: render the aggregator badge with `variant=\"default\"` (the credential badge) instead of destructive. B: drop the `queueAgeLabel` import and compute the age locally from Date.now().",
-      "observed": "A: 1 failing ('draws an aggregator domain as a warning, not as a credential'). B: 1 failing ('carries the age on the collapsed row, from the shared rule'). A is the one worth having: a filled brand badge reads as positive, and the queue drew `thehummingtree.com` (the applicant's own domain, the strongest credential) and `in.bookmyshow.com` (a ticketing aggregator, the strongest disqualifier) identically -- so the two extremes looked the same while the middle, 'Personal email', looked different.",
+      "guards": "the applications queue's evidence marks are ORDERED by weight -- heaviest first -- an aggregator email domain is `against` and never appears alongside a `for` credential, and the age comes from lib/attention-queues.ts rather than a second local calculation",
+      "mutation": "A: `return marks` instead of `return marks.sort(...)` in lib/application-evidence.ts -- the fixed sequence as it shipped. B: render the aggregator badge with the credential variant. C: drop the queueAgeLabel import and compute the age locally.",
+      "observed": "A: 2 failing ('puts the heaviest mark leftmost, which is the whole mechanism' and 'draws an aggregator domain as a warning'). B and C: 1 each. A is the one that matters and it is the one a colour fix alone would have missed -- every individual badge still LOOKS right when the sequence is wrong, and the column is what gets scanned. Found by building the screen in HTML first; the shipped fix had changed the badge's colour and left it third in a fixed order.",
       "date": "2026-09-11"
     }
   },

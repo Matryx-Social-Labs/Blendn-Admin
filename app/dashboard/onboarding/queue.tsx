@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { evidenceMarks, type EvidenceIcon } from "@/lib/application-evidence"
 import { queueAgeLabel, queueBreached } from "@/lib/attention-queues"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -37,6 +38,13 @@ const ROLE_LABEL: Record<OnboardingRow["requested_role"], string> = {
   organizer: "Organiser",
   venue_owner: "Venue owner",
   sponsor: "Sponsor",
+}
+
+/** The presentation half of `evidenceMarks` — names in, nodes out. */
+const EVIDENCE_ICON: Record<EvidenceIcon, React.ReactNode> = {
+  "alert-triangle": <IconAlertTriangle className="size-3.5" />,
+  "mail-question": <IconMailQuestion className="size-3.5" />,
+  "circle-check": <IconCircleCheck className="size-3.5" />,
 }
 
 export function OnboardingQueue({
@@ -155,45 +163,36 @@ function Row({ row, now }: { row: OnboardingRow; now: Date }) {
             {row.city ? ` · ${row.city}` : ""}
           </span>
         </div>
+        {/*
+          Evidence on a signed axis, heaviest mark first.
+
+          The badges were rendered in a fixed sequence — role, email state,
+          domain — so the strongest mark on a row could sit third. That defeats
+          the thing the badges are for: an admin scanning seven rows should be
+          able to read the LEFT EDGE of this column and know which row needs
+          reading, before reading a word.
+
+          `evidenceMarks` sorts by weight and the CSS gives each weight its own
+          register: against is outlined destructive with a glyph, for is filled
+          and warm, neutral and state are quiet. Found by building the screen in
+          HTML first — the colour fix alone left the aggregator warning third in
+          a fixed order, which looked correct in isolation and wrong in a column.
+        */}
         <div className="flex flex-wrap items-center gap-2">
-          {/*
-            An exhaustive map, not a ternary.
-
-            This read `venue_owner ? "Venue owner" : "Organiser"`, so the moment
-            sponsor applications existed they rendered as "Organiser" — an admin
-            approving one would grant placement rights believing they were
-            approving a host, and nothing on screen would say otherwise.
-          */}
-          <Badge variant="secondary">{ROLE_LABEL[row.requested_role]}</Badge>
-          {awaitingEmail ? (
-            <Badge variant="outline" className="gap-1">
-              <IconMailQuestion className="size-3.5" /> Email unconfirmed
+          {evidenceMarks(
+            {
+              roleLabel: ROLE_LABEL[row.requested_role],
+              emailDomain: row.emailDomain,
+              freeProvider: row.freeProvider,
+              aggregatorDomain: row.aggregatorDomain,
+            },
+            awaitingEmail
+          ).map((mark) => (
+            <Badge key={mark.key} variant={mark.variant} className="gap-1">
+              {mark.icon ? EVIDENCE_ICON[mark.icon] : null}
+              {mark.label}
             </Badge>
-          ) : (
-            <Badge variant="outline" className="gap-1">
-              <IconCircleCheck className="size-3.5" /> Email confirmed
-            </Badge>
-          )}
-          {/*
-            An aggregator domain is a warning, not a credential.
-
-            A company address is accepted as-is precisely because it is evidence
-            the applicant belongs to the organisation. That argument inverts at
-            a ticketing platform: `bookings@in.bookmyshow.com` proves somebody
-            works at BookMyShow, and the events they would be claiming are not
-            BookMyShow's. Rendering it in the same filled badge as
-            `thehummingtree.com` said the opposite of what it means.
-          */}
-          {row.aggregatorDomain ? (
-            <Badge variant="destructive" className="gap-1">
-              <IconAlertTriangle className="size-3.5" />
-              Ticketing platform · {row.emailDomain}
-            </Badge>
-          ) : (
-            <Badge variant={row.freeProvider ? "outline" : "default"}>
-              {row.freeProvider ? "Personal email" : row.emailDomain}
-            </Badge>
-          )}
+          ))}
           {/*
             The age, on the collapsed row.
 
