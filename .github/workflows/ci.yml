@@ -57,6 +57,21 @@ env:
 jobs:
   lint-and-types:
     runs-on: ubuntu-latest
+    # A squash-merge into dev is content this workflow already passed minutes
+    # earlier as a pull request. Re-running it was 51 of 129 runs.
+    #
+    # It is a message test rather than branch protection because **branch
+    # protection is not available on this plan** — a private repository on Free
+    # gets `403 Upgrade to GitHub Pro`. So a direct push to dev is still
+    # possible, and when it happens this workflow is the only thing that checks
+    # it: the condition skips PR merges, not pushes in general.
+    #
+    # `gh pr merge --squash` always appends `(#N)`. A hand-written commit that
+    # happens to contain `(#` would be skipped too; that is the known edge, and
+    # it is cheaper than paying for every merge.
+    if: >-
+      github.event_name != 'push'
+      || !contains(github.event.head_commit.message, '(#')
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -190,6 +205,21 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # A squash-merge into dev is content this workflow already passed minutes
+    # earlier as a pull request. Re-running it was 51 of 129 runs.
+    #
+    # It is a message test rather than branch protection because **branch
+    # protection is not available on this plan** — a private repository on Free
+    # gets `403 Upgrade to GitHub Pro`. So a direct push to dev is still
+    # possible, and when it happens this workflow is the only thing that checks
+    # it: the condition skips PR merges, not pushes in general.
+    #
+    # `gh pr merge --squash` always appends `(#N)`. A hand-written commit that
+    # happens to contain `(#` would be skipped too; that is the known edge, and
+    # it is cheaper than paying for every merge.
+    if: >-
+      github.event_name != 'push'
+      || !contains(github.event.head_commit.message, '(#')
 
     # Postgres lives only in this lane. It cost 24s of startup on every run,
     # including the two lanes that never touch a database.
@@ -288,6 +318,15 @@ jobs:
     # To run it: add the `full-e2e` label to a PR. Nothing else changed — the
     # job is intact, including the diagnostics that produced the measurement
     # above, so re-enabling it is deleting this `if:`.
+    #
+    # ⚠️ That `if:` was missing. Every word above described a gate that was not
+    # in the file, so the lane ran on all 129 runs in the ten days to 10
+    # September — 4.7 minutes each, 48% of the whole CI bill, on a job the
+    # comments said was off. Restored below.
+    if: >-
+      github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+      || contains(github.event.pull_request.labels.*.name, 'full-e2e')
 
     services:
       postgres:
@@ -533,6 +572,21 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    # A squash-merge into dev is content this workflow already passed minutes
+    # earlier as a pull request. Re-running it was 51 of 129 runs.
+    #
+    # It is a message test rather than branch protection because **branch
+    # protection is not available on this plan** — a private repository on Free
+    # gets `403 Upgrade to GitHub Pro`. So a direct push to dev is still
+    # possible, and when it happens this workflow is the only thing that checks
+    # it: the condition skips PR merges, not pushes in general.
+    #
+    # `gh pr merge --squash` always appends `(#N)`. A hand-written commit that
+    # happens to contain `(#` would be skipped too; that is the known edge, and
+    # it is cheaper than paying for every merge.
+    if: >-
+      github.event_name != 'push'
+      || !contains(github.event.head_commit.message, '(#')
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
