@@ -1,5 +1,5 @@
-    # Runs on every PR again, sweeps excluded; nightly and `full-e2e` run the
-    # lot. It was off by default for one reason, and the reason was wrong.
+    # Runs on every PR, sweeps excluded; nightly and `full-e2e` run the lot.
+    # It was off by default for one reason, and the reason was wrong.
     #
     # The lane was killed by the runner at ~6.7GB RSS and that was written up
     # as an unexplained leak that production probably shared. It was neither:
@@ -286,47 +286,33 @@ jobs:
   # starts the background loops, and it is what production executes; a lane that
   # booted `next dev` would be testing something nobody ships.
   e2e:
-    # Off by default, and NOT because the tests fail — they pass, 26 to 29 of
-    # them with zero failures on every run. The job is killed by the host
-    # because `node dist/server.js` grows to 6.7GB on a 2-core / 7.9GB runner,
-    # which is a real defect being profiled separately (`MEMORY_TRACE=1`).
+    # Runs on every pull request. The sweeps do not — see the `--grep-invert`
+    # below, which is a separate decision and still the right one.
     #
-    # Leaving it red on every PR trains people to ignore a red X, which costs
-    # more than the lane is currently worth. It runs nightly, and on demand via
-    # the `full-e2e` label or a manual dispatch, so the coverage is a decision
-    # rather than a casualty.
+    # This lane was gated off in #286 because `node dist/server.js` reached
+    # 6.7GB on a 2-core runner and the host reclaimed the machine. #290 found
+    # the cause -- `npm run` does not set NODE_ENV, so the server booted in
+    # development mode and Next.js compiled routes on demand for 231
+    # navigations. Peak RSS went 6,904M to 458M and the suite went from
+    # reclaimed-mid-run to 29 passed in 15.7s, so the gate came off with it.
     #
-    # Meanwhile the suite runs locally against a production build and a fresh
-    # seed — 32 passing including both sweeps — and that is where it is being
-    # relied on until the memory finding is closed.
+    # ⚠️ #286's justification stayed in this file for six days after #290
+    # removed the thing it justified, and on 10 September it was read as
+    # current: the gate was "restored" in #333 on the strength of a comment
+    # describing a state that no longer existed. Both comment blocks are gone
+    # now, replaced by this one. **A comment that outlives its code is worse
+    # than no comment** -- it is evidence, and it will be believed.
+    #
+    # `docs/E2E-LOCAL.md` still carries the local command, which is the faster
+    # loop while writing a spec. It is a companion to this lane, not a
+    # replacement for it.
     runs-on: ubuntu-latest
 
-    # ── OFF BY DEFAULT, and this is a deliberate retreat rather than a repair ──
-    #
-    # The suite is not broken: it passes locally, 32 tests including both heavy
-    # sweeps, against a production build and a fresh seed. What fails is the
-    # environment. `node dist/server.js` grows to 6.7GB on a 2-core / 7.9GB
-    # runner — measured, with `--max-old-space-size=1536` in force, so the
-    # growth is not the V8 old space — and the host reclaims the machine. Tests
-    # pass right up to the moment it dies.
-    #
-    # A lane that is red on every push is worse than no lane: people learn to
-    # ignore the cross, and then miss the real one. So this runs on demand until
-    # the memory question is settled, and `docs/E2E-LOCAL.md` carries the local
-    # command that replaces it meanwhile.
-    #
-    # To run it: add the `full-e2e` label to a PR. Nothing else changed — the
-    # job is intact, including the diagnostics that produced the measurement
-    # above, so re-enabling it is deleting this `if:`.
-    #
-    # ⚠️ That `if:` was missing. Every word above described a gate that was not
-    # in the file, so the lane ran on all 129 runs in the ten days to 10
-    # September — 4.7 minutes each, 48% of the whole CI bill, on a job the
-    # comments said was off. Restored below.
+    # Same merge-skip as the other three lanes: a squash merge into dev is
+    # content this workflow passed minutes earlier as a pull request.
     if: >-
-      github.event_name == 'schedule'
-      || github.event_name == 'workflow_dispatch'
-      || contains(github.event.pull_request.labels.*.name, 'full-e2e')
+      github.event_name != 'push'
+      || !contains(github.event.head_commit.message, '(#')
 
     services:
       postgres:
