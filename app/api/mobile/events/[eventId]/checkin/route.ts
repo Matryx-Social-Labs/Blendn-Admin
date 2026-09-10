@@ -1,3 +1,4 @@
+import { outOfRangeMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockCounterparties } from "@/lib/conversations"
@@ -238,7 +239,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         accuracyMetres: gpsAccuracy,
       })
       return errorResponse(
-        `You're about ${Math.round(verdict.shortfall)}m outside the check-in area. Move closer to the venue and try again.`,
+        outOfRangeMessage(verdict.shortfall),
         400,
         ErrorCode.OUT_OF_RANGE
       )
