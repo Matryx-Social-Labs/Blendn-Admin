@@ -37,6 +37,15 @@ describe("the venue search reaches the server", () => {
     expect(body).not.toMatch(/count\(\{ where: \{ deleted_at: null \} \}\)/)
   })
 
+  it("a server-side search that matches nothing is 'nothing matches', not 'no venues yet'", () => {
+    // The GET input is uncontrolled, so the table's own `query` state never
+    // learns about ?q. Found by the react pass: a search for a venue that does
+    // not exist rendered the designed empty state over a database of hundreds.
+    const table = read("components/dashboard/data-table.tsx")
+    expect(table).toMatch(/const isFiltered = activeChips\.length > 0 \|\| serverSearch !== null/)
+    expect(table).toMatch(/<a href="\?" className="text-primary hover:underline">/)
+  })
+
   it("the DataTable renders the form in the search slot, not above the filters", () => {
     // Same position as the local search, so the screen does not change shape
     // between the two modes.

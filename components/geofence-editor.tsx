@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, LayerGroup, TileLayer } from "leaflet"
@@ -111,13 +111,25 @@ export function GeofenceEditor({
   const [importing, setImporting] = useState(false)
   const [importNote, setImportNote] = useState<string | null>(null)
 
-  const fence: Geofence = value ?? {
-    type: "circle",
-    lat: fallbackCentre.lat,
-    lng: fallbackCentre.lng,
-    radius: 30,
-    buffer: 20,
-  }
+  /*
+   * Memoised, because the draw effect below keys on it. As a bare `value ?? {…}`
+   * the fallback was a NEW object on every render — and this component
+   * re-renders on every keystroke elsewhere in the form — so before a fence was
+   * drawn, typing a capacity cleared the layer group and rebuilt every marker
+   * with fresh drag handlers. Mid-drag, that destroys the node under the
+   * cursor. Keyed on the centre's numbers, not the object, for the same reason.
+   */
+  const fence: Geofence = useMemo(
+    () =>
+      value ?? {
+        type: "circle",
+        lat: fallbackCentre.lat,
+        lng: fallbackCentre.lng,
+        radius: 30,
+        buffer: 20,
+      },
+    [value, fallbackCentre.lat, fallbackCentre.lng]
+  )
 
   /*
    * Read by Leaflet's event handlers, which are registered once on mount and

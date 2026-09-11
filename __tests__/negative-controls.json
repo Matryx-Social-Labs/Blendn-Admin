@@ -475,8 +475,8 @@
     },
     "venues-search-server-side.test.ts": {
       "guards": "the admin venue index's search is a GET form that reaches the server (name OR city, case-insensitive), page.tsx reads ?q and passes it to getVenueRecords, one where clause feeds both the list and the count, and the DataTable renders the form in the same slot as the local search",
-      "mutation": "A: `db.venues.count({ where: { deleted_at: null } })` -- the count ignores the search. B: `search` (boolean) on the VenueRecords DataTable -- back to filtering the loaded page.",
-      "observed": "A: 1 failing ('matches name OR city ... counts the same set it lists'). B: 1 failing ('submits a GET form named q'). The bug this pins: the list is a 200-row page, the box searched the page, and a venue past row 200 was unfindable with the box still reading 'Search venues...'. Same fix and same guard shape as users-search-server-side.",
+      "mutation": "A: `db.venues.count({ where: { deleted_at: null } })` -- the count ignores the search. B: `search` (boolean) on the VenueRecords DataTable -- back to filtering the loaded page. C: `const isFiltered = activeChips.length > 0` -- the server search no longer counts as a filter.",
+      "observed": "A: 1 failing ('matches name OR city ... counts the same set it lists'). B: 1 failing ('submits a GET form named q'). The bug this pins: the list is a 200-row page, the box searched the page, and a venue past row 200 was unfindable with the box still reading 'Search venues...'. Same fix and same guard shape as users-search-server-side. C: 1 failing ('a server-side search that matches nothing is nothing matches, not no venues yet').",
       "date": "2026-09-11"
     }
   },

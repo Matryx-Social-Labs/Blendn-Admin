@@ -217,7 +217,11 @@ export function DataTable<T extends { id: string | number }>({
         clear: () => setFilterValues((v) => ({ ...v, [f.key]: "all" })),
       })),
   ]
-  const isFiltered = activeChips.length > 0
+  // A GET-mode search lives in the URL, not in `query`, so it has to count
+  // here explicitly — otherwise a search that matched nothing rendered the
+  // designed "No venues yet" empty state over a database of hundreds.
+  const serverSearch = typeof search === "object" && search.defaultValue?.trim() ? search : null
+  const isFiltered = activeChips.length > 0 || serverSearch !== null
   const count = selectionCount(selection, sorted.length)
   const headerState = headerCheckState(selection, pageIds)
 
@@ -475,15 +479,22 @@ export function DataTable<T extends { id: string | number }>({
         // user applied, and the fix is theirs to make.
         <div className="rounded-lg border border-border px-5 py-7 text-center text-[0.8125rem] text-muted-foreground">
           Nothing matches the current filters.{" "}
-          <button
-            onClick={() => {
-              setQuery("")
-              setFilterValues({})
-            }}
-            className="text-primary hover:underline"
-          >
-            Clear filters
-          </button>
+          {serverSearch ? (
+            // The search is in the URL, so clearing it is a navigation.
+            <a href="?" className="text-primary hover:underline">
+              Clear search
+            </a>
+          ) : (
+            <button
+              onClick={() => {
+                setQuery("")
+                setFilterValues({})
+              }}
+              className="text-primary hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">

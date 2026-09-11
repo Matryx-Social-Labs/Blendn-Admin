@@ -156,7 +156,9 @@ function Row({ row, now }: { row: OnboardingRow; now: Date }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        aria-controls={detailId}
+        // Only while the panel is mounted; an id that points at nothing is worse
+        // than no relationship.
+        aria-controls={open ? detailId : undefined}
         className="flex flex-wrap items-baseline justify-between gap-3 text-left"
       >
         <div className="flex flex-col gap-1">
