@@ -602,6 +602,28 @@ Six facts from the first Android run, each of which cost an hour:
   `patches/` applied on `postinstall`. A checkout where that has not run will
   crash on the first library pick.
 
+**Parallel is slower than serial on this Mac.** iOS and Android were tried
+side by side (2026-09-11): the Android driver died at `deviceInfo` on the
+first attempt and typed twelve characters in two minutes on the second, while
+the iPhone simulator was up. With the simulator shut, the same emulator went
+through sign-up, eight onboarding steps, sign-out, sign-in and deletion
+without a stall. **Run iOS first, shut the simulator, then Android.** Two more
+Android facts from that run: Maestro's `hideKeyboard` sends BACK when no
+keyboard is up, which leaves the app — assert the keyboard is there or tap a
+label instead — and `adb shell input text` is a reliable substitute for
+`inputText` on long strings (the field must already be focused).
+
+**When the MCP is not attached to this session** (it shows `CONNECTION_CLOSED`
+at start and `/mcp` was run elsewhere), the Maestro CLI drives the same
+devices: `maestro --device <id> test --debug-output <dir> flow.yaml`, with
+`JAVA_HOME=/opt/homebrew/opt/openjdk`. The Viewer does not show CLI runs;
+`takeScreenshot` steps plus `maestro hierarchy` are the read-back. Two
+selector facts that cost time: tab buttons are `"Me tab"` / `"Pulse tab"`,
+and a `Pressable` without `accessibilityLabel` names itself after its icon
+glyphs, so match `".*Edit profile.*"`. RN's dev LogBox (a red toast, or a
+full-screen "Console Error" with **Dismiss**) sits over the tab bar and eats
+taps; guard steps with an optional `tapOn: "Dismiss"`.
+
 **Push, specifically — a toggle is not tested until a push was sent.**
 `Device.isDevice` is false on every simulator and emulator, so the client
 registers a **fake token** there and nothing can arrive. Prove the opt-out on
