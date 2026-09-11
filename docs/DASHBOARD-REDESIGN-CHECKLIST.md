@@ -84,7 +84,7 @@ gates, the specialists, and a drive, before the next one starts.
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
 | `/dashboard` (venue-owner overview) | ✅ ea82077 (mockup `overview-venue-20260911`) | ✅ 2026-09-11 as Fatima Sheikh | `visibleEventsWhere` scope (H2 fixed here); peak cell outlined; notes as text |
-| `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 2026-09-11 (mockup `venue-detail-20260911`) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima | numbers first, record last; no chips |
+| `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 6e47108 (my venues, mockup skipped — the row pattern) / ✅ 3233c27 (mockup `venue-detail-20260911`) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima | rows with rules; numbers first, record last; no chips |
 | `/dashboard/venues/new`, `/venues/[id]/claim` | ✅ 2026-09-11 (chrome cut; mockups skipped) | ✅ E7; 2026-09-11 | header titles for both routes |
 | `/dashboard/events`, `/events/[id]` | shared | ✅ | canOperate tabs |
 | `/dashboard/chatrooms`, `/organisation` | ✅ shared | ✅ | |
@@ -108,4 +108,8 @@ gates, the specialists, and a drive, before the next one starts.
 5. ~~`/dashboard/venues/[id]`, `/venues/new`, `/venues/[id]/claim` (venue owner)~~ — done 2026-09-11
 6. ~~Admin remainder: moderation (+reports), sponsors / creative-review / charges, organisations, organisers/[id], venue-owners/[id], leads, categories, amenities, reports, audit, settings~~ — done 2026-09-11 (a638b48 + moderation follow-up)
 
-**The queue is empty.** Every dashboard route except `/login` has been through the chain. Next: `/design-review` over the live pages, then the testing routine resumes (six gates, specialists, Maestro drives, read-backs).
+**The queue is empty.** Every dashboard route except `/login` has been through the chain.
+
+`/design-review` ran 2026-09-11 over the result (report: `~/.gstack/projects/Matryx-Social-Labs-Blendn-Admin/designs/design-audit-20260911/`): 15 findings, 9 fixed in nine `style(design): FINDING-NNN` commits (10e5c64 … 5530cc7), design score B+ → A. Deferred, for the testing phase: the audit log groups days by browser timezone (`toDateString()` in a client component — will hydrate differently on Railway), the hand-typed type scale (209× `text-[0.8125rem]` while `--text-small` is unused — a codemod, its own PR), the map placeholder hex and primitive shadows. The venue owner's `/dashboard/venues` was mis-ticked above as shared with the admin index; it went through the chain in 6e47108.
+
+Next: the testing routine resumes (six gates, specialists, Maestro drives, read-backs).
