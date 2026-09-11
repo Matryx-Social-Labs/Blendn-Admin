@@ -260,6 +260,12 @@ export function SiteHeader() {
     if (pathname.startsWith("/dashboard/events/")) {
       return { title: "Event", description: "Setup, performance, and what happened on the night." }
     }
+    if (pathname.startsWith("/dashboard/venues/") && pathname.endsWith("/claim")) {
+      return { title: "Claim a venue", description: "Reviewed by an admin. Approval links every event held there to you." }
+    }
+    if (pathname.startsWith("/dashboard/venues/") && pathname !== "/dashboard/venues/new") {
+      return { title: "Venue", description: "One building — who is in it now, who books it, and its record." }
+    }
 
     return {
       title: "Overview",

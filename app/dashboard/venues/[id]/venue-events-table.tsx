@@ -4,7 +4,6 @@ import { IconCalendar } from "@tabler/icons-react"
 
 import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState } from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
 import { formatPct, formatSince } from "@/lib/dashboard-format"
 
 /**
@@ -51,9 +50,12 @@ const columns: Column<VenueEventRow>[] = [
     key: "status",
     label: "",
     sortable: false,
-    render: (r) => (
-      <Badge variant={r.status === "published" ? "default" : "secondary"}>{r.status}</Badge>
-    ),
+    // Published is the ordinary case at a venue, so it says nothing. Anything
+    // else — draft, cancelled — is worth a word.
+    render: (r) =>
+      r.status === "published" ? null : (
+        <span className="text-[0.75rem] text-muted-foreground">{r.status}</span>
+      ),
   },
 ]
 

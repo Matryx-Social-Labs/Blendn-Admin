@@ -58,12 +58,12 @@ export function VenueTypePicker({
         />
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
-        {groups.map((group, i) => {
+      <div className="border-t border-border">
+        {groups.map((group) => {
           const holdsValue = group.types.some((t) => t.value === value)
           const isOpen = !!needle || open.has(group.label) || holdsValue
           return (
-            <div key={group.label} className={cn(i < groups.length - 1 && "border-b border-border")}>
+            <div key={group.label} className="border-b border-border">
               <button
                 type="button"
                 onClick={() =>
