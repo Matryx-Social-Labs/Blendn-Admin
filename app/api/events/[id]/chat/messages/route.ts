@@ -78,6 +78,12 @@ export async function GET(_: Request, { params }: RouteContext) {
     })
     const violationMap = new Map(violationCounts.map((v) => [v.user_id, v._count.id]))
 
+    // What is waiting on a human. The feed polls every 5s, so this is the one
+    // live number the organiser's screen has for the moderation queue.
+    const pendingFlags = await db.moderation_flags.count({
+      where: { chat_group_id: event.chat_group.id, status: "pending" },
+    })
+
     // Fetch recent violations for banned/muted users
     const restrictedUserIds = members
       .filter((m) => m.status === "banned" || m.status === "muted")
@@ -125,6 +131,7 @@ export async function GET(_: Request, { params }: RouteContext) {
 
     return NextResponse.json({
       chatGroupId: event.chat_group.id,
+      pendingFlags,
       messages: messages.reverse().map((m) => ({
         id: m.id,
         content: m.content,

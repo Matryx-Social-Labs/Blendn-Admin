@@ -62,6 +62,7 @@ interface ChatMember {
 
 interface ChatFeedData {
   chatGroupId: string
+  pendingFlags: number
   messages: ChatMessage[]
   members: ChatMember[]
 }
@@ -224,14 +225,26 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-        <div>
-          <h2 className="font-semibold text-sm">Live Chat Feed</h2>
-          <p className="text-xs text-muted-foreground">
-            {data ? `${data.messages.length} messages · ${activeMembers.length} active · ${restrictedCount} restricted` : "Loading\u2026"}
-          </p>
-        </div>
+      {/* The room's pulse. Numbers first, and the one that needs a human —
+          flags waiting — in the destructive colour so it reads before the rest. */}
+      <div className="flex items-center justify-between gap-3 pb-3 shrink-0">
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
+          {data ? (
+            <>
+              <span><b className="font-bold text-foreground">{activeMembers.length}</b> in the room</span>
+              <span><b className="font-bold text-foreground">{data.messages.length}</b> messages</span>
+              <span><b className="font-bold text-foreground">{restrictedCount}</b> restricted</span>
+              {data.pendingFlags > 0 ? (
+                <span className="font-bold text-destructive">
+                  {data.pendingFlags} flag{data.pendingFlags === 1 ? "" : "s"} waiting
+                </span>
+              ) : null}
+              <span className="text-faint-foreground">refreshes every 5s</span>
+            </>
+          ) : (
+            "Loading…"
+          )}
+        </p>
         <Button
           size="sm"
           variant="ghost"
@@ -245,12 +258,12 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       </div>
 
       {/* Tab switcher */}
-      <div className="flex border-b shrink-0">
+      <div className="flex gap-4 border-b shrink-0">
         <Button
           type="button"
           variant="ghost"
           onClick={() => setActiveTab("messages")}
-          className={`flex-1 py-2 h-auto rounded-none text-xs font-medium transition-colors ${
+          className={`px-1 py-2 h-auto rounded-none text-[0.8125rem] font-medium transition-colors hover:bg-transparent ${
             activeTab === "messages"
               ? "border-b-2 border-primary text-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -262,7 +275,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
           type="button"
           variant="ghost"
           onClick={() => setActiveTab("members")}
-          className={`flex-1 py-2 h-auto rounded-none text-xs font-medium transition-colors ${
+          className={`px-1 py-2 h-auto rounded-none text-[0.8125rem] font-medium transition-colors hover:bg-transparent ${
             activeTab === "members"
               ? "border-b-2 border-primary text-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -281,7 +294,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       <div className="flex-1 overflow-y-auto min-h-0">
         {loading && !data ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-muted-foreground">Loading chat\u2026</p>
+            <p className="text-sm text-muted-foreground">Loading chat…</p>
           </div>
         ) : failed && !data ? (
           <div className="flex items-center justify-center h-full p-6 text-center">
@@ -479,10 +492,6 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-4 py-2 border-t shrink-0">
-        <p className="text-[10px] text-muted-foreground">Auto-refreshes every 5 seconds</p>
-      </div>
     </div>
   )
 }

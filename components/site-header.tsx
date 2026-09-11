@@ -250,8 +250,8 @@ export function SiteHeader() {
 
     if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/messaging")) {
       return {
-        title: "Chatrooms",
-        description: "Every room whose chat is open — live events and post-event feedback windows.",
+        title: "Room",
+        description: "What is being said, and what needs you.",
       }
     }
     if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/edit")) {

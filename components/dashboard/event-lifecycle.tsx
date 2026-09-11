@@ -1,12 +1,7 @@
 import { cn } from "@/lib/utils"
-import type { EventState } from "@/lib/event-phase"
+import { STATE_LABEL, type EventState } from "@/lib/event-phase"
 
-const PHASES: Array<{ key: EventState; label: string }> = [
-  { key: "draft", label: "Draft" },
-  { key: "upcoming", label: "Upcoming" },
-  { key: "live", label: "Live" },
-  { key: "over", label: "Over" },
-]
+const PHASES = (Object.keys(STATE_LABEL) as EventState[]).map((key) => ({ key, label: STATE_LABEL[key] }))
 
 /**
  * Where the event is in its life, before the page says anything else.
