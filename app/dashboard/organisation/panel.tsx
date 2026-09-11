@@ -274,7 +274,7 @@ function Invites({
       </div>
 
       {needsReason ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+        <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3">
           <p className="text-[0.8125rem] leading-6">
             That address is outside your verified domain. Say why — it goes in the audit log.
           </p>

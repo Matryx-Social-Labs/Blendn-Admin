@@ -78,13 +78,16 @@ const SOURCE_LABELS: Record<string, string> = {
   manual: "Manual",
 }
 
+// One neutral treatment for every source. Six palette hues (red, blue,
+// purple, yellow, orange, grey) were six colours with no meaning beyond
+// "different"; the source name is the information.
 const SOURCE_COLORS: Record<string, string> = {
-  auto_keyword: "bg-red-500/10 text-red-400 border-red-500/20",
-  auto_text: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  auto_image: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-  auto_spam: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-  user_report: "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  manual: "bg-gray-500/10 text-gray-400 border-gray-500/20",
+  auto_keyword: "border-border text-muted-foreground",
+  auto_text: "border-border text-muted-foreground",
+  auto_image: "border-border text-muted-foreground",
+  auto_spam: "border-border text-muted-foreground",
+  user_report: "border-warning/40 text-warning",
+  manual: "border-border text-muted-foreground",
 }
 
 function topCategory(categories: Record<string, number>): string | null {
@@ -342,7 +345,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                           </Badge>
                         )}
                         {isMuted && (
-                          <Badge className="text-[10px] px-1 py-0 h-4 bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
+                          <Badge className="text-[10px] px-1 py-0 h-4 bg-warning/10 text-warning border-warning/20">
                             muted
                           </Badge>
                         )}
@@ -411,8 +414,8 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
               <div>
                 {bannedMembers.length > 0 && <Separator className="mb-4" />}
                 <div className="flex items-center gap-2 mb-2">
-                  <IconVolume3 className="size-4 text-yellow-500" />
-                  <p className="text-xs font-semibold text-yellow-500 uppercase tracking-wide">
+                  <IconVolume3 className="size-4 text-warning" />
+                  <p className="text-xs font-semibold text-warning uppercase tracking-wide">
                     Muted ({mutedMembers.length})
                   </p>
                 </div>
@@ -434,9 +437,9 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
 
             {/* ── No restricted message ── */}
             {bannedMembers.length === 0 && mutedMembers.length === 0 && (
-              <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-3">
-                <IconShieldCheck className="size-4 text-green-500 shrink-0" />
-                <p className="text-xs text-green-400">No banned or muted users in this chat.</p>
+              <div className="flex items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-3">
+                <IconShieldCheck className="size-4 text-success shrink-0" />
+                <p className="text-xs text-success">No banned or muted users in this chat.</p>
               </div>
             )}
 
@@ -456,7 +459,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                     <div className="flex items-center gap-2 min-w-0">
                       <p className="text-sm truncate">{m.anonymousName ?? "Attendee"}</p>
                       {m.violationCount > 0 && (
-                        <span className="flex items-center gap-0.5 text-[10px] text-yellow-500">
+                        <span className="flex items-center gap-0.5 text-[10px] text-warning">
                           <IconAlertTriangle className="size-3" />
                           {m.violationCount}
                         </span>
@@ -466,7 +469,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-xs h-7 text-yellow-500 hover:text-yellow-500 hover:bg-yellow-500/10"
+                        className="text-xs h-7 text-warning hover:text-warning hover:bg-warning/10"
                         onClick={() => void memberAction(m.userId, "mute")}
                         disabled={actionLoading === `action-${m.userId}`}
                       >
@@ -516,8 +519,8 @@ function RestrictedMemberCard({
   actionLoading,
 }: RestrictedMemberCardProps) {
   const isBanned = type === "banned"
-  const borderColor = isBanned ? "border-destructive/20" : "border-yellow-500/20"
-  const bgColor = isBanned ? "bg-destructive/5" : "bg-yellow-500/5"
+  const borderColor = isBanned ? "border-destructive/20" : "border-warning/20"
+  const bgColor = isBanned ? "bg-destructive/5" : "bg-warning/5"
   const dateStr = isBanned ? member.bannedAt : member.mutedAt
 
   return (
@@ -553,7 +556,7 @@ function RestrictedMemberCard({
                 <span>by {member.bannedByName}</span>
               )}
               {member.violationCount > 0 && (
-                <span className="text-yellow-500">{member.violationCount} violation{member.violationCount !== 1 ? "s" : ""}</span>
+                <span className="text-warning">{member.violationCount} violation{member.violationCount !== 1 ? "s" : ""}</span>
               )}
             </div>
           </div>
@@ -610,12 +613,12 @@ function RestrictedMemberCard({
                   {SOURCE_LABELS[v.source] ?? v.source}
                 </Badge>
                 <span className={`text-[10px] font-medium ${
-                  v.confidence >= 0.85 ? "text-red-400" : v.confidence >= 0.5 ? "text-yellow-400" : "text-muted-foreground"
+                  v.confidence >= 0.85 ? "text-destructive" : v.confidence >= 0.5 ? "text-warning" : "text-muted-foreground"
                 }`}>
                   {Math.round(v.confidence * 100)}% confidence
                 </span>
                 {v.autoAction === "hidden" && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-red-500/10 text-red-400 border-red-500/20">
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-destructive/10 text-destructive border-destructive/20">
                     Auto-hidden
                   </Badge>
                 )}
@@ -643,7 +646,7 @@ function RestrictedMemberCard({
                         key={cat}
                         className={`text-[10px] px-1.5 py-0.5 rounded ${
                           topCategory(v.categories) === cat
-                            ? "bg-red-500/15 text-red-400"
+                            ? "bg-destructive/15 text-destructive"
                             : "bg-muted text-muted-foreground"
                         }`}
                       >

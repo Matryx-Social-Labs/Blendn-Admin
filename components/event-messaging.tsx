@@ -493,7 +493,7 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
           who will actually get a notification, not chatroom members.
         */}
         {confirming ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+          <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3">
             <p className="text-[0.8125rem] leading-6">
               This posts to the chatroom for{" "}
               <b className="font-semibold">{audience.members} member{audience.members === 1 ? "" : "s"}</b>
@@ -544,7 +544,7 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
         ) : (
           <div className="space-y-2">
             {announcements.map((a) => (
-              <div key={a.id} className="rounded-lg border bg-amber-50 dark:bg-amber-950/20 p-3">
+              <div key={a.id} className="border-t border-border py-2 first:border-t-0">
                 <p className="text-sm">{a.content}</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {a.sender.name ?? a.sender.email} ·{" "}

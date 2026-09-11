@@ -51,7 +51,7 @@ export default async function OnboardingPage() {
         domain is a warning, and the two are no longer the same colour.
       */}
       {!emailConfigured() ? (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-[0.8125rem] leading-6">
+        <div className="rounded-lg border border-warning/40 bg-warning/5 p-4 text-[0.8125rem] leading-6">
           <strong className="font-semibold">Email is not configured.</strong> Applicants cannot
           confirm their address, and approving one will not send them their sign-in details — the
           password is shown to you once instead, to pass on yourself. Set{" "}

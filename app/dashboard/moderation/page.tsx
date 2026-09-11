@@ -114,7 +114,7 @@ export default async function ModerationPage({
           */}
           {photoBacklog > 0 ? (
             <span
-              className="rounded-full border border-amber-500/40 px-2.5 py-1 text-[0.75rem] text-amber-600 dark:text-amber-400"
+              className="text-[0.8125rem] font-bold text-warning"
               title="Uploaded while photo moderation could not run. They are live on profiles."
             >
               {photoBacklog} photo{photoBacklog === 1 ? "" : "s"} unchecked
