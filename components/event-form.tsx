@@ -40,6 +40,20 @@ interface EventFormProps {
   amenities?: AmenityOption[]
 }
 
+/** The fields the readiness rule reads -- subscribed to as a set, not the form. */
+const READINESS_FIELDS = [
+  "title",
+  "start_time",
+  "end_time",
+  "timezone",
+  "latitude",
+  "longitude",
+  "geofence",
+  "check_in_radius",
+  "category_ids",
+  "cover_image_url",
+] as const
+
 export function EventForm({
   onSubmit,
   defaultValues,
@@ -166,50 +180,21 @@ export function EventForm({
    *
    * `useWatch` rather than `form.watch()` in the body: the latter re-renders
    * this whole component — eight sections and two Leaflet maps — on every
-   * keystroke in any field. This subscribes to the eight fields the rule reads,
+   * keystroke in any field. This subscribes to only the fields the rule reads (`READINESS_FIELDS`),
    * so typing a title does not redraw a map.
    */
-  const watched = useWatch({
-    control: form.control,
-    name: [
-      "title",
-      "start_time",
-      "end_time",
-      "timezone",
-      "latitude",
-      "longitude",
-      "geofence",
-      "check_in_radius",
-      "category_ids",
-      "cover_image_url",
-    ],
-  })
-  const readiness = useMemo(() => {
-    const [
-      title,
-      start_time,
-      end_time,
-      timezone,
-      latitude,
-      longitude,
-      geofence,
-      check_in_radius,
-      category_ids,
-      cover_image_url,
-    ] = watched
-    return eventReadiness({
-      title,
-      start_time,
-      end_time,
-      timezone,
-      latitude,
-      longitude,
-      geofence,
-      check_in_radius,
-      category_ids,
-      cover_image_url,
-    })
-  }, [watched])
+  const watched = useWatch({ control: form.control, name: READINESS_FIELDS })
+  // Keyed off the one list, so a field added to it cannot land in the wrong
+  // slot. The first version repeated the ten names three times -- the
+  // subscription, a positional destructure and the call -- and nothing but eye
+  // kept them aligned.
+  const readiness = useMemo(
+    () =>
+      eventReadiness(
+        Object.fromEntries(READINESS_FIELDS.map((key, i) => [key, watched[i]])) as Partial<EventFormValues>
+      ),
+    [watched]
+  )
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
