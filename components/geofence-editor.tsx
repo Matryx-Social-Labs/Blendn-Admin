@@ -517,8 +517,9 @@ export function GeofenceEditor({
               // Without this, changing the map layer submits the event form.
               type="button"
               onClick={() => setLayer(k)}
+              aria-pressed={layer === k}
               className={cn(
-                "rounded-md px-2.5 py-1 text-[0.71875rem]",
+                "min-h-6 rounded-md px-2.5 py-1 text-[0.71875rem]",
                 layer === k ? "bg-surface-raised font-bold" : "text-muted-foreground"
               )}
             >

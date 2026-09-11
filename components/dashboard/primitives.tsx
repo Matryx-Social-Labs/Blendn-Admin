@@ -174,6 +174,7 @@ export function HeroMetric({
           aria-valuenow={Math.round(pct)}
           aria-valuemin={0}
           aria-valuemax={100}
+          aria-label={eyebrow ? `${eyebrow} progress` : "Progress"}
           className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-raised"
         >
           <div

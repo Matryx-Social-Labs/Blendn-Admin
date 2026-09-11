@@ -320,7 +320,8 @@ export function DataTable<T extends { id: string | number }>({
               <button
                 onClick={chip.clear}
                 aria-label={`Remove filter: ${chip.label}`}
-                className="inline-flex size-[17px] items-center justify-center rounded-full bg-card text-muted-foreground hover:text-foreground"
+                // 17px disc, 25px target: WCAG 2.5.8 wants 24, the chip wants to stay small.
+                className="relative inline-flex size-[17px] items-center justify-center rounded-full bg-card text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:text-foreground"
               >
                 <IconX className="size-3" />
               </button>

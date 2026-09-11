@@ -29,26 +29,28 @@ import type { Readiness } from "@/lib/event-readiness"
 export function ReadinessStrip({ readiness }: { readiness: Readiness }) {
   const { blockers, warnings } = readiness
 
-  if (blockers.length === 0 && warnings.length === 0) {
-    return (
-      <p className="flex items-center gap-2 text-[0.8125rem] text-success">
-        <IconCircleCheck className="size-4 shrink-0" aria-hidden />
-        Ready to publish.
-      </p>
-    )
-  }
-
+  /*
+   * ONE live region, mounted in every state.
+   *
+   * The first version returned a bare `<p>` for "Ready to publish" and a
+   * `role="status"` div for everything else — so the moment the last blocker
+   * cleared, the live region unmounted and a new element appeared in its
+   * place. Screen readers announce changes INSIDE a region that already
+   * exists; a region that arrives with its content says nothing. The one
+   * transition this strip exists to announce was the one it never did.
+   *
+   * Polite, not assertive: it updates on every keystroke, and an assertive
+   * region would interrupt somebody mid-word while they type a title.
+   */
   return (
-    <div
-      className="flex flex-col gap-3"
-      /*
-        Polite, not assertive. It updates on every keystroke, and an assertive
-        region would interrupt a screen-reader user mid-word while they type a
-        title. `role="status"` is the polite default.
-      */
-      role="status"
-      aria-live="polite"
-    >
+    <div className="flex flex-col gap-3" role="status" aria-live="polite">
+      {blockers.length === 0 && warnings.length === 0 ? (
+        <p className="flex items-center gap-2 text-[0.8125rem] text-success">
+          <IconCircleCheck className="size-4 shrink-0" aria-hidden />
+          Ready to publish.
+        </p>
+      ) : null}
+
       {blockers.length > 0 ? (
         <div
           className="flex flex-col gap-1.5 rounded-lg border px-4 py-3"

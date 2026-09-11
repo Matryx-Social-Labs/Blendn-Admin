@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 import { IconAlertTriangle } from "@tabler/icons-react"
 import {
@@ -50,6 +50,7 @@ export function LocationSection({
   const initialLat = form.watch("latitude")
   const initialLng = form.watch("longitude")
 
+  const mapLabelId = useId()
   const [venue, setVenue] = useState<VenueOption | null>(null)
   const venueId = form.watch("venue_id")
 
@@ -161,8 +162,15 @@ export function LocationSection({
         </p>
       ) : null}
 
-      <div>
-        <FormLabel>Map Location</FormLabel>
+      {/*
+        Not a `FormLabel`: outside a `FormField` that renders `htmlFor` pointing
+        at an id nothing has, so the label named nothing. A heading the region
+        is labelled by is what a map with no input actually wants.
+      */}
+      <section aria-labelledby={mapLabelId}>
+        <p id={mapLabelId} className="text-sm leading-none font-medium">
+          Map Location
+        </p>
         <div className="mt-2">
           <LocationPicker
             initialLat={initialLat}
@@ -171,7 +179,7 @@ export function LocationSection({
             onLocationChange={onLocationChange}
           />
         </div>
-      </div>
+      </section>
 
       {/* Auto-filled address fields (read-only display, editable as fallback) */}
       <div className="grid grid-cols-2 gap-4">

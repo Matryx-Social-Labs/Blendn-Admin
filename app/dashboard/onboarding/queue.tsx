@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useId, useState, useTransition } from "react"
 import {
   IconAlertTriangle,
   IconCheck,
@@ -75,6 +75,7 @@ export function OnboardingQueue({
 
 function Row({ row, now }: { row: OnboardingRow; now: Date }) {
   const [open, setOpen] = useState(false)
+  const detailId = useId()
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState("")
   const [credential, setCredential] = useState<{ email: string; password: string } | null>(null)
@@ -154,6 +155,8 @@ function Row({ row, now }: { row: OnboardingRow; now: Date }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={detailId}
         className="flex flex-wrap items-baseline justify-between gap-3 text-left"
       >
         <div className="flex flex-col gap-1">
@@ -216,7 +219,10 @@ function Row({ row, now }: { row: OnboardingRow; now: Date }) {
       </button>
 
       {open ? (
-        <dl className="grid gap-2 border-t border-border pt-3 text-[0.8125rem] @2xl/main:grid-cols-2">
+        <dl
+          id={detailId}
+          className="grid gap-2 border-t border-border pt-3 text-[0.8125rem] @2xl/main:grid-cols-2"
+        >
           {/*
             Evidence only. `Kind`, `Phone` and `Address` were here and none of
             them changes a decision — an admin does not approve or refuse an

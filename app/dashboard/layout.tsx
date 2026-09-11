@@ -6,7 +6,30 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { attentionQueues } from "@/lib/attention-queues-query"
 import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
+import { logger } from "@/lib/logger"
 import { canAccessDashboard } from "@/lib/rbac"
+
+/**
+ * A badge is decoration on the nav; the nav is the way to every screen.
+ *
+ * `attentionQueues()` is eight aggregates in one `Promise.all`, and this
+ * layout wraps every dashboard route — so one rejection (a table the running
+ * code knows and the database does not yet, for the seconds between a deploy's
+ * migrate and its boot) used to 500 the whole admin shell rather than one
+ * count. Logged, not swallowed: an empty strip that says nothing is the
+ * "Moderation queue is clear" bug this module was written to fix, so the
+ * failure has to land somewhere a person looks.
+ */
+async function attentionQueuesOrNone() {
+  try {
+    return await attentionQueues()
+  } catch (error) {
+    logger.error("attention queues failed; rendering the nav without badges", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  }
+}
 
 export default async function DashboardLayout({
   children,
@@ -31,7 +54,7 @@ export default async function DashboardLayout({
    * pops in after paint is one the operator has already scrolled past.
    */
   const isAdmin = session.user.role === "app_admin"
-  const badges = isAdmin ? queueBadges(await attentionQueues()) : {}
+  const badges = isAdmin ? queueBadges(await attentionQueuesOrNone()) : {}
 
   return (
     <SidebarProvider
