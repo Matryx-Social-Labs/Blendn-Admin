@@ -53,6 +53,7 @@ export default async function VenueDetailPage({
     where: { id },
     select: {
       id: true,
+      updated_at: true,
       name: true,
       address: true,
       city: true,
@@ -234,6 +235,10 @@ export default async function VenueDetailPage({
           owner asks of this page, after "how busy" and "who books here" — and
           it used to be the first block, a form above every number. */}
       <VenueManage
+        // Remount on every saved change, so the fields show what was stored
+        // rather than what was typed — router.refresh() alone left a form
+        // seeded once at mount showing the pre-save value.
+        key={venue.updated_at.toISOString()}
         orgs={ownerOptions}
         venue={{
           id: venue.id,

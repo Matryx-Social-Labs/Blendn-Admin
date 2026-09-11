@@ -321,7 +321,7 @@ function InviteRow({ orgId, invite }: { orgId: string; invite: OrgInviteRow }) {
       <div className="flex flex-col gap-0.5">
         <span className="text-sm">{invite.email}</span>
         <span className="text-[0.8125rem] text-muted-foreground">
-          {ROLE_LABEL[invite.role]} · expires {invite.expiresAt.toLocaleDateString("en-GB")}
+          {ROLE_LABEL[invite.role]} · expires {invite.expiresAt.toLocaleDateString("en-GB", { timeZone: "UTC" })}
           {invite.overrideReason ? ` · outside domain: ${invite.overrideReason}` : ""}
         </span>
       </div>

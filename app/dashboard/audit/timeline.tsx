@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useSyncExternalStore } from "react"
 import { IconChevronRight } from "@tabler/icons-react"
 
 import { Input } from "@/components/ui/input"
@@ -36,6 +36,19 @@ function actionTone(action: string): string {
 export function AuditTimeline({ page }: { page: AuditPage }) {
   const [action, setAction] = useState("all")
   const [query, setQuery] = useState("")
+  /*
+   * Day headings and times are in the reader's timezone, which only the
+   * browser knows. This component is server-rendered first, in the
+   * container's timezone (UTC on Railway), so an entry near midnight grouped
+   * under one day on the server and another in the browser — a hydration
+   * mismatch that reshuffled rows the moment the page became interactive.
+   * The list renders after mount, so there is one rendering, the browser's.
+   */
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  )
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -90,7 +103,14 @@ export function AuditTimeline({ page }: { page: AuditPage }) {
         </span>
       </div>
 
-      {days.map(([day, entries]) => (
+      {!mounted ? (
+        <div className="divide-y divide-border border-t border-border" aria-busy="true">
+          {filtered.slice(0, 8).map((entry) => (
+            <div key={entry.id} className="h-11" />
+          ))}
+        </div>
+      ) : null}
+      {mounted && days.map(([day, entries]) => (
         <section key={day} className="flex flex-col gap-1.5">
           <h2 className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
             {day}

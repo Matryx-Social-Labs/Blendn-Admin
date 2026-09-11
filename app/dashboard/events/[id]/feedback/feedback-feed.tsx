@@ -103,7 +103,7 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
                   <button
                     disabled={pending && acting === m.id}
                     className={cn(
-                      "rounded-full border border-border px-2 py-0.5 text-[0.6875rem] font-medium transition-colors hover:bg-accent",
+                      "min-h-6 rounded-full border border-border px-2 py-0.5 text-[0.6875rem] font-medium transition-colors hover:bg-accent",
                       toneClass(m.sentiment)
                     )}
                   >

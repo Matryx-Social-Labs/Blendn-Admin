@@ -69,14 +69,31 @@ export function ReportBuilder({
 
       {/* One list, one chosen row. Six cards with an orange icon each read as
           six primary things; the primary thing is the download button. */}
-      <div role="radiogroup" aria-label="Report" className="flex flex-col divide-y divide-border">
+      <div
+        role="radiogroup"
+        aria-label="Report"
+        className="flex flex-col divide-y divide-border"
+        // A radiogroup promises arrow keys and one Tab stop; role alone
+        // announces the contract without keeping it.
+        onKeyDown={(e) => {
+          const i = reports.findIndex((r) => r.key === selected?.key)
+          const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0
+          if (!step) return
+          e.preventDefault()
+          const next = reports[(i + step + reports.length) % reports.length]
+          setSelected(next)
+          ;(e.currentTarget.querySelector(`[data-key="${next.key}"]`) as HTMLElement | null)?.focus()
+        }}
+      >
         {reports.map((report) => {
           const on = selected?.key === report.key
           return (
             <button
               key={report.key}
+              data-key={report.key}
               role="radio"
               aria-checked={on}
+              tabIndex={on || (!selected && report === reports[0]) ? 0 : -1}
               onClick={() => setSelected(report)}
               className={cn(
                 "grid grid-cols-[16px_1fr] items-baseline gap-x-3 py-3 text-left transition-colors hover:bg-accent/40 -mx-2 px-2 rounded-md",

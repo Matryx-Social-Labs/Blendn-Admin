@@ -477,7 +477,10 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setContent(t.text)}
+              onClick={() => {
+                if (content.trim() && !window.confirm("Replace what you have typed?")) return
+                setContent(t.text)
+              }}
               className="h-7 rounded-full px-2.5 text-[0.75rem] font-normal text-muted-foreground"
             >
               {t.label}

@@ -46,7 +46,7 @@ const columns: Column<AttendeeRow>[] = [
     label: "No-shows",
     align: "right",
     sortType: "number",
-    render: (r) => <span className={r.noShows > 1 ? "text-warning" : undefined}>{r.noShows}</span>,
+    render: (r) => <span className={r.noShows > 1 ? "font-bold text-warning" : undefined}>{r.noShows}</span>,
   },
   {
     key: "lastAttendedAt",

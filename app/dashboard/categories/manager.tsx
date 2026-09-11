@@ -127,8 +127,6 @@ function Row({
   pending: boolean
   start: React.TransitionStartFunction
 }) {
-  const [name, setName] = useState(row.name)
-
   return (
     <div
       className={cn(
@@ -137,34 +135,10 @@ function Row({
       )}
     >
       {renaming ? (
-        <>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="h-8 max-w-64 text-[0.8125rem]"
-            autoFocus
-          />
-          <Button
-            size="sm"
-            disabled={pending || name.trim().length < 2}
-            onClick={() =>
-              start(async () => {
-                try {
-                  await renameCategory(row.id, name)
-                  toast.success("Renamed")
-                  onCancelRename()
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : "Could not rename")
-                }
-              })
-            }
-          >
-            Save
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onCancelRename} disabled={pending}>
-            Cancel
-          </Button>
-        </>
+        // Its own component, so it mounts fresh each time the pencil is
+        // clicked. Held in Row's state, a cancelled edit's text came back the
+        // next time the rename opened.
+        <RenameInline row={row} pending={pending} start={start} onDone={onCancelRename} />
       ) : (
         <>
           <span className={cn("flex-1 text-sm", isParent && "text-[0.9375rem] font-bold")}>{row.name}</span>
@@ -195,6 +169,50 @@ function Row({
         </>
       )}
     </div>
+  )
+}
+
+function RenameInline({
+  row,
+  pending,
+  start,
+  onDone,
+}: {
+  row: CategoryRow
+  pending: boolean
+  start: React.TransitionStartFunction
+  onDone: () => void
+}) {
+  const [name, setName] = useState(row.name)
+  return (
+    <>
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="h-8 max-w-64 text-[0.8125rem]"
+        autoFocus
+      />
+      <Button
+        size="sm"
+        disabled={pending || name.trim().length < 2}
+        onClick={() =>
+          start(async () => {
+            try {
+              await renameCategory(row.id, name)
+              toast.success("Renamed")
+              onDone()
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Could not rename")
+            }
+          })
+        }
+      >
+        Save
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onDone} disabled={pending}>
+        Cancel
+      </Button>
+    </>
   )
 }
 

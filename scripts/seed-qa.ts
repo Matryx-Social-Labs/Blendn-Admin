@@ -1309,7 +1309,7 @@ async function main() {
   if (APPLY) {
     const retired = await db.events.updateMany({
       where: { slug: { in: RETIRED_SLUGS }, deleted_at: null },
-      data: { deleted_at: new Date() },
+      data: { deleted_at: new Date(), updated_at: new Date() },
     })
     if (retired.count > 0) console.log(`Retired ${retired.count} event(s) under old QA names.`)
   }
