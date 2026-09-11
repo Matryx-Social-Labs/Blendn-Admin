@@ -64,21 +64,65 @@ export function OnboardingQueue({
   generatedAt: string
 }) {
   const now = new Date(generatedAt)
+  /*
+   * Held HERE, not in the row. `approveOnboardingRequest` revalidates this
+   * path, so the approved row leaves the list in the same round trip that
+   * produced the password — and a row that has unmounted cannot show anything.
+   * Driven locally with email unconfigured: the toast said "approved", the
+   * badge went 7 → 6, and the one-time credential the copy promises was on
+   * screen for zero frames. It has to outlive the row it came from.
+   */
+  const [credential, setCredential] = useState<Credential | null>(null)
   return (
     <div className="flex flex-col gap-3">
+      {credential ? <CredentialPanel credential={credential} onDone={() => setCredential(null)} /> : null}
       {rows.map((row) => (
-        <Row key={row.id} row={row} now={now} />
+        <Row key={row.id} row={row} now={now} onCredential={setCredential} />
       ))}
     </div>
   )
 }
 
-function Row({ row, now }: { row: OnboardingRow; now: Date }) {
+type Credential = { name: string; email: string; password: string }
+
+function CredentialPanel({ credential, onDone }: { credential: Credential; onDone: () => void }) {
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5">
+      <h3 className="font-semibold">{credential.name} approved</h3>
+      <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+        Email is not configured, so nothing was sent. Pass these on yourself — this is the only
+        time the password is shown.
+      </p>
+      <dl className="grid gap-1 rounded-lg border border-border bg-card p-4 font-mono text-[0.8125rem]">
+        <div className="flex gap-3">
+          <dt className="w-20 text-muted-foreground">Email</dt>
+          <dd>{credential.email}</dd>
+        </div>
+        <div className="flex gap-3">
+          <dt className="w-20 text-muted-foreground">Password</dt>
+          <dd className="select-all">{credential.password}</dd>
+        </div>
+      </dl>
+      <Button variant="outline" size="sm" className="self-start" onClick={onDone}>
+        Done
+      </Button>
+    </section>
+  )
+}
+
+function Row({
+  row,
+  now,
+  onCredential,
+}: {
+  row: OnboardingRow
+  now: Date
+  onCredential: (c: Credential) => void
+}) {
   const [open, setOpen] = useState(false)
   const detailId = useId()
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState("")
-  const [credential, setCredential] = useState<{ email: string; password: string } | null>(null)
   const [pending, start] = useTransition()
 
   const awaitingEmail = row.status === "email_pending"
@@ -105,7 +149,8 @@ function Row({ row, now }: { row: OnboardingRow; now: Date }) {
           toast.success(`${row.display_name} approved — sign-in details emailed.`)
         } else {
           toast.success(`${row.display_name} approved.`)
-          if (result.password) setCredential({ email: result.email, password: result.password })
+          if (result.password)
+            onCredential({ name: row.display_name, email: result.email, password: result.password })
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not approve")
@@ -125,30 +170,6 @@ function Row({ row, now }: { row: OnboardingRow; now: Date }) {
     })
   }
 
-  if (credential) {
-    return (
-      <section className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5">
-        <h3 className="font-semibold">{row.display_name} approved</h3>
-        <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-          Email is not configured, so nothing was sent. Pass these on yourself — this is the only
-          time the password is shown.
-        </p>
-        <dl className="grid gap-1 rounded-lg border border-border bg-card p-4 font-mono text-[0.8125rem]">
-          <div className="flex gap-3">
-            <dt className="w-20 text-muted-foreground">Email</dt>
-            <dd>{credential.email}</dd>
-          </div>
-          <div className="flex gap-3">
-            <dt className="w-20 text-muted-foreground">Password</dt>
-            <dd className="select-all">{credential.password}</dd>
-          </div>
-        </dl>
-        <Button variant="outline" size="sm" className="self-start" onClick={() => setCredential(null)}>
-          Done
-        </Button>
-      </section>
-    )
-  }
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5">

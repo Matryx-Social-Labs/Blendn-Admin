@@ -478,6 +478,12 @@
       "mutation": "A: `db.venues.count({ where: { deleted_at: null } })` -- the count ignores the search. B: `search` (boolean) on the VenueRecords DataTable -- back to filtering the loaded page. C: `const isFiltered = activeChips.length > 0` -- the server search no longer counts as a filter.",
       "observed": "A: 1 failing ('matches name OR city ... counts the same set it lists'). B: 1 failing ('submits a GET form named q'). The bug this pins: the list is a 200-row page, the box searched the page, and a venue past row 200 was unfindable with the box still reading 'Search venues...'. Same fix and same guard shape as users-search-server-side. C: 1 failing ('a server-side search that matches nothing is nothing matches, not no venues yet').",
       "date": "2026-09-11"
+    },
+    "applications-queue-credential.test.ts": {
+      "guards": "the one-time password shown after approving an application is held by the queue list, not by the row -- the row hands it up and keeps no credential state of its own",
+      "mutation": "Put `const [credential, setCredential] = useState<Credential | null>(null)` back inside Row.",
+      "observed": "1 failing ('the row hands it up and keeps none of its own'). The defect it pins was found only by driving: approveOnboardingRequest revalidates the page, the approved row leaves the list in the same round trip that produced the password, and a row that has unmounted shows nothing -- toast said approved, badge went 7 to 6, and the credential the copy promises was on screen for zero frames.",
+      "date": "2026-09-11"
     }
   },
   "grandfathered": [
