@@ -226,8 +226,11 @@ export async function updateUser(
       }
     }
 
+    // `deletedAt: null` in the where: an erased account cannot be edited back
+    // into existence. The row menu is hidden for those rows, but a server
+    // action is callable without a menu. P2025 surfaces as the generic error.
     const user = await db.user.update({
-      where: { id },
+      where: { id, deletedAt: null },
       data: updateData,
       include: {
         profile: true,
@@ -247,7 +250,7 @@ export async function updateUserRole(id: string, role: user_role) {
   if (!session?.user || session.user.role !== "app_admin") {
     throw new Error("Forbidden")
   }
-  await db.user.update({ where: { id }, data: { role } })
+  await db.user.update({ where: { id, deletedAt: null }, data: { role } })
   revalidatePath("/dashboard/users")
   return { success: true }
 }

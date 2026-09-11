@@ -579,6 +579,39 @@ the run can be watched. Also on iOS: a password field with
 `textContentType="newPassword"` gets covered by the simulator's *Automatic
 Strong Password* sheet — fill it first, before any keyboard is up, and verify
 the value in `inspect_screen`.
+**Android, specifically — the emulator is slow only when it is misconfigured.**
+Six facts from the first Android run, each of which cost an hour:
+
+- The AVD was on **SwiftShader** (software GPU). Boot it with
+  `emulator -avd Medium_Phone -gpu host -feature -Vulkan`; the `-Vulkan` is
+  because gfxstream throws `EGL_BAD_ATTRIBUTE` video artefacts on this Mac.
+  `ramSize=2560`, 2 cores in `config.ini`; **4 GB was worse** (host swap).
+  Shut the iOS simulator and never run Gradle at the same time.
+- Gradle needs **JDK ≤ 23**: `brew install openjdk@21` and
+  `JAVA_HOME=/opt/homebrew/opt/openjdk@21`.
+- `launchApp` with `stopApp: true` on a dev build lands on *"Unable to load
+  script"* because the dev launcher has no Metro URL: go to the launcher home
+  and tap `http://10.0.2.2:8081`.
+- `inputText` with a long string times out (`DEADLINE_EXCEEDED`). Short strings,
+  and `hideKeyboard` between fields.
+- A 3-button `Alert` renders **neutral / negative / positive** by index and
+  ignores `style: 'cancel'`, so the button order a flow taps is per-platform —
+  `lib/photoUtils.ts alertButtons()` in the client owns that.
+- `expo-image-picker@16.1.4` crashes natively on the Android 16 photo picker
+  (`FailedToDeduceTypeException`); the fix is a `patch-package` patch under
+  `patches/` applied on `postinstall`. A checkout where that has not run will
+  crash on the first library pick.
+
+**Push, specifically — a toggle is not tested until a push was sent.**
+`Device.isDevice` is false on every simulator and emulator, so the client
+registers a **fake token** there and nothing can arrive. Prove the opt-out on
+the server (`__tests__/integration/push-opt-out.itest.ts` runs the real sender
+with Expo mocked) and then deliver one real push to a real phone through a real
+path — editing an event the account has RSVP'd to sends `event_update` — and
+read `notifications` back. Android additionally needs FCM
+(`google-services.json`), which the client does not ship yet, so Android push is
+`not driven — no FCM config` until it does.
+
 Mobile flows declare `appId` and open with `launchApp`. Read `cheat_sheet`
 before authoring anything unfamiliar. `run_on_cloud` when a real device matters;
 `list_cloud_devices` returns valid `{device_model, device_os}` pairs and they
@@ -656,8 +689,11 @@ Three traps that have each cost time:
 
 - **`seed:qa` is a dry run without `--apply`**, and prints the accounts either
   way — so the login looks seeded and is not.
-- `browse` refuses `file://` outside the repo, so an HTML mockup must be copied
-  into the worktree first.
+- `browse` refuses `file://` and screenshot paths outside the repo or
+  `/private/tmp`. Serve the mockup instead — `python3 -m http.server 8765` from
+  its design directory — and screenshot to `/private/tmp`, then copy back.
+  Chrome DevTools MCP can only save screenshots inside the workspace; omit
+  `filePath` and read the inline image.
 - `MOBILE_JWT_SECRET` unset makes `refresh-token-store.itest.ts` fail with
   something that reads like a code defect. It is the shell, not the branch.
 

@@ -39,7 +39,7 @@ export default async function UsersPage({
   return (
     <div className="flex flex-col gap-4">
       {/*
-        Four numbers on one line, where four bordered cards used to be.
+        One line of numbers, where four bordered cards used to be.
 
         This screen is a finding tool, not a metrics screen: an admin opens it
         to locate one person and see whether anything is wrong with them. Four
@@ -47,7 +47,9 @@ export default async function UsersPage({
         box — the actual control — below the fold on a laptop.
 
         `suspended` is the only one that means somebody should look, so it is
-        the only one that gets a colour, and only when it is not zero.
+        the only one that gets a warning colour, and only when it is not zero.
+        `deleted` is the opposite — the system having worked — so it sits last,
+        fainter than the rest, and also only when it is not zero.
       */}
       <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground">
         <span>

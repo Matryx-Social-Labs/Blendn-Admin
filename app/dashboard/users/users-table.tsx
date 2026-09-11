@@ -150,6 +150,17 @@ function ActionsCell({
   )
 }
 
+/** The values `getUsers` reads off `?status=`; "all" is the absence of one. */
+const STATUS_FILTERS = [
+  { value: "all", label: "All statuses" },
+  { value: "onboarded", label: "Onboarded" },
+  { value: "not-onboarded", label: "Not onboarded" },
+  { value: "verified", label: "Verified" },
+  { value: "unverified", label: "Unverified" },
+  { value: "suspended", label: "Suspended" },
+  { value: "deleted", label: "Deleted" },
+]
+
 const columns: ColumnDef<UserWithProfile>[] = [
   {
     id: "select",
@@ -199,7 +210,7 @@ const columns: ColumnDef<UserWithProfile>[] = [
               <span className="font-medium text-muted-foreground">
                 Deleted {format(new Date(user.deletedAt), "d MMM yyyy")}
               </span>
-              <span className="text-faint-foreground font-mono text-[0.7rem]">{user.id}</span>
+              <span className="text-muted-foreground font-mono text-[0.7rem]">{user.id}</span>
             </div>
           </div>
         )
@@ -554,33 +565,36 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
   // a shared link, or the refresh after an edit.
   React.useEffect(() => setSearchText(urlSearch), [urlSearch])
 
+  /*
+   * `?status=` has been read by page.tsx since the screen was built and
+   * nothing set it — the only way to reach a filtered view was to type the
+   * URL. An unknown value (a stale bookmark, a typo) clamps to "all" so the
+   * Select never renders blank; the server treats it as no filter too.
+   */
+  const rawStatus = params.get("status") ?? "all"
+  const urlStatus = STATUS_FILTERS.some((f) => f.value === rawStatus) ? rawStatus : "all"
+  const [status, setStatus] = React.useState(urlStatus)
+  React.useEffect(() => setStatus(urlStatus), [urlStatus])
+
+  /*
+   * One writer for both params. The search is debounced (a round trip per
+   * keystroke otherwise; 300ms reads as "finished typing"), the status is not
+   * — and each write carries both values, so a status picked mid-type cannot
+   * be dropped by the search's timer landing later with a stale URL.
+   */
   React.useEffect(() => {
-    if (searchText === urlSearch) return
-    /*
-     * Debounced, because this is a round trip per keystroke otherwise. 300ms is
-     * the pause that reads as "finished typing" without feeling laggy.
-     */
+    const searchDirty = searchText !== urlSearch
+    if (!searchDirty && status === urlStatus) return
     const t = setTimeout(() => {
       const next = new URLSearchParams(params.toString())
       if (searchText) next.set("search", searchText)
       else next.delete("search")
+      if (status === "all") next.delete("status")
+      else next.set("status", status)
       router.replace(`/dashboard/users?${next.toString()}`)
-    }, 300)
+    }, searchDirty ? 300 : 0)
     return () => clearTimeout(t)
-  }, [searchText, urlSearch, params, router])
-
-  /*
-   * `?status=` has been read by page.tsx since the screen was built and
-   * nothing set it — the only way to reach a filtered view was to type the
-   * URL. Same URL-state shape as the search box, no debounce needed.
-   */
-  const urlStatus = params.get("status") ?? "all"
-  const setStatus = (value: string) => {
-    const next = new URLSearchParams(params.toString())
-    if (value === "all") next.delete("status")
-    else next.set("status", value)
-    router.replace(`/dashboard/users?${next.toString()}`)
-  }
+  }, [searchText, status, urlSearch, urlStatus, params, router])
 
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] =
@@ -635,18 +649,16 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
             onChange={(event) => setSearchText(event.target.value)}
             className="max-w-sm"
           />
-          <Select value={urlStatus} onValueChange={setStatus}>
+          <Select value={status} onValueChange={setStatus}>
             <SelectTrigger className="w-40" aria-label="Filter by status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="onboarded">Onboarded</SelectItem>
-              <SelectItem value="not-onboarded">Not onboarded</SelectItem>
-              <SelectItem value="verified">Verified</SelectItem>
-              <SelectItem value="unverified">Unverified</SelectItem>
-              <SelectItem value="suspended">Suspended</SelectItem>
-              <SelectItem value="deleted">Deleted</SelectItem>
+              {STATUS_FILTERS.map((f) => (
+                <SelectItem key={f.value} value={f.value}>
+                  {f.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

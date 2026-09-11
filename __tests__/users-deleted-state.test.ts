@@ -17,7 +17,7 @@ import { join } from "path"
  * as source text, because what matters is which branch a deleted row takes.
  */
 const mockDb = {
-  user: { findMany: jest.fn(), count: jest.fn() },
+  user: { findMany: jest.fn(), count: jest.fn(), update: jest.fn() },
   profiles: { count: jest.fn() },
 }
 const mockAuth = jest.fn()
@@ -27,7 +27,7 @@ jest.mock("@/lib/location", () => ({ normalizeLocationToCity: jest.fn(async (s: 
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
-import { getUsers, getUserStats } from "@/app/dashboard/users/actions"
+import { getUsers, getUserStats, updateUser, updateUserRole } from "@/app/dashboard/users/actions"
 
 const ROOT = join(__dirname, "..")
 const read = (rel: string) =>
@@ -39,6 +39,7 @@ beforeEach(() => {
   mockDb.user.findMany.mockResolvedValue([])
   mockDb.user.count.mockResolvedValue(0)
   mockDb.profiles.count.mockResolvedValue(0)
+  mockDb.user.update.mockResolvedValue({ id: "u1" })
 })
 
 const whereOf = (call: jest.Mock) => call.mock.calls[0][0].where as { AND: Record<string, unknown>[] }
@@ -57,6 +58,8 @@ describe("the list", () => {
     const { AND } = whereOf(mockDb.user.findMany)
     expect(AND).toContainEqual({ deletedAt: { not: null } })
     expect(AND).not.toContainEqual({ deletedAt: null })
+    // The footer counts the filtered set, not the default one.
+    expect(mockDb.user.count.mock.calls[0][0].where).toEqual({ AND })
   })
 
   it("finds the suspended accounts the stats line counts", async () => {
@@ -72,6 +75,19 @@ describe("the list", () => {
     expect(ors).toHaveLength(2)
     expect(JSON.stringify(ors)).toContain("priya")
     expect(JSON.stringify(ors)).toContain("onboarded")
+  })
+})
+
+describe("an erased account cannot be edited back into existence", () => {
+  // The row menu is hidden, but a server action is callable without a menu.
+  it("updateUser scopes its write to live rows", async () => {
+    await updateUser("u1", { name: "Resurrected" })
+    expect(mockDb.user.update.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
+  })
+
+  it("updateUserRole does too", async () => {
+    await updateUserRole("u1", "organizer")
+    expect(mockDb.user.update.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
   })
 })
 
@@ -121,12 +137,26 @@ describe("the row", () => {
     expect(statusCell.slice(branch, statusCell.indexOf("const isVerified"))).toMatch(/>\s*Deleted\s*</)
   })
 
+  it("a suspended live row says so — the red count in the stats line is findable", () => {
+    const statusCell = table.slice(table.indexOf('accessorKey: "status"'), table.indexOf('accessorKey: "role"'))
+    expect(statusCell).toMatch(/\{user\.suspended_at && \(\s*<Badge[^>]*text-destructive[^>]*>\s*Suspended/)
+  })
+
+  it("a profile row with every field nulled by erasure renders the same dash as no row", () => {
+    const profileCell = table.slice(table.indexOf('accessorKey: "profile"'), table.indexOf('accessorKey: "interests"'))
+    expect(profileCell).toMatch(/if \(!profile \|\| !\(profile\.phone \|\| profile\.location \|\| profile\.age\)\)/)
+  })
+
   it("has no action menu — there is nothing on it to edit", () => {
     expect(table).toMatch(/row\.original\.deletedAt \? null : <ActionsCell/)
   })
 
-  it("can be asked for from the status filter", () => {
-    expect(table).toMatch(/<SelectItem value="deleted">Deleted<\/SelectItem>/)
-    expect(table).toMatch(/if \(value === "all"\) next\.delete\("status"\)/)
+  it("can be asked for from the status filter, which clamps an unknown value to all", () => {
+    expect(table).toMatch(/\{ value: "deleted", label: "Deleted" \}/)
+    expect(table).toMatch(/STATUS_FILTERS\.some\(\(f\) => f\.value === rawStatus\) \? rawStatus : "all"/)
+    // One writer carries both params, so neither can drop the other's change.
+    expect(table).toMatch(/if \(status === "all"\) next\.delete\("status"\)/)
+    expect(table).toMatch(/\[searchText, status, urlSearch, urlStatus, params, router\]/)
+    expect(table.match(/router\.replace\(/g)).toHaveLength(1)
   })
 })
