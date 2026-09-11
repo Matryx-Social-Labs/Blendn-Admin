@@ -48,7 +48,7 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/chatrooms` | ✅ (see organizer) | ✅ E10 | E17 fixed the 403-as-empty state |
 | `/dashboard/users` | ✅ 380ba27, 99bf013, f2aa14e | ✅ 2026-09-11 local + read back | deleted-account state, status Select |
 | `/dashboard/organisers`, `/organisers/[id]` | ✅ 503dead (index) / — (detail) | ✅ index | detail page not designed |
-| `/dashboard/venues` (admin index), `/venues/[id]`, `/venues/new`, `/venues/[id]/claim` | ◐ c1ff7fb, 634bfae (index search + index) / — | ✅ index 2026-09-10 | detail/new/claim not designed |
+| `/dashboard/venues` (admin index), `/venues/[id]`, `/venues/new`, `/venues/[id]/claim` | ✅ c1ff7fb, 634bfae (index) / ✅ 2026-09-11 (detail, new, claim — shared with venue owner) | ✅ index 2026-09-10 | |
 | `/dashboard/venue-owners`, `/venue-owners/[id]` | ✅ 503dead (index) / — | ✅ index | |
 | `/dashboard/leads` | — | ✅ E3 | E17 prose cut |
 | `/dashboard/claims`, `/claims/venues`, `/claims/brands` | ✅ W5 + design review 2026-08-24 (events) / ◐ (venues, brands share the queue) | ✅ E7 | one queue, three kinds |
@@ -84,8 +84,8 @@ gates, the specialists, and a drive, before the next one starts.
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
 | `/dashboard` (venue-owner overview) | ✅ ea82077 (mockup `overview-venue-20260911`) | ✅ 2026-09-11 as Fatima Sheikh | `visibleEventsWhere` scope (H2 fixed here); peak cell outlined; notes as text |
-| `/dashboard/venues` (my venues), `/venues/[id]` | — (#156 occupancy hero on detail) | ✅ E5, #319 lifecycle | building occupancy |
-| `/dashboard/venues/new`, `/venues/[id]/claim` | — | ✅ E7 | |
+| `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 2026-09-11 (mockup `venue-detail-20260911`) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima | numbers first, record last; no chips |
+| `/dashboard/venues/new`, `/venues/[id]/claim` | ✅ 2026-09-11 (chrome cut; mockups skipped) | ✅ E7; 2026-09-11 | header titles for both routes |
 | `/dashboard/events`, `/events/[id]` | shared | ✅ | canOperate tabs |
 | `/dashboard/chatrooms`, `/organisation` | ✅ shared | ✅ | |
 | `/reports`, `/audit`, `/settings` | — | ✅ | shared |
@@ -105,5 +105,5 @@ gates, the specialists, and a drive, before the next one starts.
 2. ~~`/dashboard` for organiser and venue owner~~ — done 2026-09-11 (ea82077)
 3. ~~`/dashboard/events/[id]` — overview, live, attendees, messaging, feedback~~ — done 2026-09-11 (8d6f547, d1096f7)
 4. ~~`/dashboard/attendees`, `/dashboard/chatrooms`, `/dashboard/organisation`~~ — done 2026-09-11
-5. `/dashboard/venues/[id]`, `/venues/new`, `/venues/[id]/claim` (venue owner)
+5. ~~`/dashboard/venues/[id]`, `/venues/new`, `/venues/[id]/claim` (venue owner)~~ — done 2026-09-11
 6. Admin remainder: moderation (+reports), sponsors / creative-review / charges, organisations, organisers/[id], venue-owners/[id], leads, categories, amenities, reports, audit, settings
