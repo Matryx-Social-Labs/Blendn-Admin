@@ -45,7 +45,7 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/events/[id]` (overview, live, attendees tabs) | ✅ 8d6f547 (mockup `event-page-20260911`) | ✅ E8/E9; 2026-09-11 draft/upcoming/over looked at as organiser | lifecycle strip replaces the status badge; hero is Going (maybe · saved), Came when nobody RSVP'd; sections with rules, not cards |
 | `/dashboard/events/[id]/messaging` | ✅ d1096f7 (mockup `event-messaging-20260911`) | ✅ E10; 2026-09-11 as organiser + venue owner | the room's pulse line; composer sticky; templates as chips; header retitled "Room" |
 | `/dashboard/events/[id]/feedback` | ✅ d1096f7 (mockup `event-feedback-20260911`) | ✅ E12; 2026-09-11 | sentiment bar is the hero; sections with rules; stars only when rated |
-| `/dashboard/chatrooms` | — | ✅ E10 | E17 fixed the 403-as-empty state |
+| `/dashboard/chatrooms` | ✅ (see organizer) | ✅ E10 | E17 fixed the 403-as-empty state |
 | `/dashboard/users` | ✅ 380ba27, 99bf013, f2aa14e | ✅ 2026-09-11 local + read back | deleted-account state, status Select |
 | `/dashboard/organisers`, `/organisers/[id]` | ✅ 503dead (index) / — (detail) | ✅ index | detail page not designed |
 | `/dashboard/venues` (admin index), `/venues/[id]`, `/venues/new`, `/venues/[id]/claim` | ◐ c1ff7fb, 634bfae (index search + index) / — | ✅ index 2026-09-10 | detail/new/claim not designed |
@@ -74,9 +74,9 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/events/[id]` + tabs | ✅ 8d6f547 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/messaging` | ✅ d1096f7 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/feedback` | ✅ d1096f7 | ✅ 2026-09-11 | shared with admin |
-| `/dashboard/attendees` | — (W18 fixed the roster's PII) | ✅ E4 | pseudonymous roster |
-| `/dashboard/chatrooms` | — | ✅ | |
-| `/dashboard/organisation` (my organisation) | — | ✅ E4, #322 domain verification | members, domains, invites |
+| `/dashboard/attendees` | ✅ 2026-09-11 (repeat chip cut; mockup skipped — one column) | ✅ E4; 2026-09-11 | pseudonymous roster |
+| `/dashboard/chatrooms` | ✅ 2026-09-11 (mockup `chatrooms-20260911`) | ✅ 2026-09-11 | a list with state + when it changes; scope via visibleEventsWhere |
+| `/dashboard/organisation` (my organisation) | ✅ 2026-09-11 (chrome cut; mockup skipped) | ✅ E4, #322 domain verification | title line, divided lists |
 | `/dashboard/reports`, `/dashboard/audit`, `/dashboard/settings` | — | ✅ | shared |
 
 ## venue_owner
@@ -87,7 +87,8 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/venues` (my venues), `/venues/[id]` | — (#156 occupancy hero on detail) | ✅ E5, #319 lifecycle | building occupancy |
 | `/dashboard/venues/new`, `/venues/[id]/claim` | — | ✅ E7 | |
 | `/dashboard/events`, `/events/[id]` | shared | ✅ | canOperate tabs |
-| `/dashboard/chatrooms`, `/organisation`, `/reports`, `/audit`, `/settings` | — | ✅ | shared |
+| `/dashboard/chatrooms`, `/organisation` | ✅ shared | ✅ | |
+| `/reports`, `/audit`, `/settings` | — | ✅ | shared |
 
 ## sponsor
 
@@ -103,6 +104,6 @@ gates, the specialists, and a drive, before the next one starts.
 1. ~~`/dashboard/events/new` and `/events/[id]/edit`~~ — done 2026-09-11 (081bd48)
 2. ~~`/dashboard` for organiser and venue owner~~ — done 2026-09-11 (ea82077)
 3. ~~`/dashboard/events/[id]` — overview, live, attendees, messaging, feedback~~ — done 2026-09-11 (8d6f547, d1096f7)
-4. `/dashboard/attendees`, `/dashboard/chatrooms`, `/dashboard/organisation`
+4. ~~`/dashboard/attendees`, `/dashboard/chatrooms`, `/dashboard/organisation`~~ — done 2026-09-11
 5. `/dashboard/venues/[id]`, `/venues/new`, `/venues/[id]/claim` (venue owner)
 6. Admin remainder: moderation (+reports), sponsors / creative-review / charges, organisations, organisers/[id], venue-owners/[id], leads, categories, amenities, reports, audit, settings
