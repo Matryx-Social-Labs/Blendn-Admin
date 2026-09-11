@@ -45,9 +45,11 @@ export default async function OrganisationsPage() {
               <h2 className="text-[0.9375rem] font-bold text-foreground">{org.display_name}</h2>
               {/* Kind and status are words. Suspended is the one that changes
                   what the org can do, so it is the one in colour. */}
-              <span>{org.kind}</span>
-              <span className={org.status === "suspended" ? "font-bold text-destructive" : undefined}>
-                · {org.status}
+              <span>
+                {org.kind} ·{" "}
+                <span className={org.status === "suspended" ? "font-bold text-destructive" : undefined}>
+                  {org.status}
+                </span>
               </span>
             </div>
             <p className="text-[0.8125rem] text-muted-foreground">
@@ -58,7 +60,7 @@ export default async function OrganisationsPage() {
               {org.gstin ? ` · ${org.gstin}` : ""}
             </p>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
-              <span>{org.memberCount} members</span>
+              <span>{org.memberCount} member{org.memberCount === 1 ? "" : "s"}</span>
               <span>{org.eventCount} events</span>
               <span>{org.venueCount} venues</span>
               <span>since {formatDay(org.created_at.toISOString())}</span>
