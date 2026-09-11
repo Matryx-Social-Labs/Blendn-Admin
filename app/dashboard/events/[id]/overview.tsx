@@ -1,15 +1,15 @@
 import Link from "next/link"
-import { IconAlertTriangle, IconCheck, IconEdit, IconMessage2, IconUsers } from "@tabler/icons-react"
+import { IconAlertTriangle, IconEdit, IconMessage2, IconUsers } from "@tabler/icons-react"
 
 import { AttendancePanel } from "@/components/dashboard/attendance-panel"
 import { ConnectionsPanel } from "@/components/dashboard/connections-panel"
 import { HeroMetric, MetricTile } from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { EventAttendance } from "@/lib/attendance"
 import type { ConnectionMetrics } from "@/lib/connection-metrics"
 import { STATE_QUESTION } from "@/lib/event-phase"
 import type { EventOverview } from "@/lib/event-overview"
+import { cn } from "@/lib/utils"
 
 /**
  * The Overview tab — the page's front door.
@@ -48,7 +48,7 @@ export function Overview({
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[0.8125rem] text-muted-foreground">{STATE_QUESTION[state]}</p>
-        {canEdit ? (
+        {canEdit && state !== "draft" ? (
           <Button asChild variant="outline" size="sm">
             {/* The handoff to the editor. Overview answers the question; the
                 editor changes the answer. */}
@@ -76,7 +76,7 @@ export function Overview({
           answers whatever the lifecycle state makes most urgent, and two
           gradients on one screen means two priorities. */}
       {attendance ? (
-        <section className="rounded-lg border border-border bg-card p-5">
+        <section className="border-t border-border pt-5">
           <AttendancePanel attendance={attendance} live={state === "live"} />
         </section>
       ) : null}
@@ -85,55 +85,30 @@ export function Overview({
           asks first; whether they met anyone is the one that decides whether to
           run it again. */}
       {connections ? (
-        <section className="rounded-lg border border-border bg-card p-5">
+        <section className="border-t border-border pt-5">
           <ConnectionsPanel metrics={connections} />
         </section>
       ) : null}
 
       {state === "draft" ? (
-        <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5">
+        <section className="flex flex-col gap-3 border-t border-border pt-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-[0.9375rem] font-bold">Before it can go out</h3>
-            {publishable ? (
-              <Badge>
-                <IconCheck className="size-3" />
-                Nothing blocking
-              </Badge>
-            ) : (
-              <Badge variant="destructive">{blocking.length} to fix</Badge>
-            )}
+            <span className="text-[0.75rem] text-muted-foreground">
+              {publishable ? "Nothing blocking" : `${blocking.length} to fix`}
+            </span>
           </div>
-
-          {/*
-            Say where to publish whenever nothing is blocking — not only when
-            the list is empty.
-            
-            `blockers` holds advisory items too, so an event that is genuinely
-            ready but is still missing, say, a cover image showed the list and
-            swallowed this sentence. The badge beside it said "Nothing
-            blocking", the hero said "Ready to publish: Yes", and the one line
-            telling the organiser where the control lives never rendered — on
-            the screen whose heading is "What is stopping this from being
-            published?".
-            
-            Publishing living in the editor is deliberate. Saying so is what
-            makes it navigable rather than hidden.
-          */}
-          {publishable ? (
-            <p className="text-[0.8125rem] text-muted-foreground">
-              Nothing is blocking it — publish from the editor when you are ready.
-            </p>
-          ) : null}
 
           {blockers.length === 0 ? null : (
             <ul className="flex flex-col gap-2.5">
               {[...blocking, ...advisory].map((b) => (
                 <li key={b.key} className="flex items-start gap-2.5">
-                  {b.blocking ? (
-                    <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                  ) : (
-                    <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-                  )}
+                  <IconAlertTriangle
+                    className={cn(
+                      "mt-0.5 size-4 shrink-0",
+                      b.blocking ? "text-destructive" : "text-warning"
+                    )}
+                  />
                   <span className="flex flex-col gap-0.5">
                     <span className="text-[0.8125rem] font-medium">
                       {b.label}
@@ -149,11 +124,22 @@ export function Overview({
               ))}
             </ul>
           )}
+
+          {/* Publish lives in the editor, beside the readiness list that
+              explains what is missing. One button there, not a second one here. */}
+          {canEdit ? (
+            <Button asChild size="sm" className="self-start">
+              <Link href={`/dashboard/events/${eventId}/edit`}>
+                <IconEdit className="size-4" />
+                Open editor
+              </Link>
+            </Button>
+          ) : null}
         </section>
       ) : null}
 
       {!canEdit ? (
-        <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-5">
+        <section className="flex flex-col gap-2 border-t border-border pt-5">
           <h3 className="text-[0.9375rem] font-bold">Your access to this event</h3>
           <p className="max-w-prose text-[0.8125rem] text-muted-foreground">
             It is running at {venueName ? <b>{venueName}</b> : "your venue"}, so you get the live

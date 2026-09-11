@@ -6,6 +6,7 @@ import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
 import { visibleEventsWhere } from "@/lib/event-visibility"
+import { buildPacing, pacingWindowDays } from "@/lib/pacing"
 import { attentionQueues } from "@/lib/attention-queues-query"
 import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
@@ -109,21 +110,6 @@ function toRatingCounts(rows: Array<{ rating: number; _count: { _all: number } }
  * "days out" rather than a calendar date — which is the only way two events of
  * different sizes and dates can be compared to each other.
  */
-function buildPacing(
-  rsvps: Array<{ created_at: Date }>,
-  startTime: Date,
-  windowDays: number
-): PacingPoint[] {
-  const daysBefore = rsvps
-    .map((r) => Math.max(0, Math.ceil((startTime.getTime() - r.created_at.getTime()) / DAY_MS)))
-    .sort((a, b) => b - a)
-
-  const points: PacingPoint[] = []
-  for (let d = windowDays; d >= 0; d--) {
-    points.push({ daysOut: d, cumulative: daysBefore.filter((x) => x >= d).length })
-  }
-  return points
-}
 
 async function buildOrganizerOverview(userId: string, role: user_role): Promise<OrganizerOverview> {
   /*
@@ -265,7 +251,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
     const maybe = next.rsvps.filter((r) => r.status === "maybe").length
     const committed = next.rsvps.filter((r) => COMMITTED.includes(r.status))
     const daysOut = Math.max(0, Math.ceil((next.start_time.getTime() - now.getTime()) / DAY_MS))
-    const windowDays = Math.max(7, Math.min(60, daysOut + 14))
+    const windowDays = pacingWindowDays(daysOut)
 
     pacing = buildPacing(committed, next.start_time, windowDays)
     pacingCapacity = next.max_capacity
