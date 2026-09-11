@@ -413,9 +413,17 @@ async function mirrorToTigris(
  * keyword, so what comes back is not curated by us. Fine for a test environment
  * that only internal testers see; production media is what an organiser
  * uploads.
+ *
+ * **1600, not 2048.** The host answers 2048×2048 with HTTP 500 (checked
+ * 2026-09-11: 500 at 2048, 302-to-image at 1600 and below), so 12 of the 30
+ * published staging events rendered a blank card and a red "Image onError"
+ * toast on every device that opened the Pulse. A placeholder that does not
+ * load is worse than none — the card's fallback is designed, the error is
+ * not.
  */
+export const SEED_COVER_SIZE = 1600
 const cover = (seed: string) =>
-  `https://loremflickr.com/2048/2048/${MEDIA_SUBJECT[seed] ?? "event"}?lock=${lockFor(seed)}`
+  `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${MEDIA_SUBJECT[seed] ?? "event"}?lock=${lockFor(seed)}`
 
 /** A stable number per subject, so the same slug gets the same photograph. */
 const lockFor = (seed: string) =>
