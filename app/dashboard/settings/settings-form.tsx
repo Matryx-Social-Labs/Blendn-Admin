@@ -121,7 +121,10 @@ function ProfileSection({ account }: { account: Account }) {
       </div>
 
       <div>
+        {/* Secondary: the password change below is the action this page
+            exists for, and a screen gets one brand-orange button. */}
         <Button
+          variant="secondary"
           disabled={!dirty || pending || name.trim().length < 2}
           onClick={() =>
             start(async () => {
@@ -290,7 +293,7 @@ function SessionsSection({
         dashboard sign-out does not touch the mobile app's 30-day refresh
         tokens, and someone who has lost a phone needs exactly that.
       */}
-      <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+      <div className="divide-y divide-border border-y border-border">
         <SessionRow
           icon={<IconDeviceDesktop className="size-[17px]" />}
           label="Dashboard"

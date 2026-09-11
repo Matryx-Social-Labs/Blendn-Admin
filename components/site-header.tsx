@@ -220,7 +220,7 @@ const routeContent: Record<string, { title: string; description: string }> = {
   },
   "/dashboard/settings": {
     title: "Settings",
-    description: "Your account, password, and what we email you about.",
+    description: "Your account, password, and where you are signed in.",
   },
 }
 
@@ -259,6 +259,12 @@ export function SiteHeader() {
     }
     if (pathname.startsWith("/dashboard/events/")) {
       return { title: "Event", description: "Setup, performance, and what happened on the night." }
+    }
+    if (pathname.startsWith("/dashboard/organisers/")) {
+      return { title: "Organiser", description: "One host account and the events it created." }
+    }
+    if (pathname.startsWith("/dashboard/venue-owners/")) {
+      return { title: "Venue owner", description: "One owner account and the events it created." }
     }
     if (pathname.startsWith("/dashboard/venues/") && pathname.endsWith("/claim")) {
       return { title: "Claim a venue", description: "Reviewed by an admin. Approval links every event held there to you." }

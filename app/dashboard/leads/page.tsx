@@ -37,16 +37,12 @@ export default async function LeadsPage({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
-        <h2 className="text-[length:var(--text-h1)] font-bold">Leads</h2>
-        {/* The header says what these are. This says what they are not, which
-            is the distinction that decides which queue a row belongs in. */}
-        <p className="text-[0.8125rem] text-muted-foreground">
-          Separate from applications — someone asking for a walkthrough has not asked
-          for an account.
-        </p>
-      </div>
+      {/* The header says what these are. This says what they are not, which
+          is the distinction that decides which queue a row belongs in. */}
+      <p className="text-[0.8125rem] text-muted-foreground">
+        Separate from applications — someone asking for a walkthrough has not asked
+        for an account.
+      </p>
 
       <div className="flex flex-wrap gap-1">
         <MetricTile label="New this week" value={String(metrics.newThisWeek)} />

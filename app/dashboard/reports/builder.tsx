@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { refusalText } from "@/lib/refusal"
-import { IconDownload, IconFileSpreadsheet } from "@tabler/icons-react"
+import { IconDownload } from "@tabler/icons-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -67,28 +67,38 @@ export function ReportBuilder({
         follows. Every download is recorded in the audit log.
       </p>
 
-      <div className="grid gap-2 @2xl/main:grid-cols-2">
-        {reports.map((report) => (
-          <button
-            key={report.key}
-            onClick={() => setSelected(report)}
-            aria-pressed={selected?.key === report.key}
-            className={cn(
-              "flex flex-col gap-1 rounded-lg border p-4 text-left transition-colors",
-              selected?.key === report.key
-                ? "border-primary bg-primary/5"
-                : "border-border bg-card hover:border-muted-foreground/40"
-            )}
-          >
-            <span className="flex items-center gap-2 text-sm font-semibold">
-              <IconFileSpreadsheet className="size-4 text-primary" />
-              {report.label}
-            </span>
-            <span className="text-[0.78125rem] leading-5 text-muted-foreground">
-              {report.description}
-            </span>
-          </button>
-        ))}
+      {/* One list, one chosen row. Six cards with an orange icon each read as
+          six primary things; the primary thing is the download button. */}
+      <div role="radiogroup" aria-label="Report" className="flex flex-col divide-y divide-border">
+        {reports.map((report) => {
+          const on = selected?.key === report.key
+          return (
+            <button
+              key={report.key}
+              role="radio"
+              aria-checked={on}
+              onClick={() => setSelected(report)}
+              className={cn(
+                "grid grid-cols-[16px_1fr] items-baseline gap-x-3 py-3 text-left transition-colors hover:bg-accent/40 -mx-2 px-2 rounded-md",
+                on ? "text-foreground" : "text-muted-foreground"
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "mt-1 size-3 self-start rounded-full border",
+                  on ? "border-foreground bg-foreground" : "border-border-strong"
+                )}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className={cn("text-sm", on && "font-bold")}>{report.label}</span>
+                <span className="text-[0.78125rem] leading-5 text-muted-foreground">
+                  {report.description}
+                </span>
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">

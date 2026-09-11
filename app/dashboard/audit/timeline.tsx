@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react"
 import { IconChevronRight } from "@tabler/icons-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -27,10 +26,11 @@ import type { AuditEntry, AuditPage } from "@/lib/audit-actions"
 /** Destructive or privilege-granting actions carry weight and should look it. */
 const WEIGHTY = /suspend|declin|remov|revok|delet|ban|override|role_changed|password/
 
-function actionTone(action: string): "destructive" | "default" | "secondary" {
-  if (WEIGHTY.test(action)) return "destructive"
-  if (/approv|verif|accept/.test(action)) return "default"
-  return "secondary"
+// A word in mono, not a chip. A hundred rows of orange chips said nothing;
+// the one class worth a colour is the weighty one — suspensions, deletions,
+// role changes — and it gets the destructive tone.
+function actionTone(action: string): string {
+  return WEIGHTY.test(action) ? "font-bold text-destructive" : "text-foreground"
 }
 
 export function AuditTimeline({ page }: { page: AuditPage }) {
@@ -95,7 +95,7 @@ export function AuditTimeline({ page }: { page: AuditPage }) {
           <h2 className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
             {day}
           </h2>
-          <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+          <div className="divide-y divide-border border-t border-border">
             {entries.map((entry) => (
               <Entry key={entry.id} entry={entry} />
             ))}
@@ -104,7 +104,7 @@ export function AuditTimeline({ page }: { page: AuditPage }) {
       ))}
 
       {filtered.length === 0 ? (
-        <p className="rounded-lg border border-border px-5 py-7 text-center text-[0.8125rem] text-muted-foreground">
+        <p className="py-7 text-[0.8125rem] text-muted-foreground">
           Nothing matches those filters.
         </p>
       ) : null}
@@ -127,11 +127,11 @@ function Entry({ entry }: { entry: AuditEntry }) {
         )}
       >
         <span className="w-14 shrink-0 tabular-nums text-faint-foreground">
-          {entry.createdAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+          {entry.createdAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
         </span>
-        <Badge variant={actionTone(entry.action)} className="shrink-0 font-mono text-[0.6875rem]">
+        <span className={cn("w-44 shrink-0 truncate font-mono text-[0.6875rem]", actionTone(entry.action))}>
           {entry.action}
-        </Badge>
+        </span>
         <span className="min-w-0 flex-1 truncate">
           {/* Some entries have no actor at all — an application submitted at
               /apply is written before any account exists. "System" is honest;

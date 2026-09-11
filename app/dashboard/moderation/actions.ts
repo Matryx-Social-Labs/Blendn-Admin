@@ -86,7 +86,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
         // The id as well as the name: the trust lookup groups by it, and a name
         // is not a key.
         user_id: true,
-        user: { select: { name: true, email: true } },
+        user: { select: { name: true, email: true, deletedAt: true } },
         message: {
           select: {
             content: true,
@@ -161,7 +161,10 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
     confidence: flag.confidence,
     category: topCategory(flag.categories, flag.source),
     autoAction: flag.auto_action,
-    authorName: flag.user.name ?? flag.user.email,
+    // An erased account has a null name and a `deleted-<id>@…invalid`
+    // address; the fallback rendered that address as the author. The message
+    // is still reviewable, the person is gone.
+    authorName: flag.user.deletedAt ? "Deleted account" : flag.user.name ?? flag.user.email,
     messageDeleted: flag.message.deleted_at !== null,
     /*
      * The band, never the average, and the count so the band can be weighed.

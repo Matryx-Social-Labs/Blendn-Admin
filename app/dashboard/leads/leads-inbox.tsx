@@ -36,13 +36,15 @@ import type { LeadRow } from "@/lib/lead-queries"
  * received is history; the inbox should show work.
  */
 
+// A word, not a chip. New is bold because it is the work; converted and spam
+// get a colour because they are the two ends the funnel is measured by.
 const STATUS_TONE: Record<lead_status, string> = {
-  new: "border-primary bg-primary/10 text-foreground",
-  contacted: "border-border-strong",
-  qualified: "border-border-strong",
-  converted: "border-success/50 text-success",
-  archived: "border-border text-faint-foreground",
-  spam: "border-destructive/40 text-destructive",
+  new: "font-bold text-foreground",
+  contacted: "text-muted-foreground",
+  qualified: "text-muted-foreground",
+  converted: "font-bold text-success",
+  archived: "text-faint-foreground",
+  spam: "text-destructive",
 }
 
 const FILTERS: { key: string; label: string }[] = [
@@ -60,16 +62,7 @@ const columns: Column<LeadRow>[] = [
     key: "status",
     label: "Status",
     sortType: "string",
-    render: (r) => (
-      <span
-        className={cn(
-          "rounded-full border px-2 py-0.5 text-[0.6875rem] font-bold uppercase tracking-wide",
-          STATUS_TONE[r.status]
-        )}
-      >
-        {r.status}
-      </span>
-    ),
+    render: (r) => <span className={cn("text-[0.8125rem]", STATUS_TONE[r.status])}>{r.status}</span>,
   },
   { key: "email", label: "Email", sortType: "string", primary: true },
   {

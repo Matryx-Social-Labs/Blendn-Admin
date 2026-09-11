@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,38 +23,36 @@ import {
 export function SponsorRegisterView({ register }: { register: SponsorRegister }) {
   return (
     <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-[0.9375rem] font-bold">Possible duplicates</h2>
-          <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-            These brands have names that normalise to the same key. That is a
-            hint, not a verdict — check the websites before merging.
-          </p>
-        </div>
-        {register.duplicates.length === 0 ? (
-          <p className="text-[0.8125rem] text-muted-foreground">
-            None. Every brand name is distinct.
-          </p>
-        ) : (
-          register.duplicates.map((cluster) => (
+      {/* Only when there is something to merge. A heading over "None." was a
+          section about nothing, above the list the page exists for. */}
+      {register.duplicates.length > 0 ? (
+        <section className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[0.9375rem] font-bold">Possible duplicates</h2>
+            <span className="text-[0.75rem] text-faint-foreground">
+              same name key — a hint, not a verdict; check the websites before merging
+            </span>
+          </div>
+          {register.duplicates.map((cluster) => (
             <DuplicateCluster key={cluster[0].name_key} cluster={cluster} />
-          ))
-        )}
-      </section>
+          ))}
+        </section>
+      ) : null}
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-[0.9375rem] font-bold">
-          All brands{" "}
-          <span className="font-normal text-muted-foreground">
-            ({register.rest.length + register.duplicates.flat().length})
+      <section className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-[0.9375rem] font-bold">All brands</h2>
+          <span className="text-[0.75rem] text-faint-foreground">
+            {register.rest.length + register.duplicates.flat().length}
+            {register.duplicates.length === 0 ? " · every name is distinct" : ""}
           </span>
-        </h2>
+        </div>
         {register.rest.length === 0 ? (
           <p className="text-[0.8125rem] text-muted-foreground">No brands yet.</p>
         ) : (
-          <ul className="flex flex-col divide-y rounded-xl border bg-card">
+          <ul className="flex flex-col divide-y divide-border">
             {register.rest.map((row) => (
-              <li key={row.id} className="p-3">
+              <li key={row.id} className="py-3">
                 <SponsorLine row={row} />
               </li>
             ))}
@@ -70,15 +67,15 @@ function SponsorLine({ row }: { row: AdminSponsorRow }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex flex-wrap items-center gap-2">
+        <span className="flex flex-wrap items-baseline gap-x-2">
           <span className="truncate font-medium">{row.name}</span>
-          <Badge variant={row.claimed ? "default" : "outline"} className="rounded-full">
-            {row.ownerName ?? "Unclaimed"}
-          </Badge>
+          {/* Words, not chips. The owner is a fact; a pending claim is the one
+              thing here that wants a decision, so it carries the weight. */}
+          <span className="text-[0.8125rem] text-muted-foreground">{row.ownerName ?? "unclaimed"}</span>
           {row.pendingClaims > 0 ? (
-            <Badge variant="secondary" className="rounded-full">
-              {row.pendingClaims} claim{row.pendingClaims === 1 ? "" : "s"} pending
-            </Badge>
+            <span className="text-[0.8125rem] font-bold text-foreground">
+              · {row.pendingClaims} claim{row.pendingClaims === 1 ? "" : "s"} pending
+            </span>
           ) : null}
         </span>
         <span className="text-[0.8125rem] text-muted-foreground">
