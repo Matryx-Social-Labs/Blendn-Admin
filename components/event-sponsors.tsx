@@ -85,7 +85,7 @@ export function EventSponsors({ eventId }: { eventId: string }) {
                 </span>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <Badge variant={r.phase === "live" ? "default" : "outline"}>
+                <Badge variant={r.phase === "live" ? "secondary" : "outline"}>
                   {PHASE_LABEL[r.phase] ?? r.phase}
                 </Badge>
                 {r.status !== "cancelled" ? (

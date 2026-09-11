@@ -84,7 +84,7 @@ export function VenueTypePicker({
                 )}
                 <b className="flex-1 text-[0.8125rem] font-bold">{group.label}</b>
                 {holdsValue ? (
-                  <Badge>{group.types.find((t) => t.value === value)?.label}</Badge>
+                  <Badge variant="secondary">{group.types.find((t) => t.value === value)?.label}</Badge>
                 ) : null}
                 <span className="text-[0.71875rem] text-faint-foreground">
                   {group.types.length}

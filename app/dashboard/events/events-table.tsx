@@ -38,11 +38,14 @@ export interface EventRow {
  * inverted: a badge on every row is not a badge, it is a background, and it was
  * outshouting the two markers that actually mean something.
  */
-const STATUS_TONE: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  published: "outline",
-  draft: "default",
-  cancelled: "destructive",
-  completed: "outline",
+// Words. Published is the ordinary case and reads as nothing; draft is the
+// one an organiser is looking for; cancelled is the one that changed what
+// happened. The only chip left in this column is the problem, not a state.
+const STATUS_TONE: Record<string, string> = {
+  published: "text-faint-foreground",
+  draft: "font-bold text-foreground",
+  cancelled: "font-bold text-destructive",
+  completed: "text-muted-foreground",
 }
 
 export function EventsTable({
@@ -125,19 +128,13 @@ export function EventsTable({
       label: "Status",
       sortType: "string",
       render: (row) => (
-        <span className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={STATUS_TONE[row.status] ?? "outline"} className="text-[0.6875rem]">
-            {row.status}
-          </Badge>
+        <span className="flex flex-wrap items-center gap-x-1.5 text-[0.8125rem]">
+          <span className={STATUS_TONE[row.status] ?? "text-muted-foreground"}>{row.status}</span>
           {row.curation === "curated_open" ? (
-            <Badge variant="outline" className="text-[0.6875rem]">
-              unclaimed
-            </Badge>
+            <span className="text-muted-foreground">· unclaimed</span>
           ) : null}
           {row.curation === "curated_claimed" ? (
-            <Badge variant="outline" className="text-[0.6875rem]">
-              claimed
-            </Badge>
+            <span className="text-muted-foreground">· claimed</span>
           ) : null}
           {/*
             The only badge here that is a problem rather than a state.

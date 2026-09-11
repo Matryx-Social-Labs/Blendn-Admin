@@ -164,7 +164,7 @@ export default async function PlacementsPage() {
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Badge variant={p.phase === "live" ? "default" : "outline"}>
+                  <Badge variant={p.phase === "live" ? "secondary" : "outline"}>
                     {PHASE_LABEL[p.phase] ?? p.phase}
                   </Badge>
                   <span className="text-[0.8125rem] text-muted-foreground">

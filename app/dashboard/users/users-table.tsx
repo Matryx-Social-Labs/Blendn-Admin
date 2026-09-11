@@ -85,15 +85,15 @@ const ROLE_LABELS: Record<string, string> = {
   attendee: "Attendee",
 }
 
-/**
- * Brand chart hues rather than raw hexes, so these follow the theme instead of
- * staying violet/blue/green while the rest of the app is orange and purple.
- */
-const ROLE_COLORS: Record<string, React.CSSProperties> = {
-  app_admin: { backgroundColor: "var(--chart-3)", color: "var(--background)" },
-  organizer: { backgroundColor: "var(--chart-1)", color: "var(--background)" },
-  venue_owner: { backgroundColor: "var(--chart-2)", color: "var(--background)" },
-  attendee: { backgroundColor: "var(--muted)", color: "var(--muted-foreground)" },
+// A word. The role was a filled pill in a chart hue on every row — orange for
+// organisers, the brand colour a screen reserves for its primary action.
+// Attendees, the bulk of the table, read quiet; the three dashboard roles
+// read in the foreground weight so they can be picked out of a page.
+const ROLE_TONE: Record<string, string> = {
+  app_admin: "font-bold text-foreground",
+  organizer: "text-foreground",
+  venue_owner: "text-foreground",
+  attendee: "text-muted-foreground",
 }
 
 // Actions cell component - extracted to comply with React hooks rules
@@ -244,31 +244,22 @@ const columns: ColumnDef<UserWithProfile>[] = [
     cell: ({ row }) => {
       const user = row.original
       if (user.deletedAt) {
-        return (
-          <Badge variant="outline" className="text-xs">
-            Deleted
-          </Badge>
-        )
+        return <span className="text-[0.8125rem] text-faint-foreground">deleted</span>
       }
       const isVerified = !!user.emailVerified
       const isOnboarded = user.profile?.onboarded
 
+      // Words. "Verified" was a brand-orange chip on most rows of a table
+      // whose one orange thing should be the primary action; suspended is the
+      // state that changes what the account can do, so it is the one in colour.
       return (
-        <div className="flex flex-wrap gap-1">
-          <Badge variant={isVerified ? "default" : "secondary"} className="text-xs">
-            {isVerified ? "Verified" : "Unverified"}
-          </Badge>
-          {isOnboarded && (
-            <Badge variant="outline" className="text-xs">
-              Onboarded
-            </Badge>
-          )}
-          {user.suspended_at && (
-            <Badge variant="outline" className="border-destructive/60 text-destructive text-xs">
-              Suspended
-            </Badge>
-          )}
-        </div>
+        <span className="flex flex-wrap gap-x-1.5 text-[0.8125rem] text-muted-foreground">
+          <span className={isVerified ? "text-foreground" : undefined}>
+            {isVerified ? "verified" : "unverified"}
+          </span>
+          {isOnboarded ? <span>· onboarded</span> : null}
+          {user.suspended_at ? <span className="font-bold text-destructive">· suspended</span> : null}
+        </span>
       )
     },
   },
@@ -277,16 +268,8 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Role",
     cell: ({ row }) => {
       const role = row.original.role as string
-      const style = ROLE_COLORS[role] ?? ROLE_COLORS.attendee
       const label = ROLE_LABELS[role] ?? role
-      return (
-        <span
-          className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
-          style={style}
-        >
-          {label}
-        </span>
-      )
+      return <span className={`text-[0.8125rem] ${ROLE_TONE[role] ?? ROLE_TONE.attendee}`}>{label}</span>
     },
   },
   {

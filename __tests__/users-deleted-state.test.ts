@@ -129,17 +129,17 @@ describe("the row", () => {
     expect(branch).toBeLessThan(userCell.indexOf('"Unnamed User"'))
   })
 
-  it("carries one chip — Deleted — and none of the live-account chips", () => {
+  it("says one word — deleted — and none of the live-account states", () => {
     const statusCell = table.slice(table.indexOf('accessorKey: "status"'), table.indexOf('accessorKey: "role"'))
     const branch = statusCell.indexOf("if (user.deletedAt)")
     expect(branch).toBeGreaterThan(-1)
-    expect(branch).toBeLessThan(statusCell.indexOf('"Verified" : "Unverified"'))
-    expect(statusCell.slice(branch, statusCell.indexOf("const isVerified"))).toMatch(/>\s*Deleted\s*</)
+    expect(branch).toBeLessThan(statusCell.indexOf('"verified" : "unverified"'))
+    expect(statusCell.slice(branch, statusCell.indexOf("const isVerified"))).toMatch(/>\s*deleted\s*</)
   })
 
   it("a suspended live row says so — the red count in the stats line is findable", () => {
     const statusCell = table.slice(table.indexOf('accessorKey: "status"'), table.indexOf('accessorKey: "role"'))
-    expect(statusCell).toMatch(/\{user\.suspended_at && \(\s*<Badge[^>]*text-destructive[^>]*>\s*Suspended/)
+    expect(statusCell).toMatch(/\{user\.suspended_at \? <span[^>]*text-destructive[^>]*>· suspended/)
   })
 
   it("a profile row with every field nulled by erasure renders the same dash as no row", () => {
