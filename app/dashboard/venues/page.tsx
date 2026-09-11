@@ -29,7 +29,12 @@ const toneVariant = {
  * table and this screen expands each row, so recomputing would be two versions
  * of the same arithmetic that could drift apart.
  */
-export default async function MyVenuesPage() {
+export default async function MyVenuesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  const params = await searchParams
   const session = await getAuth()
   if (!session?.user) redirect("/login")
 
@@ -47,8 +52,9 @@ export default async function MyVenuesPage() {
    * page both roles land on is already shared.
    */
   if (session.user.role === "app_admin") {
-    const { venues, total } = await getVenueRecords()
-    return <VenueRecords venues={venues} total={total} />
+    const q = typeof params.q === "string" ? params.q.trim() : ""
+    const { venues, total } = await getVenueRecords(q)
+    return <VenueRecords venues={venues} total={total} q={q} />
   }
   if (session.user.role !== "venue_owner") redirect("/dashboard")
 

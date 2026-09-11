@@ -141,7 +141,13 @@ export function DataTable<T extends { id: string | number }>({
   defaultSort?: SortState
   selectable?: boolean
   bulkActions?: BulkAction[]
-  search?: boolean
+  /**
+   * `true` filters the rows the table was given. An object submits a GET form
+   * to the server instead — for a list that is a PAGE of a larger set, where
+   * searching only what is loaded finds nothing past the page and says so
+   * nowhere. Same slot, same look; only where the search happens changes.
+   */
+  search?: boolean | { name: string; defaultValue?: string }
   searchPlaceholder?: string
   filters?: TableFilter[]
   pagination?: boolean
@@ -221,7 +227,19 @@ export function DataTable<T extends { id: string | number }>({
 
       {search || filters.length > 0 || columnMenu ? (
         <div className="flex flex-wrap items-center gap-2">
-          {search ? (
+          {typeof search === "object" ? (
+            <form method="get" className="relative">
+              <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint-foreground" />
+              <Input
+                type="search"
+                name={search.name}
+                defaultValue={search.defaultValue}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
+                className="h-9 w-56 pl-8 text-[0.8125rem]"
+              />
+            </form>
+          ) : search ? (
             <div className="relative">
               <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint-foreground" />
               <Input

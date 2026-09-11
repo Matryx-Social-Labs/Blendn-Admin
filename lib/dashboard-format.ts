@@ -174,3 +174,15 @@ export function bulkDeleteMessage(
     text: `Deleted ${attempted - failed}, but ${failed} could not be removed`,
   }
 }
+
+/**
+ * A part of a whole as a rounded percentage — and 0, not NaN, when the whole
+ * is 0. An empty platform is not a concentrated one.
+ *
+ * Pure and here rather than inline in `getRoleUsers`, because the zero-divisor
+ * branch is unreachable from an integration test against a seeded database:
+ * somebody has always published something, so `0 / 0` never ran.
+ */
+export function sharePct(part: number, whole: number): number {
+  return whole === 0 ? 0 : Math.round((part / whole) * 100)
+}

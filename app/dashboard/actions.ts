@@ -955,11 +955,25 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
  * `next build` does. That has now happened twice; the guard below it has been
  * widened so there is not a third.
  */
-export async function getVenueRecords(): Promise<{ venues: VenueRecordRow[]; total: number }> {
+export async function getVenueRecords(
+  q = ""
+): Promise<{ venues: VenueRecordRow[]; total: number }> {
   const session = await getAuth()
   if (session?.user?.role !== "app_admin") throw new Error("Forbidden")
 
-  const where = { deleted_at: null }
+  // Name or city. Server-side because the list is a page: a search over the
+  // 200 rows the client holds cannot find the 201st, and used to say nothing.
+  const where = {
+    deleted_at: null,
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" as const } },
+            { city: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  }
   const [venues, total] = await Promise.all([
     db.venues.findMany({
       where,

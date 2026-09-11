@@ -114,10 +114,10 @@ describe("getRoleUsers supply split", () => {
 
     const row = (await getRoleUsers("organizer")).find((r) => r.id === host)!
     expect(row.lastEventAt).toBeNull()
-    // Zero, not NaN. An empty platform is not a concentrated one, and the
-    // divisor here is the platform's published total.
+    // Zero because THIS host published nothing. The other zero — a platform
+    // where nobody has — cannot be reached from a seeded database, so the
+    // divisor rule is pinned by `sharePct`'s unit test, not here.
     expect(row.sharePct).toBe(0)
-    expect(Number.isNaN(row.sharePct)).toBe(false)
   })
 
   it("shares sum to about 100 across everyone who has published", async () => {

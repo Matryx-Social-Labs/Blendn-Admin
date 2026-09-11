@@ -34,11 +34,12 @@ export interface CategoryOption {
  * Children under their parent, parents first, in taxonomy order.
  *
  * A top-level category with no children of its own still gets a group so it is
- * never orphaned, and anything whose parent is missing from the list falls into
- * "Other" rather than disappearing — a category can be reparented or merged by
- * an admin while somebody has this form open.
+ * never orphaned. A child whose parent relation is gone — reparented or merged
+ * by an admin while somebody has this form open — is grouped under its OWN
+ * name rather than disappearing. (This used to say "falls into Other"; there
+ * is no Other, and there never was.)
  */
-function groupByParent(categories: CategoryOption[], filter: string) {
+export function groupByParent(categories: CategoryOption[], filter: string) {
   const needle = filter.trim().toLowerCase()
   const groups = new Map<string, { key: string; label: string; items: CategoryOption[] }>()
 

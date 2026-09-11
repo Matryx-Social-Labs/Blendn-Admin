@@ -1,6 +1,7 @@
 "use server"
 
 import crypto from "crypto"
+import { sharePct } from "@/lib/dashboard-format"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
@@ -131,14 +132,8 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
     published: published.get(user.id) ?? 0,
     drafts: drafts.get(user.id) ?? 0,
     lastEventAt: last.get(user.id)?.toISOString() ?? null,
-    /*
-     * Share of PUBLISHED supply. Zero when nothing is published at all rather
-     * than NaN — an empty platform is not a concentrated one.
-     */
-    sharePct:
-      totalPublished === 0
-        ? 0
-        : Math.round(((published.get(user.id) ?? 0) / totalPublished) * 100),
+    // Share of PUBLISHED supply; see `sharePct` for the zero-divisor rule.
+    sharePct: sharePct(published.get(user.id) ?? 0, totalPublished),
   }))
 }
 

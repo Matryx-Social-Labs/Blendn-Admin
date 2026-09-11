@@ -16,9 +16,12 @@ import type { VenueRecordRow } from "@/lib/dashboard-types"
 export function VenueRecords({
   venues,
   total,
+  q = "",
 }: {
   venues: VenueRecordRow[]
   total: number
+  /** The server-side search, so the count line can say what it counts. */
+  q?: string
 }) {
   const unclaimed = venues.filter((venue) => venue.owner === null).length
 
@@ -80,12 +83,14 @@ export function VenueRecords({
         {venues.length < total ? (
           <>
             Showing <span className="tabular-nums">{venues.length}</span> of{" "}
-            <span className="tabular-nums">{total}</span> venues, unclaimed first
+            <span className="tabular-nums">{total}</span> venues{q ? ` matching “${q}”` : ""},
+            unclaimed first
           </>
         ) : (
           <>
             <b className="font-bold text-foreground tabular-nums">{total}</b> venue
             {total === 1 ? "" : "s"}
+            {q ? ` matching “${q}”` : ""}
             {unclaimed > 0 ? (
               <>
                 {" · "}
@@ -99,7 +104,10 @@ export function VenueRecords({
       columns={columns}
       rows={venues}
       sortable
-      search
+      // A GET form, not the table's own filter: this list is a page of the
+      // whole set, and a search over the page found nothing past row 200 —
+      // silently, with the box still saying "Search venues…".
+      search={{ name: "q", defaultValue: q }}
       searchPlaceholder="Search venues…"
       pagination
       defaultPageSize={20}
