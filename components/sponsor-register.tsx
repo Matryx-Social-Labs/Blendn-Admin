@@ -28,7 +28,7 @@ export function SponsorRegisterView({ register }: { register: SponsorRegister })
       {register.duplicates.length > 0 ? (
         <section className="flex flex-col gap-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-[0.9375rem] font-bold">Possible duplicates</h2>
+            <h2 className="text-[length:var(--text-h2)] font-bold">Possible duplicates</h2>
             <span className="text-[0.75rem] text-faint-foreground">
               same name key — a hint, not a verdict; check the websites before merging
             </span>
@@ -41,7 +41,7 @@ export function SponsorRegisterView({ register }: { register: SponsorRegister })
 
       <section className="flex flex-col gap-1">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-[0.9375rem] font-bold">All brands</h2>
+          <h2 className="text-[length:var(--text-h2)] font-bold">All brands</h2>
           <span className="text-[0.75rem] text-faint-foreground">
             {register.rest.length + register.duplicates.flat().length}
             {register.duplicates.length === 0 ? " · every name is distinct" : ""}

@@ -46,7 +46,7 @@ export function AmenityManager({ amenities }: { amenities: AmenityRow[] }) {
   return (
     <div className="flex flex-col gap-5">
       <section className="flex flex-col gap-1">
-        <h2 className="text-[0.9375rem] font-bold">Offered <span className="font-normal text-muted-foreground">{active.length}</span></h2>
+        <h2 className="text-[length:var(--text-h2)] font-bold">Offered <span className="font-normal text-muted-foreground">{active.length}</span></h2>
         {active.map((a) => (
           <Row
             key={a.id}
@@ -75,7 +75,7 @@ export function AmenityManager({ amenities }: { amenities: AmenityRow[] }) {
 
       {retired.length > 0 ? (
         <section className="flex flex-col gap-1 border-t border-border pt-5">
-          <h2 className="text-[0.9375rem] font-bold">Retired <span className="font-normal text-muted-foreground">{retired.length}</span></h2>
+          <h2 className="text-[length:var(--text-h2)] font-bold">Retired <span className="font-normal text-muted-foreground">{retired.length}</span></h2>
           <p className="text-[0.8125rem] text-muted-foreground">
             Not offered for new events. Still shown on the events that already list them —
             withdrawing an amenity should not rewrite what a past event said.
@@ -97,7 +97,7 @@ export function AmenityManager({ amenities }: { amenities: AmenityRow[] }) {
         </section>
       ) : null}
       <section className="border-t border-border pt-5">
-        <h2 className="text-[0.9375rem] font-bold">Add an amenity</h2>
+        <h2 className="text-[length:var(--text-h2)] font-bold">Add an amenity</h2>
         <p className="mt-1 text-[0.8125rem] text-muted-foreground">
           The label as drawn, an optional second line, and a Material Symbols name so the app
           does not carry its own slug-to-glyph mapping and drift from this list.

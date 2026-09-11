@@ -142,7 +142,7 @@ export default async function PlacementsPage() {
 
       <section className="flex flex-col gap-3">
         {/* h2, not h1 — components/site-header.tsx owns the page's only h1. */}
-        <h2 className="text-[0.9375rem] font-bold">Placements</h2>
+        <h2 className="text-[length:var(--text-h2)] font-bold">Placements</h2>
 
         {overview.placements.length === 0 ? (
           <EmptyState

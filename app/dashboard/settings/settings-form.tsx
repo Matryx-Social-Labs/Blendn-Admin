@@ -43,7 +43,7 @@ function Section({
   return (
     <section className="grid gap-6 border-b border-border py-6 @3xl/main:grid-cols-[minmax(180px,240px)_minmax(0,480px)]">
       <div className="flex flex-col gap-1">
-        <h2 className="text-[0.9375rem] font-bold">{title}</h2>
+        <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
         <p className="text-[0.78125rem] text-muted-foreground">{description}</p>
       </div>
       <div className="flex flex-col gap-3.5">{children}</div>
