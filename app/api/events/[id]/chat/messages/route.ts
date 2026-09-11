@@ -25,7 +25,11 @@ export async function GET(_: Request, { params }: RouteContext) {
     if (!eventPermissions(await actorFor(session.user), event).canOperate) {
       return errorResponse("Forbidden", 403)
     }
-    if (!event.chat_group) return NextResponse.json({ messages: [] })
+    // The full shape even when there is no room yet — the feed types
+    // `pendingFlags` and `members` as required.
+    if (!event.chat_group) {
+      return NextResponse.json({ chatGroupId: null, pendingFlags: 0, messages: [], members: [] })
+    }
 
     /*
      * Attendees are pseudonymous in event chat: they get an `anonymous_name` on
@@ -44,72 +48,73 @@ export async function GET(_: Request, { params }: RouteContext) {
     // Shaping pinned by __tests__/chat-identity.test.ts — keep them in step.
     const isPlatformAdmin = session.user.role === "app_admin"
 
-    const messages = await db.chat_messages.findMany({
-      where: { chat_group_id: event.chat_group.id, deleted_at: null },
-      orderBy: { created_at: "desc" },
-      take: 100,
-      include: {
-        user: { select: { id: true, name: true, email: true, image: true } },
-      },
-    })
-
-    // Fetch members with banned_by user info
-    const members = await db.chat_group_members.findMany({
-      where: { chat_group_id: event.chat_group.id },
-      select: {
-        user_id: true,
-        anonymous_name: true,
-        status: true,
-        banned_at: true,
-        banned_by: true,
-        updated_at: true,
-      },
-    })
+    // One wave. These four depend only on the chat group id; they ran one
+    // after another, and this route is polled every 5 seconds per open room.
+    const chatGroupId = event.chat_group.id
+    const [messages, members, violationCounts, pendingFlags] = await Promise.all([
+      db.chat_messages.findMany({
+        where: { chat_group_id: chatGroupId, deleted_at: null },
+        orderBy: { created_at: "desc" },
+        take: 100,
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+      }),
+      // Members with banned_by user info
+      db.chat_group_members.findMany({
+        where: { chat_group_id: chatGroupId },
+        select: {
+          user_id: true,
+          anonymous_name: true,
+          status: true,
+          banned_at: true,
+          banned_by: true,
+          updated_at: true,
+        },
+      }),
+      // Violation counts per user (hidden messages)
+      db.moderation_flags.groupBy({
+        by: ["user_id"],
+        where: { chat_group_id: chatGroupId, auto_action: "hidden" },
+        _count: { id: true },
+      }),
+      // What is waiting on a human — the one live number the organiser's
+      // screen has for the moderation queue.
+      db.moderation_flags.count({
+        where: { chat_group_id: chatGroupId, status: "pending" },
+      }),
+    ])
     const memberMap = new Map(members.map((m) => [m.user_id, m]))
-
-    // Fetch violation counts per user (hidden messages)
-    const violationCounts = await db.moderation_flags.groupBy({
-      by: ["user_id"],
-      where: {
-        chat_group_id: event.chat_group.id,
-        auto_action: "hidden",
-      },
-      _count: { id: true },
-    })
     const violationMap = new Map(violationCounts.map((v) => [v.user_id, v._count.id]))
-
-    // What is waiting on a human. The feed polls every 5s, so this is the one
-    // live number the organiser's screen has for the moderation queue.
-    const pendingFlags = await db.moderation_flags.count({
-      where: { chat_group_id: event.chat_group.id, status: "pending" },
-    })
 
     // Fetch recent violations for banned/muted users
     const restrictedUserIds = members
       .filter((m) => m.status === "banned" || m.status === "muted")
       .map((m) => m.user_id)
 
-    const recentViolations = restrictedUserIds.length > 0
-      ? await db.moderation_flags.findMany({
-          where: {
-            chat_group_id: event.chat_group.id,
-            user_id: { in: restrictedUserIds },
-          },
-          orderBy: { created_at: "desc" },
-          take: 100,
-          select: {
-            user_id: true,
-            source: true,
-            categories: true,
-            confidence: true,
-            auto_action: true,
-            created_at: true,
-            message: {
-              select: { content: true },
+    // Second wave: the two lookups that need `members`, together.
+    const bannedByIds = [...new Set(members.filter((m) => m.banned_by).map((m) => m.banned_by!))]
+    const [recentViolations, bannedByUsers] = await Promise.all([
+      restrictedUserIds.length > 0
+        ? db.moderation_flags.findMany({
+            where: { chat_group_id: chatGroupId, user_id: { in: restrictedUserIds } },
+            orderBy: { created_at: "desc" },
+            take: 100,
+            select: {
+              user_id: true,
+              source: true,
+              categories: true,
+              confidence: true,
+              auto_action: true,
+              created_at: true,
+              message: { select: { content: true } },
             },
-          },
-        })
-      : []
+          })
+        : [],
+      bannedByIds.length > 0
+        ? db.user.findMany({ where: { id: { in: bannedByIds } }, select: { id: true, name: true } })
+        : [],
+    ])
 
     // Group violations by user
     const violationsByUser = new Map<string, typeof recentViolations>()
@@ -119,14 +124,6 @@ export async function GET(_: Request, { params }: RouteContext) {
       violationsByUser.set(v.user_id, existing)
     }
 
-    // Fetch banned_by user names
-    const bannedByIds = [...new Set(members.filter((m) => m.banned_by).map((m) => m.banned_by!))]
-    const bannedByUsers = bannedByIds.length > 0
-      ? await db.user.findMany({
-          where: { id: { in: bannedByIds } },
-          select: { id: true, name: true },
-        })
-      : []
     const bannedByMap = new Map(bannedByUsers.map((u) => [u.id, u.name]))
 
     return NextResponse.json({

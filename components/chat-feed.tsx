@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -124,11 +124,17 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
   const [expandedUser, setExpandedUser] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const isFirstLoad = useRef(true)
+  // The mount fetch, the 5s poll and the Refresh button can all be in flight
+  // at once. A slow older response must not land after a newer one and put
+  // a stale pending-flag count or ban state back on screen.
+  const requestSeq = useRef(0)
 
   const fetchData = useCallback(async (silent = false) => {
+    const seq = ++requestSeq.current
     try {
       if (!silent) setLoading(true)
       const res = await fetch(`/api/events/${eventId}/chat/messages`, { cache: "no-store" })
+      if (seq !== requestSeq.current) return
       if (!res.ok) {
         /*
          * A failed poll keeps whatever is on screen — the messages were real
@@ -143,6 +149,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       setFailed(false)
       {
         const json = await res.json() as ChatFeedData
+        if (seq !== requestSeq.current) return
         setData(json)
         if (isFirstLoad.current) {
           isFirstLoad.current = false
@@ -224,6 +231,10 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
   const bannedMembers = data?.members.filter((m) => m.status === "banned") ?? []
   const mutedMembers = data?.members.filter((m) => m.status === "muted") ?? []
   const activeMembers = data?.members.filter((m) => m.status === "active") ?? []
+  const memberById = useMemo(
+    () => new Map((data?.members ?? []).map((m) => [m.userId, m])),
+    [data?.members]
+  )
   const restrictedCount = bannedMembers.length + mutedMembers.length
 
   return (
@@ -261,10 +272,12 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       </div>
 
       {/* Tab switcher */}
-      <div className="flex gap-4 border-b shrink-0">
+      <div className="flex gap-4 border-b shrink-0" role="tablist" aria-label="Room">
         <Button
           type="button"
           variant="ghost"
+          role="tab"
+          aria-selected={activeTab === "messages"}
           onClick={() => setActiveTab("messages")}
           className={`px-1 py-2 h-auto rounded-none text-[0.8125rem] font-medium transition-colors hover:bg-transparent ${
             activeTab === "messages"
@@ -277,6 +290,8 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
         <Button
           type="button"
           variant="ghost"
+          role="tab"
+          aria-selected={activeTab === "members"}
           onClick={() => setActiveTab("members")}
           className={`px-1 py-2 h-auto rounded-none text-[0.8125rem] font-medium transition-colors hover:bg-transparent ${
             activeTab === "members"
@@ -315,7 +330,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
               <p className="text-sm text-muted-foreground text-center py-8">No messages yet.</p>
             ) : (
               data.messages.map((msg) => {
-                const member = data.members.find((m) => m.userId === msg.user.id)
+                const member = memberById.get(msg.user.id)
                 const isBanned = member?.status === "banned"
                 const isMuted = member?.status === "muted"
                 return (
@@ -352,7 +367,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                       </div>
                       <p className="text-sm leading-snug break-words">{msg.content}</p>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <Button
                         size="sm"
                         variant="ghost"
@@ -371,6 +386,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                         onClick={() => void memberAction(msg.user.id, isBanned ? "unban" : "ban")}
                         disabled={actionLoading === `action-${msg.user.id}`}
                         title={isBanned ? "Unban user" : "Ban user"}
+                        aria-label={isBanned ? "Unban user" : "Ban user"}
                       >
                         <IconBan className="size-3.5" />
                       </Button>
@@ -465,7 +481,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <Button
                         size="sm"
                         variant="ghost"
@@ -525,15 +541,19 @@ function RestrictedMemberCard({
 
   return (
     <div className={`rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}>
-      {/* Header row */}
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={onToggleExpand}
-        aria-label={isExpanded ? "Collapse member details" : "Expand member details"}
-        className="w-full h-auto justify-between px-3 py-2.5 text-left font-normal hover:bg-muted/20 transition-colors"
-      >
-        <div className="flex items-center gap-2 min-w-0">
+      {/* Header row. The expand control and the action buttons are siblings:
+          this was one <button> wrapping three more, with a stopPropagation
+          wrapper to make it work — invalid HTML that browsers repair by
+          closing the outer button early, so assistive tech got a different
+          tree from the one the JSX describes. */}
+      <div className="flex w-full items-center justify-between gap-2 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          aria-expanded={isExpanded}
+          aria-label={isExpanded ? "Collapse member details" : "Expand member details"}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded text-left hover:bg-muted/20 transition-colors"
+        >
           {isExpanded ? (
             <IconChevronDown className="size-3.5 text-muted-foreground shrink-0" />
           ) : (
@@ -560,8 +580,8 @@ function RestrictedMemberCard({
               )}
             </div>
           </div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
           {isBanned ? (
             <Button
               size="sm"
@@ -595,7 +615,7 @@ function RestrictedMemberCard({
             </>
           )}
         </div>
-      </Button>
+      </div>
 
       {/* Expanded: violation history */}
       {isExpanded && member.recentViolations.length > 0 && (
@@ -603,8 +623,8 @@ function RestrictedMemberCard({
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
             Recent Violations
           </p>
-          {member.recentViolations.map((v, i) => (
-            <div key={i} className="rounded border border-border/50 bg-background/50 px-2.5 py-2 space-y-1">
+          {member.recentViolations.map((v) => (
+            <div key={`${v.source}-${v.createdAt}`} className="rounded border border-border/50 bg-background/50 px-2.5 py-2 space-y-1">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Badge
                   variant="outline"
