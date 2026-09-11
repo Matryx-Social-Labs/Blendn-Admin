@@ -69,7 +69,13 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
     <div className="flex flex-col gap-6">
       {nextEvent ? (
         <HeroMetric
-          eyebrow={`${formatDay(nextEvent.startAt)} · ${nextEvent.title}${nextEvent.venue !== "Venue TBD" ? ` · ${nextEvent.venue}` : ""}`}
+          // The venue only when the title does not already say it — "Sunset
+          // Sessions at The Humming Tree · The Humming Tree" read twice.
+          eyebrow={`${formatDay(nextEvent.startAt)} · ${nextEvent.title}${
+            nextEvent.venue !== "Venue TBD" && !nextEvent.title.includes(nextEvent.venue)
+              ? ` · ${nextEvent.venue}`
+              : ""
+          }`}
           value={nextEvent.fillPct === null ? formatNumber(nextEvent.going) : formatPct(nextEvent.fillPct)}
           unit={
             nextEvent.fillPct === null
@@ -77,10 +83,12 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
               : `filled · ${daysToGo(nextEvent.daysOut)}`
           }
           progress={nextEvent.fillPct}
+          // The value above already says going (or fill, with going as the
+          // "N of capacity" here). Never the same number twice on one card.
           description={[
-            nextEvent.capacity
-              ? `${formatNumber(nextEvent.going)} of ${formatNumber(nextEvent.capacity)} going`
-              : `${formatNumber(nextEvent.going)} going`,
+            ...(nextEvent.capacity
+              ? [`${formatNumber(nextEvent.going)} of ${formatNumber(nextEvent.capacity)} going`]
+              : []),
             `${formatNumber(nextEvent.maybe)} maybe`,
             `${formatNumber(nextEvent.favourites)} saved`,
           ]
