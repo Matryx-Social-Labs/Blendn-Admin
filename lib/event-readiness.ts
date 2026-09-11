@@ -23,11 +23,27 @@ import { validateGeofence } from "@/lib/geofence"
  * are outside it, a run with no end time. Collapsing the two would either cry
  * wolf or hide a refusal among advice, and the register has an example of each.
  */
+/** The field an item points at: the id the form gives that field's anchor. */
+export type ReadinessField =
+  | "title"
+  | "start_time"
+  | "end_time"
+  | "location"
+  | "check_in_radius"
+  | "timezone"
+  | "category_ids"
+  | "cover_image_url"
+
+export interface ReadinessItem {
+  message: string
+  field: ReadinessField
+}
+
 export interface Readiness {
   /** Publishing is refused until every one of these is cleared. */
-  blockers: string[]
+  blockers: ReadinessItem[]
   /** Publishing works. Somebody may still regret it. */
-  warnings: string[]
+  warnings: ReadinessItem[]
 }
 
 /**
@@ -41,12 +57,14 @@ export interface Readiness {
 export const TIGHT_FENCE_METRES = 50
 
 export function eventReadiness(values: Partial<EventFormValues>): Readiness {
-  const blockers: string[] = []
-  const warnings: string[] = []
+  const blockers: ReadinessItem[] = []
+  const warnings: ReadinessItem[] = []
+  const block = (field: ReadinessField, message: string) => blockers.push({ field, message })
+  const warn = (field: ReadinessField, message: string) => warnings.push({ field, message })
 
-  if (!values.title?.trim()) blockers.push("Give the event a title.")
-  if (!values.start_time) blockers.push("Set a start time.")
-  if (!values.end_time) blockers.push("Set an end time.")
+  if (!values.title?.trim()) block("title", "Give the event a title.")
+  if (!values.start_time) block("start_time", "Set a start time.")
+  if (!values.end_time) block("end_time", "Set an end time.")
 
   /*
    * The `canPublish` rule, mirrored — deliberately, and the duplication is
@@ -79,7 +97,8 @@ export function eventReadiness(values: Partial<EventFormValues>): Readiness {
    */
   const hasFence = Boolean(values.geofence) && validateGeofence(values.geofence).ok
   if (!hasPin && !hasFence) {
-    blockers.push(
+    block(
+      "location",
       "Drop a pin on the map. GPS check-in needs somewhere to check against, and the event cannot publish without it."
     )
   }
@@ -95,11 +114,13 @@ export function eventReadiness(values: Partial<EventFormValues>): Readiness {
    */
   const radius = values.check_in_radius
   if (typeof radius === "number" && radius < 10) {
-    blockers.push(
+    block(
+      "check_in_radius",
       `The check-in area is ${radius}m across, and the smallest allowed is 10m. Widen the circle or the buffer.`
     )
   } else if (typeof radius === "number" && radius < TIGHT_FENCE_METRES) {
-    warnings.push(
+    warn(
+      "check_in_radius",
       `A ${radius}m check-in area is tighter than a typical GPS fix, so people standing inside may be turned away.`
     )
   }
@@ -118,7 +139,7 @@ export function eventReadiness(values: Partial<EventFormValues>): Readiness {
     const start = Date.parse(values.start_time)
     const end = Date.parse(values.end_time)
     if (!Number.isNaN(start) && !Number.isNaN(end) && end <= start) {
-      blockers.push("The event ends before it starts.")
+      block("end_time", "The event ends before it starts.")
     }
   }
 
@@ -133,15 +154,15 @@ export function eventReadiness(values: Partial<EventFormValues>): Readiness {
      * "ended with nobody in", misattributed to a dead listing by the very
      * screen built to catch a wrong pin.
      */
-    blockers.push("Choose the timezone the event happens in, not the one you are in.")
+    block("timezone", "Choose the timezone the event happens in, not the one you are in.")
   }
 
   if (!values.category_ids?.length) {
-    warnings.push("No category, so this will not appear under any section in the app.")
+    warn("category_ids", "No category, so this will not appear under any section in the app.")
   }
 
   if (!values.cover_image_url) {
-    warnings.push("No cover image — the card renders, but as a blank rectangle.")
+    warn("cover_image_url", "No cover image — the card renders, but as a blank rectangle.")
   }
 
   return { blockers, warnings }

@@ -503,6 +503,14 @@
       "observed": "A: 1 failing ('shows live accounts by default'). B: 1 failing ('counts people on the platform'). C: 1 failing ('has no action menu'). D: 1 failing ('keeps a search when combined with the not-onboarded filter'). Nine green each time. E: 1 failing ('updateUser scopes its write to live rows'). F: 1 failing ('a suspended live row says so'). G: 1 failing ('a profile row with every field nulled'). H: 1 failing ('lists only deleted accounts when asked' \u2014 the footer assertion). Thirteen green each time",
       "reverted": true,
       "date": "2026-09-11"
+    },
+    "event-authoring-rail.test.ts": {
+      "guards": "that the event form renders the publish rail (and the bar below @4xl/main) and no submit of its own, that the buttons set the status and no Status select exists, that Publish is disabled while anything blocks, that every readiness item links to a field id that exists, that the sidebar inset clips rather than scrolls (sticky), that the long description is optional and lives under More, that categories are chips + a Popover picker, that Featured is admin-only on the screen and in both API routes, and that cancelling is a confirmed action",
+      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset. X: rename `id=\"field-start_time\"` to `field-start` in the When section",
+      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'). X: 1 failing ('every readiness item links to its field'). Nine green each time",
+      "reverted": true,
+      "date": "2026-09-11",
+      "note": "Control X was reverted with `git checkout` on a file that also carried the section's redesign, which threw the redesign away; the registry's own warning about exactly this was re-earned and the edits re-applied."
     }
   },
   "grandfathered": [

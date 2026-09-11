@@ -12,8 +12,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { IconPlus, IconX } from "@tabler/icons-react"
 import { FormSection } from "@/components/event-form/form-section"
+import { CoverImageSection } from "@/components/event-form/cover-image-section"
 import type { EventFormValues } from "@/components/event-form/schema"
 
 /**
@@ -65,23 +68,49 @@ export function groupByParent(categories: CategoryOption[], filter: string) {
 export function BasicInfoSection({
   form,
   categories,
+  cover,
 }: {
   form: UseFormReturn<EventFormValues>
   categories: CategoryOption[]
+  cover: React.ComponentProps<typeof CoverImageSection>
 }) {
   const [filter, setFilter] = useState("")
+  const [pickerOpen, setPickerOpen] = useState(false)
   const visibleGroups = useMemo(() => groupByParent(categories, filter), [categories, filter])
+  const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   return (
-    <FormSection title="Basic Info">
+    <FormSection step="01" title="What is it" hint="the four things the card shows" id="step-what">
       <FormField
         control={form.control}
         name="title"
         render={({ field }) => (
-          <FormItem>
-            <FormLabel>Title *</FormLabel>
+          <FormItem id="field-title" className="scroll-mt-6">
+            <FormLabel>Title</FormLabel>
             <FormControl>
-              <Input placeholder="Event title" {...field} />
+              <Input placeholder="Sunset Sessions at The Humming Tree" {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      {/*
+        The card's line, first, because the card is what most people will see.
+        `description` is the body on the event page; `full_description` has no
+        reader in the app and lives under More.
+      */}
+      <FormField
+        control={form.control}
+        name="short_description"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>
+              One line for the card{" "}
+              <span className="font-normal text-muted-foreground">· optional</span>
+            </FormLabel>
+            <FormControl>
+              <Input placeholder="Live indie on the terrace, doors at six" {...field} value={field.value ?? ""} />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -93,156 +122,136 @@ export function BasicInfoSection({
         name="description"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Description *</FormLabel>
+            <FormLabel>Description</FormLabel>
             <FormControl>
-              <Textarea placeholder="Short event description (shown on cards)" rows={3} {...field} />
+              <Textarea placeholder="What happens, who it is for, what to bring." rows={4} {...field} />
             </FormControl>
             <FormMessage />
           </FormItem>
         )}
       />
 
-      <FormField
-        control={form.control}
-        name="full_description"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Full Description *</FormLabel>
-            <FormControl>
-              <Textarea placeholder="Detailed event information shown on the event page" rows={5} {...field} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <FormField
-        control={form.control}
-        name="short_description"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Short Description</FormLabel>
-            <FormControl>
-              <Input placeholder="One-line summary (optional)" {...field} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      {/* Categories */}
       <FormField
         control={form.control}
         name="category_ids"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Categories</FormLabel>
-            <div className="flex flex-col gap-3">
+        render={({ field }) => {
+          const chosen = (field.value ?? []).map((id) => byId.get(id)).filter(Boolean) as CategoryOption[]
+          const primary = form.watch("primary_category_id")
+          const remove = (id: string) => {
+            const updated = (field.value ?? []).filter((x) => x !== id)
+            if (form.getValues("primary_category_id") === id) {
+              form.setValue("primary_category_id", updated[0])
+            }
+            field.onChange(updated)
+          }
+          const add = (id: string) => {
+            if (field.value?.includes(id)) return
+            field.onChange([...(field.value ?? []), id])
+            if (!form.getValues("primary_category_id")) form.setValue("primary_category_id", id)
+          }
+          return (
+            <FormItem id="field-category_ids" className="scroll-mt-6">
+              <FormLabel>Categories</FormLabel>
               {/*
-                Grouped under the parent, and filterable.
+                Chosen ones as chips; the taxonomy behind a picker.
 
-                All 89 rendered as one alphabetised two-column wall of
-                checkboxes — roughly a thousand pixels of them, with `Sports`
-                and `IPL screening` as peers at opposite ends. The taxonomy is
-                two levels on purpose (`scripts/seed-categories.ts`: "IPL,
-                cricket, football and F1 draw different crowds on different
-                nights") and `/dashboard/categories` has grouped them that way
-                all along. This is the screen where it matters most: the
-                organiser knows what kind of night they are running before they
-                know what it is called here.
-
-                The filter is not decoration at 89 options. It matches parent
-                names too, so typing "sport" keeps the whole Sports group.
+                Every category as a wall of checkboxes — 89 of them, grouped
+                under 15 headings — was roughly a thousand pixels between the
+                description and the cover, on every visit, for a choice most
+                events make once. The first chip is the primary category, which
+                is what the card shows; click another chip to make it primary.
               */}
-              <Input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter categories…"
-                className="max-w-xs"
-                aria-label="Filter categories"
-              />
-              {categories.length === 0 && (
-                <p className="text-muted-foreground text-sm">No categories available.</p>
-              )}
-              {visibleGroups.length === 0 && categories.length > 0 && (
-                <p className="text-muted-foreground text-sm">
-                  Nothing matches &ldquo;{filter}&rdquo;.
-                </p>
-              )}
-              <div className="flex flex-col gap-4">
-                {visibleGroups.map((group) => (
-                  <fieldset key={group.key} className="flex flex-col gap-2">
-                    <legend className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-faint-foreground">
-                      {group.label}
-                    </legend>
-                    <div className="grid grid-cols-2 gap-2">
-                      {group.items.map((cat) => {
-                        const checked = field.value?.includes(cat.id) ?? false
-                        return (
-                          <label
-                            key={cat.id}
-                            className="flex cursor-pointer items-center gap-2 rounded-md border p-2 text-sm hover:bg-muted/50"
-                          >
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={(v) => {
-                                const next = field.value ? [...field.value] : []
-                                if (v) {
-                                  next.push(cat.id)
-                                  if (!form.getValues("primary_category_id")) {
-                                    form.setValue("primary_category_id", cat.id)
-                                  }
-                                } else {
-                                  const updated = next.filter((id) => id !== cat.id)
-                                  if (form.getValues("primary_category_id") === cat.id) {
-                                    form.setValue("primary_category_id", updated[0])
-                                  }
-                                  field.onChange(updated)
-                                  return
-                                }
-                                field.onChange(next)
-                              }}
-                            />
-                            {cat.name}
-                          </label>
-                        )
-                      })}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {chosen.map((cat) => {
+                  const isPrimary = cat.id === primary
+                  return (
+                    <span
+                      key={cat.id}
+                      className={
+                        "inline-flex h-7 items-center gap-1 rounded-full pl-2.5 pr-1 text-[0.75rem] font-medium " +
+                        (isPrimary ? "bg-primary/15 text-foreground ring-1 ring-primary/40" : "bg-secondary")
+                      }
+                    >
+                      <button
+                        type="button"
+                        onClick={() => form.setValue("primary_category_id", cat.id)}
+                        aria-pressed={isPrimary}
+                        aria-label={isPrimary ? `${cat.name}, primary category` : `Make ${cat.name} the primary category`}
+                        className="rounded-full"
+                      >
+                        {cat.name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(cat.id)}
+                        aria-label={`Remove ${cat.name}`}
+                        className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <IconX className="size-3" aria-hidden />
+                      </button>
+                    </span>
+                  )
+                })}
+                <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" size="sm" className="h-7 rounded-full border-dashed px-2.5 text-[0.75rem]">
+                      <IconPlus className="size-3.5" aria-hidden />
+                      Add
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-80 p-0">
+                    <div className="border-b border-border p-2">
+                      <Input
+                        value={filter}
+                        onChange={(e) => setFilter(e.target.value)}
+                        placeholder="Search categories"
+                        aria-label="Filter categories"
+                        className="h-8"
+                        autoFocus
+                      />
                     </div>
-                  </fieldset>
-                ))}
+                    <div className="max-h-72 overflow-y-auto p-2">
+                      {categories.length === 0 ? (
+                        <p className="p-2 text-sm text-muted-foreground">No categories available.</p>
+                      ) : null}
+                      {visibleGroups.length === 0 && categories.length > 0 ? (
+                        <p className="p-2 text-sm text-muted-foreground">Nothing matches &ldquo;{filter}&rdquo;.</p>
+                      ) : null}
+                      {visibleGroups.map((group) => (
+                        <fieldset key={group.key} className="mb-2">
+                          <legend className="px-2 pb-1 text-[0.7rem] font-medium uppercase tracking-[0.06em] text-faint-foreground">
+                            {group.label}
+                          </legend>
+                          {group.items.map((cat) => {
+                            const checked = field.value?.includes(cat.id) ?? false
+                            return (
+                              <label
+                                key={cat.id}
+                                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
+                              >
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(v) => (v ? add(cat.id) : remove(cat.id))}
+                                />
+                                {cat.name}
+                              </label>
+                            )
+                          })}
+                        </fieldset>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
-
-              {field.value && field.value.length > 0 && (
-                <div className="space-y-1 rounded-md border p-3">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">
-                    Select the primary category:
-                  </p>
-                  <RadioGroup
-                    value={form.watch("primary_category_id")}
-                    onValueChange={(v) => form.setValue("primary_category_id", v)}
-                    className="gap-2"
-                  >
-                    {field.value.map((catId) => {
-                      const cat = categories.find((c) => c.id === catId)
-                      if (!cat) return null
-                      return (
-                        <label
-                          key={catId}
-                          className="flex items-center gap-2 text-sm cursor-pointer"
-                        >
-                          <RadioGroupItem value={catId} />
-                          {cat.name}
-                        </label>
-                      )
-                    })}
-                  </RadioGroup>
-                </div>
-              )}
-            </div>
-            <FormMessage />
-          </FormItem>
-        )}
+              <FormMessage />
+            </FormItem>
+          )
+        }}
       />
+
+      <div id="field-cover" className="scroll-mt-6">
+        <CoverImageSection {...cover} />
+      </div>
     </FormSection>
   )
 }

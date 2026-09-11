@@ -33,7 +33,7 @@ describe("eventReadiness", () => {
      */
     const { blockers } = eventReadiness(ok({ latitude: undefined, longitude: undefined }))
     expect(blockers).toHaveLength(1)
-    expect(blockers[0]).toMatch(/pin on the map/i)
+    expect(blockers[0].message).toMatch(/pin on the map/i)
   })
 
   it("accepts a VALID fence with no pin, exactly as the server does", () => {
@@ -77,7 +77,7 @@ describe("eventReadiness", () => {
       })
     )
     expect(blockers).toHaveLength(1)
-    expect(blockers[0]).toMatch(/pin on the map/i)
+    expect(blockers[0].message).toMatch(/pin on the map/i)
   })
 
   it("a half-drawn fence does not rescue a missing pin", () => {
@@ -101,8 +101,8 @@ describe("eventReadiness", () => {
      */
     const { blockers } = eventReadiness(ok({ check_in_radius: 5 }))
     expect(blockers).toHaveLength(1)
-    expect(blockers[0]).toMatch(/5m/)
-    expect(blockers[0]).toMatch(/smallest allowed is 10m/)
+    expect(blockers[0].message).toMatch(/5m/)
+    expect(blockers[0].message).toMatch(/smallest allowed is 10m/)
   })
 
   it("warns about a fence tighter than a GPS fix, without blocking it", () => {
@@ -111,7 +111,7 @@ describe("eventReadiness", () => {
     // inside get turned away.
     const { blockers, warnings } = eventReadiness(ok({ check_in_radius: 40 }))
     expect(blockers).toEqual([])
-    expect(warnings.some((w) => /tighter than a typical GPS fix/.test(w))).toBe(true)
+    expect(warnings.some((w) => /tighter than a typical GPS fix/.test(w.message))).toBe(true)
     expect(TIGHT_FENCE_METRES).toBeGreaterThan(10) // the zod floor is not a usable floor
   })
 
@@ -119,7 +119,7 @@ describe("eventReadiness", () => {
     const { blockers } = eventReadiness(
       ok({ start_time: "2026-10-01T22:00", end_time: "2026-10-01T18:00" })
     )
-    expect(blockers).toContain("The event ends before it starts.")
+    expect(blockers.map((b) => b.message)).toContain("The event ends before it starts.")
   })
 
   it("blocks on a missing timezone, and says whose timezone it means", () => {
@@ -132,7 +132,7 @@ describe("eventReadiness", () => {
      */
     const { blockers } = eventReadiness(ok({ timezone: undefined }))
     expect(blockers).toHaveLength(1)
-    expect(blockers[0]).toMatch(/not the one you are in/)
+    expect(blockers[0].message).toMatch(/not the one you are in/)
   })
 
   it("keeps advice out of the blockers", () => {

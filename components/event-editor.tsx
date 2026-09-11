@@ -10,7 +10,6 @@ import { format } from "date-fns"
 import { toZonedTime, fromZonedTime } from "date-fns-tz"
 import type { AmenityOption } from "@/components/event-form/amenities-section"
 import { EventForm, type EventFormValues } from "@/components/event-form"
-import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
 
@@ -63,6 +62,8 @@ interface EventEditorProps {
   categories: CategoryOption[]
   amenities?: AmenityOption[]
   initialEvent?: EventEditorData
+  /** app_admin only: the Featured switch. The API refuses it from anyone else. */
+  canFeature?: boolean
 }
 
 const formatDateTimeInput = (value?: string, timezone = "Asia/Kolkata") => {
@@ -107,7 +108,7 @@ const parseToFaqArray = (value: unknown): Array<{ question: string; answer: stri
   return []
 }
 
-export function EventEditor({ categories, amenities = [], initialEvent }: EventEditorProps) {
+export function EventEditor({ categories, amenities = [], initialEvent, canFeature = false }: EventEditorProps) {
   const router = useRouter()
   const [isSaving, setIsSaving] = useState(false)
   const isEditing = Boolean(initialEvent?.id)
@@ -207,8 +208,8 @@ export function EventEditor({ categories, amenities = [], initialEvent }: EventE
         // Cover image: treat empty string as undefined
         cover_image_url: data.cover_image_url || undefined,
         external_link: data.external_link || undefined,
-        // Status: always "draft" on create (server default), only sent on edit
-        status: isEditing ? data.status : "draft",
+        // The rail's buttons set this: Save draft → draft, Publish → published.
+        status: data.status,
       }
 
       const response = await fetch(
@@ -251,16 +252,17 @@ export function EventEditor({ categories, amenities = [], initialEvent }: EventE
      * `app/<route>/page.tsx`, and this `h1` lives one hop away in a component.
      * The guard follows local imports now.
      */
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div className="flex items-center justify-end">
-        <Button variant="outline" asChild className="rounded-full">
-          <Link href="/dashboard/events">Back to events</Link>
-        </Button>
-      </div>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+      <Link
+        href="/dashboard/events"
+        className="w-fit text-[0.8125rem] text-muted-foreground hover:text-foreground"
+      >
+        ← Back to events
+      </Link>
       <EventForm
         onSubmit={handleSubmit}
         defaultValues={defaultValues}
-        submitLabel={isEditing ? "Save Changes" : "Create Event"}
+        canFeature={canFeature}
         isSubmitting={isSaving}
         isEditing={isEditing}
         categories={categories}

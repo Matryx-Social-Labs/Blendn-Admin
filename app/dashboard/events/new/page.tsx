@@ -55,5 +55,11 @@ export default async function NewEventPage() {
     orderBy: { sort_order: "asc" },
   })
 
-  return <EventEditor categories={categories} amenities={amenities} />
+  return (
+    <EventEditor
+      categories={categories}
+      amenities={amenities}
+      canFeature={session.user.role === "app_admin"}
+    />
+  )
 }

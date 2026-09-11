@@ -66,7 +66,14 @@ export default async function DashboardLayout({
       }
     >
       <AppSidebar variant="inset" badges={badges} />
-      <SidebarInset className="overflow-hidden border border-border bg-background">
+      {/*
+        `overflow-x-clip`, not `overflow-hidden`: hidden makes the inset a
+        scroll container, and a sticky element inside one sticks to it rather
+        than to the viewport -- the event form's publish rail scrolled away
+        with the page. Clip still cuts anything wider than the inset and still
+        keeps the rounded corners clean; it just is not a scroller.
+      */}
+      <SidebarInset className="overflow-x-clip border border-border bg-background">
         <SiteHeader />
         {/*
           @container/main is what every dashboard grid keys off. The sidebar is

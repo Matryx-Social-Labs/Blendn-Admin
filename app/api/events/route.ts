@@ -276,7 +276,9 @@ export async function POST(req: Request) {
         ...(longitude !== undefined && { longitude }),
         ...(cover_image_url !== undefined && { cover_image_url }),
         ...(external_link !== undefined && { external_link }),
-        ...(is_featured != null && { is_featured }),
+        // The featured rail is the platform's, not the organiser's: any
+        // organiser could put their own event on it. Ignored unless app_admin.
+        ...(is_featured != null && session.user.role === "app_admin" && { is_featured }),
         ...(is_recurring != null && { is_recurring }),
         ...(location.values.check_in_radius != null && {
           check_in_radius: location.values.check_in_radius,

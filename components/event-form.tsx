@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useFieldArray, useForm, useWatch } from "react-hook-form"
-import { Button } from "@/components/ui/button"
+import { format } from "date-fns"
 import { Form } from "@/components/ui/form"
 import { toast } from "sonner"
 import type { LocationData } from "@/components/location-picker"
@@ -16,9 +16,9 @@ import { LocationSection } from "@/components/event-form/location-section"
 import { ScheduleSection } from "@/components/event-form/schedule-section"
 import { AmenitiesSection, type AmenityOption } from "@/components/event-form/amenities-section"
 import { CapacitySettingsSection } from "@/components/event-form/capacity-settings-section"
-import { CoverImageSection } from "@/components/event-form/cover-image-section"
 import { MediaSection } from "@/components/event-form/media-section"
-import { ReadinessStrip } from "@/components/event-form/readiness-strip"
+import { PublishBar, PublishRail } from "@/components/event-form/publish-rail"
+import { FormSection } from "@/components/event-form/form-section"
 import { eventReadiness } from "@/lib/event-readiness"
 import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
@@ -32,9 +32,10 @@ export type { EventFormValues } from "@/components/event-form/schema"
 interface EventFormProps {
   onSubmit: (data: EventFormValues) => void | Promise<void>
   defaultValues?: Partial<EventFormValues>
-  submitLabel?: string
   isSubmitting?: boolean
   isEditing?: boolean
+  /** app_admin only: the Featured switch, and the API's acceptance of it. */
+  canFeature?: boolean
   categories?: CategoryOption[]
   /** The seeded amenity vocabulary. Empty is a valid state: no picker drawn. */
   amenities?: AmenityOption[]
@@ -57,9 +58,9 @@ const READINESS_FIELDS = [
 export function EventForm({
   onSubmit,
   defaultValues,
-  submitLabel = "Create Event",
   isSubmitting = false,
   isEditing = false,
+  canFeature = false,
   categories = [],
   amenities = [],
 }: EventFormProps) {
@@ -196,57 +197,108 @@ export function EventForm({
     [watched]
   )
 
+  // ── The rail's inputs ───────────────────────────────────────────────────────
+
+  const [cardTitle, cardLine, cardCover, cardCategoryId, cardStart, storedStatus] = useWatch({
+    control: form.control,
+    name: ["title", "short_description", "cover_image_url", "primary_category_id", "start_time", "status"],
+  })
+  const card = {
+    title: cardTitle ?? "",
+    line: cardLine ?? "",
+    coverUrl: cardCover ?? "",
+    category: categories.find((c) => c.id === cardCategoryId)?.name ?? "",
+    when: cardStart ? safeFormat(cardStart) : "",
+  }
+
+  /*
+   * The buttons decide the status; the form carries no Status select.
+   * `status` stays a schema field, so the API payload is unchanged.
+   */
+  const submitAs = (status: EventFormValues["status"]) => {
+    form.setValue("status", status, { shouldDirty: true })
+    void form.handleSubmit(onSubmit)()
+  }
+  const cancelEvent = () => {
+    if (
+      window.confirm(
+        "Cancel this event? Everyone going is told, check-ins close, and the room archives. This cannot be undone."
+      )
+    ) {
+      submitAs("cancelled")
+    }
+  }
+  const railProps = {
+    readiness,
+    isEditing,
+    isSubmitting,
+    status: (storedStatus ?? "draft") as EventFormValues["status"],
+    onSaveDraft: () => submitAs("draft"),
+    onPublish: () => submitAs("published"),
+    onSaveChanges: () => submitAs(storedStatus ?? "published"),
+    onCancelEvent: cancelEvent,
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        {/*
-          First, because it answers the first question: can this be published?
+      <form
+        onSubmit={(e) => e.preventDefault()}
+        className="grid gap-7 @4xl/main:grid-cols-[minmax(0,1fr)_300px]"
+      >
+        <div className="min-w-0">
+          <BasicInfoSection
+            form={form}
+            categories={categories}
+            cover={{
+              form,
+              isUploadingCover,
+              setIsUploadingCover,
+              coverUploadProgress,
+              setCoverUploadProgress,
+            }}
+          />
 
-          `canPublish()` refuses an event with no coordinates and no fence, and
-          the organiser used to meet that refusal as a toast after filling in
-          5,683px of form — having already scrolled past the map that fixes it.
-          The form knew all along.
-        */}
-        <ReadinessStrip readiness={readiness} />
+          <ScheduleSection form={form} />
 
-        <BasicInfoSection form={form} categories={categories} />
+          <LocationSection form={form} onLocationChange={handleLocationChange} />
 
-        <LocationSection form={form} onLocationChange={handleLocationChange} />
+          <CapacitySettingsSection form={form} canFeature={canFeature} />
 
-        <ScheduleSection form={form} />
+          <FormSection
+            step="05"
+            title="More"
+            hint="gallery · what's included · house rules · cancellation · FAQ · accessibility · long description"
+            collapsible
+            defaultOpen={false}
+          >
+            <MediaSection
+              form={form}
+              mediaFieldArray={mediaFieldArray}
+              mediaUploadProgress={mediaUploadProgress}
+              onUpload={handleMediaUpload}
+            />
+            <AmenitiesSection form={form} amenities={amenities} />
+            <AdvancedSection
+              form={form}
+              faqFieldArray={faqFieldArray}
+              additionalInfoFieldArray={additionalInfoFieldArray}
+              accessibilityInfoFieldArray={accessibilityInfoFieldArray}
+            />
+          </FormSection>
 
-        <CapacitySettingsSection form={form} isEditing={isEditing} />
+          <PublishBar {...railProps} />
+        </div>
 
-        <AmenitiesSection form={form} amenities={amenities} />
-
-        <CoverImageSection
-          form={form}
-          isUploadingCover={isUploadingCover}
-          setIsUploadingCover={setIsUploadingCover}
-          coverUploadProgress={coverUploadProgress}
-          setCoverUploadProgress={setCoverUploadProgress}
-        />
-
-        <MediaSection
-          form={form}
-          mediaFieldArray={mediaFieldArray}
-          mediaUploadProgress={mediaUploadProgress}
-          onUpload={handleMediaUpload}
-        />
-
-        <AdvancedSection
-          form={form}
-          faqFieldArray={faqFieldArray}
-          additionalInfoFieldArray={additionalInfoFieldArray}
-          accessibilityInfoFieldArray={accessibilityInfoFieldArray}
-        />
-
-        <Button type="submit" disabled={isSubmitting} className="w-full">
-          {isSubmitting ? "Saving…" : submitLabel}
-        </Button>
+        <PublishRail {...railProps} card={card} />
       </form>
     </Form>
   )
+}
+
+/** A `datetime-local` string as the card's date line; the raw string if it does not parse. */
+function safeFormat(value: string) {
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? value : format(d, "EEE d MMM · HH:mm")
 }

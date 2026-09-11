@@ -109,6 +109,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
     <EventEditor
       categories={categories}
       amenities={amenities}
+      canFeature={session.user.role === "app_admin"}
       initialEvent={{
         id: event.id,
         title: event.title,

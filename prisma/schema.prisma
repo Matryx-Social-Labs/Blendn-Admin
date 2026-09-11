@@ -417,7 +417,7 @@ model events {
   /// is dropped after. Do not add a writer.
   current_capacity  Int                @default(0)
   created_at        DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at        DateTime?          @db.Timestamptz(6)
   organizer_id      String
   /// When the platform added this event from a public listing, rather than its
