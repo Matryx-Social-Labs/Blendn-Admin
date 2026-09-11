@@ -19,9 +19,14 @@ import { db } from "./db"
  *
  * The first version ran a `count` and a `findFirst(orderBy created_at)` per
  * table — sixteen queries for eight questions, all drawn from the same
- * connection pool on every admin page load. `aggregate` answers both at once,
- * and six of the eight tables already carry a `(status, created_at)` index that
- * covers it.
+ * connection pool on every admin page load. `aggregate` answers both at once.
+ *
+ * Four of the eight tables carry a `(status, created_at)` index that covers it
+ * — the three safety queues and the creative queue. The four claim tables have
+ * a bare `(status)` index, which is enough: they are tens of rows, a queue's
+ * pending set is a handful, and Postgres seq-scans them regardless of what is
+ * declared. This comment said "six" for a day; count the schema, not the
+ * intention.
  */
 async function pendingIn(
   model: { aggregate: (args: unknown) => Promise<{ _count: number; _min: { created_at: Date | null } }> },
