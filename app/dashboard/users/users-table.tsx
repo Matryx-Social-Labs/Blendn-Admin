@@ -182,6 +182,28 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "User",
     cell: ({ row }) => {
       const user = row.original
+      /*
+       * An erased account keeps its row (see actions.ts) with name null and a
+       * `deleted-<id>@…invalid` address. Rendered as any other row it read
+       * "Unnamed User · deleted-cmtw…@deleted.blendn.invalid", which looks
+       * like a broken signup. The name cell is the receipt instead: when it
+       * was done, and the id an erasure request can be matched against.
+       */
+      if (user.deletedAt) {
+        return (
+          <div className="flex items-center gap-3">
+            <Avatar className="h-9 w-9 border border-dashed border-border" aria-hidden="true">
+              <AvatarFallback className="bg-transparent text-faint-foreground">—</AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col">
+              <span className="font-medium text-muted-foreground">
+                Deleted {format(new Date(user.deletedAt), "d MMM yyyy")}
+              </span>
+              <span className="text-faint-foreground font-mono text-[0.7rem]">{user.id}</span>
+            </div>
+          </div>
+        )
+      }
       const initials = user.name
         ? user.name
             .split(" ")
@@ -210,6 +232,13 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Status",
     cell: ({ row }) => {
       const user = row.original
+      if (user.deletedAt) {
+        return (
+          <Badge variant="outline" className="text-xs">
+            Deleted
+          </Badge>
+        )
+      }
       const isVerified = !!user.emailVerified
       const isOnboarded = user.profile?.onboarded
 
@@ -221,6 +250,11 @@ const columns: ColumnDef<UserWithProfile>[] = [
           {isOnboarded && (
             <Badge variant="outline" className="text-xs">
               Onboarded
+            </Badge>
+          )}
+          {user.suspended_at && (
+            <Badge variant="outline" className="border-destructive/60 text-destructive text-xs">
+              Suspended
             </Badge>
           )}
         </div>
@@ -249,7 +283,10 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Profile",
     cell: ({ row }) => {
       const profile = row.original.profile
-      if (!profile) return <span className="text-muted-foreground">-</span>
+      // An erased profile keeps its row with every field nulled; same dash.
+      if (!profile || !(profile.phone || profile.location || profile.age)) {
+        return <span className="text-muted-foreground">-</span>
+      }
 
       return (
         <div className="flex flex-col gap-0.5 text-sm">
@@ -338,7 +375,8 @@ const columns: ColumnDef<UserWithProfile>[] = [
   },
   {
     id: "actions",
-    cell: ({ row, table }) => <ActionsCell row={row} table={table} />,
+    cell: ({ row, table }) =>
+      row.original.deletedAt ? null : <ActionsCell row={row} table={table} />,
   },
 ]
 
@@ -531,6 +569,19 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
     return () => clearTimeout(t)
   }, [searchText, urlSearch, params, router])
 
+  /*
+   * `?status=` has been read by page.tsx since the screen was built and
+   * nothing set it — the only way to reach a filtered view was to type the
+   * URL. Same URL-state shape as the search box, no debounce needed.
+   */
+  const urlStatus = params.get("status") ?? "all"
+  const setStatus = (value: string) => {
+    const next = new URLSearchParams(params.toString())
+    if (value === "all") next.delete("status")
+    else next.set("status", value)
+    router.replace(`/dashboard/users?${next.toString()}`)
+  }
+
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>({})
@@ -584,6 +635,20 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
             onChange={(event) => setSearchText(event.target.value)}
             className="max-w-sm"
           />
+          <Select value={urlStatus} onValueChange={setStatus}>
+            <SelectTrigger className="w-40" aria-label="Filter by status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="onboarded">Onboarded</SelectItem>
+              <SelectItem value="not-onboarded">Not onboarded</SelectItem>
+              <SelectItem value="verified">Verified</SelectItem>
+              <SelectItem value="unverified">Unverified</SelectItem>
+              <SelectItem value="suspended">Suspended</SelectItem>
+              <SelectItem value="deleted">Deleted</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center gap-2">
           <DropdownMenu>

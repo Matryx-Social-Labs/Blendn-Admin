@@ -67,6 +67,11 @@ export default async function UsersPage({
             <span className="tabular-nums">{stats.suspended.toLocaleString()}</span> suspended
           </span>
         ) : null}
+        {stats.deleted > 0 ? (
+          <span className="text-faint-foreground">
+            <span className="tabular-nums">{stats.deleted.toLocaleString()}</span> deleted
+          </span>
+        ) : null}
       </div>
 
       <UsersTable

@@ -16,6 +16,9 @@ export interface UserWithProfile {
   role: user_role
   createdAt: Date
   updatedAt: Date
+  /** Set by the mobile account route's scrub-and-keep erasure; never unset. */
+  deletedAt: Date | null
+  suspended_at: Date | null
   profile: {
     id: string
     phone: string | null
@@ -62,32 +65,54 @@ export async function getUsers(
       throw new Error("Forbidden")
     }
 
-    const where: Record<string, unknown> = {}
+    /*
+     * ANDed clauses, because two of them are ORs. `search` and `not-onboarded`
+     * each used to assign `where.OR`, so the second silently replaced the
+     * first and a search combined with that filter searched nothing.
+     */
+    const clauses: Record<string, unknown>[] = []
 
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { email: { contains: search, mode: "insensitive" } },
-        {
-          profile: {
-            phone: { contains: search, mode: "insensitive" },
+      clauses.push({
+        OR: [
+          { name: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+          {
+            profile: {
+              phone: { contains: search, mode: "insensitive" },
+            },
           },
-        },
-      ]
+        ],
+      })
+    }
+
+    /*
+     * Deleted accounts are out of the list unless asked for. Erasure keeps the
+     * row (see the note above `updateUser`), so without this an admin looking
+     * for "who is on the platform" sees a person who is not, and could open the
+     * edit dialog on them.
+     */
+    if (status === "deleted") {
+      clauses.push({ deletedAt: { not: null } })
+    } else {
+      clauses.push({ deletedAt: null })
     }
 
     if (status === "onboarded") {
-      where.profile = { onboarded: true }
+      clauses.push({ profile: { onboarded: true } })
     } else if (status === "not-onboarded") {
-      where.OR = [
-        { profile: { is: null } },
-        { profile: { onboarded: false } },
-      ]
+      clauses.push({
+        OR: [{ profile: { is: null } }, { profile: { onboarded: false } }],
+      })
     } else if (status === "verified") {
-      where.emailVerified = { not: null }
+      clauses.push({ emailVerified: { not: null } })
     } else if (status === "unverified") {
-      where.emailVerified = null
+      clauses.push({ emailVerified: null })
+    } else if (status === "suspended") {
+      clauses.push({ suspended_at: { not: null } })
     }
+
+    const where = { AND: clauses }
 
     const [users, total] = await Promise.all([
       db.user.findMany({
@@ -283,14 +308,17 @@ export async function getUserStats() {
       throw new Error("Forbidden")
     }
 
-    const [total, onboarded, verified, suspended] = await Promise.all([
-      db.user.count(),
-      db.profiles.count({ where: { onboarded: true } }),
-      db.user.count({ where: { emailVerified: { not: null } } }),
-      db.user.count({ where: { suspended_at: { not: null } } }),
+    // "Accounts" means people on the platform; an erased row is not one.
+    const live = { deletedAt: null }
+    const [total, onboarded, verified, suspended, deleted] = await Promise.all([
+      db.user.count({ where: live }),
+      db.profiles.count({ where: { onboarded: true, user: live } }),
+      db.user.count({ where: { ...live, emailVerified: { not: null } } }),
+      db.user.count({ where: { ...live, suspended_at: { not: null } } }),
+      db.user.count({ where: { deletedAt: { not: null } } }),
     ])
 
-    return { total, onboarded, verified, suspended }
+    return { total, onboarded, verified, suspended, deleted }
   } catch (error) {
     logger.error("Error fetching user stats", {
       error: error instanceof Error ? error.message : String(error),
