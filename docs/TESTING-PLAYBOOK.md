@@ -1,7 +1,7 @@
 # The testing playbook
 
 **Read this before testing anything.** Every page, every path, every fix runs the
-same chain. It is not a menu — the point is that it is the same every time, so a
+same chain (the design half of it is `DESIGN-CHAIN.md`). It is not a menu — the point is that it is the same every time, so a
 check is never skipped because somebody was in a hurry.
 
 The expensive failures on this project have all been one shape: **a check that
@@ -24,24 +24,15 @@ a local `dev`.
 ## 1 · The chain, for every page or path
 
 **This is a procedure, not a description.** Each step produces a named
-**artefact**. No artefact means the step did not happen — that is the whole
-mechanism, because "I considered the direction" is not checkable and "here is
-the direction I wrote" is.
+**artefact**. No artefact means the step did not happen.
 
-### Two gates
+The design half — operator questions, direction, mockup, and the gate that
+stops an implementation file being edited before those three exist — is
+`docs/DESIGN-CHAIN.md`, run as its own programme over
+`docs/DASHBOARD-REDESIGN-CHECKLIST.md`. This playbook starts once the screen
+exists.
 
-**Gate A — before writing code.**
-
-> **You may not edit an implementation file until steps 1, 2 and 3 have each
-> produced their artefact for the screen you are about to change.**
-
-Implementation file = anything under `app/`, `components/` or `lib/` that the
-screen renders through. Tests, docs and fixtures are not implementation files.
-
-Before the first `Edit`, state the three artefacts. In full, in the response, so
-they can be read. Not "ran the chain" — the artefacts themselves.
-
-**Gate B — before calling it done.**
+### The gate
 
 > **A flow is not tested until it has been driven end to end on the surface a
 > real person uses, and the row it should have written has been read back.**
@@ -59,68 +50,16 @@ counts**, and a ticket does not close until it produces its artefact — see §8
 
 | # | Step | How | **Artefact — what must exist before the next step** |
 |---|---|---|---|
-| 1 | Operator questions | invoke `ecc dashboard-builder` | The **numbered list of questions in priority order**, plus the **cut list**: which existing panels are going and why. |
-| 2 | Direction | invoke `ecc frontend-design-direction` | Five named things: **purpose · audience · tone · the one memorable detail · constraints**. Written out, not referenced. |
-| 3 | Build it | invoke `/design-html` | A **file on disk** under `~/.gstack/projects/$SLUG/designs/<screen>-<date>/`, and a **screenshot of it read back**. |
 | 4 | Drive the real screen | `browse` at 375 / 768 / 1440 | Screenshots, read. |
 | 5 | Measure it | §3's snippet | Numbers: contrast, overflow, `h1` count, DOM size. |
 | 6 | Gates | §2 | All six green. |
 | 7 | Specialists | §4 | Launched in the background, in parallel with the work. Findings triaged: fix what this change caused, file the rest. |
 | 8 | **Drive the journey** | §8 | Maestro flow + run for the client, a driven journey for the dashboard, **and the database row read back**. |
 
-### Step 2 when the direction is already set
+Steps 1–3 keep their numbers in `DESIGN-CHAIN.md`, so a reference to "step 2"
+means the same thing in both documents.
 
-**This is where it goes wrong, so it is written out rather than left to
-judgement.** The dashboard's direction *is* settled — dense, quiet, scannable,
-hierarchy from type, no card-in-card, one `HeroMetric`, one gradient element.
-
-That is not permission to skip step 2. **Restate the five, for this screen, in
-one line each, and name the one memorable detail — which is per-screen and
-cannot be inherited.** On the overview it was the unreached funnel stages drawn
-full width in outline. On the applications queue it was the evidence ranking. If
-you cannot name a memorable detail for the screen you are on, you have not done
-step 2, and the screen will come out generic.
-
-Invoke the skill anyway. It costs one call and it is what stops "the direction is
-locked" becoming "I skipped the direction".
-
-### Step 3 — the rule, with no judgement in it
-
-The earlier version of this file said `/design-html` was "only for a NEW
-composition" and told you to "say so rather than skipping it silently". **That
-escape clause was used to skip it every single time**, because any change can be
-argued not-new-enough. It is replaced with a test that has no opinion in it:
-
-**Run `/design-html` if the change does ANY of:**
-
-- adds, removes or reorders an element on the screen
-- changes a layout, a grid, or the order of anything
-- changes what an element *means* — a badge's tone, a number's label, an
-  action's prominence
-- changes more than one file the screen renders through
-
-**Skip it ONLY for:** a copy edit with no layout change, a token value, or a
-pure bug fix that alters nothing a person sees.
-
-If you are deciding which side of the line you are on, you are on the run-it
-side. The mockup is cheap; going back is not.
-
-### Say it out loud before implementing
-
-Before the first edit, in the response:
-
-```
-Screen: /dashboard/<x>
-1 · Questions:  1. …  2. …  3. …    Cutting: … because …
-2 · Direction:  purpose … · audience … · tone … · memorable detail … · constraints …
-3 · Mockup:     <path>  (or: skipped — copy-only change, no layout effect)
-```
-
-Three lines. If any is missing, go back and get it rather than proceeding —
-noticing at step 6 that step 2 never happened is noticing after the code is
-written, which is the same as not noticing.
-
-**And before saying it is done:**
+### Say it out loud before saying it is done
 
 ```
 8 · Driven:     <maestro flow + result, iOS>  |  <same flow, Android>  |  <dashboard journey driven>
@@ -789,9 +728,9 @@ own domain) were rendering in the same filled badge. Steps 2 and 3 were skipped
 on that screen, so whatever they would have found is unknown — which is the
 point. A skipped check produces no evidence that it was safe to skip.
 
-§1 is now written as a procedure with an artefact per step and a gate before the
-first edit, because the previous version was a description and descriptions are
-negotiable.
+The chain (now `DESIGN-CHAIN.md`) is written as a procedure with an artefact per
+step and a gate before the first edit, because the previous version was a
+description and descriptions are negotiable.
 
 ---
 

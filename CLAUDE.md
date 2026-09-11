@@ -11,22 +11,18 @@ Next.js 15 (App Router) web admin dashboard + REST API backend for **Blendn**, a
 
 Both surfaces share one PostgreSQL database via Prisma.
 
-## Testing and review — read this first
+## Design and testing — read this first
 
-`docs/TESTING-PLAYBOOK.md` is the chain every page, path and fix goes through:
-the design chain (`ecc dashboard-builder` → `ecc frontend-design-direction` →
-`/design-html`), driving the screen in a browser and measuring it, the six gates,
-the specialist fan-out (coverage EVERY time, plus schema, latency, API, security,
-comment-rot, a11y by trigger), how to brief a specialist so it returns findings
-rather than advice, and the local loop.
+Two documents, two gates.
 
-It is not a menu. The expensive failures on this project have all been one shape
-— a check that was available and was not run — and the playbook's last section
-lists what each check has already caught.
-
-**The chain in §1 is gated.** Do not edit a file under `app/`, `components/` or
-`lib/` for a screen until steps 1, 2 and 3 have produced their artefacts, and
-state those artefacts in the response before the first edit:
+`docs/DESIGN-CHAIN.md` is what every dashboard screen goes through before its
+implementation files are touched: operator questions and cuts
+(`ecc dashboard-builder`), a direction with a per-screen memorable detail
+(`ecc frontend-design-direction`), and a mockup on disk (`/design-html`).
+`docs/DASHBOARD-REDESIGN-CHECKLIST.md` lists every screen and which have been
+through it. **The chain is gated.** Do not edit a file under `app/`,
+`components/` or `lib/` for a screen until steps 1, 2 and 3 have produced their
+artefacts, and state those artefacts in the response before the first edit:
 
 ```
 Screen: /dashboard/<x>
@@ -35,9 +31,13 @@ Screen: /dashboard/<x>
 3 · Mockup:     <path>  (or: skipped — copy-only change, no layout effect)
 ```
 
-An earlier version of §3 said `/design-html` was "only for a NEW composition".
-That clause was used to skip it every time, because any change can be argued
-not-new-enough. It is now a test with no judgement in it — see §1.
+`docs/TESTING-PLAYBOOK.md` starts once the screen exists: driving it in a
+browser and measuring it, the six gates, the specialist fan-out (coverage EVERY
+time, plus schema, latency, API, security, comment-rot, a11y by trigger), how to
+brief a specialist so it returns findings rather than advice, and the local
+loop. It is not a menu. The expensive failures on this project have all been one
+shape — a check that was available and was not run — and the playbook's last
+section lists what each check has already caught.
 
 **And a second gate, before calling anything done.** A flow is not tested until
 it has been driven end to end on the surface a real person uses, and the row it
