@@ -105,9 +105,15 @@ export function ModerationTable({
       label: "Category",
       sortType: "string",
       render: (row) => (
-        <Badge variant={(row.confidence ?? 0) >= 0.9 ? "destructive" : "secondary"}>
+        <span
+          className={
+            (row.confidence ?? 0) >= 0.9
+              ? "text-[0.8125rem] font-bold text-destructive"
+              : "text-[0.8125rem] text-muted-foreground"
+          }
+        >
           {row.category}
-        </Badge>
+        </span>
       ),
     },
     {
