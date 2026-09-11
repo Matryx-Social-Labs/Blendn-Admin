@@ -501,6 +501,9 @@ model events {
 
   @@index([latitude, longitude])
   @@index([status, start_time])
+  // The rooms list asks "published and ended less than 24h ago"; start_time
+  // matches every event that has ever started, end_time is the bound.
+  @@index([status, end_time])
   @@index([venue_id])
   @@index([organizer_org_id])
   @@index([organizer_id])
@@ -2416,6 +2419,9 @@ model presence_sessions {
   @@index([occurrence_id, departed_at])
   /// The arrival curve and the entry alert.
   @@index([event_id, arrived_at])
+  // "who is inside now" — getOccupancies folds open sessions per event
+  // (event_id = ANY, departed_at IS NULL). Neither index above leads on that.
+  @@index([event_id, departed_at])
   /// One person's history, for `GET /me/attendance` and the second-event rate.
   @@index([user_id, arrived_at])
   ///
@@ -2909,6 +2915,10 @@ model moderation_flags {
 
   @@index([status, created_at])
   @@index([chat_group_id])
+  // The room's pulse counts pending flags per chat group every 5 seconds,
+  // and the chatrooms list groups them per room; with (chat_group_id) alone
+  // every flag the room ever had is fetched and status is a filter.
+  @@index([chat_group_id, status])
   @@index([user_id])
   @@index([message_id])
 }
