@@ -414,12 +414,14 @@ async function mirrorToTigris(
  * that only internal testers see; production media is what an organiser
  * uploads.
  *
- * **1600, not 2048.** The host answers 2048×2048 with HTTP 500 (checked
- * 2026-09-11: 500 at 2048, 302-to-image at 1600 and below), so 12 of the 30
- * published staging events rendered a blank card and a red "Image onError"
- * toast on every device that opened the Pulse. A placeholder that does not
- * load is worse than none — the card's fallback is designed, the error is
- * not.
+ * **1600, not 2048, and every subject probed.** The host answers HTTP 500 —
+ * not 404 — for two different things: a size it will not render (2048×2048,
+ * checked 2026-09-11) and a tag set no photograph carries. `nightclub,neon,
+ * lights` and `concert,classical,music` were the second kind; `rooftop,party`
+ * fails with two tags and works with three, so there is no rule beyond
+ * "check". Every subject in the table above answered 302-to-image on
+ * 2026-09-11. A placeholder that does not load is worse than none — the
+ * card's fallback is designed, the red "Image onError" toast is not.
  */
 export const SEED_COVER_SIZE = 1600
 const cover = (seed: string) =>
@@ -433,9 +435,9 @@ const lockFor = (seed: string) =>
 const MEDIA_SUBJECT: Record<string, string> = {
   rooftop: "rooftop,party,sunset",
   stadium: "stadium,football,crowd",
-  neon: "nightclub,neon,lights",
+  neon: "nightclub,neon",
   club: "dj,nightclub,dancing",
-  recital: "concert,classical,music",
+  recital: "concert,classical",
   coffee: "cafe,coffee,people",
   market: "market,street,stalls",
   supper: "dinner,restaurant,table",
