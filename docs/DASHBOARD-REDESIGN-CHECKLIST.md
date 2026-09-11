@@ -42,7 +42,7 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/events/curate` | ✅ #276-era W5 + design review 2026-08-24 (6→9/10) | ✅ browser, 2026-08-24 | form → `components/ui/form`, timezone bug |
 | `/dashboard/events/new` | ✅ 081bd48 (mockup `event-authoring-20260911`) | ✅ 2026-09-11, published + edited + cancelled, rows read back | four sections + sticky publish rail; Status select, required long description, category wall, organiser-settable Featured all cut |
 | `/dashboard/events/[id]/edit` | ✅ 081bd48 | ✅ 2026-09-11 | same form; rail says Published, Save changes, Cancel event… |
-| `/dashboard/events/[id]` (overview, live, attendees tabs) | ◐ #156 attendance panel + occupancy hero, #340 publish line | ✅ E8/E9 | tabs never designed as one screen |
+| `/dashboard/events/[id]` (overview, live, attendees tabs) | ✅ 8d6f547 (mockup `event-page-20260911`) | ✅ E8/E9; 2026-09-11 draft/upcoming/over looked at as organiser | lifecycle strip replaces the status badge; hero is Going (maybe · saved), Came when nobody RSVP'd; sections with rules, not cards |
 | `/dashboard/events/[id]/messaging` | — | ✅ E10 | organiser room view |
 | `/dashboard/events/[id]/feedback` | — | ✅ E12 | digest + disclosure floor |
 | `/dashboard/chatrooms` | — | ✅ E10 | E17 fixed the 403-as-empty state |
@@ -67,11 +67,11 @@ gates, the specialists, and a drive, before the next one starts.
 
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
-| `/dashboard` (organiser overview) | — | ✅ E4 | admin overview was redesigned; this branch of `getDashboardOverview` was not |
+| `/dashboard` (organiser overview) | ✅ ea82077 (mockup `overview-organizer-20260911`) | ✅ 2026-09-11 as Arjun Rao | pacing vs last event, days-to-go, ratings only when rated |
 | `/dashboard/events` | ✅ shared with admin | ✅ | organiser scope = org membership |
 | `/dashboard/events/new` | ✅ 081bd48 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/edit` | ✅ 081bd48 | ✅ 2026-09-11 | |
-| `/dashboard/events/[id]` + tabs | ◐ | ✅ E4 | |
+| `/dashboard/events/[id]` + tabs | ✅ 8d6f547 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/messaging` | — | ✅ | |
 | `/dashboard/events/[id]/feedback` | — | ✅ | |
 | `/dashboard/attendees` | — (W18 fixed the roster's PII) | ✅ E4 | pseudonymous roster |
@@ -83,7 +83,7 @@ gates, the specialists, and a drive, before the next one starts.
 
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
-| `/dashboard` (venue-owner overview) | — | ✅ E5 | H2 scope fix; not designed |
+| `/dashboard` (venue-owner overview) | ✅ ea82077 (mockup `overview-venue-20260911`) | ✅ 2026-09-11 as Fatima Sheikh | `visibleEventsWhere` scope (H2 fixed here); peak cell outlined; notes as text |
 | `/dashboard/venues` (my venues), `/venues/[id]` | — (#156 occupancy hero on detail) | ✅ E5, #319 lifecycle | building occupancy |
 | `/dashboard/venues/new`, `/venues/[id]/claim` | — | ✅ E7 | |
 | `/dashboard/events`, `/events/[id]` | shared | ✅ | canOperate tabs |
@@ -101,8 +101,8 @@ gates, the specialists, and a drive, before the next one starts.
 ## The queue, in order
 
 1. ~~`/dashboard/events/new` and `/events/[id]/edit`~~ — done 2026-09-11 (081bd48)
-2. `/dashboard` for organiser and venue owner — the two overview branches
-3. `/dashboard/events/[id]` — overview, live, attendees, messaging, feedback as one screen family
+2. ~~`/dashboard` for organiser and venue owner~~ — done 2026-09-11 (ea82077)
+3. `/dashboard/events/[id]` — ~~overview~~ (8d6f547); messaging and feedback still to go
 4. `/dashboard/attendees`, `/dashboard/chatrooms`, `/dashboard/organisation`
 5. `/dashboard/venues/[id]`, `/venues/new`, `/venues/[id]/claim` (venue owner)
 6. Admin remainder: moderation (+reports), sponsors / creative-review / charges, organisations, organisers/[id], venue-owners/[id], leads, categories, amenities, reports, audit, settings
