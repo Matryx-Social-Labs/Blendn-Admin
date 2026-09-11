@@ -74,7 +74,7 @@ export function OnboardingQueue({
    */
   const [credential, setCredential] = useState<Credential | null>(null)
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 [&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0">
       {credential ? <CredentialPanel credential={credential} onDone={() => setCredential(null)} /> : null}
       {rows.map((row) => (
         <Row key={row.id} row={row} now={now} onCredential={setCredential} />
@@ -93,7 +93,7 @@ function CredentialPanel({ credential, onDone }: { credential: Credential; onDon
         Email is not configured, so nothing was sent. Pass these on yourself — this is the only
         time the password is shown.
       </p>
-      <dl className="grid gap-1 rounded-lg border border-border bg-card p-4 font-mono text-[0.8125rem]">
+      <dl className="grid gap-1 border-t border-border pt-3 font-mono text-[0.8125rem]">
         <div className="flex gap-3">
           <dt className="w-20 text-muted-foreground">Email</dt>
           <dd>{credential.email}</dd>
@@ -172,7 +172,7 @@ function Row({
 
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5">
+    <section className="flex flex-col gap-3 border-t border-border pt-5">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

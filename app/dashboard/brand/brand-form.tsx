@@ -40,7 +40,7 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
   }
 
   return (
-    <div className="flex max-w-xl flex-col gap-5 rounded-xl border bg-card p-5">
+    <div className="flex max-w-xl flex-col gap-5">
       <div className="flex items-center justify-between gap-3">
         {/* h2 — components/site-header.tsx owns the page's only h1. */}
         <h2 className="text-[length:var(--text-h2)] font-bold">
