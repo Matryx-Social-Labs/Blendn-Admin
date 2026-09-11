@@ -36,14 +36,61 @@ describe("eventReadiness", () => {
     expect(blockers[0]).toMatch(/pin on the map/i)
   })
 
-  it("accepts a fence with no pin, exactly as the server does", () => {
-    // `canPublish` returns ok on a valid geofence alone — the coordinates are
-    // the fallback, not the requirement. Mirroring it loosely would nag about
-    // something the server is happy with.
+  it("accepts a VALID fence with no pin, exactly as the server does", () => {
+    /*
+     * `canPublish` returns ok on a valid geofence alone — the coordinates are
+     * the fallback, not the requirement. Mirroring it loosely would nag about
+     * something the server is happy with.
+     *
+     * The fixture is a REAL circle. The earlier version used `{ type: "circle" }`
+     * with no centre and no radius, which is not a valid fence — the assertion
+     * passed, but for the wrong reason, and would have passed identically
+     * whether the rule validated the fence or merely checked it was truthy.
+     */
     expect(
-      eventReadiness(ok({ latitude: undefined, longitude: undefined, geofence: { type: "circle" } }))
-        .blockers
+      eventReadiness(
+        ok({
+          latitude: undefined,
+          longitude: undefined,
+          geofence: { type: "circle", lat: 12.97, lng: 77.59, radius: 120, buffer: 20 },
+        })
+      ).blockers
     ).toEqual([])
+  })
+
+  it("blocks a fence that is present but not yet drawn", () => {
+    /*
+     * The live case, found by a coverage pass. `geofence-editor.tsx`'s
+     * `switchMode` writes `{ type: "polygon", ring: [], buffer }` the moment
+     * somebody clicks the polygon toggle — before drawing a single point.
+     *
+     * Truthy. So a rule of `Boolean(values.geofence)` flipped the strip to
+     * "Ready to publish" while the server's `validateGeofence` returned
+     * `ring_too_short` and refused on Save — the strip reintroducing the exact
+     * bug it was built to prevent, mid-session.
+     */
+    const { blockers } = eventReadiness(
+      ok({
+        latitude: undefined,
+        longitude: undefined,
+        geofence: { type: "polygon", ring: [], buffer: 0 },
+      })
+    )
+    expect(blockers).toHaveLength(1)
+    expect(blockers[0]).toMatch(/pin on the map/i)
+  })
+
+  it("a half-drawn fence does not rescue a missing pin", () => {
+    // The pair that matters: an invalid fence must not satisfy the rule on its
+    // own, and it must not mask the absence of coordinates either.
+    expect(
+      eventReadiness(ok({ geofence: { type: "polygon", ring: [], buffer: 0 } })).blockers
+    ).toEqual([])
+    expect(
+      eventReadiness(
+        ok({ latitude: undefined, longitude: undefined, geofence: { type: "circle" } })
+      ).blockers
+    ).toHaveLength(1)
   })
 
   it("names the radius that cannot be submitted, instead of Save doing nothing", () => {
@@ -124,8 +171,17 @@ describe("the form's rule and the server's rule do not drift", () => {
 
     // The server accepts a valid fence on its own...
     expect(server).toMatch(/if \(event\.geofence && validateGeofence\(event\.geofence\)\.ok\) return \{ ok: true \}/)
-    // ...and so does the form.
+    // ...and so does the form, through the SAME function.
     expect(form).toMatch(/if \(!hasPin && !hasFence\)/)
+    /*
+     * How `hasFence` is computed, not only that it is used.
+     *
+     * This assertion pinned the consumer and not the producer, so it stayed
+     * green while `hasFence` was `Boolean(values.geofence)` — a looser rule than
+     * the server's, which is the whole failure. The repo's own note: a guard
+     * must pin where a value comes from, not only what is done with it.
+     */
+    expect(form).toMatch(/validateGeofence\(values\.geofence\)\.ok/)
 
     // Both check coordinates explicitly against null/undefined rather than
     // truthily: `if (lat && lng)` is false at longitude 0, which is the bug

@@ -3,13 +3,13 @@
     "R16: every structural guard ships with a documented mutation proving it",
     "fails against broken code. A grep guard that passes against a broken",
     "codebase converts an unknown into a false assurance, which is worse than",
-    "having no guard — and this project has already shipped one `sed` control",
+    "having no guard \u2014 and this project has already shipped one `sed` control",
     "that silently never matched.",
     "",
     "`verified` entries record a mutation that was applied, observed to fail,",
     "and reverted. `grandfathered` is the ratchet: guards that predate this",
     "registry and have no recorded control. That list may shrink and must never",
-    "grow — `negative-controls.test.ts` fails on a new structural guard with no",
+    "grow \u2014 `negative-controls.test.ts` fails on a new structural guard with no",
     "entry.",
     "",
     "To clear a grandfathered entry: apply the mutation, run the suite, confirm",
@@ -27,7 +27,7 @@
     "behavioural test CAN pass vacuously when the thing it asserts is invisible",
     "through the client it uses: `geofence-clear.itest.ts` could not tell",
     "`Prisma.DbNull` from `Prisma.JsonNull`, because both read back as JS `null`",
-    "— so it agreed a fence was cleared while `geofence IS NULL` was false. It",
+    "\u2014 so it agreed a fence was cleared while `geofence IS NULL` was false. It",
     "took a raw-SQL assertion to see the difference. The rule still holds for",
     "which tests need a registry entry; it does not mean a behavioural test is",
     "automatically non-vacuous, only that it usually fails on its own terms."
@@ -157,7 +157,7 @@
     "moderation-correctness.test.ts": {
       "guards": "The five ways the moderation pipeline reported success while failing, plus: contact details are detected inside moderateMessage (both write paths), and the flag is not overwritten by recordExamined",
       "mutation": "Two run: (a) replace `checkContactInfo(content)` with `null` in lib/moderation/index.ts; (b) delete the `if (contactResult) return` guard. Run this suite, revert each.",
-      "observed": "(a) 2 failing of 14; (b) 1 failing of 14 — the status-overwrite test specifically; 14 passing after each revert",
+      "observed": "(a) 2 failing of 14; (b) 1 failing of 14 \u2014 the status-overwrite test specifically; 14 passing after each revert",
       "date": "2026-08-26",
       "source": "run-at-e10-chat-moderation"
     },
@@ -171,7 +171,7 @@
     "no-async-setinterval.test.ts": {
       "guards": "no setInterval in lib/ drives an async callback; the three sweepers reschedule from a path a throw cannot skip",
       "mutation": "Append `setInterval(async () => { await Promise.resolve() }, 1000)` to lib/chat-lifecycle.ts",
-      "observed": "1 failing — but ONLY after widening the regex. The original required the arrow body to be a bare call, so `setInterval(async () => { ... })` passed. The control found the guard vacuous for the most natural way to write the bug.",
+      "observed": "1 failing \u2014 but ONLY after widening the regex. The original required the arrow body to be a bare call, so `setInterval(async () => { ... })` passed. The control found the guard vacuous for the most natural way to write the bug.",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -185,15 +185,15 @@
     "privacy-leaks.test.ts": {
       "guards": "see the test's own docblock; the mutations below prove it is not vacuous",
       "mutation": "Two: (a) replace app/api/mobile/conversations/route.ts with an empty stub (`export {}`); (b) delete the reverse direction from the block predicate in lib/identity.ts",
-      "observed": "(a) 1 failing; (b) 1 failing — 'makes a block override the identity gate in both directions'; passing after each revert",
+      "observed": "(a) 1 failing; (b) 1 failing \u2014 'makes a block override the identity gate in both directions'; passing after each revert",
       "date": "2026-08-28",
       "source": "run-at-scrum-52",
-      "note": "Re-verified when the identity gate became plural. G7 pinned `blocked_users.findFirst` and the literal `if (blocked || closed) return false`, both of which the refactor changed — so this guard needed rewriting to keep asserting the same property against a new shape rather than a stale one."
+      "note": "Re-verified when the identity gate became plural. G7 pinned `blocked_users.findFirst` and the literal `if (blocked || closed) return false`, both of which the refactor changed \u2014 so this guard needed rewriting to keep asserting the same property against a new shape rather than a stale one."
     },
     "server-actions-reachable.test.ts": {
       "guards": "every export in lib/ has a caller, comments excluded; KNOWN_UNREACHABLE is checked in both directions",
       "mutation": "Delete a KNOWN_UNREACHABLE entry for something still dead, and separately wire up an entry still on the list",
-      "observed": "3 failing — the integration merge ran this for real: once #265 and #268 wired canPublish, notifyEventCancelled and notifyEventDetailsChanged, all three KNOWN_UNREACHABLE entries went stale and the suite named each one.",
+      "observed": "3 failing \u2014 the integration merge ran this for real: once #265 and #268 wired canPublish, notifyEventCancelled and notifyEventDetailsChanged, all three KNOWN_UNREACHABLE entries went stale and the suite named each one.",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -240,68 +240,68 @@
       "source": "run-at-integration-merge"
     },
     "mobile-list-envelope.test.ts": {
-      "guards": "Every mobile list endpoint answers `data.<name>`, never a bare array — see the test's docblock",
+      "guards": "Every mobile list endpoint answers `data.<name>`, never a bare array \u2014 see the test's docblock",
       "mutation": "In app/api/mobile/categories/route.ts revert `successResponse({ categories })` to `successResponse(categories)`, run this suite, revert",
-      "observed": "1 failing — offenders listed `app/api/mobile/categories/route.ts :: successResponse(categories)`; 2 passing after the revert",
+      "observed": "1 failing \u2014 offenders listed `app/api/mobile/categories/route.ts :: successResponse(categories)`; 2 passing after the revert",
       "date": "2026-08-25",
       "source": "run-at-e13-contract"
     },
     "host-supply-excludes-curated.test.ts": {
       "guards": "Every organiser-keyed supply query in app/dashboard/actions.ts uses hostSupply(), so a curated event never counts its curating admin as a publishing host",
       "mutation": "Revert the `by: [\"organizer_id\", \"status\"]` groupBy from hostSupply() to eventScope(), run this suite, revert",
-      "observed": "1 failing of 2 — the offender block was listed; 2 passing after the revert",
+      "observed": "1 failing of 2 \u2014 the offender block was listed; 2 passing after the revert",
       "date": "2026-08-25",
       "source": "run-at-e3-admin-surface"
     },
     "dashboard-prose-budget.test.ts": {
-      "guards": "No dashboard page leads with more than 180 characters of literal explanatory prose — site-header already says what the screen is",
+      "guards": "No dashboard page leads with more than 180 characters of literal explanatory prose \u2014 site-header already says what the screen is",
       "mutation": "Prepend the header's own description back onto the paragraph in app/dashboard/leads/page.tsx, run this suite, revert",
-      "observed": "1 failing of 2 — reported leads/page.tsx at 229 chars; 2 passing after the revert",
+      "observed": "1 failing of 2 \u2014 reported leads/page.tsx at 229 chars; 2 passing after the revert",
       "date": "2026-08-25",
       "source": "run-at-e17-density"
     },
     "events-have-occurrences.test.ts": {
       "guards": "Every write path that creates an event also calls syncOccurrences, so check-in can resolve a day for it",
       "mutation": "Comment out the syncOccurrences call in app/dashboard/events/curate/actions.ts, run this suite, revert",
-      "observed": "1 failing of 2 — missing listed app/dashboard/events/curate/actions.ts; 2 passing after the revert",
+      "observed": "1 failing of 2 \u2014 missing listed app/dashboard/events/curate/actions.ts; 2 passing after the revert",
       "date": "2026-08-26",
       "source": "run-at-e9-checkin"
     },
     "failed-fetch-is-not-empty.test.ts": {
       "guards": "No dashboard component branches on res.ok without saying what happens when it is false, so a 403 cannot render as an empty result",
       "mutation": "In components/chat-feed.tsx replace the `if (!res.ok) { setFailed(true); return }` early return with a bare `if (res.ok) {`, run this suite, revert",
-      "observed": "1 failing of 2 — silent listed components/chat-feed.tsx; 2 passing after the revert. NOTE: the first version of this guard did NOT fail against the same mutation, because its `!res.ok` exemption was file-scoped and chat-feed has one in deleteMessage. Rescoped to the call site.",
+      "observed": "1 failing of 2 \u2014 silent listed components/chat-feed.tsx; 2 passing after the revert. NOTE: the first version of this guard did NOT fail against the same mutation, because its `!res.ok` exemption was file-scoped and chat-feed has one in deleteMessage. Rescoped to the call site.",
       "date": "2026-08-26",
       "source": "run-at-e16-code-quality"
     },
     "undefined-query-budget.test.ts": {
       "guards": "No explicit undefined reaches a Prisma call, the counter is not vacuous now that the tree is at zero, and strictUndefinedChecks stays enabled",
       "mutation": "Four: (a) restore `faq: event.details.faq ?? undefined` in the clone route; (b) delete the previewFeatures line from schema.prisma; (c) point the Prisma-call regex at a token that matches nothing; (d) restore `geofence: venue?.geofence ?? undefined` in scripts/seed-qa.ts",
-      "observed": "1 failing each — (a) and (d) 'finds none in the tree', (b) 'keeps strictUndefinedChecks enabled', (c) 'still counts a hazard when it sees one'; 3 passing after each revert",
+      "observed": "1 failing each \u2014 (a) and (d) 'finds none in the tree', (b) 'keeps strictUndefinedChecks enabled', (c) 'still counts a hazard when it sees one'; 3 passing after each revert",
       "date": "2026-08-28",
       "source": "run-at-scrum-53-completion",
-      "note": "Rewritten when the count reached zero. The old entry guarded a shrinking budget; at zero, 'found nothing' is the pass condition, so a broken counter and a clean tree became indistinguishable — control (c) is what separates them, and it needed a synthetic fixture because there is no longer a real site to find. Scope later widened to `scripts` after the flag broke `scripts/seed-qa.ts` and failed CI's e2e job at the seed step while every other job stayed green — the scan had been `app` and `lib` only. One of the two seed sites would still have escaped it, because the object is built outside the Prisma call; the flag caught what the scanner structurally cannot, which is the argument for having both."
+      "note": "Rewritten when the count reached zero. The old entry guarded a shrinking budget; at zero, 'found nothing' is the pass condition, so a broken counter and a clean tree became indistinguishable \u2014 control (c) is what separates them, and it needed a synthetic fixture because there is no longer a real site to find. Scope later widened to `scripts` after the flag broke `scripts/seed-qa.ts` and failed CI's e2e job at the seed step while every other job stayed green \u2014 the scan had been `app` and `lib` only. One of the two seed sites would still have escaped it, because the object is built outside the Prisma call; the flag caught what the scanner structurally cannot, which is the argument for having both."
     },
     "room-pseudonyms.itest.ts": {
       "guards": "Every sender, quoted author and reaction author on a room page gets their pseudonym, and neither read route goes back to loading the whole roster to render one page",
       "mutation": "Four: (a) drop `parent_message.user.id` from the page id set; (b) restore the unscoped `where: { chat_group_id }` member lookup; (c) blind the source marker the structural half searches for; (d) drop `r.user_id` from the event-chat id set",
-      "observed": "1 failing each — (a) 'names a quoted message's author', (b) and (c) 'does not read the whole roster', (d) 'names each sender, and each reaction's author'; 4 passing after each revert",
+      "observed": "1 failing each \u2014 (a) 'names a quoted message's author', (b) and (c) 'does not read the whole roster', (d) 'names each sender, and each reaction's author'; 4 passing after each revert",
       "date": "2026-08-28",
       "source": "run-at-scrum-52",
-      "note": "Control (a) failed to fail on the first attempt and that is why it is worth recording. The fixture let the quoted author send a message that was itself on the page, so their id arrived through the sender path and the assertion held whatever the reply path did — the test asserted less than its own docstring claimed. Fixed with `limit=1` so the author is reachable only as a parent. The same gap was then found by inspection in the event-chat test, which had no reaction author who was not also a sender; control (d) exists because of it."
+      "note": "Control (a) failed to fail on the first attempt and that is why it is worth recording. The fixture let the quoted author send a message that was itself on the page, so their id arrived through the sender path and the assertion held whatever the reply path did \u2014 the test asserted less than its own docstring claimed. Fixed with `limit=1` so the author is reachable only as a parent. The same gap was then found by inspection in the event-chat test, which had no reaction author who was not also a sender; control (d) exists because of it."
     },
     "select-fragment-collision.test.ts": {
       "guards": "No object spreads two select fragments (or a fragment plus an inline key) that claim the same key, and the allowlist cannot go stale",
       "mutation": "Three: (a) add an inline `venue: true` beside `...eventPermissionSelect` in lib/sponsor-actions.ts; (b) delete the `...curationSelect` spread from the one allowlisted file; (c) point the fragment-detector regex at a name that matches nothing",
-      "observed": "(a) 1 failing — 'has no unallowed collision'; (b) 1 failing — 'keeps the allowlist honest'; (c) 3 failing, including the two controls; 4 passing after each revert",
+      "observed": "(a) 1 failing \u2014 'has no unallowed collision'; (b) 1 failing \u2014 'keeps the allowlist honest'; (c) 3 failing, including the two controls; 4 passing after each revert",
       "date": "2026-08-28",
       "source": "run-at-e16",
-      "note": "Written because the rule had bitten three times and `tsc` caught only two. TS objects with TS2783 when two spreads are structurally incompatible, which is luck: two fragments both selecting a relation with different nested columns are assignable to each other, so the overwrite is silent — and a relation is where it costs most. The live case this guards is latent rather than present: `eventPermissionSelect` and `fenceSelect` both claim `venue`, nothing spreads both yet, and CLAUDE.md records that a select missing `venue` silently denies a venue owner."
+      "note": "Written because the rule had bitten three times and `tsc` caught only two. TS objects with TS2783 when two spreads are structurally incompatible, which is luck: two fragments both selecting a relation with different nested columns are assignable to each other, so the overwrite is silent \u2014 and a relation is where it costs most. The live case this guards is latent rather than present: `eventPermissionSelect` and `fenceSelect` both claim `venue`, nothing spreads both yet, and CLAUDE.md records that a select missing `venue` silently denies a venue owner."
     },
     "dashboard-error-contract.test.ts": {
       "guards": "No route on either surface returns a bare-string error, and both refusal-reading consumers go through lib/refusal.ts",
       "mutation": "A: restore `new NextResponse(\"Unauthorized\", { status: 401 })` in app/api/search/route.ts. B: restore `await res.text()` in app/dashboard/reports/builder.tsx",
-      "observed": "A: 1 failing ('has no raw-string response in any route'). B: 1 failing ('keeps the consumers reading refusals through the shared reader') — the half the offender count cannot see",
+      "observed": "A: 1 failing ('has no raw-string response in any route'). B: 1 failing ('keeps the consumers reading refusals through the shared reader') \u2014 the half the offender count cannot see",
       "date": "2026-09-04"
     },
     "reactions-tally.test.ts": {
@@ -310,76 +310,76 @@
       "observed": "A: 1 failing ('has an emitter that no longer takes a reactor'). B: 1 failing ('has a writer at all'). Each half fails on its own.",
       "date": "2026-09-04",
       "source": "run-at-tr2",
-      "note": "Control (b) failed to fail on the first attempt: blinding the regex left the guard green, because the tree is clean and 'found no offenders' is the pass condition. Fixed with a fixture the detector runs against. The scan also needed narrowing three times, each the same mistake — a rule about what is emitted, written as a search for a string that also appears in what is read: first `user_id` in the Prisma select that feeds `mine`, then `authUser.userId` in the call computing it. snake_case is a column, camelCase is the wire, and only a `userId:` key is forbidden."
+      "note": "Control (b) failed to fail on the first attempt: blinding the regex left the guard green, because the tree is clean and 'found no offenders' is the pass condition. Fixed with a fixture the detector runs against. The scan also needed narrowing three times, each the same mistake \u2014 a rule about what is emitted, written as a search for a string that also appears in what is read: first `user_id` in the Prisma select that feeds `mine`, then `authUser.userId` in the call computing it. snake_case is a column, camelCase is the wire, and only a `userId:` key is forbidden."
     },
     "baseline-resurrection.test.ts": {
-      "guards": "The baseline creates nothing that a later migration drops — so replaying the chain onto a deployed database cannot resurrect a removed object",
+      "guards": "The baseline creates nothing that a later migration drops \u2014 so replaying the chain onto a deployed database cannot resurrect a removed object",
       "mutation": "Two: (a) restore the `CREATE UNIQUE INDEX ... event_check_ins_event_id_user_id_key` line in the baseline; (b) point the DROP INDEX detector at a token that matches nothing",
-      "observed": "(a) 1 failing — 'creates nothing that a later migration drops'; (b) 1 failing — 'detects a resurrection when there is one'; 3 passing after each revert",
+      "observed": "(a) 1 failing \u2014 'creates nothing that a later migration drops'; (b) 1 failing \u2014 'detects a resurrection when there is one'; 3 passing after each revert",
       "date": "2026-08-28",
       "source": "run-at-migration-audit",
-      "note": "Written after the bug was found live. The baseline sorts first by name, so on a fresh install it creates the index and `20260807_event_occurrences` drops it moments later — correct. On staging that migration was recorded months ago, so the baseline applies AFTER it and re-creates the unique it existed to remove, making a second-day check-in violate a constraint. Nothing errors and the deploy succeeds. Found only by replaying against a schema-only copy of staging; every check against an empty database was green. The guard also had to strip SQL comments, because the fix leaves a note naming the index and a raw-text scan flags the very comment that records the fix."
+      "note": "Written after the bug was found live. The baseline sorts first by name, so on a fresh install it creates the index and `20260807_event_occurrences` drops it moments later \u2014 correct. On staging that migration was recorded months ago, so the baseline applies AFTER it and re-creates the unique it existed to remove, making a second-day check-in violate a constraint. Nothing errors and the deploy succeeds. Found only by replaying against a schema-only copy of staging; every check against an empty database was green. The guard also had to strip SQL comments, because the fix leaves a note naming the index and a raw-text scan flags the very comment that records the fix."
     },
     "workflow-yaml.test.ts": {
       "guards": "No GitHub workflow carries a duplicate mapping key, which GitHub rejects outright while permissive YAML loaders accept silently",
-      "mutation": "Insert a second `if:` under the `e2e` job, immediately before `runs-on:` — the exact shape that shipped",
-      "observed": "1 failing — 'has no duplicate keys'; 3 passing after revert",
+      "mutation": "Insert a second `if:` under the `e2e` job, immediately before `runs-on:` \u2014 the exact shape that shipped",
+      "observed": "1 failing \u2014 'has no duplicate keys'; 3 passing after revert",
       "date": "2026-09-03",
       "source": "run-at-workflow-trigger-investigation",
-      "note": "Written after shipping the bug. Two `if:` keys on one job made every run on the branch invalid: the run is created, no job matches, and it reports as a plain red failure with zero jobs — indistinguishable from a broken test, and no `pull_request` check fires at all. It survived three commits because the check I was using was `yaml.safe_load`, which keeps the last duplicate and reports the file as clean. The detector here is line-based on purpose: every YAML parser available to it is the permissive one whose behaviour caused the bug. The first attempt at this control was also invalid — the anchor did not match, so the mutation never applied and the guard looked weak when it was not."
+      "note": "Written after shipping the bug. Two `if:` keys on one job made every run on the branch invalid: the run is created, no job matches, and it reports as a plain red failure with zero jobs \u2014 indistinguishable from a broken test, and no `pull_request` check fires at all. It survived three commits because the check I was using was `yaml.safe_load`, which keeps the last duplicate and reports the file as clean. The detector here is line-based on purpose: every YAML parser available to it is the permissive one whose behaviour caused the bug. The first attempt at this control was also invalid \u2014 the anchor did not match, so the mutation never applied and the guard looked weak when it was not."
     },
     "e2e-server-mode.test.ts": {
       "guards": "The e2e lane's `npm run start` carries NODE_ENV=production in its env prefix, read from the assignments rather than the comment above them",
       "mutation": "Delete the `NODE_ENV=production \\` line from the server-start step in .github/workflows/ci.yml, leaving the comment that names it",
-      "observed": "1 failing: 'starts in production mode' — and it failed with NODE_ENV=production still present in the comment block, which is the point",
+      "observed": "1 failing: 'starts in production mode' \u2014 and it failed with NODE_ENV=production still present in the comment block, which is the point",
       "date": "2026-09-04"
     },
     "occupancy-inferred.test.ts": {
       "guards": "The live tab actually passes occupancyMostlyInferred to OccupancyHero's `unreliable` prop, rather than computing the rule and never rendering it",
       "mutation": "Delete the `unreliable={occupancyMostlyInferred(snapshot)}` line from components/dashboard/live-tab.tsx",
-      "observed": "1 failing: 'is actually wired to the screen' — the state the prop was genuinely in for weeks after #278 removed the mass-checkout guard it was written for",
+      "observed": "1 failing: 'is actually wired to the screen' \u2014 the state the prop was genuinely in for weeks after #278 removed the mass-checkout guard it was written for",
       "date": "2026-09-04"
     },
     "reports-have-both-ends.test.ts": {
       "guards": "Each of user_reports, message_reports and event_reports has a writer and a reader, with comments stripped so a table named in prose does not count",
       "mutation": "A: replace `db.event_reports.create(` with `Promise.resolve(` in the mobile report route. B: repoint the three `db.event_reports.*` reads in the admin queue at user_reports",
-      "observed": "A: 1 failing ('event_reports can be written'). B: 1 failing ('event_reports is read by the admin queue') — the two halves of the state the table was actually in",
+      "observed": "A: 1 failing ('event_reports can be written'). B: 1 failing ('event_reports is read by the admin queue') \u2014 the two halves of the state the table was actually in",
       "date": "2026-09-04"
     },
     "read-receipts.test.ts": {
       "guards": "emitPrivateRead persists the read BEFORE consulting read_receipts and only for messages the reader did not send; the conversation list feeds isReadForViewer the OTHER party's setting",
       "mutation": "A: delete the `if (reader?.read_receipts === false) return` line in lib/socket-server.ts. B: replace `otherPartyAllowsReceipts: otherUser.profile?.read_receipts` with a literal `true`",
-      "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') — the case a negative match on the old shape could not catch, because that expression is now the helper's argument",
+      "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') \u2014 the case a negative match on the old shape could not catch, because that expression is now the helper's argument",
       "date": "2026-09-04"
     },
     "dashboard-view.test.ts": {
       "guards": "mayReachRoute agrees with visibleNavFor for every role and every nav item, fails closed on unknown roles and undeclared routes, and the sponsor has both a discriminant in DashboardOverview and its own branch in getDashboardOverview",
       "mutation": "A: make mayReachRoute return true instead of checking allowedRoles. B: delete the `role === \"sponsor\"` branch from getDashboardOverview so sponsors fall through to the organiser build",
-      "observed": "A: 3 failing (keeps everybody else out, agrees with the menu, fails closed). B: 1 failing ('routes the sponsor to its own builder'). The equivalence assertion also caught two real defects while being written — an unlisted-route short-circuit that bypassed a declared gate, and /dashboard/venues having two nav entries so `find` denied admins their own index",
+      "observed": "A: 3 failing (keeps everybody else out, agrees with the menu, fails closed). B: 1 failing ('routes the sponsor to its own builder'). The equivalence assertion also caught two real defects while being written \u2014 an unlisted-route short-circuit that bypassed a declared gate, and /dashboard/venues having two nav entries so `find` denied admins their own index",
       "date": "2026-09-05"
     },
     "deletion-contract.test.ts": {
       "guards": "Every model that belongs to a user and carries personal scalar columns has a recorded disposition (SCRUBBED/DELETED/RETAINED), the code does what the contract claims, and every RETAINED entry states a reason",
       "mutation": "A: append a `visit_traces` model with user_id + latitude/longitude to schema.prisma and declare nothing. B: delete the presence_sessions scrub from the deletion path while leaving its SCRUBBED entry in the contract",
-      "observed": "A: 1 failing ('has a decision recorded for every one') — the exact scenario that let presence_sessions ship with GPS the deletion path never touched. B: 1 failing ('does the scrubbing and deleting it claims to')",
+      "observed": "A: 1 failing ('has a decision recorded for every one') \u2014 the exact scenario that let presence_sessions ship with GPS the deletion path never touched. B: 1 failing ('does the scrubbing and deleting it claims to')",
       "date": "2026-09-05"
     },
     "sentiment.test.ts": {
       "guards": "Paid messages are excluded from the sentiment corpus by their metadata marker, in the QUERY rather than after the fetch, and the exclusion is bounded by the sweep limit",
       "mutation": "A: remove the `metadata ->> 'sponsored_message_id' IS NULL` predicate. B: remove `id: { in: eligibleIds }` from the Prisma where, so the raw selection stops scoping the fetch",
-      "observed": "A: 1 failing ('excludes paid messages by their marker'). B: 1 failing ('does it in the query, not after the fetch') — the half that matters, because the sweep selects only messages with no feedback row, so an ad filtered in JS would be re-selected every pass for ever",
+      "observed": "A: 1 failing ('excludes paid messages by their marker'). B: 1 failing ('does it in the query, not after the fetch') \u2014 the half that matters, because the sweep selects only messages with no feedback row, so an ad filtered in JS would be re-selected every pass for ever",
       "date": "2026-09-05"
     },
     "board-requests.test.ts": {
       "guards": "The board request routes: the accepted conversation carries its board request as origin and both pseudonyms; the recipient is read off the post rather than the payload; a decision claims the row with the status in the predicate and puts it back if the conversation cannot be opened; check-in prefers the handle the board has been showing; accepting is refused once there is nothing left to answer, via the shared isLiveRequest rather than a check the route invents",
       "mutation": "A: delete `boardRequestId: requestId` from the `openConversation` call. B: delete the `if (preferred && !existingNames.has(preferred)) return preferred` short-circuit. C: add `toUserId` to the send route's zod schema. D: delete the `updateMany` that reverts the request to pending when `openConversation` throws. E: delete the `action === \"accept\" && !isLiveRequest(boardRequest)` guard. F: keep the error copy and replace the condition with `false`. G: keep the guard and drop `event: { select: { end_time: true } }` from the route's select",
-      "observed": "A: 1 failing ('passes the board request as the conversation's origin') — the one that matters, because dropping it typechecks (the argument is optional; two of three callers have no board request) and every behavioural assertion still passes, while `cameFromMatch` starts answering true for a board conversation. B: 1 failing ('is a preference at check-in, not an override'). C: 1 failing ('takes the recipient from the post, never from the request body'). D: 2 failing ('puts the request back...' and 'claims the request with the status in the predicate', the latter because the revert is one of the three claims it counts). First run of all four reported zero failures: the harness grepped for `✕` and this reporter prints `●`, so a passing control was indistinguishable from a silent one — the exact failure R16 exists to catch, arriving in the control rather than in the guard. E, F and G: 1 failing each ('refuses to accept an ask with nothing left to answer'). F is the one worth having — it is the shape the first draft of this guard would have missed, because asserting the error copy exists stays green while the branch is unreachable, which is exactly how the two claim handlers in #315 shipped graceful paths that had never run",
+      "observed": "A: 1 failing ('passes the board request as the conversation's origin') \u2014 the one that matters, because dropping it typechecks (the argument is optional; two of three callers have no board request) and every behavioural assertion still passes, while `cameFromMatch` starts answering true for a board conversation. B: 1 failing ('is a preference at check-in, not an override'). C: 1 failing ('takes the recipient from the post, never from the request body'). D: 2 failing ('puts the request back...' and 'claims the request with the status in the predicate', the latter because the revert is one of the three claims it counts). First run of all four reported zero failures: the harness grepped for `\u2715` and this reporter prints `\u25cf`, so a passing control was indistinguishable from a silent one \u2014 the exact failure R16 exists to catch, arriving in the control rather than in the guard. E, F and G: 1 failing each ('refuses to accept an ask with nothing left to answer'). F is the one worth having \u2014 it is the shape the first draft of this guard would have missed, because asserting the error copy exists stays green while the branch is unreachable, which is exactly how the two claim handlers in #315 shipped graceful paths that had never run",
       "date": "2026-09-09"
     },
     "dm-moderation.test.ts": {
-      "guards": "The DM visibility predicate matches a NULL verdict explicitly rather than with a bare `not`, and all three participant-facing reads carry it — the thread, the inbox preview and the unread count — while the two moderation reads deliberately do not",
+      "guards": "The DM visibility predicate matches a NULL verdict explicitly rather than with a bare `not`, and all three participant-facing reads carry it \u2014 the thread, the inbox preview and the unread count \u2014 while the two moderation reads deliberately do not",
       "mutation": "A: delete `moderation_status: null` from `VISIBLE_DM`, leaving the bare `{ not: \"hidden\" }`. B: delete the spread from the unread `_count` filter. C: delete `where: VISIBLE_DM` from the inbox preview. D: delete the spread from the thread's where clause",
-      "observed": "A: the structural assertion fails, and against real Postgres two cases in `dm-gating.itest.ts` fail — an ordinary message with a NULL verdict disappears, because `moderation_status <> 'hidden'` is NULL for a NULL row and NULL is the ordinary case here. That mutation hides the entire message history of every conversation in the product. B, C, D: 1 failing each ('is carried by every participant-facing read of a DM'). The first version of that guard asserted the file merely *contained* `VISIBLE_DM`, and control B passed against it — the preview's copy kept it green while the unread count had lost it. Now brace-matched per query block",
+      "observed": "A: the structural assertion fails, and against real Postgres two cases in `dm-gating.itest.ts` fail \u2014 an ordinary message with a NULL verdict disappears, because `moderation_status <> 'hidden'` is NULL for a NULL row and NULL is the ordinary case here. That mutation hides the entire message history of every conversation in the product. B, C, D: 1 failing each ('is carried by every participant-facing read of a DM'). The first version of that guard asserted the file merely *contained* `VISIBLE_DM`, and control B passed against it \u2014 the preview's copy kept it green while the unread count had lost it. Now brace-matched per query block",
       "date": "2026-09-05"
     },
     "toaster-mounted.test.ts": {
@@ -391,44 +391,44 @@
     },
     "upload-accept-matches-gate.test.ts": {
       "guards": "every content type the event form's ACCEPT map offers is accepted by validateContentType('events'), that the ACCEPT map was actually found (so the regex cannot go vacuous), and that the documented exclusion (application/pdf) stays excluded",
-      "mutation": "remove \"video/mp4\" from the events allowlist in lib/tigris.ts — the exact state the codebase was in when this was found",
+      "mutation": "remove \"video/mp4\" from the events allowlist in lib/tigris.ts \u2014 the exact state the codebase was in when this was found",
       "observed": "1 failing ('the events folder accepts every content type offered for video'); the vacuity guard and the pdf-exclusion guard stayed green",
       "reverted": true,
       "date": "2026-09-10"
     },
     "prisma-shorthand-ratchet.test.ts": {
-      "guards": "no NEW bare shorthand appears inside a Prisma `data:` block anywhere in app/ or lib/, that the baseline has no stale entries so shrinking stays deliberate, and that the scan found the known ones so the ratchet cannot go vacuous; and, added 2026-09-10, that no NEW Prisma write assembles its `data:` object in a variable — the blind spot that let the sixth outage through, because the shorthand scan only sees literal `data: {` blocks",
+      "guards": "no NEW bare shorthand appears inside a Prisma `data:` block anywhere in app/ or lib/, that the baseline has no stale entries so shrinking stays deliberate, and that the scan found the known ones so the ratchet cannot go vacuous; and, added 2026-09-10, that no NEW Prisma write assembles its `data:` object in a variable \u2014 the blind spot that let the sixth outage through, because the shorthand scan only sees literal `data: {` blocks",
       "mutation": "A: add a bare `ratchet_probe_field,` to the data block in app/api/mobile/message-requests/route.ts. B: convert `message,` there to a conditional spread WITHOUT pruning the baseline; C: add a `db.check_in_refusals.create({ data: sneakyPayload })` to lib/check-in-refusals.ts, a file not in INDIRECT_DATA. D: add a `lib/gone.ts` entry to INDIRECT_DATA for a file that does not exist",
       "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both; C: 1 failing ('has not grown'), naming lib/check-in-refusals.ts. D: 1 failing ('has no stale entries'), naming lib/gone.ts. Both vacuity guards stayed green",
       "reverted": true,
       "date": "2026-09-10"
     },
     "users-search-server-side.test.ts": {
-      "guards": "that the users search box drives `?search=` on the URL — which `page.tsx` reads and passes to `getUsers` — rather than filtering the 50 rows already fetched, and that the footer discloses the cap instead of implying the page is the whole set",
+      "guards": "that the users search box drives `?search=` on the URL \u2014 which `page.tsx` reads and passes to `getUsers` \u2014 rather than filtering the 50 rows already fetched, and that the footer discloses the cap instead of implying the page is the whole set",
       "mutation": "C: `if (false && shown < total)` in `rowCountLabel`, so the cap goes undisclosed. D: revert the input to `table.getColumn(\"user\").setFilterValue(...)`",
       "observed": "C: 2 failing, both naming the exact sentence expected against the selection-count fallback received. D: 1 failing ('does not filter the fetched page instead'). The vacuity guard stayed green in both",
       "reverted": true,
       "date": "2026-09-10",
-      "note": "The FIRST version of this guard was vacuous and mutation C is why it exists in this shape: it asserted the source contained `data.length < total`, and `{false && data.length < total}` still contains that text. The sentence was extracted to a pure function so the test could vary arguments rather than match characters — R18's pattern, earned again."
+      "note": "The FIRST version of this guard was vacuous and mutation C is why it exists in this shape: it asserted the source contained `data.length < total`, and `{false && data.length < total}` still contains that text. The sentence was extracted to a pure function so the test could vary arguments rather than match characters \u2014 R18's pattern, earned again."
     },
     "range-control-scope.test.ts": {
-      "guards": "that the date-range control renders on exactly the dashboard pages whose `page.tsx` calls `resolveRange` — checked in both directions, so a page that gains a range without being listed fails, and a listed page that stops reading one fails too",
+      "guards": "that the date-range control renders on exactly the dashboard pages whose `page.tsx` calls `resolveRange` \u2014 checked in both directions, so a page that gains a range without being listed fails, and a listed page that stops reading one fails too",
       "mutation": "A: add a `resolveRange` call to app/dashboard/users/page.tsx without listing the route. B: add \"/dashboard/users\" to RANGED without the page reading a range",
       "observed": "A: 1 failing ('shows it on every page that reads a range'), naming /dashboard/users. B: 1 failing ('shows it on no page that ignores one'), naming the same route. The vacuity guard stayed green in both",
       "reverted": true,
       "date": "2026-09-10"
     },
     "event-tab-destinations.test.ts": {
-      "guards": "that the Chat and Attendees tabs, which `eventTabsFor` offers on `canOperate`, lead to a page that admits `canOperate` — and that the broadcast composer and sponsor panel on that page stay behind `canEdit`, so widening the gate does not hand a venue owner a broadcast into an event they do not run",
+      "guards": "that the Chat and Attendees tabs, which `eventTabsFor` offers on `canOperate`, lead to a page that admits `canOperate` \u2014 and that the broadcast composer and sponsor panel on that page stay behind `canEdit`, so widening the gate does not hand a venue owner a broadcast into an event they do not run",
       "mutation": "A: put the page gate back to `canEdit`. B: replace the `permissions.canEdit ?` guard around the left column with `true ?`",
-      "observed": "A: 1 failing ('lets canOperate into the page those tabs lead to'). B: 2 failing — the composer guard, and the assertion that ChatFeed and ModerationQueue sit outside it, because an always-true guard swallows the whole column. The vacuity guard stayed green in both",
+      "observed": "A: 1 failing ('lets canOperate into the page those tabs lead to'). B: 2 failing \u2014 the composer guard, and the assertion that ChatFeed and ModerationQueue sit outside it, because an always-true guard swallows the whole column. The vacuity guard stayed green in both",
       "reverted": true,
       "date": "2026-09-10"
     },
     "attention-queues.test.ts": {
       "guards": "the sidebar badges and the overview's attention strip read one module: app/dashboard/layout.tsx counts no queue table itself, every badgeKey in dashboardNav is one queueBadges actually produces, and the pure half stays free of `db` so a client component can import it without dragging `pg` into the browser bundle",
       "mutation": "A: add `db.moderation_flags.count({ where: { status: 'pending' } })` back into app/dashboard/layout.tsx. B: delete the `pendingCreative` line from queueBadges(). C: add `import { db } from './db'` to lib/attention-queues.ts.",
-      "observed": "A: 1 failing ('the layout counts nothing itself'). B: 1 failing ('every badgeKey the nav asks for is one queueBadges produces'), reporting [\"pendingCreative\"] where [] was expected — exactly the silent failure the guard exists for, since a nav item asking for a badge nothing supplies renders no badge and no error. C: 1 failing ('the pure half never imports the database'). C is the one that matters: the real defect it stands for was found by `npm run build`, not by tsc and not by 2418 unit tests, because Jest resolves the import and never asks which bundle it lands in.",
+      "observed": "A: 1 failing ('the layout counts nothing itself'). B: 1 failing ('every badgeKey the nav asks for is one queueBadges produces'), reporting [\"pendingCreative\"] where [] was expected \u2014 exactly the silent failure the guard exists for, since a nav item asking for a badge nothing supplies renders no badge and no error. C: 1 failing ('the pure half never imports the database'). C is the one that matters: the real defect it stands for was found by `npm run build`, not by tsc and not by 2418 unit tests, because Jest resolves the import and never asks which bundle it lands in.",
       "date": "2026-09-10"
     },
     "attention-queues.itest.ts": {
@@ -456,10 +456,10 @@
       "date": "2026-09-10"
     },
     "event-readiness.test.ts": {
-      "guards": "the create-event form's readiness rule says the same thing as the server's canPublish -- a valid geofence alone is enough, coordinates are checked explicitly against null rather than truthily",
-      "mutation": "In lib/geofence-input.ts, delete the `if (event.geofence && validateGeofence(event.geofence).ok) return { ok: true }` early return so the server requires coordinates even with a fence.",
-      "observed": "1 failing ('mirrors canPublish's two conditions'). The duplication between form and server is deliberate -- the server cannot trust a form, and the mobile clone route creates events without touching the form at all -- so what has to be guarded is that the two say the SAME thing. A form that nags about something the server allows trains people to ignore it; one that stays quiet about a refusal is the bug the strip was written to fix, restored.",
-      "date": "2026-09-10"
+      "guards": "the create-event form's readiness rule says the same thing as the server's canPublish -- a valid geofence alone is enough, coordinates are checked explicitly against null rather than truthily, and a fence counts only when validateGeofence says it does (switchMode('polygon') writes a truthy empty-ring object before anything is drawn)",
+      "mutation": "A: in lib/geofence-input.ts, delete the `if (event.geofence && validateGeofence(event.geofence).ok) return { ok: true }` early return so the server requires coordinates even with a fence. B: in lib/event-readiness.ts, `const hasFence = Boolean(values.geofence)` -- presence instead of validity, as it shipped.",
+      "observed": "A: 1 failing ('mirrors canPublish's two conditions'). B: 3 failing ('blocks a fence that is present but not yet drawn', 'a half-drawn fence does not rescue a missing pin', and the pin that the rule reads validateGeofence(...).ok). B was found by the silent-failure pass reading the editor, not by driving it: the strip flipped to 'Ready to publish' the instant the polygon toggle was clicked, mid-session, while the server would refuse on Save. The strip exists to prevent exactly that refusal, so a looser rule than the server's is the bug it was written to fix, restored live.",
+      "date": "2026-09-11"
     },
     "theme-colour-hydration.test.ts": {
       "guards": "themeColour() -- which returns a hex fallback on the server and a computed token on the client -- is only imported by map components, and never reaches a server-rendered `style` prop",

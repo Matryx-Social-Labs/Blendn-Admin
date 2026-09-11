@@ -1,4 +1,5 @@
 import type { EventFormValues } from "@/components/event-form/schema"
+import { validateGeofence } from "@/lib/geofence"
 
 /**
  * What still stops this event being published, said before Save rather than
@@ -59,7 +60,24 @@ export function eventReadiness(values: Partial<EventFormValues>): Readiness {
    */
   const hasPin =
     typeof values.latitude === "number" && typeof values.longitude === "number"
-  const hasFence = Boolean(values.geofence)
+  /*
+   * VALIDATED, not merely present.
+   *
+   * This was `Boolean(values.geofence)`, and the difference is not academic:
+   * `geofence-editor.tsx`'s `switchMode` writes
+   * `{ type: "polygon", ring: [], buffer }` the instant somebody clicks the
+   * polygon toggle, **before they have drawn anything**. That object is truthy,
+   * so the strip flipped to "Ready to publish" while `validateGeofence`
+   * returned `ring_too_short` and the server refused on Save.
+   *
+   * The strip exists to stop exactly that — being refused after the scroll — so
+   * a looser rule than the server's turns it into the bug it was written to
+   * prevent, and does it live, mid-session, rather than only at first load.
+   *
+   * `validateGeofence` is the server's own function and is pure, so this is the
+   * same rule rather than a second one that has to be kept in step.
+   */
+  const hasFence = Boolean(values.geofence) && validateGeofence(values.geofence).ok
   if (!hasPin && !hasFence) {
     blockers.push(
       "Drop a pin on the map. GPS check-in needs somewhere to check against, and the event cannot publish without it."
