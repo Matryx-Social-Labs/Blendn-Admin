@@ -49,6 +49,7 @@ jest.mock("@/lib/mobile-auth", () => ({
 
 const mockDeletePrefix = jest.fn().mockResolvedValue(3)
 jest.mock("@/lib/tigris", () => ({ deletePrefix: (...a: unknown[]) => mockDeletePrefix(...a) }))
+jest.mock("@/lib/logger", () => ({ logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 jest.mock("@/lib/rate-limit", () => ({
   rateLimit: jest.fn().mockResolvedValue(null),
   userLimit: jest.fn().mockReturnValue({ windowMs: 1, maxRequests: 99 }),
@@ -58,6 +59,7 @@ import { readFileSync } from "fs"
 import { join, resolve } from "path"
 import { NextRequest } from "next/server"
 import { DELETE } from "@/app/api/mobile/account/route"
+import { logger } from "@/lib/logger"
 
 const USER = "u1"
 
@@ -285,10 +287,16 @@ describe("the photos leave storage, not only the row", () => {
     expect(delOrder).toBeGreaterThan(txOrder)
   })
 
-  it("a storage failure does not undo the erasure the database accepted", async () => {
+  it("a storage failure does not undo the erasure the database accepted, and is logged by user", async () => {
     mockAuth.mockResolvedValue({ userId: USER })
     mockDeletePrefix.mockRejectedValueOnce(new Error("listing failed"))
     const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(res.status).toBe(200)
+    // The 200 is right — the row is erased. The objects are not, and the only
+    // trace of that is this line, so it has to name who.
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/storage|object|prefix/i),
+      expect.objectContaining({ userId: USER })
+    )
   })
 })

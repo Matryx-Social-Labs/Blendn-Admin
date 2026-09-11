@@ -106,17 +106,28 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
  * primary, from `User.image` too — the same two writes the PUT made, undone.
  */
 export async function moderateProfilePhoto(url: string, userId: string): Promise<void> {
-  const check = await checkImageContent(url)
-  if (check.checked && check.result?.action === "hide") {
-    const profile = await db.profiles.findUnique({ where: { id: userId }, select: { photos: true } })
-    const remaining = (profile?.photos ?? []).filter((u) => u !== url)
-    await db.$transaction([
-      db.profiles.update({ where: { id: userId }, data: { photos: remaining } }),
-      db.user.update({ where: { id: userId }, data: { image: remaining[0] ?? null } }),
-    ])
-    await recordPhotoCheck(url, userId, true)
-    logger.warn("Profile photo removed after moderation", { userId })
-    return
+  try {
+    const check = await checkImageContent(url)
+    if (check.checked && check.result?.action === "hide") {
+      const profile = await db.profiles.findUnique({ where: { id: userId }, select: { photos: true } })
+      const remaining = (profile?.photos ?? []).filter((u) => u !== url)
+      await db.$transaction([
+        db.profiles.update({ where: { id: userId }, data: { photos: remaining } }),
+        db.user.update({ where: { id: userId }, data: { image: remaining[0] ?? null } }),
+      ])
+      await recordPhotoCheck(url, userId, true)
+      logger.warn("Profile photo removed after moderation", { userId })
+      return
+    }
+    await recordPhotoCheck(url, userId, check.checked)
+  } catch (error) {
+    // Nothing above us: `after()` reports a rejection with a bare
+    // console.error, which is not where this app's errors go. A photo that
+    // should have come down and did not is worth a real log line.
+    logger.error("Profile photo moderation failed; photo left in place", {
+      userId,
+      url,
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
-  await recordPhotoCheck(url, userId, check.checked)
 }

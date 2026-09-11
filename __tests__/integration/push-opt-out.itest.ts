@@ -15,7 +15,8 @@
  * DeviceNotRegistered and the sender deletes the row — the stale-token
  * cleanup working, which would read here as the switch failing.
  */
-const sent = jest.fn(async (msgs: { to: string }[]) => msgs.map(() => ({ status: "ok", id: "t" })))
+type Ticket = { status: string; id?: string; message?: string; details?: { error: string } }
+const sent = jest.fn(async (msgs: { to: string }[]): Promise<Ticket[]> => msgs.map(() => ({ status: "ok", id: "t" })))
 jest.mock("expo-server-sdk", () => {
   class Expo {
     static isExpoPushToken(t: string) {
@@ -78,5 +79,18 @@ describe("the switch is honoured on the send path", () => {
     const id = await person("po-none", null)
     await expect(push(id)).resolves.toBe(true)
     expect(sent).toHaveBeenCalledTimes(1)
+  })
+
+  it("a DeviceNotRegistered ticket deletes that token row and no other", async () => {
+    // The cleanup the docstring above says the real client would trigger,
+    // driven deliberately instead of by accident.
+    const id = await person("po-stale", { push_enabled: true })
+    const bystander = await person("po-fresh", { push_enabled: true })
+    sent.mockImplementationOnce(async (msgs: { to: string }[]) =>
+      msgs.map(() => ({ status: "error", message: "gone", details: { error: "DeviceNotRegistered" } }))
+    )
+    await push(id)
+    await expect(db.push_tokens.count({ where: { user_id: id } })).resolves.toBe(0)
+    await expect(db.push_tokens.count({ where: { user_id: bystander } })).resolves.toBe(1)
   })
 })

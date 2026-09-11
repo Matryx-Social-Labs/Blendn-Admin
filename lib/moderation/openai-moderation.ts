@@ -100,6 +100,10 @@ function evaluateScores(
  */
 export const MODERATION_TIMEOUT_MS = 8_000
 
+/** `AbortSignal.timeout` rejects the fetch with a DOMException named TimeoutError. */
+const abortedByTimeout = (error: unknown) =>
+  error instanceof Error && error.name === "TimeoutError"
+
 export async function checkTextContent(content: string): Promise<ModerationCheck> {
   const apiKey = getApiKey()
   if (!apiKey) {
@@ -143,7 +147,7 @@ export async function checkTextContent(content: string): Promise<ModerationCheck
     }
   } catch (error) {
     logger.error("OpenAI Moderation API call failed", { error: String(error) })
-    return notChecked("error")
+    return notChecked(abortedByTimeout(error) ? "timeout" : "error")
   }
 }
 
@@ -199,6 +203,6 @@ export async function checkImageContent(imageUrl: string): Promise<ModerationChe
     }
   } catch (error) {
     logger.error("OpenAI Image Moderation API call failed", { error: String(error) })
-    return notChecked("error")
+    return notChecked(abortedByTimeout(error) ? "timeout" : "error")
   }
 }
