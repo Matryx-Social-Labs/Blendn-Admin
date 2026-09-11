@@ -137,7 +137,9 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
         city: true,
         venue_name: true,
         max_capacity: true,
-        rsvps: { select: { created_at: true, status: true } },
+        // Committed only, like the benchmark query below: `not_going` is never
+        // read, and this is the one event most likely to have many rows.
+        rsvps: { where: { status: { in: COMMITTED } }, select: { created_at: true, status: true } },
         _count: { select: { favorites: true } },
       },
     }),

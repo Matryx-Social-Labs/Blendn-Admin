@@ -115,8 +115,15 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
              */
             label: "Going",
             value: String(going),
+            // `=== null`, not truthy: max_capacity has no floor in the schema
+            // or the form, so 0 is a reachable value, and the tile below says
+            // "Capacity 0" — the hint must not say "no capacity set" beside it.
             hint: [
-              capacity ? `of ${capacity} · ${pct(going, capacity)}% full` : "no capacity set",
+              capacity === null
+                ? "no capacity set"
+                : capacity === 0
+                  ? "capacity 0"
+                  : `of ${capacity} · ${pct(going, capacity)}% full`,
               `${maybe} maybe`,
               `${saved} saved`,
             ].join(" · "),
