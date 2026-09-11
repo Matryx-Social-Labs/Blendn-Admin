@@ -10,7 +10,6 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -65,18 +64,15 @@ export function OrgPanel({
   permissions: OrgPermissions
 }) {
   return (
-    <section className="flex flex-col gap-5 rounded-lg border border-border bg-card p-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-[length:var(--text-h2)] font-bold">{org.display_name}</h2>
-          {org.legal_name ? (
-            <p className="text-[0.8125rem] text-muted-foreground">{org.legal_name}</p>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={org.status === "verified" ? "default" : "secondary"}>{org.status}</Badge>
-          <Badge variant="outline">You are {ROLE_LABEL[org.myRole].toLowerCase()}</Badge>
-        </div>
+    <section className="flex flex-col gap-5">
+      {/* One title line. Status and your role are words beside the name, not
+          chips — neither is an action, and the card around all of it is gone. */}
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <h2 className="text-[length:var(--text-h2)] font-bold">{org.display_name}</h2>
+        <span className="text-[0.8125rem] text-muted-foreground">
+          {org.legal_name ? `${org.legal_name} · ` : ""}
+          {org.status} · you are {org.myRole === "owner" ? "the owner" : ROLE_LABEL[org.myRole].toLowerCase()}
+        </span>
       </div>
 
       <Members
@@ -136,21 +132,21 @@ function Members({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <h3 className="text-sm font-semibold">Members</h3>
-      <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3 border-t border-border pt-5">
+      <h3 className="text-[0.9375rem] font-bold">Members</h3>
+      <div className="flex flex-col divide-y divide-border">
         {members.map((m) => (
           <div
             key={m.id}
-            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+            className="flex flex-wrap items-center justify-between gap-3 py-2.5"
           >
             <div className="flex flex-col gap-0.5">
               <span className="text-sm font-medium">
                 {m.name ?? m.email}
                 {m.isPrimary ? (
-                  <Badge variant="secondary" className="ml-2 align-middle">
-                    Primary contact
-                  </Badge>
+                  <span className="ml-2 text-[0.75rem] font-normal text-faint-foreground">
+                    primary contact
+                  </span>
                 ) : null}
               </span>
               <span className="text-[0.8125rem] text-muted-foreground">{m.email}</span>
@@ -185,14 +181,14 @@ function Members({
                 </Button>
               </div>
             ) : (
-              <Badge variant="outline">{ROLE_LABEL[m.role]}</Badge>
+              <span className="text-[0.8125rem] text-muted-foreground">{ROLE_LABEL[m.role]}</span>
             )}
           </div>
         ))}
       </div>
       {canManage ? (
         <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-          {ROLE_BLURB.admin} {ROLE_BLURB.staff}
+          Admin: {ROLE_BLURB.admin} Staff: {ROLE_BLURB.staff}
         </p>
       ) : null}
     </div>
@@ -241,7 +237,7 @@ function Invites({
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-5">
-      <h3 className="text-sm font-semibold">Invite someone</h3>
+      <h3 className="text-[0.9375rem] font-bold">Invite someone</h3>
       <p className="text-[0.8125rem] leading-6 text-muted-foreground">
         {verifiedDomains.length > 0
           ? `Invites go to ${verifiedDomains.map((d) => d.domain).join(", ")} without ceremony. Anyone else needs a reason, which is recorded.`
@@ -321,7 +317,7 @@ function Invites({
 function InviteRow({ orgId, invite }: { orgId: string; invite: OrgInviteRow }) {
   const [pending, start] = useTransition()
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-2.5">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-2.5">
       <div className="flex flex-col gap-0.5">
         <span className="text-sm">{invite.email}</span>
         <span className="text-[0.8125rem] text-muted-foreground">
@@ -369,7 +365,7 @@ function JoinRequests({ orgId, requests }: { orgId: string; requests: OrgJoinReq
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-5">
-      <h3 className="text-sm font-semibold">Requests to join</h3>
+      <h3 className="text-[0.9375rem] font-bold">Requests to join</h3>
       <p className="text-[0.8125rem] leading-6 text-muted-foreground">
         People with an address on your verified domain. Approving adds them as staff — promote them
         afterwards if they need more.
@@ -377,7 +373,7 @@ function JoinRequests({ orgId, requests }: { orgId: string; requests: OrgJoinReq
       {requests.map((r) => (
         <div
           key={r.id}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+          className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-2.5"
         >
           <div className="flex flex-col gap-0.5">
             <span className="text-sm font-medium">{r.name ?? r.email}</span>
@@ -423,7 +419,7 @@ function Domains({ orgId, domains }: { orgId: string; domains: MyOrg["domains"] 
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-5">
-      <h3 className="text-sm font-semibold">Domain</h3>
+      <h3 className="text-[0.9375rem] font-bold">Domain</h3>
       <p className="text-[0.8125rem] leading-6 text-muted-foreground">
         Verifying a domain proves you control it, which is what lets invites be restricted to it.
         Add the TXT record at your DNS provider, then check.
@@ -471,10 +467,10 @@ function DomainRow({ orgId, domain }: { orgId: string; domain: MyOrg["domains"][
   const [address, setAddress] = useState("")
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-2.5">
       <div className="flex items-center gap-2">
         {domain.verified ? (
-          <IconCircleCheck className="size-4 text-primary" />
+          <IconCircleCheck className="size-4 text-success" />
         ) : (
           <IconClock className="size-4 text-muted-foreground" />
         )}

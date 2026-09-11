@@ -45,7 +45,6 @@ const ALLOWED = new Set([
   // WRITES it on create, which is the column's legitimate job -- recording who
   // made the row -- and is indistinguishable from a scope filter by grep.
   "app/api/events/route.ts",
-  "app/dashboard/chatrooms/page.tsx",
   "app/dashboard/actions.ts",
   /*
    * Writes `organizer_id` on clone and does not yet write `organizer_org_id` --
