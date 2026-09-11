@@ -47,6 +47,8 @@ jest.mock("@/lib/mobile-auth", () => ({
   getAuthenticatedUser: (...a: unknown[]) => mockAuth(...a),
 }))
 
+const mockDeletePrefix = jest.fn().mockResolvedValue(3)
+jest.mock("@/lib/tigris", () => ({ deletePrefix: (...a: unknown[]) => mockDeletePrefix(...a) }))
 jest.mock("@/lib/rate-limit", () => ({
   rateLimit: jest.fn().mockResolvedValue(null),
   userLimit: jest.fn().mockReturnValue({ windowMs: 1, maxRequests: 99 }),
@@ -262,5 +264,31 @@ describe("what survives a deletion, and what must not", () => {
     expect(call.where).toEqual(expect.objectContaining({ sender_id: expect.any(String) }))
     expect(call.where).not.toHaveProperty("recipient_id")
     expect(call.data).toEqual({ message: null })
+  })
+})
+
+describe("the photos leave storage, not only the row", () => {
+  /*
+   * `profiles.photos` was nulled and the objects stayed in a public-read
+   * bucket under deterministic keys -- any URL another person had seen kept
+   * resolving to the deleted face. The prefix is everything this account ever
+   * uploaded as a profile photo.
+   */
+  it("deletes every object under profile/{userId}/ after the transaction", async () => {
+    mockAuth.mockResolvedValue({ userId: USER })
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    // After, not inside: the transaction is the erasure; storage is cleanup.
+    const txOrder = mockDb.$transaction.mock.invocationCallOrder[0]
+    const delOrder = mockDeletePrefix.mock.invocationCallOrder[0]
+    expect(delOrder).toBeGreaterThan(txOrder)
+  })
+
+  it("a storage failure does not undo the erasure the database accepted", async () => {
+    mockAuth.mockResolvedValue({ userId: USER })
+    mockDeletePrefix.mockRejectedValueOnce(new Error("listing failed"))
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
   })
 })

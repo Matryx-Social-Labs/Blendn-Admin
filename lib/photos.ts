@@ -1,5 +1,8 @@
 import { checkImageContent } from "./moderation/openai-moderation"
-import { getObjectSize, ownedPhotoKey } from "./tigris"
+import { getMaxFileSize, getObjectSize, ownedPhotoKey } from "./tigris"
+import { db } from "./db"
+import { logger } from "./logger"
+import { recordPhotoCheck } from "./photo-checks"
 
 /**
  * Whether a photo may go on a profile.
@@ -34,6 +37,7 @@ export type PhotoRejection =
   | { ok: false; code: "not_ours"; message: string }
   | { ok: false; code: "too_small"; message: string }
   | { ok: false; code: "unsafe"; message: string }
+  | { ok: false; code: "too_large"; message: string }
 
 export type PhotoVerdict = { ok: true; checked: boolean } | PhotoRejection
 
@@ -48,25 +52,26 @@ export type PhotoVerdict = { ok: true; checked: boolean } | PhotoRejection
  */
 export const MIN_PHOTO_BYTES = 8_000
 
+/**
+ * The cheap gates, on the request path: ours, uploaded, not blank, not huge.
+ *
+ * The vendor check used to run here too, and the profile PUT — the write the
+ * person is watching a spinner for — waited on OpenAI fetching and scoring
+ * the image, unbounded. It now runs in `moderateProfilePhoto` after the
+ * response. The read side already tolerated an unchecked photo (every
+ * failure of the vendor call degraded to `checked: false` and nothing on a
+ * read path consults it), so this makes the accidental path the deliberate
+ * one, and the moderation screen's unchecked count is where it shows.
+ */
 export async function checkProfilePhoto(url: string, userId: string): Promise<PhotoVerdict> {
   const key = ownedPhotoKey(url, userId)
   if (!key) {
-    /*
-     * Deliberately not specific.
-     *
-     * "Wrong host", "wrong owner" and "malformed" are one message, because the
-     * useful version of this error tells an attacker which part of their probe
-     * was closer. A real client cannot hit this at all: it uploads through
-     * `POST /uploads/presigned-url` and posts back the `publicUrl` it was
-     * handed.
-     */
     return {
       ok: false,
       code: "not_ours",
       message: "Upload photos through the app rather than linking to them",
     }
   }
-
   const size = await getObjectSize(key)
   if (size === null) {
     // The object is not there. Almost always a client posting the URL before
@@ -85,30 +90,33 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
       message: "That looks like a blank image. Pick a photo of yourself.",
     }
   }
+  if (size > getMaxFileSize("profile")) {
+    // The presigned PUT cannot bound size; this is the first place the
+    // server sees the object, so it is where the ceiling is enforced.
+    return { ok: false, code: "too_large", message: "That photo is too large. Pick one under 10 MB." }
+  }
+  return { ok: true, checked: false }
+}
 
+/**
+ * The vendor check, after the response. Pulls the photo if it fails.
+ *
+ * Runs inside `after()` from the profile PUT, so nobody is waiting on it.
+ * A `hide` verdict removes the URL from the profile and, if it was the
+ * primary, from `User.image` too — the same two writes the PUT made, undone.
+ */
+export async function moderateProfilePhoto(url: string, userId: string): Promise<void> {
   const check = await checkImageContent(url)
   if (check.checked && check.result?.action === "hide") {
-    return {
-      ok: false,
-      code: "unsafe",
-      message: "That photo cannot be used here.",
-    }
+    const profile = await db.profiles.findUnique({ where: { id: userId }, select: { photos: true } })
+    const remaining = (profile?.photos ?? []).filter((u) => u !== url)
+    await db.$transaction([
+      db.profiles.update({ where: { id: userId }, data: { photos: remaining } }),
+      db.user.update({ where: { id: userId }, data: { image: remaining[0] ?? null } }),
+    ])
+    await recordPhotoCheck(url, userId, true)
+    logger.warn("Profile photo removed after moderation", { userId })
+    return
   }
-
-  /*
-   * `checked: false` when moderation could not run.
-   *
-   * Degrading **open** is the deliberate choice: a moderation outage must not
-   * stop people having a profile photo, which is the same call `lib/email.ts`
-   * makes. The row records `unchecked` so it can be swept later rather than
-   * being silently assumed fine.
-   *
-   * This used to be `verdict !== null || hasModerationKey()`, an approximation
-   * of a question the API could not answer: `checkImageContent` returned null
-   * for clean, for a missing key and for a failed call alike. So a configured
-   * key plus an API error read as **checked** -- the one combination where the
-   * guess is wrong, and the one that happens during an outage. It now asks
-   * directly, and `hasModerationKey` is gone with it.
-   */
-  return { ok: true, checked: check.checked }
+  await recordPhotoCheck(url, userId, check.checked)
 }

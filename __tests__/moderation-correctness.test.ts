@@ -71,7 +71,9 @@ describe("G3 — nothing is called clean that was not checked", () => {
      * guess is wrong, and the one that happens during an outage.
      */
     const src = code("lib/photos.ts")
-    expect(src).toMatch(/checked: check\.checked/)
+    // The vendor's own answer is what gets recorded -- now after the
+    // response, in moderateProfilePhoto, but still never a guess.
+    expect(src).toMatch(/recordPhotoCheck\(url, userId, check\.checked\)/)
     expect(src).not.toMatch(/hasModerationKey/)
   })
 

@@ -88,6 +88,18 @@ function evaluateScores(
  * Still delivers on failure -- refusing to send a message because a third-party
  * API is down is its own harm -- but says so, rather than reporting clean.
  */
+/**
+ * How long a vendor call may hold a request.
+ *
+ * Neither fetch here had a deadline. The text check sits on the chat send
+ * path and the image check sat on the profile PUT, so a stalled OpenAI call
+ * held the person's request until Node's own timeout — minutes — while the
+ * mobile client gave up at 15 s and showed "taking too long", and the write
+ * then landed anyway from the abandoned request. A timeout is just another
+ * branch of the "error" path this file already degrades through.
+ */
+export const MODERATION_TIMEOUT_MS = 8_000
+
 export async function checkTextContent(content: string): Promise<ModerationCheck> {
   const apiKey = getApiKey()
   if (!apiKey) {
@@ -98,6 +110,7 @@ export async function checkTextContent(content: string): Promise<ModerationCheck
   try {
     const response = await fetch(OPENAI_MODERATION_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(MODERATION_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -148,6 +161,7 @@ export async function checkImageContent(imageUrl: string): Promise<ModerationChe
   try {
     const response = await fetch(OPENAI_MODERATION_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(MODERATION_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,

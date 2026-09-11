@@ -484,6 +484,18 @@
       "mutation": "Put `const [credential, setCredential] = useState<Credential | null>(null)` back inside Row.",
       "observed": "1 failing ('the row hands it up and keeps none of its own'). The defect it pins was found only by driving: approveOnboardingRequest revalidates the page, the approved row leaves the list in the same round trip that produced the password, and a row that has unmounted shows nothing -- toast said approved, badge went 7 to 6, and the credential the copy promises was on screen for zero frames.",
       "date": "2026-09-11"
+    },
+    "photo-moderation-off-the-request-path.test.ts": {
+      "guards": "checkProfilePhoto never calls the vendor on the profile PUT's request path; moderateProfilePhoto runs after the response via after(), and a hide verdict pulls the photo AND re-mirrors User.image; both OpenAI fetches and the Tigris HEAD carry a deadline",
+      "mutation": "A: `const check = await checkImageContent(url)` back inside checkProfilePhoto. B: drop the db.user.update from moderateProfilePhoto's hide branch.",
+      "observed": "A: 1 failing ('never calls the vendor'). B: 1 failing ('a hide verdict pulls the photo and re-mirrors the primary'). The perf pass measured the wall clock: the one write that makes a photo appear waited on OpenAI fetching and scoring the image with no timeout, while the client gave up at 15s and the write then landed anyway from the abandoned request.",
+      "date": "2026-09-11"
+    },
+    "photos.test.ts": {
+      "guards": "ownedPhotoKey / ownedObjectKey bind a URL to the uploader and a folder (exact host, https, decoded, no traversal); the delete route uses ownedObjectKey over an allow-list of folders rather than extractKeyFromUrl",
+      "mutation": "In app/api/mobile/uploads/delete/route.ts, replace the ownedObjectKey lookup with extractKeyFromUrl and a split('/')[1] check.",
+      "observed": "1 failing ('the route uses it, and no longer the loose parser'). Grandfathered guards in the same file (the SSRF cases) predate the registry.",
+      "date": "2026-09-11"
     }
   },
   "grandfathered": [

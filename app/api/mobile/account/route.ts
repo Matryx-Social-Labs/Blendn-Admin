@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { deletePrefix } from "@/lib/tigris"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // DELETE /api/mobile/account — Delete the authenticated user's own account.
@@ -16,8 +17,11 @@ import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/li
 // any dashboard sessions), and mark deletedAt so the account can never
 // be signed back into.
 export async function DELETE(request: NextRequest) {
+  // Declared outside the try so the failure log can name the account -- a
+  // rolled-back erasure of ~20 tables was logged without saying whose.
+  let authUser: Awaited<ReturnType<typeof getAuthenticatedUser>> = null
   try {
-    const authUser = await getAuthenticatedUser(request)
+    authUser = await getAuthenticatedUser(request)
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
@@ -223,9 +227,26 @@ export async function DELETE(request: NextRequest) {
       }),
     ])
 
+    /*
+     * After the transaction, not inside it: storage is not transactional and
+     * a listing failure must not roll back an erasure the database already
+     * accepted. Failure here is logged with the id, and the objects stay
+     * reachable until a retry -- which is the state everything was in
+     * before, now visible rather than silent.
+     */
+    try {
+      const gone = await deletePrefix(`profile/${authUser.userId}/`)
+      logger.info("Account deletion: profile photos removed from storage", { userId: authUser.userId, gone })
+    } catch (error) {
+      logger.error("Account deletion: profile photos NOT removed from storage", {
+        userId: authUser.userId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
     return successResponse({ deleted: true })
   } catch (error) {
-    logger.error("Account deletion error", { error: error instanceof Error ? error.message : String(error) })
+    logger.error("Account deletion error", { userId: authUser?.userId, error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to delete account")
   }
 }
