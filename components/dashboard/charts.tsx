@@ -103,26 +103,45 @@ export type PacingPoint = { daysOut: number; cumulative: number }
 export function PacingChart({
   points,
   capacity,
+  benchmark,
   windowDays = 21,
   empty,
 }: {
   points: PacingPoint[]
   capacity: number | null
+  /** The last event that ran, on the same window: the grey ghost under the live curve. */
+  benchmark?: { title: string; points: PacingPoint[] } | null
   windowDays?: number
   empty?: boolean
 }) {
-  const data = points.map((p) => ({ ...p, x: windowDays - p.daysOut }))
-  const peak = Math.max(capacity ?? 0, ...points.map((p) => p.cumulative), 10)
+  // One row per x, both series on it, so the tooltip reads both at a glance.
+  const ghost = new Map(benchmark?.points.map((p) => [p.daysOut, p.cumulative]) ?? [])
+  const data = points.map((p) => ({ ...p, x: windowDays - p.daysOut, benchmark: ghost.get(p.daysOut) }))
+  const peak = Math.max(
+    capacity ?? 0,
+    ...points.map((p) => p.cumulative),
+    ...(benchmark?.points.map((p) => p.cumulative) ?? []),
+    10
+  )
+  const hint = [
+    capacity ? `capacity ${capacity}` : "no capacity set",
+    benchmark ? `grey is your last event, ${benchmark.title}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
 
   return (
     <ChartFrame
       title="RSVP pacing"
-      hint={capacity ? `capacity ${capacity}` : "no capacity set"}
+      hint={hint}
       empty={empty}
       emptyText="RSVPs plot here as they arrive — publish the event to start the curve."
     >
       <ChartContainer
-        config={{ cumulative: { label: "RSVPs", color: "var(--chart-1)" } }}
+        config={{
+          cumulative: { label: "RSVPs", color: "var(--chart-1)" },
+          benchmark: { label: benchmark?.title ?? "Last event", color: "var(--faint-foreground)" },
+        }}
         className="h-[200px] w-full"
       >
         <LineChart data={data} margin={{ left: 4, right: 12, top: 8 }}>
@@ -187,6 +206,18 @@ export function PacingChart({
               />
             }
           />
+          {benchmark ? (
+            <Line
+              dataKey="benchmark"
+              type="monotone"
+              stroke="var(--faint-foreground)"
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+            />
+          ) : null}
           <Line
             dataKey="cumulative"
             type="monotone"
@@ -522,11 +553,14 @@ export function UtilHeatmap({
   empty?: boolean
 }) {
   const max = Math.max(1, ...counts.flat())
+  // The busiest cell is outlined, so the "Peak window" tile and this picture
+  // are one thing rather than a number and a chart that have to be matched.
+  const peak = counts.flatMap((row, di) => row.map((v, si) => ({ v, di, si }))).find((c) => c.v === max) ?? null
 
   return (
     <ChartFrame
       title="Utilisation by day and time"
-      hint="last 8 weeks"
+      hint={peak ? "last 8 weeks · peak outlined" : "last 8 weeks"}
       empty={empty}
       emptyText="Fills as events are hosted — shows your peak days and times."
     >
@@ -542,11 +576,12 @@ export function UtilHeatmap({
             <span className="self-center">{slot}</span>
             {DAYS.map((day, di) => {
               const value = counts[di]?.[si] ?? 0
+              const isPeak = peak != null && peak.di === di && peak.si === si && value > 0
               return (
                 <div
                   key={day}
-                  title={`${day} ${slot}: ${value} event${value === 1 ? "" : "s"}`}
-                  className="h-6 rounded"
+                  title={`${day} ${slot}: ${value} event${value === 1 ? "" : "s"}${isPeak ? " · peak" : ""}`}
+                  className={isPeak ? "h-6 rounded outline outline-2 outline-offset-2 outline-foreground" : "h-6 rounded"}
                   style={{
                     background:
                       value === 0

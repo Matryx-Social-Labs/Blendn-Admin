@@ -71,6 +71,8 @@ export interface OrganizerOverview {
   nextEvent: NextEvent | null
   pacing: PacingPoint[]
   pacingCapacity: number | null
+  /** The last event that ran, on the same window — the ghost under the live curve. */
+  benchmark: { title: string; points: PacingPoint[] } | null
   ratings: RatingCounts
   noShowRatePct: number | null
   noShowDelta: number | null

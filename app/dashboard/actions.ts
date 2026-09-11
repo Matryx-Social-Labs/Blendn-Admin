@@ -5,6 +5,7 @@ import type { rsvp_status } from "@prisma/client"
 import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
+import { visibleEventsWhere } from "@/lib/event-visibility"
 import { attentionQueues } from "@/lib/attention-queues-query"
 import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
@@ -124,17 +125,24 @@ function buildPacing(
   return points
 }
 
-async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview> {
+async function buildOrganizerOverview(userId: string, role: user_role): Promise<OrganizerOverview> {
+  /*
+   * Organisation-shaped, not identity-shaped (CLAUDE.md, and H2 in the audit):
+   * `organizer_id` records who created the row. A colleague at the same org
+   * saw an empty overview, and a venue owner saw only the events they had
+   * personally created in their own building -- usually none.
+   */
+  const scope = await visibleEventsWhere({ id: userId, role })
   const now = new Date()
   const windowStart = new Date(now.getTime() - 30 * DAY_MS)
   const priorStart = new Date(now.getTime() - 60 * DAY_MS)
   const todayStart = new Date(now)
   todayStart.setHours(0, 0, 0, 0)
-  const pastEvents = { ...eventScope(userId), start_time: { lt: now } }
+  const pastEvents = { ...scope, start_time: { lt: now } }
 
   const [next, previous, ratingSpread, ratingAggregate, chatToday, eventRows] = await Promise.all([
     db.events.findFirst({
-      where: { ...eventScope(userId), status: "published", start_time: { gte: now } },
+      where: { ...scope, status: "published", start_time: { gte: now } },
       orderBy: { start_time: "asc" },
       select: {
         id: true,
@@ -152,6 +160,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
       where: { ...pastEvents, status: "published" },
       orderBy: { start_time: "desc" },
       select: {
+        title: true,
         start_time: true,
         max_capacity: true,
         rsvps: { where: { status: { in: COMMITTED } }, select: { created_at: true } },
@@ -159,11 +168,11 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     }),
     db.event_ratings.groupBy({
       by: ["rating"],
-      where: { event: eventScope(userId) },
+      where: { event: scope },
       _count: { _all: true },
     }),
     db.event_ratings.aggregate({
-      where: { event: eventScope(userId) },
+      where: { event: scope },
       _avg: { rating: true },
       _count: { rating: true },
     }),
@@ -171,11 +180,11 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
       where: {
         deleted_at: null,
         created_at: { gte: todayStart },
-        chat_group: { event: eventScope(userId) },
+        chat_group: { event: scope },
       },
     }),
     db.events.findMany({
-      where: eventScope(userId),
+      where: scope,
       orderBy: { start_time: "desc" },
       take: 25,
       select: {
@@ -232,7 +241,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
      * `repeatAttendees` folds on distinct `event_id` instead.
      */
     db.event_check_ins.findMany({
-      where: { status: { in: ATTENDED }, event: eventScope(userId) },
+      where: { status: { in: ATTENDED }, event: scope },
       select: { user_id: true, event_id: true, kind: true },
     }),
   ])
@@ -249,6 +258,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
   let nextEvent: NextEvent | null = null
   let pacing: PacingPoint[] = []
   let pacingCapacity: number | null = null
+  let benchmark: OrganizerOverview["benchmark"] = null
 
   if (next) {
     const going = next.rsvps.filter((r) => r.status === "going").length
@@ -262,11 +272,12 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
 
     let pacingNote: string | null = null
     if (previous && previous.rsvps.length > 0) {
-      const benchmark = buildPacing(previous.rsvps, previous.start_time, windowDays).find(
-        (p) => p.daysOut === daysOut
-      )
-      if (benchmark && benchmark.cumulative > 0) {
-        const ratio = committed.length / benchmark.cumulative
+      // The whole curve is drawn under the live one; the note reads one point of it.
+      const previousPacing = buildPacing(previous.rsvps, previous.start_time, windowDays)
+      benchmark = { title: previous.title, points: previousPacing }
+      const atThisPoint = previousPacing.find((p) => p.daysOut === daysOut)
+      if (atThisPoint && atThisPoint.cumulative > 0) {
+        const ratio = committed.length / atThisPoint.cumulative
         pacingNote =
           ratio >= 1.1
             ? "Pacing ahead of your last event at this point."
@@ -300,6 +311,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     nextEvent,
     pacing,
     pacingCapacity,
+    benchmark,
     ratings: toRatingCounts(ratingSpread),
     noShowRatePct: round1(noShowNow),
     noShowDelta:
@@ -632,7 +644,14 @@ function dayIndex(date: Date) {
   return (date.getDay() + 6) % 7
 }
 
-async function buildVenueOverview(userId: string): Promise<VenueOverview> {
+async function buildVenueOverview(userId: string, role: user_role): Promise<VenueOverview> {
+  /*
+   * Organisation-shaped, not identity-shaped (CLAUDE.md, and H2 in the audit):
+   * `organizer_id` records who created the row. A colleague at the same org
+   * saw an empty overview, and a venue owner saw only the events they had
+   * personally created in their own building -- usually none.
+   */
+  const scope = await visibleEventsWhere({ id: userId, role })
   const now = new Date()
   const windowStart = new Date(now.getTime() - WINDOW_WEEKS * 7 * DAY_MS)
 
@@ -640,8 +659,7 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
     // An event linked to a venue counts even if its free-text name is null —
     // the link is the stronger statement about where it happened.
     where: {
-      ...eventScope(userId),
-      OR: [{ venue_name: { not: null } }, { venue_id: { not: null } }],
+      AND: [scope, { OR: [{ venue_name: { not: null } }, { venue_id: { not: null } }] }],
     },
     select: {
       id: true,
@@ -678,18 +696,18 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
       db.event_rsvps.count({
         where: {
           status: { in: COMMITTED },
-          event: { ...eventScope(userId), start_time: { lt: now } },
+          event: { ...scope, start_time: { lt: now } },
         },
       }),
       db.event_check_ins.count({
         where: {
           status: { in: ATTENDED },
-          event: { ...eventScope(userId), start_time: { lt: now } },
+          event: { ...scope, start_time: { lt: now } },
         },
       }),
       db.events.count({
         where: {
-          ...eventScope(userId),
+          ...scope,
           status: "published",
           start_time: { gte: now, lte: new Date(now.getTime() + 14 * DAY_MS) },
         },
@@ -697,25 +715,25 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
       db.event_rsvps.count({
         where: {
           status: { in: COMMITTED },
-          event: { ...eventScope(userId), start_time: { gte: recentFrom, lt: now } },
+          event: { ...scope, start_time: { gte: recentFrom, lt: now } },
         },
       }),
       db.event_check_ins.count({
         where: {
           status: { in: ATTENDED },
-          event: { ...eventScope(userId), start_time: { gte: recentFrom, lt: now } },
+          event: { ...scope, start_time: { gte: recentFrom, lt: now } },
         },
       }),
       db.event_rsvps.count({
         where: {
           status: { in: COMMITTED },
-          event: { ...eventScope(userId), start_time: { gte: priorFrom, lt: recentFrom } },
+          event: { ...scope, start_time: { gte: priorFrom, lt: recentFrom } },
         },
       }),
       db.event_check_ins.count({
         where: {
           status: { in: ATTENDED },
-          event: { ...eventScope(userId), start_time: { gte: priorFrom, lt: recentFrom } },
+          event: { ...scope, start_time: { gte: priorFrom, lt: recentFrom } },
         },
       }),
     ])
@@ -772,14 +790,13 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
 
       // Tone is about what needs attention, not a ranking: a low rating across
       // several organisers' events is a facilities problem worth surfacing.
+      // Only a low rating is an alarm; a quiet room is a fact, not a fault.
       const tone: VenueRow["tone"] =
         averageRating !== null && averageRating < 3.5
           ? "destructive"
           : nightsPerWeek >= 2
             ? "success"
-            : nightsPerWeek < 0.5
-              ? "destructive"
-              : "neutral"
+            : "neutral"
 
       return {
         name,
@@ -802,11 +819,11 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
         tone,
         note:
           averageRating !== null && averageRating < 3.5
-            ? "ratings low"
+            ? "ratings skew low"
             : nightsPerWeek >= 2
-              ? "performing"
+              ? "busiest room"
               : nightsPerWeek < 0.5
-                ? "underused"
+                ? `quiet — ${inWindow.length} in ${WINDOW_WEEKS} weeks`
                 : "steady",
       }
     })
@@ -901,7 +918,7 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
   const { role, userId } = await dashboardActor()
   try {
     if (role === "app_admin") return await buildAdminOverview(range)
-    if (role === "venue_owner") return await buildVenueOverview(userId)
+    if (role === "venue_owner") return await buildVenueOverview(userId, role)
     /*
      * Sponsors used to fall through to the line below — an organiser overview
      * scoped to `organizer_id = <their own user id>`, which is never theirs. So
@@ -909,7 +926,7 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
      * a quiet month rather than a screen asking the wrong question.
      */
     if (role === "sponsor") return await buildSponsorOverview()
-    return await buildOrganizerOverview(userId)
+    return await buildOrganizerOverview(userId, role)
   } catch (error) {
     logger.error("Failed to build dashboard overview", {
       role,

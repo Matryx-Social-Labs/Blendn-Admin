@@ -9,7 +9,6 @@ import Link from "next/link"
 import {
   IconCalendarPlus,
   IconPlus,
-  IconStar,
 } from "@tabler/icons-react"
 
 import { PacingChart } from "@/components/dashboard/charts"
@@ -42,7 +41,12 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
     {
       key: "status",
       label: "Status",
-      render: (r) => <Badge variant={statusTone(r.status)}>{r.status.replace(/_/g, " ")}</Badge>,
+      // Published is the norm and unmarked. The old version put a brand-orange
+      // badge on every published row -- fourteen of them, shouting the default.
+      render: (r) =>
+        r.status === "published" ? null : (
+          <Badge variant={statusTone(r.status)}>{r.status.replace(/_/g, " ")}</Badge>
+        ),
     },
     { key: "going", label: "Going", align: "right", secondary: true },
     {
@@ -69,8 +73,8 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
           value={nextEvent.fillPct === null ? formatNumber(nextEvent.going) : formatPct(nextEvent.fillPct)}
           unit={
             nextEvent.fillPct === null
-              ? `going · ${nextEvent.daysOut === 0 ? "today" : `${nextEvent.daysOut} days to go`}`
-              : `filled · ${nextEvent.daysOut === 0 ? "today" : `${nextEvent.daysOut} days to go`}`
+              ? `going · ${daysToGo(nextEvent.daysOut)}`
+              : `filled · ${daysToGo(nextEvent.daysOut)}`
           }
           progress={nextEvent.fillPct}
           description={[
@@ -104,27 +108,25 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
         />
       )}
 
-      <div className="grid gap-6 @3xl/main:grid-cols-[3fr_2fr]">
+      {/*
+        The chart takes the width until there are ratings to show beside it.
+        An organiser with no ratings yet used to get an empty dashed box for
+        40% of the top row, and the tile below already says "no ratings yet".
+      */}
+      <div className={data.ratingCount ? "grid gap-6 @3xl/main:grid-cols-[3fr_2fr]" : "grid gap-6"}>
         <PacingChart
           points={data.pacing}
           capacity={data.pacingCapacity}
+          benchmark={data.benchmark}
           windowDays={data.pacing.length ? data.pacing[0].daysOut : 21}
           empty={!nextEvent || data.pacing.every((p) => p.cumulative === 0)}
         />
-        <div className="flex flex-col gap-3">
-          <SectionTitle hint={data.ratingCount ? `avg ${data.averageRating}` : undefined}>
-            Ratings
-          </SectionTitle>
-          {data.ratingCount === 0 ? (
-            <EmptyState
-              compact
-              icon={<IconStar />}
-              description="Ratings arrive after your first event ends — attendees rate 1–5 in the app."
-            />
-          ) : (
+        {data.ratingCount ? (
+          <div className="flex flex-col gap-3">
+            <SectionTitle hint={`avg ${data.averageRating}`}>Ratings</SectionTitle>
             <RatingBars counts={data.ratings} />
-          )}
-        </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-1">
@@ -175,7 +177,8 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
           }
           footer={
             <span>
-              {formatNumber(data.events.length)} events · fill is — when no capacity is set
+              {formatNumber(data.events.length)} events · published is unmarked · fill is — when no
+              capacity is set
             </span>
           }
         />
@@ -183,3 +186,6 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
     </div>
   )
 }
+
+const daysToGo = (days: number) =>
+  days === 0 ? "today" : days === 1 ? "1 day to go" : `${days} days to go`
