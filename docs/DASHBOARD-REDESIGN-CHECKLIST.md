@@ -40,8 +40,8 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/moderation/reports` | — | ✅ E10 | |
 | `/dashboard/events` (list) | ✅ 46d00fb, 380ba27 | ✅ 2026-09-10 | server-fetched, zero column fixed |
 | `/dashboard/events/curate` | ✅ #276-era W5 + design review 2026-08-24 (6→9/10) | ✅ browser, 2026-08-24 | form → `components/ui/form`, timezone bug |
-| `/dashboard/events/new` | ◐ b63008e readiness strip only | ✅ 2026-09-10 (strip) | **the form body never went through the chain — next** |
-| `/dashboard/events/[id]/edit` | ◐ same strip | ◐ | same form as `/new` |
+| `/dashboard/events/new` | ✅ 081bd48 (mockup `event-authoring-20260911`) | ✅ 2026-09-11, published + edited + cancelled, rows read back | four sections + sticky publish rail; Status select, required long description, category wall, organiser-settable Featured all cut |
+| `/dashboard/events/[id]/edit` | ✅ 081bd48 | ✅ 2026-09-11 | same form; rail says Published, Save changes, Cancel event… |
 | `/dashboard/events/[id]` (overview, live, attendees tabs) | ◐ #156 attendance panel + occupancy hero, #340 publish line | ✅ E8/E9 | tabs never designed as one screen |
 | `/dashboard/events/[id]/messaging` | — | ✅ E10 | organiser room view |
 | `/dashboard/events/[id]/feedback` | — | ✅ E12 | digest + disclosure floor |
@@ -69,8 +69,8 @@ gates, the specialists, and a drive, before the next one starts.
 |---|---|---|---|
 | `/dashboard` (organiser overview) | — | ✅ E4 | admin overview was redesigned; this branch of `getDashboardOverview` was not |
 | `/dashboard/events` | ✅ shared with admin | ✅ | organiser scope = org membership |
-| `/dashboard/events/new` | ◐ strip only | ✅ strip | **first in the queue** |
-| `/dashboard/events/[id]/edit` | ◐ strip only | ◐ | with `/new` |
+| `/dashboard/events/new` | ✅ 081bd48 | ✅ 2026-09-11 | shared with admin |
+| `/dashboard/events/[id]/edit` | ✅ 081bd48 | ✅ 2026-09-11 | |
 | `/dashboard/events/[id]` + tabs | ◐ | ✅ E4 | |
 | `/dashboard/events/[id]/messaging` | — | ✅ | |
 | `/dashboard/events/[id]/feedback` | — | ✅ | |
@@ -100,7 +100,7 @@ gates, the specialists, and a drive, before the next one starts.
 
 ## The queue, in order
 
-1. `/dashboard/events/new` and `/events/[id]/edit` — the form body (organiser)
+1. ~~`/dashboard/events/new` and `/events/[id]/edit`~~ — done 2026-09-11 (081bd48)
 2. `/dashboard` for organiser and venue owner — the two overview branches
 3. `/dashboard/events/[id]` — overview, live, attendees, messaging, feedback as one screen family
 4. `/dashboard/attendees`, `/dashboard/chatrooms`, `/dashboard/organisation`
