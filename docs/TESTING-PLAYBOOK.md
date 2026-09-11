@@ -428,9 +428,25 @@ inspect_screen  → the view hierarchy, before targeting anything
 run             → one full flow as inline YAML, not a string of single commands
 ```
 
-Two facts that have each cost a run: the bundle id is
-**`com.matryxsociallabs.blendn`** (not `com.blendn.app`), and Maestro **text
-selectors are full-string regex** — `"Check in"` does not match "Check in now".
+**Both platforms, every time — iOS AND Android.** One simulator is not the
+client. The product ships to both stores and has had Android-only defects, so
+a journey driven only on the iPhone simulator is half-driven: run the same
+flow on an Android emulator (`list_devices` shows both; boot one with
+`emulator -avd …` if none is up) and read the row back from each. If Android
+cannot be run, the §8 line says so — `Driven: iOS only — <reason>` — and the
+ticket stays open.
+
+Three facts that have each cost a run: the bundle id is
+**`com.matryxsociallabs.blendn`** (not `com.blendn.app`), Maestro **text
+selectors are full-string regex** — `"Check in"` does not match "Check in now"
+— and if the MCP answers *"Device became unreachable"* on every call, its
+driver session is dead: **restart the MCP** (kill the `maestro mcp` java
+process; the harness respawns it) rather than falling back to the CLI, and
+**open the Maestro Viewer** (`http://127.0.0.1:9999/`) before running flows so
+the run can be watched. Also on iOS: a password field with
+`textContentType="newPassword"` gets covered by the simulator's *Automatic
+Strong Password* sheet — fill it first, before any keyboard is up, and verify
+the value in `inspect_screen`.
 Mobile flows declare `appId` and open with `launchApp`. Read `cheat_sheet`
 before authoring anything unfamiliar.
 
@@ -544,9 +560,25 @@ inspect_screen   → the view hierarchy, before targeting anything
 run              → one full flow as inline YAML, not a string of single commands
 ```
 
-Two facts that have each cost a run: the bundle id is
-**`com.matryxsociallabs.blendn`** (not `com.blendn.app`), and Maestro **text
-selectors are full-string regex** — `"Check in"` does not match "Check in now".
+**Both platforms, every time — iOS AND Android.** One simulator is not the
+client. The product ships to both stores and has had Android-only defects, so
+a journey driven only on the iPhone simulator is half-driven: run the same
+flow on an Android emulator (`list_devices` shows both; boot one with
+`emulator -avd …` if none is up) and read the row back from each. If Android
+cannot be run, the §8 line says so — `Driven: iOS only — <reason>` — and the
+ticket stays open.
+
+Three facts that have each cost a run: the bundle id is
+**`com.matryxsociallabs.blendn`** (not `com.blendn.app`), Maestro **text
+selectors are full-string regex** — `"Check in"` does not match "Check in now"
+— and if the MCP answers *"Device became unreachable"* on every call, its
+driver session is dead: **restart the MCP** (kill the `maestro mcp` java
+process; the harness respawns it) rather than falling back to the CLI, and
+**open the Maestro Viewer** (`http://127.0.0.1:9999/`) before running flows so
+the run can be watched. Also on iOS: a password field with
+`textContentType="newPassword"` gets covered by the simulator's *Automatic
+Strong Password* sheet — fill it first, before any keyboard is up, and verify
+the value in `inspect_screen`.
 Mobile flows declare `appId` and open with `launchApp`. Read `cheat_sheet`
 before authoring anything unfamiliar. `run_on_cloud` when a real device matters;
 `list_cloud_devices` returns valid `{device_model, device_os}` pairs and they
