@@ -255,7 +255,7 @@ export function PublishRail(props: PublishRailProps) {
 export function PublishBar(props: Omit<PublishRailProps, "card">) {
   const left = props.readiness.blockers.length
   return (
-    <div className="@4xl/main:hidden sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-border bg-background/90 px-4 py-2.5 text-[0.8125rem] backdrop-blur md:-mx-6">
+    <div className="@4xl/main:hidden sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-border bg-background/90 px-4 py-2.5 text-[0.8125rem] backdrop-blur lg:-mx-6 lg:px-6">
       <span className="flex-1 truncate text-muted-foreground">
         {left === 0
           ? "Everything the app needs is here"
