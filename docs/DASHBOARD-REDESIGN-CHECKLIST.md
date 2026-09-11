@@ -36,8 +36,8 @@ gates, the specialists, and a drive, before the next one starts.
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
 | `/dashboard` (admin overview) | ✅ 5c3e7f9 | ✅ Chrome DevTools 2026-09-10 | five panels, attention strip |
-| `/dashboard/moderation` | — | ✅ E10 (API + dashboard data) | E17 prose cut only |
-| `/dashboard/moderation/reports` | — | ✅ E10 | |
+| `/dashboard/moderation` | ✅ 2026-09-11 (chips → words; mockup skipped — DataTable pattern) | ✅ E10; 2026-09-11 with two seeded flags | erased author reads "Deleted account" |
+| `/dashboard/moderation/reports` | ✅ 2026-09-11 (same) | ✅ E10 | |
 | `/dashboard/events` (list) | ✅ 46d00fb, 380ba27 | ✅ 2026-09-10 | server-fetched, zero column fixed |
 | `/dashboard/events/curate` | ✅ #276-era W5 + design review 2026-08-24 (6→9/10) | ✅ browser, 2026-08-24 | form → `components/ui/form`, timezone bug |
 | `/dashboard/events/new` | ✅ 081bd48 (mockup `event-authoring-20260911`) | ✅ 2026-09-11, published + edited + cancelled, rows read back | four sections + sticky publish rail; Status select, required long description, category wall, organiser-settable Featured all cut |
@@ -47,21 +47,21 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/events/[id]/feedback` | ✅ d1096f7 (mockup `event-feedback-20260911`) | ✅ E12; 2026-09-11 | sentiment bar is the hero; sections with rules; stars only when rated |
 | `/dashboard/chatrooms` | ✅ (see organizer) | ✅ E10 | E17 fixed the 403-as-empty state |
 | `/dashboard/users` | ✅ 380ba27, 99bf013, f2aa14e | ✅ 2026-09-11 local + read back | deleted-account state, status Select |
-| `/dashboard/organisers`, `/organisers/[id]` | ✅ 503dead (index) / — (detail) | ✅ index | detail page not designed |
+| `/dashboard/organisers`, `/organisers/[id]` | ✅ 503dead (index) / ✅ a638b48 (detail, `RoleUserDetail`) | ✅ index; detail 2026-09-11 | |
 | `/dashboard/venues` (admin index), `/venues/[id]`, `/venues/new`, `/venues/[id]/claim` | ✅ c1ff7fb, 634bfae (index) / ✅ 2026-09-11 (detail, new, claim — shared with venue owner) | ✅ index 2026-09-10 | |
-| `/dashboard/venue-owners`, `/venue-owners/[id]` | ✅ 503dead (index) / — | ✅ index | |
-| `/dashboard/leads` | — | ✅ E3 | E17 prose cut |
+| `/dashboard/venue-owners`, `/venue-owners/[id]` | ✅ 503dead (index) / ✅ a638b48 (detail) | ✅ index | shares `RoleUserDetail` |
+| `/dashboard/leads` | ✅ a638b48 | ✅ E3 | status as a word; duplicate h2 cut |
 | `/dashboard/claims`, `/claims/venues`, `/claims/brands` | ✅ W5 + design review 2026-08-24 (events) / ◐ (venues, brands share the queue) | ✅ E7 | one queue, three kinds |
 | `/dashboard/onboarding` (applications) | ✅ ac0962f, ce62887, 2fd92dd | ✅ 2026-09-11 | credential panel, evidence order |
-| `/dashboard/sponsors` (brands) | — | ✅ E6 | |
-| `/dashboard/creative-review` | — | ✅ E6 | |
-| `/dashboard/charges` | — | ✅ E6 | |
-| `/dashboard/organisations` | — | ✅ E7 | |
-| `/dashboard/categories` | — | ✅ E3 | merge keeps interests (W14) |
-| `/dashboard/amenities` | — | ✅ #298 | |
-| `/dashboard/reports` | — | ✅ E12 (exports) | |
-| `/dashboard/audit` | — | ✅ E3 | |
-| `/dashboard/settings` | — | ✅ E3 | |
+| `/dashboard/sponsors` (brands) | ✅ a638b48 | ✅ E6 | duplicates section only when there are any |
+| `/dashboard/creative-review` | ✅ a638b48 | ✅ E6 | rule beside the buttons |
+| `/dashboard/charges` | ✅ a638b48 | ✅ E6 | MetricTiles + divided ledger |
+| `/dashboard/organisations` | ✅ a638b48 | ✅ E7 | divided list, controls to the right |
+| `/dashboard/categories` | ✅ a638b48 | ✅ E3 | merge keeps interests (W14); counts as text |
+| `/dashboard/amenities` | ✅ a638b48 | ✅ #298 | list first, add form last |
+| `/dashboard/reports` | ✅ a638b48 | ✅ E12 (exports) | radio list, one orange button |
+| `/dashboard/audit` | ✅ a638b48 | ✅ E3 | mono words; en-GB pinned (hydration) |
+| `/dashboard/settings` | ✅ a638b48 | ✅ E3 | one primary |
 
 ## organizer
 
@@ -106,4 +106,6 @@ gates, the specialists, and a drive, before the next one starts.
 3. ~~`/dashboard/events/[id]` — overview, live, attendees, messaging, feedback~~ — done 2026-09-11 (8d6f547, d1096f7)
 4. ~~`/dashboard/attendees`, `/dashboard/chatrooms`, `/dashboard/organisation`~~ — done 2026-09-11
 5. ~~`/dashboard/venues/[id]`, `/venues/new`, `/venues/[id]/claim` (venue owner)~~ — done 2026-09-11
-6. Admin remainder: moderation (+reports), sponsors / creative-review / charges, organisations, organisers/[id], venue-owners/[id], leads, categories, amenities, reports, audit, settings
+6. ~~Admin remainder: moderation (+reports), sponsors / creative-review / charges, organisations, organisers/[id], venue-owners/[id], leads, categories, amenities, reports, audit, settings~~ — done 2026-09-11 (a638b48 + moderation follow-up)
+
+**The queue is empty.** Every dashboard route except `/login` has been through the chain. Next: `/design-review` over the live pages, then the testing routine resumes (six gates, specialists, Maestro drives, read-backs).
