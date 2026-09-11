@@ -65,7 +65,10 @@ function ChartFrame({
 
           They are siblings on screen; they are siblings in the outline now.
         */}
-        <h2 className="text-sm font-bold">{title}</h2>
+        {/* Same size as SectionTitle. A chart panel and a table section are
+            siblings on the overview; they read as siblings only if their
+            headings are the same size. */}
+        <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
         <span className="flex items-baseline gap-3">
           {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
           {action}
