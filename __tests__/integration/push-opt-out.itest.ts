@@ -1,22 +1,39 @@
+/**
+ * `push_enabled` decides whether a push goes out — evaluated by Postgres,
+ * through the real sender.
+ *
+ * The unit test pins the SHAPE of the filter. Its own docstring says why the
+ * shape matters: an inclusive filter (`push_enabled: true`) would drop
+ * everyone with no `profiles` row, because `User.profile` is optional. That
+ * is a claim about how Postgres evaluates a relation filter, so only Postgres
+ * can confirm it — and only through `sendPushNotification`, because the
+ * selector is private and a test that writes its own filter proves nothing
+ * about the module (the first version of this file did exactly that, and a
+ * control that inverted the module's filter passed it).
+ *
+ * Expo's client is mocked: with a synthetic token the real one answers
+ * DeviceNotRegistered and the sender deletes the row — the stale-token
+ * cleanup working, which would read here as the switch failing.
+ */
+const sent = jest.fn(async (msgs: { to: string }[]) => msgs.map(() => ({ status: "ok", id: "t" })))
+jest.mock("expo-server-sdk", () => {
+  class Expo {
+    static isExpoPushToken(t: string) {
+      return t.startsWith("ExponentPushToken[")
+    }
+    chunkPushNotifications(m: unknown[]) {
+      return [m]
+    }
+    sendPushNotificationsAsync(chunk: { to: string }[]) {
+      return sent(chunk)
+    }
+  }
+  return { Expo }
+})
+
 import { sendPushNotification } from "@/lib/push-notifications"
 import { closeDb, db, makeUser, testId } from "./helpers"
 
-/**
- * `push_enabled` decides whether a push goes out — evaluated by Postgres.
- *
- * The unit test pins the SHAPE of the filter (`NOT: { user: { profile: { is:
- * { push_enabled: false } } } }`). The filter's own docstring says why the
- * shape matters: an inclusive filter would drop everyone with no `profiles`
- * row. That is a claim about how Postgres evaluates a relation filter, and
- * only Postgres can confirm it. Three people, one token each: opted out,
- * opted in, and no profile row at all.
- *
- * `sendPushNotification` is asked, not the private selector, so this is the
- * real send path: it returns false when nobody is reachable and never calls
- * Expo for an opted-out person (the fake token below would be rejected as
- * invalid before any network call anyway — this asserts on selection, which
- * is the part the switch controls).
- */
 const users: string[] = []
 
 afterAll(async () => {
@@ -26,6 +43,8 @@ afterAll(async () => {
   await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
 })
+
+beforeEach(() => sent.mockClear())
 
 async function person(label: string, profile: { push_enabled: boolean } | null) {
   const id = await makeUser(testId(label))
@@ -37,35 +56,27 @@ async function person(label: string, profile: { push_enabled: boolean } | null) 
   return id
 }
 
+const push = (userId: string) =>
+  sendPushNotification({ userId, title: "t", body: "b", data: { type: "event_update" } })
+
 describe("the switch is honoured on the send path", () => {
-  it("opted out: no token is selected, so nothing is sent", async () => {
+  it("opted out: nothing is sent, and the token is left alone for when it is turned back on", async () => {
     const id = await person("po-off", { push_enabled: false })
-    await expect(
-      sendPushNotification({ userId: id, title: "t", body: "b", data: { type: "event_update" } })
-    ).resolves.toBe(false)
-    // And the token is untouched: nothing was attempted, so nothing was
-    // cleaned up. Turning the switch back on must find it again.
+    await expect(push(id)).resolves.toBe(false)
+    expect(sent).not.toHaveBeenCalled()
     await expect(db.push_tokens.count({ where: { user_id: id } })).resolves.toBe(1)
   })
 
-  it("opted in: the token is selected", async () => {
+  it("opted in: the push goes to that token", async () => {
     const id = await person("po-on", { push_enabled: true })
-    // Selection only. Calling the sender here reaches Expo with a synthetic
-    // token, Expo answers DeviceNotRegistered, and the sender then DELETES
-    // the row -- the stale-token cleanup working -- which is a different
-    // thing from the switch and would make this assertion read as the switch
-    // failing. (That is exactly what the first version of this test did.)
-    const tokens = await db.push_tokens.findMany({
-      where: { user_id: id, NOT: { user: { profile: { is: { push_enabled: false } } } } },
-    })
-    expect(tokens).toHaveLength(1)
+    await expect(push(id)).resolves.toBe(true)
+    expect(sent).toHaveBeenCalledTimes(1)
+    expect(sent.mock.calls[0][0].map((m) => m.to)).toEqual([`ExponentPushToken[itest-${id}]`])
   })
 
   it("no profile row at all: still reachable — the column's default is true", async () => {
     const id = await person("po-none", null)
-    const tokens = await db.push_tokens.findMany({
-      where: { user_id: id, NOT: { user: { profile: { is: { push_enabled: false } } } } },
-    })
-    expect(tokens).toHaveLength(1)
+    await expect(push(id)).resolves.toBe(true)
+    expect(sent).toHaveBeenCalledTimes(1)
   })
 })
