@@ -44,7 +44,7 @@ it has been driven end to end on the surface a real person uses, and the row it
 should have written has been read back. State it:
 
 ```
-8 · Driven:     <maestro flow + result>  |  <dashboard journey driven>
+8 · Driven:     <maestro flow + result, iOS>  |  <same flow, Android>  |  <dashboard journey driven>
     Read back:  <the SELECT, and what it returned>
     Or:         not driven — <the specific reason>, and the ticket stays open
 ```

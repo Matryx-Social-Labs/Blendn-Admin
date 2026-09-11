@@ -123,7 +123,7 @@ written, which is the same as not noticing.
 **And before saying it is done:**
 
 ```
-8 · Driven:     <maestro flow path + result>  |  <dashboard journey driven>
+8 · Driven:     <maestro flow + result, iOS>  |  <same flow, Android>  |  <dashboard journey driven>
     Read back:  <the SELECT, and what it returned>
     Or:         not driven — <the specific reason>, and the ticket stays open
 ```
