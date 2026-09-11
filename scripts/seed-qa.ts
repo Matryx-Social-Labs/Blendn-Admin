@@ -742,7 +742,12 @@ async function main() {
     const hashed = await bcrypt.hash(generatePassword(), HASH_COST)
     const u = await db.user.upsert({
       where: { email: a.email },
-      update: { role: "attendee", deletedAt: null, suspended_at: null },
+      // `password` here too. The dashboard upsert above resets it on every
+      // run; this one did not, so an attendee kept whatever random password
+      // its first seed generated and the "same password" promised below was
+      // false for every re-seed — the mobile sign-in a tester was given
+      // never worked.
+      update: { password: hashed, role: "attendee", deletedAt: null, suspended_at: null },
       create: {
         email: a.email,
         name: a.name,
@@ -931,11 +936,27 @@ async function main() {
       "great turnout for a tuesday",
       "reach me on 98450 12345 if you get lost",
     ]
+    /*
+     * A handle may already belong to somebody who is no longer an attendee —
+     * an erased account keeps its membership row (history survives erasure by
+     * design) and therefore its pseudonym, and the room's unique is on
+     * (chat_group_id, anonymous_name). The first re-seed after a deletion
+     * drive died on exactly that. Hand out the handles that are free.
+     */
+    const members = await db.chat_group_members.findMany({
+      where: { chat_group_id: room.id },
+      select: { user_id: true, anonymous_name: true },
+    })
+    const taken = new Set(members.map((m) => m.anonymous_name))
+    const handleOf = new Map(members.map((m) => [m.user_id, m.anonymous_name]))
+    const free = HANDLES.filter((h) => !taken.has(h))
     for (let i = 0; i < Math.min(attendeeIds.length, HANDLES.length); i++) {
+      const handle = handleOf.get(attendeeIds[i]) ?? free.shift()
+      if (!handle) break
       await db.chat_group_members.upsert({
         where: { chat_group_id_user_id: { chat_group_id: room.id, user_id: attendeeIds[i] } },
         update: {},
-        create: { chat_group_id: room.id, user_id: attendeeIds[i], anonymous_name: HANDLES[i] },
+        create: { chat_group_id: room.id, user_id: attendeeIds[i], anonymous_name: handle },
       })
       const existing = await db.chat_messages.findFirst({
         where: { chat_group_id: room.id, user_id: attendeeIds[i], content: lines[i] },
