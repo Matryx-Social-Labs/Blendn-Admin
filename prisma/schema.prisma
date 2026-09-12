@@ -984,6 +984,11 @@ model mobile_refresh_tokens {
   expires_at  DateTime  @db.Timestamptz(6)
   created_at  DateTime  @default(now()) @db.Timestamptz(6)
   revoked_at  DateTime? @db.Timestamptz(6)
+  /// The row that rotation issued in this one's place. Lets a replay of a
+  /// just-rotated token — a client that never got the new pair — be answered
+  /// with a fresh pair and the orphaned successor revoked, instead of a 401
+  /// that signs the device out. See verifyRefreshToken.
+  replaced_by String?   @db.Uuid
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 

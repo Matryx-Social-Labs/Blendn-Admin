@@ -559,6 +559,14 @@
       "reverted": true,
       "date": "2026-09-12",
       "note": "Eighth and ninth strictUndefinedChecks outages, both on the safety path; SCRUM-99."
+    },
+    "integration/refresh-replay.itest.ts": {
+      "guards": "that a refresh token replayed inside the grace window after rotation is answered with a fresh pair and its orphaned successor revoked, that the orphan is then refused, and that a replay long after rotation still ends the family",
+      "mutation": "in lib/mobile-auth.ts verifyRefreshToken, replace the successor revocation inside the grace branch with `return null` (the previous behaviour)",
+      "observed": "1 failing ('re-issues on a replay inside the grace window…' — retry returned 401). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Found by driving two phones for half an hour: the emulator's refresh timed out and the session died. SCRUM-101."
     }
   },
   "grandfathered": [
