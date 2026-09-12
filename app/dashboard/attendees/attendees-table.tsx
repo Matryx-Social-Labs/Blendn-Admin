@@ -4,7 +4,6 @@ import { IconUsers } from "@tabler/icons-react"
 
 import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState } from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
 import { formatSince } from "@/lib/dashboard-format"
 
 /**
@@ -31,14 +30,23 @@ export interface AttendeeRow {
 
 const columns: Column<AttendeeRow>[] = [
   { key: "name", label: "Person", sortType: "string", primary: true },
-  { key: "attended", label: "Attended", align: "right", sortType: "number" },
+  {
+    key: "attended",
+    label: "Attended",
+    align: "right",
+    sortType: "number",
+    // Bold from the second event on. That is the repeat signal; it used to be
+    // a brand-orange "repeat" chip in its own column, and orange is for the
+    // one primary action on a screen.
+    render: (r) => <span className={r.repeat ? "font-bold" : undefined}>{r.attended}</span>,
+  },
   { key: "rsvps", label: "RSVPs", align: "right", secondary: true, sortType: "number" },
   {
     key: "noShows",
     label: "No-shows",
     align: "right",
     sortType: "number",
-    render: (r) => <span className={r.noShows > 1 ? "text-warning" : undefined}>{r.noShows}</span>,
+    render: (r) => <span className={r.noShows > 1 ? "font-bold text-warning" : undefined}>{r.noShows}</span>,
   },
   {
     key: "lastAttendedAt",
@@ -52,13 +60,6 @@ const columns: Column<AttendeeRow>[] = [
     sortValue: (r) => (r.lastAttendedAt ? new Date(r.lastAttendedAt) : null),
     render: (r) => formatSince(r.lastAttendedAt),
     secondary: true,
-  },
-  {
-    key: "repeat",
-    label: "",
-    hideable: false,
-    sortable: false,
-    render: (r) => (r.repeat ? <Badge>repeat</Badge> : null),
   },
 ]
 

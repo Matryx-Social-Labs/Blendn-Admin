@@ -47,14 +47,15 @@ export default async function ClaimVenuePage({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-[length:var(--text-h1)] font-bold">Claim {venue.name}</h1>
-        <p className="text-[0.8125rem] text-muted-foreground">
+      {/* h2: the site header owns the page's only h1. */}
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
+        <span className="text-[0.8125rem] text-muted-foreground">
           {venueTypeLabel(venue.venue_type)}
           {[venue.address, venue.city].filter(Boolean).length
             ? ` · ${[venue.address, venue.city].filter(Boolean).join(", ")}`
             : ""}
-        </p>
+        </span>
       </div>
 
       <VenueClaimForm

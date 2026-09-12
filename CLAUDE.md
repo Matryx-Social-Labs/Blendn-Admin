@@ -11,6 +11,49 @@ Next.js 15 (App Router) web admin dashboard + REST API backend for **Blendn**, a
 
 Both surfaces share one PostgreSQL database via Prisma.
 
+## Design and testing — read this first
+
+Two documents, two gates.
+
+`docs/DESIGN-CHAIN.md` is what every dashboard screen goes through before its
+implementation files are touched: operator questions and cuts
+(`ecc dashboard-builder`), a direction with a per-screen memorable detail
+(`ecc frontend-design-direction`), and a mockup on disk (`/design-html`).
+`docs/DASHBOARD-REDESIGN-CHECKLIST.md` lists every screen and which have been
+through it. **The chain is gated.** Do not edit a file under `app/`,
+`components/` or `lib/` for a screen until steps 1, 2 and 3 have produced their
+artefacts, and state those artefacts in the response before the first edit:
+
+```
+Screen: /dashboard/<x>
+1 · Questions:  1. …  2. …  3. …    Cutting: … because …
+2 · Direction:  purpose · audience · tone · memorable detail · constraints
+3 · Mockup:     <path>  (or: skipped — copy-only change, no layout effect)
+```
+
+`docs/TESTING-PLAYBOOK.md` starts once the screen exists: driving it in a
+browser and measuring it, the six gates, the specialist fan-out (coverage EVERY
+time, plus schema, latency, API, security, comment-rot, a11y by trigger), how to
+brief a specialist so it returns findings rather than advice, and the local
+loop. It is not a menu. The expensive failures on this project have all been one
+shape — a check that was available and was not run — and the playbook's last
+section lists what each check has already caught.
+
+**And a second gate, before calling anything done.** A flow is not tested until
+it has been driven end to end on the surface a real person uses, and the row it
+should have written has been read back. State it:
+
+```
+8 · Driven:     <maestro flow + result, iOS>  |  <same flow, Android>  |  <dashboard journey driven>
+    Read back:  <the SELECT, and what it returned>
+    Or:         not driven — <the specific reason>, and the ticket stays open
+```
+
+Green unit, integration and a screenshot are not that. Every defect this project
+has shipped passed all three — the interest graph nobody wrote, the preference
+that stored `true` when somebody said no, the push token that survived sign-out.
+Each was caught by driving the product and reading the database. See §8.
+
 ## Common Commands
 
 ```bash

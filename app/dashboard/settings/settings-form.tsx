@@ -43,7 +43,7 @@ function Section({
   return (
     <section className="grid gap-6 border-b border-border py-6 @3xl/main:grid-cols-[minmax(180px,240px)_minmax(0,480px)]">
       <div className="flex flex-col gap-1">
-        <h2 className="text-[0.9375rem] font-bold">{title}</h2>
+        <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
         <p className="text-[0.78125rem] text-muted-foreground">{description}</p>
       </div>
       <div className="flex flex-col gap-3.5">{children}</div>
@@ -121,7 +121,10 @@ function ProfileSection({ account }: { account: Account }) {
       </div>
 
       <div>
+        {/* Secondary: the password change below is the action this page
+            exists for, and a screen gets one brand-orange button. */}
         <Button
+          variant="secondary"
           disabled={!dirty || pending || name.trim().length < 2}
           onClick={() =>
             start(async () => {
@@ -290,7 +293,7 @@ function SessionsSection({
         dashboard sign-out does not touch the mobile app's 30-day refresh
         tokens, and someone who has lost a phone needs exactly that.
       */}
-      <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+      <div className="divide-y divide-border border-y border-border">
         <SessionRow
           icon={<IconDeviceDesktop className="size-[17px]" />}
           label="Dashboard"

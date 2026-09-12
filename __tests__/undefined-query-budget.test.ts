@@ -105,7 +105,11 @@ const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\
  */
 function prismaCallBodies(src: string): string[] {
   const bodies: string[] = []
-  for (const m of src.matchAll(/\b(?:db|tx)\.\w+\.\w+\s*\(/g)) {
+  // Whitespace allowed around the dots: `db.audit_logs\n    .create(` is how
+  // lib/audit-log.ts is written, and the tighter pattern walked past its
+  // `details: entry.details ?? undefined` — so every audit row without
+  // details silently failed to write. Found in the dev log, not by a test.
+  for (const m of src.matchAll(/\b(?:db|tx)\s*\.\s*\w+\s*\.\s*\w+\s*\(/g)) {
     let depth = 0
     for (let i = m.index! + m[0].length - 1; i < src.length; i++) {
       if (src[i] === "(") depth++
@@ -126,7 +130,8 @@ function countIn(src: string): number {
   return prismaCallBodies(clean).reduce(
     (n, body) =>
       n +
-      (body.match(/:\s*\w[\w.?]*\s*\?\?\s*undefined/g) ?? []).length +
+      (body.match(/:\s*\w[\w.?]*\s*(\?\?|\|\|)\s*undefined/g) ?? []).length +
+      (body.match(/:\s*\w[\w.?]*\s+as\s+[^,}\n]*\|\s*undefined/g) ?? []).length +
       (body.match(/:\s*undefined\b/g) ?? []).length,
     0
   )
@@ -160,8 +165,16 @@ describe("no explicit undefined reaches a Prisma call", () => {
       await db.events.findFirst({ where: { id: maybeId ?? undefined } })
       await db.profiles.update({ where: { id }, data: { bio: undefined } })
       await tx.event_check_ins.create({ data: { device_info: info ?? undefined } })
+      await db.chat_messages.create({ data: { metadata: metadata || undefined } })
+      await db.chat_messages.create({ data: { metadata: metadata as Prisma.InputJsonValue | undefined } })
+      db.audit_logs
+        .create({ data: { details: entry.details ?? undefined } })
     `
-    expect(countIn(hazards)).toBe(3)
+    // The fourth and fifth are the ones that shipped: `metadata || undefined`
+    // in the group send path and `metadata as … | undefined` in the event
+    // room's, which the `??`-only pattern walked straight past. The sixth is
+    // the audit helper's call split across a newline.
+    expect(countIn(hazards)).toBe(6)
 
     // And that it is not simply matching everything it is shown.
     expect(countIn(`const x = { id: undefined }; await fetch(url)`)).toBe(0)

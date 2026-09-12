@@ -1,12 +1,9 @@
-import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
-import { IconMapPin } from "@tabler/icons-react"
 
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
-import { EmptyState, MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
+import { MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
 import { VenueManage } from "./venue-manage"
-import { Badge } from "@/components/ui/badge"
 import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
@@ -56,6 +53,7 @@ export default async function VenueDetailPage({
     where: { id },
     select: {
       id: true,
+      updated_at: true,
       name: true,
       address: true,
       city: true,
@@ -163,36 +161,84 @@ export default async function VenueDetailPage({
   const returning = [...repeatOrganisers.values()].filter((n) => n > 1).length
 
 
+  // One title line. Status, capacity and owner are words beside the name —
+  // none is an action, so none is a chip.
+  const titleMeta = [
+    venue.deleted_at ? "retired" : venue.status,
+    venue.capacity ? `${formatNumber(venue.capacity)} capacity` : null,
+    venue.claimed_at
+      ? isAdmin && venue.owner_org
+        ? venue.owner_org.display_name
+        : null
+      : // Only an admin ever sees an unclaimed venue, so this is a prompt to
+        // act rather than a status nobody can change.
+        "unclaimed",
+  ].filter(Boolean)
+  // The address line without the city repeated: "12th Main Rd, Bengaluru,
+  // Bengaluru" is what the seed produces and what an owner types.
+  const address =
+    venue.address && venue.city && venue.address.endsWith(venue.city)
+      ? venue.address
+      : [venue.address, venue.city].filter(Boolean).join(" · ")
+
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-0.5">
+        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
           <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
-          <p className="flex items-center gap-1.5 text-[0.8125rem] text-muted-foreground">
-            <IconMapPin className="size-3.5" />
-            {[venue.address, venue.city].filter(Boolean).join(", ") || "No address recorded"}
-          </p>
+          <span className="text-[0.8125rem] text-muted-foreground">{titleMeta.join(" · ")}</span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={venue.status === "active" ? "default" : "secondary"}>{venue.status}</Badge>
-          {venue.deleted_at ? <Badge variant="destructive">Retired</Badge> : null}
-          {venue.claimed_at ? (
-            isAdmin && venue.owner_org ? (
-              <Badge variant="outline">{venue.owner_org.display_name}</Badge>
-            ) : null
-          ) : (
-            // Only an admin ever sees an unclaimed venue, so this is a prompt
-            // to act rather than a status nobody can change.
-            <Badge variant="outline">Unclaimed</Badge>
-          )}
-        </div>
+        <p className="text-[0.8125rem] text-muted-foreground">
+          {address || "No address recorded"}
+        </p>
       </div>
 
       {/* Above the window metrics, deliberately: everything below is about a
           date range someone chose, and this is about right now. */}
       <BuildingOccupancyPanel occupancy={building} />
 
+      <div className="flex flex-wrap gap-1">
+        <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />
+        <MetricTile label="Attended" value={formatNumber(totalAttended)} hint="GPS check-ins" />
+        <MetricTile
+          label="Turn-up"
+          value={turnUp === null ? null : formatPct(turnUp)}
+          hint={turnUp === null ? "needs a past event" : "of committed RSVPs"}
+        />
+        <MetricTile
+          label="Returning organisers"
+          value={returning}
+          hint={returning === 0 ? "nobody has come back yet" : "booked here more than once"}
+        />
+      </div>
+
+      <div className="grid gap-8 @3xl/main:grid-cols-[2fr_1fr] @3xl/main:items-start">
+        <section className="flex flex-col gap-3 border-t border-border pt-5">
+          <SectionTitle hint={rows.length ? `${rows.length} in window` : undefined}>
+            Events here
+          </SectionTitle>
+          <VenueEventsTable rows={rows} />
+        </section>
+        <section className="flex flex-col gap-3 border-t border-border pt-5">
+          <SectionTitle hint={ratingTotal ? `avg ${averageRating} · all-time` : "all-time"}>
+            Ratings
+          </SectionTitle>
+          {ratingTotal === 0 ? (
+            <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
+          ) : (
+            <RatingBars counts={ratings} />
+          )}
+        </section>
+      </div>
+
+      {/* The record last. "Is the pin right" is the third question a venue
+          owner asks of this page, after "how busy" and "who books here" — and
+          it used to be the first block, a form above every number. */}
       <VenueManage
+        // Remount on every saved change, so the fields show what was stored
+        // rather than what was typed — router.refresh() alone left a form
+        // seeded once at mount showing the pre-save value.
+        key={venue.updated_at.toISOString()}
         orgs={ownerOptions}
         venue={{
           id: venue.id,
@@ -208,52 +254,6 @@ export default async function VenueDetailPage({
         }}
         isAdmin={isAdmin}
       />
-
-      <div className="flex flex-wrap gap-1">
-        <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />
-        <MetricTile label="Attended" value={formatNumber(totalAttended)} hint="GPS check-ins" />
-        <MetricTile
-          label="Turn-up"
-          value={turnUp === null ? null : formatPct(turnUp)}
-          hint={turnUp === null ? "needs a past event" : "of committed RSVPs"}
-        />
-        <MetricTile
-          label="Capacity"
-          value={venue.capacity ?? null}
-          hint={venue.capacity ? "declared" : "none declared"}
-        />
-        <MetricTile
-          label="Returning organisers"
-          value={returning}
-          hint={returning === 0 ? "nobody has come back yet" : "booked here more than once"}
-        />
-      </div>
-
-      <div className="grid gap-6 @3xl/main:grid-cols-[2fr_1fr]">
-        <div className="flex flex-col gap-3">
-          <SectionTitle hint={rows.length ? `${rows.length} in window` : undefined}>
-            Events here
-          </SectionTitle>
-          <VenueEventsTable rows={rows} />
-        </div>
-        <div className="flex flex-col gap-3">
-          <SectionTitle hint={ratingTotal ? `avg ${averageRating}` : undefined}>Ratings</SectionTitle>
-          {ratingTotal === 0 ? (
-            <EmptyState
-              compact
-              description="No ratings for events at this venue yet. Ratings are all-time, not limited to the date range."
-            />
-          ) : (
-            <RatingBars counts={ratings} />
-          )}
-        </div>
-      </div>
-
-      <p className="text-[0.75rem] text-faint-foreground">
-        <Link href="/dashboard/venues" className="hover:text-foreground hover:underline">
-          ← All venues
-        </Link>
-      </p>
     </div>
   )
 }

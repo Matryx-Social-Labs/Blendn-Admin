@@ -13,16 +13,5 @@ export default async function CreativeReviewPage() {
 
   const rows = await getCreativeQueue()
 
-  return (
-    <div className="flex flex-col gap-5">
-      {/* What the two buttons actually do, which is not what they say: neither
-          starts a campaign, and one stops a running one. */}
-      <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-        Approving does not switch a campaign on — the organiser decides when it runs.
-        Rejecting stops it, so a campaign already sending an older revision goes quiet
-        immediately.
-      </p>
-      <CreativeQueue rows={rows} />
-    </div>
-  )
+  return <CreativeQueue rows={rows} />
 }

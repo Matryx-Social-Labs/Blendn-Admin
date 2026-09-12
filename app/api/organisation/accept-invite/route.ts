@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     windowMs: 15 * 60 * 1000,
     maxRequests: 20,
     keyGenerator: (r) =>
-      `org:accept-invite:${r.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"}`,
+      `org:accept-invite:${clientIpFrom(r.headers)}`,
   })
   if (limited) return limited
 

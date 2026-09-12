@@ -6,7 +6,7 @@ import {
 
 export default function Loading() {
   return (
-    <div className="flex flex-col gap-6 py-6">
+    <div className="flex flex-col gap-5">
       <PageHeaderSkeleton />
       <StatCardsSkeleton />
       <TableSkeleton rows={5} columns={4} />

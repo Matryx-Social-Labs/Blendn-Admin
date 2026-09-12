@@ -37,15 +37,21 @@ export default async function OnboardingPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* The submission rule, which decides how much weight a row deserves and
-          is invisible from the row itself. */}
-      <p className="text-[0.8125rem] text-muted-foreground">
-        A company email address was accepted as-is; a personal one had to supply a
-        GSTIN or a website. Neither is proof — both are shown so you can weigh them.
-      </p>
+      {/*
+        The paragraph explaining the submission rule is gone.
 
+        It said a company address was accepted as-is and a personal one had to
+        supply a GSTIN or a website — which is true, and is what the badges on
+        every row already show. Explaining the gate above the queue is
+        explaining the product inside the product to somebody who has read it a
+        hundred times, and it pushed the first decision below the fold.
+
+        What it was really carrying — "neither is proof" — now lives where it
+        changes a decision: the domain badge is a credential, an aggregator
+        domain is a warning, and the two are no longer the same colour.
+      */}
       {!emailConfigured() ? (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-[0.8125rem] leading-6">
+        <div className="rounded-lg border border-warning/40 bg-warning/5 p-4 text-[0.8125rem] leading-6">
           <strong className="font-semibold">Email is not configured.</strong> Applicants cannot
           confirm their address, and approving one will not send them their sign-in details — the
           password is shown to you once instead, to pass on yourself. Set{" "}
@@ -62,7 +68,7 @@ export default async function OnboardingPage() {
         />
       ) : (
         <>
-          <OnboardingQueue rows={pending.rows} />
+          <OnboardingQueue rows={pending.rows} generatedAt={new Date().toISOString()} />
           {pending.total > pending.rows.length ? (
             /* A cap the screen does not mention is an admin who reads the page,
                believes it is the queue, and stops looking. */

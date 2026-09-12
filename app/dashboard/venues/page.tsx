@@ -1,9 +1,8 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { IconAlertTriangle, IconBuildingStore, IconCalendar } from "@tabler/icons-react"
+import { IconAlertTriangle, IconBuildingStore } from "@tabler/icons-react"
 
 import { EmptyState, MetricTile, RatingBars } from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { getAuth } from "@/lib/auth"
 import { formatDay, formatNumber } from "@/lib/dashboard-format"
@@ -16,12 +15,6 @@ import { VenueRecords } from "./venue-records"
 
 export const dynamic = "force-dynamic"
 
-const toneVariant = {
-  success: "default",
-  neutral: "secondary",
-  destructive: "destructive",
-} as const
-
 /**
  * Venue owner: one section per venue, never blended.
  *
@@ -29,7 +22,12 @@ const toneVariant = {
  * table and this screen expands each row, so recomputing would be two versions
  * of the same arithmetic that could drift apart.
  */
-export default async function MyVenuesPage() {
+export default async function MyVenuesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  const params = await searchParams
   const session = await getAuth()
   if (!session?.user) redirect("/login")
 
@@ -47,7 +45,9 @@ export default async function MyVenuesPage() {
    * page both roles land on is already shared.
    */
   if (session.user.role === "app_admin") {
-    return <VenueRecords venues={await getVenueRecords()} />
+    const q = typeof params.q === "string" ? params.q.trim() : ""
+    const { venues, total } = await getVenueRecords(q)
+    return <VenueRecords venues={venues} total={total} q={q} />
   }
   if (session.user.role !== "venue_owner") redirect("/dashboard")
 
@@ -101,13 +101,28 @@ export default async function MyVenuesPage() {
       {overview.venues.map((venue) => {
         const lowSkew = venue.ratings[0] + venue.ratings[1] > venue.ratings[3] + venue.ratings[4]
         return (
-          <section
-            key={venue.name}
-            className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5"
-          >
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
-              <Badge variant={toneVariant[venue.tone]}>{venue.note}</Badge>
+          /* A section with a rule per building, not a card. The note is a
+             word beside the name — destructive only when it is the ratings. */
+          <section key={venue.name} className="flex flex-col gap-4 border-t border-border pt-5">
+            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+              <h2 className="text-[length:var(--text-h2)] font-bold">
+                {venue.id ? (
+                  <Link href={`/dashboard/venues/${venue.id}`} className="underline-offset-4 hover:underline">
+                    {venue.name}
+                  </Link>
+                ) : (
+                  venue.name
+                )}
+              </h2>
+              <span
+                className={
+                  venue.tone === "destructive"
+                    ? "text-[0.8125rem] font-bold text-destructive"
+                    : "text-[0.8125rem] text-muted-foreground"
+                }
+              >
+                {venue.note}
+              </span>
             </div>
 
             <div className="flex flex-wrap gap-1">
@@ -127,37 +142,33 @@ export default async function MyVenuesPage() {
 
             <div className="grid gap-5 @2xl/main:grid-cols-2">
               {venue.ratings.every((n) => n === 0) ? (
-                <EmptyState
-                  compact
-                  description="No ratings for events at this venue yet."
-                />
+                <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
               ) : (
                 <RatingBars counts={venue.ratings} />
               )}
 
-              {venue.nextBooking ? (
-                <div className="flex flex-col gap-2">
-                  <p className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-                    Next booking
+              <div className="flex flex-col gap-1">
+                <p className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+                  Next booking
+                </p>
+                {venue.nextBooking ? (
+                  <p className="text-[0.8125rem]">
+                    <Link
+                      href={`/dashboard/events/${venue.nextBooking.id}`}
+                      className="font-medium underline-offset-4 hover:underline"
+                    >
+                      {venue.nextBooking.name}
+                    </Link>
+                    <span className="text-muted-foreground">
+                      {" "}· {formatDay(venue.nextBooking.startAt)} · {formatNumber(venue.nextBooking.going)} going
+                    </span>
                   </p>
-                  <Link
-                    href={`/dashboard/events/${venue.nextBooking.id}`}
-                    className="rounded-lg border border-border p-3 transition-colors hover:bg-accent"
-                  >
-                    <p className="font-medium">{venue.nextBooking.name}</p>
-                    <p className="text-[0.8125rem] text-muted-foreground">
-                      {formatDay(venue.nextBooking.startAt)} ·{" "}
-                      {formatNumber(venue.nextBooking.going)} going
-                    </p>
-                  </Link>
-                </div>
-              ) : (
-                <EmptyState
-                  compact
-                  icon={<IconCalendar />}
-                  description="No upcoming bookings for this room — it drops off organisers' radar without listed availability."
-                />
-              )}
+                ) : (
+                  <p className="text-[0.8125rem] text-muted-foreground">
+                    Nothing booked — a room with no listed availability drops off organisers&apos; radar.
+                  </p>
+                )}
+              </div>
             </div>
 
             {lowSkew ? (

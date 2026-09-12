@@ -56,14 +56,17 @@ export default async function EditEventPage({ params }: EventPageProps) {
         venue: { select: { owner_org_id: true } },
       },
     }),
+    // With the parent — see the same query in `../new/page.tsx`. The picker
+    // groups by it; an alphabetised flat list put `Sports` and `IPL screening`
+    // ~1000px apart as peers.
     db.categories.findMany({
       select: {
         id: true,
         name: true,
+        parent_id: true,
+        parent: { select: { name: true } },
       },
-      orderBy: {
-        name: "asc",
-      },
+      orderBy: [{ parent: { name: "asc" } }, { name: "asc" }],
     }),
   ])
 
@@ -106,6 +109,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
     <EventEditor
       categories={categories}
       amenities={amenities}
+      canFeature={session.user.role === "app_admin"}
       initialEvent={{
         id: event.id,
         title: event.title,

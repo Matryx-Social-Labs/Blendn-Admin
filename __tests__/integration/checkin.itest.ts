@@ -196,6 +196,16 @@ describe("re-entry", () => {
 
     // One person, however many times they went in and out.
     expect((await getOccupancy(eventId)).uniqueAttendance).toBe(1)
+
+    // And the row says so on its own: the return reuses the row, and the old
+    // check-out timestamp stayed on it beside `checked_in` — which is the
+    // shape the Banter tab's live section filters out. Found by leaving and
+    // coming back on a phone.
+    const row = await db.event_check_ins.findFirst({
+      where: { event_id: eventId, user_id: smoker.id },
+      select: { status: true, check_out_time: true },
+    })
+    expect(row).toEqual({ status: "checked_in", check_out_time: null })
   })
 
   it("checking in twice without leaving does not double-count", async () => {
@@ -204,6 +214,40 @@ describe("re-entry", () => {
     await doCheckIn(eventId, keen.token)
     await doCheckIn(eventId, keen.token)
     expect((await getOccupancy(eventId)).inside).toBe(1)
+  })
+})
+
+describe("a room ban survives walking out and back in", () => {
+  it("keeps a human's ban and lets a lifted suspension's through", async () => {
+    // Rejoin set `active` on any non-active membership, so an organiser's ban
+    // lasted until the next check-in. `banned_by` tells the two apart.
+    const eventId = await liveEvent({ capacity: 100 })
+    const banned = await attendee("banned")
+    const suspended = await attendee("suspended")
+    await doCheckIn(eventId, banned.token)
+    await doCheckIn(eventId, suspended.token)
+    const group = await db.chat_groups.findFirstOrThrow({ where: { event_id: eventId }, select: { id: true } })
+
+    await db.chat_group_members.update({
+      where: { chat_group_id_user_id: { chat_group_id: group.id, user_id: banned.id } },
+      data: { status: "banned", banned_at: new Date(), banned_by: "organiser" },
+    })
+    await db.chat_group_members.update({
+      where: { chat_group_id_user_id: { chat_group_id: group.id, user_id: suspended.id } },
+      data: { status: "banned" },
+    })
+    await doCheckOut(eventId, banned.token)
+    await doCheckOut(eventId, suspended.token)
+
+    expect((await doCheckIn(eventId, banned.token)).status).toBe(200)
+    expect((await doCheckIn(eventId, suspended.token)).status).toBe(200)
+
+    const rows = await db.chat_group_members.findMany({
+      where: { chat_group_id: group.id, user_id: { in: [banned.id, suspended.id] } },
+      select: { user_id: true, status: true },
+    })
+    expect(rows.find((r) => r.user_id === banned.id)?.status).toBe("banned")
+    expect(rows.find((r) => r.user_id === suspended.id)?.status).toBe("active")
   })
 })
 

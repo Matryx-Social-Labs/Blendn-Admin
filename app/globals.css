@@ -178,8 +178,21 @@
   --warning: oklch(0.8 0.14 80);
   /* Brand purple, lifted for contrast on ink. */
   --info: oklch(0.62 0.16 316);
-  /* A third text level below muted, for hints that must not compete. */
-  --faint-foreground: oklch(0.55 0.012 320);
+  /*
+   * A third text level below muted, for hints that must not compete.
+   *
+   * 0.55 measured **3.99:1 on `--background` and 3.67:1 on `--card`** — both
+   * under the 4.5:1 AA floor, at 12-13px where the large-text exemption does
+   * not apply. It is not a decorative token: it carries the nav group labels,
+   * every table header, the funnel's conversion percentages and the em-dash
+   * that stands in for a zero, so the failure was on nearly every screen.
+   *
+   * 0.60 is the lowest lightness that clears AA on both surfaces (4.92 and
+   * 4.52); measured in the browser rather than computed, because oklch to sRGB
+   * is not a lightness-to-luminance identity. "Must not compete" survives —
+   * muted is 7.82:1, so the two levels are still clearly apart.
+   */
+  --faint-foreground: oklch(0.60 0.012 320);
   --surface-raised: oklch(0.245 0.008 320);
   --border: oklch(1 0 0 / 10%);
   --border-strong: oklch(1 0 0 / 18%);

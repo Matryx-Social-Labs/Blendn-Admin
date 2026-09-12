@@ -59,7 +59,19 @@ function SignInForm() {
     setError(null)
     try {
       const result = await signIn("credentials", { email, password, redirect: false })
-      if (result?.error) {
+      /*
+       * The sign-in route is rate limited per network, and NextAuth reports a
+       * 429 as `ok: false` with no `error` string. This branch used to check
+       * `error` alone, push to the dashboard, get bounced straight back to
+       * /login by the middleware, and show nothing — a locked-out operator
+       * saw the form reappear and typed the password again. Found by signing
+       * in as four people in one afternoon.
+       */
+      if (result?.status === 429) {
+        setError(RATE_LIMITED)
+        return
+      }
+      if (result?.error || !result?.ok) {
         // One message for a wrong email and a wrong password. Distinguishing
         // them confirms which addresses have accounts.
         setError("That email and password don't match an operator account.")
@@ -67,8 +79,17 @@ function SignInForm() {
       }
       router.push(callbackUrl)
       router.refresh()
-    } catch {
-      setError("Couldn't reach the server. Try again in a moment.")
+    } catch (err) {
+      /*
+       * next-auth's client does `new URL(data.url)` on whatever the callback
+       * returned. The rate limiter answers 429 with a JSON body and no `url`,
+       * so the client throws `TypeError: Invalid URL` before `status` is ever
+       * returned — which is how a lockout read as "couldn't reach the server".
+       * A real network failure throws too, with "Failed to fetch" / "Load
+       * failed", so the message is the only thing that tells them apart.
+       */
+      const invalidUrl = err instanceof TypeError && /Invalid URL/i.test(err.message)
+      setError(invalidUrl ? RATE_LIMITED : "Couldn't reach the server. Try again in a moment.")
     } finally {
       setLoading(false)
     }
@@ -164,6 +185,9 @@ function SignInForm() {
     </div>
   )
 }
+
+const RATE_LIMITED =
+  "Too many sign-in attempts from this network. Wait fifteen minutes and try again."
 
 export default function LoginPage() {
   return (

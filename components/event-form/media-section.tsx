@@ -306,7 +306,7 @@ export function MediaSection({
   const sensors = useSensors(useSensor(PointerSensor))
 
   return (
-    <FormSection title="Gallery" defaultOpen={false}>
+    <FormSection title="Gallery" level={3}>
       {/*
         This said "additional images shown on the event detail page", which
         undersold it twice: video has always been supported here, and the app

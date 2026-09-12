@@ -238,7 +238,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
         })}
       </ol>
 
-      <div className="rounded-lg border border-border bg-card p-5">
+      <div className="border-t border-border pt-5">
         {stage === "Basics" ? (
           <div className="flex flex-col gap-5">
             <div className="flex flex-col gap-2">

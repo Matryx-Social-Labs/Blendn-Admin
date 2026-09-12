@@ -52,9 +52,18 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath }: RoleU
             className="h-11 max-w-sm rounded-xl pl-11"
           />
         </div>
-        <Button onClick={() => setModalOpen(true)} className="rounded-full">
+        {/*
+          Secondary, not the filled brand button.
+
+          It mints an account and shows a password once. That is the most
+          consequential control on a read screen, and it was also the loudest
+          thing on it — the only saturated element on a page whose job is
+          finding a host. Prominence should track how often something is
+          wanted, not how much it does.
+        */}
+        <Button variant="outline" onClick={() => setModalOpen(true)} className="rounded-full">
           <IconUserPlus className="size-4" />
-          Generate Credentials
+          Generate credentials
         </Button>
       </div>
 
@@ -64,15 +73,16 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath }: RoleU
             <TableRow>
               <TableHead className="px-3">Name</TableHead>
               <TableHead className="px-3">Email</TableHead>
-              <TableHead className="px-3">Events</TableHead>
-              <TableHead className="px-3">Joined</TableHead>
+              <TableHead className="px-3 text-right">Published</TableHead>
+              <TableHead className="px-3 text-right">Share</TableHead>
+              <TableHead className="px-3">Last event</TableHead>
               <TableHead className="w-24 px-3">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                   {search
                     ? `No ${roleLabel.toLowerCase()}s match "${search}".`
                     : `No ${roleLabel.toLowerCase()}s yet. Use Generate Credentials to add one.`}
@@ -96,11 +106,39 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath }: RoleU
                       </div>
                     </TableCell>
                     <TableCell className="px-3 text-sm text-muted-foreground">{user.email}</TableCell>
-                    <TableCell className="px-3">
-                      <span className="text-sm">{user._count.organized_events}</span>
+                    <TableCell className="px-3 text-right">
+                      {/*
+                        Published, with drafts beside it rather than folded in.
+                        `_count.organized_events` counted every row whatever its
+                        status, so ten drafts and nothing live read as the
+                        busiest host on the platform.
+                      */}
+                      <span className="text-sm tabular-nums">{user.published}</span>
+                      {user.drafts > 0 ? (
+                        <span className="ml-1.5 text-xs text-muted-foreground">
+                          +{user.drafts} draft
+                        </span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="px-3 text-right">
+                      {user.published === 0 ? (
+                        <span className="text-sm text-faint-foreground">—</span>
+                      ) : (
+                        <span className="text-sm tabular-nums">{user.sharePct}%</span>
+                      )}
                     </TableCell>
                     <TableCell className="px-3 text-sm text-muted-foreground">
-                      {format(new Date(user.createdAt), "MMM d, yyyy")}
+                      {/*
+                        Last PUBLISHED event, not the join date. "Joined 5 Sept"
+                        is the same for everybody seeded on one afternoon and
+                        never changes again; "never published" is the row that
+                        wants a nudge.
+                      */}
+                      {user.lastEventAt ? (
+                        format(new Date(user.lastEventAt), "d MMM yyyy")
+                      ) : (
+                        <span className="text-faint-foreground">Never published</span>
+                      )}
                     </TableCell>
                     <TableCell className="px-3">
                       <Button asChild variant="outline" size="sm" className="rounded-full">

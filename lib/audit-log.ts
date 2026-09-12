@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { logger } from "./logger"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
@@ -23,7 +24,16 @@ export function auditLog(entry: AuditLogEntry): void {
         action: entry.action,
         resource: entry.resource,
         resource_id: entry.resourceId ?? null,
-        details: entry.details ?? undefined,
+        /*
+         * Conditional spread, not `?? undefined`. With `strictUndefinedChecks`
+         * on, an explicit undefined here made every audit write WITHOUT
+         * details throw — `signout`, among others — and the catch below
+         * logged it and moved on, so the accountability record had holes
+         * nobody was told about. Seen in the dev log as "Audit log write
+         * failed"; the ratchet had missed it because this call is split
+         * across a newline.
+         */
+        ...(entry.details !== undefined && { details: entry.details }),
         ip_address: entry.ipAddress ?? null,
       },
     })
@@ -33,12 +43,11 @@ export function auditLog(entry: AuditLogEntry): void {
 }
 
 /**
- * Extract IP address from request headers
+ * The address written onto an audit row. Same reader as the rate limiters:
+ * the last hop is the one the platform's edge added, the first is whatever
+ * the client sent, and an audit trail that records a spoofable address is
+ * evidence of nothing.
  */
 export function getRequestIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  )
+  return clientIpFrom(request.headers)
 }

@@ -28,7 +28,10 @@ export async function GET(
 
     // Get the user's public profile
     const user = await db.user.findUnique({
-      where: { id: userId },
+      // A deleted account is nobody to look at. Without this the anonymised
+      // row served as a profile — `identityVisible: true`, a member-since
+      // date, an attendance count — to anyone who kept the id.
+      where: { id: userId, deletedAt: null },
       select: {
         id: true,
         name: true,

@@ -59,6 +59,22 @@ import { join } from "path"
  * smaller and sharper instrument than widening the scan to every member
  * expression, which measured **220 hits across 50 files** and would have been
  * noise a reviewer learns to skip.
+ *
+ * ## Two more it did not see, 2026-09-12
+ *
+ * **The baseline grandfathered a live outage.** `report/route.ts -> description`
+ * was in the list below as "fine" from the day it was taken; `description` is
+ * `z.string().optional()` and the app never sends it, so no message report
+ * from the phone had ever been written. A baseline taken blind is a list of
+ * things to read, not a list of things that are safe.
+ *
+ * **A one-line `data: { a, b, c }` was invisible.** The line regex wanted the
+ * shorthand on its own line, so `peer-ratings/route.ts`'s single-line create
+ * with a bare optional `note` was never counted — and every rating without a
+ * note 500'd. The scan now looks inside the block regardless of layout, with
+ * `...( … )` conditional spreads dropped first so the converted form is not
+ * counted as the hazard it replaced. The eight files that surfaced were each
+ * read: every one is a required or computed value.
  */
 const ROOT = join(__dirname, "..")
 
@@ -70,28 +86,36 @@ const ROOT = join(__dirname, "..")
  */
 const BASELINE: Record<string, string[]> = {
   "app/api/events/[id]/announcements/route.ts": ["content"],
+  "app/api/events/[id]/chat/moderation/[flagId]/route.ts": ["action"],
   "app/api/events/[id]/chat/moderation/route.ts": ["limit", "page", "total"],
   "app/api/events/[id]/sponsored-messages/route.ts": ["content", "interval_minutes", "sponsor_id"],
   "app/api/events/route.ts": ["description", "timezone", "title"],
   "app/api/mobile/auth/signup/route.ts": ["email", "name"],
+  "app/api/mobile/chat/groups/[chatGroupId]/messages/[messageId]/reactions/route.ts": ["emoji"],
   "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts": ["content", "type"],
   "app/api/mobile/events/[eventId]/chat/route.ts": ["anonymous_name", "content", "type"],
   "app/api/mobile/events/[eventId]/checkin/route.ts": ["anonymous_name"],
+  // `rating` is required by the schema and `issue` is defaulted in the
+  // destructure; `note`, the optional one, is a conditional spread.
+  "app/api/mobile/events/[eventId]/peer-ratings/route.ts": ["issue", "rating"],
   "app/api/mobile/message-requests/route.ts": ["message"],
-  "app/api/mobile/messages/[messageId]/report/route.ts": ["description", "reason"],
+  "app/api/mobile/messages/[messageId]/report/route.ts": ["reason"],
   "app/api/onboarding/apply/route.ts": ["kind", "tier"],
   "app/dashboard/events/[id]/feedback/actions.ts": ["category", "sentiment"],
   "app/dashboard/events/curate/actions.ts": ["geofence"],
+  "app/dashboard/users/actions.ts": ["role"],
+  "lib/admin-role-actions.ts": ["email", "name", "role", "status"],
   "lib/amenity-actions.ts": ["name"],
+  "lib/category-actions.ts": ["slug"],
   "lib/charge-actions.ts": ["currency"],
   "lib/event-claim-actions.ts": ["flags"],
   "lib/mobile-auth.ts": ["email", "provider"],
   "lib/onboarding-actions.ts": ["domain", "status"],
-  "lib/org-actions.ts": ["role"],
-  "lib/poll-actions.ts": ["question"],
+  "lib/org-actions.ts": ["domain", "role"],
+  "lib/poll-actions.ts": ["kind", "label", "position", "question"],
   "lib/push-notifications.ts": ["title"],
   "lib/sponsor-actions.ts": ["name", "name_key"],
-  "lib/sponsored-scheduler.ts": ["type"],
+  "lib/sponsored-scheduler.ts": ["failures", "type"],
   "lib/upload-grant-actions.ts": ["key"],
   "lib/venue-actions.ts": ["name"],
 }
@@ -101,15 +125,33 @@ function stripComments(src: string): string {
 }
 
 /** The brace-matched body of the object starting at `start`. */
-function braceBlock(src: string, start: number): string {
+function braceBlock(src: string, start: number, open = "{", close = "}"): string {
   let depth = 1
   let i = start
   while (i < src.length && depth > 0) {
-    if (src[i] === "{") depth++
-    else if (src[i] === "}") depth--
+    if (src[i] === open) depth++
+    else if (src[i] === close) depth--
     i++
   }
   return src.slice(start, i)
+}
+
+/**
+ * Drop every `...( … )` — the conditional-spread form a hazard is converted
+ * into — so `...(note !== undefined && { note })` does not read as a bare
+ * `note`. Paren-matched, not a negated character class: the guard rule from
+ * R16 applies to this scanner as much as to any other.
+ */
+function withoutConditionalSpreads(block: string): string {
+  let out = ""
+  let i = 0
+  for (;;) {
+    const j = block.indexOf("...(", i)
+    if (j < 0) return out + block.slice(i)
+    out += block.slice(i, j)
+    const inner = braceBlock(block, j + 4, "(", ")")
+    i = j + 4 + inner.length
+  }
 }
 
 function sourceFiles(): string[] {
@@ -134,8 +176,10 @@ function scan(): Record<string, string[]> {
     const src = stripComments(readFileSync(abs, "utf8"))
     const names = new Set<string>()
     for (const m of src.matchAll(/\bdata\s*:\s*\{/g)) {
-      const block = braceBlock(src, (m.index ?? 0) + m[0].length)
-      for (const s of block.matchAll(/^\s{2,}([a-z_][a-z0-9_]*),\s*$/gm)) names.add(s[1])
+      const block = withoutConditionalSpreads(braceBlock(src, (m.index ?? 0) + m[0].length))
+      // A bare identifier bounded by `{`/`,` before and `,`/`}` after, on its
+      // own line or inline — `x: y,` is not matched, `y` follows a colon.
+      for (const s of block.matchAll(/(?:^|[{,])\s*([a-z_][a-z0-9_]*)\s*(?=[,}])/gm)) names.add(s[1])
     }
     if (names.size) found[rel] = [...names].sort()
   }

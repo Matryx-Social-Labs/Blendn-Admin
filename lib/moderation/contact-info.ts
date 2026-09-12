@@ -1,32 +1,29 @@
 /**
- * Spotting contact details in a pseudonymous room.
+ * Spotting contact details in a pseudonymous room — and removing them there.
  *
- * ## What this is not
+ * ## The decision, and what it replaced
  *
- * It is **not a filter**, and it cannot be one. Every deterministic detector has
- * a next bypass — `9876543210` becomes `nine eight seven`, becomes `n1ne e1ght`,
- * becomes `🅝🅘🅝🅔`, becomes "the number of fingers on two hands, minus one" —
- * and each tightening catches more innocent messages on the way past. A filter
- * that blocks teaches the boundary in one message and then loses sight of the
- * behaviour entirely, which is strictly worse than not blocking: you get the
- * evasion *and* an empty flag stream.
+ * This module was written as a *suspicion* and not a filter: the sender was
+ * warned, the server flagged, nothing was blocked. The argument was that every
+ * deterministic detector has a next bypass — `9876543210` becomes `nine eight
+ * seven`, becomes `n1ne e1ght` — and that a block teaches the boundary in one
+ * message and then loses sight of the behaviour, leaving the evasion *and* an
+ * empty flag stream.
  *
- * So this returns a *suspicion*, the client warns before sending, and the
- * server records a flag. A false positive costs one tap.
+ * On 2026-09-12 the product owner decided the other way for rooms, after a
+ * drive showed a seeded phone number sitting in a live room, visible to
+ * everyone, for hours until a moderator acted. The room's promise is that
+ * nobody can be reached outside it without both agreeing; a number on screen
+ * breaks that for as long as it is on screen. So in a **room** a message with
+ * a number, an address, a handle or a DM link is hidden on write — the sender
+ * is told, nobody else sees it — and still flagged, so the moderator keeps the
+ * pattern and can restore a false positive. The evasion argument loses only
+ * the message that was hidden; it keeps the flag.
  *
- * ## What the harm actually is
- *
- * Not "a phone number was transmitted". Two distinct things:
- *
- * 1. **Someone posting another person's details.** Doxxing, and undetectable
- *    here — the string for "my number" and "her number" is identical. This
- *    catches it only incidentally; the real remedy is the report button.
- * 2. **Moving a conversation off-platform**, where there is no block, no report
- *    and no moderation. That is the one worth a nudge, and it is why the warning
- *    is addressed to the *sender* rather than hidden from the reader.
- *
- * Sharing your own number is your identity to give. The nudge says "the room is
- * anonymous, are you sure", not "you may not".
+ * **DMs are not rooms.** `lib/dm-moderation.ts` reads this module as a
+ * boolean and lets the message through with a flag: two people who chose
+ * each other can share a number, and the harm the header above described —
+ * the doxxing case — is the report button's job there.
  *
  * ## Addresses are deliberately not detected
  *
@@ -203,20 +200,19 @@ export function findContactInfo(content: string): ContactInfoFinding[] {
 }
 
 /**
- * The moderation verdict, which is always `flag` and never `hide`.
+ * The room verdict: `hide`, with the flag carried so a moderator can restore.
  *
- * Deliberately not tunable by a threshold constant. A confidence dial here
- * would eventually be turned up by somebody reasoning that more blocking is
- * more safety, and that is the exact mistake this module's header argues
- * against. If the policy changes, it should change as code with the reasoning
- * attached, not as a number in a config file.
+ * Deliberately not tunable by a threshold constant — the policy changed once
+ * as code with the reasoning attached (header), and should only change that
+ * way again. The DM path ignores the action and reads only whether anything
+ * was found.
  */
 export function checkContactInfo(content: string): ModerationResult | null {
   const findings = findContactInfo(content)
   if (findings.length === 0) return null
 
   return {
-    action: "flag",
+    action: "hide",
     source: "keyword",
     categories: Object.fromEntries(findings.map((f) => [`contact_${f.kind}`, 1])),
     confidence: 1,
@@ -230,11 +226,11 @@ export function checkContactInfo(content: string): ModerationResult | null {
  *
  * Names the room's promise rather than a rule: "the room is anonymous" is a
  * reason somebody can agree with, where "this is not allowed" is one they will
- * route around. It also stays true for the case the detector cannot see — that
- * the number might not be theirs to give.
+ * route around. Says what will happen, because it will: the message is removed
+ * on send, not judged later.
  */
 export function contactInfoWarning(findings: readonly ContactInfoFinding[]): string | null {
   if (findings.length === 0) return null
   const what = findings.map((f) => f.hint).join(" ")
-  return `${what} This room is anonymous — everyone here sees it. Send anyway?`
+  return `${what} This room is anonymous — a message with contact details is removed before anyone sees it.`
 }

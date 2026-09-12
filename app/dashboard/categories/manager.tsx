@@ -4,7 +4,6 @@ import { useMemo, useState, useTransition } from "react"
 import { IconArrowsJoin, IconPencil, IconPlus } from "@tabler/icons-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -63,15 +62,15 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
       {creating ? <CreateForm parents={parents} onDone={() => setCreating(false)} /> : null}
 
       {orphans.length > 0 ? (
-        <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-[0.8125rem]">
+        <p className="border-l-2 border-destructive pl-3 text-[0.8125rem]">
           {orphans.length} categor{orphans.length === 1 ? "y" : "ies"} point at a parent that no
           longer exists. They will not appear under any parent filter.
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-6">
         {parents.map((parent) => (
-          <section key={parent.id} className="rounded-lg border border-border bg-card">
+          <section key={parent.id} className="border-t border-border">
             <Row
               row={parent}
               isParent
@@ -128,60 +127,39 @@ function Row({
   pending: boolean
   start: React.TransitionStartFunction
 }) {
-  const [name, setName] = useState(row.name)
-
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-2.5 border-b border-border px-4 py-2.5 last:border-0",
-        !isParent && "pl-10"
+        "flex flex-wrap items-center gap-2.5 border-b border-border py-2 last:border-0",
+        !isParent && "pl-6"
       )}
     >
       {renaming ? (
-        <>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="h-8 max-w-64 text-[0.8125rem]"
-            autoFocus
-          />
-          <Button
-            size="sm"
-            disabled={pending || name.trim().length < 2}
-            onClick={() =>
-              start(async () => {
-                try {
-                  await renameCategory(row.id, name)
-                  toast.success("Renamed")
-                  onCancelRename()
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : "Could not rename")
-                }
-              })
-            }
-          >
-            Save
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onCancelRename} disabled={pending}>
-            Cancel
-          </Button>
-        </>
+        // Its own component, so it mounts fresh each time the pencil is
+        // clicked. Held in Row's state, a cancelled edit's text came back the
+        // next time the rename opened.
+        <RenameInline row={row} pending={pending} start={start} onDone={onCancelRename} />
       ) : (
         <>
-          <span className={cn("flex-1 text-sm", isParent && "font-semibold")}>{row.name}</span>
+          <span className={cn("flex-1 text-sm", isParent && "text-[0.9375rem] font-bold")}>{row.name}</span>
           <code className="text-[0.6875rem] text-faint-foreground">{row.slug}</code>
-          <Badge variant={row.eventCount === 0 ? "outline" : "secondary"}>
-            {row.eventCount} event{row.eventCount === 1 ? "" : "s"}
-          </Badge>
           {/*
             Interests sit beside events because they are what matching ranks
             on. A category with no events and four hundred interests looks dead
             by the event count alone, and retiring it used to destroy all four
-            hundred.
+            hundred. Plain text, tabular — seventy rows of chips was a wall.
           */}
-          <Badge variant={row.interestCount === 0 ? "outline" : "secondary"}>
-            {row.interestCount} interest{row.interestCount === 1 ? "" : "s"}
-          </Badge>
+          <span
+            className={cn(
+              "w-40 text-right text-[0.75rem] tabular-nums",
+              row.eventCount === 0 && row.interestCount === 0
+                ? "text-faint-foreground"
+                : "text-muted-foreground"
+            )}
+          >
+            {row.eventCount} event{row.eventCount === 1 ? "" : "s"} · {row.interestCount} interest
+            {row.interestCount === 1 ? "" : "s"}
+          </span>
           <Button size="sm" variant="ghost" onClick={onRename} aria-label={`Rename ${row.name}`}>
             <IconPencil className="size-4" />
           </Button>
@@ -194,13 +172,57 @@ function Row({
   )
 }
 
+function RenameInline({
+  row,
+  pending,
+  start,
+  onDone,
+}: {
+  row: CategoryRow
+  pending: boolean
+  start: React.TransitionStartFunction
+  onDone: () => void
+}) {
+  const [name, setName] = useState(row.name)
+  return (
+    <>
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="h-8 max-w-64 text-[0.8125rem]"
+        autoFocus
+      />
+      <Button
+        size="sm"
+        disabled={pending || name.trim().length < 2}
+        onClick={() =>
+          start(async () => {
+            try {
+              await renameCategory(row.id, name)
+              toast.success("Renamed")
+              onDone()
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Could not rename")
+            }
+          })
+        }
+      >
+        Save
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onDone} disabled={pending}>
+        Cancel
+      </Button>
+    </>
+  )
+}
+
 function CreateForm({ parents, onDone }: { parents: CategoryRow[]; onDone: () => void }) {
   const [name, setName] = useState("")
   const [parentId, setParentId] = useState("none")
   const [pending, start] = useTransition()
 
   return (
-    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card p-4">
+    <div className="flex flex-wrap items-end gap-2 border-l-2 border-border-strong pl-3">
       <div className="flex flex-1 flex-col gap-1.5">
         <label className="text-[0.75rem] text-muted-foreground">Name</label>
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="IPL Streaming" className="h-9" />
@@ -259,7 +281,7 @@ function MergeForm({
   const into = options.find((o) => o.id === intoId)
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+    <div className="flex flex-col gap-3 border-l-2 border-warning pl-3">
       <p className="text-[0.8125rem] leading-6">
         Merge <b>{from.name}</b> into another category. Its {from.eventCount} event
         {from.eventCount === 1 ? "" : "s"} and {from.interestCount} saved interest

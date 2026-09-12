@@ -141,7 +141,13 @@ export function DataTable<T extends { id: string | number }>({
   defaultSort?: SortState
   selectable?: boolean
   bulkActions?: BulkAction[]
-  search?: boolean
+  /**
+   * `true` filters the rows the table was given. An object submits a GET form
+   * to the server instead — for a list that is a PAGE of a larger set, where
+   * searching only what is loaded finds nothing past the page and says so
+   * nowhere. Same slot, same look; only where the search happens changes.
+   */
+  search?: boolean | { name: string; defaultValue?: string }
   searchPlaceholder?: string
   filters?: TableFilter[]
   pagination?: boolean
@@ -211,7 +217,11 @@ export function DataTable<T extends { id: string | number }>({
         clear: () => setFilterValues((v) => ({ ...v, [f.key]: "all" })),
       })),
   ]
-  const isFiltered = activeChips.length > 0
+  // A GET-mode search lives in the URL, not in `query`, so it has to count
+  // here explicitly — otherwise a search that matched nothing rendered the
+  // designed "No venues yet" empty state over a database of hundreds.
+  const serverSearch = typeof search === "object" && search.defaultValue?.trim() ? search : null
+  const isFiltered = activeChips.length > 0 || serverSearch !== null
   const count = selectionCount(selection, sorted.length)
   const headerState = headerCheckState(selection, pageIds)
 
@@ -221,7 +231,19 @@ export function DataTable<T extends { id: string | number }>({
 
       {search || filters.length > 0 || columnMenu ? (
         <div className="flex flex-wrap items-center gap-2">
-          {search ? (
+          {typeof search === "object" ? (
+            <form method="get" className="relative">
+              <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint-foreground" />
+              <Input
+                type="search"
+                name={search.name}
+                defaultValue={search.defaultValue}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
+                className="h-9 w-56 pl-8 text-[0.8125rem]"
+              />
+            </form>
+          ) : search ? (
             <div className="relative">
               <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint-foreground" />
               <Input
@@ -320,7 +342,8 @@ export function DataTable<T extends { id: string | number }>({
               <button
                 onClick={chip.clear}
                 aria-label={`Remove filter: ${chip.label}`}
-                className="inline-flex size-[17px] items-center justify-center rounded-full bg-card text-muted-foreground hover:text-foreground"
+                // 17px disc, 25px target: WCAG 2.5.8 wants 24, the chip wants to stay small.
+                className="relative inline-flex size-[17px] items-center justify-center rounded-full bg-card text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:text-foreground"
               >
                 <IconX className="size-3" />
               </button>
@@ -456,15 +479,22 @@ export function DataTable<T extends { id: string | number }>({
         // user applied, and the fix is theirs to make.
         <div className="rounded-lg border border-border px-5 py-7 text-center text-[0.8125rem] text-muted-foreground">
           Nothing matches the current filters.{" "}
-          <button
-            onClick={() => {
-              setQuery("")
-              setFilterValues({})
-            }}
-            className="text-primary hover:underline"
-          >
-            Clear filters
-          </button>
+          {serverSearch ? (
+            // The search is in the URL, so clearing it is a navigation.
+            <a href="?" className="text-primary hover:underline">
+              Clear search
+            </a>
+          ) : (
+            <button
+              onClick={() => {
+                setQuery("")
+                setFilterValues({})
+              }}
+              className="text-primary hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">

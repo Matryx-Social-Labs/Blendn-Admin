@@ -7,9 +7,8 @@ import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { rateLimit } from "@/lib/rate-limit"
-import { moderateMessage, checkSpam } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
-import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import {
   successResponse,
@@ -372,9 +371,9 @@ export async function POST(
       )
     }
 
-    // --- Pre-save moderation: keyword filter (sync, <1ms) ---
-    const keywordResult = checkKeywords(content)
-    if (keywordResult && keywordResult.action === "hide") {
+    // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
+    const preSave = preSaveCheck(content)
+    if (preSave) {
       // Save the message but immediately mark it as hidden
       const message = await db.chat_messages.create({
         data: {
@@ -382,15 +381,16 @@ export async function POST(
           user_id: user.userId,
           content,
           type,
-          metadata: metadata || undefined,
+          ...(metadata != null && { metadata }),
           parent_id: parentId || null,
           moderation_status: "hidden",
           deleted_at: new Date(),
         },
       })
-      // Flag for review and check auto-mute (fire-and-forget)
-      void flagForReview(message.id, chatGroupId, user.userId, keywordResult)
-      void checkAndAutoMute(user.userId, chatGroupId)
+      // Flag for review and, for abuse rather than a phone number, count
+      // toward an auto-mute (fire-and-forget)
+      void flagForReview(message.id, chatGroupId, user.userId, preSave.result)
+      if (preSave.autoMute) void checkAndAutoMute(user.userId, chatGroupId)
       // Return success to sender but message is already hidden — never emitted to others
       return successResponse({
         id: message.id,
@@ -424,7 +424,14 @@ export async function POST(
         user_id: user.userId,
         content,
         type,
-        metadata: metadata || undefined,
+        /*
+         * Conditional spread, not `metadata || undefined`. The client omits
+         * `metadata` on every plain text message, and with
+         * `strictUndefinedChecks` on, an explicit undefined here made
+         * `chat_messages.create` throw — every message sent from the app into
+         * a room returned 500. Found by sending one from a phone.
+         */
+        ...(metadata != null && { metadata }),
         parent_id: parentId || null,
       },
       include: {

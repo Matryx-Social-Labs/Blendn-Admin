@@ -2,7 +2,6 @@ import { notFound, redirect } from "next/navigation"
 
 import { LiveTab } from "@/components/dashboard/live-tab"
 import { issuesFor } from "@/lib/event-issues"
-import { Badge } from "@/components/ui/badge"
 import { getEventAttendance } from "@/lib/attendance"
 import { getConnectionMetrics } from "@/lib/connection-metrics"
 import { getAuth } from "@/lib/auth"
@@ -17,6 +16,9 @@ import { curationSelect, curationState } from "@/lib/curation"
 import { refusalSummary } from "@/lib/check-in-refusals"
 import { CurationHealth } from "./curation-health"
 import { EventVenueLink } from "./venue-link"
+import { EventLifecycle } from "@/components/dashboard/event-lifecycle"
+import { eventStateFor } from "@/lib/event-phase"
+import { CHAT_WINDOW_HOURS } from "@/lib/chat-window"
 
 export const dynamic = "force-dynamic"
 
@@ -67,6 +69,7 @@ export default async function EventDetailPage({
       id: true,
       title: true,
       status: true,
+      created_at: true,
       start_time: true,
       end_time: true,
       venue_name: true,
@@ -89,8 +92,9 @@ export default async function EventDetailPage({
   const permissions = eventPermissions(await actorFor(session.user), event)
   if (!permissions.canOperate) redirect("/dashboard/events")
 
+  const now = new Date()
   const feedbackWindowOpen =
-    Date.now() < event.end_time.getTime() + FEEDBACK_WINDOW_HOURS * 3_600_000
+    now.getTime() < event.end_time.getTime() + FEEDBACK_WINDOW_HOURS * 3_600_000
 
   const tabs = eventTabsFor(event.start_time.toISOString(), event.end_time.toISOString(), {
     canOperate: permissions.canOperate,
@@ -99,36 +103,49 @@ export default async function EventDetailPage({
   const activeTab = (tabs.find((t) => t.key === requestedTab)?.key ?? "overview") as EventTabKey
 
   const venueName = event.venue?.name ?? event.venue_name
+  const lifecycleState = eventStateFor(event)
+  const day = (d: Date) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(d)
+  const time = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeStyle: "short" }).format(d)
+  const daysUntil = Math.ceil((event.start_time.getTime() - now.getTime()) / 86_400_000)
+  const lifecycleDates = {
+    draft: `created ${day(event.created_at)}`,
+    upcoming:
+      lifecycleState === "upcoming"
+        ? daysUntil <= 0
+          ? "doors today"
+          : `doors in ${daysUntil} day${daysUntil === 1 ? "" : "s"}`
+        : lifecycleState === "draft"
+          ? "not yet published"
+          : "published",
+    live: `${day(event.start_time)} ${time(event.start_time)} – ${time(event.end_time)}`,
+    over: `feedback open ${CHAT_WINDOW_HOURS}h after`,
+  }
 
   const header = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[length:var(--text-h2)] font-bold">{event.title}</h2>
-            {event.status !== "published" ? (
-              <Badge variant={event.status === "cancelled" ? "destructive" : "secondary"}>
-                {event.status}
-              </Badge>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <h2 className="text-[length:var(--text-h2)] font-bold">{event.title}</h2>
+          {/* One line: when, where, and — for somebody who may edit a linked venue — the way out of a wrong link. */}
+          <p className="flex flex-wrap items-center gap-x-1 text-[0.8125rem] text-muted-foreground">
+            <span>
+              {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(event.start_time)}
+              {" – "}
+              {time(event.end_time)}
+              {venueName ? ` · ${venueName}` : ""}
+              {event.city ? `, ${event.city}` : ""}
+            </span>
+            {event.venue && permissions.canEdit ? (
+              <EventVenueLink eventId={event.id} venueName={venueName ?? "this venue"} />
             ) : null}
-          </div>
-          <p className="text-[0.8125rem] text-muted-foreground">
-            {new Intl.DateTimeFormat("en-GB", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            }).format(event.start_time)}
-            {venueName ? ` · ${venueName}` : ""}
-            {event.city ? `, ${event.city}` : ""}
           </p>
+          <EventLifecycle state={lifecycleState} cancelled={event.status === "cancelled"} dates={lifecycleDates} />
           {/*
             Only when a venue RECORD is linked, and only for somebody who may
             edit. `venue_name` alone is free text the organiser typed — there is
             nothing to unlink from — and a venue owner reading this page has the
             dispute flow instead, which is the other side of the same question.
           */}
-          {event.venue && permissions.canEdit ? (
-            <EventVenueLink eventId={event.id} venueName={venueName ?? "this venue"} />
-          ) : null}
         </div>
       </div>
       <EventTabs eventId={event.id} active={activeTab} tabs={tabs} />

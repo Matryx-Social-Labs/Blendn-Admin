@@ -72,17 +72,10 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
-        <h3 className="text-sm font-bold">Feedback window</h3>
-        <span className="text-[0.75rem] text-muted-foreground">
-          tap a label to correct it — the classifier misses sarcasm
-        </span>
-      </div>
-
-      <ul className="flex flex-col gap-3 p-3.5">
+    <div className="flex flex-col gap-3">
+      <ul className="flex flex-col divide-y divide-border">
         {messages.map((m) => (
-          <li key={m.id} className="flex flex-col gap-1">
+          <li key={m.id} className="flex flex-col gap-1 py-3 first:pt-0">
             <span className="flex flex-wrap items-center gap-2 text-[0.75rem] text-muted-foreground">
               {/*
                 * Suppressed messages keep their label and lose their author.
@@ -110,7 +103,7 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
                   <button
                     disabled={pending && acting === m.id}
                     className={cn(
-                      "rounded-full border border-border px-2 py-0.5 text-[0.6875rem] font-medium transition-colors hover:bg-accent",
+                      "min-h-6 rounded-full border border-border px-2 py-0.5 text-[0.6875rem] font-medium transition-colors hover:bg-accent",
                       toneClass(m.sentiment)
                     )}
                   >
@@ -157,11 +150,9 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
         ))}
       </ul>
 
-      <p className="border-t border-border px-3.5 py-2.5 text-[0.75rem] text-faint-foreground">
-        Names are pseudonyms, enforced server-side — the real identity never
-        reaches this page. Messages in categories too few people raised are held
-        back entirely, because a stable pseudonym in a small room is a name.
-        Corrections are saved and kept for tuning.
+      <p className="max-w-[70ch] border-t border-border pt-3 text-[0.75rem] text-faint-foreground">
+        Names are pseudonyms, enforced server-side. Small categories are held back
+        entirely — a stable pseudonym in a small room is a name.
       </p>
     </div>
   )

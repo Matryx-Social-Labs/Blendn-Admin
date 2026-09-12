@@ -100,8 +100,8 @@ export function VenueClaimForm({
 
   return (
     <div className="flex flex-col gap-5">
-      <section className="flex flex-col gap-2.5 rounded-lg border border-border bg-card p-5">
-        <h2 className="text-[0.9375rem] font-bold">What approval gives you</h2>
+      <section className="flex flex-col gap-2.5">
+        <h3 className="text-[0.9375rem] font-bold">What approval gives you</h3>
         <ul className="flex flex-col gap-1.5 text-[0.8125rem] text-muted-foreground">
           <li>· Events another organiser holds at {venueName} link to you automatically.</li>
           <li>· You see the attendee count, the chatroom and the feedback for those events.</li>
@@ -128,7 +128,7 @@ export function VenueClaimForm({
         </section>
       ) : null}
 
-      <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
+      <section className="flex flex-col gap-4 border-t border-border pt-5">
         <div className="flex flex-col gap-2">
           <Label htmlFor="gstin">GSTIN (optional)</Label>
           <Input
@@ -147,22 +147,20 @@ export function VenueClaimForm({
           </p>
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
           <Label>Documents</Label>
           {DOCS.map((doc) => {
             const attached = evidence[doc.key]
             return (
               <div
                 key={doc.key}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3.5 py-3"
+                className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-3 first-of-type:border-t-0"
               >
                 <span className="flex flex-col gap-0.5">
                   <span className="flex items-center gap-2 text-[0.8125rem] font-medium">
                     {doc.label}
                     {doc.required ? (
-                      <span className="text-[0.6875rem] font-bold uppercase tracking-wide text-primary">
-                        Required
-                      </span>
+                      <span className="text-[0.75rem] font-normal text-muted-foreground">required</span>
                     ) : null}
                   </span>
                   <span className="text-[0.75rem] text-faint-foreground">{doc.hint}</span>

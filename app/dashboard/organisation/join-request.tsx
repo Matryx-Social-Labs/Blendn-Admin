@@ -98,7 +98,7 @@ export function JoinRequest() {
       {state.matches.map((match) => (
         <div
           key={match.id}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
+          className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-3"
         >
           <span className="text-sm font-medium">{match.name}</span>
           {match.requestState === "pending" ? (

@@ -15,7 +15,7 @@ export const kvItemSchema = z.object({
 export const eventFormSchema = z.object({
   title: z.string().min(3, { message: "Title must be at least 3 characters." }),
   description: z.string().min(10, { message: "Description must be at least 10 characters." }),
-  full_description: z.string().min(10, { message: "Full description must be at least 10 characters." }),
+  full_description: z.string().optional(),
   short_description: z.string().optional(),
   venue_name: z.string().optional(),
   // Set only when a listed venue is picked. Free text leaves this null, which

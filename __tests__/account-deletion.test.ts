@@ -38,6 +38,7 @@ const mockDb = {
   message_requests: { updateMany: jest.fn() },
   board_posts: { deleteMany: jest.fn() },
   board_requests: { updateMany: jest.fn() },
+  private_conversations: { updateMany: jest.fn() },
   $transaction: jest.fn().mockResolvedValue([]),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -47,6 +48,9 @@ jest.mock("@/lib/mobile-auth", () => ({
   getAuthenticatedUser: (...a: unknown[]) => mockAuth(...a),
 }))
 
+const mockDeletePrefix = jest.fn().mockResolvedValue(3)
+jest.mock("@/lib/tigris", () => ({ deletePrefix: (...a: unknown[]) => mockDeletePrefix(...a) }))
+jest.mock("@/lib/logger", () => ({ logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 jest.mock("@/lib/rate-limit", () => ({
   rateLimit: jest.fn().mockResolvedValue(null),
   userLimit: jest.fn().mockReturnValue({ windowMs: 1, maxRequests: 99 }),
@@ -56,6 +60,7 @@ import { readFileSync } from "fs"
 import { join, resolve } from "path"
 import { NextRequest } from "next/server"
 import { DELETE } from "@/app/api/mobile/account/route"
+import { logger } from "@/lib/logger"
 
 const USER = "u1"
 
@@ -262,5 +267,53 @@ describe("what survives a deletion, and what must not", () => {
     expect(call.where).toEqual(expect.objectContaining({ sender_id: expect.any(String) }))
     expect(call.where).not.toHaveProperty("recipient_id")
     expect(call.data).toEqual({ message: null })
+  })
+
+  it("closes every conversation they were in, so nobody keeps writing to an erased account", async () => {
+    /*
+     * Driven after a deletion: the other person's inbox still listed the
+     * thread under the pseudonym, a message into it returned 200 and wrote a
+     * notification row for the erased account, and nothing told the sender
+     * they were talking to nobody. Closed is "gone for both people".
+     */
+    await del()
+    const call = mockDb.private_conversations.updateMany.mock.calls[0][0]
+    expect(call.where).toEqual({
+      OR: [{ user1_id: expect.any(String) }, { user2_id: expect.any(String) }],
+      closed_at: null,
+    })
+    expect(call.data).toEqual(expect.objectContaining({ closed_at: expect.any(Date), closed_reason: "account_deleted" }))
+  })
+})
+
+describe("the photos leave storage, not only the row", () => {
+  /*
+   * `profiles.photos` was nulled and the objects stayed in a public-read
+   * bucket under deterministic keys -- any URL another person had seen kept
+   * resolving to the deleted face. The prefix is everything this account ever
+   * uploaded as a profile photo.
+   */
+  it("deletes every object under profile/{userId}/ after the transaction", async () => {
+    mockAuth.mockResolvedValue({ userId: USER })
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    // After, not inside: the transaction is the erasure; storage is cleanup.
+    const txOrder = mockDb.$transaction.mock.invocationCallOrder[0]
+    const delOrder = mockDeletePrefix.mock.invocationCallOrder[0]
+    expect(delOrder).toBeGreaterThan(txOrder)
+  })
+
+  it("a storage failure does not undo the erasure the database accepted, and is logged by user", async () => {
+    mockAuth.mockResolvedValue({ userId: USER })
+    mockDeletePrefix.mockRejectedValueOnce(new Error("listing failed"))
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
+    // The 200 is right — the row is erased. The objects are not, and the only
+    // trace of that is this line, so it has to name who.
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/storage|object|prefix/i),
+      expect.objectContaining({ userId: USER })
+    )
   })
 })

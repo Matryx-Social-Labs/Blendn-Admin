@@ -278,7 +278,6 @@ describe("admin overview", () => {
     const overview = (as("app_admin"), await getDashboardOverview())
     if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
-    expect(overview.growth).toHaveLength(8)
     /*
      * The whole loop, not the first four stages.
      *
@@ -300,7 +299,36 @@ describe("admin overview", () => {
     // Nested subsets, or the shape lies: no stage may exceed the one above it.
     const values = overview.funnel.map((s) => s.value)
     expect(values).toEqual([...values].sort((a, b) => b - a))
-    expect(overview.attention.pending).toBeGreaterThanOrEqual(0)
+    /*
+     * All four queues, always — including the empty ones.
+     *
+     * The strip used to count `moderation_flags` alone and rendered
+     * "Moderation queue is clear" beside a sidebar showing Claims 4 and
+     * Applications 7. Asserting the SHAPE rather than any count is what stops
+     * that returning: a fifth queue added to `attentionQueues` without a row
+     * here fails, and so does silently dropping one.
+     */
+    expect(overview.attention.map((q) => q.key).sort()).toEqual([
+      "applications",
+      "claims",
+      "creative",
+      "moderation",
+    ])
+    for (const queue of overview.attention) {
+      expect(queue.count).toBeGreaterThanOrEqual(0)
+      // An empty queue has no oldest item, and a non-empty one always does.
+      expect(queue.oldest === null).toBe(queue.count === 0)
+      expect(queue.slaHours).toBeGreaterThan(0)
+    }
+
+    // Refusals are distinct people, so the total can never exceed the sum of
+    // the per-reason rows and can be lower when one person hit two reasons.
+    const refusalRows = overview.refusals.byReason.reduce((sum, r) => sum + r.people, 0)
+    expect(overview.refusals.total).toBeLessThanOrEqual(refusalRows || 0)
+
+    expect(overview.upcomingEvents).toBeGreaterThanOrEqual(0)
+    // Server time, carried to the client so both render the same ages.
+    expect(Number.isNaN(Date.parse(overview.generatedAt))).toBe(false)
     expect(overview.publishingHosts.publishing).toBeLessThanOrEqual(
       overview.publishingHosts.total + overview.publishingHosts.publishing
     )

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -15,6 +15,7 @@ import {
   IconChevronRight,
   IconAlertTriangle,
   IconShieldCheck,
+  IconSpeakerphone,
 } from "@tabler/icons-react"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ interface ChatMessage {
   id: string
   content: string
   type: string
+  kind: "user" | "announcement" | "sponsored"
   createdAt: string
   user: {
     id: string
@@ -62,6 +64,7 @@ interface ChatMember {
 
 interface ChatFeedData {
   chatGroupId: string
+  pendingFlags: number
   messages: ChatMessage[]
   members: ChatMember[]
 }
@@ -77,13 +80,16 @@ const SOURCE_LABELS: Record<string, string> = {
   manual: "Manual",
 }
 
+// One neutral treatment for every source. Six palette hues (red, blue,
+// purple, yellow, orange, grey) were six colours with no meaning beyond
+// "different"; the source name is the information.
 const SOURCE_COLORS: Record<string, string> = {
-  auto_keyword: "bg-red-500/10 text-red-400 border-red-500/20",
-  auto_text: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  auto_image: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-  auto_spam: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-  user_report: "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  manual: "bg-gray-500/10 text-gray-400 border-gray-500/20",
+  auto_keyword: "border-border text-muted-foreground",
+  auto_text: "border-border text-muted-foreground",
+  auto_image: "border-border text-muted-foreground",
+  auto_spam: "border-border text-muted-foreground",
+  user_report: "border-warning/40 text-warning",
+  manual: "border-border text-muted-foreground",
 }
 
 function topCategory(categories: Record<string, number>): string | null {
@@ -120,11 +126,17 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
   const [expandedUser, setExpandedUser] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const isFirstLoad = useRef(true)
+  // The mount fetch, the 5s poll and the Refresh button can all be in flight
+  // at once. A slow older response must not land after a newer one and put
+  // a stale pending-flag count or ban state back on screen.
+  const requestSeq = useRef(0)
 
   const fetchData = useCallback(async (silent = false) => {
+    const seq = ++requestSeq.current
     try {
       if (!silent) setLoading(true)
       const res = await fetch(`/api/events/${eventId}/chat/messages`, { cache: "no-store" })
+      if (seq !== requestSeq.current) return
       if (!res.ok) {
         /*
          * A failed poll keeps whatever is on screen — the messages were real
@@ -139,6 +151,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       setFailed(false)
       {
         const json = await res.json() as ChatFeedData
+        if (seq !== requestSeq.current) return
         setData(json)
         if (isFirstLoad.current) {
           isFirstLoad.current = false
@@ -220,18 +233,34 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
   const bannedMembers = data?.members.filter((m) => m.status === "banned") ?? []
   const mutedMembers = data?.members.filter((m) => m.status === "muted") ?? []
   const activeMembers = data?.members.filter((m) => m.status === "active") ?? []
+  const memberById = useMemo(
+    () => new Map((data?.members ?? []).map((m) => [m.userId, m])),
+    [data?.members]
+  )
   const restrictedCount = bannedMembers.length + mutedMembers.length
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-        <div>
-          <h2 className="font-semibold text-sm">Live Chat Feed</h2>
-          <p className="text-xs text-muted-foreground">
-            {data ? `${data.messages.length} messages · ${activeMembers.length} active · ${restrictedCount} restricted` : "Loading\u2026"}
-          </p>
-        </div>
+      {/* The room's pulse. Numbers first, and the one that needs a human —
+          flags waiting — in the destructive colour so it reads before the rest. */}
+      <div className="flex items-center justify-between gap-3 pb-3 shrink-0">
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
+          {data ? (
+            <>
+              <span><b className="font-bold text-foreground">{activeMembers.length}</b> in the room</span>
+              <span><b className="font-bold text-foreground">{data.messages.length}</b> messages</span>
+              <span><b className="font-bold text-foreground">{restrictedCount}</b> restricted</span>
+              {data.pendingFlags > 0 ? (
+                <span className="font-bold text-destructive">
+                  {data.pendingFlags} flag{data.pendingFlags === 1 ? "" : "s"} waiting
+                </span>
+              ) : null}
+              <span className="text-faint-foreground">refreshes every 5s</span>
+            </>
+          ) : (
+            "Loading…"
+          )}
+        </p>
         <Button
           size="sm"
           variant="ghost"
@@ -245,12 +274,14 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       </div>
 
       {/* Tab switcher */}
-      <div className="flex border-b shrink-0">
+      <div className="flex gap-4 border-b shrink-0" role="tablist" aria-label="Room">
         <Button
           type="button"
           variant="ghost"
+          role="tab"
+          aria-selected={activeTab === "messages"}
           onClick={() => setActiveTab("messages")}
-          className={`flex-1 py-2 h-auto rounded-none text-xs font-medium transition-colors ${
+          className={`px-1 py-2 h-auto rounded-none text-[0.8125rem] font-medium transition-colors hover:bg-transparent ${
             activeTab === "messages"
               ? "border-b-2 border-primary text-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -261,8 +292,10 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
         <Button
           type="button"
           variant="ghost"
+          role="tab"
+          aria-selected={activeTab === "members"}
           onClick={() => setActiveTab("members")}
-          className={`flex-1 py-2 h-auto rounded-none text-xs font-medium transition-colors ${
+          className={`px-1 py-2 h-auto rounded-none text-[0.8125rem] font-medium transition-colors hover:bg-transparent ${
             activeTab === "members"
               ? "border-b-2 border-primary text-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -281,7 +314,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       <div className="flex-1 overflow-y-auto min-h-0">
         {loading && !data ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-muted-foreground">Loading chat\u2026</p>
+            <p className="text-sm text-muted-foreground">Loading chat…</p>
           </div>
         ) : failed && !data ? (
           <div className="flex items-center justify-center h-full p-6 text-center">
@@ -299,9 +332,14 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
               <p className="text-sm text-muted-foreground text-center py-8">No messages yet.</p>
             ) : (
               data.messages.map((msg) => {
-                const member = data.members.find((m) => m.userId === msg.user.id)
+                const member = memberById.get(msg.user.id)
                 const isBanned = member?.status === "banned"
                 const isMuted = member?.status === "muted"
+                // The room's own voice, labelled with the word the phone shows.
+                // The server prefixes a label line onto the content; the badge
+                // says it, so the line is dropped rather than printed twice.
+                const broadcast = msg.kind !== "user"
+                const body = broadcast ? msg.content.replace(/^(📣 \[Sponsored\]|📢 \[Announcement from [^\]]*\])\n/, "") : msg.content
                 return (
                   <div
                     key={msg.id}
@@ -310,13 +348,23 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                     }`}
                   >
                     <div className="size-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
-                      <IconUser className="size-3.5 text-muted-foreground" />
+                      {broadcast ? (
+                        <IconSpeakerphone className="size-3.5 text-muted-foreground" />
+                      ) : (
+                        <IconUser className="size-3.5 text-muted-foreground" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline gap-1.5 flex-wrap">
-                        <span className="text-xs font-medium truncate">
-                          {msg.user.anonymousName ?? "Attendee"}
-                        </span>
+                        {broadcast ? (
+                          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 uppercase tracking-wide">
+                            {msg.kind === "sponsored" ? "Sponsored" : "Announcement"}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs font-medium truncate">
+                            {msg.user.anonymousName ?? "Attendee"}
+                          </span>
+                        )}
                         <span className="text-[10px] text-muted-foreground shrink-0">
                           {new Date(msg.createdAt).toLocaleTimeString("en-IN", {
                             hour: "2-digit",
@@ -329,14 +377,14 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                           </Badge>
                         )}
                         {isMuted && (
-                          <Badge className="text-[10px] px-1 py-0 h-4 bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
+                          <Badge className="text-[10px] px-1 py-0 h-4 bg-warning/10 text-warning border-warning/20">
                             muted
                           </Badge>
                         )}
                       </div>
-                      <p className="text-sm leading-snug break-words">{msg.content}</p>
+                      <p className="text-sm leading-snug break-words">{body}</p>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <Button
                         size="sm"
                         variant="ghost"
@@ -355,6 +403,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                         onClick={() => void memberAction(msg.user.id, isBanned ? "unban" : "ban")}
                         disabled={actionLoading === `action-${msg.user.id}`}
                         title={isBanned ? "Unban user" : "Ban user"}
+                        aria-label={isBanned ? "Unban user" : "Ban user"}
                       >
                         <IconBan className="size-3.5" />
                       </Button>
@@ -398,8 +447,8 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
               <div>
                 {bannedMembers.length > 0 && <Separator className="mb-4" />}
                 <div className="flex items-center gap-2 mb-2">
-                  <IconVolume3 className="size-4 text-yellow-500" />
-                  <p className="text-xs font-semibold text-yellow-500 uppercase tracking-wide">
+                  <IconVolume3 className="size-4 text-warning" />
+                  <p className="text-xs font-semibold text-warning uppercase tracking-wide">
                     Muted ({mutedMembers.length})
                   </p>
                 </div>
@@ -421,9 +470,9 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
 
             {/* ── No restricted message ── */}
             {bannedMembers.length === 0 && mutedMembers.length === 0 && (
-              <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-3">
-                <IconShieldCheck className="size-4 text-green-500 shrink-0" />
-                <p className="text-xs text-green-400">No banned or muted users in this chat.</p>
+              <div className="flex items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-3">
+                <IconShieldCheck className="size-4 text-success shrink-0" />
+                <p className="text-xs text-success">No banned or muted users in this chat.</p>
               </div>
             )}
 
@@ -443,17 +492,17 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                     <div className="flex items-center gap-2 min-w-0">
                       <p className="text-sm truncate">{m.anonymousName ?? "Attendee"}</p>
                       {m.violationCount > 0 && (
-                        <span className="flex items-center gap-0.5 text-[10px] text-yellow-500">
+                        <span className="flex items-center gap-0.5 text-[10px] text-warning">
                           <IconAlertTriangle className="size-3" />
                           {m.violationCount}
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-xs h-7 text-yellow-500 hover:text-yellow-500 hover:bg-yellow-500/10"
+                        className="text-xs h-7 text-warning hover:text-warning hover:bg-warning/10"
                         onClick={() => void memberAction(m.userId, "mute")}
                         disabled={actionLoading === `action-${m.userId}`}
                       >
@@ -479,10 +528,6 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-4 py-2 border-t shrink-0">
-        <p className="text-[10px] text-muted-foreground">Auto-refreshes every 5 seconds</p>
-      </div>
     </div>
   )
 }
@@ -507,21 +552,25 @@ function RestrictedMemberCard({
   actionLoading,
 }: RestrictedMemberCardProps) {
   const isBanned = type === "banned"
-  const borderColor = isBanned ? "border-destructive/20" : "border-yellow-500/20"
-  const bgColor = isBanned ? "bg-destructive/5" : "bg-yellow-500/5"
+  const borderColor = isBanned ? "border-destructive/20" : "border-warning/20"
+  const bgColor = isBanned ? "bg-destructive/5" : "bg-warning/5"
   const dateStr = isBanned ? member.bannedAt : member.mutedAt
 
   return (
     <div className={`rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}>
-      {/* Header row */}
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={onToggleExpand}
-        aria-label={isExpanded ? "Collapse member details" : "Expand member details"}
-        className="w-full h-auto justify-between px-3 py-2.5 text-left font-normal hover:bg-muted/20 transition-colors"
-      >
-        <div className="flex items-center gap-2 min-w-0">
+      {/* Header row. The expand control and the action buttons are siblings:
+          this was one <button> wrapping three more, with a stopPropagation
+          wrapper to make it work — invalid HTML that browsers repair by
+          closing the outer button early, so assistive tech got a different
+          tree from the one the JSX describes. */}
+      <div className="flex w-full items-center justify-between gap-2 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          aria-expanded={isExpanded}
+          aria-label={isExpanded ? "Collapse member details" : "Expand member details"}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded text-left hover:bg-muted/20 transition-colors"
+        >
           {isExpanded ? (
             <IconChevronDown className="size-3.5 text-muted-foreground shrink-0" />
           ) : (
@@ -544,12 +593,12 @@ function RestrictedMemberCard({
                 <span>by {member.bannedByName}</span>
               )}
               {member.violationCount > 0 && (
-                <span className="text-yellow-500">{member.violationCount} violation{member.violationCount !== 1 ? "s" : ""}</span>
+                <span className="text-warning">{member.violationCount} violation{member.violationCount !== 1 ? "s" : ""}</span>
               )}
             </div>
           </div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
           {isBanned ? (
             <Button
               size="sm"
@@ -583,7 +632,7 @@ function RestrictedMemberCard({
             </>
           )}
         </div>
-      </Button>
+      </div>
 
       {/* Expanded: violation history */}
       {isExpanded && member.recentViolations.length > 0 && (
@@ -591,8 +640,8 @@ function RestrictedMemberCard({
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
             Recent Violations
           </p>
-          {member.recentViolations.map((v, i) => (
-            <div key={i} className="rounded border border-border/50 bg-background/50 px-2.5 py-2 space-y-1">
+          {member.recentViolations.map((v) => (
+            <div key={`${v.source}-${v.createdAt}`} className="rounded border border-border/50 bg-background/50 px-2.5 py-2 space-y-1">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Badge
                   variant="outline"
@@ -601,12 +650,12 @@ function RestrictedMemberCard({
                   {SOURCE_LABELS[v.source] ?? v.source}
                 </Badge>
                 <span className={`text-[10px] font-medium ${
-                  v.confidence >= 0.85 ? "text-red-400" : v.confidence >= 0.5 ? "text-yellow-400" : "text-muted-foreground"
+                  v.confidence >= 0.85 ? "text-destructive" : v.confidence >= 0.5 ? "text-warning" : "text-muted-foreground"
                 }`}>
                   {Math.round(v.confidence * 100)}% confidence
                 </span>
                 {v.autoAction === "hidden" && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-red-500/10 text-red-400 border-red-500/20">
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-destructive/10 text-destructive border-destructive/20">
                     Auto-hidden
                   </Badge>
                 )}
@@ -634,7 +683,7 @@ function RestrictedMemberCard({
                         key={cat}
                         className={`text-[10px] px-1.5 py-0.5 rounded ${
                           topCategory(v.categories) === cat
-                            ? "bg-red-500/15 text-red-400"
+                            ? "bg-destructive/15 text-destructive"
                             : "bg-muted text-muted-foreground"
                         }`}
                       >

@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+
+import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, LayerGroup, TileLayer } from "leaflet"
 import {
   IconBuildingCommunity,
@@ -48,13 +50,28 @@ import {
 
 const ACCURACY_CAP = DEFAULT_ACCURACY_POLICY.cap
 
-const COLOURS = {
-  extent: "#F05423",
-  buffer: "#BE5C71",
-  accuracy: "#9a948f",
-  other: "#8F49AA",
-  bad: "#e5484d",
-} as const
+/*
+ * Read from the tokens rather than copied from them.
+ *
+ * These were the light-theme hexes, hardcoded, on a dark-pinned app — and three
+ * of the five are brand values that already exist in `globals.css` twice, with
+ * the dark pair deliberately lifted so the purple carries against `#0D0C0C`.
+ *
+ * A function rather than a constant because `getComputedStyle` needs a
+ * document: at module scope this would run during SSR and bake the fallback in.
+ */
+function colours() {
+  return {
+    extent: themeColour("--chart-1", "#F05423"),
+    buffer: themeColour("--chart-2", "#BE5C71"),
+    accuracy: themeColour("--muted-foreground", "#9a948f"),
+    other: themeColour("--chart-3", "#8F49AA"),
+    bad: themeColour("--destructive", "#e5484d"),
+    // The handle outline. `--background` is the app's ink, so it tracks the theme
+    // rather than assuming the dark one.
+    ink: themeColour("--background", "#0D0C0C"),
+  }
+}
 
 export interface GeofenceEditorProps {
   value: Geofence | null
@@ -75,6 +92,13 @@ export function GeofenceEditor({
   editable = true,
   height = 420,
 }: GeofenceEditorProps) {
+  /*
+   * Resolved in the body rather than at module scope: `getComputedStyle` needs a
+   * document, and at module scope this would evaluate once during SSR and bake
+   * the fallbacks in for the life of the process.
+   */
+  const COLOURS = colours()
+
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<LeafletMap | null>(null)
   const layerRef = useRef<LayerGroup | null>(null)
@@ -87,13 +111,25 @@ export function GeofenceEditor({
   const [importing, setImporting] = useState(false)
   const [importNote, setImportNote] = useState<string | null>(null)
 
-  const fence: Geofence = value ?? {
-    type: "circle",
-    lat: fallbackCentre.lat,
-    lng: fallbackCentre.lng,
-    radius: 30,
-    buffer: 20,
-  }
+  /*
+   * Memoised, because the draw effect below keys on it. As a bare `value ?? {…}`
+   * the fallback was a NEW object on every render — and this component
+   * re-renders on every keystroke elsewhere in the form — so before a fence was
+   * drawn, typing a capacity cleared the layer group and rebuilt every marker
+   * with fresh drag handlers. Mid-drag, that destroys the node under the
+   * cursor. Keyed on the centre's numbers, not the object, for the same reason.
+   */
+  const fence: Geofence = useMemo(
+    () =>
+      value ?? {
+        type: "circle",
+        lat: fallbackCentre.lat,
+        lng: fallbackCentre.lng,
+        radius: 30,
+        buffer: 20,
+      },
+    [value, fallbackCentre.lat, fallbackCentre.lng]
+  )
 
   /*
    * Read by Leaflet's event handlers, which are registered once on mount and
@@ -261,7 +297,7 @@ export function GeofenceEditor({
         const edge = destination(centre, 90, fence.radius)
         const radiusMarker = L.marker(edge, {
           draggable: true,
-          icon: handle(13, "#fff", "#0D0C0C"),
+          icon: handle(13, "#fff", COLOURS.ink),
         }).addTo(group)
         radiusMarker.bindTooltip("Drag to set the radius", { direction: "right" })
         radiusMarker.on("dragend", (e) => {
@@ -316,7 +352,7 @@ export function GeofenceEditor({
           const first = i === 0 && drawing && fence.ring.length >= 3
           const marker = L.marker(point, {
             draggable: true,
-            icon: handle(first ? 16 : 12, "#fff", crossed ? COLOURS.bad : "#0D0C0C"),
+            icon: handle(first ? 16 : 12, "#fff", crossed ? COLOURS.bad : COLOURS.ink),
           }).addTo(group)
           if (first) marker.bindTooltip("Click to close the outline", { direction: "top" })
 
@@ -477,6 +513,12 @@ export function GeofenceEditor({
       ) : null}
 
       <div className="relative overflow-hidden rounded-xl border border-border-strong">
+        {/*
+          OpenStreetMap's own unloaded-tile colour, deliberately not a brand
+          token: this is what the map looks like before tiles arrive, and
+          matching the app's surface would make a loading map read as a broken
+          one. The literal is the map's, not the design system's.
+        */}
         <div ref={containerRef} style={{ height }} className="bg-[#e8e4de]" />
 
         <div className="absolute right-2.5 top-2.5 z-[800] flex overflow-hidden rounded-lg border border-border-strong bg-background/90 p-0.5 backdrop-blur">
@@ -487,8 +529,9 @@ export function GeofenceEditor({
               // Without this, changing the map layer submits the event form.
               type="button"
               onClick={() => setLayer(k)}
+              aria-pressed={layer === k}
               className={cn(
-                "rounded-md px-2.5 py-1 text-[0.71875rem]",
+                "min-h-6 rounded-md px-2.5 py-1 text-[0.71875rem]",
                 layer === k ? "bg-surface-raised font-bold" : "text-muted-foreground"
               )}
             >
@@ -514,17 +557,17 @@ export function GeofenceEditor({
         ) : null}
 
         <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
-          <Legend colour={COLOURS.extent} dash="solid" label="Extent — the venue itself" />
-          <Legend colour={COLOURS.buffer} dash="dashed" label={`Buffer — your tolerance (${fence.buffer} m)`} />
+          <Legend token="--chart-1" dash="solid" label="Extent — the venue itself" />
+          <Legend token="--chart-2" dash="dashed" label={`Buffer — your tolerance (${fence.buffer} m)`} />
           {showAccuracy ? (
             <Legend
-              colour={COLOURS.accuracy}
+              token="--muted-foreground"
               dash="dotted"
               label={`GPS allowance — automatic, up to ${ACCURACY_CAP} m`}
             />
           ) : null}
           {overlap ? (
-            <Legend colour={COLOURS.other} dash="dashed" label={`${overlap.name} (concurrent)`} />
+            <Legend token="--chart-3" dash="dashed" label={`${overlap.name} (concurrent)`} />
           ) : null}
         </div>
       </div>
@@ -597,13 +640,34 @@ export function GeofenceEditor({
   )
 }
 
-function Legend({ colour, dash, label }: { colour: string; dash: string; label: string }) {
+/**
+ * A swatch, drawn from the CSS variable rather than from a resolved colour.
+ *
+ * ## Why this takes a token and not a colour
+ *
+ * It used to take `COLOURS.extent` — a string from `themeColour()`, which reads
+ * `getComputedStyle` on the client and returns its hex FALLBACK on the server,
+ * because there is no document to compute against. React then rendered
+ * `border-top-color: rgb(240, 84, 35)` on the server and
+ * `borderTop: 2.5px solid lab(61.25% 57.01 57.75)` on the client, and reported a
+ * **hydration mismatch** on every load of `/dashboard/events/new`.
+ *
+ * `themeColour` is right where it is used: Leaflet takes colours as JS strings
+ * on its layer options, at runtime, after mount, where `var(--chart-1)` means
+ * nothing. It is wrong the moment its result reaches an inline style that is
+ * server-rendered — and nothing said so, because the mismatch is a console
+ * warning on a page nobody reads the console of.
+ *
+ * A swatch is plain DOM. It can just have the variable, which serialises
+ * identically on both sides and tracks the theme for free.
+ */
+function Legend({ token, dash, label }: { token: string; dash: string; label: string }) {
   return (
     <span className="flex items-center gap-2">
       <span
         aria-hidden
         className="w-4 shrink-0"
-        style={{ borderTop: `2.5px ${dash} ${colour}` }}
+        style={{ borderTop: `2.5px ${dash} var(${token})` }}
       />
       <span>{label}</span>
     </span>

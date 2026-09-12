@@ -137,6 +137,8 @@ export async function POST(request: NextRequest) {
           id: user.id,
           email: user.email,
           name: user.name,
+          // Same shape as sign-in and /auth/session — see the sign-in route.
+          image: user.image,
           profile: { ...profileForSelfResponse(profile), location: normalizedLocation },
         },
         accessToken,

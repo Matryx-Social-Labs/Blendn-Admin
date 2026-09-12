@@ -1,5 +1,7 @@
 "use client"
 
+import type { CategoryOption } from "@/components/event-form/basic-info-section"
+
 import { logger } from "@/lib/logger"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -8,14 +10,8 @@ import { format } from "date-fns"
 import { toZonedTime, fromZonedTime } from "date-fns-tz"
 import type { AmenityOption } from "@/components/event-form/amenities-section"
 import { EventForm, type EventFormValues } from "@/components/event-form"
-import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
-
-interface CategoryOption {
-  id: string
-  name: string
-}
 
 interface EventEditorData {
   id?: string
@@ -66,6 +62,8 @@ interface EventEditorProps {
   categories: CategoryOption[]
   amenities?: AmenityOption[]
   initialEvent?: EventEditorData
+  /** app_admin only: the Featured switch. The API refuses it from anyone else. */
+  canFeature?: boolean
 }
 
 const formatDateTimeInput = (value?: string, timezone = "Asia/Kolkata") => {
@@ -110,7 +108,7 @@ const parseToFaqArray = (value: unknown): Array<{ question: string; answer: stri
   return []
 }
 
-export function EventEditor({ categories, amenities = [], initialEvent }: EventEditorProps) {
+export function EventEditor({ categories, amenities = [], initialEvent, canFeature = false }: EventEditorProps) {
   const router = useRouter()
   const [isSaving, setIsSaving] = useState(false)
   const isEditing = Boolean(initialEvent?.id)
@@ -210,8 +208,8 @@ export function EventEditor({ categories, amenities = [], initialEvent }: EventE
         // Cover image: treat empty string as undefined
         cover_image_url: data.cover_image_url || undefined,
         external_link: data.external_link || undefined,
-        // Status: always "draft" on create (server default), only sent on edit
-        status: isEditing ? data.status : "draft",
+        // The rail's buttons set this: Save draft → draft, Publish → published.
+        status: data.status,
       }
 
       const response = await fetch(
@@ -244,26 +242,27 @@ export function EventEditor({ categories, amenities = [], initialEvent }: EventE
   }
 
   return (
-    <div className="container mx-auto flex max-w-5xl flex-col gap-6 py-10">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">
-            {isEditing ? "Edit Event" : "Create Event"}
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            {isEditing
-              ? "Update event details, location, and settings."
-              : "Fill in the details below — the event will be saved as a draft."}
-          </p>
-        </div>
-        <Button variant="outline" asChild>
-          <Link href="/dashboard/events">Back to Events</Link>
-        </Button>
-      </div>
+    /*
+     * No `h1` and no strapline. `site-header.tsx` owns the page's only `h1` and
+     * already renders "New event" with "Publish an event. Save a draft at any
+     * point." — so this rendered a SECOND `h1` saying almost the same thing,
+     * and a second sentence saying exactly the same thing.
+     *
+     * `__tests__/dashboard-header-title.test.ts` could not see it: it reads
+     * `app/<route>/page.tsx`, and this `h1` lives one hop away in a component.
+     * The guard follows local imports now.
+     */
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+      <Link
+        href="/dashboard/events"
+        className="w-fit text-[0.8125rem] text-muted-foreground hover:text-foreground"
+      >
+        ← Back to events
+      </Link>
       <EventForm
         onSubmit={handleSubmit}
         defaultValues={defaultValues}
-        submitLabel={isEditing ? "Save Changes" : "Create Event"}
+        canFeature={canFeature}
         isSubmitting={isSaving}
         isEditing={isEditing}
         categories={categories}

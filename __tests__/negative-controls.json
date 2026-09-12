@@ -399,9 +399,10 @@
     "prisma-shorthand-ratchet.test.ts": {
       "guards": "no NEW bare shorthand appears inside a Prisma `data:` block anywhere in app/ or lib/, that the baseline has no stale entries so shrinking stays deliberate, and that the scan found the known ones so the ratchet cannot go vacuous; and, added 2026-09-10, that no NEW Prisma write assembles its `data:` object in a variable — the blind spot that let the sixth outage through, because the shorthand scan only sees literal `data: {` blocks",
       "mutation": "A: add a bare `ratchet_probe_field,` to the data block in app/api/mobile/message-requests/route.ts. B: convert `message,` there to a conditional spread WITHOUT pruning the baseline; C: add a `db.check_in_refusals.create({ data: sneakyPayload })` to lib/check-in-refusals.ts, a file not in INDIRECT_DATA. D: add a `lib/gone.ts` entry to INDIRECT_DATA for a file that does not exist",
-      "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both; C: 1 failing ('has not grown'), naming lib/check-in-refusals.ts. D: 1 failing ('has no stale entries'), naming lib/gone.ts. Both vacuity guards stayed green",
+      "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both; C: 1 failing ('has not grown'), naming lib/check-in-refusals.ts. D: 1 failing ('has no stale entries'), naming lib/gone.ts. Both vacuity guards stayed green. E (2026-09-12, after widening the scan to inline blocks): put back the bare `note,` in the one-line create of app/api/mobile/events/[eventId]/peer-ratings/route.ts — 1 failing ('has not grown'), naming `peer-ratings/route.ts -> note`; green after cp of the saved file",
       "reverted": true,
-      "date": "2026-09-10"
+      "date": "2026-09-12",
+      "note": "The 2026-09-10 baseline grandfathered a live outage (report/route.ts -> description) and the line-anchored regex never saw one-line data blocks (peer-ratings -> note). Both are SCRUM-99."
     },
     "users-search-server-side.test.ts": {
       "guards": "that the users search box drives `?search=` on the URL — which `page.tsx` reads and passes to `getUsers` — rather than filtering the 50 rows already fetched, and that the footer discloses the cap instead of implying the page is the whole set",
@@ -424,6 +425,149 @@
       "observed": "A: 1 failing ('lets canOperate into the page those tabs lead to'). B: 2 failing — the composer guard, and the assertion that ChatFeed and ModerationQueue sit outside it, because an always-true guard swallows the whole column. The vacuity guard stayed green in both",
       "reverted": true,
       "date": "2026-09-10"
+    },
+    "attention-queues.test.ts": {
+      "guards": "the sidebar badges and the overview's attention strip read one module: app/dashboard/layout.tsx counts no queue table itself, every badgeKey in dashboardNav is one queueBadges actually produces, and the pure half stays free of `db` so a client component can import it without dragging `pg` into the browser bundle",
+      "mutation": "A: add `db.moderation_flags.count({ where: { status: 'pending' } })` back into app/dashboard/layout.tsx. B: delete the `pendingCreative` line from queueBadges(). C: add `import { db } from './db'` to lib/attention-queues.ts.",
+      "observed": "A: 1 failing ('the layout counts nothing itself'). B: 1 failing ('every badgeKey the nav asks for is one queueBadges produces'), reporting [\"pendingCreative\"] where [] was expected — exactly the silent failure the guard exists for, since a nav item asking for a badge nothing supplies renders no badge and no error. C: 1 failing ('the pure half never imports the database'). C is the one that matters: the real defect it stands for was found by `npm run build`, not by tsc and not by 2418 unit tests, because Jest resolves the import and never asks which bundle it lands in.",
+      "date": "2026-09-10"
+    },
+    "attention-queues.itest.ts": {
+      "guards": "three moderation tables fold into ONE strip row, and the oldest item across all three wins -- with rows actually in the tables",
+      "mutation": "A: `oldest: earliest([flags])` instead of `earliest(moderation)`. B: `count: sum([flags])` instead of `sum(moderation)`.",
+      "observed": "A and B each: 1 failing ('folds three moderation tables into one row and takes the oldest of them'). Behavioural, so no entry is strictly required -- registered because it REPLACES a vacuous one. dashboard-report.itest.ts asserted the same invariants against tables the fixture never wrote to, so every assertion ran as 0 >= 0 and would have passed against both mutations above.",
+      "date": "2026-09-10"
+    },
+    "refusals-by-reason.itest.ts": {
+      "guards": "refusalsByReason counts distinct PEOPLE per reason and distinct people overall, not check-in-refusal rows",
+      "mutation": "A: `total: rows.length`. B: per-reason `people` computed as `rows.filter(r => r.reason === reason).length`.",
+      "observed": "A and B each: 1 failing ('counts distinct people per reason, and distinct people overall'). The fixture is the load-bearing part: one person refused twice for the same reason AND once for a second reason is the only row shape that tells attempts from people, and it is why total (2) is deliberately lower than the sum of its own rows (3).",
+      "date": "2026-09-10"
+    },
+    "role-user-supply.itest.ts": {
+      "guards": "getRoleUsers separates PUBLISHED supply from drafts, dates the last published event (not the last draft), and computes sharePct against the platform's published total",
+      "mutation": "A: `const target = published` -- fold every status into the published count, which is what `_count.organized_events` did. B: drop `status: 'published'` from the lastEventAt groupBy.",
+      "observed": "A: 2 failing ('counts published as supply and drafts separately' and the share-sums-to-100 case). B: 2 failing ('dates the last PUBLISHED event, not the last draft' and 'gives a host with nothing published a null date'). The fixture is what makes A visible: two hosts with the SAME total of three events, one 2-published-1-draft and one 3-draft, so the old count and the new one disagree on which is the busiest supplier while agreeing on the total.",
+      "date": "2026-09-10"
+    },
+    "venue-index-filters.test.ts": {
+      "guards": "the venue index's Ownership filter is keyed on a field the row actually carries with values the server actually produces, and the query is bounded with the cap stated on screen",
+      "mutation": "A: key the filter back on `owner` with `__unclaimed__` option values -- the dead control as first written. B: delete `take: VENUE_INDEX_PAGE` from getVenueRecords.",
+      "observed": "A: 1 failing ('keys Ownership on a field the row carries, with matching values'). B: 1 failing ('bounds the query and hands the total back so the cap can be stated'). A is the one worth having: `DataTable` filters with String(row[key]) === value, so a filter keyed on `owner` renders a working-looking dropdown that selects nothing -- a control with nothing behind it, which is worse than a missing feature because it looks present.",
+      "date": "2026-09-10"
+    },
+    "event-readiness.test.ts": {
+      "guards": "the create-event form's readiness rule says the same thing as the server's canPublish -- a valid geofence alone is enough, coordinates are checked explicitly against null rather than truthily, and a fence counts only when validateGeofence says it does (switchMode('polygon') writes a truthy empty-ring object before anything is drawn)",
+      "mutation": "A: in lib/geofence-input.ts, delete the `if (event.geofence && validateGeofence(event.geofence).ok) return { ok: true }` early return so the server requires coordinates even with a fence. B: in lib/event-readiness.ts, `const hasFence = Boolean(values.geofence)` -- presence instead of validity, as it shipped.",
+      "observed": "A: 1 failing ('mirrors canPublish's two conditions'). B: 3 failing ('blocks a fence that is present but not yet drawn', 'a half-drawn fence does not rescue a missing pin', and the pin that the rule reads validateGeofence(...).ok). B was found by the silent-failure pass reading the editor, not by driving it: the strip flipped to 'Ready to publish' the instant the polygon toggle was clicked, mid-session, while the server would refuse on Save. The strip exists to prevent exactly that refusal, so a looser rule than the server's is the bug it was written to fix, restored live.",
+      "date": "2026-09-11"
+    },
+    "theme-colour-hydration.test.ts": {
+      "guards": "themeColour() -- which returns a hex fallback on the server and a computed token on the client -- is only imported by map components, and never reaches a server-rendered `style` prop",
+      "mutation": "In components/geofence-editor.tsx's Legend, put `${COLOURS.extent}` back in the style prop where `var(${token})` now is.",
+      "observed": "1 failing ('puts no resolved colour into a style prop in the map components'). The real defect was a hydration mismatch on every load of /dashboard/events/new -- rgb(240,84,35) server-side against lab(61.25% 57.01 57.75) client-side, from three legend swatches. Invisible to tsc, to 2456 unit tests and to `next build`; the page renders correctly and the only symptom is a console warning. Found with Chrome DevTools MCP, which named the component and the exact style diff -- `browse` could only report that a mismatch existed.",
+      "date": "2026-09-10"
+    },
+    "applications-queue-evidence.test.ts": {
+      "guards": "the applications queue's evidence marks are ORDERED by weight -- heaviest first -- an aggregator email domain is `against` and never appears alongside a `for` credential, and the age comes from lib/attention-queues.ts rather than a second local calculation",
+      "mutation": "A: `return marks` instead of `return marks.sort(...)` in lib/application-evidence.ts -- the fixed sequence as it shipped. B: render the aggregator badge with the credential variant. C: drop the queueAgeLabel import and compute the age locally.",
+      "observed": "A: 2 failing ('puts the heaviest mark leftmost, which is the whole mechanism' and 'draws an aggregator domain as a warning'). B and C: 1 each. A is the one that matters and it is the one a colour fix alone would have missed -- every individual badge still LOOKS right when the sequence is wrong, and the column is what gets scanned. Found by building the screen in HTML first; the shipped fix had changed the badge's colour and left it third in a fixed order.",
+      "date": "2026-09-11"
+    },
+    "venues-search-server-side.test.ts": {
+      "guards": "the admin venue index's search is a GET form that reaches the server (name OR city, case-insensitive), page.tsx reads ?q and passes it to getVenueRecords, one where clause feeds both the list and the count, and the DataTable renders the form in the same slot as the local search",
+      "mutation": "A: `db.venues.count({ where: { deleted_at: null } })` -- the count ignores the search. B: `search` (boolean) on the VenueRecords DataTable -- back to filtering the loaded page. C: `const isFiltered = activeChips.length > 0` -- the server search no longer counts as a filter.",
+      "observed": "A: 1 failing ('matches name OR city ... counts the same set it lists'). B: 1 failing ('submits a GET form named q'). The bug this pins: the list is a 200-row page, the box searched the page, and a venue past row 200 was unfindable with the box still reading 'Search venues...'. Same fix and same guard shape as users-search-server-side. C: 1 failing ('a server-side search that matches nothing is nothing matches, not no venues yet').",
+      "date": "2026-09-11"
+    },
+    "applications-queue-credential.test.ts": {
+      "guards": "the one-time password shown after approving an application is held by the queue list, not by the row -- the row hands it up and keeps no credential state of its own",
+      "mutation": "Put `const [credential, setCredential] = useState<Credential | null>(null)` back inside Row.",
+      "observed": "1 failing ('the row hands it up and keeps none of its own'). The defect it pins was found only by driving: approveOnboardingRequest revalidates the page, the approved row leaves the list in the same round trip that produced the password, and a row that has unmounted shows nothing -- toast said approved, badge went 7 to 6, and the credential the copy promises was on screen for zero frames.",
+      "date": "2026-09-11"
+    },
+    "photo-moderation-off-the-request-path.test.ts": {
+      "guards": "checkProfilePhoto never calls the vendor on the profile PUT's request path; moderateProfilePhoto runs after the response via after(), and a hide verdict pulls the photo AND re-mirrors User.image; both OpenAI fetches and the Tigris HEAD carry a deadline",
+      "mutation": "A: `const check = await checkImageContent(url)` back inside checkProfilePhoto. B: drop the db.user.update from moderateProfilePhoto's hide branch.",
+      "observed": "A: 1 failing ('never calls the vendor'). B: 1 failing ('a hide verdict pulls the photo and re-mirrors the primary'). The perf pass measured the wall clock: the one write that makes a photo appear waited on OpenAI fetching and scoring the image with no timeout, while the client gave up at 15s and the write then landed anyway from the abandoned request.",
+      "date": "2026-09-11"
+    },
+    "photos.test.ts": {
+      "guards": "ownedPhotoKey / ownedObjectKey bind a URL to the uploader and a folder (exact host, https, decoded, no traversal); the delete route uses ownedObjectKey over an allow-list of folders rather than extractKeyFromUrl",
+      "mutation": "In app/api/mobile/uploads/delete/route.ts, replace the ownedObjectKey lookup with extractKeyFromUrl and a split('/')[1] check.",
+      "observed": "1 failing ('the route uses it, and no longer the loose parser'). Grandfathered guards in the same file (the SSRF cases) predate the registry.",
+      "date": "2026-09-11"
+    },
+    "users-deleted-state.test.ts": {
+      "guards": "that /dashboard/users lists live accounts by default and erased ones only on ?status=deleted, that the stats line counts people on the platform plus a separate erased count, that a deleted row renders as a receipt (date + id) with one Deleted chip and no action menu, and that a search survives the not-onboarded filter instead of being overwritten by it; and, after the coverage pass, that updateUser/updateUserRole scope their write to `deletedAt: null`, that a suspended live row carries a Suspended chip, that an all-null profile row renders the dash, and that the count footer follows a non-default filter",
+      "mutation": "A: drop the `else { clauses.push({ deletedAt: null }) }` default in getUsers. B: `db.user.count()` for total in getUserStats. C: render `<ActionsCell>` unconditionally in the actions column. D: `clauses.splice(0, clauses.length, {...})` in the not-onboarded branch, reproducing the OR overwrite. E: `where: { id }` in updateUser. F: `!user.suspended_at &&` on the chip. G: revert the profile guard to `if (!profile)`. H: `db.user.count({ where: { AND: [{ deletedAt: null }] } })` regardless of filter",
+      "observed": "A: 1 failing ('shows live accounts by default'). B: 1 failing ('counts people on the platform'). C: 1 failing ('has no action menu'). D: 1 failing ('keeps a search when combined with the not-onboarded filter'). Nine green each time. E: 1 failing ('updateUser scopes its write to live rows'). F: 1 failing ('a suspended live row says so'). G: 1 failing ('a profile row with every field nulled'). H: 1 failing ('lists only deleted accounts when asked' — the footer assertion). Thirteen green each time",
+      "reverted": true,
+      "date": "2026-09-11"
+    },
+    "event-authoring-rail.test.ts": {
+      "guards": "that the event form renders the publish rail (and the bar below @4xl/main) and no submit of its own, that the buttons set the status and no Status select exists, that Publish is disabled while anything blocks, that every readiness item links to a field id that exists, that the sidebar inset clips rather than scrolls (sticky), that the long description is optional and lives under More, that categories are chips + a Popover picker, that Featured is admin-only on the screen and in both API routes, and that cancelling is a confirmed action",
+      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset. X: rename `id=\"field-start_time\"` to `field-start` in the When section",
+      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'). X: 1 failing ('every readiness item links to its field'). Nine green each time",
+      "reverted": true,
+      "date": "2026-09-11",
+      "note": "Control X was reverted with `git checkout` on a file that also carried the section's redesign, which threw the redesign away; the registry's own warning about exactly this was re-earned and the edits re-applied."
+    },
+    "socket-instance-shared.test.ts": {
+      "guards": "that lib/socket-server.ts holds the Socket.io instance on globalThis (no module-local `let io`, and `__blendnSocketIo = io` is written by initSocketServer), and that every `if (!io …)` guard is preceded by `const io = currentIo()` — so the copy of the module Next bundles into route and action chunks emits through the instance server.ts initialised",
+      "mutation": "in lib/socket-server.ts, reintroduce `let io: Server | null = null` above emitChatMessageHidden and delete that function's `const io = currentIo()` line",
+      "observed": "2 failing: 'keeps the instance on globalThis' and 'every emitter reads the shared instance before its guard'. Green after revert (cp of the saved file, not git checkout)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "The defect this guards was found by joining a room from a socket.io client, posting through the REST route, and receiving nothing — in dev and against the production build."
+    },
+    "integration/room-send.itest.ts": {
+      "guards": "that a plain text message (no metadata, no parent) is written by both send routes against real Postgres, and that a message with contact details is hidden on write and flagged (without an auto-mute) on both, with the sender served a placeholder",
+      "mutation": "(a) in app/api/mobile/events/[eventId]/chat/route.ts, change `parent_id: parentId ?? null` back to `parent_id: parentId`; (b) in lib/moderation/contact-info.ts, change the verdict's `action: \"hide\"` back to `\"flag\"`",
+      "observed": "(a) 2 failing — both contact cases (the event route 500s on the explicit undefined; the group case fails on the shared fixture's second room). (b) 2 failing — both contact cases, `moderation_status` is `flagged` not `hidden`. Green after each revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "The plain-message cases are the ones that would have caught SCRUM-83 and the event route's twin before a phone did; no regex sees `parent_id: parentId` with an optional `parentId`."
+    },
+    "contact-info.test.ts": {
+      "guards": "that the room verdict for contact details is `hide` with the flag carried, that `preSaveCheck` exists in the pipeline and returns `autoMute: false` for contact details, that both send routes call `preSaveCheck` (not `checkKeywords`) and gate the auto-mute on `preSave.autoMute`, that the DM path reads the verdict as a boolean and allows, and that the sender copy says the message is removed",
+      "mutation": "in app/api/mobile/events/[eventId]/chat/route.ts, drop the `if (preSave.autoMute)` gate so a phone number counts toward an auto-mute",
+      "observed": "1 failing ('is decided before the row is written, on both send routes'). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "The runtime half of this policy is pinned by integration/room-send.itest.ts against real Postgres."
+    },
+    "dashboard-feed-broadcast-kind.test.ts": {
+      "guards": "that the dashboard chat/messages route derives `kind` from `metadata.sponsored_message_id` and `type === \"announcement\"`, and that components/chat-feed.tsx labels a broadcast row (Sponsored / Announcement) in place of the `anonymousName ?? \"Attendee\"` sender and renders the stripped `body` rather than `msg.content`",
+      "mutation": "in components/chat-feed.tsx, replace `const broadcast = msg.kind !== \"user\"` with `const broadcast = false as boolean` so every row renders as an Attendee again",
+      "observed": "1 failing ('labels the row instead of naming an Attendee'). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Driven on the dashboard as the organiser before and after; K3.10."
+    },
+    "integration/dm-send.itest.ts": {
+      "guards": "that a text-only DM is written through the real route against real Postgres, with media_url/media_type null rather than an explicit undefined",
+      "mutation": "in app/api/mobile/conversations/[conversationId]/messages/route.ts, put back `media_url: mediaUrl, media_type: mediaType as media_type | null`",
+      "observed": "1 failing (500, strictUndefinedChecks). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Same class as SCRUM-83; a bare optional variable, invisible to any regex."
+    },
+    "integration/safety-writes.itest.ts": {
+      "guards": "that a message report with no description and a peer rating with no note are written through their real routes against real Postgres, with the omitted column null rather than an explicit undefined",
+      "mutation": "in app/api/mobile/events/[eventId]/peer-ratings/route.ts, put back the bare `note,` in the create data",
+      "observed": "1 failing ('rates a connected peer with no note' — 500, strictUndefinedChecks). Green after revert (cp of the saved file). The report half was observed live: 500 from the API before the spread, 201 after",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Eighth and ninth strictUndefinedChecks outages, both on the safety path; SCRUM-99."
+    },
+    "integration/refresh-replay.itest.ts": {
+      "guards": "that a refresh token replayed inside the grace window after rotation is answered with a fresh pair and its orphaned successor revoked, that the orphan is then refused, and that a replay long after rotation still ends the family",
+      "mutation": "in lib/mobile-auth.ts verifyRefreshToken, replace the successor revocation inside the grace branch with `return null` (the previous behaviour)",
+      "observed": "1 failing ('re-issues on a replay inside the grace window…' — retry returned 401). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Found by driving two phones for half an hour: the emulator's refresh timed out and the session died. SCRUM-101."
     }
   },
   "grandfathered": [

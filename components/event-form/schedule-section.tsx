@@ -19,14 +19,14 @@ export function ScheduleSection({
   form: UseFormReturn<EventFormValues>
 }) {
   return (
-    <FormSection title="Date & Time">
-      <div className="grid grid-cols-2 gap-4">
+    <FormSection step="02" title="When" id="step-when">
+      <div className="grid gap-4 @2xl/main:grid-cols-[1fr_1fr_minmax(0,1.2fr)]">
         <FormField
           control={form.control}
           name="start_time"
           render={({ field }) => (
-            <FormItem>
-              <FormLabel>Start *</FormLabel>
+            <FormItem id="field-start_time" className="scroll-mt-6">
+              <FormLabel>Starts</FormLabel>
               <FormControl>
                 <Input type="datetime-local" {...field} />
               </FormControl>
@@ -38,8 +38,8 @@ export function ScheduleSection({
           control={form.control}
           name="end_time"
           render={({ field }) => (
-            <FormItem>
-              <FormLabel>End *</FormLabel>
+            <FormItem id="field-end_time" className="scroll-mt-6">
+              <FormLabel>Ends</FormLabel>
               <FormControl>
                 <Input type="datetime-local" {...field} />
               </FormControl>
@@ -47,21 +47,23 @@ export function ScheduleSection({
             </FormItem>
           )}
         />
+        <FormField
+          control={form.control}
+          name="timezone"
+          render={({ field }) => (
+            <FormItem id="field-timezone" className="scroll-mt-6">
+              <FormLabel>
+                Timezone{" "}
+                <span className="font-normal text-muted-foreground">· where it happens</span>
+              </FormLabel>
+              <FormControl>
+                <TimezoneSelect value={field.value} onChange={field.onChange} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
       </div>
-
-      <FormField
-        control={form.control}
-        name="timezone"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Timezone *</FormLabel>
-            <FormControl>
-              <TimezoneSelect value={field.value} onChange={field.onChange} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
     </FormSection>
   )
 }

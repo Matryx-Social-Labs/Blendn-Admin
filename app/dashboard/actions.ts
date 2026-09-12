@@ -5,6 +5,10 @@ import type { rsvp_status } from "@prisma/client"
 import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
+import { visibleEventsWhere } from "@/lib/event-visibility"
+import { buildPacing, pacingWindowDays } from "@/lib/pacing"
+import { attentionQueues } from "@/lib/attention-queues-query"
+import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
@@ -13,6 +17,7 @@ import { loopClosure } from "@/lib/loop-closure"
 import { activeSince } from "@/lib/product-events"
 import { cityDemand } from "@/lib/demand"
 import { cityKey } from "@/lib/address"
+import { VENUE_INDEX_PAGE } from "@/lib/constants"
 import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
@@ -105,33 +110,25 @@ function toRatingCounts(rows: Array<{ rating: number; _count: { _all: number } }
  * "days out" rather than a calendar date — which is the only way two events of
  * different sizes and dates can be compared to each other.
  */
-function buildPacing(
-  rsvps: Array<{ created_at: Date }>,
-  startTime: Date,
-  windowDays: number
-): PacingPoint[] {
-  const daysBefore = rsvps
-    .map((r) => Math.max(0, Math.ceil((startTime.getTime() - r.created_at.getTime()) / DAY_MS)))
-    .sort((a, b) => b - a)
 
-  const points: PacingPoint[] = []
-  for (let d = windowDays; d >= 0; d--) {
-    points.push({ daysOut: d, cumulative: daysBefore.filter((x) => x >= d).length })
-  }
-  return points
-}
-
-async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview> {
+async function buildOrganizerOverview(userId: string, role: user_role): Promise<OrganizerOverview> {
+  /*
+   * Organisation-shaped, not identity-shaped (CLAUDE.md, and H2 in the audit):
+   * `organizer_id` records who created the row. A colleague at the same org
+   * saw an empty overview, and a venue owner saw only the events they had
+   * personally created in their own building -- usually none.
+   */
+  const scope = await visibleEventsWhere({ id: userId, role })
   const now = new Date()
   const windowStart = new Date(now.getTime() - 30 * DAY_MS)
   const priorStart = new Date(now.getTime() - 60 * DAY_MS)
   const todayStart = new Date(now)
   todayStart.setHours(0, 0, 0, 0)
-  const pastEvents = { ...eventScope(userId), start_time: { lt: now } }
+  const pastEvents = { ...scope, start_time: { lt: now } }
 
   const [next, previous, ratingSpread, ratingAggregate, chatToday, eventRows] = await Promise.all([
     db.events.findFirst({
-      where: { ...eventScope(userId), status: "published", start_time: { gte: now } },
+      where: { ...scope, status: "published", start_time: { gte: now } },
       orderBy: { start_time: "asc" },
       select: {
         id: true,
@@ -140,7 +137,9 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
         city: true,
         venue_name: true,
         max_capacity: true,
-        rsvps: { select: { created_at: true, status: true } },
+        // Committed only, like the benchmark query below: `not_going` is never
+        // read, and this is the one event most likely to have many rows.
+        rsvps: { where: { status: { in: COMMITTED } }, select: { created_at: true, status: true } },
         _count: { select: { favorites: true } },
       },
     }),
@@ -149,6 +148,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
       where: { ...pastEvents, status: "published" },
       orderBy: { start_time: "desc" },
       select: {
+        title: true,
         start_time: true,
         max_capacity: true,
         rsvps: { where: { status: { in: COMMITTED } }, select: { created_at: true } },
@@ -156,11 +156,11 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     }),
     db.event_ratings.groupBy({
       by: ["rating"],
-      where: { event: eventScope(userId) },
+      where: { event: scope },
       _count: { _all: true },
     }),
     db.event_ratings.aggregate({
-      where: { event: eventScope(userId) },
+      where: { event: scope },
       _avg: { rating: true },
       _count: { rating: true },
     }),
@@ -168,11 +168,11 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
       where: {
         deleted_at: null,
         created_at: { gte: todayStart },
-        chat_group: { event: eventScope(userId) },
+        chat_group: { event: scope },
       },
     }),
     db.events.findMany({
-      where: eventScope(userId),
+      where: scope,
       orderBy: { start_time: "desc" },
       take: 25,
       select: {
@@ -229,7 +229,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
      * `repeatAttendees` folds on distinct `event_id` instead.
      */
     db.event_check_ins.findMany({
-      where: { status: { in: ATTENDED }, event: eventScope(userId) },
+      where: { status: { in: ATTENDED }, event: scope },
       select: { user_id: true, event_id: true, kind: true },
     }),
   ])
@@ -246,24 +246,26 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
   let nextEvent: NextEvent | null = null
   let pacing: PacingPoint[] = []
   let pacingCapacity: number | null = null
+  let benchmark: OrganizerOverview["benchmark"] = null
 
   if (next) {
     const going = next.rsvps.filter((r) => r.status === "going").length
     const maybe = next.rsvps.filter((r) => r.status === "maybe").length
     const committed = next.rsvps.filter((r) => COMMITTED.includes(r.status))
     const daysOut = Math.max(0, Math.ceil((next.start_time.getTime() - now.getTime()) / DAY_MS))
-    const windowDays = Math.max(7, Math.min(60, daysOut + 14))
+    const windowDays = pacingWindowDays(daysOut)
 
     pacing = buildPacing(committed, next.start_time, windowDays)
     pacingCapacity = next.max_capacity
 
     let pacingNote: string | null = null
     if (previous && previous.rsvps.length > 0) {
-      const benchmark = buildPacing(previous.rsvps, previous.start_time, windowDays).find(
-        (p) => p.daysOut === daysOut
-      )
-      if (benchmark && benchmark.cumulative > 0) {
-        const ratio = committed.length / benchmark.cumulative
+      // The whole curve is drawn under the live one; the note reads one point of it.
+      const previousPacing = buildPacing(previous.rsvps, previous.start_time, windowDays)
+      benchmark = { title: previous.title, points: previousPacing }
+      const atThisPoint = previousPacing.find((p) => p.daysOut === daysOut)
+      if (atThisPoint && atThisPoint.cumulative > 0) {
+        const ratio = committed.length / atThisPoint.cumulative
         pacingNote =
           ratio >= 1.1
             ? "Pacing ahead of your last event at this point."
@@ -297,6 +299,7 @@ async function buildOrganizerOverview(userId: string): Promise<OrganizerOverview
     nextEvent,
     pacing,
     pacingCapacity,
+    benchmark,
     ratings: toRatingCounts(ratingSpread),
     noShowRatePct: round1(noShowNow),
     noShowDelta:
@@ -347,40 +350,31 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
   const inPrior = { gte: prior.from, lt: prior.to }
 
   const [
-    pendingFlags,
-    oldestFlag,
-    highConfidence,
-    flagRooms,
-    users,
+    attention,
     activeThisWeek,
-    publishedEvents,
     checkIns,
+    refusals,
+    upcomingEvents,
     hostAccounts,
     publishingHosts,
     curatedPublished,
     curatedUnclaimed,
     funnel,
-    signupsBeforeWindow,
-    signupBuckets,
-    activeBuckets,
     supplyRows,
     cityRows,
+    demandRows,
+    checkInsPrior,
   ] = await Promise.all([
-    db.moderation_flags.count({ where: { status: "pending" } }),
-    db.moderation_flags.findFirst({
-      where: { status: "pending" },
-      orderBy: { created_at: "asc" },
-      select: { created_at: true },
-    }),
-    // 0.9 is the pipeline's own "act without a human" threshold; above it a
-    // flag is very likely real, which is what makes it the queue's priority.
-    db.moderation_flags.count({ where: { status: "pending", confidence: { gte: 0.9 } } }),
-    db.moderation_flags.findMany({
-      where: { status: "pending" },
-      select: { chat_group_id: true },
-      distinct: ["chat_group_id"],
-    }),
-    db.user.count(),
+    /*
+     * All four queues, from the module the sidebar badges also read.
+     *
+     * This replaced four `moderation_flags` reads that produced a count, an
+     * age, a high-confidence subset and a room count — a rich description of
+     * ONE queue on a strip whose job is "is anything waiting", while three
+     * other queues went uncounted. Depth on one queue was the wrong axis;
+     * breadth across all of them is the question.
+     */
+    attentionQueues(),
     /*
      * Real app-opens where there are any, the old proxy where there are not.
      *
@@ -404,7 +398,6 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
       })
       return { count: rows.length, source: "proxy" as const }
     }) as Promise<{ count: number; source: "app_opens" | "proxy" }>,
-    db.events.count({ where: { ...eventScope(), status: "published" } }),
     /*
      * Window-scoped, matching its own delta.
      *
@@ -420,6 +413,26 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
      */
     db.event_check_ins.count({
       where: { status: { in: ATTENDED }, event: eventScope(), created_at: inRange },
+    }),
+    /*
+     * The other half of the same door.
+     *
+     * Arrivals alone cannot tell a quiet week from a week where the fence was
+     * wrong, and `check_in_refusals` has been recording the difference with no
+     * platform-wide reader since it was added — the per-event screen was the
+     * only place it surfaced, which means you had to already suspect an event
+     * to find out anything was wrong with it.
+     */
+    refusalsByReason(range),
+    /*
+     * Published and not yet over.
+     *
+     * Replaces an all-time count of published events, which only ever went up
+     * and answered a question nobody has. What an admin wants from supply is
+     * whether there is anything to send people to *next week*.
+     */
+    db.events.count({
+      where: { ...eventScope(), status: "published", end_time: { gte: now } },
     }),
     db.user.count({ where: { role: { in: ["organizer", "venue_owner"] } } }),
     db.events
@@ -450,31 +463,6 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
      * and it is stated where the query is.
      */
     loopClosure(),
-    /*
-     * A baseline count, not every user row.
-     *
-     * The `signups` line is CUMULATIVE — each of the eight points is "every
-     * user created up to this bucket" — so the old query loaded the entire
-     * `user` table to compute it, ordered, for eight numbers. It is invisible
-     * under ~20k users and then it is not, and the sibling
-     * `mobile_refresh_tokens` query on the next line already shows the bounded
-     * pattern.
-     *
-     * Split in two: one count for everything before the window, and only the
-     * rows inside it. Cumulative semantics are preserved exactly —
-     * `baseline + (rows up to bucketEnd)` — while transfer is bounded by
-     * signups in the last eight weeks rather than by all history.
-     */
-    db.user.count({ where: { createdAt: { lt: new Date(now.getTime() - 8 * 7 * DAY_MS) } } }),
-    db.user.findMany({
-      where: { createdAt: { gte: new Date(now.getTime() - 8 * 7 * DAY_MS) } },
-      select: { createdAt: true },
-      orderBy: { createdAt: "asc" },
-    }),
-    db.mobile_refresh_tokens.findMany({
-      where: { created_at: { gte: new Date(now.getTime() - 8 * 7 * DAY_MS) } },
-      select: { created_at: true, user_id: true },
-    }),
     db.events.groupBy({
       by: ["organizer_id", "status"],
       where: hostSupply(),
@@ -487,28 +475,41 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
         _count: { select: { rsvps: true, favorites: true } },
       },
     }),
+    /*
+     * Moved up from the tail, where it was costing two sequential round trips
+     * for nothing.
+     *
+     * It ran after wave 2 (`organisers`/`lastEvents`), which really does depend
+     * on `supplyRows`. `cityDemand` depends on neither — it reads `city_demand`
+     * and `events` directly — so it sat behind a wave it has no relationship
+     * with, purely because of where the `await` happened to be written.
+     * Measured by a latency pass; the fix is moving two lines.
+     */
+    cityDemand(50),
+    /*
+     * Same: the previous window's arrivals need only `range`, which wave 1
+     * already has. It was the LAST thing the function did, in a single-item
+     * `Promise.all`, after waves 1, 2 and 3.
+     */
+    db.event_check_ins.count({
+      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inPrior },
+    }),
   ])
 
-  /* Weekly growth: cumulative signups against distinct users with a session
-     that week. Plotted together deliberately — the gap between the two lines
-     is the vanity, and a signups line alone hides it entirely. */
-  const growth: AdminOverview["growth"] = []
-  for (let week = 7; week >= 0; week--) {
-    const bucketEnd = new Date(now.getTime() - week * 7 * DAY_MS)
-    const bucketStart = new Date(bucketEnd.getTime() - 7 * DAY_MS)
-    growth.push({
-      label: week === 0 ? "now" : `−${week}w`,
-      // Cumulative: everything before the window, plus what landed inside it
-      // up to this bucket. Identical to the old all-rows filter.
-      signups:
-        signupsBeforeWindow + signupBuckets.filter((u) => u.createdAt <= bucketEnd).length,
-      active: new Set(
-        activeBuckets
-          .filter((t) => t.created_at > bucketStart && t.created_at <= bucketEnd)
-          .map((t) => t.user_id)
-      ).size,
-    })
-  }
+  /*
+   * The signups-vs-active chart is gone, and so are its three queries.
+   *
+   * It was CUMULATIVE, which K4.7 has had on the register since the first
+   * audit: a cumulative series can only go up, so it cannot show the one thing
+   * a growth chart is for. Staging plotted 42, 42, 45, 82, 95, 95, 95, 121 —
+   * three flat weeks in the middle that the chart drew as a plateau at the
+   * ceiling, indistinguishable from healthy.
+   *
+   * The honest version is a weekly (non-cumulative) signup series, and that is
+   * a build rather than a deletion: it wants `product_events`, which now
+   * exists. Recorded as the next metric rather than shipped half-done, because
+   * a chart that flatters is worse than no chart.
+   */
 
   const publishedByOrganiser = new Map<string, number>()
   const draftsByOrganiser = new Map<string, number>()
@@ -577,7 +578,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
    * appear at all -- which is exactly the city the number is for: somewhere
    * people are looking and nobody is supplying.
    */
-  for (const row of await cityDemand(50)) {
+  for (const row of demandRows) {
     const existing = cityMap.get(row.cityKey)
     if (existing) {
       existing.waiting = row.waiting
@@ -594,54 +595,19 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     }
   }
 
-  /*
-   * Two shapes of comparison, because the metrics are two shapes.
-   *
-   * `users` and `publishedEvents` are cumulative totals, so the honest question
-   * is "how much did the total grow across this window" — the baseline is the
-   * total as it stood at `range.from`. `checkIns` is naturally window-scoped, so
-   * it compares this window's count against the previous window's.
-   *
-   * Comparing a cumulative total against a windowed count would be the classic
-   * version of this bug: an all-time figure divided by 30 days of activity,
-   * rendering a delta in the thousands of percent.
-   */
-  const [usersAtStart, eventsAtStart, checkInsNow, checkInsPrior] = await Promise.all([
-    db.user.count({ where: { createdAt: { lt: range.from } } }),
-    db.events.count({
-      where: { ...eventScope(), status: "published", created_at: { lt: range.from } },
-    }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inRange },
-    }),
-    db.event_check_ins.count({
-      where: { status: { in: ATTENDED }, event: eventScope(), created_at: inPrior },
-    }),
-  ])
-
   return {
     role: "app_admin",
-    attention: {
-      pending: pendingFlags,
-      oldestHours: oldestFlag
-        ? Math.floor((now.getTime() - oldestFlag.created_at.getTime()) / (60 * 60 * 1000))
-        : null,
-      highConfidence,
-      affectedRooms: flagRooms.length,
-    },
-    users,
+    attention,
+    // Server time, so the client renders the same ages the server did.
+    generatedAt: now.toISOString(),
     activeThisWeek,
-    publishedEvents,
     checkIns,
-    deltas: {
-      users: tileDelta({ current: users, previous: usersAtStart }),
-      publishedEvents: tileDelta({ current: publishedEvents, previous: eventsAtStart }),
-      checkIns: tileDelta({ current: checkInsNow, previous: checkInsPrior }),
-    },
+    refusals,
+    deltas: { checkIns: tileDelta({ current: checkIns, previous: checkInsPrior }) },
     rangeLabel: rangeLabel(range),
     publishingHosts: { publishing: publishingHosts, total: hostAccounts },
+    upcomingEvents,
     curated: { published: curatedPublished, unclaimed: curatedUnclaimed },
-    growth,
     funnel,
     supply,
     cities: Array.from(cityMap.values()).sort((a, b) => b.events - a.events),
@@ -666,7 +632,14 @@ function dayIndex(date: Date) {
   return (date.getDay() + 6) % 7
 }
 
-async function buildVenueOverview(userId: string): Promise<VenueOverview> {
+async function buildVenueOverview(userId: string, role: user_role): Promise<VenueOverview> {
+  /*
+   * Organisation-shaped, not identity-shaped (CLAUDE.md, and H2 in the audit):
+   * `organizer_id` records who created the row. A colleague at the same org
+   * saw an empty overview, and a venue owner saw only the events they had
+   * personally created in their own building -- usually none.
+   */
+  const scope = await visibleEventsWhere({ id: userId, role })
   const now = new Date()
   const windowStart = new Date(now.getTime() - WINDOW_WEEKS * 7 * DAY_MS)
 
@@ -674,8 +647,7 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
     // An event linked to a venue counts even if its free-text name is null —
     // the link is the stronger statement about where it happened.
     where: {
-      ...eventScope(userId),
-      OR: [{ venue_name: { not: null } }, { venue_id: { not: null } }],
+      AND: [scope, { OR: [{ venue_name: { not: null } }, { venue_id: { not: null } }] }],
     },
     select: {
       id: true,
@@ -712,18 +684,18 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
       db.event_rsvps.count({
         where: {
           status: { in: COMMITTED },
-          event: { ...eventScope(userId), start_time: { lt: now } },
+          event: { ...scope, start_time: { lt: now } },
         },
       }),
       db.event_check_ins.count({
         where: {
           status: { in: ATTENDED },
-          event: { ...eventScope(userId), start_time: { lt: now } },
+          event: { ...scope, start_time: { lt: now } },
         },
       }),
       db.events.count({
         where: {
-          ...eventScope(userId),
+          ...scope,
           status: "published",
           start_time: { gte: now, lte: new Date(now.getTime() + 14 * DAY_MS) },
         },
@@ -731,25 +703,25 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
       db.event_rsvps.count({
         where: {
           status: { in: COMMITTED },
-          event: { ...eventScope(userId), start_time: { gte: recentFrom, lt: now } },
+          event: { ...scope, start_time: { gte: recentFrom, lt: now } },
         },
       }),
       db.event_check_ins.count({
         where: {
           status: { in: ATTENDED },
-          event: { ...eventScope(userId), start_time: { gte: recentFrom, lt: now } },
+          event: { ...scope, start_time: { gte: recentFrom, lt: now } },
         },
       }),
       db.event_rsvps.count({
         where: {
           status: { in: COMMITTED },
-          event: { ...eventScope(userId), start_time: { gte: priorFrom, lt: recentFrom } },
+          event: { ...scope, start_time: { gte: priorFrom, lt: recentFrom } },
         },
       }),
       db.event_check_ins.count({
         where: {
           status: { in: ATTENDED },
-          event: { ...eventScope(userId), start_time: { gte: priorFrom, lt: recentFrom } },
+          event: { ...scope, start_time: { gte: priorFrom, lt: recentFrom } },
         },
       }),
     ])
@@ -778,17 +750,17 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
    * Normalising case and whitespace fixes "The Loft" vs "the loft" for the
    * unlinked remainder, which the raw-string version never could.
    */
-  const byVenue = new Map<string, { label: string; events: typeof events }>()
+  const byVenue = new Map<string, { id: string | null; label: string; events: typeof events }>()
   for (const event of events) {
     const displayName = event.venue?.name ?? event.venue_name ?? "Unnamed venue"
     const key = event.venue_id ?? `name:${normaliseVenueName(displayName)}`
     const bucket = byVenue.get(key)
     if (bucket) bucket.events.push(event)
-    else byVenue.set(key, { label: displayName, events: [event] })
+    else byVenue.set(key, { id: event.venue_id ?? null, label: displayName, events: [event] })
   }
 
   const venues: VenueRow[] = Array.from(byVenue.values())
-    .map(({ label: name, events: venueEvents }) => {
+    .map(({ id, label: name, events: venueEvents }) => {
       const inWindow = venueEvents.filter((e) => e.start_time >= windowStart && e.start_time < now)
       const ratings = emptyRatings()
       let ratingTotal = 0
@@ -806,16 +778,16 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
 
       // Tone is about what needs attention, not a ranking: a low rating across
       // several organisers' events is a facilities problem worth surfacing.
+      // Only a low rating is an alarm; a quiet room is a fact, not a fault.
       const tone: VenueRow["tone"] =
         averageRating !== null && averageRating < 3.5
           ? "destructive"
           : nightsPerWeek >= 2
             ? "success"
-            : nightsPerWeek < 0.5
-              ? "destructive"
-              : "neutral"
+            : "neutral"
 
       return {
+        id,
         name,
         eventsInWindow: inWindow.length,
         nightsPerWeek: Math.round(nightsPerWeek * 10) / 10,
@@ -836,11 +808,11 @@ async function buildVenueOverview(userId: string): Promise<VenueOverview> {
         tone,
         note:
           averageRating !== null && averageRating < 3.5
-            ? "ratings low"
+            ? "ratings skew low"
             : nightsPerWeek >= 2
-              ? "performing"
+              ? "busiest room"
               : nightsPerWeek < 0.5
-                ? "underused"
+                ? `quiet — ${inWindow.length} in ${WINDOW_WEEKS} weeks`
                 : "steady",
       }
     })
@@ -935,7 +907,7 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
   const { role, userId } = await dashboardActor()
   try {
     if (role === "app_admin") return await buildAdminOverview(range)
-    if (role === "venue_owner") return await buildVenueOverview(userId)
+    if (role === "venue_owner") return await buildVenueOverview(userId, role)
     /*
      * Sponsors used to fall through to the line below — an organiser overview
      * scoped to `organizer_id = <their own user id>`, which is never theirs. So
@@ -943,7 +915,7 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
      * a quiet month rather than a screen asking the wrong question.
      */
     if (role === "sponsor") return await buildSponsorOverview()
-    return await buildOrganizerOverview(userId)
+    return await buildOrganizerOverview(userId, role)
   } catch (error) {
     logger.error("Failed to build dashboard overview", {
       role,
@@ -968,35 +940,87 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
  * doing"; this answers "what exists and who owns it", which is an operational
  * question with a different shape and a different sort order.
  */
-export async function getVenueRecords(): Promise<VenueRecordRow[]> {
+/**
+ * The admin venue index.
+ *
+ * ## Bounded, and the screen says so
+ *
+ * This was an unbounded `findMany` with two correlated counts per row, and the
+ * screen rendered every row it returned with no pagination. On the local seed
+ * that is **395 rows and a 15,812px document**; in production it is however
+ * many venues exist, all of them, every time an admin opens the page. Nothing
+ * on the screen offered a search box to avoid it.
+ *
+ * The cap is returned with the rows rather than applied silently — the same
+ * *no silent caps* rule the exports follow. A truncated list that presents
+ * itself as the whole list is how an operator concludes a venue is missing.
+ *
+ * The page size lives in `lib/constants.ts`, NOT beside the query. A
+ * `"use server"` module may only export async functions, and an `export const`
+ * here is a build error that neither `tsc` nor the unit suite sees — only
+ * `next build` does. That has now happened twice; the guard below it has been
+ * widened so there is not a third.
+ */
+export async function getVenueRecords(
+  q = ""
+): Promise<{ venues: VenueRecordRow[]; total: number }> {
   const session = await getAuth()
   if (session?.user?.role !== "app_admin") throw new Error("Forbidden")
 
-  const venues = await db.venues.findMany({
-    where: { deleted_at: null },
-    select: {
-      id: true,
-      name: true,
-      city: true,
-      status: true,
-      owner_org: { select: { display_name: true } },
-      _count: {
-        select: {
-          events: { where: { deleted_at: null } },
-          claims: { where: { status: "pending" } },
+  // Name or city. Server-side because the list is a page: a search over the
+  // 200 rows the client holds cannot find the 201st, and used to say nothing.
+  const where = {
+    deleted_at: null,
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" as const } },
+            { city: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  }
+  const [venues, total] = await Promise.all([
+    db.venues.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        city: true,
+        status: true,
+        owner_org: { select: { display_name: true } },
+        _count: {
+          select: {
+            events: { where: { deleted_at: null } },
+            claims: { where: { status: "pending" } },
+          },
         },
       },
-    },
-    orderBy: { name: "asc" },
-  })
+      /*
+       * Unclaimed first, then by name.
+       *
+       * Alphabetical put "Aashirwad Bar" at the top of 395 rows and the venues
+       * with a pending claim wherever their name fell. Unclaimed is the queue —
+       * this file's own component docstring says so — and a queue sorted by
+       * name is not a queue.
+       */
+      orderBy: [{ owner_org_id: { sort: "asc", nulls: "first" } }, { name: "asc" }],
+      take: VENUE_INDEX_PAGE,
+    }),
+    db.venues.count({ where }),
+  ])
 
-  return venues.map((venue) => ({
-    id: venue.id,
-    name: venue.name,
-    city: venue.city,
-    owner: venue.owner_org?.display_name ?? null,
-    events: venue._count.events,
-    pendingClaims: venue._count.claims,
-    status: venue.status,
-  }))
+  return {
+    venues: venues.map((venue) => ({
+      id: venue.id,
+      name: venue.name,
+      city: venue.city,
+      owner: venue.owner_org?.display_name ?? null,
+      ownership: venue.owner_org ? ("claimed" as const) : ("unclaimed" as const),
+      events: venue._count.events,
+      pendingClaims: venue._count.claims,
+      status: venue.status,
+    })),
+    total,
+  }
 }

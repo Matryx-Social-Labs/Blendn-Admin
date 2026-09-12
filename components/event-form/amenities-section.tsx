@@ -48,7 +48,7 @@ export function AmenitiesSection({
   amenities: AmenityOption[]
 }) {
   return (
-    <FormSection title="What's included" defaultOpen={false}>
+    <FormSection title="What's included" level={3}>
       <p className="text-sm text-muted-foreground">
         Shown as tiles on the event page. Tick only what you are actually
         providing — people will arrive expecting these.

@@ -1,3 +1,5 @@
+import { readFileSync } from "fs"
+import { join } from "path"
 import {
   checkContactInfo,
   contactInfoWarning,
@@ -108,15 +110,43 @@ describe("handles and links", () => {
   })
 })
 
-describe("the verdict is always a flag", () => {
-  it("never hides, whatever it finds", () => {
+describe("the verdict, per surface", () => {
+  it("hides in a room, and carries the flag so a moderator can restore", () => {
     /*
-     * The whole design. A block teaches the boundary in one message and then
-     * loses sight of the behaviour — you get the evasion *and* an empty flag
-     * stream, which is strictly worse than not blocking.
+     * Decided 2026-09-12 after a drive showed a seeded phone number sitting in
+     * a live room for hours. The old design ("never hides — a block teaches
+     * the boundary and empties the flag stream") kept the evasion argument;
+     * this keeps the flag, and loses only the message that was hidden.
      */
     const result = checkContactInfo("9876543210 add me on insta wa.me/1")
-    expect(result?.action).toBe("flag")
+    expect(result?.action).toBe("hide")
+    expect(result?.categories).toMatchObject({ contact_phone: 1, contact_handle: 1, contact_link: 1 })
+  })
+
+  it("is decided before the row is written, on both send routes", () => {
+    /*
+     * A hide that happens after the emit is a number the room already saw.
+     * `preSaveCheck` composes keywords and contact details and both routes
+     * call it instead of `checkKeywords` directly — with `autoMute: false`
+     * for contact details, since sharing your own number is not abuse.
+     */
+    const pipeline = readFileSync(join(process.cwd(), "lib/moderation/index.ts"), "utf8")
+    expect(pipeline).toMatch(/export function preSaveCheck/)
+    expect(pipeline).toMatch(/contact && contact\.action === "hide"\) return \{ result: contact, autoMute: false \}/)
+    for (const route of [
+      "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts",
+      "app/api/mobile/events/[eventId]/chat/route.ts",
+    ]) {
+      const src = readFileSync(join(process.cwd(), route), "utf8")
+      expect(src).toMatch(/const preSave = preSaveCheck\(content\)/)
+      expect(src).not.toMatch(/checkKeywords\(content\)/)
+      expect(src).toMatch(/if \(preSave\.autoMute\) void checkAndAutoMute/)
+    }
+  })
+
+  it("the DM path reads it as a yes/no and lets the message through", () => {
+    const dm = readFileSync(join(process.cwd(), "lib/dm-moderation.ts"), "utf8")
+    expect(dm).toMatch(/if \(checkContactInfo\(text\)\) return \{ verdict: "allow", status: "flagged" \}/)
   })
 
   it("returns null for clean text rather than an allow verdict", () => {
@@ -124,10 +154,11 @@ describe("the verdict is always a flag", () => {
     expect(checkContactInfo("great set tonight")).toBeNull()
   })
 
-  it("says nothing to the room, only to the sender", () => {
+  it("tells the sender what will happen, not what is forbidden", () => {
     const warning = contactInfoWarning(findContactInfo("9876543210"))
-    expect(warning).toContain("Send anyway?")
+    expect(warning).toContain("removed before anyone sees it")
     expect(warning).toContain("anonymous")
+    expect(warning).not.toContain("Send anyway")
   })
 
   it("has no warning when there is nothing to warn about", () => {

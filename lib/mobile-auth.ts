@@ -43,6 +43,8 @@ const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000 // 30 days in ms
  * A replay long after rotation is still treated as theft.
  */
 const REFRESH_REUSE_GRACE_MS = 60 * 1000 // 60 seconds
+/** How long a revoked row outlives its revocation — comfortably past the grace. */
+const REVOKED_TOKEN_RETENTION_MS = 60 * 60 * 1000
 
 export interface TokenPayload {
   userId: string
@@ -212,24 +214,49 @@ export async function verifyRefreshToken(
     //
     // Exception: a replay within REFRESH_REUSE_GRACE_MS of rotation is almost
     // certainly the client retrying after it never received the new token.
-    // Reject the request, but don't sign the user out everywhere over it.
+    // This used to reject that request too ("don't sign the user out
+    // everywhere") — which signed them out *here*, because the pair the server
+    // issued reached nobody and the pair the client still held was dead.
+    // Driven on an emulator: one refresh timed out on the client after the
+    // server had rotated, and thirty minutes into the session the app was at
+    // the sign-in screen. On a slow venue network that is the ordinary case,
+    // not the edge.
+    //
+    // So a replay inside the grace is accepted: the successor nobody holds is
+    // revoked, and the route below rotates again from this token. One live
+    // token per device still holds — a stolen token replayed in the window
+    // kills the legitimate successor, and the legitimate device's next
+    // refresh then trips reuse detection and ends the family.
     if (storedToken.revoked_at) {
       const sinceRevokedMs = Date.now() - storedToken.revoked_at.getTime()
 
       if (sinceRevokedMs <= REFRESH_REUSE_GRACE_MS) {
-        logger.info("Refresh token replayed just after rotation, treating as client retry", {
+        // Only a token retired *by rotation* is re-issuable — one revoked by
+        // sign-out, suspension, or by being the orphan of an earlier replay
+        // has no successor to retire and is simply refused.
+        if (!storedToken.replaced_by) {
+          logger.info("Revoked refresh token replayed inside the grace window, refusing", {
+            userId: storedToken.user_id,
+            sinceRevokedMs,
+          })
+          return null
+        }
+        logger.info("Refresh token replayed just after rotation, re-issuing", {
           userId: storedToken.user_id,
           sinceRevokedMs,
         })
+        await db.mobile_refresh_tokens.updateMany({
+          where: { id: storedToken.replaced_by, revoked_at: null },
+          data: { revoked_at: new Date() },
+        })
+      } else {
+        logger.error("Refresh token reuse detected, revoking all refresh tokens", {
+          userId: storedToken.user_id,
+          sinceRevokedMs,
+        })
+        await revokeUserRefreshTokens(storedToken.user_id)
         return null
       }
-
-      logger.error("Refresh token reuse detected, revoking all refresh tokens", {
-        userId: storedToken.user_id,
-        sinceRevokedMs,
-      })
-      await revokeUserRefreshTokens(storedToken.user_id)
-      return null
     }
 
     // Check if token is expired in DB
@@ -265,20 +292,20 @@ export async function revokeUserRefreshTokens(userId: string): Promise<void> {
 }
 
 /**
- * Revoke a specific refresh token
+ * Revoke a specific refresh token. On rotation, `replacedBy` is the successor's
+ * id, and the revocation time is (re)stamped so a replay inside the grace
+ * window is measured from the rotation the client actually missed.
  */
-export async function revokeRefreshToken(token: string): Promise<void> {
+export async function revokeRefreshToken(token: string, replacedBy?: string): Promise<void> {
   try {
     const decoded = jwt.decode(token) as DecodedToken | null
     if (!decoded?.jti) return
 
     await db.mobile_refresh_tokens.updateMany({
-      where: {
-        id: decoded.jti,
-        revoked_at: null,
-      },
+      where: replacedBy ? { id: decoded.jti } : { id: decoded.jti, revoked_at: null },
       data: {
         revoked_at: new Date(),
+        ...(replacedBy != null && { replaced_by: replacedBy }),
       },
     })
   } catch {
@@ -346,11 +373,16 @@ export async function getAuthenticatedUser(
  * Clean up expired refresh tokens (can be called periodically)
  */
 export async function cleanupExpiredTokens(): Promise<number> {
+  // Revoked rows are kept for a while, not deleted on sight: a rotated token's
+  // row is what lets a client that lost the rotation response be re-issued
+  // (see verifyRefreshToken), and deleting it inside the grace window turned
+  // that path into a plain 401.
+  const revokedBefore = new Date(Date.now() - REVOKED_TOKEN_RETENTION_MS)
   const result = await db.mobile_refresh_tokens.deleteMany({
     where: {
       OR: [
         { expires_at: { lt: new Date() } },
-        { revoked_at: { not: null } },
+        { revoked_at: { lt: revokedBefore } },
       ],
     },
   })

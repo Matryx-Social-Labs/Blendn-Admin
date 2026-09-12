@@ -55,7 +55,7 @@ export default async function CuratePage({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-bold">
+        <h2 className="text-[length:var(--text-h2)] font-bold">
           Curation health{city ? <span className="font-normal text-muted-foreground"> · {city}</span> : null}
         </h2>
         {/* The header already names the number that matters. What it cannot fit

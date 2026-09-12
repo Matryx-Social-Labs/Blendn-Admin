@@ -3,6 +3,7 @@
 import { headers } from "next/headers"
 
 import { auditLog } from "@/lib/audit-log"
+import { clientIpFrom } from "@/lib/client-ip"
 import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
 import { CLAIM_LIMITS, CLAIM_PAGE, claimRefusal, curationSelect } from "@/lib/curation"
@@ -57,12 +58,12 @@ const HOUR_MS = 60 * 60 * 1000
 async function overClaimLimit(email: string, eventId: string): Promise<string | null> {
   /*
    * `x-forwarded-for` is spoofable, which is why it is the weakest of the three
-   * and never the only one. Behind Railway's proxy the left-most entry is the
-   * real client; with no header at all every anonymous caller shares one
-   * bucket, which fails toward refusing rather than toward letting through.
+   * and never the only one. The LAST hop is the one the platform's edge added
+   * — the left-most is whatever the client sent, which is why this goes
+   * through `clientIpFrom` like every other limiter. With no header at all
+   * every anonymous caller shares one bucket, which fails toward refusing.
    */
-  const forwarded = (await headers()).get("x-forwarded-for") ?? "unknown"
-  const ip = forwarded.split(",")[0]!.trim() || "unknown"
+  const ip = clientIpFrom(await headers())
 
   const [byEmail, byEvent, byIp] = await Promise.all([
     hit(`rl:claim:email:${email}`, HOUR_MS),
@@ -114,6 +115,25 @@ export async function fileEventClaim(
       orgId = await owningOrgFor(session.user)
     } catch {
       orgId = null
+    }
+  }
+
+  /*
+   * An application id from the browser has to be the caller's own.
+   *
+   * A pending application grants nothing, which is why accepting the id was
+   * safe — until the hand-over started resolving the organisation from an
+   * *approved* one. Without this check anyone who knew a request's uuid could
+   * file a claim on any event under any email and have it handed to that
+   * organisation. The request's contact address must be the claim's.
+   */
+  if (input.onboardingId) {
+    const request = await db.organiser_onboarding_requests.findUnique({
+      where: { id: input.onboardingId },
+      select: { contact_email: true },
+    })
+    if (!request || request.contact_email.toLowerCase() !== email) {
+      return { ok: false, error: "That application does not match this email address" }
     }
   }
 
@@ -241,11 +261,37 @@ export async function decideEventClaim(
       id: true,
       status: true,
       org_id: true,
+      onboarding_id: true,
+      contact_email: true,
       event: { select: { id: true, title: true, ...curationSelect } },
     },
   })
   if (!claim) throw new Error("Claim not found")
   if (claim.status !== "pending") throw new Error("This claim has already been decided.")
+
+  /*
+   * A claim filed without an account carries `onboarding_id` and no `org_id`;
+   * approving that application creates the organisation and records it on the
+   * request — and nothing wrote it back to the claim. So the funnel's second
+   * half dead-ended: the queue said "approving creates the organisation
+   * first", the action said "approve the onboarding request first", and after
+   * doing so the hand-over still refused, for ever. Found by handing over the
+   * seeded no-account claim. The organisation is resolved from the request
+   * here, at decision time.
+   */
+  const request = claim.onboarding_id
+    ? await db.organiser_onboarding_requests.findUnique({
+        where: { id: claim.onboarding_id },
+        select: { org_id: true, contact_email: true },
+      })
+    : null
+  // Filing already refused a request that is not the claimant's own; checked
+  // again here because this is the write that hands over an event, and a
+  // read at filing time is not a guarantee at decision time.
+  if (request && request.contact_email.toLowerCase() !== claim.contact_email.toLowerCase()) {
+    throw new Error("The application on this claim belongs to a different email address.")
+  }
+  const orgId = claim.org_id ?? request?.org_id ?? null
 
   // A decline with no reason produces an identical re-file, and the queue gets
   // the same row again. Same rule as the venue queue.
@@ -255,9 +301,9 @@ export async function decideEventClaim(
   }
 
   if (decision === "approve") {
-    if (!claim.org_id) {
+    if (!orgId) {
       throw new Error(
-        "Approve the onboarding request first — there is no organisation to hand this to yet."
+        "Approve their application first — there is no organisation to hand this to yet."
       )
     }
     /*
@@ -297,6 +343,12 @@ export async function decideEventClaim(
           reviewed_by: admin.id,
           reviewed_at: new Date(),
           decision_note: trimmed || null,
+          // Recorded on the claim too, so the row says who got the event.
+          // `event_claims_one_claimant` wants exactly one of the pair set, so
+          // the request id goes as the organisation arrives.
+          ...(decision === "approve" && !claim.org_id && orgId
+            ? { org_id: orgId, onboarding_id: null }
+            : {}),
         },
       })
 
@@ -305,7 +357,7 @@ export async function decideEventClaim(
       // The one write that unlocks every screen.
       await tx.events.update({
         where: { id: claim.event.id },
-        data: { organizer_org_id: claim.org_id, claimed_at: new Date() },
+        data: { organizer_org_id: orgId, claimed_at: new Date() },
       })
 
       /*
@@ -332,7 +384,7 @@ export async function decideEventClaim(
     action: decision === "approve" ? "event_claim.approved" : "event_claim.declined",
     resource: "event_claim",
     resourceId: claimId,
-    details: { eventId: claim.event.id, title: claim.event.title, orgId: claim.org_id },
+    details: { eventId: claim.event.id, title: claim.event.title, orgId },
   })
 }
 

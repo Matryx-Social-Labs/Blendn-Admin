@@ -48,9 +48,13 @@ export function EventVenueLink({
 
   if (!open) {
     return (
-      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        Not at {venueName}?
-      </Button>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="underline decoration-border-strong underline-offset-[3px] hover:text-foreground"
+      >
+        · Not at {venueName}?
+      </button>
     )
   }
 

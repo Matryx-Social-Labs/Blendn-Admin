@@ -5,6 +5,7 @@ import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
+import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
 
 /**
@@ -413,9 +414,19 @@ async function mirrorToTigris(
  * keyword, so what comes back is not curated by us. Fine for a test environment
  * that only internal testers see; production media is what an organiser
  * uploads.
+ *
+ * **1600, not 2048, and every subject probed.** The host answers HTTP 500 —
+ * not 404 — for two different things: a size it will not render (2048×2048,
+ * checked 2026-09-11) and a tag set no photograph carries. `nightclub,neon,
+ * lights` and `concert,classical,music` were the second kind; `rooftop,party`
+ * fails with two tags and works with three, so there is no rule beyond
+ * "check". Every subject in the table above answered 302-to-image on
+ * 2026-09-11. A placeholder that does not load is worse than none — the
+ * card's fallback is designed, the red "Image onError" toast is not.
  */
+export const SEED_COVER_SIZE = 1600
 const cover = (seed: string) =>
-  `https://loremflickr.com/2048/2048/${MEDIA_SUBJECT[seed] ?? "event"}?lock=${lockFor(seed)}`
+  `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${MEDIA_SUBJECT[seed] ?? "event"}?lock=${lockFor(seed)}`
 
 /** A stable number per subject, so the same slug gets the same photograph. */
 const lockFor = (seed: string) =>
@@ -425,9 +436,9 @@ const lockFor = (seed: string) =>
 const MEDIA_SUBJECT: Record<string, string> = {
   rooftop: "rooftop,party,sunset",
   stadium: "stadium,football,crowd",
-  neon: "nightclub,neon,lights",
+  neon: "nightclub,neon",
   club: "dj,nightclub,dancing",
-  recital: "concert,classical,music",
+  recital: "concert,classical",
   coffee: "cafe,coffee,people",
   market: "market,street,stalls",
   supper: "dinner,restaurant,table",
@@ -732,7 +743,12 @@ async function main() {
     const hashed = await bcrypt.hash(generatePassword(), HASH_COST)
     const u = await db.user.upsert({
       where: { email: a.email },
-      update: { role: "attendee", deletedAt: null, suspended_at: null },
+      // `password` here too. The dashboard upsert above resets it on every
+      // run; this one did not, so an attendee kept whatever random password
+      // its first seed generated and the "same password" promised below was
+      // false for every re-seed — the mobile sign-in a tester was given
+      // never worked.
+      update: { password: hashed, role: "attendee", deletedAt: null, suspended_at: null },
       create: {
         email: a.email,
         name: a.name,
@@ -810,6 +826,32 @@ async function main() {
           check_out_time: status === "checked_out" ? slot.event.end_time : null,
         },
       })
+      /*
+       * A real check-in opens a presence session as well (`openSession` in the
+       * checkin route), and the dashboard's "inside" figure reads that table,
+       * not `event_check_ins`. Seeding only the check-in row put 6 people on
+       * the phone's Grid and 0 on the organiser's Rooms page for the same room.
+       */
+      if (status === "checked_in") {
+        const session = await openSession({
+          eventId: slot.event.id,
+          occurrenceId: slot.occurrence.id,
+          userId,
+          at: slot.event.start_time,
+          source: "polling",
+        })
+        // Arrived at doors, still pinging: a session last seen at start_time
+        // reads as stale after ten minutes and counts as nobody inside.
+        await db.presence_sessions.update({
+          where: { id: session.id },
+          data: { last_seen_at: new Date() },
+        })
+      } else {
+        await db.presence_sessions.updateMany({
+          where: { occurrence_id: slot.occurrence.id, user_id: userId, departed_at: null },
+          data: { departed_at: slot.event.end_time, departed_source: "user" },
+        })
+      }
       n++
     }
     return n
@@ -902,9 +944,16 @@ async function main() {
     select: { id: true, title: true },
   })
   if (liveEvent) {
+    /*
+     * `status: "active"` on re-run, for the room and its members. The seed
+     * moves this event to "live now" each time it runs; between runs the chat
+     * lifecycle sweeper has archived the room and marked every member `left`,
+     * and an upsert that touches neither re-seeds a live event whose room says
+     * 0 in it and whose announcements reach 0 members.
+     */
     const room = await db.chat_groups.upsert({
       where: { event_id: liveEvent.id },
-      update: {},
+      update: { status: "active" },
       create: { event_id: liveEvent.id, name: liveEvent.title, type: "event" },
     })
     /*
@@ -921,11 +970,27 @@ async function main() {
       "great turnout for a tuesday",
       "reach me on 98450 12345 if you get lost",
     ]
+    /*
+     * A handle may already belong to somebody who is no longer an attendee —
+     * an erased account keeps its membership row (history survives erasure by
+     * design) and therefore its pseudonym, and the room's unique is on
+     * (chat_group_id, anonymous_name). The first re-seed after a deletion
+     * drive died on exactly that. Hand out the handles that are free.
+     */
+    const members = await db.chat_group_members.findMany({
+      where: { chat_group_id: room.id },
+      select: { user_id: true, anonymous_name: true },
+    })
+    const taken = new Set(members.map((m) => m.anonymous_name))
+    const handleOf = new Map(members.map((m) => [m.user_id, m.anonymous_name]))
+    const free = HANDLES.filter((h) => !taken.has(h))
     for (let i = 0; i < Math.min(attendeeIds.length, HANDLES.length); i++) {
+      const handle = handleOf.get(attendeeIds[i]) ?? free.shift()
+      if (!handle) break
       await db.chat_group_members.upsert({
         where: { chat_group_id_user_id: { chat_group_id: room.id, user_id: attendeeIds[i] } },
-        update: {},
-        create: { chat_group_id: room.id, user_id: attendeeIds[i], anonymous_name: HANDLES[i] },
+        update: { status: "active" },
+        create: { chat_group_id: room.id, user_id: attendeeIds[i], anonymous_name: handle },
       })
       const existing = await db.chat_messages.findFirst({
         where: { chat_group_id: room.id, user_id: attendeeIds[i], content: lines[i] },
@@ -1278,7 +1343,7 @@ async function main() {
   if (APPLY) {
     const retired = await db.events.updateMany({
       where: { slug: { in: RETIRED_SLUGS }, deleted_at: null },
-      data: { deleted_at: new Date() },
+      data: { deleted_at: new Date(), updated_at: new Date() },
     })
     if (retired.count > 0) console.log(`Retired ${retired.count} event(s) under old QA names.`)
   }

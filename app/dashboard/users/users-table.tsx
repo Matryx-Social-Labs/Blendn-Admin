@@ -85,15 +85,15 @@ const ROLE_LABELS: Record<string, string> = {
   attendee: "Attendee",
 }
 
-/**
- * Brand chart hues rather than raw hexes, so these follow the theme instead of
- * staying violet/blue/green while the rest of the app is orange and purple.
- */
-const ROLE_COLORS: Record<string, React.CSSProperties> = {
-  app_admin: { backgroundColor: "var(--chart-3)", color: "var(--background)" },
-  organizer: { backgroundColor: "var(--chart-1)", color: "var(--background)" },
-  venue_owner: { backgroundColor: "var(--chart-2)", color: "var(--background)" },
-  attendee: { backgroundColor: "var(--muted)", color: "var(--muted-foreground)" },
+// A word. The role was a filled pill in a chart hue on every row — orange for
+// organisers, the brand colour a screen reserves for its primary action.
+// Attendees, the bulk of the table, read quiet; the three dashboard roles
+// read in the foreground weight so they can be picked out of a page.
+const ROLE_TONE: Record<string, string> = {
+  app_admin: "font-bold text-foreground",
+  organizer: "text-foreground",
+  venue_owner: "text-foreground",
+  attendee: "text-muted-foreground",
 }
 
 // Actions cell component - extracted to comply with React hooks rules
@@ -150,6 +150,17 @@ function ActionsCell({
   )
 }
 
+/** The values `getUsers` reads off `?status=`; "all" is the absence of one. */
+const STATUS_FILTERS = [
+  { value: "all", label: "All statuses" },
+  { value: "onboarded", label: "Onboarded" },
+  { value: "not-onboarded", label: "Not onboarded" },
+  { value: "verified", label: "Verified" },
+  { value: "unverified", label: "Unverified" },
+  { value: "suspended", label: "Suspended" },
+  { value: "deleted", label: "Deleted" },
+]
+
 const columns: ColumnDef<UserWithProfile>[] = [
   {
     id: "select",
@@ -182,6 +193,28 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "User",
     cell: ({ row }) => {
       const user = row.original
+      /*
+       * An erased account keeps its row (see actions.ts) with name null and a
+       * `deleted-<id>@…invalid` address. Rendered as any other row it read
+       * "Unnamed User · deleted-cmtw…@deleted.blendn.invalid", which looks
+       * like a broken signup. The name cell is the receipt instead: when it
+       * was done, and the id an erasure request can be matched against.
+       */
+      if (user.deletedAt) {
+        return (
+          <div className="flex items-center gap-3">
+            <Avatar className="h-9 w-9 border border-dashed border-border" aria-hidden="true">
+              <AvatarFallback className="bg-transparent text-faint-foreground">—</AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col">
+              <span className="font-medium text-muted-foreground">
+                Deleted {format(new Date(user.deletedAt), "d MMM yyyy")}
+              </span>
+              <span className="text-muted-foreground font-mono text-[0.7rem]">{user.id}</span>
+            </div>
+          </div>
+        )
+      }
       const initials = user.name
         ? user.name
             .split(" ")
@@ -210,20 +243,23 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Status",
     cell: ({ row }) => {
       const user = row.original
+      if (user.deletedAt) {
+        return <span className="text-[0.8125rem] text-faint-foreground">deleted</span>
+      }
       const isVerified = !!user.emailVerified
       const isOnboarded = user.profile?.onboarded
 
+      // Words. "Verified" was a brand-orange chip on most rows of a table
+      // whose one orange thing should be the primary action; suspended is the
+      // state that changes what the account can do, so it is the one in colour.
       return (
-        <div className="flex flex-wrap gap-1">
-          <Badge variant={isVerified ? "default" : "secondary"} className="text-xs">
-            {isVerified ? "Verified" : "Unverified"}
-          </Badge>
-          {isOnboarded && (
-            <Badge variant="outline" className="text-xs">
-              Onboarded
-            </Badge>
-          )}
-        </div>
+        <span className="flex flex-wrap gap-x-1.5 text-[0.8125rem] text-muted-foreground">
+          <span className={isVerified ? "text-foreground" : undefined}>
+            {isVerified ? "verified" : "unverified"}
+          </span>
+          {isOnboarded ? <span>· onboarded</span> : null}
+          {user.suspended_at ? <span className="font-bold text-destructive">· suspended</span> : null}
+        </span>
       )
     },
   },
@@ -232,16 +268,8 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Role",
     cell: ({ row }) => {
       const role = row.original.role as string
-      const style = ROLE_COLORS[role] ?? ROLE_COLORS.attendee
       const label = ROLE_LABELS[role] ?? role
-      return (
-        <span
-          className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
-          style={style}
-        >
-          {label}
-        </span>
-      )
+      return <span className={`text-[0.8125rem] ${ROLE_TONE[role] ?? ROLE_TONE.attendee}`}>{label}</span>
     },
   },
   {
@@ -249,7 +277,10 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Profile",
     cell: ({ row }) => {
       const profile = row.original.profile
-      if (!profile) return <span className="text-muted-foreground">-</span>
+      // An erased profile keeps its row with every field nulled; same dash.
+      if (!profile || !(profile.phone || profile.location || profile.age)) {
+        return <span className="text-muted-foreground">-</span>
+      }
 
       return (
         <div className="flex flex-col gap-0.5 text-sm">
@@ -298,12 +329,30 @@ const columns: ColumnDef<UserWithProfile>[] = [
     header: "Activity",
     cell: ({ row }) => {
       const counts = row.original._count
-      return (
-        <div className="flex flex-col gap-0.5 text-xs">
-          <span>{counts.organized_events} events organized</span>
-          <span>{counts.event_check_ins} check-ins</span>
-          <span>{counts.event_favorites} favorites</span>
-        </div>
+      /*
+       * One line, and nothing at all when there is nothing.
+       *
+       * This rendered three stacked lines per row unconditionally, so ten rows
+       * of accounts that have done nothing yet — most of them, on a product
+       * with 121 users — were thirty lines reading "0 events organized / 0
+       * check-ins / 0 favorites". Thirty lines of zero is not information; it
+       * is the column asserting itself over the two beside it that decide
+       * whether an account is a problem.
+       *
+       * `check-ins` stays attendance-DAYS and stays labelled that way. It is
+       * the one allowlisted row count in `count-people-boundary.test.ts`,
+       * because "12 check-ins" is exactly what the number is.
+       */
+      const parts = [
+        counts.organized_events > 0 ? `${counts.organized_events} organised` : null,
+        counts.event_check_ins > 0 ? `${counts.event_check_ins} check-ins` : null,
+        counts.event_favorites > 0 ? `${counts.event_favorites} saved` : null,
+      ].filter(Boolean)
+
+      return parts.length === 0 ? (
+        <span className="text-xs text-faint-foreground">—</span>
+      ) : (
+        <span className="text-xs">{parts.join(" · ")}</span>
       )
     },
   },
@@ -320,7 +369,8 @@ const columns: ColumnDef<UserWithProfile>[] = [
   },
   {
     id: "actions",
-    cell: ({ row, table }) => <ActionsCell row={row} table={table} />,
+    cell: ({ row, table }) =>
+      row.original.deletedAt ? null : <ActionsCell row={row} table={table} />,
   },
 ]
 
@@ -498,20 +548,36 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
   // a shared link, or the refresh after an edit.
   React.useEffect(() => setSearchText(urlSearch), [urlSearch])
 
+  /*
+   * `?status=` has been read by page.tsx since the screen was built and
+   * nothing set it — the only way to reach a filtered view was to type the
+   * URL. An unknown value (a stale bookmark, a typo) clamps to "all" so the
+   * Select never renders blank; the server treats it as no filter too.
+   */
+  const rawStatus = params.get("status") ?? "all"
+  const urlStatus = STATUS_FILTERS.some((f) => f.value === rawStatus) ? rawStatus : "all"
+  const [status, setStatus] = React.useState(urlStatus)
+  React.useEffect(() => setStatus(urlStatus), [urlStatus])
+
+  /*
+   * One writer for both params. The search is debounced (a round trip per
+   * keystroke otherwise; 300ms reads as "finished typing"), the status is not
+   * — and each write carries both values, so a status picked mid-type cannot
+   * be dropped by the search's timer landing later with a stale URL.
+   */
   React.useEffect(() => {
-    if (searchText === urlSearch) return
-    /*
-     * Debounced, because this is a round trip per keystroke otherwise. 300ms is
-     * the pause that reads as "finished typing" without feeling laggy.
-     */
+    const searchDirty = searchText !== urlSearch
+    if (!searchDirty && status === urlStatus) return
     const t = setTimeout(() => {
       const next = new URLSearchParams(params.toString())
       if (searchText) next.set("search", searchText)
       else next.delete("search")
+      if (status === "all") next.delete("status")
+      else next.set("status", status)
       router.replace(`/dashboard/users?${next.toString()}`)
-    }, 300)
+    }, searchDirty ? 300 : 0)
     return () => clearTimeout(t)
-  }, [searchText, urlSearch, params, router])
+  }, [searchText, status, urlSearch, urlStatus, params, router])
 
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] =
@@ -522,7 +588,9 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [pagination, setPagination] = React.useState({
     pageIndex: 0,
-    pageSize: 10,
+    // 20, not 10. Thirty-five accounts over four pages made paging the primary
+    // interaction on a screen whose job is finding one person.
+    pageSize: 20,
   })
 
   const table = useReactTable({
@@ -564,6 +632,18 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
             onChange={(event) => setSearchText(event.target.value)}
             className="max-w-sm"
           />
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="w-40" aria-label="Filter by status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTERS.map((f) => (
+                <SelectItem key={f.value} value={f.value}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center gap-2">
           <DropdownMenu>

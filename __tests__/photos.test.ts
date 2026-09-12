@@ -110,3 +110,30 @@ describe("the size floor", () => {
     expect(MIN_PHOTO_BYTES).toBeLessThan(50_000)
   })
 })
+
+describe("the delete route binds the key the way the fetch path does", () => {
+  /*
+   * `extractKeyFromUrl` -- "useless as a security check" by its own docstring
+   * -- parsed the URL for DELETE /uploads, and ownership was `split("/")[1]`.
+   * Now the folder-bound validator, with the folder from an allow-list.
+   */
+  it("accepts own objects in the three deletable folders and nothing else", async () => {
+    const { ownedObjectKey } = await import("@/lib/tigris")
+    const host = "https://blendn-media.fly.storage.tigris.dev"
+    expect(ownedObjectKey(`${host}/chat/${USER}/1-a.jpg`, USER, "chat")).toBe(`chat/${USER}/1-a.jpg`)
+    expect(ownedObjectKey(`${host}/events/${USER}/1-a.jpg`, USER, "events")).toBe(`events/${USER}/1-a.jpg`)
+    // Somebody else's, a different folder than asked for, a host that merely contains ours.
+    expect(ownedObjectKey(`${host}/chat/other/1-a.jpg`, USER, "chat")).toBeNull()
+    expect(ownedObjectKey(`${host}/chat/${USER}/1-a.jpg`, USER, "profile")).toBeNull()
+    expect(ownedObjectKey(`https://evil.example/?x=blendn-media.fly.storage.tigris.dev/chat/${USER}/a`, USER, "chat")).toBeNull()
+  })
+
+  it("the route uses it, and no longer the loose parser", async () => {
+    const { readFileSync } = await import("fs")
+    const { join } = await import("path")
+    const src = readFileSync(join(__dirname, "..", "app/api/mobile/uploads/delete/route.ts"), "utf8")
+    expect(src).toMatch(/ownedObjectKey\(url, authUser\.userId, f\)/)
+    expect(src).not.toMatch(/extractKeyFromUrl/)
+    expect(src).toMatch(/DELETABLE_FOLDERS: UploadFolder\[\] = \["profile", "chat", "events"\]/)
+  })
+})

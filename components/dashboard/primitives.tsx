@@ -129,6 +129,7 @@ export function HeroMetric({
   progress,
   action,
   tone = "brand",
+  className,
 }: {
   eyebrow?: string
   value: string | number | null
@@ -138,12 +139,19 @@ export function HeroMetric({
   progress?: number | null
   action?: ReactNode
   tone?: "brand" | "muted"
+  /** Placement only — the hero owns its own colour, type and chrome. */
+  className?: string
 }) {
   const pct =
     progress === null || progress === undefined ? null : Math.max(0, Math.min(100, progress))
 
   return (
-    <section className="relative overflow-hidden rounded-lg border border-border bg-card px-5 py-5">
+    <section
+      className={cn(
+        "relative overflow-hidden rounded-lg border border-border bg-card px-5 py-5",
+        className
+      )}
+    >
       <div
         aria-hidden
         className="absolute inset-x-0 top-0 h-[3px]"
@@ -166,6 +174,7 @@ export function HeroMetric({
           aria-valuenow={Math.round(pct)}
           aria-valuemin={0}
           aria-valuemax={100}
+          aria-label={eyebrow ? `${eyebrow} progress` : "Progress"}
           className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-raised"
         >
           <div

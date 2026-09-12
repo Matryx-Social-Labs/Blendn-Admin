@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import jwt from "jsonwebtoken"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import {
@@ -63,15 +64,15 @@ export async function POST(request: NextRequest) {
     // what narrows the type for everything below.
     if (blocked || !user) return unauthorizedResponse("User not found")
 
-    // Revoke the old refresh token (token rotation)
-    await revokeRefreshToken(oldRefreshToken)
-
     // Generate new tokens
     const accessToken = signAccessToken(user.id, user.email)
     const refreshToken = signRefreshToken(user.id, user.email)
 
-    // Store new refresh token
+    // Store the new one, then retire the old one pointing at it — so a replay
+    // of the old token inside the grace window can find and revoke the
+    // successor the client never received.
     await storeRefreshToken(user.id, refreshToken)
+    await revokeRefreshToken(oldRefreshToken, (jwt.decode(refreshToken) as { jti?: string } | null)?.jti)
 
     return successResponse({
       accessToken,

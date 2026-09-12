@@ -22,6 +22,7 @@
 const mockDb = {
   amenities: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -116,15 +117,27 @@ describe("adding", () => {
     expect(mockDb.amenities.create.mock.calls[0][0].data.sort_order).toBe(40)
   })
 
-  it("does not collide on a duplicate name", async () => {
-    // `slug` is @unique, so a second "Open Bar" would be a raw P2002 in an
-    // admin's face.
+  it("does not collide on a duplicate slug from a different name", async () => {
+    // `slug` is @unique, so "Open-bar!" beside "Open Bar" would be a raw P2002
+    // in an admin's face.
     mockDb.amenities.findMany.mockResolvedValue([{ slug: "open-bar" }])
-    mockDb.amenities.create.mockResolvedValue({ id: ID, name: "Open Bar" })
+    mockDb.amenities.create.mockResolvedValue({ id: ID, name: "Open-bar!" })
 
-    await createAmenity({ name: "Open Bar" })
+    await createAmenity({ name: "Open-bar!" })
 
     expect(mockDb.amenities.create.mock.calls[0][0].data.slug).toBe("open-bar-2")
+  })
+
+  it("refuses the same name, and says so differently when it is retired", async () => {
+    // The suffix used to let a second "Cloakroom" in as `cloakroom-2`, and
+    // the organiser's picker then offered Cloakroom twice.
+    mockDb.amenities.findFirst.mockResolvedValueOnce({ is_active: true })
+    await expect(createAmenity({ name: "cloakroom" })).rejects.toThrow("already exists")
+
+    mockDb.amenities.findFirst.mockResolvedValueOnce({ is_active: false })
+    await expect(createAmenity({ name: "Cloakroom" })).rejects.toThrow("restore it")
+
+    expect(mockDb.amenities.create).not.toHaveBeenCalled()
   })
 
   it("refuses a non-admin", async () => {

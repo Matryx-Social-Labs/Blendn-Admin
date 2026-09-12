@@ -92,7 +92,7 @@ export function ClaimBrand({ claims }: { claims: MyClaimRow[] }) {
   if (pendingClaim) {
     return (
       <div className="flex max-w-xl flex-col gap-2 rounded-xl border bg-card p-5">
-        <h2 className="text-[0.9375rem] font-bold">
+        <h2 className="text-[length:var(--text-h2)] font-bold">
           Your claim on {pendingClaim.brandName} is being reviewed
         </h2>
         <p className="text-[0.8125rem] leading-6 text-muted-foreground">
@@ -108,7 +108,7 @@ export function ClaimBrand({ claims }: { claims: MyClaimRow[] }) {
     return (
       <div className="flex max-w-xl flex-col gap-5 rounded-xl border bg-card p-5">
         <div className="flex flex-col gap-1">
-          <h2 className="text-[0.9375rem] font-bold">Claiming {picked.name}</h2>
+          <h2 className="text-[length:var(--text-h2)] font-bold">Claiming {picked.name}</h2>
           <p className="text-[0.8125rem] leading-6 text-muted-foreground">
             {picked.placements === 0
               ? "No placements attached yet."
@@ -173,7 +173,7 @@ export function ClaimBrand({ claims }: { claims: MyClaimRow[] }) {
   return (
     <div className="flex max-w-xl flex-col gap-4 rounded-xl border bg-card p-5">
       <div className="flex flex-col gap-1">
-        <h2 className="text-[0.9375rem] font-bold">Has your brand already been added?</h2>
+        <h2 className="text-[length:var(--text-h2)] font-bold">Has your brand already been added?</h2>
         <p className="text-[0.8125rem] leading-6 text-muted-foreground">
           Organisers add brands while setting up an event, so yours may already be
           here with placements attached. Claiming it keeps that history —

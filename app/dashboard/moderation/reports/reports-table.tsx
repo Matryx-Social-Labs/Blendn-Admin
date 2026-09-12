@@ -78,7 +78,7 @@ export function ReportsTable({
       label: "About",
       sortType: "string",
       render: (row) => (
-        <Badge variant="secondary">
+        <span className="text-[0.8125rem] text-muted-foreground">
           {row.kind === "user"
             ? "Person"
             : row.kind === "event"
@@ -86,7 +86,7 @@ export function ReportsTable({
               : row.messageType === "private"
                 ? "DM"
                 : "Room message"}
-        </Badge>
+        </span>
       ),
     },
     {

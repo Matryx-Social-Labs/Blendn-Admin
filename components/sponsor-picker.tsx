@@ -234,7 +234,7 @@ export function SponsorPicker({
                     is added immediately; a claimed one has to be invited and
                     waits, and an organiser should know which they are choosing.
                   */}
-                  <Badge variant={r.ownerName ? "default" : "outline"} className="rounded-full">
+                  <Badge variant={r.ownerName ? "secondary" : "outline"} className="rounded-full">
                     {r.ownerName ? `Claimed by ${r.ownerName}` : "Unclaimed"}
                   </Badge>
                   {r.exact ? (

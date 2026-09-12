@@ -417,7 +417,7 @@ model events {
   /// is dropped after. Do not add a writer.
   current_capacity  Int                @default(0)
   created_at        DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at        DateTime?          @db.Timestamptz(6)
   organizer_id      String
   /// When the platform added this event from a public listing, rather than its
@@ -501,6 +501,9 @@ model events {
 
   @@index([latitude, longitude])
   @@index([status, start_time])
+  // The rooms list asks "published and ended less than 24h ago"; start_time
+  // matches every event that has ever started, end_time is the bound.
+  @@index([status, end_time])
   @@index([venue_id])
   @@index([organizer_org_id])
   @@index([organizer_id])
@@ -981,6 +984,11 @@ model mobile_refresh_tokens {
   expires_at  DateTime  @db.Timestamptz(6)
   created_at  DateTime  @default(now()) @db.Timestamptz(6)
   revoked_at  DateTime? @db.Timestamptz(6)
+  /// The row that rotation issued in this one's place. Lets a replay of a
+  /// just-rotated token — a client that never got the new pair — be answered
+  /// with a fresh pair and the orphaned successor revoked, instead of a 401
+  /// that signs the device out. See verifyRefreshToken.
+  replaced_by String?   @db.Uuid
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
@@ -2000,6 +2008,14 @@ model check_in_refusals {
 
   /// The curation-health read: refusals per event, newest first.
   @@index([event_id, created_at])
+  /// The platform-wide read: every refusal in a window, whatever the event.
+  ///
+  /// A bare date index beside a composite one that starts with `event_id`, for
+  /// the same reason `event_check_ins` carries one: `refusalsByReason` filters
+  /// on `created_at` ALONE, so the composite's leading column is unconstrained
+  /// and cannot be seeked -- the whole table gets scanned on every admin
+  /// overview render. Same shape of gap, same fix, one table later.
+  @@index([created_at])
   @@index([user_id])
 }
 
@@ -2408,6 +2424,9 @@ model presence_sessions {
   @@index([occurrence_id, departed_at])
   /// The arrival curve and the entry alert.
   @@index([event_id, arrived_at])
+  // "who is inside now" — getOccupancies folds open sessions per event
+  // (event_id = ANY, departed_at IS NULL). Neither index above leads on that.
+  @@index([event_id, departed_at])
   /// One person's history, for `GET /me/attendance` and the second-event rate.
   @@index([user_id, arrived_at])
   ///
@@ -2620,6 +2639,13 @@ model sponsored_creatives {
   sends   sponsored_message_sends[]
 
   @@index([message_id, created_at])
+  /// The review queue: what is pending, oldest first.
+  ///
+  /// Every other table `attentionQueues()` reads has at least a bare status
+  /// index and three have this exact pair; `sponsored_creatives` was the one
+  /// with none, so the only queue whose SLA is commercial rather than safety
+  /// was also the only one doing a sequential scan on every admin page load.
+  @@index([moderation_status, created_at])
 }
 
 /// One fan-out. What the sponsor's report reads.
@@ -2894,6 +2920,10 @@ model moderation_flags {
 
   @@index([status, created_at])
   @@index([chat_group_id])
+  // The room's pulse counts pending flags per chat group every 5 seconds,
+  // and the chatrooms list groups them per room; with (chat_group_id) alone
+  // every flag the room ever had is fetched and status is a filter.
+  @@index([chat_group_id, status])
   @@index([user_id])
   @@index([message_id])
 }
