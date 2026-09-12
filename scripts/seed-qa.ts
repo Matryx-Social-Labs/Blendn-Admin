@@ -5,6 +5,7 @@ import { PrismaClient, type user_role } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
+import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
 
 /**
@@ -825,6 +826,32 @@ async function main() {
           check_out_time: status === "checked_out" ? slot.event.end_time : null,
         },
       })
+      /*
+       * A real check-in opens a presence session as well (`openSession` in the
+       * checkin route), and the dashboard's "inside" figure reads that table,
+       * not `event_check_ins`. Seeding only the check-in row put 6 people on
+       * the phone's Grid and 0 on the organiser's Rooms page for the same room.
+       */
+      if (status === "checked_in") {
+        const session = await openSession({
+          eventId: slot.event.id,
+          occurrenceId: slot.occurrence.id,
+          userId,
+          at: slot.event.start_time,
+          source: "polling",
+        })
+        // Arrived at doors, still pinging: a session last seen at start_time
+        // reads as stale after ten minutes and counts as nobody inside.
+        await db.presence_sessions.update({
+          where: { id: session.id },
+          data: { last_seen_at: new Date() },
+        })
+      } else {
+        await db.presence_sessions.updateMany({
+          where: { occurrence_id: slot.occurrence.id, user_id: userId, departed_at: null },
+          data: { departed_at: slot.event.end_time, departed_source: "user" },
+        })
+      }
       n++
     }
     return n
@@ -917,9 +944,16 @@ async function main() {
     select: { id: true, title: true },
   })
   if (liveEvent) {
+    /*
+     * `status: "active"` on re-run, for the room and its members. The seed
+     * moves this event to "live now" each time it runs; between runs the chat
+     * lifecycle sweeper has archived the room and marked every member `left`,
+     * and an upsert that touches neither re-seeds a live event whose room says
+     * 0 in it and whose announcements reach 0 members.
+     */
     const room = await db.chat_groups.upsert({
       where: { event_id: liveEvent.id },
-      update: {},
+      update: { status: "active" },
       create: { event_id: liveEvent.id, name: liveEvent.title, type: "event" },
     })
     /*
@@ -955,7 +989,7 @@ async function main() {
       if (!handle) break
       await db.chat_group_members.upsert({
         where: { chat_group_id_user_id: { chat_group_id: room.id, user_id: attendeeIds[i] } },
-        update: {},
+        update: { status: "active" },
         create: { chat_group_id: room.id, user_id: attendeeIds[i], anonymous_name: handle },
       })
       const existing = await db.chat_messages.findFirst({
