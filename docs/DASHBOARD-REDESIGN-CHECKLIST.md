@@ -163,3 +163,28 @@ SCRUM-84 (P1 claim funnel + host leak), SCRUM-85 (P2 ×7). Recorded, not
 fixed: SCRUM-86 (client: Join Chat opens behind the Grid modal), SCRUM-87
 (client: empty bubbles for removed messages; a timeout rendered as "not open
 yet"), SCRUM-88 (decision: admin queue shows real names by default).
+
+**Second drive, later on 2026-09-12 — two phones, every row read back.**
+The product owner's note — one iOS simulator as Ananya, one Android emulator
+as Dev Tester — is what made the two-sided journeys checkable. The emulator
+ANR'd after a dev-server restart, so its half was driven from the API where
+it had to be.
+
+| Journey | Surface | Read back / result |
+|---|---|---|
+| Sponsored send → room | scheduler → iOS + organiser feed | rendered as a peer's bubble from "Attendee" live and on reload, and as "Attendee" on the organiser's feed (**SCRUM-97**, fixed: `kind` on the wire, the client and the dashboard key off it) |
+| Report a message → Reports queue → Remove | iOS → admin | **no report from the app had ever been written** (500, `description` undefined — **SCRUM-99**); Remove set `deleted_at` and told nobody until it emitted |
+| Notifications centre, reveal, ask-to-reveal | iOS ↔ Android | both sides confirmed on two devices; the bell was frozen for the session and relit on open (**SCRUM-100**, fixed) |
+| Half an hour of two phones | Android | one timed-out refresh signed the device out; the server refused the retry the grace window was written for (**SCRUM-101**, fixed both sides, migration `replaced_by`) |
+| Peer rating → harassment → Reports queue | iOS → API → admin | rating without a note 500'd (**SCRUM-99**); the rating screen is reachable only by deep link, "Going" shows hearts not RSVPs, iOS has no `blendn://` scheme (**SCRUM-102**, recorded) |
+| Account deletion → Users "Deleted" | iOS → admin | the row renders as designed; the deleted person's DM threads stayed open and their profile still served (**SCRUM-103**, fixed) |
+| Sponsor role, leads inbox, organiser CSV | dashboard | passed; three copy fixes (**SCRUM-104**) |
+| Grid → Connect → accept → thread | iOS → API | passed; a person with a photo was told to add one, an accepted request drew the match's reveal header (**SCRUM-105**, fixed) |
+| Block and report → blocked list → unblock | iOS | "Block and report" 500'd and rolled back — no block, no report; two more report routes with it; the blocked list read "Unknown user" (**SCRUM-106**, fixed) |
+
+Twelve `strictUndefinedChecks` outages so far, five of them today and every
+one on a safety route. The shorthand ratchet was widened to one-line blocks
+and stops blessing a converted spread, but a member expression is not a
+shape a regex can classify; what caught these was posting the real route
+with the optional field omitted (`safety-writes.itest.ts`, `dm-send.itest.ts`,
+`refresh-replay.itest.ts`).
