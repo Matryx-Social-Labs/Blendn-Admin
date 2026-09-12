@@ -27,10 +27,9 @@ import {
 } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { claimAnonymousName } from "@/lib/anonymous-names"
-import { moderateMessage, checkSpam } from "@/lib/moderation"
+import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
-import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 
 interface RouteParams {
@@ -653,9 +652,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // --- Pre-save moderation: keyword filter (sync, <1ms) ---
-    const keywordResult = checkKeywords(content)
-    if (keywordResult && keywordResult.action === "hide") {
+    // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
+    const preSave = preSaveCheck(content)
+    if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users
       const message = await db.chat_messages.create({
         data: {
@@ -663,14 +662,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           user_id: authUser.userId,
           content,
           type,
-          parent_id: parentId,
-          metadata: metadata as Prisma.InputJsonValue | undefined,
+          parent_id: parentId ?? null,
+          ...(metadata != null && { metadata: metadata as Prisma.InputJsonValue }),
           moderation_status: "hidden",
           deleted_at: new Date(),
         },
       })
-      void flagForReview(message.id, chatGroup.id, authUser.userId, keywordResult)
-      void checkAndAutoMute(authUser.userId, chatGroup.id)
+      void flagForReview(message.id, chatGroup.id, authUser.userId, preSave.result)
+      if (preSave.autoMute) void checkAndAutoMute(authUser.userId, chatGroup.id)
       return successResponse({
         message: {
           id: message.id,
@@ -689,8 +688,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         user_id: authUser.userId,
         content,
         type,
-        parent_id: parentId,
-        metadata: metadata as Prisma.InputJsonValue | undefined,
+        parent_id: parentId ?? null,
+        /*
+         * Conditional spread. `metadata as … | undefined` wrote an explicit
+         * undefined whenever the client omitted it — every plain message —
+         * and `strictUndefinedChecks` threw. Same defect as the group route's
+         * `metadata || undefined`, in a shape the ratchet could not see. Found
+         * by POSTing a text message through this route.
+         */
+        ...(metadata != null && { metadata: metadata as Prisma.InputJsonValue }),
       },
     })
 

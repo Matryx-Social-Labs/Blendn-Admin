@@ -127,6 +127,7 @@ function countIn(src: string): number {
     (n, body) =>
       n +
       (body.match(/:\s*\w[\w.?]*\s*(\?\?|\|\|)\s*undefined/g) ?? []).length +
+      (body.match(/:\s*\w[\w.?]*\s+as\s+[^,}\n]*\|\s*undefined/g) ?? []).length +
       (body.match(/:\s*undefined\b/g) ?? []).length,
     0
   )
@@ -161,10 +162,12 @@ describe("no explicit undefined reaches a Prisma call", () => {
       await db.profiles.update({ where: { id }, data: { bio: undefined } })
       await tx.event_check_ins.create({ data: { device_info: info ?? undefined } })
       await db.chat_messages.create({ data: { metadata: metadata || undefined } })
+      await db.chat_messages.create({ data: { metadata: metadata as Prisma.InputJsonValue | undefined } })
     `
-    // The fourth is the one that shipped: `metadata || undefined` in the room
-    // send path, which the `??`-only pattern walked straight past.
-    expect(countIn(hazards)).toBe(4)
+    // The fourth and fifth are the ones that shipped: `metadata || undefined`
+    // in the group send path and `metadata as … | undefined` in the event
+    // room's, which the `??`-only pattern walked straight past.
+    expect(countIn(hazards)).toBe(5)
 
     // And that it is not simply matching everything it is shown.
     expect(countIn(`const x = { id: undefined }; await fetch(url)`)).toBe(0)

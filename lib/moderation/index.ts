@@ -3,6 +3,28 @@ import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent } from "./openai-moderation"
 import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
 import { checkContactInfo } from "./contact-info"
+import type { ModerationResult } from "./types"
+
+/**
+ * What is decided before the row is written.
+ *
+ * Both send routes ran `checkKeywords` themselves and hid on a match; contact
+ * details ran later, inside `moderateMessage`, after the message had already
+ * been emitted to the room. Now that a number in a room is removed rather than
+ * flagged (see `contact-info.ts`), it has to be decided here, before the
+ * emit — the ordering CLAUDE.md names as a real bug once already. One
+ * function, so a third route cannot pick which checks to run before saving.
+ *
+ * `autoMute` is false for contact details: sharing your own number is not
+ * abuse, and three of them in an hour is not a reason to silence somebody.
+ */
+export function preSaveCheck(content: string): { result: ModerationResult; autoMute: boolean } | null {
+  const keyword = checkKeywords(content)
+  if (keyword && keyword.action === "hide") return { result: keyword, autoMute: true }
+  const contact = checkContactInfo(content)
+  if (contact && contact.action === "hide") return { result: contact, autoMute: false }
+  return null
+}
 
 /**
  * Main moderation orchestrator.

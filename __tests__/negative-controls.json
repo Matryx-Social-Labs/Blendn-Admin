@@ -519,6 +519,22 @@
       "reverted": true,
       "date": "2026-09-12",
       "note": "The defect this guards was found by joining a room from a socket.io client, posting through the REST route, and receiving nothing — in dev and against the production build."
+    },
+    "integration/room-send.itest.ts": {
+      "guards": "that a plain text message (no metadata, no parent) is written by both send routes against real Postgres, and that a message with contact details is hidden on write and flagged (without an auto-mute) on both, with the sender served a placeholder",
+      "mutation": "(a) in app/api/mobile/events/[eventId]/chat/route.ts, change `parent_id: parentId ?? null` back to `parent_id: parentId`; (b) in lib/moderation/contact-info.ts, change the verdict's `action: \"hide\"` back to `\"flag\"`",
+      "observed": "(a) 2 failing — both contact cases (the event route 500s on the explicit undefined; the group case fails on the shared fixture's second room). (b) 2 failing — both contact cases, `moderation_status` is `flagged` not `hidden`. Green after each revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "The plain-message cases are the ones that would have caught SCRUM-83 and the event route's twin before a phone did; no regex sees `parent_id: parentId` with an optional `parentId`."
+    },
+    "contact-info.test.ts": {
+      "guards": "that the room verdict for contact details is `hide` with the flag carried, that `preSaveCheck` exists in the pipeline and returns `autoMute: false` for contact details, that both send routes call `preSaveCheck` (not `checkKeywords`) and gate the auto-mute on `preSave.autoMute`, that the DM path reads the verdict as a boolean and allows, and that the sender copy says the message is removed",
+      "mutation": "in app/api/mobile/events/[eventId]/chat/route.ts, drop the `if (preSave.autoMute)` gate so a phone number counts toward an auto-mute",
+      "observed": "1 failing ('is decided before the row is written, on both send routes'). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "The runtime half of this policy is pinned by integration/room-send.itest.ts against real Postgres."
     }
   },
   "grandfathered": [
