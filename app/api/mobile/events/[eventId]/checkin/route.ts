@@ -318,6 +318,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       update: {
         status: "checked_in",
         check_in_time: now,
+        /*
+         * Coming back after a check-out reuses the row (one per person per
+         * occurrence), and the old check-out timestamp stayed on it beside
+         * `checked_in`. The Banter tab's live section wants both `checked_in`
+         * and no `check_out_time`, so the room somebody had just walked back
+         * into was not listed as live. Found by leaving and returning.
+         */
+        check_out_time: null,
         latitude,
         longitude,
         ...(deviceInfo !== undefined && { device_info: deviceInfo }),

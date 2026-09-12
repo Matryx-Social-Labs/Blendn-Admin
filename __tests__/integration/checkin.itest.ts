@@ -196,6 +196,16 @@ describe("re-entry", () => {
 
     // One person, however many times they went in and out.
     expect((await getOccupancy(eventId)).uniqueAttendance).toBe(1)
+
+    // And the row says so on its own: the return reuses the row, and the old
+    // check-out timestamp stayed on it beside `checked_in` — which is the
+    // shape the Banter tab's live section filters out. Found by leaving and
+    // coming back on a phone.
+    const row = await db.event_check_ins.findFirst({
+      where: { event_id: eventId, user_id: smoker.id },
+      select: { status: true, check_out_time: true },
+    })
+    expect(row).toEqual({ status: "checked_in", check_out_time: null })
   })
 
   it("checking in twice without leaving does not double-count", async () => {
