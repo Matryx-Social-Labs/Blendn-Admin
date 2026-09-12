@@ -55,16 +55,55 @@ export async function GET(request: NextRequest) {
       blocks.map((b) => b.blocked_id)
     )
 
-    const users = blocks.map((b) => ({
-      blocked_id: b.blocked_id,
-      // `null`, not a pseudonym: a pseudonym is per-event and this list is not
-      // scoped to one. The client already renders a placeholder for an
-      // unrevealed person.
-      blocked_user_name: visible.has(b.blocked_id) ? b.blocked.name : null,
-      blocked_user_photo: visible.has(b.blocked_id) ? b.blocked.image : null,
-      reason: null,
-      blocked_at: b.created_at.toISOString(),
-    }))
+    /*
+     * The name you knew them by.
+     *
+     * With the identity gate closed for every blocked pair, this list rendered
+     * "Unknown user" for each row — driven on iOS after blocking from a
+     * thread — so someone with three blocks could not tell which was which,
+     * and the one job the list has (unblocking) needed a guess. The most
+     * recent conversation between the pair knows what the blocker saw: the
+     * pseudonym snapshot if it was pseudonymous, the real name if it never was
+     * (an accepted request showed it). Neither is new information; it is
+     * exactly what the block was a reaction to. No conversation, no name.
+     */
+    const ids = blocks.map((b) => b.blocked_id)
+    const conversations = ids.length
+      ? await db.private_conversations.findMany({
+          where: {
+            OR: [
+              { user1_id: authUser.userId, user2_id: { in: ids } },
+              { user2_id: authUser.userId, user1_id: { in: ids } },
+            ],
+          },
+          orderBy: { created_at: "desc" },
+          select: { user1_id: true, user2_id: true, user1_pseudonym: true, user2_pseudonym: true },
+        })
+      : []
+    // `null` in the map means "a conversation that showed the real name".
+    const knownAs = new Map<string, string | null>()
+    for (const c of conversations) {
+      const theirs = c.user1_id === authUser.userId ? c.user2_id : c.user1_id
+      if (knownAs.has(theirs)) continue // newest first
+      const pseudonym = c.user1_id === theirs ? c.user1_pseudonym : c.user2_pseudonym
+      const wasPseudonymous = c.user1_pseudonym !== null || c.user2_pseudonym !== null
+      knownAs.set(theirs, wasPseudonymous ? pseudonym : null)
+    }
+
+    const users = blocks.map((b) => {
+      const name = visible.has(b.blocked_id)
+        ? b.blocked.name
+        : knownAs.has(b.blocked_id)
+          ? (knownAs.get(b.blocked_id) ?? b.blocked.name)
+          : null
+      return {
+        blocked_id: b.blocked_id,
+        blocked_user_name: name,
+        blocked_user_photo: visible.has(b.blocked_id) ? b.blocked.image : null,
+        reason: null,
+        blocked_at: b.created_at.toISOString(),
+      }
+    })
 
     return successResponse({ users })
   } catch (error) {

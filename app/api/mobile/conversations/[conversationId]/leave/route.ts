@@ -157,7 +157,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               message_id: report.messageId,
               message_type: "private",
               reason: report.reason,
-              description: report.description,
+              // Optional, and the sheet sends `{ reason: "other" }` alone — so
+              // "Block and report" and "Unmatch and report" both 500'd and the
+              // whole transaction rolled back: no block, no report, thread
+              // still open. Driven on iOS. Tenth strictUndefinedChecks outage.
+              ...(report.description !== undefined && { description: report.description }),
             },
           })
         } else {
@@ -166,7 +170,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               reporter_id: authUser.userId,
               reported_id: otherId,
               reason: report.reason,
-              description: report.description,
+              ...(report.description !== undefined && { description: report.description }),
             },
           })
         }

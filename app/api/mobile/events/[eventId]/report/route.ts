@@ -83,7 +83,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         event_id: eventId,
         user_id: authUser.userId,
         reason: validation.data.reason,
-        description: validation.data.description,
+        // Optional and usually omitted, so this arrived as an explicit
+        // undefined and strictUndefinedChecks refused the write — every
+        // event report without a description 500'd. Found by sweeping after
+        // the leave route's twin (SCRUM-106).
+        ...(validation.data.description !== undefined && { description: validation.data.description }),
       },
     })
 

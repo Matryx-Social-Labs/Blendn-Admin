@@ -22,12 +22,24 @@ const reportRoute = require("@/app/api/mobile/messages/[messageId]/report/route"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const ratingRoute = require("@/app/api/mobile/events/[eventId]/peer-ratings/route") as
   typeof import("@/app/api/mobile/events/[eventId]/peer-ratings/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const leaveRoute = require("@/app/api/mobile/conversations/[conversationId]/leave/route") as
+  typeof import("@/app/api/mobile/conversations/[conversationId]/leave/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const userReportRoute = require("@/app/api/mobile/users/[userId]/report/route") as
+  typeof import("@/app/api/mobile/users/[userId]/report/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const eventReportRoute = require("@/app/api/mobile/events/[eventId]/report/route") as
+  typeof import("@/app/api/mobile/events/[eventId]/report/route")
 
 const users: string[] = []
 const events: string[] = []
 
 afterAll(async () => {
   await db.message_reports.deleteMany({ where: { reporter_id: { in: users } } })
+  await db.user_reports.deleteMany({ where: { reporter_id: { in: users } } })
+  await db.event_reports.deleteMany({ where: { user_id: { in: users } } })
+  await db.blocked_users.deleteMany({ where: { blocker_id: { in: users } } })
   await db.peer_ratings.deleteMany({ where: { rater_id: { in: users } } })
   await db.event_likes.deleteMany({ where: { event_id: { in: events } } })
   await cleanup(users, events)
@@ -102,4 +114,63 @@ it("rates a connected peer with no note and writes the row", async () => {
   expect([200, 201]).toContain(res.status)
   const row = await db.peer_ratings.findFirst({ where: { event_id: eventId, rater_id: me.id } })
   expect(row).toMatchObject({ rated_id: them.id, rating: 4, issue: "none", note: null })
+})
+
+it("blocks and reports from a conversation with no description, in one transaction", async () => {
+  /*
+   * "Block and report" on the phone sends `{ action: "block", report: { reason:
+   * "other" } }` — no description — and the whole transaction rolled back:
+   * no block, no report, thread still open, and the sheet said "Could not do
+   * that". Driven on iOS, tenth of its kind.
+   */
+  const me = await person("sw-leaver")
+  const them = await person("sw-left")
+  const conversation = await db.private_conversations.create({
+    data: { user1_id: me.id, user2_id: them.id, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" },
+  })
+
+  const res = await leaveRoute.POST(
+    post(`/api/mobile/conversations/${conversation.id}/leave`, me.token, {
+      action: "block",
+      report: { reason: "other" },
+    }),
+    { params: Promise.resolve({ conversationId: conversation.id }) }
+  )
+  expect(res.status).toBe(200)
+  const closed = await db.private_conversations.findUniqueOrThrow({ where: { id: conversation.id } })
+  expect(closed.closed_reason).toBe("block")
+  expect(await db.blocked_users.count({ where: { blocker_id: me.id, blocked_id: them.id } })).toBe(1)
+  const report = await db.user_reports.findFirst({ where: { reporter_id: me.id, reported_id: them.id } })
+  expect(report).toMatchObject({ reason: "other", description: null })
+  await db.private_conversations.delete({ where: { id: conversation.id } })
+})
+
+it("reports a person and an event with no description", async () => {
+  // The same optional in two more routes, found by sweeping after the one above.
+  const me = await person("sw-rep")
+  const them = await person("sw-reported")
+  const host = await makeUser("sw-host3", "organizer")
+  users.push(host)
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+
+  const u = await userReportRoute.POST(
+    post(`/api/mobile/users/${them.id}/report`, me.token, { reason: "spam" }),
+    { params: Promise.resolve({ userId: them.id }) }
+  )
+  expect([200, 201]).toContain(u.status)
+  expect(await db.user_reports.findFirst({ where: { reporter_id: me.id, reported_id: them.id } })).toMatchObject({
+    reason: "spam",
+    description: null,
+  })
+
+  const e = await eventReportRoute.POST(
+    post(`/api/mobile/events/${eventId}/report`, me.token, { reason: "misleading" }),
+    { params: Promise.resolve({ eventId }) }
+  )
+  expect([200, 201]).toContain(e.status)
+  expect(await db.event_reports.findFirst({ where: { user_id: me.id, event_id: eventId } })).toMatchObject({
+    reason: "misleading",
+    description: null,
+  })
 })
