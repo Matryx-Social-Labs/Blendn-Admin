@@ -52,7 +52,7 @@ export default async function FeedbackPage({
           </Link>
         </h2>
         <span className="text-[0.8125rem] text-muted-foreground">
-          ended {ended} · {window}
+          {new Date(digest.endedAt).getTime() > Date.now() ? "ends" : "ended"} {ended} · {window}
           {total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""}
         </span>
       </div>
@@ -97,11 +97,22 @@ export default async function FeedbackPage({
             <p className="max-w-[60ch] text-[0.8125rem] leading-relaxed text-muted-foreground">
               {digest.counts.negative === 0 ? (
                 "Nothing negative was classified. Read the messages anyway — the classifier is cautious, not omniscient."
+              ) : topIssue?.suppressed ? (
+                /* Below the disclosure floor the count is null and the quotes
+                   are held back too, so "<5 of 1 … read them" would promise a
+                   read the page cannot give. Name the category; that is what
+                   is disclosed. */
+                <>
+                  The negatives are the takeaway. Fewer than five people raised them, so the
+                  category is listed —{" "}
+                  <b className="font-medium text-foreground">{topIssue.category.replace(/_/g, " ")}</b>
+                  {" "}— and the messages are held back until more people say the same thing.
+                </>
               ) : topIssue ? (
                 <>
                   The negatives are the takeaway, and{" "}
                   <b className="font-medium text-foreground">
-                    {topIssue.count ?? "<5"} of {digest.counts.negative}
+                    {topIssue.count} of {digest.counts.negative}
                   </b>{" "}
                   are about{" "}
                   <b className="font-medium text-foreground">{topIssue.category.replace(/_/g, " ")}</b>.
