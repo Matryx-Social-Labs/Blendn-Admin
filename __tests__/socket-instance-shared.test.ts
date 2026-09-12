@@ -18,6 +18,9 @@ describe("lib/socket-server.ts", () => {
   it("keeps the instance on globalThis rather than in a module-local", () => {
     expect(src).not.toMatch(/^let io\b/m)
     expect(src).toMatch(/__blendnSocketIo = io/)
+    // And the accessor really reads it — `return null` here would satisfy
+    // every call-site assertion below while restoring the original bug.
+    expect(src).toMatch(/function currentIo\(\)[^{]*\{\s*return shared\.__blendnSocketIo \?\? null\s*\}/)
   })
 
   it("every emitter reads the shared instance before its guard", () => {
