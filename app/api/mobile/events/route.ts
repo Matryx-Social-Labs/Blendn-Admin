@@ -78,6 +78,14 @@ export async function GET(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
+    // The Pulse's search box calls this route with `search=`, not
+    // `/events/search` — so every search from the app's own search box was
+    // missing from the funnel's one stream-only signal. Deduped per person
+    // per day like `feed_browsed`; the words are still never recorded.
+    if (parsed.data.search) {
+      record({ name: PRODUCT_EVENTS.searched, userId: authUser.userId })
+    }
+
     const {
       page,
       limit,

@@ -576,6 +576,13 @@
       "reverted": true,
       "date": "2026-09-12",
       "note": "The earlier cases in this file are behavioural (inviteState, token hashing) and need no entry."
+    },
+    "product-events-emitters.test.ts": {
+      "guards": "that app/api/mobile/events/route.ts records PRODUCT_EVENTS.searched when `search=` is present (the Pulse's search box calls the list route, not /events/search), that /events/search still records it, and that neither record() call carries the query text",
+      "mutation": "delete the `if (parsed.data.search) { record(...) }` block from the list route",
+      "observed": "1 failing ('records a search from the list route…'). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-12"
     }
   },
   "grandfathered": [

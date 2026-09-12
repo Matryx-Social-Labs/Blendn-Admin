@@ -196,7 +196,22 @@ export function record(input: {
       seenDay = day
       seen = new Set()
     }
-    if (seen.has(key)) return
+    /*
+     * The flush timer runs whether or not this signal is new.
+     *
+     * It used to sit below the dedupe's early return, so a buffer was flushed
+     * only when a *new* key arrived at least FLUSH_MS after the last flush. One
+     * person using the app alone on a replica — every signal after the first
+     * deduped — never produced that key, and their `searched` and
+     * `feed_browsed` sat in memory until somebody else showed up, or the
+     * process restarted and dropped them. Driven: a search from the Pulse
+     * wrote nothing for four minutes of trying.
+     */
+    const flushDue = Date.now() - lastFlush >= FLUSH_MS && buffer.length > 0
+    if (seen.has(key)) {
+      if (flushDue) void flushProductEvents()
+      return
+    }
     if (seen.size >= MAX_CACHED_KEYS) seen = new Set()
     seen.add(key)
 
