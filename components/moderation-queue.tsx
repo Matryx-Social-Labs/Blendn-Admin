@@ -216,7 +216,7 @@ export function ModerationQueue({ eventId }: ModerationQueueProps) {
                       disabled={actionLoading === flag.id}
                       onClick={() => handleReview(flag.id, "approve")}
                     >
-                      Restore (False Positive)
+                      {flag.message.isDeleted ? "Restore" : "Keep"}
                     </Button>
                     <Button
                       size="sm"
@@ -224,7 +224,7 @@ export function ModerationQueue({ eventId }: ModerationQueueProps) {
                       disabled={actionLoading === flag.id}
                       onClick={() => handleReview(flag.id, "reject")}
                     >
-                      Keep Hidden
+                      {flag.message.isDeleted ? "Keep hidden" : "Remove"}
                     </Button>
                   </div>
                 ) : (
