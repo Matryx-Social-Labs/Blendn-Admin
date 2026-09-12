@@ -250,6 +250,17 @@ describe("the host resolver is actually wired to something", () => {
     expect(service).not.toMatch(/organizer: event\.organizer,/)
   })
 
+  it("the detail route resolves the host too — it is the screen an attendee reads", () => {
+    // The list was fixed (T83) and this route still passed `event.organizer`
+    // through, so `EventDetailScreen` showed the curating admin's real name
+    // on every curated event. Found by reading one event through both routes.
+    const detail = code("app/api/mobile/events/[eventId]/route.ts")
+    expect(detail).toMatch(/import \{ eventHost \} from "@\/lib\/event-host"/)
+    expect(detail).toMatch(/eventHost\(event\)/)
+    expect(detail).not.toMatch(/organizer: event\.organizer,/)
+    expect(detail).toMatch(/organizer_org: \{ select: \{ display_name: true \} \}/)
+  })
+
   it("selects the columns the resolver needs", () => {
     // `...eventHostSelect` cannot be spread here -- it claims `organizer` too,
     // with a narrower shape, and would silently drop `id`/`image`. So the

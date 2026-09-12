@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { eventHost } from "@/lib/event-host"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import { cancelEventCheckIns, isCancellingEvent } from "@/lib/event-cancellation"
@@ -79,6 +80,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             // endpoint never included it — only this one did.
           },
         },
+        // What `eventHost` reads. Named rather than spread from
+        // `eventHostSelect`, which claims `organizer` with a narrower shape.
+        organizer_org: { select: { display_name: true } },
         details: true,
         categories: {
           include: {
@@ -256,7 +260,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       isRecurring: event.is_recurring,
       externalLink: event.external_link,
       createdAt: event.created_at,
-      organizer: event.organizer,
+      /*
+       * The host, resolved — org, then the platform, then the creating user.
+       *
+       * The list went through `eventHost` (T83) and this route still passed
+       * `event.organizer` through, so the one screen an attendee reads
+       * carried the curating admin's real name and avatar as the host of
+       * every curated event, and the creating user's name instead of the
+       * organisation's on everyone else's. Found by reading the same event
+       * through both routes. Same shape as the list, so no client release.
+       */
+      organizer: (() => {
+        const host = eventHost(event)
+        return host.isPlatform
+          ? { id: null, name: host.name, image: null }
+          : { id: event.organizer.id, name: host.name, image: event.organizer.image }
+      })(),
       details: event.details
         ? {
             fullDescription: event.details.full_description,
