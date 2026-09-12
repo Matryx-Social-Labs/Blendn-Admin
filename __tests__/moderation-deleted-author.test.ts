@@ -18,6 +18,9 @@ const mockDb = {
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))
 jest.mock("@/lib/trust", () => ({ trustSignalsFor: jest.fn().mockResolvedValue(new Map()) }))
+// The action module now tells the room about a removal; socket-server pulls in
+// ESM-only deps a unit test cannot load, and this test never resolves a flag.
+jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden: jest.fn() }))
 
 import { getModerationQueue } from "@/app/dashboard/moderation/actions"
 

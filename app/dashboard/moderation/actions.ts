@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import type { moderation_status_type } from "@prisma/client"
 
 import { auditLog } from "@/lib/audit-log"
+import { emitChatMessageHidden } from "@/lib/socket-server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { trustSignalsFor } from "@/lib/trust"
@@ -214,7 +215,7 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
 
   const flag = await db.moderation_flags.findUnique({
     where: { id: flagId },
-    select: { id: true, message_id: true, status: true },
+    select: { id: true, message_id: true, status: true, chat_group_id: true, user_id: true },
   })
   if (!flag) throw new Error("Flag not found")
   if (flag.status !== "pending") {
@@ -260,6 +261,16 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
       })
     }
   })
+
+  /*
+   * Tell the room. The auto-hide path emits this the moment it hides; the
+   * human decision did not, so a message an admin removed stayed on every
+   * phone that already had the room open until the next reload. Seen from a
+   * simulator: the API stopped serving it, the screen kept showing it.
+   */
+  if (decision === "remove") {
+    emitChatMessageHidden(flag.chat_group_id, flag.message_id, flag.user_id)
+  }
 
   // Fire-and-forget by design (see lib/audit-log.ts): the decision is already
   // committed, so a failed audit write logs and moves on rather than making the

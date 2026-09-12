@@ -13,8 +13,10 @@ const mockDb = {
   $transaction: jest.fn().mockResolvedValue([]),
 }
 const auditLog = jest.fn()
+const emitChatMessageHidden = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog }))
+jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden }))
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "arjun", role: "organizer" } }) }))
 jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn().mockResolvedValue({ id: "arjun", role: "organizer", orgIds: ["org1"] }) }))
 jest.mock("@/lib/rbac", () => ({ eventPermissions: () => ({ canEdit: true, canOperate: true }) }))
@@ -46,12 +48,14 @@ function messageWrite() {
 describe("PATCH /api/events/[id]/chat/moderation/[flagId]", () => {
   it("reject hides a message that was never auto-hidden", async () => {
     mockDb.moderation_flags.findFirst.mockResolvedValue({
-      id: "f1", message_id: "m1", status: "pending", message: { deleted_at: null },
+      id: "f1", message_id: "m1", status: "pending", user_id: "u9", message: { deleted_at: null },
     })
     const res = await PATCH(req("reject"), { params })
     expect(res.status).toBe(200)
     expect(messageWrite()).toMatchObject({ moderation_status: "hidden" })
     expect(messageWrite().deleted_at).toBeInstanceOf(Date)
+    // And the phones that have the room open are told, as auto-hide does.
+    expect(emitChatMessageHidden).toHaveBeenCalledWith("g1", "m1", "u9")
   })
 
   it("reject keeps the original deleted_at on a message that was already hidden", async () => {
@@ -69,6 +73,7 @@ describe("PATCH /api/events/[id]/chat/moderation/[flagId]", () => {
     })
     await PATCH(req("approve"), { params })
     expect(messageWrite()).toEqual({ moderation_status: "clean", deleted_at: null })
+    expect(emitChatMessageHidden).not.toHaveBeenCalled()
     expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({
       userId: "arjun", action: "moderation.flag_approved", resource: "moderation_flag", resourceId: "f1",
     }))

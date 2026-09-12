@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
+import { emitChatMessageHidden } from "@/lib/socket-server"
 
 interface RouteParams {
   params: Promise<{ id: string; flagId: string }>
@@ -85,6 +86,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         id: true,
         message_id: true,
         status: true,
+        user_id: true,
         message: { select: { deleted_at: true } },
       },
     })
@@ -148,6 +150,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           },
         }),
       ])
+    }
+
+    // The room is told, as the auto-hide path already does; without this the
+    // message stayed on every open phone until the next reload.
+    if (action === "reject") {
+      emitChatMessageHidden(event.chat_group.id, flag.message_id, flag.user_id)
     }
 
     // Same action names as the admin twin, so one audit query finds both.

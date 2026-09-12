@@ -11,8 +11,34 @@ import { buildLiveSnapshot } from "./live-snapshot"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
-// Socket.io server instance
-let io: Server | null = null
+/*
+ * The Socket.io instance lives on `globalThis`, not in this module.
+ *
+ * `server.ts` (ts-node in dev, `dist/server.js` in production) calls
+ * `initSocketServer` on its copy of this file. Next.js bundles a SECOND copy of
+ * `lib/socket-server.ts` into every route and server-action chunk that imports
+ * it — the source map of `.next/server/chunks/` lists the file — and that
+ * copy's `io` was null for ever. So every `emit*` below, called from a REST
+ * route or a dashboard action, returned at `if (!io)` and delivered nothing:
+ * a message posted to a room never reached the phones already in it, a
+ * check-in never broadcast, a moderation decision never took the message off
+ * anyone's screen. Only socket-to-socket traffic (typing, the ops tick) ever
+ * worked, because those handlers run inside the initialising copy.
+ *
+ * Found by connecting a socket.io client, joining a room, posting through
+ * the REST route and receiving nothing — in dev and against the production
+ * build alike. Same trick `lib/db.ts` uses for the Prisma client: one process,
+ * one `globalThis`, however many module instances.
+ */
+declare global {
+  var __blendnSocketIo: Server<ClientToServerEvents, ServerToClientEvents> | null | undefined
+}
+const shared = globalThis as typeof globalThis & {
+  __blendnSocketIo?: Server<ClientToServerEvents, ServerToClientEvents> | null
+}
+function currentIo(): Server<ClientToServerEvents, ServerToClientEvents> | null {
+  return shared.__blendnSocketIo ?? null
+}
 
 // Kept in sync with ALLOWED_ORIGINS in middleware.ts
 const ALLOWED_ORIGINS = [
@@ -79,12 +105,15 @@ export interface ServerToClientEvents {
     userName: string
     isTyping: boolean
   }) => void
+  /*
+   * The tally, never who reacted (CHAT.md:119). This still declared the old
+   * `{ userId, emoji, action }` shape after the emitter moved to counts; it
+   * never failed to typecheck because `io` was an untyped `Server`.
+   */
   "chat:reaction": (data: {
     chatGroupId: string
     messageId: string
-    userId: string
-    emoji: string
-    action: "add" | "remove"
+    tally: { emoji: string; count: number }[]
   }) => void
 
   // Private messaging
@@ -208,6 +237,7 @@ const opsTimers = new Map<string, OpsLoop>()
 const OPS_INTERVAL_MS = 5000
 
 export function startOpsBroadcast(eventId: string): void {
+  const io = currentIo()
   if (!io || opsTimers.has(eventId)) return
 
   /*
@@ -288,6 +318,7 @@ export function stopOpsBroadcast(eventId: string): void {
  * than showing a zero that reads as "nobody is here".
  */
 export async function socketsInChatRoom(chatGroupId: string): Promise<number | undefined> {
+  const io = currentIo()
   if (!io) return undefined
   try {
     const sockets = await io.in(`chat:${chatGroupId}`).fetchSockets()
@@ -510,7 +541,7 @@ export async function emitPrivateRead(
  * Initialize Socket.io server
  */
 export function initSocketServer(httpServer: HttpServer): Server {
-  io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+  const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {
       // Native mobile clients (Expo/React Native WebSocket) don't send an Origin
       // header, so `origin` is undefined for them and always allowed. Browser
@@ -800,6 +831,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
    *
    * The sponsored scheduler stays, because it genuinely does need `io`.
    */
+  shared.__blendnSocketIo = io
   logger.info("Socket.io server initialized")
   return io
 }
@@ -813,6 +845,7 @@ export function emitEventCheckIn(
   userName: string,
   userImage?: string
 ): void {
+  const io = currentIo()
   if (!io) return
 
   const checkInTime = new Date().toISOString()
@@ -849,6 +882,7 @@ export function emitEventCheckIn(
  * Emit an event checkout update
  */
 export function emitEventCheckOut(eventId: string, userId: string): void {
+  const io = currentIo()
   if (!io) return
 
   io.to(`event:${eventId}`).emit("event:checkout", {
@@ -867,6 +901,7 @@ export function emitEventInterestUpdate(
   interested: boolean,
   interestCount: number
 ): void {
+  const io = currentIo()
   if (!io) return
 
   io.to(`event:${eventId}`).emit("event:interestUpdate", {
@@ -890,6 +925,7 @@ export function emitEventInterestUpdate(
  * across the Redis adapter, so it reaches sockets held by other instances too.
  */
 export function closeConversationRoom(conversationId: string): void {
+  const io = currentIo()
   if (!io) return
   io.in(`conversation:${conversationId}`).socketsLeave(`conversation:${conversationId}`)
 }
@@ -927,6 +963,7 @@ export function emitChatMessage(
   },
   excludeUserIds: readonly string[] = []
 ): void {
+  const io = currentIo()
   if (!io) return
 
   const room = io.to(`chat:${chatGroupId}`)
@@ -948,6 +985,7 @@ export function emitChatReaction(
   messageId: string,
   tally: Array<{ emoji: string; count: number }>
 ): void {
+  const io = currentIo()
   if (!io) return
 
   /*
@@ -977,6 +1015,7 @@ export function emitChatReaction(
  * Emit a message deletion to the chat room
  */
 export function emitChatMessageDeleted(chatGroupId: string, messageId: string): void {
+  const io = currentIo()
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", { chatGroupId, messageId })
 }
@@ -987,6 +1026,7 @@ export function emitChatMessageDeleted(chatGroupId: string, messageId: string): 
  * "message removed" placeholder to the sender instead of just deleting it.
  */
 export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string): void {
+  const io = currentIo()
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", {
     chatGroupId,
@@ -1000,6 +1040,7 @@ export function emitChatMessageHidden(chatGroupId: string, messageId: string, us
  * Emit a member ban/unban to the chat room
  */
 export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean): void {
+  const io = currentIo()
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:memberBanned", { chatGroupId, userId, banned })
 }
@@ -1008,6 +1049,7 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
  * Emit a member mute/unmute to the chat room
  */
 export function emitChatMemberMuted(chatGroupId: string, userId: string, muted: boolean, reason?: string): void {
+  const io = currentIo()
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:memberMuted", { chatGroupId, userId, muted, reason })
 }
@@ -1030,6 +1072,7 @@ export function emitPrivateMessage(
     createdAt: Date
   }
 ): void {
+  const io = currentIo()
   if (!io) return
 
   // Emit to conversation room (for active viewers)
