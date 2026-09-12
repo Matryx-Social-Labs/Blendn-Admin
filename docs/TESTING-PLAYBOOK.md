@@ -541,6 +541,16 @@ Six facts from the first Android run, each of which cost an hour:
   `patches/` applied on `postinstall`. A checkout where that has not run will
   crash on the first library pick.
 
+**The Android emulator on this Mac is not a surface this branch can drive.**
+Two more attempts (2026-09-12): cold boot with `-gpu host -feature -Vulkan
+-no-snapshot-load`, ports reversed, the Maestro MCP's driver held a dead gRPC
+connection to the previous emulator under the same serial (`Device server
+died during 'deviceInfo'`), so the CLI drove it instead — sign-in reached The
+Pulse with the check-in state (`Open the room` asserted visible), then the
+emulator fell to 1.5 fps with 13,000 dropped frames and `adb shell` stopped
+answering for over a minute. Record it as `Driven: iOS only — emulator
+unresponsive`, and spend the time on the iOS run rather than a third attempt.
+
 **Parallel is slower than serial on this Mac.** iOS and Android were tried
 side by side (2026-09-11): the Android driver died at `deviceInfo` on the
 first attempt and typed twelve characters in two minutes on the second, while
@@ -562,6 +572,34 @@ and a `Pressable` without `accessibilityLabel` names itself after its icon
 glyphs, so match `".*Edit profile.*"`. RN's dev LogBox (a red toast, or a
 full-screen "Console Error" with **Dismiss**) sits over the tab bar and eats
 taps; guard steps with an optional `tapOn: "Dismiss"`.
+
+**The client points at staging unless told otherwise — and the shell cannot
+tell it.** `.env.local` sets `EXPO_PUBLIC_API_BASE_URL=https://staging-api.blendn.app`,
+and in a dev build `expo/virtual/env` merges the `.env*` files **over**
+`process.env`, so `EXPO_PUBLIC_API_BASE_URL=http://localhost:3100 npx expo start`
+still signs in against staging — the sign-in "fails" with no request in the
+local log, which reads like a seed problem. Write `.env.development.local`
+(gitignored) with the local URL; it is loaded last and wins. On Android map
+the ports in rather than editing the URL: `adb reverse tcp:3100 tcp:3100` and
+`tcp:8081`. And warm the routes first: `next dev` compiles each API route on
+its first hit, 15–40 s here, while the client aborts at 15 s — so the first
+tap on every screen fails once, and a check-in whose body was cut off logged
+`Unexpected end of JSON input`. Curl the journey's routes with a token before
+driving, or the first failure of every screen is the compiler.
+
+**Seeded people leave the room by themselves.** The seed opens a presence
+session per check-in and stamps `last_seen_at = now`; the dashboard's "inside"
+reads sessions seen in the last ten minutes, and the sweeper closes sessions
+when the event ends. Ten minutes after a re-seed the Rooms page honestly says
+0 inside while the Grid (which reads `event_check_ins`) still says 6. Drive the
+live room within ten minutes of seeding, or check in from the phone — the
+phone's session pings and stays inside.
+
+**Live delivery is a socket probe, not a screenshot.** A REST 201 does not
+prove the room heard it. `socket.io-client` from the client's `node_modules`:
+connect with an attendee token, `join:chat` the group, POST a message through
+the route, count events. That probe is how the null-instance defect (§7) was
+found after a screenshot of the same room had looked fine.
 
 **Push, specifically — a toggle is not tested until a push was sent.**
 `Device.isDevice` is false on every simulator and emulator, so the client
@@ -691,6 +729,11 @@ Kept as the argument against skipping it:
 | measuring | The venue index rendering **395 rows in a 15,812px document** with no search and no pagination |
 | driving it | A filter keyed on a field whose values could never match its options — a control that selected nothing while looking like it worked |
 | `npm run build` | `pg` in a browser bundle; `export const` in a `"use server"` file |
+| driving it, phone | **Sending a message into a room returned 500** — `metadata: metadata \|\| undefined` under `strictUndefinedChecks`; the ratchet matched `??` and not `\|\|`. On dev and the last production build |
+| socket probe | **No emit from a route or action ever reached a phone** — Next bundles its own copy of `lib/socket-server.ts`, whose `io` was null; live chat delivery, check-in broadcasts and moderation removals were all silent, in dev and the production build alike |
+| driving it, phone | Rejecting a flag left the message visible when it had never been auto-hidden; neither organiser decision wrote to `audit_logs`; a return after check-out kept the old `check_out_time`, so the Banter tab listed the room under Recent rather than Live |
+| driving it, dashboard | The venue owner's list could not reach the venue record it exists to edit; a second amenity with the same name was suffixed rather than refused; "<5 of 1 … read them" on a held-back category; "1 people inside" |
+| read-back | The seed wrote `event_check_ins` and not `presence_sessions`, so the Grid said six and the Rooms page said nobody |
 
 ### Open, recorded rather than fixed
 
