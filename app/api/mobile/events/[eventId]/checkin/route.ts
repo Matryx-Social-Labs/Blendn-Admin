@@ -430,7 +430,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    if (existingMembership) {
+    /*
+     * A ban a human applied survives a check-in.
+     *
+     * Rejoining set `status: "active"` on any non-active membership, so an
+     * organiser's ban lasted exactly until the banned person walked out and
+     * back in — the ban evaporated on the next check-in, the same shape as the
+     * mute that cleared itself (G5). `banned_by` is the discriminator, as it
+     * is for mutes: a human's ban has one, a suspension's does not, and the
+     * suspension docstring promises re-entry through this door once lifted.
+     * The check-in itself still stands — presence is a fact — the room stays
+     * closed to them.
+     */
+    const humanBanned = existingMembership?.status === "banned" && Boolean(existingMembership.banned_by)
+    if (existingMembership && humanBanned) {
+      logger.info("Check-in kept a room ban", { userId: authUser.userId, chatGroupId: chatGroup.id })
+    } else if (existingMembership) {
       if (existingMembership.status !== "active" || existingMembership.last_allowed_at || !existingMembership.anonymous_name) {
         const rejoin = (anonymous_name: string) =>
           db.chat_group_members.update({

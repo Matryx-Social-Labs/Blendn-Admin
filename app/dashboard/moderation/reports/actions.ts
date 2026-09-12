@@ -310,8 +310,18 @@ export async function resolveReport(
           })
 
   if (!report) throw new Error("Report not found")
-  // Two admins working the queue at once would otherwise both act on it.
-  if (report.status !== "pending") throw new Error("This report has already been reviewed")
+  /*
+   * Two admins working the queue at once would otherwise both act on it.
+   *
+   * Reinstate is the exception, deliberately: it is offered on an already
+   * resolved report — the reports table says so in as many words — and this
+   * guard refused it, so every "Reinstate" 500'd and a suspension could only
+   * be lifted by somebody with database access. Found by suspending and then
+   * trying to undo it.
+   */
+  if (decision !== "reinstate" && report.status !== "pending") {
+    throw new Error("This report has already been reviewed")
+  }
 
   const subjectId =
     kind === "user"
@@ -343,12 +353,16 @@ export async function resolveReport(
   }
 
   await db.$transaction(async (tx) => {
-    if (kind === "user") {
-      await tx.user_reports.update({ where: { id: reportId }, data: reviewed })
-    } else if (kind === "event") {
-      await tx.event_reports.update({ where: { id: reportId }, data: reviewed })
-    } else {
-      await tx.message_reports.update({ where: { id: reportId }, data: reviewed })
+    // A reinstate after the fact leaves the report's own verdict alone: the
+    // report was upheld, the suspension is what is being lifted.
+    if (decision !== "reinstate" || report.status === "pending") {
+      if (kind === "user") {
+        await tx.user_reports.update({ where: { id: reportId }, data: reviewed })
+      } else if (kind === "event") {
+        await tx.event_reports.update({ where: { id: reportId }, data: reviewed })
+      } else {
+        await tx.message_reports.update({ where: { id: reportId }, data: reviewed })
+      }
     }
 
     /*

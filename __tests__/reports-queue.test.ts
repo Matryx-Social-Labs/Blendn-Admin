@@ -280,6 +280,24 @@ describe("resolveReport", () => {
     })
   })
 
+  it("reinstating works on a report that was already resolved — that is when it is offered", async () => {
+    /*
+     * The table offers Reinstate only on resolved rows ("a suspension that can
+     * only be reversed by an engineer with database access is not reversible
+     * in any sense the product can rely on"), and the already-reviewed guard
+     * refused exactly that row — every Reinstate 500'd. Found by suspending
+     * someone and trying to undo it.
+     */
+    mockDb.user_reports.findUnique.mockResolvedValue({ ...pendingUserReport, status: "resolved" })
+    await resolveReport("user", "ur1", "reinstate")
+    expect(tx.user.update).toHaveBeenCalledWith({
+      where: { id: "u9" },
+      data: { suspended_at: null, suspended_by: null },
+    })
+    // The report's own verdict stands; only the suspension is lifted.
+    expect(tx.user_reports.update).not.toHaveBeenCalled()
+  })
+
   it("writes every decision to the audit log", async () => {
     mockDb.user_reports.findUnique.mockResolvedValue(pendingUserReport)
     await resolveReport("user", "ur1", "suspend")
