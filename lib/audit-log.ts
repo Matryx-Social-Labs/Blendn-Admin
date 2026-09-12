@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { logger } from "./logger"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
@@ -42,12 +43,11 @@ export function auditLog(entry: AuditLogEntry): void {
 }
 
 /**
- * Extract IP address from request headers
+ * The address written onto an audit row. Same reader as the rate limiters:
+ * the last hop is the one the platform's edge added, the first is whatever
+ * the client sent, and an audit trail that records a spoofable address is
+ * evidence of nothing.
  */
 export function getRequestIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  )
+  return clientIpFrom(request.headers)
 }

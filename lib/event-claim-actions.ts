@@ -3,6 +3,7 @@
 import { headers } from "next/headers"
 
 import { auditLog } from "@/lib/audit-log"
+import { clientIpFrom } from "@/lib/client-ip"
 import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
 import { CLAIM_LIMITS, CLAIM_PAGE, claimRefusal, curationSelect } from "@/lib/curation"
@@ -57,12 +58,12 @@ const HOUR_MS = 60 * 60 * 1000
 async function overClaimLimit(email: string, eventId: string): Promise<string | null> {
   /*
    * `x-forwarded-for` is spoofable, which is why it is the weakest of the three
-   * and never the only one. Behind Railway's proxy the left-most entry is the
-   * real client; with no header at all every anonymous caller shares one
-   * bucket, which fails toward refusing rather than toward letting through.
+   * and never the only one. The LAST hop is the one the platform's edge added
+   * — the left-most is whatever the client sent, which is why this goes
+   * through `clientIpFrom` like every other limiter. With no header at all
+   * every anonymous caller shares one bucket, which fails toward refusing.
    */
-  const forwarded = (await headers()).get("x-forwarded-for") ?? "unknown"
-  const ip = forwarded.split(",")[0]!.trim() || "unknown"
+  const ip = clientIpFrom(await headers())
 
   const [byEmail, byEvent, byIp] = await Promise.all([
     hit(`rl:claim:email:${email}`, HOUR_MS),
