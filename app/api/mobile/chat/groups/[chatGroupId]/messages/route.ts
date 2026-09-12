@@ -382,7 +382,7 @@ export async function POST(
           user_id: user.userId,
           content,
           type,
-          metadata: metadata || undefined,
+          ...(metadata != null && { metadata }),
           parent_id: parentId || null,
           moderation_status: "hidden",
           deleted_at: new Date(),
@@ -424,7 +424,14 @@ export async function POST(
         user_id: user.userId,
         content,
         type,
-        metadata: metadata || undefined,
+        /*
+         * Conditional spread, not `metadata || undefined`. The client omits
+         * `metadata` on every plain text message, and with
+         * `strictUndefinedChecks` on, an explicit undefined here made
+         * `chat_messages.create` throw — every message sent from the app into
+         * a room returned 500. Found by sending one from a phone.
+         */
+        ...(metadata != null && { metadata }),
         parent_id: parentId || null,
       },
       include: {
