@@ -241,7 +241,10 @@ export function SiteHeader() {
             ? "What is waiting on you, whether the loop closes, and who is supplying it."
             : role === "organizer"
               ? "Your next event first — pacing, then what your past events say."
-              : "Each venue on its own terms — utilisation, ratings, bookings.",
+              : role === "sponsor"
+                ? // Driven as the sponsor: the venue owner's line rendered here.
+                  "What is running, what is waiting on you, and who your sends reached."
+                : "Each venue on its own terms — utilisation, ratings, bookings.",
       }
     }
 
