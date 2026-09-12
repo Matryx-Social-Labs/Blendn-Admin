@@ -39,6 +39,7 @@ const mockDb = {
   board_posts: { deleteMany: jest.fn() },
   board_requests: { updateMany: jest.fn() },
   private_conversations: { updateMany: jest.fn() },
+  $executeRaw: jest.fn(),
   $transaction: jest.fn().mockResolvedValue([]),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -267,6 +268,19 @@ describe("what survives a deletion, and what must not", () => {
     expect(call.where).toEqual(expect.objectContaining({ sender_id: expect.any(String) }))
     expect(call.where).not.toHaveProperty("recipient_id")
     expect(call.data).toEqual({ message: null })
+  })
+
+  it("takes their name out of other people's notification centres", async () => {
+    /*
+     * A DM push is titled with the sender's name and a request push names
+     * them in the body; those rows belong to the other person and survive.
+     * Driven: "Dev Tester — Sent you a message" two hours after the erasure.
+     */
+    await del()
+    const sql = mockDb.$executeRaw.mock.calls.map((c: unknown[]) => (c[0] as TemplateStringsArray).join("?"))
+    expect(sql.some((q: string) => q.includes("kind = 'private_message'") && q.includes("SET title = 'Someone'"))).toBe(true)
+    expect(sql.some((q: string) => q.includes("kind = 'message_request'") && q.includes("sender_id ="))).toBe(true)
+    expect(sql.some((q: string) => q.includes("kind = 'message_request_response'") && q.includes("recipient_id ="))).toBe(true)
   })
 
   it("closes every conversation they were in, so nobody keeps writing to an erased account", async () => {

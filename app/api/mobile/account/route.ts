@@ -242,6 +242,40 @@ export async function DELETE(request: NextRequest) {
         },
         data: { closed_at: new Date(), closed_by: authUser.userId, closed_reason: "account_deleted" },
       }),
+
+      /*
+       * Their name in other people's notification centres.
+       *
+       * A DM push is titled with the sender's name — the real one after a
+       * reveal — and a message-request push names them in the body. Those
+       * rows belong to the other person and survive this deletion, so the
+       * name kept appearing in a list two hours after the account was gone.
+       * Driven: "Dev Tester — Sent you a message" in the recipient's centre
+       * after Dev Tester had erased everything. Redacted to a neutral word;
+       * the row's job (a deep link into a now-closed thread) is done anyway.
+       */
+      db.$executeRaw`
+        UPDATE notifications
+        SET title = 'Someone'
+        WHERE kind = 'private_message'
+          AND data->>'conversationId' IN (
+            SELECT id::text FROM private_conversations
+            WHERE user1_id = ${authUser.userId} OR user2_id = ${authUser.userId}
+          )`,
+      db.$executeRaw`
+        UPDATE notifications
+        SET body = 'Someone wants to connect'
+        WHERE kind = 'message_request'
+          AND data->>'requestId' IN (
+            SELECT id::text FROM message_requests WHERE sender_id = ${authUser.userId}
+          )`,
+      db.$executeRaw`
+        UPDATE notifications
+        SET body = 'Someone accepted your message request'
+        WHERE kind = 'message_request_response'
+          AND data->>'requestId' IN (
+            SELECT id::text FROM message_requests WHERE recipient_id = ${authUser.userId}
+          )`,
     ])
 
     /*
