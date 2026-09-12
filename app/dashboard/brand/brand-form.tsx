@@ -98,7 +98,9 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
         <p className="text-[0.8125rem] text-muted-foreground">
           {brand.placementCount === 0
             ? "No placements yet."
-            : `${brand.placementCount} placement${brand.placementCount === 1 ? "" : "s"} use this brand. Renaming it changes how they all read.`}
+            : brand.placementCount === 1
+              ? "1 placement uses this brand. Renaming it changes how it reads."
+              : `${brand.placementCount} placements use this brand. Renaming it changes how they all read.`}
         </p>
       ) : null}
 
