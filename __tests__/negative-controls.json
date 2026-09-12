@@ -536,6 +536,14 @@
       "date": "2026-09-12",
       "note": "The runtime half of this policy is pinned by integration/room-send.itest.ts against real Postgres."
     },
+    "dashboard-feed-broadcast-kind.test.ts": {
+      "guards": "that the dashboard chat/messages route derives `kind` from `metadata.sponsored_message_id` and `type === \"announcement\"`, and that components/chat-feed.tsx labels a broadcast row (Sponsored / Announcement) in place of the `anonymousName ?? \"Attendee\"` sender and renders the stripped `body` rather than `msg.content`",
+      "mutation": "in components/chat-feed.tsx, replace `const broadcast = msg.kind !== \"user\"` with `const broadcast = false as boolean` so every row renders as an Attendee again",
+      "observed": "1 failing ('labels the row instead of naming an Attendee'). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Driven on the dashboard as the organiser before and after; K3.10."
+    },
     "integration/dm-send.itest.ts": {
       "guards": "that a text-only DM is written through the real route against real Postgres, with media_url/media_type null rather than an explicit undefined",
       "mutation": "in app/api/mobile/conversations/[conversationId]/messages/route.ts, put back `media_url: mediaUrl, media_type: mediaType as media_type | null`",

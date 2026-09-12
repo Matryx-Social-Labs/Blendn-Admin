@@ -15,6 +15,7 @@ import {
   IconChevronRight,
   IconAlertTriangle,
   IconShieldCheck,
+  IconSpeakerphone,
 } from "@tabler/icons-react"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ interface ChatMessage {
   id: string
   content: string
   type: string
+  kind: "user" | "announcement" | "sponsored"
   createdAt: string
   user: {
     id: string
@@ -333,6 +335,11 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                 const member = memberById.get(msg.user.id)
                 const isBanned = member?.status === "banned"
                 const isMuted = member?.status === "muted"
+                // The room's own voice, labelled with the word the phone shows.
+                // The server prefixes a label line onto the content; the badge
+                // says it, so the line is dropped rather than printed twice.
+                const broadcast = msg.kind !== "user"
+                const body = broadcast ? msg.content.replace(/^(📣 \[Sponsored\]|📢 \[Announcement from [^\]]*\])\n/, "") : msg.content
                 return (
                   <div
                     key={msg.id}
@@ -341,13 +348,23 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                     }`}
                   >
                     <div className="size-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
-                      <IconUser className="size-3.5 text-muted-foreground" />
+                      {broadcast ? (
+                        <IconSpeakerphone className="size-3.5 text-muted-foreground" />
+                      ) : (
+                        <IconUser className="size-3.5 text-muted-foreground" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline gap-1.5 flex-wrap">
-                        <span className="text-xs font-medium truncate">
-                          {msg.user.anonymousName ?? "Attendee"}
-                        </span>
+                        {broadcast ? (
+                          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 uppercase tracking-wide">
+                            {msg.kind === "sponsored" ? "Sponsored" : "Announcement"}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs font-medium truncate">
+                            {msg.user.anonymousName ?? "Attendee"}
+                          </span>
+                        )}
                         <span className="text-[10px] text-muted-foreground shrink-0">
                           {new Date(msg.createdAt).toLocaleTimeString("en-IN", {
                             hour: "2-digit",
@@ -365,7 +382,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                           </Badge>
                         )}
                       </div>
-                      <p className="text-sm leading-snug break-words">{msg.content}</p>
+                      <p className="text-sm leading-snug break-words">{body}</p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <Button

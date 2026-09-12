@@ -133,6 +133,19 @@ export async function GET(_: Request, { params }: RouteContext) {
         id: m.id,
         content: m.content,
         type: m.type,
+        /*
+         * What the row is, since `type` cannot say: a sponsored send keeps
+         * `type` for its media kind and marks itself in metadata (see
+         * lib/sponsored-scheduler.ts). Without this the organiser's own feed
+         * showed their announcement and the sponsor's ad as messages from
+         * "Attendee" (K3.10) — the same string an attendee could type.
+         */
+        kind:
+          (m.metadata as { sponsored_message_id?: string } | null)?.sponsored_message_id
+            ? "sponsored"
+            : m.type === "announcement"
+              ? "announcement"
+              : "user",
         createdAt: m.created_at.toISOString(),
         user: {
           id: m.user.id,
