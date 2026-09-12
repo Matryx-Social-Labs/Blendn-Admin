@@ -241,11 +241,33 @@ export async function decideEventClaim(
       id: true,
       status: true,
       org_id: true,
+      onboarding_id: true,
       event: { select: { id: true, title: true, ...curationSelect } },
     },
   })
   if (!claim) throw new Error("Claim not found")
   if (claim.status !== "pending") throw new Error("This claim has already been decided.")
+
+  /*
+   * A claim filed without an account carries `onboarding_id` and no `org_id`;
+   * approving that application creates the organisation and records it on the
+   * request — and nothing wrote it back to the claim. So the funnel's second
+   * half dead-ended: the queue said "approving creates the organisation
+   * first", the action said "approve the onboarding request first", and after
+   * doing so the hand-over still refused, for ever. Found by handing over the
+   * seeded no-account claim. The organisation is resolved from the request
+   * here, at decision time.
+   */
+  const orgId =
+    claim.org_id ??
+    (claim.onboarding_id
+      ? (
+          await db.organiser_onboarding_requests.findUnique({
+            where: { id: claim.onboarding_id },
+            select: { org_id: true },
+          })
+        )?.org_id ?? null
+      : null)
 
   // A decline with no reason produces an identical re-file, and the queue gets
   // the same row again. Same rule as the venue queue.
@@ -255,9 +277,9 @@ export async function decideEventClaim(
   }
 
   if (decision === "approve") {
-    if (!claim.org_id) {
+    if (!orgId) {
       throw new Error(
-        "Approve the onboarding request first — there is no organisation to hand this to yet."
+        "Approve their application first — there is no organisation to hand this to yet."
       )
     }
     /*
@@ -297,6 +319,12 @@ export async function decideEventClaim(
           reviewed_by: admin.id,
           reviewed_at: new Date(),
           decision_note: trimmed || null,
+          // Recorded on the claim too, so the row says who got the event.
+          // `event_claims_one_claimant` wants exactly one of the pair set, so
+          // the request id goes as the organisation arrives.
+          ...(decision === "approve" && !claim.org_id && orgId
+            ? { org_id: orgId, onboarding_id: null }
+            : {}),
         },
       })
 
@@ -305,7 +333,7 @@ export async function decideEventClaim(
       // The one write that unlocks every screen.
       await tx.events.update({
         where: { id: claim.event.id },
-        data: { organizer_org_id: claim.org_id, claimed_at: new Date() },
+        data: { organizer_org_id: orgId, claimed_at: new Date() },
       })
 
       /*
@@ -332,7 +360,7 @@ export async function decideEventClaim(
     action: decision === "approve" ? "event_claim.approved" : "event_claim.declined",
     resource: "event_claim",
     resourceId: claimId,
-    details: { eventId: claim.event.id, title: claim.event.title, orgId: claim.org_id },
+    details: { eventId: claim.event.id, title: claim.event.title, orgId },
   })
 }
 

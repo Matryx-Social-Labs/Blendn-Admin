@@ -134,7 +134,7 @@ describe("deciding one", () => {
      * `organizer_org_id`. That is the strongest argument for representing
      * curation this way rather than with a separate table.
      */
-    expect(src).toMatch(/organizer_org_id: claim\.org_id, claimed_at: new Date\(\)/)
+    expect(src).toMatch(/organizer_org_id: orgId, claimed_at: new Date\(\)/)
   })
 
   it("never rewrites organizer_id", () => {
@@ -158,7 +158,22 @@ describe("deciding one", () => {
   })
 
   it("refuses to approve a claim with no organisation to hand it to", () => {
-    expect(src).toMatch(/Approve the onboarding request first/)
+    expect(src).toMatch(/Approve their application first/)
+  })
+
+  it("takes the organisation from the approved application when the claim has none", () => {
+    /*
+     * A no-account claim carries `onboarding_id`; approving that application
+     * creates the organisation on the request and nothing wrote it back to the
+     * claim, so the hand-over refused for ever. Found by handing over the
+     * seeded no-account claim after the flag copy had promised it would work.
+     */
+    const decide = src.slice(src.indexOf("export async function decideEventClaim"))
+    expect(decide).toMatch(/organiser_onboarding_requests\.findUnique\(\{[\s\S]*?where: \{ id: claim\.onboarding_id \}/)
+    expect(decide).toMatch(/claim\.org_id \?\?/)
+    // And it is recorded on the claim, so the row says who got the event.
+    // …and `event_claims_one_claimant` wants exactly one of the pair set.
+    expect(decide).toMatch(/\{ org_id: orgId, onboarding_id: null \}/)
   })
 
   it("makes the write and the supersede one transaction", () => {
