@@ -109,7 +109,7 @@ export default async function ChatroomsPage() {
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
         <span><b className="font-bold text-foreground">{live.length}</b> live</span>
         <span><b className="font-bold text-foreground">{feedback}</b> in {feedback === 1 ? "its" : "their"} feedback window</span>
-        <span><b className="font-bold text-foreground">{inside}</b> people inside</span>
+        <span><b className="font-bold text-foreground">{inside}</b> {inside === 1 ? "person" : "people"} inside</span>
         {flags > 0 ? (
           <span className="font-bold text-destructive">{flags} flag{flags === 1 ? "" : "s"} waiting</span>
         ) : null}
