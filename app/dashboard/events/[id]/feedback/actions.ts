@@ -37,6 +37,8 @@ export interface FeedbackMessage {
 export interface FeedbackDigest {
   eventTitle: string
   endedAt: string
+  /** False while the room is still live — the tab is reachable before the end. */
+  ended: boolean
   windowClosesAt: string
   windowOpen: boolean
   counts: { positive: number; neutral: number; negative: number }
@@ -151,6 +153,7 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
     endedAt: event.end_time.toISOString(),
     windowClosesAt: closesAt.toISOString(),
     windowOpen: Date.now() < closesAt.getTime(),
+    ended: Date.now() >= event.end_time.getTime(),
     counts,
     /*
      * Counts, suppressed below the disclosure floor.

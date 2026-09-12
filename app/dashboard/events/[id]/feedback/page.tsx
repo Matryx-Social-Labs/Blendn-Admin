@@ -52,7 +52,7 @@ export default async function FeedbackPage({
           </Link>
         </h2>
         <span className="text-[0.8125rem] text-muted-foreground">
-          {new Date(digest.endedAt).getTime() > Date.now() ? "ends" : "ended"} {ended} · {window}
+          {digest.ended ? "ended" : "ends"} {ended} · {window}
           {total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""}
         </span>
       </div>
