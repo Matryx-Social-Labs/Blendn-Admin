@@ -568,6 +568,14 @@
       "reverted": true,
       "date": "2026-09-12",
       "note": "Found by driving two phones for half an hour: the emulator's refresh timed out and the session died. SCRUM-101."
+    },
+    "org-invites.test.ts": {
+      "guards": "(2026-09-12 addition) that app/api/organisation/accept-invite/route.ts answers an existing member with `alreadyMember: true` BEFORE `inviteState` judges the token, so a second accept by the person who was just let in is not \"already used\"",
+      "mutation": "move the `organisation_members.findUnique` block back below `const state = inviteState(`",
+      "observed": "1 failing ('answers a member with success before the token's state is judged'). Green after revert",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "The earlier cases in this file are behavioural (inviteState, token hashing) and need no entry."
     }
   },
   "grandfathered": [
