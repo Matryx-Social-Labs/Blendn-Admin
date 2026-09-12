@@ -23,7 +23,16 @@ export function auditLog(entry: AuditLogEntry): void {
         action: entry.action,
         resource: entry.resource,
         resource_id: entry.resourceId ?? null,
-        details: entry.details ?? undefined,
+        /*
+         * Conditional spread, not `?? undefined`. With `strictUndefinedChecks`
+         * on, an explicit undefined here made every audit write WITHOUT
+         * details throw — `signout`, among others — and the catch below
+         * logged it and moved on, so the accountability record had holes
+         * nobody was told about. Seen in the dev log as "Audit log write
+         * failed"; the ratchet had missed it because this call is split
+         * across a newline.
+         */
+        ...(entry.details !== undefined && { details: entry.details }),
         ip_address: entry.ipAddress ?? null,
       },
     })

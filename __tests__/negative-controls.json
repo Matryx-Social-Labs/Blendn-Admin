@@ -535,6 +535,14 @@
       "reverted": true,
       "date": "2026-09-12",
       "note": "The runtime half of this policy is pinned by integration/room-send.itest.ts against real Postgres."
+    },
+    "integration/dm-send.itest.ts": {
+      "guards": "that a text-only DM is written through the real route against real Postgres, with media_url/media_type null rather than an explicit undefined",
+      "mutation": "in app/api/mobile/conversations/[conversationId]/messages/route.ts, put back `media_url: mediaUrl, media_type: mediaType as media_type | null`",
+      "observed": "1 failing (500, strictUndefinedChecks). Green after revert (cp of the saved file)",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Same class as SCRUM-83; a bare optional variable, invisible to any regex."
     }
   },
   "grandfathered": [

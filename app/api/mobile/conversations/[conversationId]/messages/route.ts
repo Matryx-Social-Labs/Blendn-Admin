@@ -235,8 +235,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         conversation_id: conversationId,
         sender_id: authUser.userId,
         message_text: text,
-        media_url: mediaUrl,
-        media_type: mediaType as media_type | null,
+        // Both optional in the schema, so undefined whenever a text-only DM is
+        // sent — which is every DM. Explicit undefined threw under
+        // `strictUndefinedChecks`, so sending a DM returned 500. Found by
+        // sending one from the simulator after a match.
+        ...(mediaUrl != null && { media_url: mediaUrl }),
+        ...(mediaType != null && { media_type: mediaType as media_type }),
         moderation_status: screen.status,
       },
       include: {
