@@ -551,6 +551,14 @@
       "reverted": true,
       "date": "2026-09-12",
       "note": "Same class as SCRUM-83; a bare optional variable, invisible to any regex."
+    },
+    "integration/safety-writes.itest.ts": {
+      "guards": "that a message report with no description and a peer rating with no note are written through their real routes against real Postgres, with the omitted column null rather than an explicit undefined",
+      "mutation": "in app/api/mobile/events/[eventId]/peer-ratings/route.ts, put back the bare `note,` in the create data",
+      "observed": "1 failing ('rates a connected peer with no note' — 500, strictUndefinedChecks). Green after revert (cp of the saved file). The report half was observed live: 500 from the API before the spread, 201 after",
+      "reverted": true,
+      "date": "2026-09-12",
+      "note": "Eighth and ninth strictUndefinedChecks outages, both on the safety path; SCRUM-99."
     }
   },
   "grandfathered": [

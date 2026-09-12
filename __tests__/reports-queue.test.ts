@@ -36,6 +36,9 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const mockAuditLog = jest.fn()
 jest.mock("@/lib/audit-log", () => ({ auditLog: (...a: unknown[]) => mockAuditLog(...a) }))
 
+const emitChatMessageHidden = jest.fn()
+jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden }))
+
 import { getReportQueue, resolveReport } from "@/app/dashboard/moderation/reports/actions"
 
 const T0 = new Date("2026-08-10T12:00:00.000Z")
@@ -247,6 +250,22 @@ describe("resolveReport", () => {
     )
     expect(tx.chat_messages.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "m1" } })
+    )
+  })
+
+  it("tells the room a removed message is gone", async () => {
+    /*
+     * Driven from a phone: the report landed, the admin pressed Remove, the
+     * row got `deleted_at`, and the message stayed on the reporter's screen
+     * until the next reload. The flag queue's twin already emitted; this did
+     * not.
+     */
+    mockDb.message_reports.findUnique.mockResolvedValue(pendingGroupReport)
+    mockDb.chat_messages.findUnique.mockResolvedValue({ user_id: "u9", chat_group_id: "g1" })
+    await resolveReport("message", "mr1", "remove_message")
+    expect(emitChatMessageHidden).toHaveBeenCalledWith("g1", "m1", "u9")
+    expect(tx.chat_messages.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ deleted_by: "admin1" }) })
     )
   })
 

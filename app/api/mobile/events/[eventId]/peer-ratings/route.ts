@@ -86,7 +86,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     await db.peer_ratings.create({
-      data: { event_id: eventId, rater_id: authUser.userId, rated_id: ratedId, rating, issue, note },
+      // `note` is optional and the app sends `note.trim() || undefined`, so a
+      // rating without a note arrived as an explicit undefined and
+      // strictUndefinedChecks refused the write — every wordless rating 500'd.
+      data: {
+        event_id: eventId,
+        rater_id: authUser.userId,
+        rated_id: ratedId,
+        rating,
+        issue,
+        ...(note !== undefined && { note }),
+      },
     })
 
     if (issue === "harassment") {
