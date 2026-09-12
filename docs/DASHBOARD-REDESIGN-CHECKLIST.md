@@ -137,6 +137,27 @@ below was read back with `psql`.
 | Claims: decline, approve application, hand over | dashboard → mobile API | dead-ended on the first try (**SCRUM-84**, fixed); then `event_claims approved`, `events.organizer_org_id`, `claimed_at`, siblings superseded; new organiser signed in and opened the event |
 | Organiser creates and publishes | dashboard → mobile API | `events published`, org set, venue linked, fence; mobile detail names the org, not the creator (**SCRUM-84**) |
 
+**Android, second attempt (later on 2026-09-12, iOS simulator shut first):**
+the emulator held for ~25 minutes. Driven with the Maestro CLI (the MCP's
+driver kept a dead connection to the earlier boot) and `adb shell input
+text` for anything longer than a word: room + announcement ✅, send a
+message ✅ (row read back, flagged), admin Remove reaching the emulator
+**live** ✅ (`android-after-remove`), check-out ✅ (`checked_out`,
+`departed_source=user`). Check-in: not driven — the emulator console
+accepted `geo fix` but the framework's GPS provider kept the Mountain View
+default, so the app sat waiting on a position. Two Android-only client
+notes: the room's chat presents *over* the Grid there (SCRUM-86 is iOS
+only), and the event detail logs "Encountered two children with the same
+key" on Android.
+
+**After the drive, decided and shipped:** contact details are removed on
+write in a room (server `6a76f43`, iOS-verified), and a removed message is
+a dashed "This message was removed by moderation." placeholder on the
+client (`f982a76`, iOS-verified). The event room's own send route
+(`POST /events/:id/chat`) was also returning 500 on every plain message —
+two more explicit-undefined shapes — and now has an integration suite that
+posts through both routes against real Postgres.
+
 Fixed on this branch: SCRUM-82 (P0 socket instance), SCRUM-83 (P0 chat send),
 SCRUM-84 (P1 claim funnel + host leak), SCRUM-85 (P2 ×7). Recorded, not
 fixed: SCRUM-86 (client: Join Chat opens behind the Grid modal), SCRUM-87
