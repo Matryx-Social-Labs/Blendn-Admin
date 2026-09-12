@@ -92,6 +92,14 @@ export interface ServerToClientEvents {
       id: string
       content: string
       type: string
+      /**
+       * What kind of thing this is when `type` is busy carrying the media
+       * kind. A sponsored send persists `type: "image"` or `"text"` and marks
+       * itself with `metadata.sponsored_message_id`; the history serves that
+       * metadata, the wire did not — so live, an ad arrived as a text message
+       * from "Sponsored" and the client drew it as a peer's bubble (K3.4).
+       */
+      kind?: "sponsored"
       userId: string
       userName: string
       userImage?: string
@@ -955,6 +963,7 @@ export function emitChatMessage(
     id: string
     content: string
     type: string
+    kind?: "sponsored"
     userId: string
     userName: string
     userImage?: string
