@@ -112,4 +112,33 @@ gates, the specialists, and a drive, before the next one starts.
 
 `/design-review` ran 2026-09-11 over the result (report: `~/.gstack/projects/Matryx-Social-Labs-Blendn-Admin/designs/design-audit-20260911/`): 15 findings, 9 fixed in nine `style(design): FINDING-NNN` commits (10e5c64 … 5530cc7), design score B+ → A. Deferred, for the testing phase: the audit log groups days by browser timezone (`toDateString()` in a client component — will hydrate differently on Railway), the hand-typed type scale (209× `text-[0.8125rem]` while `--text-small` is unused — a codemod, its own PR), the map placeholder hex and primitive shadows. The venue owner's `/dashboard/venues` was mis-ticked above as shared with the admin index; it went through the chain in 6e47108.
 
-Next: the testing routine resumes (six gates, specialists, Maestro drives, read-backs).
+## Driven 2026-09-12 — the journeys, both surfaces, rows read back
+
+The testing routine ran over the finished redesign. Dashboard journeys driven
+through `browse` against the seed on :3100, the phone half on the iOS
+simulator against the same server (Android: not driven — the emulator fell
+to 1.5 fps and `adb` stopped answering; recorded in the playbook). Every row
+below was read back with `psql`.
+
+| Journey | Surfaces | Read back |
+|---|---|---|
+| Announcement → room | dashboard → iOS | `chat_messages type=announcement`; rendered as ANNOUNCEMENT on the phone |
+| Attendee sends a message | iOS → dashboard | 500 on first try (**SCRUM-83**, fixed); then the row, and Cosmic Panda on the organiser's feed |
+| Organiser moderation: Keep one, Remove one | dashboard → iOS | `moderation_flags` approved/rejected, message `hidden`, two `audit_logs` rows; the removed message gone from the phone (**SCRUM-85**) |
+| Admin moderation: Remove | iOS → dashboard → iOS | `hidden`, `moderation.message_removed`; the phone dropped it **live** once the emit reached a socket (**SCRUM-82**) |
+| Check out, check back in | iOS → dashboard | `event_check_ins checked_in`, `presence_sessions` open; Rooms page "1 person inside"; Banter "Live now" only after the `check_out_time` fix |
+| Venue owner edits capacity | dashboard | `venues.capacity` 300→320→300, `venue.updated` |
+| Organisation invite | dashboard | `organisation_invites` staff, expires +7d, `org.invite` |
+| Feedback label correction | dashboard | `event_feedback sentiment=neutral source=human corrected_at`, `feedback.label_corrected` |
+| Category rename, amenity add | dashboard | `categories.name`, `category.renamed`; duplicate amenity refused (**SCRUM-85**) |
+| Users: deleted filter | dashboard | 46 accounts / 1 deleted; row has no menu, no chips |
+| Reports export | dashboard | 200, 2 rows, `report.exported` with the window |
+| Settings name save | dashboard | `User.name` round trip |
+| Claims: decline, approve application, hand over | dashboard → mobile API | dead-ended on the first try (**SCRUM-84**, fixed); then `event_claims approved`, `events.organizer_org_id`, `claimed_at`, siblings superseded; new organiser signed in and opened the event |
+| Organiser creates and publishes | dashboard → mobile API | `events published`, org set, venue linked, fence; mobile detail names the org, not the creator (**SCRUM-84**) |
+
+Fixed on this branch: SCRUM-82 (P0 socket instance), SCRUM-83 (P0 chat send),
+SCRUM-84 (P1 claim funnel + host leak), SCRUM-85 (P2 ×7). Recorded, not
+fixed: SCRUM-86 (client: Join Chat opens behind the Grid modal), SCRUM-87
+(client: empty bubbles for removed messages; a timeout rendered as "not open
+yet"), SCRUM-88 (decision: admin queue shows real names by default).
