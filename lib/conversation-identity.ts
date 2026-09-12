@@ -164,3 +164,21 @@ export function cameFromMatch(conversation: {
   if (conversation.origin_board_request_id) return false
   return conversation.user1_pseudonym !== null || conversation.user2_pseudonym !== null
 }
+
+/**
+ * Is there anything to reveal here at all?
+ *
+ * A conversation from an accepted message request has real names from the
+ * moment it exists — the request was the crossing — and a board conversation
+ * or a match keeps pseudonyms until each side chooses. The app used to infer
+ * this from whether the reveal fields were *absent*, and the routes always
+ * sent them, so an accepted request rendered the match header: "You can see
+ * their name. They can't see yours." — false, with a reveal button the server
+ * refuses. Stated explicitly instead.
+ */
+export function isPseudonymous(conversation: {
+  user1_pseudonym: string | null
+  user2_pseudonym: string | null
+}): boolean {
+  return conversation.user1_pseudonym !== null || conversation.user2_pseudonym !== null
+}

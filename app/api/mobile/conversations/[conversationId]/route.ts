@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { closeConversation } from "@/lib/conversations"
-import { cameFromMatch, displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
+import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { closeConversationRoom } from "@/lib/socket-server"
@@ -73,6 +73,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       /** Same field as the inbox, so the thread header and the row agree. */
       fromMatch: cameFromMatch(conversation),
+      /** False for an accepted message request: real names throughout, nothing to reveal. */
+      pseudonymous: isPseudonymous(conversation),
       youRevealed: isUser1 ? conversation.user1_revealed : conversation.user2_revealed,
       theyRevealed,
       revealRequested: isUser1

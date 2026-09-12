@@ -160,6 +160,15 @@ export const ConversationSchema = z
   .object({
     id: z.string().uuid(),
     otherUser: ChatUserSchema,
+    fromMatch: z.boolean().describe("Opened from a mutual like rather than an accepted message request."),
+    pseudonymous: z
+      .boolean()
+      .describe(
+        "Whether there is anything left to reveal. False for an accepted message request — real names from the start — so the client draws no reveal header on it."
+      ),
+    youRevealed: z.boolean(),
+    theyRevealed: z.boolean(),
+    revealRequested: z.boolean(),
     lastMessage: z
       .object({
         id: z.string().uuid(),

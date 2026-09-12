@@ -529,6 +529,14 @@ tell them apart. Anything built on it would greet every accepted message request
 as a new match. Derived from `user1_pseudonym`/`user2_pseudonym`; the pseudonyms
 themselves are never sent.
 
+Each conversation (list row and `GET /conversations/:id`) also carries
+**`pseudonymous`** — whether there is anything left to reveal. It is `false` for
+a conversation from an accepted message request, which has real names from the
+moment it exists because the request was the crossing. The app used to infer
+this from the reveal fields being *absent*, and the routes always sent them, so
+an accepted request drew the match header — "You can see their name. They can't
+see yours." — and a reveal button the server refuses with 400.
+
 ### GET /events/:eventId/chat
 The response carries a **`write`** block:
 
