@@ -248,6 +248,19 @@ export function SiteHeader() {
       }
     }
 
+    // The events list is scoped by role — every event for an admin, an
+    // organiser's own, a venue owner's venues — and "every event on the
+    // platform" was read by a venue owner above a list of fourteen at theirs.
+    if (pathname === "/dashboard/events" && role !== "app_admin") {
+      return {
+        title: "Events",
+        description:
+          role === "venue_owner"
+            ? "Every event at your venues — search, filter, and drill in."
+            : "Every event your organisation runs — search, filter, and drill in.",
+      }
+    }
+
     const exact = routeContent[pathname]
     if (exact) return exact
 
