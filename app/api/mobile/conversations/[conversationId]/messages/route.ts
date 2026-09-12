@@ -234,7 +234,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       data: {
         conversation_id: conversationId,
         sender_id: authUser.userId,
-        message_text: text,
+        // Optional behind the "text or media" refinement, so a media-only DM
+        // arrived as an explicit undefined — the same outage as the media
+        // columns below, from the other side of the same refinement.
+        message_text: text ?? null,
         // Both optional in the schema, so undefined whenever a text-only DM is
         // sent — which is every DM. Explicit undefined threw under
         // `strictUndefinedChecks`, so sending a DM returned 500. Found by

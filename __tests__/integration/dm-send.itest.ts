@@ -58,3 +58,26 @@ it("writes a text-only message and serves it back", async () => {
   const row = await db.private_messages.findUniqueOrThrow({ where: { id: body.data.id } })
   expect(row).toMatchObject({ message_text: "corner table is the best seat", media_url: null, media_type: null })
 })
+
+it("writes a media-only message with a null text, not an explicit undefined", async () => {
+  // The other side of the "text or media" refinement: `text` is optional too.
+  const a = await person("dm_c")
+  const b = await person("dm_d")
+  const conversation = await db.private_conversations.create({
+    data: { user1_id: a.id, user2_id: b.id, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" },
+  })
+  conversations.push(conversation.id)
+
+  const res = await route.POST(
+    new NextRequest(`http://localhost/api/mobile/conversations/${conversation.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${a.token}` },
+      body: JSON.stringify({ mediaUrl: "https://cdn.example/photo.jpg", mediaType: "image" }),
+    }),
+    { params: Promise.resolve({ conversationId: conversation.id }) }
+  )
+  expect([200, 201]).toContain(res.status)
+  const body = (await res.json()) as { data: { id: string } }
+  const row = await db.private_messages.findUniqueOrThrow({ where: { id: body.data.id } })
+  expect(row).toMatchObject({ message_text: null, media_url: "https://cdn.example/photo.jpg", media_type: "image" })
+})
