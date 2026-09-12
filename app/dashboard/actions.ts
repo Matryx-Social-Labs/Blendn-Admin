@@ -750,17 +750,17 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
    * Normalising case and whitespace fixes "The Loft" vs "the loft" for the
    * unlinked remainder, which the raw-string version never could.
    */
-  const byVenue = new Map<string, { label: string; events: typeof events }>()
+  const byVenue = new Map<string, { id: string | null; label: string; events: typeof events }>()
   for (const event of events) {
     const displayName = event.venue?.name ?? event.venue_name ?? "Unnamed venue"
     const key = event.venue_id ?? `name:${normaliseVenueName(displayName)}`
     const bucket = byVenue.get(key)
     if (bucket) bucket.events.push(event)
-    else byVenue.set(key, { label: displayName, events: [event] })
+    else byVenue.set(key, { id: event.venue_id ?? null, label: displayName, events: [event] })
   }
 
   const venues: VenueRow[] = Array.from(byVenue.values())
-    .map(({ label: name, events: venueEvents }) => {
+    .map(({ id, label: name, events: venueEvents }) => {
       const inWindow = venueEvents.filter((e) => e.start_time >= windowStart && e.start_time < now)
       const ratings = emptyRatings()
       let ratingTotal = 0
@@ -787,6 +787,7 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
             : "neutral"
 
       return {
+        id,
         name,
         eventsInWindow: inWindow.length,
         nightsPerWeek: Math.round(nightsPerWeek * 10) / 10,

@@ -105,7 +105,15 @@ export default async function MyVenuesPage({
              word beside the name — destructive only when it is the ratings. */
           <section key={venue.name} className="flex flex-col gap-4 border-t border-border pt-5">
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-              <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
+              <h2 className="text-[length:var(--text-h2)] font-bold">
+                {venue.id ? (
+                  <Link href={`/dashboard/venues/${venue.id}`} className="underline-offset-4 hover:underline">
+                    {venue.name}
+                  </Link>
+                ) : (
+                  venue.name
+                )}
+              </h2>
               <span
                 className={
                   venue.tone === "destructive"

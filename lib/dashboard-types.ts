@@ -204,6 +204,12 @@ export interface AdminOverview {
  * the same room are two venues.
  */
 export interface VenueRow {
+  /**
+   * The venue record, when the events are linked to one; null for a free-text
+   * name bucket. Without it the owner's own list could not reach
+   * `/dashboard/venues/<id>` — the only screen that edits or retires a venue.
+   */
+  id: string | null
   name: string
   eventsInWindow: number
   /** Events per week over the trailing 8 weeks. */
