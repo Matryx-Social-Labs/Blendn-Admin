@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { IconCalendar } from "@tabler/icons-react"
-import { formatSince } from "@/lib/dashboard-format"
+import { whenLabel } from "@/lib/dashboard-format"
 import {
   confirmVenueLink,
   disputeVenueLink,
@@ -99,7 +99,12 @@ function LinkedEventRow({ event }: { event: VenueLinkedEvent }) {
           {event.title}
         </Link>
         <p className="text-[0.75rem] text-faint-foreground">
-          {event.venueName} · {formatSince(event.startAt)} ·{" "}
+          {/*
+            `whenLabel`, not `formatSince`: these are upcoming events, and a
+            "how long ago" formatter said "today" for every one of them —
+            driven as the venue owner, an event on the 20th read "today".
+          */}
+          {event.venueName} · {whenLabel(new Date(event.startAt), new Date(event.endAt), new Date())} ·{" "}
           {event.organiserName ?? "Unknown organiser"} ·{" "}
           {event.linkStatus === "disputed" ? (
             <span className="font-bold text-destructive">disputed</span>
