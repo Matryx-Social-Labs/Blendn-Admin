@@ -38,6 +38,7 @@ const mockDb = {
   message_requests: { updateMany: jest.fn() },
   board_posts: { deleteMany: jest.fn() },
   board_requests: { updateMany: jest.fn() },
+  private_conversations: { updateMany: jest.fn() },
   $transaction: jest.fn().mockResolvedValue([]),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -266,6 +267,22 @@ describe("what survives a deletion, and what must not", () => {
     expect(call.where).toEqual(expect.objectContaining({ sender_id: expect.any(String) }))
     expect(call.where).not.toHaveProperty("recipient_id")
     expect(call.data).toEqual({ message: null })
+  })
+
+  it("closes every conversation they were in, so nobody keeps writing to an erased account", async () => {
+    /*
+     * Driven after a deletion: the other person's inbox still listed the
+     * thread under the pseudonym, a message into it returned 200 and wrote a
+     * notification row for the erased account, and nothing told the sender
+     * they were talking to nobody. Closed is "gone for both people".
+     */
+    await del()
+    const call = mockDb.private_conversations.updateMany.mock.calls[0][0]
+    expect(call.where).toEqual({
+      OR: [{ user1_id: expect.any(String) }, { user2_id: expect.any(String) }],
+      closed_at: null,
+    })
+    expect(call.data).toEqual(expect.objectContaining({ closed_at: expect.any(Date), closed_reason: "account_deleted" }))
   })
 })
 

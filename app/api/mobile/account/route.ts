@@ -225,6 +225,23 @@ export async function DELETE(request: NextRequest) {
         where: { from_user_id: authUser.userId },
         data: { message: null },
       }),
+
+      /*
+       * Their conversations close. Driven after a deletion: the other person's
+       * inbox still listed the thread under the pseudonym, a message into it
+       * returned 200 and wrote a notification row for the erased account, and
+       * nothing told the sender they were talking to nobody. Closed is "gone
+       * for both people" everywhere else in the product, so it is the right
+       * state here too; the messages stay for moderation, as they do on a
+       * block.
+       */
+      db.private_conversations.updateMany({
+        where: {
+          OR: [{ user1_id: authUser.userId }, { user2_id: authUser.userId }],
+          closed_at: null,
+        },
+        data: { closed_at: new Date(), closed_by: authUser.userId, closed_reason: "account_deleted" },
+      }),
     ])
 
     /*
