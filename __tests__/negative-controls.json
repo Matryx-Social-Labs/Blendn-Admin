@@ -399,9 +399,10 @@
     "prisma-shorthand-ratchet.test.ts": {
       "guards": "no NEW bare shorthand appears inside a Prisma `data:` block anywhere in app/ or lib/, that the baseline has no stale entries so shrinking stays deliberate, and that the scan found the known ones so the ratchet cannot go vacuous; and, added 2026-09-10, that no NEW Prisma write assembles its `data:` object in a variable — the blind spot that let the sixth outage through, because the shorthand scan only sees literal `data: {` blocks",
       "mutation": "A: add a bare `ratchet_probe_field,` to the data block in app/api/mobile/message-requests/route.ts. B: convert `message,` there to a conditional spread WITHOUT pruning the baseline; C: add a `db.check_in_refusals.create({ data: sneakyPayload })` to lib/check-in-refusals.ts, a file not in INDIRECT_DATA. D: add a `lib/gone.ts` entry to INDIRECT_DATA for a file that does not exist",
-      "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both; C: 1 failing ('has not grown'), naming lib/check-in-refusals.ts. D: 1 failing ('has no stale entries'), naming lib/gone.ts. Both vacuity guards stayed green",
+      "observed": "A: 1 failing ('has not grown'), naming the exact file -> field. B: 1 failing ('has no stale entries, so shrinking is deliberate'). The vacuity guard stayed green in both; C: 1 failing ('has not grown'), naming lib/check-in-refusals.ts. D: 1 failing ('has no stale entries'), naming lib/gone.ts. Both vacuity guards stayed green. E (2026-09-12, after widening the scan to inline blocks): put back the bare `note,` in the one-line create of app/api/mobile/events/[eventId]/peer-ratings/route.ts — 1 failing ('has not grown'), naming `peer-ratings/route.ts -> note`; green after cp of the saved file",
       "reverted": true,
-      "date": "2026-09-10"
+      "date": "2026-09-12",
+      "note": "The 2026-09-10 baseline grandfathered a live outage (report/route.ts -> description) and the line-anchored regex never saw one-line data blocks (peer-ratings -> note). Both are SCRUM-99."
     },
     "users-search-server-side.test.ts": {
       "guards": "that the users search box drives `?search=` on the URL — which `page.tsx` reads and passes to `getUsers` — rather than filtering the 50 rows already fetched, and that the footer discloses the cap instead of implying the page is the whole set",
