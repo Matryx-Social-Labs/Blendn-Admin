@@ -87,10 +87,14 @@ test.describe("the venue picker and the pin agree", () => {
     })
     expect(centre.hasMarker).toBe(true)
 
-    // The coordinates readout is the same fact, in text the organiser can see.
-    await expect(page.getByText(String(AWAY_FROM_DEFAULT.lat)).first()).toBeVisible({
+    // The form's own coordinates are the same fact. The redesign cut the
+    // human-readable lat/lng line (the pin and the address say it), so the
+    // section carries them as data attributes for exactly this read.
+    const holder = page.locator("[data-lat]").first()
+    await expect(holder).toHaveAttribute("data-lat", String(AWAY_FROM_DEFAULT.lat), {
       timeout: 15_000,
     })
+    await expect(holder).toHaveAttribute("data-lng", String(AWAY_FROM_DEFAULT.lng))
 
     // And it is not the fallback centre — the failure this test exists to catch
     // would leave the pin sitting exactly there.

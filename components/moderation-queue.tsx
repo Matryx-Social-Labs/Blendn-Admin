@@ -95,11 +95,7 @@ export function ModerationQueue({ eventId }: ModerationQueueProps) {
       )
       const json = await res.json()
       if (json.success) {
-        toast.success(
-          action === "approve"
-            ? "Message restored (false positive)"
-            : "Message kept hidden"
-        )
+        toast.success(action === "approve" ? "Message kept" : "Message removed")
         fetchFlags()
       } else {
         toast.error(json.error || "Failed to review flag")

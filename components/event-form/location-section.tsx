@@ -171,7 +171,11 @@ export function LocationSection({
         <p id={mapLabelId} className="text-sm leading-none font-medium">
           Map Location
         </p>
-        <div className="mt-2">
+        {/* The redesign cut the lat/lng text readout — the pin and the address
+            say it. The coordinates still need to be readable by something
+            that is not a person: `e2e/venue-pin.spec.ts` proves the picker
+            and the pin agree by reading them here. */}
+        <div className="mt-2" data-lat={initialLat ?? ""} data-lng={initialLng ?? ""}>
           <LocationPicker
             initialLat={initialLat}
             initialLng={initialLng}

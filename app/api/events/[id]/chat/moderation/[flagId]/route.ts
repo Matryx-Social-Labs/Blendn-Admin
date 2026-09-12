@@ -13,7 +13,8 @@ interface RouteParams {
 
 /**
  * PATCH /api/events/[id]/chat/moderation/[flagId]
- * Review a moderation flag: approve (restore message) or reject (keep hidden)
+ * Review a moderation flag: approve (restore the message) or reject (hide it —
+ * whether or not the pipeline had already hidden it)
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
