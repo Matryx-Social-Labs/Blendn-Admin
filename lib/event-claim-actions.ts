@@ -117,6 +117,25 @@ export async function fileEventClaim(
     }
   }
 
+  /*
+   * An application id from the browser has to be the caller's own.
+   *
+   * A pending application grants nothing, which is why accepting the id was
+   * safe — until the hand-over started resolving the organisation from an
+   * *approved* one. Without this check anyone who knew a request's uuid could
+   * file a claim on any event under any email and have it handed to that
+   * organisation. The request's contact address must be the claim's.
+   */
+  if (input.onboardingId) {
+    const request = await db.organiser_onboarding_requests.findUnique({
+      where: { id: input.onboardingId },
+      select: { contact_email: true },
+    })
+    if (!request || request.contact_email.toLowerCase() !== email) {
+      return { ok: false, error: "That application does not match this email address" }
+    }
+  }
+
   if (Boolean(orgId) === Boolean(input.onboardingId)) {
     return {
       ok: false,
@@ -242,6 +261,7 @@ export async function decideEventClaim(
       status: true,
       org_id: true,
       onboarding_id: true,
+      contact_email: true,
       event: { select: { id: true, title: true, ...curationSelect } },
     },
   })
@@ -258,16 +278,19 @@ export async function decideEventClaim(
    * seeded no-account claim. The organisation is resolved from the request
    * here, at decision time.
    */
-  const orgId =
-    claim.org_id ??
-    (claim.onboarding_id
-      ? (
-          await db.organiser_onboarding_requests.findUnique({
-            where: { id: claim.onboarding_id },
-            select: { org_id: true },
-          })
-        )?.org_id ?? null
-      : null)
+  const request = claim.onboarding_id
+    ? await db.organiser_onboarding_requests.findUnique({
+        where: { id: claim.onboarding_id },
+        select: { org_id: true, contact_email: true },
+      })
+    : null
+  // Filing already refused a request that is not the claimant's own; checked
+  // again here because this is the write that hands over an event, and a
+  // read at filing time is not a guarantee at decision time.
+  if (request && request.contact_email.toLowerCase() !== claim.contact_email.toLowerCase()) {
+    throw new Error("The application on this claim belongs to a different email address.")
+  }
+  const orgId = claim.org_id ?? request?.org_id ?? null
 
   // A decline with no reason produces an identical re-file, and the queue gets
   // the same row again. Same rule as the venue queue.
