@@ -19,6 +19,7 @@ import { z } from "zod"
 import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
+import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
 
 interface RouteParams {
@@ -50,6 +51,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Verify conversation exists and user has access
     const conversation = await db.private_conversations.findUnique({
       where: { id: conversationId },
+      include: {
+        // The other party's `read_receipts` decides whether the caller may be
+        // told their message was read. The list route already asks; this one
+        // projected `is_read` raw, so a reader who turned receipts off was
+        // reported read on every reload. Driven 2026-09-13 with a probe: the
+        // socket stayed silent and the GET said `isRead: true`.
+        user1: { select: { profile: { select: { read_receipts: true } } } },
+        user2: { select: { profile: { select: { read_receipts: true } } } },
+      },
     })
 
     if (!conversation) {
@@ -111,6 +121,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    const otherParty = conversation.user1_id === authUser.userId ? conversation.user2 : conversation.user1
+
     // Format for mobile app
     const formattedMessages = messages.map((msg) => ({
       id: msg.id,
@@ -125,7 +137,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       text: msg.message_text,
       mediaUrl: msg.media_url,
       mediaType: msg.media_type,
-      isRead: msg.is_read,
+      isRead: isReadForViewer({
+        senderIsViewer: msg.sender_id === authUser.userId,
+        isRead: msg.is_read,
+        otherPartyAllowsReceipts: otherParty.profile?.read_receipts,
+      }),
       createdAt: msg.created_at,
     }))
 

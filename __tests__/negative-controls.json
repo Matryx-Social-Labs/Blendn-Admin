@@ -347,9 +347,9 @@
       "date": "2026-09-04"
     },
     "read-receipts.test.ts": {
-      "guards": "emitPrivateRead persists the read BEFORE consulting read_receipts and only for messages the reader did not send; the conversation list feeds isReadForViewer the OTHER party's setting",
-      "mutation": "A: delete the `if (reader?.read_receipts === false) return` line in lib/socket-server.ts. B: replace `otherPartyAllowsReceipts: otherUser.profile?.read_receipts` with a literal `true`",
-      "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') — the case a negative match on the old shape could not catch, because that expression is now the helper's argument",
+      "guards": "emitPrivateRead persists the read BEFORE consulting read_receipts and only for messages the reader did not send; the conversation list feeds isReadForViewer the OTHER party's setting; the thread route projects isRead through isReadForViewer with the OTHER party's setting",
+      "mutation": "A: delete the `if (reader?.read_receipts === false) return` line in lib/socket-server.ts. B: replace `otherPartyAllowsReceipts: otherUser.profile?.read_receipts` with a literal `true`. C: replace the thread route's `isRead: isReadForViewer({...})` with `isRead: msg.is_read`",
+      "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') — the case a negative match on the old shape could not catch, because that expression is now the helper's argument. C: 1 failing ('nor in the thread itself, which is the third surface'), 2026-09-13",
       "date": "2026-09-04"
     },
     "dashboard-view.test.ts": {

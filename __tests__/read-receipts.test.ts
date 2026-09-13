@@ -117,4 +117,19 @@ describe("both surfaces honour it, and reading is still recorded", () => {
     expect(src).toMatch(/otherPartyAllowsReceipts:\s*otherUser\.profile\?\.read_receipts/)
     expect(src).toMatch(/senderIsViewer:\s*lastMessage\.sender_id === authUser\.userId/)
   })
+
+  it("nor in the thread itself, which is the third surface", () => {
+    /*
+     * Driven 2026-09-13 with the reader's receipts off: the socket relayed
+     * nothing and the list withheld it, and GET /conversations/:id/messages
+     * answered `isRead: true` on the sender's own message -- so every reload
+     * drew the double tick the other two surfaces had just refused.
+     */
+    const src = code("app/api/mobile/conversations/[conversationId]/messages/route.ts")
+    expect(src).toMatch(/isRead:\s*isReadForViewer\(/)
+    expect(src).toMatch(/otherPartyAllowsReceipts:\s*otherParty\.profile\?\.read_receipts/)
+    expect(src).toMatch(/senderIsViewer:\s*msg\.sender_id === authUser\.userId/)
+    // The other party, not the viewer: the ternary picks the side the caller is not.
+    expect(src).toMatch(/conversation\.user1_id === authUser\.userId \? conversation\.user2 : conversation\.user1/)
+  })
 })
