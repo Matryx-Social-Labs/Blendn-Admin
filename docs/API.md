@@ -133,7 +133,9 @@ through it.
 
 Crossing from one column to the other is the message request, and it is the only
 crossing: `GET /events/:eventId/checkins` returns pseudonyms, never real names or
-photos. Blocks are honoured in both directions everywhere, and are reported as
+photos — except for someone who turned on "Show who I am" in that room
+(`event_match_preferences.revealed`), who is listed by name with `image`, the
+same rule the Grid card already applied. Blocks are honoured in both directions everywhere, and are reported as
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
 
