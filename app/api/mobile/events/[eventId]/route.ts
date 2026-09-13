@@ -5,7 +5,7 @@ import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PRODUCT_EVENTS, record } from "@/lib/product-events"
-import { cancelEventCheckIns, isCancellingEvent } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
@@ -446,6 +446,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const isCancelling = isCancellingEvent(status, event.status)
+    if (isUncancellingEvent(status, event.status)) {
+      return errorResponse(UNCANCEL_REFUSAL, 400)
+    }
 
     const updated = await db.events.update({
       where: { id: eventId },

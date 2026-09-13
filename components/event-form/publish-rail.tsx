@@ -198,7 +198,7 @@ function Actions({
         </p>
       ) : null}
       {!live ? (
-        <Button type="button" variant="outline" onClick={onSaveDraft} disabled={isSubmitting} className={compact ? "" : "w-full"}>
+        <Button type="button" variant="outline" onClick={onSaveDraft} disabled={isSubmitting || cancelled} className={compact ? "" : "w-full"}>
           {isEditing ? "Save as draft" : "Save draft"}
         </Button>
       ) : null}

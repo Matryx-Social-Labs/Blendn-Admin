@@ -45,3 +45,24 @@ export function isCancellingEvent(
 ): boolean {
   return nextStatus === "cancelled" && currentStatus !== "cancelled"
 }
+
+/**
+ * Whether this write would take an event back OUT of cancelled.
+ *
+ * Cancelling is terminal: the check-ins were closed, the room archived, and
+ * everyone going was told "This event has been cancelled" -- the confirm the
+ * organiser accepted says "This cannot be undone". Driven 2026-09-13: the
+ * editor's "Save as draft" then flipped the row to `draft`, from where
+ * Publish reopens it, and nobody who was told it was off is told it is on.
+ * Both PATCH routes refuse the transition; a cancelled event is re-run by
+ * creating a new one (or cloning it).
+ */
+export function isUncancellingEvent(
+  nextStatus: string | null | undefined,
+  currentStatus: string
+): boolean {
+  return currentStatus === "cancelled" && nextStatus != null && nextStatus !== "cancelled"
+}
+
+export const UNCANCEL_REFUSAL =
+  "This event was cancelled and everyone going was told. Create a new event instead."

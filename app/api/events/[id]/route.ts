@@ -8,7 +8,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { cancelEventCheckIns } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
@@ -211,6 +211,11 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     // Fix #35: When cancelling an event, cascade to active check-ins
     const isCancelling = status === "cancelled" && event.status !== "cancelled"
+
+    // And cancelled is terminal -- see lib/event-cancellation.ts.
+    if (isUncancellingEvent(status, event.status)) {
+      return NextResponse.json({ error: UNCANCEL_REFUSAL }, { status: 400 })
+    }
 
     // Omitted means "leave the link alone" — a PATCH that only changes the
     // title must not unlink the venue. Explicit null unlinks.
