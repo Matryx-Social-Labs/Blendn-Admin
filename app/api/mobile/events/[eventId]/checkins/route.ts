@@ -133,11 +133,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         user: {
           select: {
             id: true,
+            name: true,
             profile: {
               select: {
                 age: true,
                 date_of_birth: true,
                 location: true,
+                photos: true,
               },
             },
           },
@@ -148,22 +150,42 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       take: limit,
     })
 
-    const pseudonyms = await pseudonymsForEvent(eventId)
+    /*
+     * The reveal flag the header promised. "Show who I am" in the room sets
+     * `event_match_preferences.revealed`; the Grid card already answers it
+     * (`lib/matching.ts`: `revealed && name ? name : pseudonym`) and this list
+     * did not — driven: the card read "Ananya Bhat" while the roster beside
+     * it still said "Cosmic Panda" (L2.5). Same rule, same two fields, only
+     * for people who chose it, and only inside this event.
+     */
+    const [pseudonyms, revealedRows] = await Promise.all([
+      pseudonymsForEvent(eventId),
+      db.event_match_preferences.findMany({
+        where: { event_id: eventId, revealed: true, user_id: { in: checkIns.map((c) => c.user.id) } },
+        select: { user_id: true },
+      }),
+    ])
+    const revealed = new Set(revealedRows.map((r) => r.user_id))
 
     return successResponse({
       attendees: await Promise.all(
-        checkIns.map(async (c) => ({
-          // Kept: a message request, a block and a report all need to name a
-          // person, and the id discloses nothing on its own.
-          userId: c.user.id,
-          name: pseudonyms.get(c.user.id) ?? "Attendee",
-          // Deliberately absent: `image` and the real `name`. See the header.
-          // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
-          // now, so the age it shows should be the one they are now.
-          age: ageFrom(c.user.profile),
-          location: await normalizeLocationToCity(c.user.profile?.location),
-          checkInTime: c.check_in_time,
-        }))
+        checkIns.map(async (c) => {
+          const shown = revealed.has(c.user.id) && c.user.name
+          return {
+            // Kept: a message request, a block and a report all need to name a
+            // person, and the id discloses nothing on its own.
+            userId: c.user.id,
+            name: shown ? c.user.name : pseudonyms.get(c.user.id) ?? "Attendee",
+            // Present only for somebody who revealed in this room; the header
+            // explains why it is otherwise absent.
+            ...(shown && { image: c.user.profile?.photos?.[0] ?? null }),
+            // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
+            // now, so the age it shows should be the one they are now.
+            age: ageFrom(c.user.profile),
+            location: await normalizeLocationToCity(c.user.profile?.location),
+            checkInTime: c.check_in_time,
+          }
+        })
       ),
       pagination: paginationMeta(page, limit, totalCount),
     })

@@ -15,6 +15,8 @@ const mockDb = {
   // The roster consults blocks now: a block is a safety promise, not a mute,
   // and this is the one screen that answers "is he in this room".
   blocked_users: { findMany: jest.fn() },
+  // The reveal flag: "Show who I am" in the room. Empty unless a case sets it.
+  event_match_preferences: { findMany: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -50,6 +52,7 @@ beforeEach(() => {
   mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "ci1" })
   mockDb.event_check_ins.count.mockResolvedValue(1)
   mockDb.event_check_ins.findMany.mockResolvedValue([bare])
+  mockDb.event_match_preferences.findMany.mockResolvedValue([])
   mockDb.blocked_users.findMany.mockResolvedValue([])
 })
 
@@ -122,11 +125,32 @@ describe("GET /events/:id/checkins — who counts as present", () => {
 
 describe("GET /events/:id/checkins — what it discloses", () => {
   it("still returns the pseudonym, never the real name or photo", async () => {
+    mockDb.event_check_ins.findMany.mockResolvedValue([
+      { ...bare, user: { ...bare.user, name: "Ananya Bhat", profile: { ...bare.user.profile, photos: ["https://cdn/a.jpg"] } } },
+    ])
     const body = await (await GET(req(), { params })).json()
     const [a] = body.data.attendees
     expect(a.name).toBe("Cosmic Panda")
     expect(a).not.toHaveProperty("image")
-    expect(JSON.stringify(body)).not.toMatch(/photos|image/)
+    expect(JSON.stringify(body)).not.toMatch(/photos|image|Ananya/)
+  })
+
+  it("shows the real name and photo of someone who chose to, in this room only", async () => {
+    /*
+     * Driven on iOS: "Show who I am" set the flag, the Grid card read the real
+     * name, and this roster beside it still said "Cosmic Panda" (L2.5). Same
+     * rule as lib/matching.ts, scoped to the event the flag was set in.
+     */
+    mockDb.event_check_ins.findMany.mockResolvedValue([
+      { ...bare, user: { ...bare.user, name: "Ananya Bhat", profile: { ...bare.user.profile, photos: ["https://cdn/a.jpg"] } } },
+    ])
+    mockDb.event_match_preferences.findMany.mockResolvedValue([{ user_id: "u2" }])
+    const body = await (await GET(req(), { params })).json()
+    const [a] = body.data.attendees
+    expect(a.name).toBe("Ananya Bhat")
+    expect(a.image).toBe("https://cdn/a.jpg")
+    const where = mockDb.event_match_preferences.findMany.mock.calls[0][0].where
+    expect(where).toMatchObject({ event_id: EVENT, revealed: true })
   })
 
   it("falls back to Attendee when the room has no pseudonym for someone", async () => {

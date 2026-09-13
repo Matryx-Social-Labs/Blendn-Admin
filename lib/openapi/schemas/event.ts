@@ -476,10 +476,13 @@ export const AttendeeListResponseSchema = z
         userId: z.string(),
         /**
          * The room pseudonym ("Cosmic Panda"), not the real name — the same one
-         * this person carries in the event chat. `image` is deliberately absent:
-         * a photo identifies as surely as a name.
+         * this person carries in the event chat — unless they turned on "Show
+         * who I am" in this room, in which case it is their name and `image`
+         * their photo. Otherwise `image` is absent: a photo identifies as
+         * surely as a name.
          */
         name: z.string(),
+        image: z.string().nullable().optional(),
         age: z.number().nullable(),
         location: z.string().nullable(),
         checkInTime: z.string().datetime(),
