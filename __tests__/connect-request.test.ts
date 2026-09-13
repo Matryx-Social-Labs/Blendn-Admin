@@ -65,6 +65,19 @@ describe("the protections that were already there", () => {
     // "you were never at the same event".
     expect(ROUTE()).toContain("blocked_users.findFirst")
   })
+
+  it("answers a closed pair with the same words as a stranger", () => {
+    /*
+     * Before the duplicate-request guard, which would otherwise describe the
+     * old accepted row ("this user has already sent you a request") to
+     * somebody who was unmatched. Same 404 as the likes route, deliberately.
+     */
+    const route = ROUTE()
+    const closed = route.indexOf("pairIsClosed(authUser.userId, recipientId)")
+    expect(closed).toBeGreaterThan(-1)
+    expect(closed).toBeLessThan(route.indexOf("message_requests.findFirst"))
+    expect(route.slice(closed, closed + 200)).toContain('notFoundResponse("User not found")')
+  })
 })
 
 describe("connect reveals the sender, and that is the point", () => {
