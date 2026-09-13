@@ -69,6 +69,7 @@ async function roomWith(texts: string[], opts: { archived?: boolean } = {}) {
 }
 
 afterAll(async () => {
+  if (users.length) await db.moderation_flags.deleteMany({ where: { user_id: { in: users } } })
   await cleanup(users, events)
   await closeDb()
 })
@@ -97,6 +98,40 @@ describe("the sweeper writes what the live screen reads", () => {
 
     const alerts = deriveAlerts(snapshot!, { scheduledEnd: new Date(Date.now() + 3_600_000) })
     expect(alerts.map((a) => a.kind)).toContain("safety")
+  })
+
+  it("routes a safety message to the moderation queue, flagged and never hidden", async () => {
+    /*
+     * The alert has said "Routed to moderation regardless of sentiment" since
+     * it was written, and nothing did it. Driven 2026-09-13: a message about
+     * being grabbed at the bar opened a critical issue and never reached the
+     * queue -- no flag row, no "flags waiting", no human unless somebody had
+     * the live tab open.
+     */
+    const { groupId, author } = await roomWith(["SAFETY he grabbed my arm and won't leave"])
+    await sweepSentiment()
+
+    const message = await db.chat_messages.findFirstOrThrow({
+      where: { chat_group_id: groupId },
+      select: { id: true, moderation_status: true },
+    })
+    const flags = await db.moderation_flags.findMany({ where: { message_id: message.id } })
+    expect(flags).toHaveLength(1)
+    expect(flags[0]).toMatchObject({
+      chat_group_id: groupId,
+      user_id: author,
+      source: "auto_text",
+      categories: ["safety_conduct"],
+      auto_action: "none",
+      status: "pending",
+    })
+    // Flagged, so it is in the queue -- and still on screen for the room.
+    expect(message.moderation_status).toBe("flagged")
+
+    // A second pass must not queue it twice.
+    await db.event_feedback.deleteMany({ where: { message_id: message.id } })
+    await sweepSentiment()
+    expect(await db.moderation_flags.count({ where: { message_id: message.id } })).toBe(1)
   })
 
   it("is idempotent — a second pass writes nothing new", async () => {
