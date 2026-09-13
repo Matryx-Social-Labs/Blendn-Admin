@@ -939,6 +939,23 @@ export function closeConversationRoom(conversationId: string): void {
 }
 
 /**
+ * Sever a suspended person's live connections.
+ *
+ * Every read gate consults `suspended_at` at the *handshake*, and the room
+ * ban refuses a *rejoin* -- but a socket that was already connected and
+ * already in `chat:<room>` keeps receiving the room. Driven 2026-09-13: a
+ * probe held as the suspended attendee received another person's message
+ * 77 seconds after the admin pressed Suspend. `disconnectSockets(true)` closes
+ * the underlying connections across the Redis adapter; the client's reconnect
+ * then meets the handshake gate and stays out.
+ */
+export function evictUserSockets(userId: string): void {
+  const io = currentIo()
+  if (!io) return
+  io.in(`user:${userId}`).disconnectSockets(true)
+}
+
+/**
  * Emit a new chat message to the room, minus anyone who should not receive it.
  *
  * `blocked_users` was consulted **nowhere** in group chat: not when listing

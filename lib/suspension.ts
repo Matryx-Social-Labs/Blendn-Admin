@@ -43,6 +43,15 @@ export const SUSPENSION_WRITE_CHANNELS = [
   "mobile_refresh_tokens",
   "push_tokens",
   "chat_group_members",
+  /*
+   * Not a row: the live socket. The handshake gate below stops a *new*
+   * connection, and the room ban stops a *rejoin*; neither touches a socket
+   * that was connected before the decision, which went on receiving the room.
+   * Applied by the caller after the transaction commits (`evictUserSockets`),
+   * because an eviction inside a transaction that then rolls back would sign
+   * out somebody who was not suspended.
+   */
+  "socket.disconnect",
 ] as const
 
 /** Every gate that has to consult it. The test reads this too. */

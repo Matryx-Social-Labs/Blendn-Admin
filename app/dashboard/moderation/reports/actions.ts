@@ -6,7 +6,7 @@ import type { report_status } from "@prisma/client"
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { emitChatMessageHidden } from "@/lib/socket-server"
+import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 
 /**
@@ -413,6 +413,11 @@ export async function resolveReport(
    */
   if (decision === "remove_message" && subject.chatGroupId && subjectId) {
     emitChatMessageHidden(subject.chatGroupId, (report as { message_id: string }).message_id, subjectId)
+  }
+
+  // After the commit, never inside it: see SUSPENSION_WRITE_CHANNELS.
+  if (decision === "suspend" && subjectId) {
+    evictUserSockets(subjectId)
   }
 
   // Fire-and-forget by design (see lib/audit-log.ts): the decision is already

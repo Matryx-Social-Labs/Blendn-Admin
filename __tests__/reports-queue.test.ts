@@ -37,7 +37,8 @@ const mockAuditLog = jest.fn()
 jest.mock("@/lib/audit-log", () => ({ auditLog: (...a: unknown[]) => mockAuditLog(...a) }))
 
 const emitChatMessageHidden = jest.fn()
-jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden }))
+const evictUserSockets = jest.fn()
+jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden, evictUserSockets }))
 
 import { getReportQueue, resolveReport } from "@/app/dashboard/moderation/reports/actions"
 
@@ -219,6 +220,8 @@ describe("resolveReport", () => {
     )
     // No notifications.
     expect(tx.push_tokens.deleteMany).toHaveBeenCalledWith({ where: { user_id: "u9" } })
+    // And the connection that already exists, which no row reaches.
+    expect(evictUserSockets).toHaveBeenCalledWith("u9")
     // No posting, in any room.
     expect(tx.chat_group_members.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
