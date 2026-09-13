@@ -15,6 +15,8 @@ import {
 } from "@/lib/api-response"
 import { randomUUID } from "crypto"
 import { syncOccurrences } from "@/lib/occurrences"
+import { resolveVenueLink } from "@/lib/venue-link"
+import type { Prisma } from "@prisma/client"
 
 export async function POST(
   request: NextRequest,
@@ -72,6 +74,14 @@ export async function POST(
 
     const newSlug = `${event.slug}-copy-${Date.now()}`
 
+    /*
+     * Derived, never copied. A disputed link is the venue owner saying "not
+     * mine"; carrying it onto a copy would make them dispute it again. Through
+     * the resolver, a clone of a linked event lands `auto_linked` like a fresh
+     * save of the same venue would.
+     */
+    const venueLink = await resolveVenueLink(event.venue_id)
+
     const cloned = await db.events.create({
       data: {
         title: `${event.title} (Copy)`,
@@ -110,6 +120,18 @@ export async function POST(
         is_featured: false,
         is_recurring: event.is_recurring,
         check_in_radius: event.check_in_radius,
+        /*
+         * The copy used to keep the pin and lose everything drawn around it.
+         * Read back on 2026-09-13: source with a 40m circle and a 20m buffer,
+         * a venue link, and a door policy; clone with `geofence` null,
+         * `venue_id` null, defaults for the rest -- so the room checked people
+         * in against the 100m legacy circle instead, and the venue owner lost
+         * the copy from "events at my venue". Json null needs the spread.
+         */
+        ...(event.geofence != null && { geofence: event.geofence as Prisma.InputJsonValue }),
+        ...venueLink,
+        door_policy: event.door_policy,
+        min_age: event.min_age,
         categories: {
           create: event.categories.map((c) => ({
             category_id: c.category_id,
