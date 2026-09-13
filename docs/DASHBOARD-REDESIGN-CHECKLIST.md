@@ -211,3 +211,4 @@ emulator never gets a GPS fix — SCRUM-112).
 | Read receipts off | API + probes | socket silent, list withheld, **the thread's GET still said read** (**SCRUM-120**, fixed) |
 | A slur in a DM | iOS composer | "Not sent — removed by moderation", stored hidden, absent from the recipient's thread |
 | Report an event → Delist | iOS → admin | the sheet, the row, Dismiss/Delist, `visibility unlisted`; the organiser is told nothing and reasons show as enum keys (**SCRUM-121**, recorded) |
+| Check out → check in again | iOS → organiser Live tab | a second `presence_sessions` row (first `departed_source=user`, second open); Live went ~2 → ~1 → 2, "count unreliable" clearing on the fresh heartbeat; "Checked in — Go to Chat" opens the room at its end |
