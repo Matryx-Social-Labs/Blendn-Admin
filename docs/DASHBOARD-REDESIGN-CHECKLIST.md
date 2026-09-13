@@ -212,3 +212,4 @@ emulator never gets a GPS fix — SCRUM-112).
 | A slur in a DM | iOS composer | "Not sent — removed by moderation", stored hidden, absent from the recipient's thread |
 | Report an event → Delist | iOS → admin | the sheet, the row, Dismiss/Delist, `visibility unlisted`; the organiser is told nothing and reasons show as enum keys (**SCRUM-121**, recorded) |
 | Check out → check in again | iOS → organiser Live tab | a second `presence_sessions` row (first `departed_source=user`, second open); Live went ~2 → ~1 → 2, "count unreliable" clearing on the fresh heartbeat; "Checked in — Go to Chat" opens the room at its end |
+| Announce from the dashboard | organiser messaging (two-step: Send to the room → Send now) → iOS room, live | row `type announcement`; the phone drew "ANNOUNCEMENT · NIGHTSHIFT COLLECTIVE" over the text, once, and followed the end |
