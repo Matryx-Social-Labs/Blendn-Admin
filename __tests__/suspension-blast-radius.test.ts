@@ -50,7 +50,27 @@ describe("every write channel is actually written", () => {
       "mobile_refresh_tokens",
       "push_tokens",
       "chat_group_members",
+      "socket.disconnect",
     ])
+  })
+
+  it("severs the live socket after the commit, not inside the transaction", () => {
+    /*
+     * Driven 2026-09-13: with every row above written, a socket held as the
+     * suspended attendee received another person's room message 77 seconds
+     * later. The handshake gate stops a new connection and the room ban stops
+     * a rejoin; only a disconnect reaches a connection that already exists.
+     */
+    const actions = stripComments(read("app/dashboard/moderation/reports/actions.ts"))
+    const tx = actions.indexOf("applySuspension(tx")
+    const evict = actions.indexOf("evictUserSockets(subjectId)")
+    expect(tx).toBeGreaterThan(-1)
+    expect(evict).toBeGreaterThan(tx)
+    // Outside the $transaction callback: the callback closes before the evict.
+    const txClose = actions.indexOf("\n  })", tx)
+    expect(txClose).toBeGreaterThan(-1)
+    expect(evict).toBeGreaterThan(txClose)
+    expect(stripComments(read("lib/socket-server.ts"))).toMatch(/io\.in\(`user:\$\{userId\}`\)\.disconnectSockets\(true\)/)
   })
 
   it("writes suspended_at", () => {
