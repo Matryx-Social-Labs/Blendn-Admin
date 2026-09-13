@@ -590,6 +590,13 @@
       "observed": "1 failing ('leaves an audit row for every member action from the dashboard'). Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-13"
+    },
+    "connect-request.test.ts": {
+      "guards": "that POST /message-requests answers a closed pair (unmatched or blocked-then-unblocked) with the stranger's 404 before the duplicate-request guard can describe the old row",
+      "mutation": "delete the `if (await pairIsClosed(authUser.userId, recipientId)) {...}` block from app/api/mobile/message-requests/route.ts",
+      "observed": "1 failing ('answers a closed pair with the same words as a stranger'). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-13"
     }
   },
   "grandfathered": [
@@ -602,7 +609,6 @@
     "changelog.test.ts",
     "chat-groups-live.test.ts",
     "chat-window-select.test.ts",
-    "connect-request.test.ts",
     "container-queries.test.ts",
     "conversation-identity.test.ts",
     "conversation-provenance.test.ts",

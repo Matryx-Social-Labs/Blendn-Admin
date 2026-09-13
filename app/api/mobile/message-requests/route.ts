@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
-import { haveSharedAnEvent } from "@/lib/conversations"
+import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -84,6 +84,21 @@ export async function POST(request: NextRequest) {
 
     if (blockExists) {
       // Return generic not-found to avoid leaking block status to the sender
+      return notFoundResponse("User not found")
+    }
+
+    /*
+     * Leaving is permanent, and the same words as the likes route.
+     *
+     * A pair whose conversation was closed used to fall through to the
+     * duplicate-request guard, which answered with whatever the old row said:
+     * "This user has already sent you a request. Check your incoming requests"
+     * -- to someone whose inbox is empty, about a request that was accepted,
+     * talked through and ended. That tells the caller the other person once
+     * wanted to talk and then stopped, which is a rejection notice by another
+     * name. Driven 2026-09-13 on two phones after an unmatch.
+     */
+    if (await pairIsClosed(authUser.userId, recipientId)) {
       return notFoundResponse("User not found")
     }
 

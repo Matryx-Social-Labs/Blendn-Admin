@@ -516,7 +516,9 @@ what makes the recipient's decision possible — "Someone wants to connect" is a
 coin flip.
 
 Guards, in order: rate limit, self-send, recipient exists, blocks either way,
-`haveSharedAnEvent`, existing request, existing conversation. And
+closed pair (an unmatch — same 404 as a block, so the refusal never says "this
+person ended it"), `haveSharedAnEvent`, existing request, existing
+conversation. And
 `@@unique([sender_id, recipient_id])` means **one request per pair for all
 time** — decline it and that person can never send another.
 
@@ -566,61 +568,6 @@ rooms into The Banter's "Live now" rail and leaves them out of Recent.
 It is a server field because the client cannot derive it: it has the room and the
 event's times, but "the event is underway" is not "I am there". Someone who never
 turned up, or who left an hour ago, has a room whose event is mid-flight.
-
-| GET | `/chat/groups/:chatGroupId/messages` | Get messages (cursor-based) |
-| POST | `/chat/groups/:chatGroupId/messages` | Send message (30/min rate limit) |
-| GET | `/chat/groups/:chatGroupId/participants` | List participants |
-
-### POST /message-requests
-**`message` is required.** A request with no message is indistinguishable from a
-like with a reveal stapled to it, and the two are separate actions:
-
-| | Like | Connect (message request) |
-|---|---|---|
-| Who learns | nobody, unless mutual | the recipient, immediately |
-| Identity | stays pseudonymous | **sends `sender.name` and `sender.image`** |
-| Conversation | opens on mutual, pseudonymous | opens on accept, real names |
-
-The reveal is deliberate, not a leak: the anonymity exists to stop people being
-*identified*, not to let people send unsolicited messages without
-accountability. Anonymous plus unsolicited is the harassment shape. It is also
-what makes the recipient's decision possible — "Someone wants to connect" is a
-coin flip.
-
-Guards, in order: rate limit, self-send, recipient exists, blocks either way,
-`haveSharedAnEvent`, existing request, existing conversation. And
-`@@unique([sender_id, recipient_id])` means **one request per pair for all
-time** — decline it and that person can never send another.
-
-### GET /conversations
-Each conversation carries **`fromMatch`** — it opened from a mutual like rather
-than from an accepted message request.
-
-It has to be a server field. The payload carries the *resolved* name and
-`theyRevealed`, and `mayShowRealName` returns `true` for **both** a
-never-pseudonymous conversation and a revealed match, so `theyRevealed` cannot
-tell them apart. Anything built on it would greet every accepted message request
-as a new match. Derived from `user1_pseudonym`/`user2_pseudonym`; the pseudonyms
-themselves are never sent.
-
-### GET /events/:eventId/chat
-The response carries a **`write`** block:
-
-```json
-{ "allowed": false, "reason": "window_closed",
-  "message": "This chat has closed. Event chats stay open for 24 hours after the event ends.",
-  "closesAt": "2026-08-17T22:00:00Z", "eventEndedAt": "2026-08-16T22:00:00Z" }
-```
-
-`reason` is one of `locked | archived | window_closed | muted | banned`, or
-`null` when writing is allowed. The composer used to guess: every refusal came
-back as a single `NOT_CHECKED_IN` covering several unrelated situations, so the
-app either showed the wrong reason or let someone type a paragraph and then threw
-it away. `closesAt` lets the room show an honest countdown.
-
-**Write access is attendance, not presence.** A `chat_group_members` row means
-you were physically at the event; checking out does not revoke it. See
-`mayWriteToRoom` in `lib/chat-window.ts`.
 
 ### GET /chat/groups/:chatGroupId/messages
 | Param | Type | Description |
