@@ -188,3 +188,21 @@ and stops blessing a converted spread, but a member expression is not a
 shape a regex can classify; what caught these was posting the real route
 with the optional field omitted (`safety-writes.itest.ts`, `dm-send.itest.ts`,
 `refresh-replay.itest.ts`).
+
+**Third drive, 2026-09-13 — two phones in one room, the organiser's editor,
+the admin's claims queue, and the 375/768 sweep.** Both phones in the
+Founders & Filter Coffee room: iOS as Ananya (Cosmic Panda), the Android
+emulator as Rohan (Quiet Otter, whose check-in is a DB fixture because the
+emulator never gets a GPS fix — SCRUM-112).
+
+| Journey | Surface | Read back / result |
+|---|---|---|
+| Connect after an unmatch | Android → API | refused with "This user has already sent you a request. Check your incoming requests" — his inbox empty, her old accepted row described to him (**SCRUM-113**, fixed: the stranger's 404, same words as the likes route) |
+| Join Chat from the room | iOS, from a fresh launch | the chat mounted, fetched its history and stayed hidden under the room modal; closing the room took two taps (**SCRUM-114**, fixed: `replace`) |
+| Reply to the other phone's message | iOS → Android, reload | quote drawn only on the sender's optimistic bubble; `parentId` never sent, `parent_id`/`parent_message` never read (**SCRUM-114**, fixed; row `93d1d809 → parent_id 08e42fac`, quote survives reload, "You" on the other phone) |
+| Open the room | iOS, twice | landed above the newest messages, "Today" on the bottom edge (**SCRUM-114**, fixed: follow the end while at it) |
+| Typing across phones | iOS → socket probe as Rohan | `chat:typing {userName:"Cosmic Panda"}` true then false — pseudonym on the wire; the Android footer was not caught inside the 2s window on a starved emulator |
+| Clone an event | API as Arjun → Postgres → dashboard | the copy kept the pin and lost the fence, the venue link, the door policy and the age floor (**SCRUM-115**, fixed; no surface calls the route — recorded) |
+| Extend and shrink a multi-day run | organiser editor | 19–20 Sept → 21st adds an occurrence; back to the 20th deletes it (no attendance); rows with attendance are cancelled, not deleted |
+| 375 / 768 sweep | 48 routes, four roles | one overflow: `/dashboard/chatrooms` at 768, the inset measured the header's nowrap subtitle (**SCRUM-116**, fixed: `min-w-0` on `SidebarInset`) |
+| Reject a brand claim | admin claims queue | row, reviewer, note and audit written; the reason the form says "is sent to the claimant" reaches nobody, on all three claim kinds (**SCRUM-117**, recorded) |
