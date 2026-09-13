@@ -206,3 +206,8 @@ emulator never gets a GPS fix — SCRUM-112).
 | Extend and shrink a multi-day run | organiser editor | 19–20 Sept → 21st adds an occurrence; back to the 20th deletes it (no attendance); rows with attendance are cancelled, not deleted |
 | 375 / 768 sweep | 48 routes, four roles | one overflow: `/dashboard/chatrooms` at 768, the inset measured the header's nowrap subtitle (**SCRUM-116**, fixed: `min-w-0` on `SidebarInset`) |
 | Reject a brand claim | admin claims queue | row, reviewer, note and audit written; the reason the form says "is sent to the claimant" reaches nobody, on all three claim kinds (**SCRUM-117**, recorded) |
+| Move an event, cancel an event | organiser editor → iOS bell | "Event updated: start time, end time" and "This event has been cancelled" reached the RSVP'd attendee; **Save as draft then un-cancelled it** with nobody told (**SCRUM-118**, fixed: cancelled is terminal on both PATCH routes) |
+| Report → Suspend → Reinstate | iOS → admin reports queue, socket probe as the suspended person | every row written; the live socket kept receiving the room 77s later (**SCRUM-119**, fixed: evicted after the commit); the 15-minute access token, the ban's copy and the one-click Suspend recorded |
+| Read receipts off | API + probes | socket silent, list withheld, **the thread's GET still said read** (**SCRUM-120**, fixed) |
+| A slur in a DM | iOS composer | "Not sent — removed by moderation", stored hidden, absent from the recipient's thread |
+| Report an event → Delist | iOS → admin | the sheet, the row, Dismiss/Delist, `visibility unlisted`; the organiser is told nothing and reasons show as enum keys (**SCRUM-121**, recorded) |
