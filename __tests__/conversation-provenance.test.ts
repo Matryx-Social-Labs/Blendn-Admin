@@ -1,6 +1,6 @@
 import { readFileSync } from "fs"
 import { join } from "path"
-import { cameFromMatch } from "@/lib/conversation-identity"
+import { cameFromMatch, isPseudonymous } from "@/lib/conversation-identity"
 
 /**
  * Two things the app could not previously know, and one moderation hole found
@@ -99,6 +99,24 @@ describe("fromMatch — the app cannot derive this", () => {
       ["app", "api", "mobile", "conversations", "[conversationId]", "route.ts"],
     ]) {
       expect(read(...f)).toContain("fromMatch: cameFromMatch(")
+    }
+  })
+
+  it("says whether there is anything left to reveal, on the inbox and the thread", () => {
+    /*
+     * Driven on iOS: an accepted message request opened a thread whose header
+     * read "You can see their name. They can't see yours." with a "Show them
+     * who you are" button the server refuses with 400 — the request was the
+     * crossing, they saw the name already. The app inferred "pseudonymous"
+     * from the reveal fields being absent, and both routes always sent them.
+     */
+    expect(isPseudonymous({ user1_pseudonym: null, user2_pseudonym: null })).toBe(false)
+    expect(isPseudonymous({ user1_pseudonym: "Cosmic Panda", user2_pseudonym: null })).toBe(true)
+    for (const f of [
+      ["app", "api", "mobile", "conversations", "route.ts"],
+      ["app", "api", "mobile", "conversations", "[conversationId]", "route.ts"],
+    ]) {
+      expect(codeOnly(read(...f))).toMatch(/pseudonymous: isPseudonymous\(conv(ersation)?\)/)
     }
   })
 

@@ -6,12 +6,11 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { IconAlertTriangle, IconCheck, IconLoader2, IconX } from "@tabler/icons-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { IconCalendar } from "@tabler/icons-react"
-import { formatSince } from "@/lib/dashboard-format"
+import { whenLabel } from "@/lib/dashboard-format"
 import {
   confirmVenueLink,
   disputeVenueLink,
@@ -58,7 +57,7 @@ export function LinkedEvents({ events }: { events: VenueLinkedEvent[] }) {
         actually at your venue, dispute it — an admin resolves it and the organiser is told.
       </p>
 
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col divide-y divide-border border-t border-border">
         {events.map((event) => (
           <LinkedEventRow key={event.id} event={event} />
         ))}
@@ -88,37 +87,37 @@ function LinkedEventRow({ event }: { event: VenueLinkedEvent }) {
   }
 
   return (
-    <li className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3.5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-0.5">
-          <Link
-            href={`/dashboard/events/${event.id}`}
-            className="text-[0.875rem] font-bold underline-offset-4 hover:underline"
-          >
-            {event.title}
-          </Link>
-          <p className="text-[0.75rem] text-faint-foreground">
-            {event.venueName} · {formatSince(event.startAt)} ·{" "}
-            {event.organiserName ?? "Unknown organiser"}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+    /* A row, not a card. The link state is a word after the meta line —
+       twelve brand-orange "Auto-linked" chips said nothing twelve times;
+       disputed is the one state that changes anything, and it is in colour. */
+    <li className="flex flex-col gap-2 py-3 @2xl/main:flex-row @2xl/main:items-start @2xl/main:justify-between @2xl/main:gap-6">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <Link
+          href={`/dashboard/events/${event.id}`}
+          className="text-[0.875rem] font-bold underline-offset-4 hover:underline"
+        >
+          {event.title}
+        </Link>
+        <p className="text-[0.75rem] text-faint-foreground">
+          {/*
+            `whenLabel`, not `formatSince`: these are upcoming events, and a
+            "how long ago" formatter said "today" for every one of them —
+            driven as the venue owner, an event on the 20th read "today".
+          */}
+          {event.venueName} · {whenLabel(new Date(event.startAt), new Date(event.endAt), new Date())} ·{" "}
+          {event.organiserName ?? "Unknown organiser"} ·{" "}
           {event.linkStatus === "disputed" ? (
-            <Badge variant="destructive">Disputed</Badge>
+            <span className="font-bold text-destructive">disputed</span>
           ) : event.linkStatus === "confirmed" ? (
-            <Badge variant="secondary">
-              <IconCheck className="size-3" />
-              Confirmed
-            </Badge>
+            "confirmed"
           ) : (
-            <Badge>Auto-linked</Badge>
+            "auto-linked"
           )}
-        </div>
+        </p>
       </div>
 
       {disputing ? (
-        <div className="flex flex-col gap-2">
+        <div className="flex w-full flex-col gap-2 @2xl/main:max-w-md">
           <Textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -143,11 +142,11 @@ function LinkedEventRow({ event }: { event: VenueLinkedEvent }) {
           </div>
         </div>
       ) : event.linkStatus !== "disputed" ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-1">
           {event.linkStatus !== "confirmed" ? (
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
               disabled={pending}
               onClick={() => act(() => confirmVenueLink(event.id), "Confirmed.")}

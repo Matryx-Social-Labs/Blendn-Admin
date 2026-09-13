@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 import { IconAlertTriangle } from "@tabler/icons-react"
 import {
@@ -50,6 +50,7 @@ export function LocationSection({
   const initialLat = form.watch("latitude")
   const initialLng = form.watch("longitude")
 
+  const mapLabelId = useId()
   const [venue, setVenue] = useState<VenueOption | null>(null)
   const venueId = form.watch("venue_id")
 
@@ -129,7 +130,7 @@ export function LocationSection({
     venue?.capacity != null && capacity != null && capacity > venue.capacity
 
   return (
-    <FormSection title="Location">
+    <FormSection step="03" title="Where" hint="check-in counts inside the purple ring" id="step-where">
       <FormField
         control={form.control}
         name="venue_name"
@@ -161,9 +162,20 @@ export function LocationSection({
         </p>
       ) : null}
 
-      <div>
-        <FormLabel>Map Location</FormLabel>
-        <div className="mt-2">
+      {/*
+        Not a `FormLabel`: outside a `FormField` that renders `htmlFor` pointing
+        at an id nothing has, so the label named nothing. A heading the region
+        is labelled by is what a map with no input actually wants.
+      */}
+      <section aria-labelledby={mapLabelId}>
+        <p id={mapLabelId} className="text-sm leading-none font-medium">
+          Map Location
+        </p>
+        {/* The redesign cut the lat/lng text readout — the pin and the address
+            say it. The coordinates still need to be readable by something
+            that is not a person: `e2e/venue-pin.spec.ts` proves the picker
+            and the pin agree by reading them here. */}
+        <div className="mt-2" data-lat={initialLat ?? ""} data-lng={initialLng ?? ""}>
           <LocationPicker
             initialLat={initialLat}
             initialLng={initialLng}
@@ -171,59 +183,24 @@ export function LocationSection({
             onLocationChange={onLocationChange}
           />
         </div>
-      </div>
+      </section>
 
-      {/* Auto-filled address fields (read-only display, editable as fallback) */}
-      <div className="grid grid-cols-2 gap-4">
-        <FormField
-          control={form.control}
-          name="address"
-          render={({ field }) => (
-            <FormItem className="col-span-2">
-              <FormLabel>Address</FormLabel>
-              <FormControl>
-                <Input placeholder="Auto-filled from map" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        {/*
-          Derived from the map, not typed.
+      <FormField
+        control={form.control}
+        name="address"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Address</FormLabel>
+            <FormControl>
+              <Input placeholder="Filled from the map; edit if the street is wrong" {...field} />
+            </FormControl>
+            <DerivedLine form={form} />
+            <FormMessage />
+          </FormItem>
+        )}
+      />
 
-          These four are what every city-scoped query groups by, so a typo here
-          does not just look wrong on this form — it splits a city in the
-          attendee app's browse list, where each spelling finds half the events
-          and neither looks like a mistake.
 
-          The escape hatch is deliberately the pin rather than the text. If the
-          resolved city is wrong the *pin* is wrong, and the pin is also what
-          the geofence and the distance sort use — so typing over the symptom
-          would leave check-in pointing at the wrong place while the form
-          finally read correctly. Moving the pin fixes both.
-        */}
-        <DerivedField form={form} name="city" label="City" />
-        <DerivedField form={form} name="state" label="State / Region" />
-        <DerivedField form={form} name="country" label="Country" />
-        <DerivedField form={form} name="postal_code" label="Postal Code" />
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        City, region, country and postal code come from the map. Move the pin or
-        redraw the area to change them.
-      </p>
-
-      {/* Hidden lat/lng — set by map */}
-      <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground">
-        <div>
-          <span className="font-medium">Lat: </span>
-          {form.watch("latitude")?.toFixed(6) ?? "—"}
-        </div>
-        <div>
-          <span className="font-medium">Lng: </span>
-          {form.watch("longitude")?.toFixed(6) ?? "—"}
-        </div>
-      </div>
 
       {/*
         The geofence, replacing a lone radius slider.
@@ -294,46 +271,26 @@ export function LocationSection({
 }
 
 /**
- * A field the map fills in and the organiser reads.
+ * City, region, country and postal code, as one line.
  *
- * Still a real form field rather than plain text: it stays in the form state,
- * it submits, and it keeps its label — so screen readers and the existing
- * layout both behave as before. Only typing is off.
- *
- * `readOnly` rather than `disabled` on purpose. A disabled input is skipped by
- * keyboard navigation and, in most browsers, is not announced at all — so an
- * organiser using a screen reader would simply never hear the city their event
- * had been filed under.
+ * They come from the map and are not typed: every city-scoped query groups
+ * by them, so a typo would split a city in the app's browse list. The escape
+ * hatch is the pin, not the text — a wrong city means a wrong pin, and the
+ * pin is also what the fence and the distance sort use.
  */
-function DerivedField({
-  form,
-  name,
-  label,
-}: {
-  form: UseFormReturn<EventFormValues>
-  name: "city" | "state" | "country" | "postal_code"
-  label: string
-}) {
+function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
+  const parts = [form.watch("city"), form.watch("state"), form.watch("country"), form.watch("postal_code")]
+    .map((v) => v?.trim())
+    .filter(Boolean)
   return (
-    <FormField
-      control={form.control}
-      name={name}
-      render={({ field }) => (
-        <FormItem>
-          <FormLabel>{label}</FormLabel>
-          <FormControl>
-            <Input
-              {...field}
-              value={field.value ?? ""}
-              readOnly
-              tabIndex={-1}
-              placeholder="From the map"
-              className="bg-muted text-muted-foreground"
-            />
-          </FormControl>
-          <FormMessage />
-        </FormItem>
+    <p className="text-[0.8125rem] text-muted-foreground">
+      {parts.length ? (
+        <>
+          <span className="text-foreground">{parts.join(" · ")}</span> — from the map
+        </>
+      ) : (
+        "City, region and postal code come from the pin."
       )}
-    />
+    </p>
   )
 }

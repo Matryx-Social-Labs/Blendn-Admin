@@ -10,7 +10,7 @@ import {
   SidebarContent,
   SidebarHeader,
 } from "@/components/ui/sidebar"
-import { visibleNavFor } from "@/lib/dashboard-nav"
+import { groupedNavFor } from "@/lib/dashboard-nav"
 
 const ROLE_LABELS: Record<string, string> = {
   app_admin: "Platform",
@@ -29,7 +29,7 @@ export function AppSidebar({
 }: React.ComponentProps<typeof Sidebar> & { badges?: Record<string, number> }) {
   const { data: session } = useSession()
   const role = session?.user?.role
-  const nav = visibleNavFor(role)
+  const groups = groupedNavFor(role)
 
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -42,7 +42,14 @@ export function AppSidebar({
         ) : null}
       </SidebarHeader>
       <SidebarContent className="py-1">
-        <NavMain items={nav} badges={badges} />
+        {groups.map((group) => (
+          <NavMain
+            key={group.label ?? "top"}
+            label={group.label}
+            items={group.items}
+            badges={badges}
+          />
+        ))}
       </SidebarContent>
     </Sidebar>
   )

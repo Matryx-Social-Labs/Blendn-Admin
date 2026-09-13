@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "fs"
+import { existsSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
 
 /**
@@ -117,10 +117,19 @@ describe("every structural guard has a recorded negative control", () => {
     /*
      * A registry that names deleted files quietly overstates coverage, and the
      * grandfathered count stops meaning anything.
+     *
+     * "Exists" is a file on disk, not a file `structuralGuards()` picked up.
+     * Those are different sets: a behavioural test needs no entry, but it may
+     * HAVE one, and two integration suites now do — they were written to
+     * replace assertions that ran against empty fixtures, so the mutation is
+     * the only evidence they are not vacuous in the same way. Resolving only
+     * structural guards made a voluntary entry indistinguishable from a
+     * deleted file.
      */
-    const present = new Set(structuralGuards())
+    const onDisk = (f: string) =>
+      existsSync(join(TESTS_DIR, f)) || existsSync(join(TESTS_DIR, "integration", f))
     const stale = [...Object.keys(REGISTRY.verified), ...REGISTRY.grandfathered].filter(
-      (f) => !present.has(f)
+      (f) => !onDisk(f)
     )
     expect(stale).toEqual([])
   })

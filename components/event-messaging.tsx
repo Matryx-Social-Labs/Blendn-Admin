@@ -14,15 +14,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CreativeMedia } from "@/components/creative-media"
 import { PollComposer } from "@/components/poll-composer"
 import { SPONSORED_MESSAGE_INTERVALS } from "@/lib/validations/event"
 import { getEventSponsors, type EventSponsorRow } from "@/lib/sponsor-actions"
 import {
-  IconBell,
-  IconBrandSpeedtest,
   IconClock,
   IconPencil,
   IconPlus,
@@ -56,13 +53,13 @@ interface Announcement {
 
 // ── Quick templates ───────────────────────────────────────────────────────────
 
-const QUICK_TEMPLATES = [
-  "Bar closing in 30 minutes — grab your last orders!",
-  "Car owners, please check the parking area for any blocking vehicles.",
-  "Stage performance starting in 10 minutes — don't miss it!",
-  "Restrooms are located near the main entrance.",
-  "Lost & found is at the help desk near gate 1.",
-  "Event wrapping up in 15 minutes. Thank you for joining us!",
+const QUICK_TEMPLATES: { label: string; text: string }[] = [
+  { label: "Bar closing", text: "Bar closing in 30 minutes — grab your last orders!" },
+  { label: "Parking", text: "Car owners, please check the parking area for any blocking vehicles." },
+  { label: "Starting in 10", text: "Stage performance starting in 10 minutes — don't miss it!" },
+  { label: "Restrooms", text: "Restrooms are located near the main entrance." },
+  { label: "Lost & found", text: "Lost & found is at the help desk near gate 1." },
+  { label: "Wrapping up", text: "Event wrapping up in 15 minutes. Thank you for joining us!" },
 ]
 
 
@@ -214,12 +211,9 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-semibold flex items-center gap-2">
-            <IconBrandSpeedtest className="size-4 text-blue-500" />
-            Sponsored Messages
-          </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Pre-written messages sent automatically to the chatroom at a set interval.
+          <h3 className="text-[0.9375rem] font-bold">Sponsored messages</h3>
+          <p className="mt-0.5 text-[0.75rem] text-faint-foreground">
+            Sent to the room on a schedule, under the brand&apos;s name.
           </p>
         </div>
         {!showForm && (
@@ -458,39 +452,41 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className="font-semibold flex items-center gap-2">
-          <IconBell className="size-4 text-amber-500" />
-          Send Announcement
-        </h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Instantly push a message to the event chatroom — shown with an Announcement badge.
-        </p>
-      </div>
-
-      {/* Quick templates */}
-      <div className="flex flex-wrap gap-1.5">
-        {QUICK_TEMPLATES.map((t) => (
-          <Button
-            key={t}
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setContent(t)}
-            className="rounded-full text-left text-xs"
-          >
-            {t.length > 50 ? t.slice(0, 50) + "…" : t}
-          </Button>
-        ))}
-      </div>
-
       <div className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="text-[0.9375rem] font-bold">Say something to the room</h3>
+          {audience.members > 0 ? (
+            <span className="text-[0.75rem] text-faint-foreground">
+              {audience.members} member{audience.members === 1 ? "" : "s"} · {audience.reachable} phone
+              {audience.reachable === 1 ? "" : "s"}
+            </span>
+          ) : null}
+        </div>
         <Textarea
-          placeholder="Type your announcement…"
+          placeholder="Type an announcement…"
           rows={3}
           value={content}
           onChange={(e) => setContent(e.target.value)}
         />
+        {/* Six one-tap openers. Short labels so they sit on one line; the
+            full sentence lands in the box where it can be edited. */}
+        <div className="flex flex-wrap gap-1.5">
+          {QUICK_TEMPLATES.map((t) => (
+            <Button
+              key={t.label}
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (content.trim() && !window.confirm("Replace what you have typed?")) return
+                setContent(t.text)
+              }}
+              className="h-7 rounded-full px-2.5 text-[0.75rem] font-normal text-muted-foreground"
+            >
+              {t.label}
+            </Button>
+          ))}
+        </div>
         {/*
           The blast radius, before the send rather than after it.
           An announcement pushes a notification to every attendee's phone — the
@@ -500,7 +496,7 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
           who will actually get a notification, not chatroom members.
         */}
         {confirming ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+          <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3">
             <p className="text-[0.8125rem] leading-6">
               This posts to the chatroom for{" "}
               <b className="font-semibold">{audience.members} member{audience.members === 1 ? "" : "s"}</b>
@@ -526,24 +522,20 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
             </div>
           </div>
         ) : (
-          <Button
-            onClick={() => setConfirming(true)}
-            disabled={sending || !content.trim()}
-            className="w-full"
-          >
-            Send Announcement
+          <Button onClick={() => setConfirming(true)} disabled={sending || !content.trim()}>
+            {audience.reachable > 0
+              ? `Send to ${audience.reachable} phone${audience.reachable === 1 ? "" : "s"}`
+              : "Send to the room"}
           </Button>
         )}
-        <p className="text-[0.6875rem] text-muted-foreground">
-          Limited to 3 per minute. Attendees see the sender as the event host, never your name.
+        <p className="text-[0.75rem] text-faint-foreground">
+          3 a minute. Attendees see the host, never your name.
         </p>
       </div>
 
-      <Separator />
-
       {/* History */}
-      <div>
-        <p className="text-sm font-medium mb-2">Recent Announcements</p>
+      <div className="border-t border-border pt-4">
+        <p className="mb-2 text-[0.9375rem] font-bold">Sent</p>
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : announcementsFailed ? (
@@ -555,7 +547,7 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
         ) : (
           <div className="space-y-2">
             {announcements.map((a) => (
-              <div key={a.id} className="rounded-lg border bg-amber-50 dark:bg-amber-950/20 p-3">
+              <div key={a.id} className="border-t border-border py-2 first:border-t-0">
                 <p className="text-sm">{a.content}</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {a.sender.name ?? a.sender.email} ·{" "}
@@ -577,22 +569,13 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
 
 interface EventMessagingProps {
   eventId: string
-  eventTitle: string
 }
 
-export function EventMessaging({ eventId, eventTitle }: EventMessagingProps) {
+export function EventMessaging({ eventId }: EventMessagingProps) {
   const [tab, setTab] = useState<MessagingTab>("announcements")
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Messaging</h2>
-        <p className="text-sm text-muted-foreground">
-          Manage announcements and sponsored messages for{" "}
-          <span className="font-medium">{eventTitle}</span>
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <Tabs
         value={tab}
         onValueChange={(value) => setTab(value as MessagingTab)}

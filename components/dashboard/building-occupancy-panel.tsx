@@ -51,7 +51,7 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
         </span>
         {overCapacity && capacity !== null ? (
           /* Ink on orange, never white — 3.4:1 fails AA. */
-          <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-[#0D0C0C]">
+          <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
             {inside - capacity} over
           </span>
         ) : null}

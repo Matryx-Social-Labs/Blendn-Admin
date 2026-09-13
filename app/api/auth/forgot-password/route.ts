@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
     windowMs: 15 * 60 * 1000,
     maxRequests: 5,
     keyGenerator: (r) =>
-      `auth:forgot:${r.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"}`,
+      `auth:forgot:${clientIpFrom(r.headers)}`,
   })
   if (limited) return limited
 

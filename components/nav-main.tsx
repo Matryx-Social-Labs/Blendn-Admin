@@ -26,7 +26,10 @@ import { cn } from "@/lib/utils"
 export function NavMain({
   items,
   badges,
+  label,
 }: {
+  /** The group heading. Omitted for the items that sit above the first one. */
+  label?: string | null
   items: {
     title: string
     description: string
@@ -40,7 +43,18 @@ export function NavMain({
   const pathname = usePathname()
 
   return (
-    <SidebarGroup className="px-2">
+    <SidebarGroup className="px-2 py-1">
+      {label ? (
+        /*
+          Same type treatment as the role label in the header — 0.6875rem,
+          uppercase, wide tracking, faint. A second, louder style here would
+          compete with the destinations themselves, which are the thing being
+          scanned.
+        */
+        <div className="px-2.5 pb-1 pt-2 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint-foreground">
+          {label}
+        </div>
+      ) : null}
       <SidebarGroupContent>
         <SidebarMenu className="gap-0.5">
           {items.map((item) => {

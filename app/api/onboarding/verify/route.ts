@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     windowMs: 15 * 60 * 1000,
     maxRequests: 20,
     keyGenerator: (r) =>
-      `onboarding:verify:${r.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"}`,
+      `onboarding:verify:${clientIpFrom(r.headers)}`,
   })
   if (limited) return limited
 

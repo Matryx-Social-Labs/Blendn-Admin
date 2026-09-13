@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     windowMs: 15 * 60 * 1000,
     maxRequests: 10,
     keyGenerator: (r) =>
-      `auth:reset:${r.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"}`,
+      `auth:reset:${clientIpFrom(r.headers)}`,
   })
   if (limited) return limited
 

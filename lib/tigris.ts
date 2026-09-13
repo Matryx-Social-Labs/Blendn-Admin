@@ -5,6 +5,8 @@ import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
   CreateBucketCommand,
   HeadBucketCommand,
   PutBucketCorsCommand,
@@ -142,6 +144,38 @@ export async function deleteFile(key: string): Promise<void> {
 }
 
 /**
+ * Delete every object under a prefix. Returns how many went.
+ *
+ * Account deletion nulled `profiles.photos` and left the objects in a
+ * public-read bucket under deterministic keys, so any URL another person had
+ * seen -- a match card, a chat, a screenshot -- kept resolving to the
+ * deleted person's face for ever. The prefix is `profile/{userId}/`; the
+ * caller passes it, this only lists and deletes.
+ */
+export async function deletePrefix(prefix: string): Promise<number> {
+  const client = getS3Client()
+  let deleted = 0
+  let token: string | undefined
+  do {
+    const page = await client.send(
+      new ListObjectsV2Command({ Bucket: TIGRIS_BUCKET, Prefix: prefix, ContinuationToken: token })
+    )
+    const keys = (page.Contents ?? []).map((o) => o.Key).filter((k): k is string => Boolean(k))
+    if (keys.length > 0) {
+      await client.send(
+        new DeleteObjectsCommand({
+          Bucket: TIGRIS_BUCKET,
+          Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
+        })
+      )
+      deleted += keys.length
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (token)
+  return deleted
+}
+
+/**
  * Extract the key from a public URL
  */
 export function extractKeyFromUrl(url: string): string | null {
@@ -197,6 +231,17 @@ const ALLOWED_PHOTO_HOSTS = new Set([
 ])
 
 export function ownedPhotoKey(url: string, userId: string): string | null {
+  return ownedObjectKey(url, userId, "profile")
+}
+
+/**
+ * The same binding for any folder the person may own an object in. `folder`
+ * is an allow-list value, never something read out of the URL: the delete
+ * route used to accept whatever `extractKeyFromUrl` produced -- the function
+ * whose own docstring calls it "useless as a security check" -- and matched
+ * only `pathParts[1]` against the caller.
+ */
+export function ownedObjectKey(url: string, userId: string, folder: UploadFolder): string | null {
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -222,7 +267,7 @@ export function ownedPhotoKey(url: string, userId: string): string | null {
   // The folder AND the owner. `profile/<userId>/` is the only shape this
   // accepts, so somebody else's photo -- or a chat attachment, which is a
   // different trust class -- is refused.
-  const prefix = `profile/${userId}/`
+  const prefix = `${folder}/${userId}/`
   if (!key.startsWith(prefix) || key.length <= prefix.length) return null
 
   return key
@@ -244,8 +289,11 @@ export function ownedPhotoKey(url: string, userId: string): string | null {
 export async function getObjectSize(key: string): Promise<number | null> {
   const client = getS3Client()
   try {
+    // The SDK has no default request timeout; this HEAD is on the profile
+    // PUT's path, and "the object is not there" must not take a minute.
     const head = await client.send(
-      new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key })
+      new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }),
+      { abortSignal: AbortSignal.timeout(5_000) }
     )
     return head.ContentLength ?? null
   } catch {

@@ -1,6 +1,7 @@
 "use server"
 
 import crypto from "crypto"
+import { sharePct } from "@/lib/dashboard-format"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
@@ -15,9 +16,18 @@ export interface RoleUser {
   image: string | null
   createdAt: Date
   role: user_role
+  /** Every event row they created, whatever its status. Kept for the detail page. */
   _count: {
     organized_events: number
   }
+  /** Live supply. This is the number a list of hosts is about. */
+  published: number
+  /** Intent, not supply — see `getRoleUsers`. */
+  drafts: number
+  /** Most recent PUBLISHED event, ISO. Null when they have never shipped one. */
+  lastEventAt: string | null
+  /** Share of the platform's published supply. The host-liquidity risk figure. */
+  sharePct: number
 }
 
 export interface RoleUserWithEvents {
@@ -53,6 +63,26 @@ function generatePassword(length = 12): string {
   return crypto.randomBytes(length).toString("base64url").slice(0, length)
 }
 
+/**
+ * The people holding a supply-side role, and what they have actually supplied.
+ *
+ * ## `organized_events` was the wrong number under the right label
+ *
+ * This counted `_count.organized_events` — every row, whatever its status — and
+ * both the per-row `Events` column and the page's `Total Events` card rendered
+ * it. So a host with ten drafts and nothing published outranked one with three
+ * live events, on a screen whose own description is *"who publishes, and how
+ * concentrated it is"*.
+ *
+ * Published and drafts are separated here for the same reason
+ * `hostSupply()` separates them on the overview: a draft is intent, and a
+ * published event is supply. `lastEventAt` is published-only on the same
+ * argument — a draft nobody shipped is not a sign of life.
+ *
+ * Curated rows are excluded from neither, and do not need to be: `role` filters
+ * this list to organisers, and a curated event's `organizer_id` is the ADMIN
+ * who curated it, so it can never land on an organiser's row here.
+ */
 export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
@@ -67,13 +97,44 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
       image: true,
       createdAt: true,
       role: true,
-      _count: {
-        select: { organized_events: true },
-      },
+      _count: { select: { organized_events: true } },
     },
   })
 
-  return users
+  if (users.length === 0) return []
+
+  const ids = users.map((u) => u.id)
+  const [byStatus, lastPublished] = await Promise.all([
+    db.events.groupBy({
+      by: ["organizer_id", "status"],
+      where: { organizer_id: { in: ids }, deleted_at: null },
+      _count: { _all: true },
+    }),
+    db.events.groupBy({
+      by: ["organizer_id"],
+      where: { organizer_id: { in: ids }, deleted_at: null, status: "published" },
+      _max: { start_time: true },
+    }),
+  ])
+
+  const published = new Map<string, number>()
+  const drafts = new Map<string, number>()
+  for (const row of byStatus) {
+    const target = row.status === "published" ? published : drafts
+    target.set(row.organizer_id, (target.get(row.organizer_id) ?? 0) + row._count._all)
+  }
+  const last = new Map(lastPublished.map((r) => [r.organizer_id, r._max.start_time]))
+
+  const totalPublished = [...published.values()].reduce((n, v) => n + v, 0)
+
+  return users.map((user) => ({
+    ...user,
+    published: published.get(user.id) ?? 0,
+    drafts: drafts.get(user.id) ?? 0,
+    lastEventAt: last.get(user.id)?.toISOString() ?? null,
+    // Share of PUBLISHED supply; see `sharePct` for the zero-divisor rule.
+    sharePct: sharePct(published.get(user.id) ?? 0, totalPublished),
+  }))
 }
 
 export async function getRoleUserById(id: string): Promise<RoleUserWithEvents | null> {

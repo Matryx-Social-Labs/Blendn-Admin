@@ -53,7 +53,7 @@ export default function DashboardError({
   return (
     <div className="flex flex-col items-start gap-3 rounded-lg border border-border bg-card p-6">
       <IconAlertTriangle className="size-5 text-destructive" />
-      <h2 className="text-sm font-bold">That page did not load</h2>
+      <h2 className="text-[length:var(--text-h2)] font-bold">That page did not load</h2>
       <p className="max-w-prose text-[0.8125rem] leading-6 text-muted-foreground">
         Nothing was changed. Try again — if it keeps happening, quote the reference below.
       </p>

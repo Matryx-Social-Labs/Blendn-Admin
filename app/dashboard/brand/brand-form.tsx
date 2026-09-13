@@ -40,10 +40,10 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
   }
 
   return (
-    <div className="flex max-w-xl flex-col gap-5 rounded-xl border bg-card p-5">
+    <div className="flex max-w-xl flex-col gap-5">
       <div className="flex items-center justify-between gap-3">
         {/* h2 — components/site-header.tsx owns the page's only h1. */}
-        <h2 className="text-[0.9375rem] font-bold">
+        <h2 className="text-[length:var(--text-h2)] font-bold">
           {brand ? "Your brand" : "Set up your brand"}
         </h2>
         {brand?.claimed_at ? (
@@ -98,7 +98,9 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
         <p className="text-[0.8125rem] text-muted-foreground">
           {brand.placementCount === 0
             ? "No placements yet."
-            : `${brand.placementCount} placement${brand.placementCount === 1 ? "" : "s"} use this brand. Renaming it changes how they all read.`}
+            : brand.placementCount === 1
+              ? "1 placement uses this brand. Renaming it changes how it reads."
+              : `${brand.placementCount} placements use this brand. Renaming it changes how they all read.`}
         </p>
       ) : null}
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useId, useState, useTransition } from "react"
 import {
   IconAlertTriangle,
   IconCheck,
@@ -10,6 +10,9 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { evidenceMarks, type EvidenceIcon } from "@/lib/application-evidence"
+import { queueAgeLabel, queueBreached } from "@/lib/attention-queues"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -37,24 +40,106 @@ const ROLE_LABEL: Record<OnboardingRow["requested_role"], string> = {
   sponsor: "Sponsor",
 }
 
-export function OnboardingQueue({ rows }: { rows: OnboardingRow[] }) {
+/** The presentation half of `evidenceMarks` — names in, nodes out. */
+const EVIDENCE_ICON: Record<EvidenceIcon, React.ReactNode> = {
+  "alert-triangle": <IconAlertTriangle className="size-3.5" />,
+  "mail-question": <IconMailQuestion className="size-3.5" />,
+  "circle-check": <IconCircleCheck className="size-3.5" />,
+}
+
+export function OnboardingQueue({
+  rows,
+  generatedAt,
+}: {
+  rows: OnboardingRow[]
+  /**
+   * Server time, ISO.
+   *
+   * The ages are rendered in a client component, so a `new Date()` taken during
+   * hydration is a different now from the one the server rendered with — an
+   * application sitting at 71h59m crosses the SLA boundary between the two and
+   * React reports a mismatch on a screen that was correct both times. Same fix
+   * as the overview's `generatedAt`.
+   */
+  generatedAt: string
+}) {
+  const now = new Date(generatedAt)
+  /*
+   * Held HERE, not in the row. `approveOnboardingRequest` revalidates this
+   * path, so the approved row leaves the list in the same round trip that
+   * produced the password — and a row that has unmounted cannot show anything.
+   * Driven locally with email unconfigured: the toast said "approved", the
+   * badge went 7 → 6, and the one-time credential the copy promises was on
+   * screen for zero frames. It has to outlive the row it came from.
+   */
+  const [credential, setCredential] = useState<Credential | null>(null)
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 [&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0">
+      {credential ? <CredentialPanel credential={credential} onDone={() => setCredential(null)} /> : null}
       {rows.map((row) => (
-        <Row key={row.id} row={row} />
+        <Row key={row.id} row={row} now={now} onCredential={setCredential} />
       ))}
     </div>
   )
 }
 
-function Row({ row }: { row: OnboardingRow }) {
+type Credential = { name: string; email: string; password: string }
+
+function CredentialPanel({ credential, onDone }: { credential: Credential; onDone: () => void }) {
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5">
+      <h3 className="font-semibold">{credential.name} approved</h3>
+      <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+        Email is not configured, so nothing was sent. Pass these on yourself — this is the only
+        time the password is shown.
+      </p>
+      <dl className="grid gap-1 border-t border-border pt-3 font-mono text-[0.8125rem]">
+        <div className="flex gap-3">
+          <dt className="w-20 text-muted-foreground">Email</dt>
+          <dd>{credential.email}</dd>
+        </div>
+        <div className="flex gap-3">
+          <dt className="w-20 text-muted-foreground">Password</dt>
+          <dd className="select-all">{credential.password}</dd>
+        </div>
+      </dl>
+      <Button variant="outline" size="sm" className="self-start" onClick={onDone}>
+        Done
+      </Button>
+    </section>
+  )
+}
+
+function Row({
+  row,
+  now,
+  onCredential,
+}: {
+  row: OnboardingRow
+  now: Date
+  onCredential: (c: Credential) => void
+}) {
   const [open, setOpen] = useState(false)
+  const detailId = useId()
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState("")
-  const [credential, setCredential] = useState<{ email: string; password: string } | null>(null)
   const [pending, start] = useTransition()
 
   const awaitingEmail = row.status === "email_pending"
+
+  /*
+   * The same age rule the attention strip uses, not a second one.
+   *
+   * `lib/attention-queues.ts` gives applications a 72-hour window and the
+   * overview's strip renders "oldest 12 days" from it. This queue showed
+   * `Applied` as a bare date inside the collapsed panel, so the SLA was
+   * invisible on the screen where the decision is taken. Two answers to "is
+   * this late" is the shape this codebase keeps paying for; one function, read
+   * twice.
+   */
+  const queue = { count: 1, oldest: row.created_at.toISOString(), slaHours: 72 }
+  const age = queueAgeLabel(queue, now)
+  const breached = queueBreached(queue, now)
 
   function approve() {
     start(async () => {
@@ -64,7 +149,8 @@ function Row({ row }: { row: OnboardingRow }) {
           toast.success(`${row.display_name} approved — sign-in details emailed.`)
         } else {
           toast.success(`${row.display_name} approved.`)
-          if (result.password) setCredential({ email: result.email, password: result.password })
+          if (result.password)
+            onCredential({ name: row.display_name, email: result.email, password: result.password })
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not approve")
@@ -84,36 +170,16 @@ function Row({ row }: { row: OnboardingRow }) {
     })
   }
 
-  if (credential) {
-    return (
-      <section className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5">
-        <h3 className="font-semibold">{row.display_name} approved</h3>
-        <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-          Email is not configured, so nothing was sent. Pass these on yourself — this is the only
-          time the password is shown.
-        </p>
-        <dl className="grid gap-1 rounded-lg border border-border bg-card p-4 font-mono text-[0.8125rem]">
-          <div className="flex gap-3">
-            <dt className="w-20 text-muted-foreground">Email</dt>
-            <dd>{credential.email}</dd>
-          </div>
-          <div className="flex gap-3">
-            <dt className="w-20 text-muted-foreground">Password</dt>
-            <dd className="select-all">{credential.password}</dd>
-          </div>
-        </dl>
-        <Button variant="outline" size="sm" className="self-start" onClick={() => setCredential(null)}>
-          Done
-        </Button>
-      </section>
-    )
-  }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5">
+    <section className="flex flex-col gap-3 border-t border-border pt-5">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        // Only while the panel is mounted; an id that points at nothing is worse
+        // than no relationship.
+        aria-controls={open ? detailId : undefined}
         className="flex flex-wrap items-baseline justify-between gap-3 text-left"
       >
         <div className="flex flex-col gap-1">
@@ -123,39 +189,76 @@ function Row({ row }: { row: OnboardingRow }) {
             {row.city ? ` · ${row.city}` : ""}
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {/*
-            An exhaustive map, not a ternary.
+        {/*
+          Evidence on a signed axis, heaviest mark first.
 
-            This read `venue_owner ? "Venue owner" : "Organiser"`, so the moment
-            sponsor applications existed they rendered as "Organiser" — an admin
-            approving one would grant placement rights believing they were
-            approving a host, and nothing on screen would say otherwise.
+          The badges were rendered in a fixed sequence — role, email state,
+          domain — so the strongest mark on a row could sit third. That defeats
+          the thing the badges are for: an admin scanning seven rows should be
+          able to read the LEFT EDGE of this column and know which row needs
+          reading, before reading a word.
+
+          `evidenceMarks` sorts by weight and the CSS gives each weight its own
+          register: against is outlined destructive with a glyph, for is filled
+          and warm, neutral and state are quiet. Found by building the screen in
+          HTML first — the colour fix alone left the aggregator warning third in
+          a fixed order, which looked correct in isolation and wrong in a column.
+        */}
+        <div className="flex flex-wrap items-center gap-2">
+          {evidenceMarks(
+            {
+              roleLabel: ROLE_LABEL[row.requested_role],
+              emailDomain: row.emailDomain,
+              freeProvider: row.freeProvider,
+              aggregatorDomain: row.aggregatorDomain,
+            },
+            awaitingEmail
+          ).map((mark) => (
+            <Badge key={mark.key} variant={mark.variant} className="gap-1">
+              {mark.icon ? EVIDENCE_ICON[mark.icon] : null}
+              {mark.label}
+            </Badge>
+          ))}
+          {/*
+            The age, on the collapsed row.
+
+            It was `Applied` inside the expanded panel, as a bare date — so the
+            queue's SLA was invisible until you opened a row, and the overview
+            could say "oldest 12 days" while this screen said nothing about
+            which. Same functions the attention strip uses, so the two cannot
+            disagree about what "late" means.
           */}
-          <Badge variant="secondary">{ROLE_LABEL[row.requested_role]}</Badge>
-          {awaitingEmail ? (
-            <Badge variant="outline" className="gap-1">
-              <IconMailQuestion className="size-3.5" /> Email unconfirmed
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="gap-1">
-              <IconCircleCheck className="size-3.5" /> Email confirmed
-            </Badge>
-          )}
-          <Badge variant={row.freeProvider ? "outline" : "default"}>
-            {row.freeProvider ? "Personal email" : row.emailDomain}
-          </Badge>
+          {age ? (
+            <span
+              className={cn(
+                "text-[0.75rem] tabular-nums",
+                breached ? "font-medium text-destructive" : "text-muted-foreground"
+              )}
+            >
+              {age}
+            </span>
+          ) : null}
         </div>
       </button>
 
       {open ? (
-        <dl className="grid gap-2 border-t border-border pt-3 text-[0.8125rem] @2xl/main:grid-cols-2">
+        <dl
+          id={detailId}
+          className="grid gap-2 border-t border-border pt-3 text-[0.8125rem] @2xl/main:grid-cols-2"
+        >
+          {/*
+            Evidence only. `Kind`, `Phone` and `Address` were here and none of
+            them changes a decision — an admin does not approve or refuse an
+            application on the strength of a phone number. Legal name, website
+            and GSTIN are what the gate actually weighs, so they are what is
+            left.
+
+            `Applied` went too: it was a bare date in a panel you had to open,
+            on the one screen where age IS the ordering. It is on the collapsed
+            row now, against the same 72-hour window the attention strip uses.
+          */}
           <Detail label="Legal name" value={row.legal_name} />
-          <Detail label="Kind" value={row.kind} />
           <Detail label="Website" value={row.website} />
-          <Detail label="Phone" value={row.contact_phone} />
-          <Detail label="Address" value={row.address} />
-          <Detail label="Applied" value={row.created_at.toLocaleDateString()} />
           {row.gstin ? (
             <div className="flex flex-col gap-0.5 @2xl/main:col-span-2">
               <dt className="text-muted-foreground">GSTIN</dt>
@@ -199,9 +302,23 @@ function Row({ row }: { row: OnboardingRow }) {
           </div>
         </div>
       ) : (
-        <div className="flex gap-2">
-          <Button size="sm" onClick={approve} disabled={pending}>
-            <IconCheck className="size-4" /> Approve
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            Approve is the near-irreversible one, and it was the filled brand
+            button on all seven rows.
+
+            It creates an organisation, a user and a membership in one
+            transaction, and hands over publishing and the attendee list. Seven
+            of them at full saturation made the consequential action the
+            screen's background — the same inversion as the events list, where
+            `published` was a filled pill on fifteen of seventeen rows.
+
+            Both actions are outline now, because on this screen neither is the
+            default: the whole point is that a person weighs the evidence first.
+            The consequence is named on the button rather than left implicit.
+          */}
+          <Button size="sm" variant="outline" onClick={approve} disabled={pending}>
+            <IconCheck className="size-4" /> Approve &amp; create the account
           </Button>
           <Button size="sm" variant="outline" onClick={() => setDeclining(true)} disabled={pending}>
             <IconX className="size-4" /> Decline

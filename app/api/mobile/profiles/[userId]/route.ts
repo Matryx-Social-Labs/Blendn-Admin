@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
-import { NextRequest } from "next/server"
+import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
-import { checkProfilePhoto } from "@/lib/photos"
+import { checkProfilePhoto, moderateProfilePhoto } from "@/lib/photos"
 import { recordPhotoCheck } from "@/lib/photo-checks"
 import { ageFrom, datingAgeRefusal, parseDateOfBirth, stripDating } from "@/lib/age"
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
@@ -399,11 +399,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
           return errorResponse(bad.message, 400, bad.code)
         }
 
-        await Promise.all(
-          fresh.map((u: string, i: number) =>
-            recordPhotoCheck(u, userId, verdicts[i].ok && verdicts[i].checked)
-          )
-        )
+        /*
+         * Recorded as unchecked now; the vendor check runs after the
+         * response and upgrades or pulls the photo. The person's spinner
+         * used to wait on OpenAI fetching and scoring the image, with no
+         * deadline, on the one write that makes a photo appear.
+         */
+        await Promise.all(fresh.map((u: string) => recordPhotoCheck(u, userId, false)))
+        after(() => Promise.all(fresh.map((u: string) => moderateProfilePhoto(u, userId))))
       }
     }
 

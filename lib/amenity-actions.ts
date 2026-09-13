@@ -130,6 +130,24 @@ export async function createAmenity(input: {
   const name = input.name.trim()
   if (name.length < 2) throw new Error("Name is required")
 
+  /*
+   * Same name, refused; same slug from a different name, suffixed. The suffix
+   * exists so "Open Bar" and "Open-bar!" do not throw a P2002 — but it also
+   * let a second "Cloakroom" in as `cloakroom-2`, and the organiser's picker
+   * then offered Cloakroom twice. Found by adding one that already existed.
+   */
+  const same = await db.amenities.findFirst({
+    where: { name: { equals: name, mode: "insensitive" } },
+    select: { is_active: true },
+  })
+  if (same) {
+    throw new Error(
+      same.is_active
+        ? `"${name}" already exists — rename that one instead`
+        : `"${name}" exists but is retired — restore it instead of adding a second`
+    )
+  }
+
   const created = await db.amenities.create({
     data: {
       name,

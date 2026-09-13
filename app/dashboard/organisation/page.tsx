@@ -37,7 +37,7 @@ export default async function OrganisationPage() {
   return (
     <div className="flex flex-col gap-6">
       {!emailConfigured() ? (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-[0.8125rem] leading-6">
+        <div className="rounded-lg border border-warning/40 bg-warning/5 p-4 text-[0.8125rem] leading-6">
           <strong className="font-semibold">Email is not configured.</strong> Invites still work,
           but nothing is sent — you&apos;ll get a link to pass on yourself.
         </div>

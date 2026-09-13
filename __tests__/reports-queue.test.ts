@@ -36,6 +36,9 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const mockAuditLog = jest.fn()
 jest.mock("@/lib/audit-log", () => ({ auditLog: (...a: unknown[]) => mockAuditLog(...a) }))
 
+const emitChatMessageHidden = jest.fn()
+jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden }))
+
 import { getReportQueue, resolveReport } from "@/app/dashboard/moderation/reports/actions"
 
 const T0 = new Date("2026-08-10T12:00:00.000Z")
@@ -250,6 +253,22 @@ describe("resolveReport", () => {
     )
   })
 
+  it("tells the room a removed message is gone", async () => {
+    /*
+     * Driven from a phone: the report landed, the admin pressed Remove, the
+     * row got `deleted_at`, and the message stayed on the reporter's screen
+     * until the next reload. The flag queue's twin already emitted; this did
+     * not.
+     */
+    mockDb.message_reports.findUnique.mockResolvedValue(pendingGroupReport)
+    mockDb.chat_messages.findUnique.mockResolvedValue({ user_id: "u9", chat_group_id: "g1" })
+    await resolveReport("message", "mr1", "remove_message")
+    expect(emitChatMessageHidden).toHaveBeenCalledWith("g1", "m1", "u9")
+    expect(tx.chat_messages.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ deleted_by: "admin1" }) })
+    )
+  })
+
   it("will not try to remove a private message", async () => {
     // `private_messages` has no `deleted_at`, so there is nothing to set. The
     // button is hidden for DMs; this is the server refusing to be asked anyway.
@@ -278,6 +297,24 @@ describe("resolveReport", () => {
       where: { id: "u9" },
       data: { suspended_at: null, suspended_by: null },
     })
+  })
+
+  it("reinstating works on a report that was already resolved — that is when it is offered", async () => {
+    /*
+     * The table offers Reinstate only on resolved rows ("a suspension that can
+     * only be reversed by an engineer with database access is not reversible
+     * in any sense the product can rely on"), and the already-reviewed guard
+     * refused exactly that row — every Reinstate 500'd. Found by suspending
+     * someone and trying to undo it.
+     */
+    mockDb.user_reports.findUnique.mockResolvedValue({ ...pendingUserReport, status: "resolved" })
+    await resolveReport("user", "ur1", "reinstate")
+    expect(tx.user.update).toHaveBeenCalledWith({
+      where: { id: "u9" },
+      data: { suspended_at: null, suspended_by: null },
+    })
+    // The report's own verdict stands; only the suspension is lifted.
+    expect(tx.user_reports.update).not.toHaveBeenCalled()
   })
 
   it("writes every decision to the audit log", async () => {

@@ -54,7 +54,7 @@ export function OverviewSponsor({ data }: { data: SponsorOverview }) {
               <span className="text-[length:var(--text-metric-hero)] font-bold leading-[1.05]">
                 {data.next.eventTitle}
               </span>
-              <Badge variant={data.next.ready ? "default" : "destructive"}>
+              <Badge variant={data.next.ready ? "secondary" : "destructive"}>
                 {data.next.ready ? "Ready to run" : "Blocked"}
               </Badge>
             </div>

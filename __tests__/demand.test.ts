@@ -26,7 +26,18 @@ describe("C12 — the list could not show the signal it collects", () => {
      * nobody is supplying.
      */
     const src = code("app/dashboard/actions.ts")
-    expect(src).toMatch(/for \(const row of await cityDemand\(50\)\)/)
+    /*
+     * Pinned on the FOLD, not on where the `await` happens to sit.
+     *
+     * This asserted the literal `for (const row of await cityDemand(50))`, and
+     * a latency pass then found that read was serialised behind a wave it does
+     * not depend on — so hoisting it into the top-level `Promise.all` broke a
+     * guard that had no opinion about scheduling. What matters is that demand
+     * rows reach the city map at all; where the read is issued is a performance
+     * decision the guard should not own.
+     */
+    expect(src).toMatch(/cityDemand\(50\)/)
+    expect(src).toMatch(/for \(const row of demandRows\)/)
     // And a demand-only city creates a row rather than being skipped.
     expect(src).toMatch(/cityMap\.set\(row\.cityKey, \{/)
   })

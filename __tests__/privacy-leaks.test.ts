@@ -108,6 +108,22 @@ describe("G7 — the blocked list is not a way to keep an identity", () => {
     expect(src).not.toMatch(/blocked_user_name: b\.blocked\.name,/)
   })
 
+  it("labels a block by the name the blocker already knew, never by a later reveal", () => {
+    /*
+     * Driven on iOS: with the gate closed the list read "Unknown user" for
+     * every row, so unblocking was a guess. The label is the pseudonym the
+     * conversation snapshotted, or the real name only when the conversation
+     * never had a pseudonym (an accepted request showed it). A reveal that
+     * came later is deliberately not consulted — a block is how you un-tell
+     * one person, and this list must not keep what the block undid.
+     */
+    const src = code("app/api/mobile/users/blocked/route.ts")
+    expect(src).toMatch(/knownAs\.set\(theirs, wasPseudonymous \? pseudonym : null\)/)
+    expect(src).not.toMatch(/user1_revealed|user2_revealed|mayShowRealName/)
+    // The photo stays behind the gate whatever the name says.
+    expect(src).toMatch(/blocked_user_photo: visible\.has\(b\.blocked_id\) \? b\.blocked\.image : null/)
+  })
+
   it("makes a block override the identity gate in both directions", () => {
     /*
      * Reveal is one-way and non-retractable by design; a block is the one way

@@ -58,7 +58,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         reporter_id: authUser.userId,
         reported_id: reportedId,
         reason: validation.data.reason,
-        description: validation.data.description,
+        // Same shape and same outage as the event report — see there.
+        ...(validation.data.description !== undefined && { description: validation.data.description }),
       },
     })
 

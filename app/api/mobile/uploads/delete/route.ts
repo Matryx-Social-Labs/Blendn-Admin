@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { deleteFile, extractKeyFromUrl } from "@/lib/tigris"
+import { deleteFile, ownedObjectKey, type UploadFolder } from "@/lib/tigris"
 import {
   successResponse,
   unauthorizedResponse,
@@ -11,6 +11,9 @@ import {
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+
+/** What a person may delete of their own: their photos, their chat media, their event media. */
+const DELETABLE_FOLDERS: UploadFolder[] = ["profile", "chat", "events"]
 
 const deleteSchema = z.object({
   url: z.string().url(),
@@ -34,21 +37,14 @@ export async function DELETE(request: NextRequest) {
 
     const { url } = parsed.data
 
-    // Extract the key from the URL
-    const key = extractKeyFromUrl(url)
+    /*
+     * Exact host, https, decoded, no traversal, and `{folder}/{userId}/` with
+     * the folder from an allow-list -- the binding `checkProfilePhoto` already
+     * uses before it fetches anything. The previous parser matched the bucket
+     * hostname anywhere in the string and then trusted `split("/")[1]`.
+     */
+    const key = DELETABLE_FOLDERS.map((f) => ownedObjectKey(url, authUser.userId, f)).find(Boolean)
     if (!key) {
-      return errorResponse("Invalid file URL")
-    }
-
-    // Verify the file belongs to the user by checking the path prefix
-    // Files are stored as: {folder}/{userId}/{timestamp}-{random}-{filename}
-    const pathParts = key.split("/")
-    if (pathParts.length < 2) {
-      return errorResponse("Invalid file path")
-    }
-
-    const userIdInPath = pathParts[1]
-    if (userIdInPath !== authUser.userId) {
       return errorResponse("You do not have permission to delete this file", 403)
     }
 

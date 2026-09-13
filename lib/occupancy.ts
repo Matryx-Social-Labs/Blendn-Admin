@@ -3,7 +3,7 @@
 // — that resolves the @/ alias for typechecking and then emits it verbatim into
 // the require(), so the build goes green and the container dies on boot.
 import { db } from "./db"
-import { headcount, cutoffFrom } from "./presence-sessions"
+import { headcount } from "./presence-sessions"
 import { resolveOccurrence } from "./occurrences"
 
 /**
@@ -210,6 +210,15 @@ export async function getOccupancies(
    * stepped out for a cigarette twice — the row-versus-person error arriving in
    * the table built to remove it.
    */
+  /*
+   * `departed_at IS NULL` and nothing about `last_seen_at` — the same rule as
+   * `headcount`, which argues it at length. This form kept a silence veto the
+   * singular had dropped, so the chatrooms list said "0 inside" for a room
+   * the event page counted 1 in: one person, checked in an hour ago, phone
+   * in a pocket. Two screens, one room, two answers — the exact thing
+   * `occupancy.itest.ts`'s "must agree" case exists to stop, which passed
+   * because its fixture was never older than the cutoff.
+   */
   const rows = await db.$queryRaw<
     { event_id: string; kind: string; people: bigint }[]
   >`
@@ -217,7 +226,6 @@ export async function getOccupancies(
       FROM presence_sessions
      WHERE event_id = ANY(${eventIds}::uuid[])
        AND departed_at IS NULL
-       AND last_seen_at > ${cutoffFrom()}
   GROUP BY event_id, kind
   `
 

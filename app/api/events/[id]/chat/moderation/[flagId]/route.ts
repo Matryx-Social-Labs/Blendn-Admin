@@ -4,6 +4,8 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
+import { auditLog } from "@/lib/audit-log"
+import { emitChatMessageHidden } from "@/lib/socket-server"
 
 interface RouteParams {
   params: Promise<{ id: string; flagId: string }>
@@ -11,7 +13,8 @@ interface RouteParams {
 
 /**
  * PATCH /api/events/[id]/chat/moderation/[flagId]
- * Review a moderation flag: approve (restore message) or reject (keep hidden)
+ * Review a moderation flag: approve (restore the message) or reject (hide it —
+ * whether or not the pipeline had already hidden it)
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
@@ -80,7 +83,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     const flag = await db.moderation_flags.findFirst({
       where: { id: flagId, chat_group_id: event.chat_group.id },
-      select: { id: true, message_id: true, status: true },
+      select: {
+        id: true,
+        message_id: true,
+        status: true,
+        user_id: true,
+        message: { select: { deleted_at: true } },
+      },
     })
 
     if (!flag) {
@@ -115,17 +124,49 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         }),
       ])
     } else {
-      // Reject — keep message hidden
-      await db.moderation_flags.update({
-        where: { id: flagId },
-        data: {
-          status: "rejected",
-          reviewed_by: session.user.id,
-          reviewed_at: new Date(),
-          review_notes: notes || null,
-        },
-      })
+      /*
+       * Reject hides the message — it does not merely "keep" it hidden.
+       *
+       * Only flags above the auto-hide threshold arrive hidden; a 62% flag is
+       * still visible in the room. This branch used to touch the flag alone,
+       * so rejecting that flag left the message on every phone while the
+       * button said "Keep Hidden". The admin twin (`dashboard/moderation/
+       * actions.ts`) has always hidden on remove; this is the same write.
+       */
+      await db.$transaction([
+        db.moderation_flags.update({
+          where: { id: flagId },
+          data: {
+            status: "rejected",
+            reviewed_by: session.user.id,
+            reviewed_at: new Date(),
+            review_notes: notes || null,
+          },
+        }),
+        db.chat_messages.update({
+          where: { id: flag.message_id },
+          data: {
+            moderation_status: "hidden",
+            ...(flag.message.deleted_at ? {} : { deleted_at: new Date() }),
+          },
+        }),
+      ])
     }
+
+    // The room is told, as the auto-hide path already does; without this the
+    // message stayed on every open phone until the next reload.
+    if (action === "reject") {
+      emitChatMessageHidden(event.chat_group.id, flag.message_id, flag.user_id)
+    }
+
+    // Same action names as the admin twin, so one audit query finds both.
+    auditLog({
+      userId: session.user.id,
+      action: action === "approve" ? "moderation.flag_approved" : "moderation.message_removed",
+      resource: "moderation_flag",
+      resourceId: flagId,
+      details: { messageId: flag.message_id, eventId },
+    })
 
     return NextResponse.json({
       success: true,

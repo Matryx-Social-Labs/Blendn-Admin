@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { NextRequest } from "next/server"
 import { blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
-import { cameFromMatch, displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
+import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -127,6 +127,8 @@ export async function GET(request: NextRequest) {
          * request. The app draws the match opener on these and only these.
          */
         fromMatch: cameFromMatch(conv),
+        /** False for an accepted message request: real names throughout, nothing to reveal. */
+        pseudonymous: isPseudonymous(conv),
         /** Your own state, for the header. Never a count of who else revealed. */
         youRevealed: conv.user1_id === authUser.userId
           ? conv.user1_revealed

@@ -36,6 +36,7 @@ export interface VenueLinkedEvent {
   id: string
   title: string
   startAt: string
+  endAt: string
   status: string
   organiserName: string | null
   linkStatus: string | null
@@ -87,6 +88,7 @@ export async function getLinkedEventsForOwner(): Promise<{
       id: true,
       title: true,
       start_time: true,
+      end_time: true,
       status: true,
       venue_link_status: true,
       venue: { select: { name: true } },
@@ -98,6 +100,7 @@ export async function getLinkedEventsForOwner(): Promise<{
     id: e.id,
     title: e.title,
     startAt: e.start_time.toISOString(),
+    endAt: e.end_time.toISOString(),
     status: e.status,
     organiserName: e.organizer_org?.display_name ?? null,
     linkStatus: e.venue_link_status,

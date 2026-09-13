@@ -39,6 +39,20 @@ export const PAGINATION = {
 } as const
 
 /**
+ * How many venue records the admin index fetches at once.
+ *
+ * It fetched every venue in the database and rendered every row with no search
+ * and no pagination — 395 rows and a 15,812px document on the local seed alone,
+ * with two correlated counts per row.
+ *
+ * Here rather than beside the query, because that query lives in a
+ * `"use server"` module, which may only export async functions. An
+ * `export const` there is a build error invisible to `tsc` and to the whole
+ * unit suite; only `next build` sees it. This is the second time.
+ */
+export const VENUE_INDEX_PAGE = 200
+
+/**
  * How many structured interests one person may hold.
  *
  * An abuse ceiling, not a UI preference. Ranking sums IDF weights over shared

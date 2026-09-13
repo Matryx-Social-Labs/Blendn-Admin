@@ -22,16 +22,6 @@ export default async function SponsorsPage() {
 
   const register = await getSponsorRegister()
 
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-          A brand is created either by its own organisation or by an organiser
-          adding it to an event. The second kind is unclaimed until the company
-          files a claim.
-        </p>
-      </div>
-      <SponsorRegisterView register={register} />
-    </div>
-  )
+  // The header says what the page is; the register says the rest.
+  return <SponsorRegisterView register={register} />
 }

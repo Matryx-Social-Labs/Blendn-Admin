@@ -549,6 +549,10 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
     if (r.status === "proposed") blocker = "Waiting for you to accept"
     else if (r.status === "draft") blocker = "The organiser has not published this yet"
     else if (r.status === "cancelled") blocker = null
+    // Nothing to act on once the event is over: the scheduler switches a
+    // campaign off itself at the end, and "Not switched on" beside "Ended · 5
+    // sends" read as something the sponsor had forgotten to do.
+    else if (phase === "ended") blocker = null
     else if (!r.event.chat_group) blocker = "The event has no chatroom yet"
     else if (campaigns.length === 0) blocker = "No creative yet"
     else if (campaigns.every((c) => c.moderation_status === "pending"))

@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { setOrganisationMaySponsor } from "@/lib/onboarding-actions"
@@ -64,10 +63,8 @@ export function OrgSponsorControl({
 
   if (maySponsor && !confirming) {
     return (
-      <div className="flex items-center gap-2 self-start">
-        <Badge variant="outline" className="rounded-full">
-          May sell placement
-        </Badge>
+      <div className="flex items-center gap-2 self-start text-[0.8125rem] text-muted-foreground">
+        <span>May sell placement</span>
         <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
           Revoke
         </Button>
@@ -77,7 +74,7 @@ export function OrgSponsorControl({
 
   if (!confirming) {
     return (
-      <Button size="sm" variant="outline" className="self-start" onClick={() => setConfirming(true)}>
+      <Button size="sm" variant="ghost" className="self-start" onClick={() => setConfirming(true)}>
         Grant sponsorship access
       </Button>
     )
@@ -86,7 +83,7 @@ export function OrgSponsorControl({
   const granting = !maySponsor
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
+    <div className="flex max-w-prose flex-col gap-2 border-l-2 border-border-strong pl-3">
       <p className="text-[0.8125rem] leading-6">
         {granting ? (
           <>

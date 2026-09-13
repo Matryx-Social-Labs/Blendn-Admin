@@ -117,7 +117,7 @@ export function OccupancyHero({
         </span>
         {over ? (
           /* Ink on orange, never white — white on #F05423 is 3.4:1 and fails AA. */
-          <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-[#0D0C0C]">
+          <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
             {overBy} over stated capacity
           </span>
         ) : null}

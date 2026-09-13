@@ -34,11 +34,13 @@ interface EventRow {
   max_capacity: number | null
 }
 
+// Words, on tokens. These were light-theme Tailwind greys and greens on a
+// dark screen. Cancelled is the one that changed what happened.
 const STATUS_STYLES: Record<event_status, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  published: "bg-green-100 text-green-700",
-  cancelled: "bg-red-100 text-red-700",
-  completed: "bg-blue-100 text-blue-700",
+  draft: "text-muted-foreground",
+  published: "text-foreground",
+  cancelled: "font-bold text-destructive",
+  completed: "text-muted-foreground",
 }
 
 interface UserEventsTableProps {
@@ -67,14 +69,14 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
 
   if (eventList.length === 0) {
     return (
-      <div className="flex h-24 items-center justify-center rounded-lg border text-muted-foreground text-sm">
+      <div className="py-6 text-[0.8125rem] text-muted-foreground">
         No events yet.
       </div>
     )
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border">
+    <div className="overflow-x-auto border-t border-border">
       <Table>
         <TableHeader className="bg-muted sticky top-0 z-10">
           <TableRow>
@@ -82,7 +84,7 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
             <TableHead>Status</TableHead>
             <TableHead>Start</TableHead>
             <TableHead>Venue</TableHead>
-            <TableHead>Capacity</TableHead>
+            <TableHead>Attended</TableHead>
             {isAdmin && <TableHead className="w-16">Moderate</TableHead>}
           </TableRow>
         </TableHeader>
@@ -91,11 +93,7 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
             <TableRow key={event.id}>
               <TableCell className="font-medium max-w-[200px] truncate">{event.title}</TableCell>
               <TableCell>
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_STYLES[event.status]}`}
-                >
-                  {event.status}
-                </span>
+                <span className={`text-[0.8125rem] ${STATUS_STYLES[event.status]}`}>{event.status}</span>
               </TableCell>
               <TableCell className="text-sm">
                 {format(new Date(event.start_time), "MMM d, yyyy")}

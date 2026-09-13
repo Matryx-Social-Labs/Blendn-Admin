@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
+import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, Marker, Circle, LeafletMouseEvent } from "leaflet"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -202,8 +203,18 @@ export function LocationPicker({
         } else {
           const circle = L.circle(latlng, {
             radius: checkInRadiusRef.current,
-            color: "#6366f1",
-            fillColor: "#6366f1",
+            /*
+             * `--chart-1`, not the indigo that was here.
+             *
+             * `#6366f1` is not in the brand palette — it is Tailwind's default
+             * indigo-500, and the design system's colour table has no indigo in
+             * it at all. This circle is the check-in radius, drawn beside the
+             * geofence editor's extent ring on the same form, and that one is
+             * brand orange: two controls describing the same area in two
+             * unrelated colours.
+             */
+            color: themeColour("--chart-1", "#F05423"),
+            fillColor: themeColour("--chart-1", "#F05423"),
             fillOpacity: 0.15,
             weight: 2,
           }).addTo(map)
@@ -331,8 +342,18 @@ export function LocationPicker({
         } else {
           const circle = L.circle(latlng, {
             radius: checkInRadiusRef.current,
-            color: "#6366f1",
-            fillColor: "#6366f1",
+            /*
+             * `--chart-1`, not the indigo that was here.
+             *
+             * `#6366f1` is not in the brand palette — it is Tailwind's default
+             * indigo-500, and the design system's colour table has no indigo in
+             * it at all. This circle is the check-in radius, drawn beside the
+             * geofence editor's extent ring on the same form, and that one is
+             * brand orange: two controls describing the same area in two
+             * unrelated colours.
+             */
+            color: themeColour("--chart-1", "#F05423"),
+            fillColor: themeColour("--chart-1", "#F05423"),
             fillOpacity: 0.15,
             weight: 2,
           }).addTo(mapInstanceRef.current)

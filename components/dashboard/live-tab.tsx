@@ -176,7 +176,7 @@ export function LiveTab({
             })}
             description={`${formatNumber(snapshot.checkedInTotal)} checked in, ${formatNumber(snapshot.checkedOutTotal)} left${
               snapshot.staleInside > 0
-                ? `. ${formatNumber(snapshot.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted.`
+                ? `. ${formatNumber(snapshot.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
                 : ""
             }${
               snapshot.medianRate10m > 0

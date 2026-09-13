@@ -61,6 +61,42 @@ async function emit(input: Parameters<typeof record>[0]) {
 const rowsFor = (userId: string) =>
   db.product_events.findMany({ where: { user_id: userId }, select: { name: true, dedupe_key: true } })
 
+describe("the flush timer does not depend on a new signal arriving", () => {
+  it("flushes a buffered signal when the next call is a duplicate", async () => {
+    /*
+     * The timer check sat below the dedupe's early return, so one person alone
+     * on a replica — every call after the first deduped — never triggered a
+     * flush, and their search sat in memory until somebody else showed up or
+     * the process restarted. Driven: a Pulse search wrote nothing.
+     */
+    const user = await person("pe_lone")
+    // First call flushes immediately (lastFlush is 0); the rest buffer.
+    record({ name: PRODUCT_EVENTS.app_opened, userId: user })
+    await flushProductEvents()
+    record({ name: PRODUCT_EVENTS.searched, userId: user })
+    expect((await rowsFor(user)).map((r) => r.name)).toEqual(["app_opened"])
+
+    // Ten seconds later the person makes another request that records
+    // nothing new. Use the seam to age the last flush rather than waiting.
+    const spy = jest.spyOn(Date, "now").mockImplementation(() => new Date().getTime() + 11_000)
+    try {
+      record({ name: PRODUCT_EVENTS.app_opened, userId: user })
+    } finally {
+      spy.mockRestore()
+    }
+    // No explicit flush here — that would pass against the bug. The deduped
+    // call itself must have started one; give it a moment to land.
+    const deadline = Date.now() + 5_000
+    let names: string[] = []
+    while (Date.now() < deadline) {
+      names = (await rowsFor(user)).map((r) => r.name).sort()
+      if (names.length === 2) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(names).toEqual(["app_opened", "searched"])
+  })
+})
+
 describe("recording a signal is safe to repeat", () => {
   it("writes one row however many times the app is opened", async () => {
     /*

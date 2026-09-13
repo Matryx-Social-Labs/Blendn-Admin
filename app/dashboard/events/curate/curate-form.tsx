@@ -157,7 +157,7 @@ export function CurateForm({ defaultCity }: { defaultCity?: string }) {
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(submit)}
-        className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4"
+        className="flex flex-col gap-4 border-t border-border pt-5"
       >
         <div className="flex flex-col gap-1">
           <h3 className="text-sm font-bold">Add an event we found</h3>

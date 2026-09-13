@@ -307,7 +307,9 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         ...(longitude != null && { longitude }),
         ...(cover_image_url != null && { cover_image_url }),
         ...(external_link != null && { external_link }),
-        ...(is_featured != null && { is_featured }),
+        // The featured rail is the platform's, not the organiser's: any
+        // organiser could put their own event on it. Ignored unless app_admin.
+        ...(is_featured != null && session.user.role === "app_admin" && { is_featured }),
         ...(is_recurring != null && { is_recurring }),
         ...(location.values.check_in_radius != null && {
           check_in_radius: location.values.check_in_radius,

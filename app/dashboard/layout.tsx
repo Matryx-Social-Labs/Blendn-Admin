@@ -3,9 +3,33 @@ import { redirect } from "next/navigation"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { attentionQueues } from "@/lib/attention-queues-query"
+import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
-import { db } from "@/lib/db"
+import { logger } from "@/lib/logger"
 import { canAccessDashboard } from "@/lib/rbac"
+
+/**
+ * A badge is decoration on the nav; the nav is the way to every screen.
+ *
+ * `attentionQueues()` is eight aggregates in one `Promise.all`, and this
+ * layout wraps every dashboard route — so one rejection (a table the running
+ * code knows and the database does not yet, for the seconds between a deploy's
+ * migrate and its boot) used to 500 the whole admin shell rather than one
+ * count. Logged, not swallowed: an empty strip that says nothing is the
+ * "Moderation queue is clear" bug this module was written to fix, so the
+ * failure has to land somewhere a person looks.
+ */
+async function attentionQueuesOrNone() {
+  try {
+    return await attentionQueues()
+  } catch (error) {
+    logger.error("attention queues failed; rendering the nav without badges", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  }
+}
 
 export default async function DashboardLayout({
   children,
@@ -17,45 +41,20 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
-  // Only admins have these nav items, so only they pay for the counts.
-  const isAdmin = session.user.role === "app_admin"
-  // The badge covers both moderation queues. Counting only flags would leave a
-  // harassment report with no number anywhere in the chrome — and a report is
-  // the one of the two with a person waiting on the other end.
-  const [
-    flagCount,
-    userReportCount,
-    messageReportCount,
-    pendingApplications,
-    eventClaims,
-    venueClaims,
-    brandClaims,
-  ] = isAdmin
-    ? await Promise.all([
-        db.moderation_flags.count({ where: { status: "pending" } }),
-        db.user_reports.count({ where: { status: "pending" } }),
-        db.message_reports.count({ where: { status: "pending" } }),
-        db.organiser_onboarding_requests.count({
-          where: { status: { in: ["pending", "email_pending"] } },
-        }),
-        db.event_claims.count({ where: { status: "pending" } }),
-        db.venue_claims.count({ where: { status: "pending" } }),
-        db.sponsor_claims.count({ where: { status: "pending" } }),
-      ])
-    : [0, 0, 0, 0, 0, 0, 0]
-  const pendingFlags = flagCount + userReportCount + messageReportCount
   /*
-   * All THREE claim queues in one number, for the same reason the moderation
-   * badge covers both of its queues: the nav has one entry, so a count that
-   * covered only part of it would leave somebody waiting with no number
-   * anywhere in the chrome. Brands joined when they moved into the shared
-   * queue — a tab whose count was missing from the badge would be the same
-   * defect at a smaller scale.
+   * Only admins have these nav items, so only they pay for the counts.
    *
-   * Counted in the server layout rather than by a client effect -- an alert
-   * that pops in after paint is one the operator has already scrolled past.
+   * Read from `lib/attention-queues.ts` rather than counted here, because these
+   * badges and the overview's attention strip are the same question and used to
+   * be two implementations of it. The strip counted `moderation_flags` alone
+   * and printed "Moderation queue is clear" next to this sidebar showing
+   * `Claims 4` and `Applications 7`.
+   *
+   * Counted in the server layout rather than by a client effect — an alert that
+   * pops in after paint is one the operator has already scrolled past.
    */
-  const pendingClaims = eventClaims + venueClaims + brandClaims
+  const isAdmin = session.user.role === "app_admin"
+  const badges = isAdmin ? queueBadges(await attentionQueuesOrNone()) : {}
 
   return (
     <SidebarProvider
@@ -66,8 +65,15 @@ export default async function DashboardLayout({
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" badges={{ pendingFlags, pendingApplications, pendingClaims }} />
-      <SidebarInset className="overflow-hidden border border-border bg-background">
+      <AppSidebar variant="inset" badges={badges} />
+      {/*
+        `overflow-x-clip`, not `overflow-hidden`: hidden makes the inset a
+        scroll container, and a sticky element inside one sticks to it rather
+        than to the viewport -- the event form's publish rail scrolled away
+        with the page. Clip still cuts anything wider than the inset and still
+        keeps the rounded corners clean; it just is not a scroller.
+      */}
+      <SidebarInset className="overflow-x-clip border border-border bg-background">
         <SiteHeader />
         {/*
           @container/main is what every dashboard grid keys off. The sidebar is

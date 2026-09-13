@@ -74,14 +74,14 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
   }
 
   return (
-    <ul className="flex flex-col gap-3">
+    <ul className="flex flex-col divide-y divide-border border-t border-border">
       {rows.map((row) => {
         const overdue = row.ageHours >= SLA_HOURS
         const busy = pending && acting === row.id
         return (
           <li
             key={row.id}
-            className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
+            className="flex flex-col gap-3 py-5"
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-sm font-bold">

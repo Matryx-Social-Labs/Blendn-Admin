@@ -1,3 +1,5 @@
+import { readFileSync } from "fs"
+import { join } from "path"
 import {
   hashInviteToken,
   newInviteToken,
@@ -256,5 +258,24 @@ describe("invitePolicy — the honest limit", () => {
     for (const email of ["a@evil-acme.com", "a@acme.com.attacker.io"]) {
       expect(invitePolicy({ verifiedDomains: ["acme.com"], email }).requiresReason).toBe(true)
     }
+  })
+})
+
+describe("accepting twice", () => {
+  it("answers a member with success before the token's state is judged", () => {
+    /*
+     * Driven: the invite page's effect ran the accept twice on sign-in, the
+     * second call hit `inviteState` → "used" and the page showed "This invite
+     * has already been used" to somebody who had just been let in. Being a
+     * member is the outcome; the token's state after that is bookkeeping.
+     */
+    const src = readFileSync(join(__dirname, "..", "app", "api", "organisation", "accept-invite", "route.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "")
+    const member = src.indexOf("organisation_members.findUnique")
+    const state = src.indexOf("const state = inviteState(")
+    expect(member).toBeGreaterThan(0)
+    expect(state).toBeGreaterThan(member)
+    expect(src.slice(member, state)).toContain("alreadyMember: true")
   })
 })

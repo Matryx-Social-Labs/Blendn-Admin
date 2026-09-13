@@ -57,7 +57,7 @@ export function OrgStatusControl({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+    <div className="flex max-w-prose flex-col gap-2 border-l-2 border-destructive pl-3">
       <p className="text-[0.8125rem] leading-6">
         Suspending {name} stops them operating. Nothing is deleted and it can be undone. Why?
       </p>

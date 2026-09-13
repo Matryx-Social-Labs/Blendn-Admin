@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "fs"
 import { join, relative, sep } from "path"
 
 /**
@@ -124,11 +124,40 @@ describe("site-header owns the only h1", () => {
 
   const pages = staticRoutes(DASHBOARD)
 
+  /**
+   * The page file AND the local components it renders, one hop.
+   *
+   * This read `page.tsx` alone, and `/dashboard/events/new` rendered a second
+   * `h1` reading "Create Event" from `components/event-editor.tsx` — one import
+   * away, invisible to the guard, beside a header already saying "New event".
+   *
+   * One hop rather than a full graph walk: a page's own header lives in the
+   * component the page renders, not four levels down, and an unbounded walk
+   * would start reading shared primitives whose `h1` (if any) is not this
+   * page's problem.
+   */
+  function ownAndImported(route: string): string[] {
+    const file = join(ROOT, "app", route.slice(1), "page.tsx")
+    const src = readFileSync(file, "utf8")
+    const out = [src]
+    for (const m of src.matchAll(/from\s+"@\/(components\/[\w./-]+)"/g)) {
+      for (const ext of [".tsx", ".ts", "/index.tsx"]) {
+        const dep = join(ROOT, m[1] + ext)
+        if (existsSync(dep)) {
+          out.push(readFileSync(dep, "utf8"))
+          break
+        }
+      }
+    }
+    return out
+  }
+
   it.each(pages.filter((r) => !KNOWN_DOUBLE_H1.includes(r)))(
     "%s renders no h1 of its own",
     (route) => {
-      const file = join(ROOT, "app", route.slice(1), "page.tsx")
-      expect(readFileSync(file, "utf8")).not.toMatch(/<h1[\s>]/)
+      for (const src of ownAndImported(route)) {
+        expect(src).not.toMatch(/<h1[\s>]/)
+      }
     }
   )
 

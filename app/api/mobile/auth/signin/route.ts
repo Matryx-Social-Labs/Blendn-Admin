@@ -109,6 +109,11 @@ export async function POST(request: NextRequest) {
         id: user.id,
         email: user.email,
         name: user.name,
+        // The same shape /auth/session returns. The app stores this object and
+        // reads `image` off it to decide whether a reveal would show anything;
+        // without it, someone with a photo was told to add one until the next
+        // session check happened to overwrite the stored copy.
+        image: user.image,
         profile: user.profile
           ? { ...profileForSelfResponse(user.profile), location: normalizedLocation }
           : null,

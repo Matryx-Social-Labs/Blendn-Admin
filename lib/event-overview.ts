@@ -1,5 +1,6 @@
 import { db } from "@/lib/db"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
+import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
 import { eventStateFor, publishBlockers, type EventState, type PublishBlocker } from "@/lib/event-phase"
 
 /**
@@ -42,16 +43,18 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
       venue_name: true,
       venue_id: true,
       max_capacity: true,
+      check_in_radius: true,
       cover_image_url: true,
-      _count: { select: { categories: true } },
+      _count: { select: { categories: true, favorites: true } },
     },
   })
   if (!event) return null
 
   const state = eventStateFor(event)
 
-  const [going, checkedIn, everCheckedIn, ratings] = await Promise.all([
+  const [going, maybe, checkedIn, everCheckedIn, ratings] = await Promise.all([
     db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
+    db.event_rsvps.count({ where: { event_id: eventId, status: "maybe" } }),
     db.event_check_ins.count({ where: { event_id: eventId, status: "checked_in" } }),
     /*
      * Rows, not people — and this one is rendered next to a panel that folds
@@ -70,7 +73,7 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
   ])
 
   const capacity = event.max_capacity
-  const fillPct = capacity ? pct(going, capacity) : null
+  const saved = event._count.favorites
   // Turn-up is against people who said they were coming, not against capacity —
   // an event that half-filled and had everyone turn up did the hard part right.
   const attendedPeople = distinctAttendees(everCheckedIn)
@@ -104,11 +107,26 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
         }
       : state === "upcoming"
         ? {
-            label: "Filled",
-            value: fmt(fillPct, "%"),
-            hint: capacity
-              ? `${going} going of ${capacity}`
-              : "No capacity set, so there is no fill to show",
+            /*
+             * Going, not "Filled". Fill needs a capacity, and most events here
+             * have none — so the hero on the state an organiser watches most
+             * read "Filled —". The count of people is the number; capacity,
+             * when set, is the context.
+             */
+            label: "Going",
+            value: String(going),
+            // `=== null`, not truthy: max_capacity has no floor in the schema
+            // or the form, so 0 is a reachable value, and the tile below says
+            // "Capacity 0" — the hint must not say "no capacity set" beside it.
+            hint: [
+              capacity === null
+                ? "no capacity set"
+                : capacity === 0
+                  ? "capacity 0"
+                  : `of ${capacity} · ${pct(going, capacity)}% full`,
+              `${maybe} maybe`,
+              `${saved} saved`,
+            ].join(" · "),
           }
         : state === "live"
           ? {
@@ -116,14 +134,18 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
               value: String(checkedIn),
               hint: going === 0 ? "Nobody RSVP'd" : `${going} said they were coming`,
             }
-          : {
-              label: "Turned up",
-              value: fmt(turnUpPct, "%"),
-              hint:
-                going === 0
-                  ? "No RSVPs to compare against"
-                  : `${attendedPeople} of ${going} who said they would`,
-            }
+          : going === 0
+            ? {
+                // A percentage of nothing is a dash. The count is still real.
+                label: "Came",
+                value: String(attendedPeople),
+                hint: "nobody RSVP'd — walk-ins only",
+              }
+            : {
+                label: "Turned up",
+                value: fmt(turnUpPct, "%"),
+                hint: `${attendedPeople} of ${going} who said they would`,
+              }
 
   const tiles: EventOverview["tiles"] =
     state === "draft"
@@ -133,12 +155,21 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
         ]
       : state === "upcoming"
         ? [
-            { label: "Going", value: String(going) },
             { label: "Capacity", value: capacity === null ? null : String(capacity) },
             {
               label: "Checked in",
               value: String(attendedPeople),
               hint: "before the doors, usually zero",
+            },
+            {
+              label: "Room opens",
+              value: `${PRE_EVENT_CHAT_HOURS}h before`,
+              hint: "the chat, for people who said they are going",
+            },
+            {
+              label: "Check-in fence",
+              value: `${event.check_in_radius} m`,
+              hint: "around the pin",
             },
           ]
         : state === "live"

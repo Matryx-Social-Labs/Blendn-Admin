@@ -4,8 +4,6 @@ import { getAuth } from "@/lib/auth"
 import { getRoleUsers } from "@/lib/admin-role-actions"
 import { RoleUsersTable } from "@/components/role-users-table"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { IconCalendarEvent, IconUsers, IconBuildingStore } from "@tabler/icons-react"
 
 export default async function VenueOwnersPage() {
   const session = await getAuth()
@@ -15,75 +13,58 @@ export default async function VenueOwnersPage() {
 
   const users = await getRoleUsers("venue_owner")
 
-  const totalEvents = users.reduce((sum, u) => sum + u._count.organized_events, 0)
+  const published = users.reduce((sum, u) => sum + u.published, 0)
+  const dormant = users.filter((u) => u.published === 0).length
 
   return (
-    <div className="flex flex-col gap-6 py-6">
-      <div className="px-4 lg:px-6">
-        <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border bg-card px-6 py-6">
-          <div className="flex gap-2">
-            <Button asChild variant="outline">
-              <Link href="/dashboard/venue-claims">Review claims</Link>
-            </Button>
-            <Button asChild>
-              {/* Admin-created venues land unclaimed, which is how the directory
-                  gets seeded before any owner is on the platform. */}
-              <Link href="/dashboard/venues/new">Add a venue</Link>
-            </Button>
-          </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground">
+          <span>
+            <b className="font-bold text-foreground tabular-nums">{users.length}</b> venue owner
+            {users.length === 1 ? "" : "s"}
+          </span>
+          {/*
+            Events they CREATED, which is not the same as events at their
+            venues — `eventScope` is `organizer_id` here and H2 records that a
+            venue owner operates every event in their building whoever made it.
+            Labelled precisely rather than counted wrongly; the building-level
+            figure needs a join through `venues.owner_org_id` and belongs on the
+            venue index, not on a list of people.
+          */}
+          <span>
+            <span className="tabular-nums">{published}</span> event
+            {published === 1 ? "" : "s"} of their own
+          </span>
+          {dormant > 0 ? (
+            <span className="font-medium text-warning">
+              <span className="tabular-nums">{dormant}</span> never published
+            </span>
+          ) : null}
+        </div>
+        {/*
+          Two buttons, out of the bordered card that held nothing else. A card
+          exists to group things; one containing a single row of controls is
+          100px of chrome around a toolbar.
+        */}
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" className="rounded-full">
+            <Link href="/dashboard/claims/venues">Review claims</Link>
+          </Button>
+          <Button asChild variant="outline" className="rounded-full">
+            {/* Admin-created venues land unclaimed, which is how the directory
+                gets seeded before any owner is on the platform. */}
+            <Link href="/dashboard/venues/new">Add a venue</Link>
+          </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 px-4 lg:px-6 @xl/main:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Venue Owners</CardTitle>
-            <IconUsers className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{users.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Events</CardTitle>
-            <IconCalendarEvent className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalEvents}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {users.length === 0 && (
-        <div className="px-4 lg:px-6">
-          <div className="rounded-xl border border-dashed bg-card px-6 py-12 text-center">
-            <div className="mx-auto flex max-w-md flex-col items-center gap-4">
-              <div className="rounded-full border bg-muted p-4">
-                <IconBuildingStore className="size-6 text-muted-foreground" />
-              </div>
-              <div className="space-y-2">
-                <h2 className="text-2xl font-semibold">No venue owners found</h2>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Once venue owner accounts are created, they will show up here with their
-                  inventory and event portfolio.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="px-4 lg:px-6">
-        <div className="rounded-xl border bg-card p-5">
-          <RoleUsersTable
-            users={users}
-            role="venue_owner"
-            roleLabel="Venue Owner"
-            detailBasePath="/dashboard/venue-owners"
-          />
-        </div>
-      </div>
+      <RoleUsersTable
+        users={users}
+        role="venue_owner"
+        roleLabel="Venue Owner"
+        detailBasePath="/dashboard/venue-owners"
+      />
     </div>
   )
 }

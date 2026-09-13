@@ -46,7 +46,7 @@ export function VenueClaimQueue({ claims }: { claims: ClaimQueueRow[] }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col divide-y divide-border border-t border-border">
       {claims.map((claim) => (
         <ClaimCard key={claim.id} claim={claim} />
       ))}
@@ -79,7 +79,7 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
   const docs = Object.entries(claim.evidence).filter(([, url]) => !!url)
 
   return (
-    <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
+    <section className="flex flex-col gap-4 py-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">

@@ -189,14 +189,31 @@ describe("visibleNavFor", () => {
      * became one nav entry. The count covers both, for the same reason the
      * moderation badge covers flags AND reports: one entry with a count for
      * half of it leaves somebody waiting with no number anywhere in the chrome.
+     *
+     * Creative review joined last, and its absence was the same defect at a
+     * smaller scale: it sat in "Needs a decision" with no count anywhere, so a
+     * sponsor waiting on a human was invisible from every screen but its own.
+     * Every entry in this group now carries one — which is the invariant worth
+     * holding, and `attention-queues.test.ts` holds the other half of it.
      */
     const badged = visibleNavFor("app_admin").filter((item) => item.badgeKey)
-    expect(badged.map((item) => item.title)).toEqual(["Moderation", "Claims", "Applications"])
+    expect(badged.map((item) => item.title)).toEqual([
+      "Moderation",
+      "Claims",
+      "Creative review",
+      "Applications",
+    ])
     expect(badged.map((item) => item.badgeKey)).toEqual([
       "pendingFlags",
       "pendingClaims",
+      "pendingCreative",
       "pendingApplications",
     ])
+
+    // Every "needs a decision" entry has one. That is the rule; the list above
+    // is just today's instance of it.
+    const decisions = visibleNavFor("app_admin").filter((item) => item.group === "decisions")
+    expect(decisions.filter((item) => !item.badgeKey)).toEqual([])
   })
 
   it("keeps Claims lit across both of its queues", () => {

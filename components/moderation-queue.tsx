@@ -95,11 +95,7 @@ export function ModerationQueue({ eventId }: ModerationQueueProps) {
       )
       const json = await res.json()
       if (json.success) {
-        toast.success(
-          action === "approve"
-            ? "Message restored (false positive)"
-            : "Message kept hidden"
-        )
+        toast.success(action === "approve" ? "Message kept" : "Message removed")
         fetchFlags()
       } else {
         toast.error(json.error || "Failed to review flag")
@@ -216,7 +212,7 @@ export function ModerationQueue({ eventId }: ModerationQueueProps) {
                       disabled={actionLoading === flag.id}
                       onClick={() => handleReview(flag.id, "approve")}
                     >
-                      Restore (False Positive)
+                      {flag.message.isDeleted ? "Restore" : "Keep"}
                     </Button>
                     <Button
                       size="sm"
@@ -224,7 +220,7 @@ export function ModerationQueue({ eventId }: ModerationQueueProps) {
                       disabled={actionLoading === flag.id}
                       onClick={() => handleReview(flag.id, "reject")}
                     >
-                      Keep Hidden
+                      {flag.message.isDeleted ? "Keep hidden" : "Remove"}
                     </Button>
                   </div>
                 ) : (

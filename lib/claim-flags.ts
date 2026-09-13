@@ -151,5 +151,5 @@ export const FLAG_COPY: Record<ClaimFlag, string> = {
   role_address_at_source: "Filed from a role address at the listing's domain.",
   free_email_provider: "Filed from a free email provider. Not suspicious, not evidence.",
   repeat_claim: "Somebody has claimed this event before.",
-  no_organisation_yet: "No account yet — approving creates the organisation first.",
+  no_organisation_yet: "No account yet — approve their application first; the hand-over then goes to that organisation.",
 }

@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 
 import { auditLog, getRequestIp } from "@/lib/audit-log"
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     windowMs: 15 * 60 * 1000,
     maxRequests: 20,
     keyGenerator: (r) =>
-      `domain:verify:${r.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"}`,
+      `domain:verify:${clientIpFrom(r.headers)}`,
   })
   if (limited) return limited
 

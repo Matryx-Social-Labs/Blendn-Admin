@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { deletePrefix } from "@/lib/tigris"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // DELETE /api/mobile/account — Delete the authenticated user's own account.
@@ -16,8 +17,11 @@ import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/li
 // any dashboard sessions), and mark deletedAt so the account can never
 // be signed back into.
 export async function DELETE(request: NextRequest) {
+  // Declared outside the try so the failure log can name the account -- a
+  // rolled-back erasure of ~20 tables was logged without saying whose.
+  let authUser: Awaited<ReturnType<typeof getAuthenticatedUser>> = null
   try {
-    const authUser = await getAuthenticatedUser(request)
+    authUser = await getAuthenticatedUser(request)
     if (!authUser) {
       return unauthorizedResponse("Authentication required")
     }
@@ -221,11 +225,79 @@ export async function DELETE(request: NextRequest) {
         where: { from_user_id: authUser.userId },
         data: { message: null },
       }),
+
+      /*
+       * Their conversations close. Driven after a deletion: the other person's
+       * inbox still listed the thread under the pseudonym, a message into it
+       * returned 200 and wrote a notification row for the erased account, and
+       * nothing told the sender they were talking to nobody. Closed is "gone
+       * for both people" everywhere else in the product, so it is the right
+       * state here too; the messages stay for moderation, as they do on a
+       * block.
+       */
+      db.private_conversations.updateMany({
+        where: {
+          OR: [{ user1_id: authUser.userId }, { user2_id: authUser.userId }],
+          closed_at: null,
+        },
+        data: { closed_at: new Date(), closed_by: authUser.userId, closed_reason: "account_deleted" },
+      }),
+
+      /*
+       * Their name in other people's notification centres.
+       *
+       * A DM push is titled with the sender's name — the real one after a
+       * reveal — and a message-request push names them in the body. Those
+       * rows belong to the other person and survive this deletion, so the
+       * name kept appearing in a list two hours after the account was gone.
+       * Driven: "Dev Tester — Sent you a message" in the recipient's centre
+       * after Dev Tester had erased everything. Redacted to a neutral word;
+       * the row's job (a deep link into a now-closed thread) is done anyway.
+       */
+      db.$executeRaw`
+        UPDATE notifications
+        SET title = 'Someone'
+        WHERE kind = 'private_message'
+          AND data->>'conversationId' IN (
+            SELECT id::text FROM private_conversations
+            WHERE user1_id = ${authUser.userId} OR user2_id = ${authUser.userId}
+          )`,
+      db.$executeRaw`
+        UPDATE notifications
+        SET body = 'Someone wants to connect'
+        WHERE kind = 'message_request'
+          AND data->>'requestId' IN (
+            SELECT id::text FROM message_requests WHERE sender_id = ${authUser.userId}
+          )`,
+      db.$executeRaw`
+        UPDATE notifications
+        SET body = 'Someone accepted your message request'
+        WHERE kind = 'message_request_response'
+          AND data->>'requestId' IN (
+            SELECT id::text FROM message_requests WHERE recipient_id = ${authUser.userId}
+          )`,
     ])
+
+    /*
+     * After the transaction, not inside it: storage is not transactional and
+     * a listing failure must not roll back an erasure the database already
+     * accepted. Failure here is logged with the id, and the objects stay
+     * reachable until a retry -- which is the state everything was in
+     * before, now visible rather than silent.
+     */
+    try {
+      const gone = await deletePrefix(`profile/${authUser.userId}/`)
+      logger.info("Account deletion: profile photos removed from storage", { userId: authUser.userId, gone })
+    } catch (error) {
+      logger.error("Account deletion: profile photos NOT removed from storage", {
+        userId: authUser.userId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
 
     return successResponse({ deleted: true })
   } catch (error) {
-    logger.error("Account deletion error", { error: error instanceof Error ? error.message : String(error) })
+    logger.error("Account deletion error", { userId: authUser?.userId, error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to delete account")
   }
 }

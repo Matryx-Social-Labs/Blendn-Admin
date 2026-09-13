@@ -189,6 +189,25 @@ describe("getOccupancies (the batched form)", () => {
   it("handles an empty list without querying", async () => {
     expect((await getOccupancies([])).size).toBe(0)
   })
+
+  it("still counts somebody whose phone has been silent for an hour, as the single form does", async () => {
+    /*
+     * Driven on the dashboard: the chatrooms list read "0 inside" for a room
+     * whose event page counted 1. This form kept a `last_seen_at` veto the
+     * singular had argued away; the "agrees" case above never saw it because
+     * its fixture was seconds old.
+     */
+    const { eventId, occurrenceId } = await eventWithCapacity(50)
+    const stale = new Date(Date.now() - 60 * 60_000)
+    const userId = await makeUser(testId("batchstale"))
+    users.push(userId)
+    await putInRoom({ eventId, occurrenceId, userId, at: stale, lastSeen: stale })
+
+    const one = await getOccupancy(eventId)
+    const many = await getOccupancies([eventId])
+    expect(one.inside).toBe(1)
+    expect(many.get(eventId)!.inside).toBe(1)
+  })
 })
 
 describe("the two screens must agree", () => {

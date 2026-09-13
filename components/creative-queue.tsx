@@ -6,7 +6,6 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { IconAlertTriangle, IconLoader2, IconMicrophone2 } from "@tabler/icons-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/dashboard/primitives"
@@ -33,7 +32,7 @@ export function CreativeQueue({ rows }: { rows: CreativeQueueRow[] }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-0">
       {rows.map((row) => (
         <CreativeCard key={row.id} row={row} />
       ))}
@@ -64,23 +63,23 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
   }
 
   return (
-    <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
+    <section className="flex flex-col gap-4 border-t border-border pt-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[0.9375rem] font-bold">
+          <div className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem] text-muted-foreground">
+            <span className="text-[0.9375rem] font-bold text-foreground">
               {row.brandName ?? "No brand"}
             </span>
             {row.campaignActive ? (
               /*
                 Live means this campaign is sending an EARLIER approved revision
                 right now. Rejecting stops it; approving swaps what runs. Either
-                way it is not a quiet decision.
+                way it is not a quiet decision — so it is the one word in colour.
               */
-              <Badge variant="destructive">Campaign is live</Badge>
+              <span className="font-bold text-destructive">· campaign is live</span>
             ) : null}
-            {row.isLatest ? null : <Badge variant="outline">Superseded</Badge>}
-            {row.hadRejection ? <Badge variant="secondary">Refused before</Badge> : null}
+            {row.isLatest ? null : <span>· superseded</span>}
+            {row.hadRejection ? <span>· refused before</span> : null}
           </div>
           <p className="text-[0.78125rem] text-muted-foreground">
             {row.ownerName ?? "Unclaimed brand"} ·{" "}
@@ -144,7 +143,15 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        {/* What the two buttons actually do, which is not what they say:
+            neither starts a campaign, and one stops a running one. Beside the
+            buttons, where the decision is made, not as a paragraph above the
+            queue. */}
+        <p className="text-[0.75rem] text-faint-foreground">
+          Approve lets the organiser switch it on · Reject stops it now
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
         {rejecting ? (
           <>
             <Button type="button" variant="ghost" onClick={() => setRejecting(false)}>
@@ -171,6 +178,7 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
             </Button>
           </>
         )}
+        </div>
       </div>
     </section>
   )

@@ -54,7 +54,21 @@ function ChartFrame({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-bold">{title}</h3>
+        {/*
+          `h2`, not `h3`.
+
+          `site-header` owns the page's only `h1` and bodies start at `h2`, per
+          the design system. Every chart panel rendered an `h3` — and on the
+          admin overview those panels sit in the row *above* the `h2` tables, so
+          the document outline read h1 → h3 → h3 → h2 → h2. A reader navigating
+          by heading meets two subsections before their parent exists.
+
+          They are siblings on screen; they are siblings in the outline now.
+        */}
+        {/* Same size as SectionTitle. A chart panel and a table section are
+            siblings on the overview; they read as siblings only if their
+            headings are the same size. */}
+        <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
         <span className="flex items-baseline gap-3">
           {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
           {action}
@@ -92,33 +106,62 @@ export type PacingPoint = { daysOut: number; cumulative: number }
 export function PacingChart({
   points,
   capacity,
+  benchmark,
   windowDays = 21,
   empty,
 }: {
   points: PacingPoint[]
   capacity: number | null
+  /** The last event that ran, on the same window: the grey ghost under the live curve. */
+  benchmark?: { title: string; points: PacingPoint[] } | null
   windowDays?: number
   empty?: boolean
 }) {
-  const data = points.map((p) => ({ ...p, x: windowDays - p.daysOut }))
-  const peak = Math.max(capacity ?? 0, ...points.map((p) => p.cumulative), 10)
+  // One row per x, both series on it, so the tooltip reads both at a glance.
+  const ghost = new Map(benchmark?.points.map((p) => [p.daysOut, p.cumulative]) ?? [])
+  const data = points.map((p) => ({ ...p, x: windowDays - p.daysOut, benchmark: ghost.get(p.daysOut) }))
+  const peak = Math.max(
+    capacity ?? 0,
+    ...points.map((p) => p.cumulative),
+    ...(benchmark?.points.map((p) => p.cumulative) ?? []),
+    10
+  )
+  const hint = [
+    capacity ? `capacity ${capacity}` : "no capacity set",
+    benchmark ? `grey is your last event, ${benchmark.title}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
 
   return (
     <ChartFrame
       title="RSVP pacing"
-      hint={capacity ? `capacity ${capacity}` : "no capacity set"}
+      hint={hint}
       empty={empty}
       emptyText="RSVPs plot here as they arrive — publish the event to start the curve."
     >
       <ChartContainer
-        config={{ cumulative: { label: "RSVPs", color: "var(--chart-1)" } }}
+        config={{
+          cumulative: { label: "RSVPs", color: "var(--chart-1)" },
+          benchmark: { label: benchmark?.title ?? "Last event", color: "var(--faint-foreground)" },
+        }}
         className="h-[200px] w-full"
       >
         <LineChart data={data} margin={{ left: 4, right: 12, top: 8 }}>
           <defs>
+            {/*
+              The brand gradient, from the tokens rather than from two literals.
+
+              `#8F49AA` is the purple at its *light-theme* lightness. The design
+              system pins the dark theme's `--chart-3` higher (L 0.62 against
+              0.532) precisely because "the brand purple at its true lightness
+              does not carry against #0D0C0C" — and this app is dark-pinned, so
+              the hardcoded pair was drawing the one value the doc says is too
+              dark to read here.
+            */}
             <linearGradient id="pacing-brand" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#F05423" />
-              <stop offset="100%" stopColor="#8F49AA" />
+              <stop offset="0%" stopColor="var(--chart-1)" />
+              <stop offset="100%" stopColor="var(--chart-3)" />
             </linearGradient>
           </defs>
           <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
@@ -166,6 +209,18 @@ export function PacingChart({
               />
             }
           />
+          {benchmark ? (
+            <Line
+              dataKey="benchmark"
+              type="monotone"
+              stroke="var(--faint-foreground)"
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+            />
+          ) : null}
           <Line
             dataKey="cumulative"
             type="monotone"
@@ -219,12 +274,38 @@ export function Funnel({
               <span className="w-24 shrink-0 text-right text-[0.75rem] text-muted-foreground">
                 {stage.label}
               </span>
-              <div className="h-5 flex-1 overflow-hidden rounded bg-surface-raised">
+              {/*
+                A stage nobody has reached is drawn at FULL width, in outline.
+
+                Every other funnel in the world renders a zero stage as a sliver
+                or as nothing, and `barWidth` correctly returns 0 for it — so
+                three consecutive zeroes were three empty tracks the eye slid
+                straight past. On this product that is the wrong reading twice
+                over: `matched`, `conversed` and `came back` are the only three
+                stages no competitor can measure, and they are the whole thesis.
+                Nobody meeting anybody is the most important fact the dashboard
+                can carry, and it was the quietest thing on the screen.
+
+                Full-width and dashed makes the absence as wide as the 113 above
+                it. It is a shape difference rather than a colour one, so it
+                survives greyscale and colour-blindness without a legend.
+              */}
+              {stage.value === 0 ? (
                 <div
-                  className="h-full rounded bg-chart-1"
-                  style={{ width: `${barWidth(stage.value, max)}%` }}
+                  className="h-5 flex-1 rounded border border-dashed border-border-strong"
+                  aria-hidden
                 />
-              </div>
+              ) : (
+                <div className="h-5 flex-1 overflow-hidden rounded bg-surface-raised">
+                  <div
+                    className="h-full rounded"
+                    style={{
+                      width: `${barWidth(stage.value, max)}%`,
+                      background: stageFill(index, stages.length),
+                    }}
+                  />
+                </div>
+              )}
               <span className="w-10 text-right text-[0.8125rem] font-bold tabular-nums">
                 {stage.value}
               </span>
@@ -237,6 +318,28 @@ export function Funnel({
       </div>
     </ChartFrame>
   )
+}
+
+/**
+ * Stages walk `--chart-1` to `--chart-3`, which `app/globals.css` documents as
+ * the brand's orange-to-purple ramp sampled at three points.
+ *
+ * The screen was almost entirely `--chart-1` while 2 and 3 went unused, which
+ * the design direction calls a one-note palette. Walking the ramp also carries
+ * meaning for free: a stage's colour says how deep into the loop it is.
+ *
+ * **An earlier version of this gave stage 0 `--gradient-brand` itself, and the
+ * comment above it claimed that did not collide with `HeroMetric`.** It did.
+ * `DESIGN_SYSTEM.md` allows exactly one gradient element per screen, on the
+ * grounds that a second one means the screen has two priorities and one of them
+ * is wrong — and driving the page showed precisely that: the widest bar on the
+ * screen competing with the hero beside it. The comment defended the bug, which
+ * is worse than not having one.
+ */
+export function stageFill(index: number, count: number): string {
+  if (count < 2) return "var(--chart-1)"
+  const step = Math.round((index / (count - 1)) * 2)
+  return `var(--chart-${step + 1})`
 }
 
 /* -------------------------------------------------------------------------- */
@@ -453,11 +556,14 @@ export function UtilHeatmap({
   empty?: boolean
 }) {
   const max = Math.max(1, ...counts.flat())
+  // The busiest cell is outlined, so the "Peak window" tile and this picture
+  // are one thing rather than a number and a chart that have to be matched.
+  const peak = counts.flatMap((row, di) => row.map((v, si) => ({ v, di, si }))).find((c) => c.v === max) ?? null
 
   return (
     <ChartFrame
       title="Utilisation by day and time"
-      hint="last 8 weeks"
+      hint={peak ? "last 8 weeks · peak outlined" : "last 8 weeks"}
       empty={empty}
       emptyText="Fills as events are hosted — shows your peak days and times."
     >
@@ -473,11 +579,12 @@ export function UtilHeatmap({
             <span className="self-center">{slot}</span>
             {DAYS.map((day, di) => {
               const value = counts[di]?.[si] ?? 0
+              const isPeak = peak != null && peak.di === di && peak.si === si && value > 0
               return (
                 <div
                   key={day}
-                  title={`${day} ${slot}: ${value} event${value === 1 ? "" : "s"}`}
-                  className="h-6 rounded"
+                  title={`${day} ${slot}: ${value} event${value === 1 ? "" : "s"}${isPeak ? " · peak" : ""}`}
+                  className={isPeak ? "h-6 rounded outline outline-2 outline-offset-2 outline-foreground" : "h-6 rounded"}
                   style={{
                     background:
                       value === 0

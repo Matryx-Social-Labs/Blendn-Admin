@@ -85,7 +85,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         message_id: messageId,
         message_type: messageType,
         reason,
-        description,
+        // Optional in the schema, so `undefined` when the phone omits it — and
+        // the client always omits it. strictUndefinedChecks refused the write,
+        // so no report from the app ever landed.
+        ...(description !== undefined && { description }),
       },
     })
 

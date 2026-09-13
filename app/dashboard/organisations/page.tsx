@@ -2,7 +2,6 @@ import { redirect } from "next/navigation"
 import { IconBuilding, IconCircleCheck } from "@tabler/icons-react"
 
 import { EmptyState } from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
 import { getAuth } from "@/lib/auth"
 import { getOrganisations } from "@/lib/onboarding-actions"
 import { formatDay } from "@/lib/dashboard-format"
@@ -38,76 +37,56 @@ export default async function OrganisationsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* What suspending does and does not do. Reversibility is the fact that
-          decides whether somebody clicks it, and it is not on the button. */}
-      <p className="text-[0.8125rem] text-muted-foreground">
-        Suspending stops an organisation operating without deleting anyone&apos;s history
-        — events, check-ins and messages stay intact, and it can be undone.
-      </p>
-
+    <ul className="flex flex-col divide-y divide-border">
       {orgs.map((org) => (
-        <section
-          key={org.id}
-          className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5"
-        >
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <div className="flex flex-col gap-1">
-              <h2 className="font-semibold">{org.display_name}</h2>
-              <p className="text-[0.8125rem] text-muted-foreground">
-                {org.legal_name ?? "No legal name"}
-                {org.primaryContact
-                  ? ` · ${org.primaryContact.name ?? org.primaryContact.email}`
-                  : " · no primary contact"}
-              </p>
+        <li key={org.id} className="flex flex-col gap-2 py-4 @3xl/main:flex-row @3xl/main:items-start @3xl/main:justify-between @3xl/main:gap-6">
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem] text-muted-foreground">
+              <h2 className="text-[0.9375rem] font-bold text-foreground">{org.display_name}</h2>
+              {/* Kind and status are words. Suspended is the one that changes
+                  what the org can do, so it is the one in colour. */}
+              <span>
+                {org.kind} ·{" "}
+                <span className={org.status === "suspended" ? "font-bold text-destructive" : undefined}>
+                  {org.status}
+                </span>
+              </span>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{org.kind}</Badge>
-              <Badge
-                variant={
-                  org.status === "verified"
-                    ? "default"
-                    : org.status === "suspended"
-                      ? "destructive"
-                      : "secondary"
-                }
-              >
-                {org.status}
-              </Badge>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-x-6 gap-y-1 text-[0.8125rem] text-muted-foreground">
-            <span>{org.memberCount} members</span>
-            <span>{org.eventCount} events</span>
-            <span>{org.venueCount} venues</span>
-            <span>since {formatDay(org.created_at.toISOString())}</span>
-            {org.gstin ? <span className="font-mono">{org.gstin}</span> : null}
-          </div>
-
-          {org.domains.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
+            <p className="text-[0.8125rem] text-muted-foreground">
+              {org.legal_name ?? "No legal name"}
+              {org.primaryContact
+                ? ` · ${org.primaryContact.name ?? org.primaryContact.email}`
+                : " · no primary contact"}
+              {org.gstin ? ` · ${org.gstin}` : ""}
+            </p>
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
+              <span>{org.memberCount} member{org.memberCount === 1 ? "" : "s"}</span>
+              <span>{org.eventCount} events</span>
+              <span>{org.venueCount} venues</span>
+              <span>since {formatDay(org.created_at.toISOString())}</span>
               {org.domains.map((d) => (
-                <Badge key={d.domain} variant="outline" className="gap-1 font-normal">
-                  {d.verified ? <IconCircleCheck className="size-3.5 text-primary" /> : null}
+                <span key={d.domain} className="inline-flex items-center gap-1">
+                  {d.verified ? <IconCircleCheck className="size-3.5 text-success" /> : null}
                   {d.domain}
                   {d.verified ? "" : " (unverified)"}
-                </Badge>
+                </span>
               ))}
-            </div>
-          ) : null}
+            </p>
+          </div>
 
-          <div className="flex flex-col gap-3">
-            <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
+          {/* The two controls, small and to the right. Suspending keeps every
+              event, check-in and message; the control says so when opened. */}
+          <div className="flex shrink-0 flex-wrap items-start gap-2 @3xl/main:flex-col @3xl/main:items-end">
             <OrgSponsorControl
               orgId={org.id}
               maySponsor={org.may_sponsor}
               status={org.status}
               name={org.display_name}
             />
+            <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
           </div>
-        </section>
+        </li>
       ))}
-    </div>
+    </ul>
   )
 }

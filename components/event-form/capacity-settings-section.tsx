@@ -22,58 +22,20 @@ import type { EventFormValues } from "@/components/event-form/schema"
 
 export function CapacitySettingsSection({
   form,
-  isEditing,
+  canFeature,
 }: {
   form: UseFormReturn<EventFormValues>
-  isEditing: boolean
+  /** Only app_admin may put an event on the platform's featured rail. */
+  canFeature: boolean
 }) {
   return (
-    <FormSection title="Capacity & Settings">
-      {isEditing && (
-        <FormField
-          control={form.control}
-          name="status"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Status</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="published">Published</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                  {/*
-                    `completed` is organiser-set and has no automatic writer, on
-                    purpose.
-
-                    The register files it as declared-but-unreachable, which is
-                    half right: nothing marks an event complete when it ends,
-                    and it does not need to. `eventStateFor` already returns
-                    "over" from `end_time` whatever the status says, so a stored
-                    `completed` only short-circuits a value that is derived
-                    anyway. A sweeper maintaining it would be a second source of
-                    truth for a question the timestamps already answer — which
-                    is `events.current_capacity`, a counter with no writer that
-                    three surfaces still render.
-
-                    So it stays selectable and stays manual. Picking it early is
-                    an organiser saying "this is finished", which closes the
-                    room, and that is a decision they are allowed to make.
-                  */}
-                  <SelectItem value="completed">Completed</SelectItem>
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-      )}
-
-      <div className="grid grid-cols-2 gap-4">
+    <FormSection step="04" title="Who can come" id="step-who">
+      {/*
+        No Status select. Publishing is a gated transition and lives on the
+        rail's buttons; cancelling is its own action there. "Completed" had no
+        writer and no meaning — `eventStateFor` derives "over" from `end_time`.
+      */}
+      <div className="grid gap-4 @2xl/main:grid-cols-[1.1fr_1.3fr_0.8fr_0.8fr]">
         <FormField
           control={form.control}
           name="visibility"
@@ -82,14 +44,14 @@ export function CapacitySettingsSection({
               <FormLabel>Visibility</FormLabel>
               <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select visibility" />
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Public" />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
                   <SelectItem value="public">Public</SelectItem>
-                  <SelectItem value="private">Private</SelectItem>
                   <SelectItem value="unlisted">Unlisted</SelectItem>
+                  <SelectItem value="private">Private</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -102,10 +64,10 @@ export function CapacitySettingsSection({
           name="door_policy"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Door policy</FormLabel>
+              <FormLabel>Door</FormLabel>
               <Select onValueChange={field.onChange} value={field.value ?? "open"}>
                 <FormControl>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Anyone can turn up" />
                   </SelectTrigger>
                 </FormControl>
@@ -116,26 +78,29 @@ export function CapacitySettingsSection({
                   <SelectItem value="invite_only">Invite only</SelectItem>
                 </SelectContent>
               </Select>
-              {/*
-                This used to read "it does not stop anyone joining or checking
-                in, exactly like the minimum age", which was wrong in the one
-                direction that matters. `min_age` IS enforced — twice: discovery
-                filters it out (`min_age: null OR min_age <= viewerAge`) and
-                check-in returns 403 AGE_RESTRICTED and records an `under_age`
-                refusal. Door policy is enforced by nobody.
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-                The claim was borrowed from `events.service.ts`, which says
-                "nothing here gates *an RSVP*, exactly as with min_age" — true,
-                and narrow. Dropping "an RSVP" turned an accurate comparison
-                into one that could persuade an organiser their 18+ night is not
-                actually age-gated.
-              */}
-              <p className="text-xs text-muted-foreground">
-                Shown as a badge so people know what to expect at the door.{" "}
-                <strong>Blendn does not enforce it</strong> — your door does.
-                Leave it as &ldquo;anyone can turn up&rdquo; and we show how many
-                places are left instead, once the event is nearly full.
-              </p>
+        <FormField
+          control={form.control}
+          name="min_age"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Minimum age</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min={13}
+                  max={25}
+                  placeholder="None"
+                  value={field.value ?? ""}
+                  onChange={(e) =>
+                    field.onChange(e.target.value === "" ? undefined : Number(e.target.value))
+                  }
+                />
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}
@@ -146,16 +111,14 @@ export function CapacitySettingsSection({
           name="max_capacity"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Max Capacity</FormLabel>
+              <FormLabel>Capacity</FormLabel>
               <FormControl>
                 <Input
                   type="number"
-                  placeholder="Unlimited if blank"
+                  placeholder="Unlimited"
                   value={field.value ?? ""}
                   onChange={(e) =>
-                    field.onChange(
-                      e.target.value === "" ? undefined : Number(e.target.value)
-                    )
+                    field.onChange(e.target.value === "" ? undefined : Number(e.target.value))
                   }
                 />
               </FormControl>
@@ -164,71 +127,53 @@ export function CapacitySettingsSection({
           )}
         />
       </div>
+      {/*
+        The two rules a reader cannot infer, and only those. Door policy is a
+        badge Blend'n does not enforce; the minimum age IS enforced — discovery
+        hides the event and check-in refuses — so an organiser setting it needs
+        to know it turns people away rather than warning them.
+      */}
+      <p className="text-[0.8125rem] text-muted-foreground">
+        The door policy is shown as a badge; your door enforces it. A minimum age
+        hides the event from anyone younger, or who has not told us their age.
+      </p>
 
-      <FormField
-        control={form.control}
-        name="min_age"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Minimum age</FormLabel>
-            <FormControl>
-              <Input
-                type="number"
-                min={13}
-                max={25}
-                placeholder="No age restriction"
-                value={field.value ?? ""}
-                onChange={(e) =>
-                  field.onChange(e.target.value === "" ? undefined : Number(e.target.value))
-                }
-              />
-            </FormControl>
-            <div className="text-muted-foreground text-sm">
-              {/*
-                Said plainly because it is a real refusal at the door, not a
-                label on a listing — an organiser setting this needs to know it
-                turns people away rather than warning them.
-              */}
-              Leave blank unless the event has one. Anyone younger — or who has
-              not told us their age — cannot see the event or check in.
-            </div>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <div className="grid grid-cols-2 gap-4">
-        <FormField
-          control={form.control}
-          name="is_featured"
-          render={({ field }) => (
-            <FormItem className="flex items-center justify-between rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <FormLabel>Featured</FormLabel>
-                <div className="text-muted-foreground text-sm">
-                  Highlight this event on the home screen.
-                </div>
-              </div>
-              <FormControl>
-                <Switch checked={field.value ?? false} onCheckedChange={field.onChange} />
-              </FormControl>
-            </FormItem>
-          )}
-        />
-
+      <div className="grid gap-4 @2xl/main:grid-cols-2">
         <FormField
           control={form.control}
           name="external_link"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>External Link</FormLabel>
+              <FormLabel>
+                Tickets link <span className="font-normal text-muted-foreground">· optional</span>
+              </FormLabel>
               <FormControl>
-                <Input placeholder="https://…" {...field} value={field.value ?? ""} />
+                <Input placeholder="https://" {...field} value={field.value ?? ""} />
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
+
+        {canFeature ? (
+          <FormField
+            control={form.control}
+            name="is_featured"
+            render={({ field }) => (
+              <FormItem className="flex items-center justify-between gap-4 @2xl/main:pt-6">
+                <div className="space-y-0.5">
+                  <FormLabel>Featured</FormLabel>
+                  <div className="text-[0.8125rem] text-muted-foreground">
+                    On the Pulse&rsquo;s featured rail. Admins only.
+                  </div>
+                </div>
+                <FormControl>
+                  <Switch checked={field.value ?? false} onCheckedChange={field.onChange} />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        ) : null}
       </div>
     </FormSection>
   )

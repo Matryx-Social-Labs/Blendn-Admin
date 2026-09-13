@@ -129,10 +129,10 @@ export function VenueManage({
     })
 
   return (
-    <section className="flex flex-col gap-3">
-      <SectionTitle hint={venue.ownerOrg ?? "unclaimed"}>Record</SectionTitle>
+    <section className="flex flex-col gap-3 border-t border-border pt-5">
+      <SectionTitle hint="what events here inherit">Record</SectionTitle>
 
-      <div className="grid gap-3 rounded-lg border border-border bg-card p-4 @2xl/main:grid-cols-3">
+      <div className="grid gap-3 @2xl/main:grid-cols-3">
         <div className="flex flex-col gap-1.5 @2xl/main:col-span-3">
           <Label htmlFor="name">Name</Label>
           <Input {...field("name")} />

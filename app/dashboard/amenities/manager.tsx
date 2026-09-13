@@ -45,8 +45,59 @@ export function AmenityManager({ amenities }: { amenities: AmenityRow[] }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <section className="rounded-lg border border-border bg-card px-5 py-4">
-        <h2 className="text-sm font-bold">Add an amenity</h2>
+      <section className="flex flex-col gap-1">
+        <h2 className="text-[length:var(--text-h2)] font-bold">Offered <span className="font-normal text-muted-foreground">{active.length}</span></h2>
+        {active.map((a) => (
+          <Row
+            key={a.id}
+            amenity={a}
+            pending={pending}
+            editing={editing === a.id}
+            editName={editName}
+            onEditName={setEditName}
+            onStartEdit={() => {
+              setEditing(a.id)
+              setEditName(a.name)
+            }}
+            onCancelEdit={() => setEditing(null)}
+            onSave={() =>
+              run(async () => {
+                await updateAmenity(a.id, { name: editName })
+                setEditing(null)
+              }, "Renamed")
+            }
+            onToggle={() =>
+              run(() => setAmenityActive(a.id, false), `${a.name} retired`)
+            }
+          />
+        ))}
+      </section>
+
+      {retired.length > 0 ? (
+        <section className="flex flex-col gap-1 border-t border-border pt-5">
+          <h2 className="text-[length:var(--text-h2)] font-bold">Retired <span className="font-normal text-muted-foreground">{retired.length}</span></h2>
+          <p className="text-[0.8125rem] text-muted-foreground">
+            Not offered for new events. Still shown on the events that already list them —
+            withdrawing an amenity should not rewrite what a past event said.
+          </p>
+          {retired.map((a) => (
+            <Row
+              key={a.id}
+              amenity={a}
+              pending={pending}
+              editing={false}
+              editName=""
+              onEditName={() => {}}
+              onStartEdit={() => {}}
+              onCancelEdit={() => {}}
+              onSave={() => {}}
+              onToggle={() => run(() => setAmenityActive(a.id, true), `${a.name} restored`)}
+            />
+          ))}
+        </section>
+      ) : null}
+      <section className="border-t border-border pt-5">
+        <h2 className="text-[length:var(--text-h2)] font-bold">Add an amenity</h2>
         <p className="mt-1 text-[0.8125rem] text-muted-foreground">
           The label as drawn, an optional second line, and a Material Symbols name so the app
           does not carry its own slug-to-glyph mapping and drift from this list.
@@ -95,57 +146,6 @@ export function AmenityManager({ amenities }: { amenities: AmenityRow[] }) {
         </div>
       </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-bold">Offered ({active.length})</h2>
-        {active.map((a) => (
-          <Row
-            key={a.id}
-            amenity={a}
-            pending={pending}
-            editing={editing === a.id}
-            editName={editName}
-            onEditName={setEditName}
-            onStartEdit={() => {
-              setEditing(a.id)
-              setEditName(a.name)
-            }}
-            onCancelEdit={() => setEditing(null)}
-            onSave={() =>
-              run(async () => {
-                await updateAmenity(a.id, { name: editName })
-                setEditing(null)
-              }, "Renamed")
-            }
-            onToggle={() =>
-              run(() => setAmenityActive(a.id, false), `${a.name} retired`)
-            }
-          />
-        ))}
-      </section>
-
-      {retired.length > 0 ? (
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-bold">Retired ({retired.length})</h2>
-          <p className="text-[0.8125rem] text-muted-foreground">
-            Not offered for new events. Still shown on the events that already list them —
-            withdrawing an amenity should not rewrite what a past event said.
-          </p>
-          {retired.map((a) => (
-            <Row
-              key={a.id}
-              amenity={a}
-              pending={pending}
-              editing={false}
-              editName=""
-              onEditName={() => {}}
-              onStartEdit={() => {}}
-              onCancelEdit={() => {}}
-              onSave={() => {}}
-              onToggle={() => run(() => setAmenityActive(a.id, true), `${a.name} restored`)}
-            />
-          ))}
-        </section>
-      ) : null}
     </div>
   )
 }
@@ -174,7 +174,7 @@ function Row({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3",
+        "flex flex-wrap items-center justify-between gap-3 border-b border-border py-2.5 last:border-0",
         !amenity.isActive && "opacity-70"
       )}
     >
@@ -207,11 +207,11 @@ function Row({
       {!editing ? (
         <div className="flex items-center gap-1.5">
           {amenity.isActive ? (
-            <Button size="sm" variant="secondary" disabled={pending} onClick={onStartEdit}>
+            <Button size="sm" variant="ghost" disabled={pending} onClick={onStartEdit}>
               Rename
             </Button>
           ) : null}
-          <Button size="sm" variant="secondary" disabled={pending} onClick={onToggle}>
+          <Button size="sm" variant="ghost" disabled={pending} onClick={onToggle}>
             {amenity.isActive ? "Retire" : "Restore"}
           </Button>
         </div>

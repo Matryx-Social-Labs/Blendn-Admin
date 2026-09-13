@@ -6,10 +6,10 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { IconLoader2, IconReceipt } from "@tabler/icons-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { EmptyState } from "@/components/dashboard/primitives"
+import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
+import { cn } from "@/lib/utils"
 import {
   advanceCharge,
   pricePlacement,
@@ -34,53 +34,34 @@ function money(minor: number, currency: string): string {
   }).format(minor / 100)
 }
 
-const STATUS_VARIANT: Record<string, "default" | "outline" | "secondary" | "destructive"> = {
-  draft: "outline",
-  agreed: "secondary",
-  settled: "default",
-  void: "destructive",
-}
 
 export function ChargeLedgerView({ ledger }: { ledger: ChargeLedger }) {
   const unbilled = ledger.placements.filter((p) => !p.charge)
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap gap-3">
-        {ledger.totals.length === 0 ? null : (
-          ledger.totals.map((t) => (
-            /*
-             * One tile per currency, never a combined figure. Summing minor
-             * units across currencies yields a number in no currency at all.
-             */
-            <div key={t.currency} className="flex flex-col gap-1 rounded-xl border bg-card p-4">
-              <span className="text-[0.75rem] uppercase tracking-wide text-faint-foreground">
-                {t.currency}
-              </span>
-              <span className="text-[1.25rem] font-bold">
-                {money(t.settledMinor, t.currency)}{" "}
-                <span className="text-[0.8125rem] font-normal text-muted-foreground">settled</span>
-              </span>
-              <span className="text-[0.8125rem] text-muted-foreground">
-                {money(t.agreedMinor, t.currency)} agreed, not yet paid
-              </span>
-            </div>
-          ))
-        )}
-        <div className="flex flex-col gap-1 rounded-xl border bg-card p-4">
-          <span className="text-[0.75rem] uppercase tracking-wide text-faint-foreground">
-            Unbilled
-          </span>
-          <span className="text-[1.25rem] font-bold">{unbilled.length}</span>
-          {/*
-            The reason this screen lists placements rather than charges. A list
-            of charges answers "what have we billed"; the gap is what loses
-            money.
-          */}
-          <span className="text-[0.8125rem] text-muted-foreground">
-            placements running with no price on them
-          </span>
-        </div>
+      <div className="flex flex-wrap gap-1">
+        {ledger.totals.map((t) => (
+          /*
+           * One tile per currency, never a combined figure. Summing minor
+           * units across currencies yields a number in no currency at all.
+           */
+          <MetricTile
+            key={t.currency}
+            label={`${t.currency} settled`}
+            value={money(t.settledMinor, t.currency)}
+            hint={`${money(t.agreedMinor, t.currency)} agreed, not yet paid`}
+          />
+        ))}
+        {/*
+          The reason this screen lists placements rather than charges. A list
+          of charges answers "what have we billed"; the gap is what loses money.
+        */}
+        <MetricTile
+          label="Unbilled"
+          value={unbilled.length}
+          hint="placements running with no price on them"
+        />
       </div>
 
       {ledger.placements.length === 0 ? (
@@ -90,9 +71,9 @@ export function ChargeLedgerView({ ledger }: { ledger: ChargeLedger }) {
           description="Approved placements appear here as soon as an organiser attaches a brand to an event."
         />
       ) : (
-        <ul className="flex flex-col divide-y rounded-xl border bg-card">
+        <ul className="flex flex-col divide-y divide-border">
           {ledger.placements.map((p) => (
-            <li key={p.placementId} className="p-4">
+            <li key={p.placementId} className="py-4">
               <PlacementCharge placement={p} />
             </li>
           ))}
@@ -144,13 +125,17 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{placement.brandName}</span>
-            <Badge variant="outline">{placement.phase}</Badge>
+          <span className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem] text-muted-foreground">
+            <span className="font-medium text-foreground">{placement.brandName}</span>
+            <span>· {placement.phase}</span>
+            {/* The one word in colour is the one that loses money: a running
+                placement with no price on it. A void charge is the other. */}
             {charge ? (
-              <Badge variant={STATUS_VARIANT[charge.status]}>{charge.status}</Badge>
+              <span className={cn(charge.status === "void" && "font-bold text-destructive")}>
+                · {charge.status}
+              </span>
             ) : (
-              <Badge variant="destructive">Unbilled</Badge>
+              <span className="font-bold text-destructive">· unbilled</span>
             )}
           </span>
           <span className="text-[0.8125rem] text-muted-foreground">

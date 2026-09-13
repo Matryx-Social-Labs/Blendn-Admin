@@ -220,7 +220,7 @@ const routeContent: Record<string, { title: string; description: string }> = {
   },
   "/dashboard/settings": {
     title: "Settings",
-    description: "Your account, password, and what we email you about.",
+    description: "Your account, password, and where you are signed in.",
   },
 }
 
@@ -238,10 +238,26 @@ export function SiteHeader() {
         title: "Overview",
         description:
           role === "app_admin"
-            ? "Platform health: what needs attention, growth vs vanity, and supply."
+            ? "What is waiting on you, whether the loop closes, and who is supplying it."
             : role === "organizer"
               ? "Your next event first — pacing, then what your past events say."
-              : "Each venue on its own terms — utilisation, ratings, bookings.",
+              : role === "sponsor"
+                ? // Driven as the sponsor: the venue owner's line rendered here.
+                  "What is running, what is waiting on you, and who your sends reached."
+                : "Each venue on its own terms — utilisation, ratings, bookings.",
+      }
+    }
+
+    // The events list is scoped by role — every event for an admin, an
+    // organiser's own, a venue owner's venues — and "every event on the
+    // platform" was read by a venue owner above a list of fourteen at theirs.
+    if (pathname === "/dashboard/events" && role !== "app_admin") {
+      return {
+        title: "Events",
+        description:
+          role === "venue_owner"
+            ? "Every event at your venues — search, filter, and drill in."
+            : "Every event your organisation runs — search, filter, and drill in.",
       }
     }
 
@@ -250,8 +266,8 @@ export function SiteHeader() {
 
     if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/messaging")) {
       return {
-        title: "Chatrooms",
-        description: "Every room whose chat is open — live events and post-event feedback windows.",
+        title: "Room",
+        description: "What is being said, and what needs you.",
       }
     }
     if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/edit")) {
@@ -259,6 +275,18 @@ export function SiteHeader() {
     }
     if (pathname.startsWith("/dashboard/events/")) {
       return { title: "Event", description: "Setup, performance, and what happened on the night." }
+    }
+    if (pathname.startsWith("/dashboard/organisers/")) {
+      return { title: "Organiser", description: "One host account and the events it created." }
+    }
+    if (pathname.startsWith("/dashboard/venue-owners/")) {
+      return { title: "Venue owner", description: "One owner account and the events it created." }
+    }
+    if (pathname.startsWith("/dashboard/venues/") && pathname.endsWith("/claim")) {
+      return { title: "Claim a venue", description: "Reviewed by an admin. Approval links every event held there to you." }
+    }
+    if (pathname.startsWith("/dashboard/venues/") && pathname !== "/dashboard/venues/new") {
+      return { title: "Venue", description: "One building — who is in it now, who books it, and its record." }
     }
 
     return {

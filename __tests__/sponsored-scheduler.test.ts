@@ -126,6 +126,19 @@ describe("the happy path", () => {
     expect(call.data.chat_message_id).toBe("message-1")
   })
 
+  it("marks the live payload as sponsored, because `type` is busy being the media kind", async () => {
+    /*
+     * The row carries `metadata.sponsored_message_id`; the wire carried
+     * nothing. Driven on iOS: an ad arrived as a text message from
+     * "Sponsored" and the client drew it as a peer's bubble (K3.4).
+     */
+    await sweepSponsored(NOW)
+
+    const { emitChatMessage } = jest.requireMock("@/lib/socket-server")
+    expect(emitChatMessage).toHaveBeenCalledTimes(1)
+    expect(emitChatMessage.mock.calls[0][1]).toMatchObject({ kind: "sponsored", userName: "Sponsored" })
+  })
+
   it("schedules the next window from now, so a backlog is not replayed", async () => {
     await sweepSponsored(NOW)
 

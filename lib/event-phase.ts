@@ -48,6 +48,14 @@ export function eventStateFor(
   return phase === "pre" ? "upcoming" : phase === "live" ? "live" : "over"
 }
 
+/** The word for each state, where a screen names it in a sentence. */
+export const STATE_LABEL: Record<EventState, string> = {
+  draft: "Draft",
+  upcoming: "Upcoming",
+  live: "Live",
+  over: "Over",
+}
+
 /** What the screen is asking, per state. Used as the Overview's own subtitle. */
 export const STATE_QUESTION: Record<EventState, string> = {
   draft: "What is stopping this from being published?",

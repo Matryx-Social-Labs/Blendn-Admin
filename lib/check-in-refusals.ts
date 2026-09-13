@@ -125,3 +125,72 @@ export async function refusalSummary(eventId: string): Promise<RefusalSummary> {
     topReason: [...byReason.entries()].sort((a, b) => b[1] - a[1])[0][0],
   }
 }
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Plainly what happened, for the platform-wide panel.
+ *
+ * Deliberately not the diagnosis wording in
+ * `app/dashboard/events/[id]/curation-health.tsx`, which says things like *"Pin
+ * is probably wrong"*. That is the right sentence about ONE event, where the
+ * other columns rule the alternatives out. Across every event at once it would
+ * be a guess dressed as a finding — a platform with eight out-of-range refusals
+ * has eight people who were somewhere else, and how many of those are bad pins
+ * is exactly what you open the per-event screen to learn.
+ */
+export const REFUSAL_LABEL: Record<refusal_reason, string> = {
+  out_of_range: "Outside the fence",
+  no_geofence: "Event had no fence",
+  too_early: "Before doors",
+  too_late: "After the window closed",
+  day_cancelled: "Day was cancelled",
+  under_age: "Under 18",
+}
+
+export interface RefusalBreakdown {
+  /** Distinct people turned away in the window. */
+  total: number
+  byReason: Array<{ reason: refusal_reason; label: string; people: number }>
+}
+
+/**
+ * Everyone turned away across the platform, split by why.
+ *
+ * Sits under turn-up rather than beside it on purpose: arrivals and refusals
+ * are the two halves of the same door, and a week where both rose is a
+ * completely different week from one where only arrivals did.
+ *
+ * People per reason, not attempts, for the reason `refusalSummary` gives — and
+ * `total` is distinct people across ALL reasons, so it is not the sum of the
+ * rows beneath it whenever somebody was refused twice for different reasons.
+ * That is the honest number and it is worth the arithmetic not adding up: the
+ * alternative is a total that double-counts one person having a bad night.
+ */
+export async function refusalsByReason(range: {
+  from: Date
+  to: Date
+}): Promise<RefusalBreakdown> {
+  const rows = await db.check_in_refusals.findMany({
+    where: { created_at: { gte: range.from, lt: range.to } },
+    select: { user_id: true, reason: true },
+    // Bounded like its sibling. Ten thousand refusals in a window says the same
+    // thing as one thousand, and neither should be pulled into a page render.
+    take: 5_000,
+    orderBy: { created_at: "desc" },
+  })
+
+  const people = new Map<refusal_reason, Set<string>>()
+  for (const r of rows) {
+    const set = people.get(r.reason) ?? new Set<string>()
+    set.add(r.user_id)
+    people.set(r.reason, set)
+  }
+
+  return {
+    total: new Set(rows.map((r) => r.user_id)).size,
+    byReason: [...people.entries()]
+      .map(([reason, set]) => ({ reason, label: REFUSAL_LABEL[reason], people: set.size }))
+      .sort((a, b) => b.people - a.people || a.reason.localeCompare(b.reason)),
+  }
+}

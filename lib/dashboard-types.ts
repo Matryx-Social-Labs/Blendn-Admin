@@ -1,3 +1,7 @@
+// Type-only, so neither module's `db` import survives into a client bundle.
+import type { AttentionQueue } from "@/lib/attention-queues"
+import type { RefusalBreakdown } from "@/lib/check-in-refusals"
+
 /**
  * Roles that get a dashboard shell.
  *
@@ -67,6 +71,8 @@ export interface OrganizerOverview {
   nextEvent: NextEvent | null
   pacing: PacingPoint[]
   pacingCapacity: number | null
+  /** The last event that ran, on the same window — the ghost under the live curve. */
+  benchmark: { title: string; points: PacingPoint[] } | null
   ratings: RatingCounts
   noShowRatePct: number | null
   noShowDelta: number | null
@@ -80,14 +86,6 @@ export interface OrganizerOverview {
 /* -------------------------------------------------------------------------- */
 /* Admin                                                                       */
 /* -------------------------------------------------------------------------- */
-
-export interface ModerationAttention {
-  pending: number
-  /** Age of the oldest pending flag, in hours. The SLA is age, not count. */
-  oldestHours: number | null
-  highConfidence: number
-  affectedRooms: number
-}
 
 export interface OrganiserSupplyRow {
   id: string
@@ -138,33 +136,56 @@ export interface TileDelta {
 
 export interface AdminOverview {
   role: "app_admin"
-  attention: ModerationAttention
-  users: number
+  /**
+   * Every queue with something in it, and every queue without.
+   *
+   * Was `ModerationAttention` — flags only — which is how the strip came to
+   * read "Moderation queue is clear" beside a sidebar showing `Claims 4` and
+   * `Applications 7`. See `lib/attention-queues.ts`, which is now the single
+   * source for this and for those badges.
+   */
+  attention: AttentionQueue[]
+  /**
+   * When the server computed all of this, ISO.
+   *
+   * The attention strip renders ages ("open 23h", "open 1 day") from a `now`,
+   * and it lives inside a client component — so a `new Date()` taken during
+   * hydration is a DIFFERENT now from the one the server rendered with. An item
+   * sitting at 23h59m crosses the day boundary between the two and React
+   * reports a hydration mismatch on a screen that was correct both times.
+   *
+   * Rare, and the kind of rare that only ever happens in production. One field
+   * removes the class rather than narrowing the window.
+   */
+  generatedAt: string
   /**
    * Distinct people who opened the app in the last seven days, and which
    * signal produced that number.
    *
-   * `source` is rendered on the tile. It used to be distinct refresh-token
-   * holders unconditionally — a "session proxy" by its own label — and it is
-   * now real app-opens wherever `product_events` has any, falling back only
-   * while the table is still filling. A number that can come from two sources
-   * has to say which, or it is two numbers wearing one label.
+   * Rendered as the loop's hint rather than as its own tile: it is the only
+   * honest liveness signal on the screen, and on its own it answered nothing.
+   * Beside "113 signed up" it answers how much of that is real.
+   *
+   * `source` is displayed. It used to be distinct refresh-token holders
+   * unconditionally — a "session proxy" by its own label — and it is now real
+   * app-opens wherever `product_events` has any, falling back only while the
+   * table is still filling. A number that can come from two sources has to say
+   * which, or it is two numbers wearing one label.
    */
   activeThisWeek: { count: number; source: "app_opens" | "proxy" }
-  publishedEvents: number
+  /** Arrivals in the window. Rows, not people — see the panel's own note. */
   checkIns: number
-  /** Period-over-period change for the tiles that carry one. */
-  deltas: {
-    users: TileDelta
-    publishedEvents: TileDelta
-    checkIns: TileDelta
-  }
-  /** The window these figures cover, for the tiles' hint text. */
+  /** People turned away at a door in the same window. The other half of turn-up. */
+  refusals: RefusalBreakdown
+  /** Period-over-period change for arrivals, the one figure that carries one. */
+  deltas: { checkIns: TileDelta }
+  /** The window these figures cover. */
   rangeLabel: string
   publishingHosts: { publishing: number; total: number }
+  /** Published and not yet ended. The forward-looking half of supply. */
+  upcomingEvents: number
   /** Events we listed ourselves. Never host liquidity — see `hostSupply`. */
   curated: { published: number; unclaimed: number }
-  growth: Array<{ label: string; signups: number; active: number }>
   funnel: Array<{ label: string; value: number }>
   supply: OrganiserSupplyRow[]
   cities: CityRow[]
@@ -183,6 +204,12 @@ export interface AdminOverview {
  * the same room are two venues.
  */
 export interface VenueRow {
+  /**
+   * The venue record, when the events are linked to one; null for a free-text
+   * name bucket. Without it the owner's own list could not reach
+   * `/dashboard/venues/<id>` — the only screen that edits or retires a venue.
+   */
+  id: string | null
   name: string
   eventsInWindow: number
   /** Events per week over the trailing 8 weeks. */
@@ -271,4 +298,14 @@ export interface VenueRecordRow {
   /** Claims waiting on a decision. A venue can attract more than one. */
   pendingClaims: number
   status: string
+  /**
+   * `owner` as a filterable value.
+   *
+   * `DataTable` filters with `String(row[key]) === value`, so a filter keyed on
+   * `owner` can only ever match a literal organisation name — an "Unclaimed"
+   * option would be a control that selects nothing, which is the
+   * ship-the-UI-without-the-logic anti-pattern the roadmap names explicitly.
+   * Derived on the server so the control has something to match.
+   */
+  ownership: "claimed" | "unclaimed"
 }

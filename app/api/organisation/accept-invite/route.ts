@@ -1,3 +1,4 @@
+import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     windowMs: 15 * 60 * 1000,
     maxRequests: 20,
     keyGenerator: (r) =>
-      `org:accept-invite:${r.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"}`,
+      `org:accept-invite:${clientIpFrom(r.headers)}`,
   })
   if (limited) return limited
 
@@ -67,6 +68,24 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    /*
+     * Already a member — success, before the state check.
+     *
+     * This branch sat below `inviteState`, which reports "used" the moment
+     * `accepted_at` is set, so the second of two accepts by the same person
+     * got "This invite has already been used." Driven: the page's effect ran
+     * the accept twice on sign-in and showed the failure state to somebody
+     * who had just been let in. Being in the organisation is the outcome the
+     * invite exists for; the token's state after that is bookkeeping.
+     */
+    const member = await db.organisation_members.findUnique({
+      where: { org_id_user_id: { org_id: invite.org_id, user_id: session.user.id } },
+      select: { id: true },
+    })
+    if (member) {
+      return NextResponse.json({ success: true, orgName: invite.org.display_name, alreadyMember: true })
+    }
+
     const state = inviteState(invite, session.user.email ?? "")
     if (state !== "valid") {
       const message = {
@@ -85,19 +104,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Already a member — treat as success. They clicked twice, or were added by
-    // hand in between; either way they are in and an error would be confusing.
-    const existing = await db.organisation_members.findUnique({
-      where: { org_id_user_id: { org_id: invite.org_id, user_id: session.user.id } },
-      select: { id: true },
-    })
-    if (existing) {
-      await db.organisation_invites.update({
-        where: { id: invite.id },
-        data: { accepted_at: new Date() },
-      })
-      return NextResponse.json({ success: true, orgName: invite.org.display_name, alreadyMember: true })
-    }
 
     await db.$transaction(async (tx) => {
       // updateMany with accepted_at: null in the filter is the concurrency

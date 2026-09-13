@@ -5,7 +5,7 @@
 // function across that boundary — it throws at render, not at build. These
 // take their data as a prop and touch nothing server-only, so the directive
 // is the whole fix.
-import { IconAlertTriangle, IconBuildingStore, IconStar } from "@tabler/icons-react"
+import { IconAlertTriangle, IconBuildingStore } from "@tabler/icons-react"
 
 import { UtilHeatmap } from "@/components/dashboard/charts"
 import { DataTable, type Column } from "@/components/dashboard/data-table"
@@ -18,12 +18,6 @@ import {
 import { Badge } from "@/components/ui/badge"
 import type { VenueOverview, VenueRow } from "@/lib/dashboard-types"
 import { formatDay, formatNumber, formatPct } from "@/lib/dashboard-format"
-
-const toneVariant = {
-  success: "default",
-  neutral: "secondary",
-  destructive: "destructive",
-} as const
 
 /**
  * Venue owner overview — per venue, always. Never a blended number.
@@ -65,7 +59,14 @@ export function OverviewVenue({ data }: { data: VenueOverview }) {
     {
       key: "note",
       label: "",
-      render: (r) => <Badge variant={toneVariant[r.tone]}>{r.note}</Badge>,
+      // Colour only for the one that needs attention. "performing" used to be a
+      // brand-orange badge -- the primary colour on a status word.
+      render: (r) =>
+        r.tone === "destructive" ? (
+          <Badge variant="destructive">{r.note}</Badge>
+        ) : (
+          <span className="text-[0.8125rem] text-muted-foreground">{r.note}</span>
+        ),
     },
   ]
 
@@ -73,6 +74,7 @@ export function OverviewVenue({ data }: { data: VenueOverview }) {
     (venue) => venue.ratings[0] + venue.ratings[1] > venue.ratings[3] + venue.ratings[4]
   )
   const focusVenue = data.venues[0]
+  const hasRatings = Boolean(focusVenue && focusVenue.ratings.some((n) => n > 0))
 
   return (
     <div className="flex flex-col gap-6">
@@ -90,12 +92,6 @@ export function OverviewVenue({ data }: { data: VenueOverview }) {
               description="Each venue you host at gets its own row — utilisation, ratings and bookings are never blended. Venues are read from the venue name on your events."
             />
           }
-          footer={
-            <span>
-              A low rating at one room across several organisers&apos; events is a facilities
-              signal, not an event signal.
-            </span>
-          }
         />
       </div>
 
@@ -107,24 +103,25 @@ export function OverviewVenue({ data }: { data: VenueOverview }) {
         </p>
       ) : null}
 
-      <div className="grid gap-6 @3xl/main:grid-cols-[3fr_2fr]">
+      {/* The ratings panel appears once there is a rating to show; before that the heatmap has the width. */}
+      <div className={hasRatings ? "grid gap-6 @3xl/main:grid-cols-[3fr_2fr]" : "grid gap-6"}>
         <UtilHeatmap counts={data.utilisation} empty={data.venues.length === 0} />
+        {hasRatings ? (
         <div className="flex flex-col gap-3">
-          <SectionTitle hint={focusVenue?.name}>Ratings</SectionTitle>
-          {!focusVenue || focusVenue.ratings.every((n) => n === 0) ? (
-            <EmptyState
-              compact
-              icon={<IconStar />}
-              description="Attendee ratings for events at each venue land here after events end."
-            />
-          ) : (
-            <RatingBars counts={focusVenue.ratings} />
-          )}
-          <p className="text-[0.75rem] text-faint-foreground">
-            Shown for your busiest venue. Open My venues to compare distributions — an average
-            alone hides a bad room.
-          </p>
+          <SectionTitle
+            hint={
+              focusVenue
+                ? [focusVenue.name, focusVenue.averageRating !== null ? `avg ${focusVenue.averageRating}` : null]
+                    .filter(Boolean)
+                    .join(" · ")
+                : undefined
+            }
+          >
+            Ratings
+          </SectionTitle>
+          <RatingBars counts={focusVenue!.ratings} />
         </div>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-1">

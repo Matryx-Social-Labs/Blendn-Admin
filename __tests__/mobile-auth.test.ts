@@ -17,6 +17,14 @@ const mockDb = {
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
+// The stored hash in these fixtures is not real; the graced-replay path is the
+// one that reaches the compare, so it is answered explicitly per test.
+const mockBcryptCompare = jest.fn()
+jest.mock("bcryptjs", () => ({
+  ...jest.requireActual("bcryptjs"),
+  compare: (...a: unknown[]) => mockBcryptCompare(...a),
+}))
+
 import jwt from "jsonwebtoken"
 import {
   signAccessToken,
@@ -166,15 +174,29 @@ describe("verifyRefreshToken — reuse handling", () => {
     await expect(verifyRefreshToken(signRefreshToken(USER, EMAIL))).resolves.toBeNull()
   })
 
-  it("rejects a token replayed seconds after rotation WITHOUT nuking every session", async () => {
-    // The refresh route revokes the old token before the client has stored the
-    // new one. An app killed mid-refresh replays the old token on next launch —
-    // that is recovery, not theft. Revoking the family here would sign the user
-    // out on every device they own.
-    const token = withStoredToken({ revoked_at: new Date(Date.now() - 5_000) })
+  it("re-issues on a token replayed seconds after rotation, revoking the successor nobody holds", async () => {
+    /*
+     * The refresh route rotates before the client has stored the new pair. A
+     * client whose refresh timed out replays the old token — that is recovery,
+     * not theft. This used to reject it without touching the family, which
+     * still signed *this* device out: the issued pair reached nobody and the
+     * held pair was dead. Driven on an emulator, thirty minutes in.
+     */
+    const token = withStoredToken({ revoked_at: new Date(Date.now() - 5_000), replaced_by: "succ-1" })
+    mockBcryptCompare.mockResolvedValue(true)
 
+    await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: USER, type: "refresh" })
+    // Only the orphaned successor is revoked — never the whole family.
+    expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenCalledTimes(1)
+    expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "succ-1", revoked_at: null } })
+    )
+  })
+
+  it("still rejects a graced replay whose hash does not match", async () => {
+    const token = withStoredToken({ revoked_at: new Date(Date.now() - 5_000), replaced_by: "succ-1" })
+    mockBcryptCompare.mockResolvedValue(false)
     await expect(verifyRefreshToken(token)).resolves.toBeNull()
-    expect(mockDb.mobile_refresh_tokens.updateMany).not.toHaveBeenCalled()
   })
 
   it("revokes the whole family when a token is replayed long after rotation", async () => {

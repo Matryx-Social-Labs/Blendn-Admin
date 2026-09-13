@@ -62,10 +62,30 @@ export function sourceDomain(url: string | null | undefined): string | null {
  * aggregator, and listing every one of them is not a maintainable list.
  */
 export function isAggregatorSource(url: string | null | undefined): boolean {
-  const host = sourceDomain(url)
-  if (!host) return false
+  return isAggregatorDomain(sourceDomain(url))
+}
 
-  const parts = host.split(".")
+/**
+ * The same question, asked of a bare host rather than a URL.
+ *
+ * An **application** carries an email domain, not a source URL, and
+ * `bookings@in.bookmyshow.com` is exactly the case the aggregator list exists
+ * to catch: one address at a ticketing platform could otherwise claim every
+ * event on the platform. The applications queue rendered that domain in the
+ * same filled badge it uses for `thehummingtree.com` — so the strongest
+ * negative signal in the queue looked identical to the strongest positive one.
+ *
+ * Split out rather than duplicated, because the list must have one reader. A
+ * second copy is how `in.bookmyshow.com` ends up on one list and not the other.
+ */
+export function isAggregatorDomain(host: string | null | undefined): boolean {
+  if (!host) return false
+  const lower = host.trim().toLowerCase().replace(/^www\./, "")
+
+  // Matches the host and its parent domains, so `in.bookmyshow.com` and
+  // `events.eventbrite.co.uk` both resolve — a subdomain of an aggregator is an
+  // aggregator, and listing every one of them is not a maintainable list.
+  const parts = lower.split(".")
   for (let i = 0; i < parts.length - 1; i++) {
     if (AGGREGATORS.has(parts.slice(i).join("."))) return true
   }

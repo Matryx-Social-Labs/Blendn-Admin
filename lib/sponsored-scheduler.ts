@@ -443,8 +443,10 @@ async function sendOne(
        * against, having watched this repo ship two vocabularies sharing one
        * name before.
        *
-       * Until then the marker remains `metadata.sponsored_message_id`, which
-       * the REST read has and the socket payload does not (K3.4).
+       * Until then the marker remains `metadata.sponsored_message_id` on the
+       * row, and `kind: "sponsored"` on the socket payload (see `emit` below),
+       * so both paths agree — the wire carried no marker at all before, and
+       * the client drew a live ad as a peer's bubble (K3.4).
        */
       type,
       content: `📣 [Sponsored]\n${creative.content}`,
@@ -544,6 +546,9 @@ async function emit(
       // told "text" renders a caption and drops the artwork the sponsor paid
       // for, and only a page refresh reveals the difference.
       type: message.type,
+      // The structured marker the history already carries in `metadata`. A
+      // string heuristic on `userName` was all the client had live.
+      kind: "sponsored",
       userId: message.userId,
       userName: "Sponsored",
       createdAt: message.createdAt,

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import type { moderation_status_type } from "@prisma/client"
 
 import { auditLog } from "@/lib/audit-log"
+import { emitChatMessageHidden } from "@/lib/socket-server"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { trustSignalsFor } from "@/lib/trust"
@@ -86,7 +87,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
         // The id as well as the name: the trust lookup groups by it, and a name
         // is not a key.
         user_id: true,
-        user: { select: { name: true, email: true } },
+        user: { select: { name: true, email: true, deletedAt: true } },
         message: {
           select: {
             content: true,
@@ -161,7 +162,10 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
     confidence: flag.confidence,
     category: topCategory(flag.categories, flag.source),
     autoAction: flag.auto_action,
-    authorName: flag.user.name ?? flag.user.email,
+    // An erased account has a null name and a `deleted-<id>@…invalid`
+    // address; the fallback rendered that address as the author. The message
+    // is still reviewable, the person is gone.
+    authorName: flag.user.deletedAt ? "Deleted account" : flag.user.name ?? flag.user.email,
     messageDeleted: flag.message.deleted_at !== null,
     /*
      * The band, never the average, and the count so the band can be weighed.
@@ -211,7 +215,7 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
 
   const flag = await db.moderation_flags.findUnique({
     where: { id: flagId },
-    select: { id: true, message_id: true, status: true },
+    select: { id: true, message_id: true, status: true, chat_group_id: true, user_id: true },
   })
   if (!flag) throw new Error("Flag not found")
   if (flag.status !== "pending") {
@@ -257,6 +261,16 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
       })
     }
   })
+
+  /*
+   * Tell the room. The auto-hide path emits this the moment it hides; the
+   * human decision did not, so a message an admin removed stayed on every
+   * phone that already had the room open until the next reload. Seen from a
+   * simulator: the API stopped serving it, the screen kept showing it.
+   */
+  if (decision === "remove") {
+    emitChatMessageHidden(flag.chat_group_id, flag.message_id, flag.user_id)
+  }
 
   // Fire-and-forget by design (see lib/audit-log.ts): the decision is already
   // committed, so a failed audit write logs and moves on rather than making the

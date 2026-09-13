@@ -6,6 +6,7 @@ import type { report_status } from "@prisma/client"
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { emitChatMessageHidden } from "@/lib/socket-server"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 
 /**
@@ -310,16 +311,27 @@ export async function resolveReport(
           })
 
   if (!report) throw new Error("Report not found")
-  // Two admins working the queue at once would otherwise both act on it.
-  if (report.status !== "pending") throw new Error("This report has already been reviewed")
+  /*
+   * Two admins working the queue at once would otherwise both act on it.
+   *
+   * Reinstate is the exception, deliberately: it is offered on an already
+   * resolved report — the reports table says so in as many words — and this
+   * guard refused it, so every "Reinstate" 500'd and a suspension could only
+   * be lifted by somebody with database access. Found by suspending and then
+   * trying to undo it.
+   */
+  if (decision !== "reinstate" && report.status !== "pending") {
+    throw new Error("This report has already been reviewed")
+  }
 
-  const subjectId =
+  const subject =
     kind === "user"
-      ? (report as { reported_id: string }).reported_id
+      ? { userId: (report as { reported_id: string }).reported_id, chatGroupId: null }
       : kind === "event"
         ? // An event report is about a listing, not a person. See the row mapping.
-          null
-        : await messageAuthorId(report as { message_id: string; message_type: string })
+          { userId: null, chatGroupId: null }
+        : await messageSubject(report as { message_id: string; message_type: string })
+  const subjectId = subject.userId
 
   if ((decision === "suspend" || decision === "reinstate") && !subjectId) {
     throw new Error("The reported message no longer exists, so its author cannot be resolved")
@@ -343,12 +355,16 @@ export async function resolveReport(
   }
 
   await db.$transaction(async (tx) => {
-    if (kind === "user") {
-      await tx.user_reports.update({ where: { id: reportId }, data: reviewed })
-    } else if (kind === "event") {
-      await tx.event_reports.update({ where: { id: reportId }, data: reviewed })
-    } else {
-      await tx.message_reports.update({ where: { id: reportId }, data: reviewed })
+    // A reinstate after the fact leaves the report's own verdict alone: the
+    // report was upheld, the suspension is what is being lifted.
+    if (decision !== "reinstate" || report.status === "pending") {
+      if (kind === "user") {
+        await tx.user_reports.update({ where: { id: reportId }, data: reviewed })
+      } else if (kind === "event") {
+        await tx.event_reports.update({ where: { id: reportId }, data: reviewed })
+      } else {
+        await tx.message_reports.update({ where: { id: reportId }, data: reviewed })
+      }
     }
 
     /*
@@ -370,7 +386,7 @@ export async function resolveReport(
     if (decision === "remove_message") {
       await tx.chat_messages.update({
         where: { id: (report as { message_id: string }).message_id },
-        data: { deleted_at: new Date() },
+        data: { deleted_at: new Date(), deleted_by: session.user.id },
       })
     }
 
@@ -390,6 +406,15 @@ export async function resolveReport(
     }
   })
 
+  /*
+   * Tell the room, as the flag queue's twin does. Driven from a phone: the
+   * report landed, the admin pressed Remove, the row got `deleted_at`, and the
+   * message stayed on the screen that had reported it until the next reload.
+   */
+  if (decision === "remove_message" && subject.chatGroupId && subjectId) {
+    emitChatMessageHidden(subject.chatGroupId, (report as { message_id: string }).message_id, subjectId)
+  }
+
   // Fire-and-forget by design (see lib/audit-log.ts): the decision is already
   // committed, so a failed audit write must not make the admin think their
   // action failed.
@@ -405,21 +430,24 @@ export async function resolveReport(
   revalidatePath("/dashboard/moderation")
 }
 
-/** Resolve who wrote a reported message, across the two message tables. */
-async function messageAuthorId(report: {
+/**
+ * Who wrote a reported message, across the two message tables — and, for a
+ * room message, which room, because removing it has to be told to the room.
+ */
+async function messageSubject(report: {
   message_id: string
   message_type: string
-}): Promise<string | null> {
+}): Promise<{ userId: string | null; chatGroupId: string | null }> {
   if (report.message_type === "private") {
     const m = await db.private_messages.findUnique({
       where: { id: report.message_id },
       select: { sender_id: true },
     })
-    return m?.sender_id ?? null
+    return { userId: m?.sender_id ?? null, chatGroupId: null }
   }
   const m = await db.chat_messages.findUnique({
     where: { id: report.message_id },
-    select: { user_id: true },
+    select: { user_id: true, chat_group_id: true },
   })
-  return m?.user_id ?? null
+  return { userId: m?.user_id ?? null, chatGroupId: m?.chat_group_id ?? null }
 }

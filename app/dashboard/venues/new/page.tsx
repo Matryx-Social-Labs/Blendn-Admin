@@ -20,17 +20,15 @@ export default async function NewVenuePage() {
   const canOwn = session.user.role === "venue_owner"
   if (!canOwn && session.user.role !== "app_admin") redirect("/dashboard/venues")
 
+  // The site header already says "Add a venue" and what one is; the one
+  // sentence that differs by role is all this page adds above the form.
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
-        <h2 className="text-[length:var(--text-h1)] font-bold">Add a venue</h2>
-        <p className="text-[0.8125rem] text-muted-foreground">
-          {canOwn
-            ? "It joins your venues straight away — you are describing your own place, so there is nothing to claim."
-            : "Created unclaimed. A venue owner can claim it, and you decide."}
-        </p>
-      </div>
+      <p className="text-[0.8125rem] text-muted-foreground">
+        {canOwn
+          ? "It joins your venues straight away — you are describing your own place, so there is nothing to claim."
+          : "Created unclaimed. A venue owner can claim it, and you decide."}
+      </p>
       <VenueCreateForm canOwn={canOwn} />
     </div>
   )

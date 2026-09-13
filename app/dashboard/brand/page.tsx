@@ -29,8 +29,8 @@ export default async function BrandPage() {
   const claimPending = !brand && claims.some((c) => c.status === "pending")
 
   return (
-    <div className="flex flex-col gap-6 py-6">
-      <div className="flex flex-col gap-4 px-4 lg:px-6">
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4">
         {/* The header says attendees see this. The non-obvious part is that they
             see nothing else named, which is why it is worth getting right. */}
         <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">

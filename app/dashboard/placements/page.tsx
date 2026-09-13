@@ -73,8 +73,8 @@ export default async function PlacementsPage() {
    */
   if (!overview.brandName) {
     return (
-      <div className="flex flex-col gap-6 py-6">
-        <div className="px-4 lg:px-6">
+      <div className="flex flex-col gap-5">
+        <div>
           <EmptyState
             icon={<IconMicrophone2 className="size-6" />}
             title="Add your brand first"
@@ -91,8 +91,8 @@ export default async function PlacementsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 py-6">
-      <div className="px-4 lg:px-6">
+    <div className="flex flex-col gap-5">
+      <div>
         {overview.next ? (
           <HeroMetric
             eyebrow="Next placement"
@@ -120,7 +120,7 @@ export default async function PlacementsPage() {
         `DESIGN_SYSTEM.md:89` records two grids falling visibly out of step when
         one used `md:` and the other did not.
       */}
-      <div className="grid gap-6 px-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4 lg:px-6">
+      <div className="grid gap-6  @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
         <MetricTile label="Live now" value={overview.liveNow} />
         <MetricTile
           label="Awaiting you"
@@ -140,9 +140,9 @@ export default async function PlacementsPage() {
         <MetricTile label="Brand" value={overview.brandName} />
       </div>
 
-      <section className="flex flex-col gap-3 px-4 lg:px-6">
+      <section className="flex flex-col gap-3">
         {/* h2, not h1 — components/site-header.tsx owns the page's only h1. */}
-        <h2 className="text-[0.9375rem] font-bold">Placements</h2>
+        <h2 className="text-[length:var(--text-h2)] font-bold">Placements</h2>
 
         {overview.placements.length === 0 ? (
           <EmptyState
@@ -164,7 +164,7 @@ export default async function PlacementsPage() {
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Badge variant={p.phase === "live" ? "default" : "outline"}>
+                  <Badge variant={p.phase === "live" ? "secondary" : "outline"}>
                     {PHASE_LABEL[p.phase] ?? p.phase}
                   </Badge>
                   <span className="text-[0.8125rem] text-muted-foreground">

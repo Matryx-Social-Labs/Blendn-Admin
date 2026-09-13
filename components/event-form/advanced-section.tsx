@@ -27,8 +27,29 @@ export function AdvancedSection({
   accessibilityInfoFieldArray: UseFieldArrayReturn<EventFormValues, "accessibility_info">
 }) {
   return (
-    <FormSection title="Advanced" defaultOpen={false}>
-      <div className="grid grid-cols-2 gap-4">
+    <FormSection title="Details" level={3}>
+      {/*
+        Required and first on the old form, as "Full Description *". No app
+        screen renders `fullDescription` — the API falls back to `description`
+        and 4 of 31 staging events differ — so it is optional and last.
+      */}
+      <FormField
+        control={form.control}
+        name="full_description"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>
+              Long description{" "}
+              <span className="font-normal text-muted-foreground">· optional, not shown in the app yet</span>
+            </FormLabel>
+            <FormControl>
+              <Textarea rows={5} {...field} value={field.value ?? ""} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <div className="grid gap-4 @2xl/main:grid-cols-2">
         <FormField
           control={form.control}
           name="house_rules"
