@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
+import { auditLog } from "@/lib/audit-log"
 import { emitChatMemberBanned, emitChatMemberMuted } from "@/lib/socket-server"
 
 interface RouteContext {
@@ -88,6 +89,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (action === "mute" || action === "unmute") {
       emitChatMemberMuted(event.chat_group.id, targetUserId, action === "mute", "Muted by admin")
     }
+
+    // The trail the schema promises beside `banned_by` / `muted_by` — a
+    // mute from the dashboard left no audit row at all. Fire-and-forget, as
+    // every other admin action here.
+    auditLog({
+      userId: session.user.id,
+      action: `chat.member_${action}`,
+      resource: "chat_group_member",
+      resourceId: targetUserId,
+      details: { eventId, chatGroupId: event.chat_group.id },
+    })
 
     return NextResponse.json({ success: true, action, status: statusMap[action] })
   } catch (err) {

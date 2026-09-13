@@ -29,7 +29,7 @@ import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
-import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
+import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 
 interface RouteParams {
@@ -517,11 +517,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // Check if the auto-mute window has expired (1 hour)
       const wasUnmuted = await checkAndAutoUnmute(authUser.userId, chatGroup.id)
       if (!wasUnmuted) {
-        return errorResponse(
-          "You are muted in this chat. Your messages have been flagged for policy violations.",
-          403,
-          ErrorCode.USER_MUTED
-        )
+        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
       }
       // User was auto-unmuted, proceed with sending
     }

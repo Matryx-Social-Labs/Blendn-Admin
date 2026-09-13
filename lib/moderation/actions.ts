@@ -261,3 +261,18 @@ function mapSource(
       return "auto_spam"
   }
 }
+
+/**
+ * Why a muted person cannot post, in words that are true.
+ *
+ * Both send routes said "Your messages have been flagged for policy
+ * violations" to everyone muted — including somebody an organiser had muted
+ * by hand with zero flags. Driven from the dashboard: Mute, then the phone
+ * was told it had violated a policy. `muted_by` is the difference between an
+ * organiser's decision and the pipeline's; say which.
+ */
+export function mutedRefusal(membership: { muted_by: string | null }): string {
+  return membership.muted_by
+    ? "The organiser has muted you in this room."
+    : "You are muted in this room. Your messages have been flagged for policy violations."
+}

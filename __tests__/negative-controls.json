@@ -583,6 +583,13 @@
       "observed": "1 failing ('records a search from the list route…'). Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-12"
+    },
+    "muted-refusal.test.ts": {
+      "guards": "that both mobile send routes refuse a muted member with mutedRefusal(membership) and no longer carry the \"flagged for policy violations\" literal, and that the dashboard member-action route writes an audit row `chat.member_<action>`",
+      "mutation": "delete the auditLog({...}) block from app/api/events/[id]/chat/members/[userId]/route.ts",
+      "observed": "1 failing ('leaves an audit row for every member action from the dashboard'). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-13"
     }
   },
   "grandfathered": [

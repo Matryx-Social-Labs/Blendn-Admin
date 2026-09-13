@@ -8,7 +8,7 @@ import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
-import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute } from "@/lib/moderation/actions"
+import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import {
   successResponse,
@@ -297,11 +297,7 @@ export async function POST(
       const wasUnmuted = await checkAndAutoUnmute(user.userId, chatGroupId)
       if (wasUnmuted) effectiveStatus = "active"
       if (!wasUnmuted) {
-        return errorResponse(
-          "You are muted in this chat group. Your messages have been flagged for policy violations.",
-          403,
-          ErrorCode.USER_MUTED
-        )
+        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
       }
       // User was auto-unmuted, proceed with sending
     }
@@ -333,11 +329,7 @@ export async function POST(
         )
       }
       if (denial.reason === "muted") {
-        return errorResponse(
-          "You are muted in this chat group. Your messages have been flagged for policy violations.",
-          403,
-          ErrorCode.USER_MUTED
-        )
+        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
       }
       return errorResponse(
         chatClosedMessage(denial.reason),
