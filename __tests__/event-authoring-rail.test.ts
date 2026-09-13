@@ -69,6 +69,13 @@ describe("the rail answers 'can this publish' from every scroll position", () =>
     expect(layout).toMatch(/<SidebarInset className="overflow-x-clip /)
     expect(layout).not.toMatch(/<SidebarInset className="overflow-hidden/)
   })
+
+  it("and the inset may be narrower than its content, so the header can truncate", () => {
+    // Clip is not a scroller, so `min-width: auto` still measures the nowrap
+    // subtitle: at 768 with the sidebar open, /dashboard/chatrooms was 77px
+    // wider than its slot and the account button sat past the right edge.
+    expect(read("app/dashboard/layout.tsx")).toMatch(/<SidebarInset className="overflow-x-clip min-w-0 /)
+  })
 })
 
 describe("the cuts", () => {

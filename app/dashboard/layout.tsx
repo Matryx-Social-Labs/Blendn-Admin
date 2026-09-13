@@ -72,8 +72,16 @@ export default async function DashboardLayout({
         than to the viewport -- the event form's publish rail scrolled away
         with the page. Clip still cuts anything wider than the inset and still
         keeps the rounded corners clean; it just is not a scroller.
+
+        `min-w-0` because clip is not a scroller: `min-width: auto` on this
+        flex item still resolves to its content's min-content width, and the
+        header's nowrap subtitle is part of that. On a 768px viewport with the
+        sidebar open, /dashboard/chatrooms' subtitle made the inset 77px wider
+        than its slot -- the page scrolled sideways and the account button sat
+        past the right edge. `truncate` on the subtitle cannot act until the
+        inset is allowed to be narrower than the text.
       */}
-      <SidebarInset className="overflow-x-clip border border-border bg-background">
+      <SidebarInset className="overflow-x-clip min-w-0 border border-border bg-background">
         <SiteHeader />
         {/*
           @container/main is what every dashboard grid keys off. The sidebar is

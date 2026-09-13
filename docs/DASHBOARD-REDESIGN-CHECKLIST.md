@@ -188,3 +188,28 @@ and stops blessing a converted spread, but a member expression is not a
 shape a regex can classify; what caught these was posting the real route
 with the optional field omitted (`safety-writes.itest.ts`, `dm-send.itest.ts`,
 `refresh-replay.itest.ts`).
+
+**Third drive, 2026-09-13 — two phones in one room, the organiser's editor,
+the admin's claims queue, and the 375/768 sweep.** Both phones in the
+Founders & Filter Coffee room: iOS as Ananya (Cosmic Panda), the Android
+emulator as Rohan (Quiet Otter, whose check-in is a DB fixture because the
+emulator never gets a GPS fix — SCRUM-112).
+
+| Journey | Surface | Read back / result |
+|---|---|---|
+| Connect after an unmatch | Android → API | refused with "This user has already sent you a request. Check your incoming requests" — his inbox empty, her old accepted row described to him (**SCRUM-113**, fixed: the stranger's 404, same words as the likes route) |
+| Join Chat from the room | iOS, from a fresh launch | the chat mounted, fetched its history and stayed hidden under the room modal; closing the room took two taps (**SCRUM-114**, fixed: `replace`) |
+| Reply to the other phone's message | iOS → Android, reload | quote drawn only on the sender's optimistic bubble; `parentId` never sent, `parent_id`/`parent_message` never read (**SCRUM-114**, fixed; row `93d1d809 → parent_id 08e42fac`, quote survives reload, "You" on the other phone) |
+| Open the room | iOS, twice | landed above the newest messages, "Today" on the bottom edge (**SCRUM-114**, fixed: follow the end while at it) |
+| Typing across phones | iOS → socket probe as Rohan | `chat:typing {userName:"Cosmic Panda"}` true then false — pseudonym on the wire; the Android footer was not caught inside the 2s window on a starved emulator |
+| Clone an event | API as Arjun → Postgres → dashboard | the copy kept the pin and lost the fence, the venue link, the door policy and the age floor (**SCRUM-115**, fixed; no surface calls the route — recorded) |
+| Extend and shrink a multi-day run | organiser editor | 19–20 Sept → 21st adds an occurrence; back to the 20th deletes it (no attendance); rows with attendance are cancelled, not deleted |
+| 375 / 768 sweep | 48 routes, four roles | one overflow: `/dashboard/chatrooms` at 768, the inset measured the header's nowrap subtitle (**SCRUM-116**, fixed: `min-w-0` on `SidebarInset`) |
+| Reject a brand claim | admin claims queue | row, reviewer, note and audit written; the reason the form says "is sent to the claimant" reaches nobody, on all three claim kinds (**SCRUM-117**, recorded) |
+| Move an event, cancel an event | organiser editor → iOS bell | "Event updated: start time, end time" and "This event has been cancelled" reached the RSVP'd attendee; **Save as draft then un-cancelled it** with nobody told (**SCRUM-118**, fixed: cancelled is terminal on both PATCH routes) |
+| Report → Suspend → Reinstate | iOS → admin reports queue, socket probe as the suspended person | every row written; the live socket kept receiving the room 77s later (**SCRUM-119**, fixed: evicted after the commit); the 15-minute access token, the ban's copy and the one-click Suspend recorded |
+| Read receipts off | API + probes | socket silent, list withheld, **the thread's GET still said read** (**SCRUM-120**, fixed) |
+| A slur in a DM | iOS composer | "Not sent — removed by moderation", stored hidden, absent from the recipient's thread |
+| Report an event → Delist | iOS → admin | the sheet, the row, Dismiss/Delist, `visibility unlisted`; the organiser is told nothing and reasons show as enum keys (**SCRUM-121**, recorded) |
+| Check out → check in again | iOS → organiser Live tab | a second `presence_sessions` row (first `departed_source=user`, second open); Live went ~2 → ~1 → 2, "count unreliable" clearing on the fresh heartbeat; "Checked in — Go to Chat" opens the room at its end |
+| Announce from the dashboard | organiser messaging (two-step: Send to the room → Send now) → iOS room, live | row `type announcement`; the phone drew "ANNOUNCEMENT · NIGHTSHIFT COLLECTIVE" over the text, once, and followed the end |
