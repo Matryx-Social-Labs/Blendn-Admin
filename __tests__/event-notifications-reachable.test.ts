@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 import { materialEventChanges } from "@/lib/services/event-notifications.service"
+import { isUncancellingEvent } from "@/lib/event-cancellation"
 
 /**
  * Cancelling an event has to tell the people who were going.
@@ -64,6 +65,29 @@ describe("event notifications are reachable", () => {
      * does not call this.
      */
     expect(callersOf("notifyEventDetailsChanged")).toContain("app/api/events/[id]/route.ts")
+  })
+
+  it("and cancelled is terminal on both paths, because the people told cannot be untold", () => {
+    /*
+     * Driven 2026-09-13: the editor's confirm said "This cannot be undone",
+     * everyone going was pushed "This event has been cancelled", and "Save as
+     * draft" then flipped the row to `draft` -- from where Publish reopens it
+     * with nobody told. Both routes refuse the transition with the same words.
+     */
+    const callers = callersOf("isUncancellingEvent")
+    expect(callers).toContain("app/api/events/[id]/route.ts")
+    expect(callers).toContain("app/api/mobile/events/[eventId]/route.ts")
+    for (const rel of ["app/api/events/[id]/route.ts", "app/api/mobile/events/[eventId]/route.ts"]) {
+      expect(stripComments(read(rel))).toMatch(/isUncancellingEvent\(status, event\.status\)\) \{\s*return [^\n]*UNCANCEL_REFUSAL/)
+    }
+    expect(isUncancellingEvent("draft", "cancelled")).toBe(true)
+    expect(isUncancellingEvent("published", "cancelled")).toBe(true)
+    expect(isUncancellingEvent(undefined, "cancelled")).toBe(false)
+    expect(isUncancellingEvent("cancelled", "cancelled")).toBe(false)
+    expect(isUncancellingEvent("draft", "published")).toBe(false)
+    // The rail stops offering the draft button on a cancelled event, so the
+    // refusal is a backstop rather than the thing an organiser meets.
+    expect(read("components/event-form/publish-rail.tsx")).toMatch(/onClick=\{onSaveDraft\} disabled=\{isSubmitting \|\| cancelled\}/)
   })
 })
 
