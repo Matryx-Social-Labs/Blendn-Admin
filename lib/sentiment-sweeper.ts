@@ -132,6 +132,8 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
     select: {
       id: true,
       content: true,
+      user_id: true,
+      chat_group_id: true,
       chat_group: { select: { event_id: true } },
     },
     // Oldest first: a backlog should drain in the order it happened, so the
@@ -145,6 +147,7 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
   if (batch.length === 0) return { classified: 0, hasMore: false }
 
   const eventOf = new Map(batch.map((m) => [m.id, m.chat_group.event_id]))
+  const rowOf = new Map(batch.map((m) => [m.id, m]))
   const results = await classifyMessages(batch.map((m) => ({ id: m.id, text: m.content })))
 
   let classified = 0
@@ -185,6 +188,23 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
         },
       })
       classified += 1
+
+      /*
+       * "Routed to moderation regardless of sentiment" -- the live tab's Safety
+       * alert has said this since it was written, and nothing did it. Driven
+       * 2026-09-13: "some guy keeps following me around the bar and grabbed
+       * my arm" was classified safety_conduct, opened a critical issue, and
+       * never reached the moderation queue -- no flag row, no "flags waiting",
+       * no human unless somebody happened to open the live tab.
+       *
+       * A flag, never a hide: this is a person asking for help, and hiding it
+       * is the one action that makes things worse. `flagged` on the message
+       * only when nothing stronger is already there.
+       */
+      if (result.category === "safety_conduct") {
+        const row = rowOf.get(result.id)
+        if (row) await routeSafetyToModeration(row, result.confidence)
+      }
     } catch (error) {
       // One bad row must not abandon the rest of the batch. It has no feedback
       // row, so the next pass finds it again.
@@ -196,6 +216,35 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
   }
 
   return { classified, hasMore }
+}
+
+/** One flag per message: the sweeper re-runs, the queue must not fill with copies. */
+async function routeSafetyToModeration(
+  row: { id: string; chat_group_id: string; user_id: string },
+  confidence: number
+): Promise<void> {
+  const existing = await db.moderation_flags.findFirst({
+    where: { message_id: row.id },
+    select: { id: true },
+  })
+  if (existing) return
+  await db.$transaction([
+    db.moderation_flags.create({
+      data: {
+        message_id: row.id,
+        chat_group_id: row.chat_group_id,
+        user_id: row.user_id,
+        source: "auto_text",
+        categories: ["safety_conduct"],
+        confidence,
+        auto_action: "none",
+      },
+    }),
+    db.chat_messages.updateMany({
+      where: { id: row.id, OR: [{ moderation_status: null }, { moderation_status: "clean" }] },
+      data: { moderation_status: "flagged" },
+    }),
+  ])
 }
 
 let timer: NodeJS.Timeout | null = null

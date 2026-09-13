@@ -114,6 +114,10 @@ const BASELINE: Record<string, string[]> = {
   "lib/org-actions.ts": ["domain", "role"],
   "lib/poll-actions.ts": ["kind", "label", "position", "question"],
   "lib/push-notifications.ts": ["title"],
+  // `confidence` is the classifier's score, a required number on the function's
+  // signature — never undefined, so the shorthand cannot hide the outage this
+  // ratchet exists for. The safety→moderation route (SCRUM-122).
+  "lib/sentiment-sweeper.ts": ["confidence"],
   "lib/sponsor-actions.ts": ["name", "name_key"],
   "lib/sponsored-scheduler.ts": ["failures", "type"],
   "lib/upload-grant-actions.ts": ["key"],
