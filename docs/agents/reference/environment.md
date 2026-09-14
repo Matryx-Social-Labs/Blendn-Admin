@@ -60,7 +60,28 @@ avoid the per-network sign-in rate limit.
 - Metro: `8081` (Android needs `adb reverse tcp:8081 tcp:8081`).
 - Local dev server (if used for itests / a local drive): `3100`.
 
-## The Android emulator (`Blendn_GApis`)
+## The Android emulator — use `Blendn_A34`, not `Blendn_GApis`
+
+**API 34 is the supported target. API 36.1 is not usable.** The section below
+records what API 36 cost and why, because the symptoms all look like something
+else (a slow GPU, slow typing) and the real causes are invisible unless you time
+a primitive.
+
+On API 34 (`system-images;android-34;google_apis;arm64-v8a`), out of the box:
+`ro.dalvik.vm.enable_uffd_gc=false`, Settings cold start 2.2 s, `uiautomator
+dump` 3.1 s, 20 chars 1.3 s — no workaround needed, and Maestro's driver starts.
+
+### The recipe that works
+
+1. **A release build, not the dev client.** `cd android && SENTRY_DISABLE_AUTO_UPLOAD=true ./gradlew assembleRelease` with **JDK 21** (`/opt/homebrew/opt/openjdk@21`; JDK 26 fails the React Native Gradle plugin). The 14 MB unminified dev bundle is what makes the dev client ANR under input; the release APK embeds a minified bundle and needs no Metro at all. `.env.local` + `.env` both point at staging, so the URL bakes in correctly — verify with `strings assets/index.android.bundle | grep staging-api`.
+2. **Keep Maestro's driver installed.** Maestro's own install fails silently here and it uninstalls the driver after each run, so the *next* run dies on `deviceInfo`. Extract `maestro-app.apk` and `maestro-server.apk` from `maestro-client.jar` and install them once.
+3. **Reap the zombie driver before every run.** A killed run leaves a defunct `[.mobile.maestro]` process that blocks the next driver start — the symptom is `Device server died during 'deviceInfo' ... UNAVAILABLE`. `adb shell am force-stop dev.mobile.maestro` clears it. This is the single highest-value line in `/tmp/mflows/mshot.sh`.
+4. **Watch host load.** An iOS simulator + its XCUITest runner + Metro + a 6-core emulator put a 10-core M1 Pro at load average 20 with 3.6M pageouts, and the guest ANRs because its `system_server` cannot get CPU. Shut down whichever platform you are not driving. Disabling guest bloat helps too (`pm disable-user --user 0 com.google.android.googlequicksearchbox` was burning 59%).
+5. **Do not `launchApp` mid-suite.** Restarting the app and immediately tapping is what triggers most ANRs; drive a warm app.
+
+`input tap x y` is frequently dropped by React Native — use `input swipe x y x y 120`, a tap with dwell. For *text*, prefer Maestro's `inputText` over `adb shell input text`: adb's key injection outruns RN's controlled `TextInput` and drops all but the first character or two.
+
+## Why API 36.1 (`Blendn_GApis`) was abandoned
 
 Measured 2026-09-14. The AVD looked GPU-bound and was not; two unrelated causes
 made it ~56× slow, and both are invisible unless you time a primitive.
