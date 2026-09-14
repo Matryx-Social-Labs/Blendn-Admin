@@ -59,3 +59,46 @@ avoid the per-network sign-in rate limit.
 ## Ports
 - Metro: `8081` (Android needs `adb reverse tcp:8081 tcp:8081`).
 - Local dev server (if used for itests / a local drive): `3100`.
+
+## The Android emulator (`Blendn_GApis`)
+
+Measured 2026-09-14. The AVD looked GPU-bound and was not; two unrelated causes
+made it ~56× slow, and both are invisible unless you time a primitive.
+
+| | before | after |
+|---|---|---|
+| `adb shell input text` (20 chars) | 11.3 s | 0.187 s |
+| `uiautomator dump` (28-node tree) | 30.8 s | 3.5 s |
+| Settings cold start | 20 s timeout | 1.3 s |
+
+**`enable_uffd_gc` is the big one.** With it on, *every* process fails to start
+in time — `userfaultfd: MOVE ioctl seems unsupported: Connection timed out`, then
+`ANR … failed to complete startup`. That is also why Maestro's Android driver
+dies: its process ANRs before the gRPC server binds, so `inputText` blocks until
+the 120 s deadline and reports a timeout that looks like slow typing.
+
+It must be set **before zygote starts** — setting it post-boot does nothing — and
+`persist.device_config.*` is re-synced from device_config at every boot unless
+sync is disabled first. Once, then restart the emulator from the host:
+
+```bash
+adb root                                   # google_apis (non-Play) only
+adb shell device_config set_sync_disabled_for_tests persistent
+adb shell device_config put runtime_native_boot enable_uffd_gc false
+adb shell setprop persist.device_config.runtime_native_boot.enable_uffd_gc false
+adb unroot                                 # Maestro's driver breaks under root adbd
+```
+
+Verify: `adb shell getprop persist.device_config.runtime_native_boot.enable_uffd_gc`
+→ `false`. `-gpu host` is correct; surfaceflinger at 245% was a symptom of the
+uffd thrash, not the renderer.
+
+`config.ini` is now `hw.ramSize=6144`, `hw.cpu.ncore=6`, `vm.heapSize=512M`
+(was 4096/4/228M — 195 MB free of 4 GB, swapping, with the RN dev app resident).
+
+**Driving it.** Maestro 2.10's Android driver still ANRs at startup on this image
+even after both fixes, so drive Android with `adb` directly. A bare
+`input tap x y` is frequently dropped by React Native — use
+`input swipe x y x y 120`, a tap with dwell. Typing is still the weak point: the
+14 MB unminified dev bundle leaves the JS thread slow enough that rapid input
+ANRs the app, so type in small chunks and read the field back.
