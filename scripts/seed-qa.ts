@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
 
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
-import { PrismaClient, type user_role } from "@prisma/client"
+import { PrismaClient, type user_role, type connection_intent } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
@@ -739,7 +739,33 @@ async function main() {
    * and a tester needs the list, not seven credential blocks.
    */
   const attendeeIds: string[] = []
-  for (const a of ATTENDEES) {
+  /*
+   * A complete profile per attendee — name, age, ≥2 interests, ≥1 intent — so
+   * matching and the board work out of the box. Without this, seed accounts
+   * have an empty interest graph (matching ranks on it, so every card is
+   * blank) and fail the board's complete-profile gate: both primitives look
+   * broken on a fresh seed. The graph is client-written in production; the seed
+   * has to stand in for onboarding.
+   *
+   * Interests are drawn from a rotating window over the same pool, so adjacent
+   * attendees share categories and matching has a real signal to rank on rather
+   * than everyone being equidistant.
+   */
+  const leafCats = await db.categories.findMany({
+    where: { parent_id: { not: null } },
+    orderBy: { slug: "asc" },
+    take: 8,
+    select: { id: true },
+  })
+  const INTENT_POOL: connection_intent[][] = [
+    ["networking", "friendship"],
+    ["dating", "just_here"],
+    ["friendship"],
+    ["networking", "dating"],
+  ]
+
+  for (let ai = 0; ai < ATTENDEES.length; ai++) {
+    const a = ATTENDEES[ai]
     const hashed = await bcrypt.hash(generatePassword(), HASH_COST)
     const u = await db.user.upsert({
       where: { email: a.email },
@@ -764,11 +790,23 @@ async function main() {
      * first reads zero, which looks like a broken funnel rather than a thin
      * world.
      */
+    const intent = INTENT_POOL[ai % INTENT_POOL.length]
     await db.profiles.upsert({
       where: { id: u.id },
-      update: { age: a.age, onboarded: true },
-      create: { id: u.id, name: a.name, age: a.age, onboarded: true },
+      update: { age: a.age, onboarded: true, intent_default: intent },
+      create: { id: u.id, name: a.name, age: a.age, onboarded: true, intent_default: intent },
     })
+
+    // Three interests from a rotating window, so neighbours overlap. Idempotent:
+    // clear this user's rows first, then create, so a re-seed does not stack.
+    if (leafCats.length >= 3) {
+      const picks = [0, 1, 2].map((k) => leafCats[(ai + k) % leafCats.length].id)
+      await db.user_interests.deleteMany({ where: { user_id: u.id } })
+      await db.user_interests.createMany({
+        data: picks.map((category_id) => ({ user_id: u.id, category_id })),
+        skipDuplicates: true,
+      })
+    }
     attendeeIds.push(u.id)
   }
 
