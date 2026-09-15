@@ -1,11 +1,11 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
   successResponse,
   unauthorizedResponse,
-  notFoundResponse,
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -38,15 +38,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       searchParams.get("limit") ?? undefined
     )
 
-    // Check if event exists
-    const event = await db.events.findUnique({
-      where: { id: eventId, deleted_at: null },
-      select: { id: true },
-    })
-
-    if (!event) {
-      return notFoundResponse("Event not found")
-    }
+    const denied = await attendeeEventAccess(authUser.userId, eventId, "view")
+    if (denied) return eventAccessResponse(denied)
 
     // Get total count
     const totalCount = await db.event_favorites.count({

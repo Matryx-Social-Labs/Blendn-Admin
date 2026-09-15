@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -27,15 +28,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "favorite", authUser.userId))
     if (limited) return limited
 
-    // Check if event exists
-    const event = await db.events.findUnique({
-      where: { id: eventId, deleted_at: null },
-      select: { id: true },
-    })
-
-    if (!event) {
-      return notFoundResponse("Event not found")
-    }
+    const denied = await attendeeEventAccess(authUser.userId, eventId, "participate")
+    if (denied) return eventAccessResponse(denied)
 
     // Add to favorites (upsert to handle duplicates)
     await db.event_favorites.upsert({

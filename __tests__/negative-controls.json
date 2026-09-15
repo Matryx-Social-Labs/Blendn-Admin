@@ -597,6 +597,13 @@
       "observed": "1 failing ('answers a closed pair with the same words as a stranger'). Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-13"
+    },
+    "integration/event-access.itest.ts": {
+      "guards": "that every single-event attendee route (GET, RSVP, favourite, board) refuses an under-age viewer with AGE_RESTRICTED, answers a draft or a stranger's private event with 404, and writes no row on refusal — through one resolver, lib/event-access.ts",
+      "mutation": "in app/api/mobile/events/[eventId]/rsvp/route.ts change `if (denied) return eventAccessResponse(denied)` to `if (denied && false) ...`",
+      "observed": "3 failing (the 17-year-old's rsvp 200 not 403, the unknown-age rsvp 200, the draft rsvp 200 with a row written). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-15"
     }
   },
   "grandfathered": [

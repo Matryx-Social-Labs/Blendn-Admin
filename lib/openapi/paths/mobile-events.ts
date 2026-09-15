@@ -49,7 +49,9 @@ registry.registerPath({
     "Going alone, and looking for somebody to go with. Readable by anyone who " +
     "RSVP'd or favourited — somebody deciding whether to go is exactly who it is " +
     "for. Authors are pseudonyms, the same handle the room uses; the request " +
-    "count is a number and never a list of who asked.",
+    "count is a number and never a list of who asked. An age-restricted event's " +
+    "board answers 403 `AGE_RESTRICTED` for an under-age or unknown age, before " +
+    "the RSVP/favourite gate.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string() }) },
   responses: {
@@ -218,6 +220,9 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}",
   tags: ["Mobile Events"],
   summary: "Get event details",
+  description:
+    "Drafts and private events you are not on the list for answer 404. An 18+ event answers " +
+    "403 `AGE_RESTRICTED` for a viewer below the line (see lib/event-access.ts).",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -372,6 +377,9 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/rsvp",
   tags: ["Mobile Events"],
   summary: "RSVP to event",
+  description:
+    "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age; 404 for a draft " +
+    "or a private event you are not on the list for (lib/event-access.ts).",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -431,6 +439,9 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/favorite",
   tags: ["Mobile Events"],
   summary: "Favorite event",
+  description:
+    "Same answers as RSVP: 403 `AGE_RESTRICTED` on an age-restricted event for an under-age or " +
+    "unknown age; 404 for a draft or a private event you are not on the list for.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {
