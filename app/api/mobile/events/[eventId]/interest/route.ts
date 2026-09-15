@@ -3,12 +3,12 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { emitEventInterestUpdate } from "@/lib/socket-server"
 import {
   successResponse,
   errorResponse,
   unauthorizedResponse,
-  notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 
@@ -33,15 +33,9 @@ export async function POST(
       return errorResponse("Invalid event ID format", 400)
     }
 
-    // Check if event exists
-    const event = await db.events.findUnique({
-      where: { id: eventId },
-      select: { id: true },
-    })
-
-    if (!event) {
-      return notFoundResponse("Event not found")
-    }
+    // The same row `favorite` writes, so the same door — see lib/event-access.ts.
+    const denied = await attendeeEventAccess(user.userId, eventId, "participate")
+    if (denied) return eventAccessResponse(denied)
 
     // Check if user already has this event as a favorite (interest)
     const existingFavorite = await db.event_favorites.findUnique({

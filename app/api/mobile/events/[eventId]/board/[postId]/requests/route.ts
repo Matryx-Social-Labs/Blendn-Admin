@@ -7,6 +7,7 @@ import { boardWriteDenial } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { notifyBoardRequest } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -68,6 +69,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * event started would open one on the strength of an intent that has
      * already been overtaken by whether they actually turned up.
      */
+    const denied = await attendeeEventAccess(user.userId, eventId, "participate")
+    if (denied) return eventAccessResponse(denied)
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       select: { id: true, start_time: true },

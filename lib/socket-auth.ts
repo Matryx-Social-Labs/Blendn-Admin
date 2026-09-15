@@ -1,4 +1,6 @@
 import { db } from "./db"
+import { actorFor } from "./org-membership"
+import { eventPermissionSelect, eventPermissions } from "./rbac"
 
 /**
  * Room-join authorization for Socket.io.
@@ -76,11 +78,26 @@ export async function canJoinConversation(
 export async function canJoinEvent(userId: string, eventId: string): Promise<boolean> {
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
-    select: { visibility: true, organizer_id: true },
+    select: { visibility: true, organizer_id: true, ...eventPermissionSelect },
   })
   if (!event) return false
   if (event.visibility !== "private") return true
+
+  /*
+   * Staff access is organisation-shaped, like everywhere else: a colleague at
+   * the organisation running the event, or at the venue hosting it, operates
+   * it and may watch its counter. `organizer_id` stays as the legacy creator
+   * fallback `visibleEventsWhere` keeps for the same reason — a row created
+   * before organisations existed must not vanish from its creator — and goes
+   * when that one does. This function is now also what `attendeeEventAccess`
+   * asks about a private event, so answering by creator alone would have told
+   * the creator's own colleagues "not found" through the mobile API.
+   */
   if (event.organizer_id === userId) return true
+  const user = await db.user.findUnique({ where: { id: userId }, select: { role: true } })
+  if (user && eventPermissions(await actorFor({ id: userId, role: user.role }), event).canOperate) {
+    return true
+  }
 
   // An RSVP only grants access if the user actually intends to attend.
   // `rsvp_status` includes `not_going`, and declining an invite must not hand

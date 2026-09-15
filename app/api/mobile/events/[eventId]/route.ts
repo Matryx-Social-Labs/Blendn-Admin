@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -50,6 +51,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    // Drafts and strangers' private events read as not found; an under-age
+    // viewer is told why. See lib/event-access.ts.
+    const denied = await attendeeEventAccess(authUser.userId, eventId, "view")
+    if (denied) return eventAccessResponse(denied)
 
     // Parse optional coordinates from query
     const searchParams = request.nextUrl.searchParams

@@ -4,11 +4,11 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import {
   successResponse,
   errorResponse,
   unauthorizedResponse,
-  notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 
@@ -29,11 +29,8 @@ export async function POST(
     const { eventId } = await params
     if (!uuidRegex.test(eventId)) return errorResponse("Invalid event ID format", 400)
 
-    const event = await db.events.findUnique({
-      where: { id: eventId, deleted_at: null },
-      select: { id: true },
-    })
-    if (!event) return notFoundResponse("Event not found")
+    const denied = await attendeeEventAccess(user.userId, eventId, "participate")
+    if (denied) return eventAccessResponse(denied)
 
     const body = await request.json()
     const status: "going" | "maybe" | "not_going" = body.status || "going"
@@ -68,6 +65,12 @@ export async function DELETE(
 
     const { eventId } = await params
     if (!uuidRegex.test(eventId)) return errorResponse("Invalid event ID format", 400)
+
+    // A draft or a stranger's private event is not found here either — this
+    // answered a real `going` count for any id. Withdrawing is never refused
+    // on age: somebody who got in before the rule must be able to get out.
+    const denied = await attendeeEventAccess(user.userId, eventId, "view")
+    if (denied?.kind === "not_found") return eventAccessResponse(denied)
 
     await db.event_rsvps.deleteMany({
       where: { event_id: eventId, user_id: user.userId },

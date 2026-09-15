@@ -597,6 +597,13 @@
       "observed": "1 failing ('answers a closed pair with the same words as a stranger'). Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-13"
+    },
+    "integration/event-access.itest.ts": {
+      "guards": "that every single-event attendee route (GET, RSVP, favourite, interest, interested-users, board read/post/request, and the withdrawals) refuses an under-age viewer with errorCode AGE_RESTRICTED, answers a draft, soft-deleted or stranger's private event with 404 NOT_FOUND, admits an organisation colleague to a private event, and writes no row on refusal — through one resolver, lib/event-access.ts",
+      "mutation": "A: in rsvp/route.ts change `if (denied) return eventAccessResponse(denied)` to `if (denied && false) ...`. B: the same on the board POST guard in board/route.ts (the coverage pass showed the first version of the test did not catch B — its 403s were checked by status, and the board's own 'not going' 403 masked the missing age guard)",
+      "observed": "A: 3 failing. B: 3 failing (the minor's boardPost '403 FORBIDDEN' not '403 AGE_RESTRICTED', the unknown-age boardPost, the draft boardPost 403 not 404). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-15"
     }
   },
   "grandfathered": [

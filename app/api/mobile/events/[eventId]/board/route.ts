@@ -6,6 +6,7 @@ import { boardDenialMessage, mayReadBoard } from "@/lib/board"
 import { boardPseudonyms, boardWriteDenial, entitlementFor } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { db } from "@/lib/db"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -42,6 +43,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { eventId } = await params
 
+    const denied = await attendeeEventAccess(user.userId, eventId, "participate")
+    if (denied) return eventAccessResponse(denied)
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       select: { id: true, start_time: true },
@@ -140,6 +143,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * rather than intent. A board that stayed open would be a second room with
      * a weaker gate running beside the real one.
      */
+    const denied = await attendeeEventAccess(user.userId, eventId, "participate")
+    if (denied) return eventAccessResponse(denied)
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       select: { id: true, start_time: true },
