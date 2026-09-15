@@ -213,3 +213,22 @@ emulator never gets a GPS fix — SCRUM-112).
 | Report an event → Delist | iOS → admin | the sheet, the row, Dismiss/Delist, `visibility unlisted`; the organiser is told nothing and reasons show as enum keys (**SCRUM-121**, recorded) |
 | Check out → check in again | iOS → organiser Live tab | a second `presence_sessions` row (first `departed_source=user`, second open); Live went ~2 → ~1 → 2, "count unreliable" clearing on the fresh heartbeat; "Checked in — Go to Chat" opens the room at its end |
 | Announce from the dashboard | organiser messaging (two-step: Send to the room → Send now) → iOS room, live | row `type announcement`; the phone drew "ANNOUNCEMENT · NIGHTSHIFT COLLECTIVE" over the text, once, and followed the end |
+
+**Fourth drive, 2026-09-15 — the account lifecycle on both phones, against
+staging, closing E19 (SCRUM-54).** iOS dev client on the simulator (Metro →
+staging), Android release APK on `Blendn_A34` (the SCRUM-128 recipe); the
+dashboard through `browse` as Priya, then Arjun. Every row read back from the
+staging Postgres.
+
+| Journey | Surface | Read back / result |
+|---|---|---|
+| Sign-up refusals | iOS | invalid email, 11-char password, an existing address — each refused with its own copy, no row written |
+| Sign up → eight steps, Allow on both permissions, no photo | iOS | `profiles` complete (gender, dob, orientations, `interested_in` derived, `reveal_by_default f`, location, occupation, `work_field`, bio), `user_interests` 3, `onboarded t`; `push_tokens` empty by design on a simulator |
+| Another city | iOS, simulator in Lisbon | "You're in Lisboa — nothing here yet. Showing Bengaluru."; `city_demand {lisboa, opens 1→2}`; admin Cities row **Lisboa · 1 waiting · 0 events** |
+| "Looking for" | both | `looking_for` written, `intent_default` empty → board `403` "Add … why you go out" (**SCRUM-77**, reconfirmed); a 17-year-old picked Dating and it stored |
+| Sign up as a 17-year-old (age 25 typed, DOB 2009) with a photo | Android | `age` normalised to 17 from the birth date; photo on Tigris, `User.image` set; feed and search hid the 18+ event; check-in refused `under_age` and the overview's turn-away tile counted it |
+| The 18+ event by id | Android deep link → API | full detail, RSVP `going`, favourite, the board's "split a cab?" post — all open to the minor; the organiser's page counted them (**SCRUM-130**, fixed: `lib/event-access.ts`, which also closed drafts and strangers' private events on every single-event route) |
+| Admin edits Age to 17 | dashboard | `profiles.age 17`, the list says "17 years old", the product still says 30 (birth date wins); no `audit_logs` row for any admin user edit or role change (**SCRUM-131**, recorded) |
+| Delete account | iOS → dashboard | erased and anonymised, tokens revoked, email reusable; the two `going` RSVPs survived and Arjun's overview reads "1 going" for a deleted person; the still-valid access token re-populated the erased profile (**SCRUM-132**, recorded) |
+| Organiser opens `/dashboard/users` | dashboard | redirected to `/dashboard` |
+| Release build's Location map | Android | blank grid — the Maps key is not authorised for the debug keystore's SHA-1 (**SCRUM-125**, comment) |
