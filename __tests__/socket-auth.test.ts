@@ -3,6 +3,8 @@ const mockDb = {
   private_conversations: { findUnique: jest.fn() },
   events: { findFirst: jest.fn() },
   event_rsvps: { findFirst: jest.fn() },
+  user: { findUnique: jest.fn() },
+  organisation_members: { findMany: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -17,6 +19,9 @@ const EVENT_ID = "33333333-3333-3333-3333-333333333333"
 
 beforeEach(() => {
   jest.clearAllMocks()
+  // An attendee with no memberships, unless a test says otherwise.
+  mockDb.user.findUnique.mockResolvedValue({ role: "attendee" })
+  mockDb.organisation_members.findMany.mockResolvedValue([])
 })
 
 describe("canJoinChat", () => {
@@ -124,6 +129,32 @@ describe("canJoinEvent", () => {
       organizer_id: USER,
     })
     await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(true)
+  })
+
+  it("allows a colleague at the organisation running a private event — access is org-shaped", async () => {
+    mockDb.events.findFirst.mockResolvedValue({
+      visibility: "private",
+      organizer_id: OTHER,
+      organizer_org_id: "org_nightshift",
+      venue: null,
+    })
+    mockDb.user.findUnique.mockResolvedValue({ role: "organizer" })
+    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_nightshift" }])
+    mockDb.event_rsvps.findFirst.mockResolvedValue(null)
+    await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(true)
+  })
+
+  it("denies an organiser from a different organisation", async () => {
+    mockDb.events.findFirst.mockResolvedValue({
+      visibility: "private",
+      organizer_id: OTHER,
+      organizer_org_id: "org_nightshift",
+      venue: null,
+    })
+    mockDb.user.findUnique.mockResolvedValue({ role: "organizer" })
+    mockDb.organisation_members.findMany.mockResolvedValue([{ org_id: "org_elsewhere" }])
+    mockDb.event_rsvps.findFirst.mockResolvedValue(null)
+    await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(false)
   })
 
   it("allows an RSVP'd attendee into a private event", async () => {

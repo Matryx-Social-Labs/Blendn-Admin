@@ -1277,14 +1277,17 @@ shipped `orientation` and `gender` together to any authenticated caller.
   "18+" — a shared link reaches that screen whatever the listing did. For a
   viewer whose derived age is **below** the line it returns 403
   `AGE_RESTRICTED` instead, like the door; an unknown age is shown the event.
-- **RSVP, favourite and the board (`/rsvp`, `/favorite`, `/board`,
-  `/board/:postId/requests`) refuse 403 `AGE_RESTRICTED`** for an under-age
+- **RSVP, favourite/interest and the board (`/rsvp`, `/favorite`, `/interest`,
+  `/board`, `/board/:postId/requests`) refuse 403 `AGE_RESTRICTED`** for an under-age
   *or unknown* age — these are the beginning of being there, so they take the
   door's posture, not discovery's. Until this, only the feed and the door
   applied the rule, and a 17-year-old could RSVP to, save and read the board
   of an 18+ event by id (SCRUM-130). The rule lives in one place,
   `lib/event-access.ts`, which also answers a **draft** or a stranger's
-  **private** event with 404 on every one of those routes.
+  **private** event with 404 on every one of those routes — withdrawals
+  (`DELETE /rsvp`, `DELETE /favorite`) included, though a withdrawal is never
+  refused on age. A private event admits its guests (an RSVP) and the staff of
+  the organisation running it, not only the row's creator.
 
 Set by the organiser in the dashboard event form, bounded 13–25.
 

@@ -7,7 +7,6 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
-  notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 
@@ -75,15 +74,10 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "favorite", authUser.userId))
     if (limited) return limited
 
-    // Check if event exists
-    const event = await db.events.findUnique({
-      where: { id: eventId, deleted_at: null },
-      select: { id: true },
-    })
-
-    if (!event) {
-      return notFoundResponse("Event not found")
-    }
+    // Same answer as POST for a draft or a stranger's private event; removing
+    // a save is never refused on age.
+    const denied = await attendeeEventAccess(authUser.userId, eventId, "view")
+    if (denied?.kind === "not_found") return eventAccessResponse(denied)
 
     // Remove from favorites
     await db.event_favorites.deleteMany({
