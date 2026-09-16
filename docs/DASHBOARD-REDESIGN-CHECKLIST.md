@@ -232,3 +232,20 @@ staging Postgres.
 | Delete account | iOS → dashboard | erased and anonymised, tokens revoked, email reusable; the two `going` RSVPs survived and Arjun's overview reads "1 going" for a deleted person; the still-valid access token re-populated the erased profile (**SCRUM-132**, recorded) |
 | Organiser opens `/dashboard/users` | dashboard | redirected to `/dashboard` |
 | Release build's Location map | Android | blank grid — the Maps key is not authorised for the debug keystore's SHA-1 (**SCRUM-125**, comment) |
+
+**Fifth drive, 2026-09-15/16 — the decision halves nobody had driven on
+staging, and the phone after the age-gate fix.** Jira was checked before
+each: SCRUM-32 covers the `/apply` gate variants, SCRUM-84 the event-claim
+funnel, SCRUM-109 invite → accept — none were repeated. Dashboard through
+`browse`, phone on the Android release build; the staging log read where the
+row alone could not explain.
+
+| Journey | Surface | Read back / result |
+|---|---|---|
+| SCRUM-130 re-driven after promotion | API as the minor → Android deep link | every guarded route 403 `AGE_RESTRICTED`, the draft 404; the deep link that opened the full event lands on "Event not found"; the pre-fix RSVP withdrawn through `DELETE /rsvp` (200 — never refused on age) |
+| Adult path after the fix | Android, Ananya | Design Week opens in full, "I'm going" → `event_rsvps going` |
+| Apply → Applications queue → approve / decline | `/apply` → admin | GSTIN refusal is a toast; own-domain application `email_pending · tier domain`; approve wrote org + owner + organizer account + audit; decline stored the reason; organiser locked out of the queue (**SCRUM-133**); the approval email carries the initial password in plaintext (**SCRUM-134**) |
+| Venue claim → queue → approve / decline → owner's page | venue owner → admin → owner | evidence uploaded and filed; approve set `venues.owner_org_id`; decline stored the reason and told nobody (**SCRUM-117** reconfirmed); the trade licence is public at its URL (**SCRUM-135**); the won venue is absent from the owner's Venues page (**SCRUM-136**) (**SCRUM-137**) |
+| Organisation membership | outsider → colleague → removed | a staff colleague opens and may edit an event he did not create; role change and removal audited; the removed member is back to 0 events; removing the last owner is refused — as "Minified React error #441" (**SCRUM-139**: every thrown server-action refusal is masked in production) (**SCRUM-140**) |
+| The idle phone overnight | Android | signed out with no message; staging log: a refresh rotated at 20:50 UTC, the phone replayed the old token 869 s later, outside the 60 s grace, and the server revoked every session (**SCRUM-138**) |
+| Privacy toggles | Android settings | `show_online` and `push_enabled` write `false`; nothing reads `show_online` — the switch guards a feature that does not exist (**SCRUM-141**) |
