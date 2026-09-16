@@ -67,8 +67,51 @@ it("re-issues on a replay inside the grace window and retires the pair nobody go
   expect((await refresh(lostPair.refreshToken)).status).toBe(401)
 })
 
-it("still ends the family on a replay long after rotation", async () => {
+it("re-issues on a replay a quarter of an hour later when the successor was never used — the idle phone (SCRUM-138)", async () => {
   const userId = await makeUser("rr-b")
+  users.push(userId)
+  const { email } = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
+  const first = signRefreshToken(userId, email)
+  await storeRefreshToken(userId, first)
+  const lostPair = ((await (await refresh(first)).json()) as { data: { refreshToken: string } }).data
+
+  // 869 s later, as it happened on staging: the access token expired, the
+  // phone presented the token it still held.
+  await db.mobile_refresh_tokens.update({
+    where: { id: jti(first) },
+    data: { revoked_at: new Date(Date.now() - 869_000) },
+  })
+  const retry = await refresh(first)
+  expect(retry.status).toBe(200)
+  const retryPair = ((await retry.json()) as { data: { refreshToken: string } }).data
+  const live = await db.mobile_refresh_tokens.findMany({ where: { user_id: userId, revoked_at: null } })
+  expect(live.map((r) => r.id)).toEqual([jti(retryPair.refreshToken)])
+  expect((await refresh(lostPair.refreshToken)).status).toBe(401)
+})
+
+it("still ends the family when the successor WAS used — the theft signature, whatever the clock says", async () => {
+  const userId = await makeUser("rr-c")
+  users.push(userId)
+  const { email } = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
+  const first = signRefreshToken(userId, email)
+  await storeRefreshToken(userId, first)
+  const pair = ((await (await refresh(first)).json()) as { data: { refreshToken: string } }).data
+  // The device carried on: its successor rotated normally.
+  const next = ((await (await refresh(pair.refreshToken)).json()) as { data: { refreshToken: string } }).data
+
+  // Then the original, well inside the window, from somebody else.
+  await db.mobile_refresh_tokens.update({
+    where: { id: jti(first) },
+    data: { revoked_at: new Date(Date.now() - 5 * 60_000) },
+  })
+  expect((await refresh(first)).status).toBe(401)
+  // Everybody is out, the legitimate chain included.
+  expect((await refresh(next.refreshToken)).status).toBe(401)
+  expect(await db.mobile_refresh_tokens.count({ where: { user_id: userId, revoked_at: null } })).toBe(0)
+})
+
+it("still ends the family on a replay long after rotation", async () => {
+  const userId = await makeUser("rr-d")
   users.push(userId)
   const { email } = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   const first = signRefreshToken(userId, email)
@@ -77,7 +120,7 @@ it("still ends the family on a replay long after rotation", async () => {
 
   await db.mobile_refresh_tokens.update({
     where: { id: jti(first) },
-    data: { revoked_at: new Date(Date.now() - 10 * 60_000) },
+    data: { revoked_at: new Date(Date.now() - 25 * 60_000) },
   })
   expect((await refresh(first)).status).toBe(401)
   // Reuse detection: the legitimate successor is gone too.

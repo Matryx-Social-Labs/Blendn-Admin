@@ -184,12 +184,33 @@ describe("verifyRefreshToken — reuse handling", () => {
      */
     const token = withStoredToken({ revoked_at: new Date(Date.now() - 5_000), replaced_by: "succ-1" })
     mockBcryptCompare.mockResolvedValue(true)
+    // The successor was never used: live, never itself rotated.
+    mockDb.mobile_refresh_tokens.updateMany.mockResolvedValue({ count: 1 })
 
     await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: USER, type: "refresh" })
     // Only the orphaned successor is revoked — never the whole family.
     expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenCalledTimes(1)
     expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "succ-1", revoked_at: null } })
+      expect.objectContaining({ where: { id: "succ-1", revoked_at: null, replaced_by: null } })
+    )
+  })
+
+  it("re-issues a quarter of an hour later too, when the successor was never used (the idle phone, SCRUM-138)", async () => {
+    const token = withStoredToken({ revoked_at: new Date(Date.now() - 869_000), replaced_by: "succ-1" })
+    mockBcryptCompare.mockResolvedValue(true)
+    mockDb.mobile_refresh_tokens.updateMany.mockResolvedValue({ count: 1 })
+    await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: USER, type: "refresh" })
+    expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenCalledTimes(1)
+  })
+
+  it("revokes the whole family when the successor was already used, however soon", async () => {
+    const token = withStoredToken({ revoked_at: new Date(Date.now() - 5_000), replaced_by: "succ-1" })
+    mockBcryptCompare.mockResolvedValue(true)
+    // Retiring the successor matched nothing: it was rotated by whoever holds it.
+    mockDb.mobile_refresh_tokens.updateMany.mockResolvedValueOnce({ count: 0 })
+    await expect(verifyRefreshToken(token)).resolves.toBeNull()
+    expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { user_id: USER, revoked_at: null }, data: { revoked_at: expect.any(Date) } })
     )
   })
 
@@ -200,7 +221,7 @@ describe("verifyRefreshToken — reuse handling", () => {
   })
 
   it("revokes the whole family when a token is replayed long after rotation", async () => {
-    const token = withStoredToken({ revoked_at: new Date(Date.now() - 10 * 60_000) })
+    const token = withStoredToken({ revoked_at: new Date(Date.now() - 25 * 60_000) })
 
     await expect(verifyRefreshToken(token)).resolves.toBeNull()
     expect(mockDb.mobile_refresh_tokens.updateMany).toHaveBeenCalledWith(

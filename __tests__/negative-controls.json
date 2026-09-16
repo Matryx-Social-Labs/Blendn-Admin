@@ -562,12 +562,11 @@
       "note": "Eighth and ninth strictUndefinedChecks outages, both on the safety path; SCRUM-99."
     },
     "integration/refresh-replay.itest.ts": {
-      "guards": "that a refresh token replayed inside the grace window after rotation is answered with a fresh pair and its orphaned successor revoked, that the orphan is then refused, and that a replay long after rotation still ends the family",
-      "mutation": "in lib/mobile-auth.ts verifyRefreshToken, replace the successor revocation inside the grace branch with `return null` (the previous behaviour)",
-      "observed": "1 failing ('re-issues on a replay inside the grace window…' — retry returned 401). Green after revert (cp of the saved file)",
+      "guards": "that a refresh token replayed within 20 minutes of rotation, while its successor was never used, is re-issued (the idle-phone lost-response case, SCRUM-138); that a replay whose successor WAS used ends the family whatever the clock says; that a replay past the window ends the family",
+      "mutation": "A: REFRESH_REUSE_GRACE_MS back to 60 * 1000. B: drop `revoked_at: null, replaced_by: null` from the successor-retiring updateMany",
+      "observed": "A: 1 failing (the 869 s re-issue). B: 1 failing (the used-successor family kill: 200 not 401). Green after cp of the saved file",
       "reverted": true,
-      "date": "2026-09-12",
-      "note": "Found by driving two phones for half an hour: the emulator's refresh timed out and the session died. SCRUM-101."
+      "date": "2026-09-16"
     },
     "org-invites.test.ts": {
       "guards": "(2026-09-12 addition) that app/api/organisation/accept-invite/route.ts answers an existing member with `alreadyMember: true` BEFORE `inviteState` judges the token, so a second accept by the person who was just let in is not \"already used\"",
