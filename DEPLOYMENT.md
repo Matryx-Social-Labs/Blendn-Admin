@@ -258,6 +258,7 @@ so it is never related to session or login state.
 | `TIGRIS_ACCESS_KEY` | No | Tigris credentials |
 | `TIGRIS_SECRET_KEY` | No | Tigris credentials |
 | `TIGRIS_BUCKET` | No | Bucket for uploads (default: blendn-media) |
+| `TIGRIS_PRIVATE_BUCKET` | No | Private bucket for claim evidence, read only through signed URLs (default: `<TIGRIS_BUCKET>-private`, created on boot) |
 | `TIGRIS_REGION` | No | Bucket region (default: auto) |
 | `OPENAI_API_KEY` | No | AI moderation. Without it, moderation falls back to keyword matching only |
 | `RESEND_API_KEY` | No | Transactional email. Without it onboarding and invites still work, but nothing is sent — the dashboard shows the link/password to pass on by hand |

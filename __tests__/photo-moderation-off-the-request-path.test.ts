@@ -123,7 +123,7 @@ describe("the vendor calls have a deadline", () => {
     const src = readFileSync(require.resolve("@/lib/moderation/openai-moderation"), "utf8")
     expect(src.match(/signal: AbortSignal\.timeout\(MODERATION_TIMEOUT_MS\)/g)?.length).toBe(2)
     const tigris = readFileSync(require.resolve("@/lib/tigris"), "utf8")
-    expect(tigris).toMatch(/new HeadObjectCommand\(\{ Bucket: TIGRIS_BUCKET, Key: key \}\),\s*\{ abortSignal: AbortSignal\.timeout\(5_000\) \}/)
+    expect(tigris).toMatch(/new HeadObjectCommand\(\{ Bucket: bucketForKey\(key\), Key: key \}\),\s*\{ abortSignal: AbortSignal\.timeout\(5_000\) \}/)
   })
 })
 

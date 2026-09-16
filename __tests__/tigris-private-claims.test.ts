@@ -20,6 +20,7 @@ process.env.TIGRIS_ENDPOINT = "https://t3.storage.dev"
 process.env.TIGRIS_ACCESS_KEY = "test"
 process.env.TIGRIS_SECRET_KEY = "test"
 process.env.TIGRIS_BUCKET = "blendn-media-test"
+delete process.env.TIGRIS_PRIVATE_BUCKET
 
 const signed = jest.fn(async (_client: unknown, command: { input: { Key: string } }) =>
   `https://signed.example/${command.input.Key}?X-Amz-Signature=abc`
@@ -39,6 +40,11 @@ jest.mock("@aws-sdk/client-s3", () => {
     S3Client: class {
       async send(command: unknown) {
         sent.push(command)
+        // The private bucket does not exist yet: the boot path must create it.
+        const c = command as { name: string; input: { Bucket?: string } }
+        if (c.name === "HeadBucket" && c.input.Bucket === "blendn-media-test-private") {
+          throw Object.assign(new Error("NotFound"), { name: "NotFound", $metadata: { httpStatusCode: 404 } })
+        }
         return {}
       }
     },
@@ -55,7 +61,15 @@ jest.mock("@aws-sdk/client-s3", () => {
   }
 })
 
-import { PUBLIC_FOLDERS, ensureBucketExists, reviewableUrl, validateContentType } from "@/lib/tigris"
+import {
+  PUBLIC_FOLDERS,
+  bucketFor,
+  ensureBucketExists,
+  extractKeyFromUrl,
+  getPresignedUploadUrl,
+  reviewableUrl,
+  validateContentType,
+} from "@/lib/tigris"
 
 const ROOT = join(__dirname, "..")
 const code = (p: string) => stripComments(readFileSync(join(ROOT, p), "utf8"))
@@ -81,6 +95,28 @@ describe("the bucket policy, as applied on every boot", () => {
     expect(PUBLIC_FOLDERS).not.toContain("claims")
     expect(resources.some((r) => r.includes("/claims/"))).toBe(false)
   })
+
+  it("creates the private bucket with CORS and never a public policy — Tigris ignores a folder policy, the bucket is the lever", () => {
+    const forPrivate = (name: string) =>
+      sent.filter((c) => (c as { name: string; input: { Bucket?: string } }).name === name && (c as { input: { Bucket?: string } }).input.Bucket === "blendn-media-test-private")
+    expect(forPrivate("CreateBucket")).toHaveLength(1)
+    expect(forPrivate("PutBucketCors")).toHaveLength(1)
+    expect(forPrivate("PutBucketPolicy")).toHaveLength(0)
+  })
+})
+
+describe("where a claim document goes", () => {
+  it("is the private bucket, and the stored reference names it", async () => {
+    expect(bucketFor("claims")).toBe("blendn-media-test-private")
+    expect(bucketFor("events")).toBe("blendn-media-test")
+    const { uploadUrl, publicUrl, key } = await getPresignedUploadUrl("licence.pdf", "application/pdf", "claims", "user1")
+    expect(key).toMatch(/^claims\/user1\//)
+    expect(publicUrl).toBe(`https://blendn-media-test-private.fly.storage.tigris.dev/${key}`)
+    expect(uploadUrl).toContain("X-Amz-Signature")
+    const put = signed.mock.calls.at(-1)![1] as unknown as { input: { Bucket: string } }
+    expect(put.input.Bucket).toBe("blendn-media-test-private")
+    expect(extractKeyFromUrl(publicUrl)).toBe(key)
+  })
 })
 
 describe("what a reviewer is handed", () => {
@@ -88,12 +124,13 @@ describe("what a reviewer is handed", () => {
 
   it("signs a private key and leaves a public one alone", async () => {
     const bucket = "blendn-media-test"
-    const priv = `https://${bucket}.fly.storage.tigris.dev/claims/user1/1-abc-licence.pdf`
+    const priv = `https://${bucket}-private.fly.storage.tigris.dev/claims/user1/1-abc-licence.pdf`
     const pub = `https://${bucket}.fly.storage.tigris.dev/events/user1/1-abc-cover.jpg`
 
     await expect(reviewableUrl(priv)).resolves.toContain("X-Amz-Signature")
     expect(signed).toHaveBeenCalledTimes(1)
-    expect(signed.mock.calls[0][1].input.Key).toBe("claims/user1/1-abc-licence.pdf")
+    const get = signed.mock.calls[0][1] as unknown as { input: { Bucket: string; Key: string } }
+    expect(get.input).toMatchObject({ Bucket: "blendn-media-test-private", Key: "claims/user1/1-abc-licence.pdf" })
 
     // Evidence filed before `claims/` existed, and a link the claimant pasted.
     await expect(reviewableUrl(pub)).resolves.toBe(pub)

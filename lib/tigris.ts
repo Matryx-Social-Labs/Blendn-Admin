@@ -20,6 +20,16 @@ const TIGRIS_ENDPOINT = process.env.TIGRIS_ENDPOINT || ""
 const TIGRIS_ACCESS_KEY = process.env.TIGRIS_ACCESS_KEY || ""
 const TIGRIS_SECRET_KEY = process.env.TIGRIS_SECRET_KEY || ""
 const TIGRIS_BUCKET = process.env.TIGRIS_BUCKET || "blendn-media"
+/**
+ * Where private documents live. Tigris makes access a property of the
+ * BUCKET: a public bucket serves every object to anyone, `PutBucketPolicy`
+ * is not implemented and a per-object `private` ACL is accepted and ignored
+ * (both verified against staging while fixing SCRUM-135). So a private
+ * folder inside the public bucket cannot exist; a second bucket, private by
+ * default, is the only lever. Created on boot if missing, never given a
+ * public policy, read only through signed URLs.
+ */
+const TIGRIS_PRIVATE_BUCKET = process.env.TIGRIS_PRIVATE_BUCKET || `${TIGRIS_BUCKET}-private`
 const TIGRIS_REGION = process.env.TIGRIS_REGION || "auto"
 
 // Validate configuration
@@ -71,6 +81,15 @@ export type UploadFolder = "profile" | "chat" | "events" | "sponsored" | "claims
  */
 export const PUBLIC_FOLDERS: readonly UploadFolder[] = ["profile", "chat", "events", "sponsored"]
 
+/** The bucket a folder lives in: the public one, or the private one. */
+export function bucketFor(folder: UploadFolder): string {
+  return (PUBLIC_FOLDERS as readonly string[]).includes(folder) ? TIGRIS_BUCKET : TIGRIS_PRIVATE_BUCKET
+}
+
+function bucketForKey(key: string): string {
+  return bucketFor(key.split("/")[0] as UploadFolder)
+}
+
 /**
  * Generate a unique filename with folder prefix
  */
@@ -88,8 +107,9 @@ function generateKey(folder: UploadFolder, filename: string, userId: string): st
  * Get the public URL for a stored object
  */
 function getPublicUrl(key: string): string {
-  // Tigris uses virtual-hosted style URLs for public access
-  return `https://${TIGRIS_BUCKET}.fly.storage.tigris.dev/${key}`
+  // Tigris uses virtual-hosted style URLs for public access. For a private
+  // key this is the stored reference, not something that serves.
+  return `https://${bucketForKey(key)}.fly.storage.tigris.dev/${key}`
 }
 
 /**
@@ -117,7 +137,7 @@ export async function getPresignedUploadUrl(
   const key = generateKey(folder, filename, userId)
 
   const command = new PutObjectCommand({
-    Bucket: TIGRIS_BUCKET,
+    Bucket: bucketFor(folder),
     Key: key,
     ContentType: contentType,
     ...(opts.checksum ? { ChecksumAlgorithm: "SHA256" as const } : {}),
@@ -152,7 +172,7 @@ export async function deleteFile(key: string): Promise<void> {
   const client = getS3Client()
 
   const command = new DeleteObjectCommand({
-    Bucket: TIGRIS_BUCKET,
+    Bucket: bucketForKey(key),
     Key: key,
   })
 
@@ -174,13 +194,13 @@ export async function deletePrefix(prefix: string): Promise<number> {
   let token: string | undefined
   do {
     const page = await client.send(
-      new ListObjectsV2Command({ Bucket: TIGRIS_BUCKET, Prefix: prefix, ContinuationToken: token })
+      new ListObjectsV2Command({ Bucket: bucketForKey(prefix), Prefix: prefix, ContinuationToken: token })
     )
     const keys = (page.Contents ?? []).map((o) => o.Key).filter((k): k is string => Boolean(k))
     if (keys.length > 0) {
       await client.send(
         new DeleteObjectsCommand({
-          Bucket: TIGRIS_BUCKET,
+          Bucket: bucketForKey(prefix),
           Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
         })
       )
@@ -197,25 +217,18 @@ export async function deletePrefix(prefix: string): Promise<number> {
 export function extractKeyFromUrl(url: string): string | null {
   const cleanedUrl = url.split(/[?#]/)[0]
 
-  // Handle virtual-hosted style: https://bucket.fly.storage.tigris.dev/key
-  const vhostPrefix = `${TIGRIS_BUCKET}.fly.storage.tigris.dev/`
-  const vhostIndex = cleanedUrl.indexOf(vhostPrefix)
-  if (vhostIndex !== -1) {
-    return cleanedUrl.substring(vhostIndex + vhostPrefix.length)
+  for (const bucket of [TIGRIS_BUCKET, TIGRIS_PRIVATE_BUCKET]) {
+    // Virtual-hosted (fly and t3 hosts), then legacy path-style.
+    for (const prefix of [
+      `${bucket}.fly.storage.tigris.dev/`,
+      `${bucket}.t3.storage.dev/`,
+      `/${bucket}/`,
+    ]) {
+      const index = cleanedUrl.indexOf(prefix)
+      if (index !== -1) return cleanedUrl.substring(index + prefix.length)
+    }
   }
-
-  // Handle virtual-hosted t3 style: https://bucket.t3.storage.dev/key
-  const t3VhostPrefix = `${TIGRIS_BUCKET}.t3.storage.dev/`
-  const t3VhostIndex = cleanedUrl.indexOf(t3VhostPrefix)
-  if (t3VhostIndex !== -1) {
-    return cleanedUrl.substring(t3VhostIndex + t3VhostPrefix.length)
-  }
-
-  // Handle legacy path-style: https://t3.storage.dev/bucket/key
-  const bucketPrefix = `/${TIGRIS_BUCKET}/`
-  const index = cleanedUrl.indexOf(bucketPrefix)
-  if (index === -1) return null
-  return cleanedUrl.substring(index + bucketPrefix.length)
+  return null
 }
 
 /**
@@ -308,7 +321,7 @@ export async function getObjectSize(key: string): Promise<number | null> {
     // The SDK has no default request timeout; this HEAD is on the profile
     // PUT's path, and "the object is not there" must not take a minute.
     const head = await client.send(
-      new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }),
+      new HeadObjectCommand({ Bucket: bucketForKey(key), Key: key }),
       { abortSignal: AbortSignal.timeout(5_000) }
     )
     return head.ContentLength ?? null
@@ -326,7 +339,7 @@ export async function getObjectSize(key: string): Promise<number | null> {
  */
 export async function getPresignedReadUrl(key: string, expiresIn = 900): Promise<string> {
   const client = getS3Client()
-  return getSignedUrl(client, new GetObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }), { expiresIn })
+  return getSignedUrl(client, new GetObjectCommand({ Bucket: bucketForKey(key), Key: key }), { expiresIn })
 }
 
 /**
@@ -492,6 +505,53 @@ async function setBucketPublicRead(): Promise<void> {
   logger.info("Public-read policy set for bucket", { bucket: TIGRIS_BUCKET })
 }
 
+const BROWSER_UPLOAD_CORS = {
+  CORSRules: [
+    {
+      AllowedHeaders: ["*"],
+      AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
+      AllowedOrigins: ["*"],
+      ExposeHeaders: ["ETag"],
+      MaxAgeSeconds: 3600,
+    },
+  ],
+}
+
+/**
+ * The private bucket: created if missing, with the CORS the browser's
+ * direct PUT needs, and deliberately never a public policy. A failure here
+ * is logged and does not stop the boot — the media bucket is what the
+ * product cannot run without; a missing private bucket fails only the next
+ * claim upload, loudly.
+ */
+async function ensurePrivateBucket(client: S3Client): Promise<void> {
+  try {
+    await client.send(new HeadBucketCommand({ Bucket: TIGRIS_PRIVATE_BUCKET }))
+    return
+  } catch (error: unknown) {
+    const s3Error = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+    if (s3Error.name !== "NotFound" && s3Error.$metadata?.httpStatusCode !== 404) {
+      logger.warn("Could not check the private bucket", {
+        bucket: TIGRIS_PRIVATE_BUCKET,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+  }
+  try {
+    await client.send(new CreateBucketCommand({ Bucket: TIGRIS_PRIVATE_BUCKET }))
+    await client.send(
+      new PutBucketCorsCommand({ Bucket: TIGRIS_PRIVATE_BUCKET, CORSConfiguration: BROWSER_UPLOAD_CORS })
+    )
+    logger.info("Private bucket created", { bucket: TIGRIS_PRIVATE_BUCKET })
+  } catch (error) {
+    logger.error("Failed to create the private bucket", {
+      bucket: TIGRIS_PRIVATE_BUCKET,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 /**
  * Ensure the bucket exists, create it if not
  */
@@ -508,6 +568,7 @@ export async function ensureBucketExists(): Promise<boolean> {
     await client.send(new HeadBucketCommand({ Bucket: TIGRIS_BUCKET }))
     logger.info("Bucket exists", { bucket: TIGRIS_BUCKET })
     await trySetBucketPublicRead()
+    await ensurePrivateBucket(client)
     return true
   } catch (error: unknown) {
     const s3Error = error as { name?: string; $metadata?: { httpStatusCode?: number } }
@@ -537,6 +598,7 @@ export async function ensureBucketExists(): Promise<boolean> {
         )
         logger.info("CORS configured for bucket", { bucket: TIGRIS_BUCKET })
         await trySetBucketPublicRead()
+        await ensurePrivateBucket(client)
         return true
       } catch (createError) {
         logger.error("Failed to create bucket", { bucket: TIGRIS_BUCKET, error: createError instanceof Error ? createError.message : String(createError) })

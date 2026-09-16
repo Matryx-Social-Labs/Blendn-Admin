@@ -24,6 +24,9 @@ const envSchema = z.object({
   TIGRIS_ACCESS_KEY: z.string().optional(),
   TIGRIS_SECRET_KEY: z.string().optional(),
   TIGRIS_BUCKET: z.string().default("blendn-media"),
+  // Private documents (claim evidence). Defaults to `${TIGRIS_BUCKET}-private`;
+  // created on boot if missing. See lib/tigris.ts.
+  TIGRIS_PRIVATE_BUCKET: z.string().optional(),
   TIGRIS_REGION: z.string().default("auto"),
 
   // OpenAI (optional — moderation degrades to keyword-only if absent)
