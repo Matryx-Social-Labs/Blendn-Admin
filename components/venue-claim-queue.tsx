@@ -18,6 +18,7 @@ import { EmptyState } from "@/components/dashboard/primitives"
 import { IconBuildingStore } from "@tabler/icons-react"
 import { decideVenueClaim, type ClaimQueueRow } from "@/lib/venue-claim-actions"
 import { formatDay } from "@/lib/dashboard-format"
+import { refusalMessage } from "@/lib/refusal"
 
 const DOC_LABELS: Record<string, string> = {
   tradeLicence: "Trade licence",
@@ -71,7 +72,7 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
         )
         router.refresh()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Could not record the decision.")
+        toast.error(refusalMessage(e, "Could not record the decision."))
       }
     })
   }

@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { SPONSORSHIP } from "@/lib/constants"
 import { createPoll } from "@/lib/poll-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 const MAX_OPTIONS = 6
 
@@ -50,7 +51,7 @@ export function PollComposer({ eventId }: { eventId: string }) {
         toast.success("Poll posted")
         reset()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not post that poll")
+        toast.error(refusalMessage(err, "Could not post that poll"))
       }
     })
   }

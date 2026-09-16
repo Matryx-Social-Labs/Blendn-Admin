@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "@/lib/refusal"
 import { revalidatePath } from "next/cache"
 import type { report_status } from "@prisma/client"
 
@@ -81,7 +82,7 @@ export async function getReportQueue(status: report_status = "pending") {
   // action id with no page component in the path, and this one returns private
   // message content beside real names and email addresses.
   const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
+  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
 
   const now = Date.now()
 
@@ -291,7 +292,7 @@ export async function resolveReport(
 ) {
   const session = await getAuth()
   if (session?.user?.role !== "app_admin") {
-    throw new Error("Only platform admins can resolve reports")
+    throw new Refusal("Only platform admins can resolve reports")
   }
 
   const report =
@@ -310,7 +311,7 @@ export async function resolveReport(
             select: { id: true, status: true, message_id: true, message_type: true },
           })
 
-  if (!report) throw new Error("Report not found")
+  if (!report) throw new Refusal("Report not found")
   /*
    * Two admins working the queue at once would otherwise both act on it.
    *
@@ -321,7 +322,7 @@ export async function resolveReport(
    * trying to undo it.
    */
   if (decision !== "reinstate" && report.status !== "pending") {
-    throw new Error("This report has already been reviewed")
+    throw new Refusal("This report has already been reviewed")
   }
 
   const subject =
@@ -334,18 +335,18 @@ export async function resolveReport(
   const subjectId = subject.userId
 
   if ((decision === "suspend" || decision === "reinstate") && !subjectId) {
-    throw new Error("The reported message no longer exists, so its author cannot be resolved")
+    throw new Refusal("The reported message no longer exists, so its author cannot be resolved")
   }
 
   if (decision === "remove_message") {
     const r = report as { message_id: string; message_type: string }
     if (kind !== "message" || r.message_type !== "group") {
-      throw new Error("Only messages in a group room can be removed")
+      throw new Refusal("Only messages in a group room can be removed")
     }
   }
 
   if (decision === "delist" && kind !== "event") {
-    throw new Error("Only an event can be delisted")
+    throw new Refusal("Only an event can be delisted")
   }
 
   const reviewed = {

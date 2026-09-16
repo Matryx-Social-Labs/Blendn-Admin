@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Add, rename, reorder and retire amenities.
@@ -36,7 +37,7 @@ export function AmenityManager({ amenities }: { amenities: AmenityRow[] }) {
         await fn()
         toast.success(ok)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "That did not work")
+        toast.error(refusalMessage(err, "That did not work"))
       }
     })
 

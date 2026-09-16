@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { createCategory, mergeCategory, renameCategory, type CategoryRow } from "@/lib/category-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Two levels, shown as two levels.
@@ -202,7 +203,7 @@ function RenameInline({
               toast.success("Renamed")
               onDone()
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Could not rename")
+              toast.error(refusalMessage(err, "Could not rename"))
             }
           })
         }
@@ -253,7 +254,7 @@ function CreateForm({ parents, onDone }: { parents: CategoryRow[]; onDone: () =>
               setName("")
               onDone()
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Could not create")
+              toast.error(refusalMessage(err, "Could not create"))
             }
           })
         }
@@ -321,7 +322,7 @@ function MergeForm({
                 toast.success(`Merged into ${into?.name} · ${parts.join(", ")} moved`)
                 onDone()
               } catch (err) {
-                toast.error(err instanceof Error ? err.message : "Could not merge")
+                toast.error(refusalMessage(err, "Could not merge"))
               }
             })
           }

@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "@/lib/refusal"
 import type { rsvp_status } from "@prisma/client"
 
 import type { user_role } from "@prisma/client"
@@ -866,7 +867,7 @@ async function dashboardActor(): Promise<{ role: DashboardRole; userId: string }
   const session = await getAuth()
   const role = session?.user?.role as DashboardRole | undefined
   if (!session?.user?.id || !role || !canAccessDashboard(role as user_role)) {
-    throw new Error("Not authorised")
+    throw new Refusal("Not authorised")
   }
   return { role, userId: session.user.id }
 }
@@ -965,7 +966,7 @@ export async function getVenueRecords(
   q = ""
 ): Promise<{ venues: VenueRecordRow[]; total: number }> {
   const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Error("Forbidden")
+  if (session?.user?.role !== "app_admin") throw new Refusal("Forbidden")
 
   // Name or city. Server-side because the list is a page: a search over the
   // 200 rows the client holds cannot find the 201st, and used to say nothing.

@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { uploadFile } from "@/components/event-form/upload"
 import { fileVenueClaim, type ClaimEvidence } from "@/lib/venue-claim-actions"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Filing a claim.
@@ -93,7 +94,7 @@ export function VenueClaimForm({
         )
         router.push(`/dashboard/venues/${venueId}`)
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Could not file the claim.")
+        toast.error(refusalMessage(e, "Could not file the claim."))
       }
     })
   }

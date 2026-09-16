@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import type { lead_status } from "@prisma/client"
 
@@ -21,7 +22,7 @@ import { CLOSED_LEAD_STATUSES, openKey, openKeyFor } from "@/lib/leads"
 
 async function requireAdmin() {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   return session.user
 }
 
@@ -44,11 +45,11 @@ export async function setLeadStatus(leadId: string, next: lead_status): Promise<
     where: { id: leadId },
     select: { id: true, status: true, type: true, email: true, contacted_at: true },
   })
-  if (!lead) throw new Error("Lead not found")
+  if (!lead) throw new Refusal("Lead not found")
   if (lead.status === next) return
 
   if (!TRANSITIONS[lead.status].includes(next)) {
-    throw new Error(`Cannot move a ${lead.status} lead straight to ${next}.`)
+    throw new Refusal(`Cannot move a ${lead.status} lead straight to ${next}.`)
   }
 
   // `open_key` is the idempotency guarantee, and it has to follow the status:
@@ -64,7 +65,7 @@ export async function setLeadStatus(leadId: string, next: lead_status): Promise<
       select: { id: true },
     })
     if (clash) {
-      throw new Error(
+      throw new Refusal(
         "There is already an open lead for this email. Work that one instead of reopening this."
       )
     }
@@ -105,7 +106,7 @@ export async function assignLead(leadId: string, userId: string | null): Promise
       select: { role: true },
     })
     if (assignee?.role !== "app_admin") {
-      throw new Error("Leads can only be assigned to an admin.")
+      throw new Refusal("Leads can only be assigned to an admin.")
     }
   }
 
@@ -124,7 +125,7 @@ export async function assignLead(leadId: string, userId: string | null): Promise
 export async function addLeadNote(leadId: string, body: string): Promise<void> {
   const admin = await requireAdmin()
   const text = body.trim()
-  if (text.length < 2) throw new Error("Write something first.")
+  if (text.length < 2) throw new Refusal("Write something first.")
 
   await db.lead_notes.create({
     data: { lead_id: leadId, author_id: admin.id, body: text },

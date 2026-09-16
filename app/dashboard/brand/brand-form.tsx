@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { saveMyBrand, type MyBrand } from "@/lib/sponsor-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Create or edit the organisation's brand.
@@ -34,7 +35,7 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
         await saveMyBrand({ name, website, logo_url: logoUrl })
         toast.success(brand ? "Brand updated" : "Brand created")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not save your brand")
+        toast.error(refusalMessage(err, "Could not save your brand"))
       }
     })
   }

@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 
 import { db } from "@/lib/db"
@@ -57,7 +58,7 @@ export async function getLinkedEventsForOwner(): Promise<{
   total: number
 }> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const actor = await actorFor(session.user)
   if (actor.role !== "venue_owner" && actor.role !== "app_admin") return { rows: [], total: 0 }
@@ -119,12 +120,12 @@ export async function getLinkedEventsForOwner(): Promise<{
  */
 export async function disputeVenueLink(eventId: string, reason: string): Promise<void> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
   const actor = await actorFor(session.user)
 
   const trimmed = reason.trim()
   if (trimmed.length < MIN_REASON) {
-    throw new Error("Say why — an admin reads this to decide.")
+    throw new Refusal("Say why — an admin reads this to decide.")
   }
 
   const event = await db.events.findUnique({
@@ -137,7 +138,7 @@ export async function disputeVenueLink(eventId: string, reason: string): Promise
       venue: { select: { owner_org_id: true, name: true } },
     },
   })
-  if (!event?.venue_id) throw new Error("This event is not linked to a venue.")
+  if (!event?.venue_id) throw new Refusal("This event is not linked to a venue.")
 
   // Only the owner of the venue in question, or an admin. An organiser
   // disputing their own link would be unlinking, which is a different action
@@ -146,7 +147,7 @@ export async function disputeVenueLink(eventId: string, reason: string): Promise
     event.venue?.owner_org_id !== null &&
     event.venue?.owner_org_id !== undefined &&
     actor.orgIds.includes(event.venue.owner_org_id)
-  if (actor.role !== "app_admin" && !ownsVenue) throw new Error("Forbidden")
+  if (actor.role !== "app_admin" && !ownsVenue) throw new Refusal("Forbidden")
 
   if (event.venue_link_status === "disputed") return
 
@@ -177,20 +178,20 @@ export async function disputeVenueLink(eventId: string, reason: string): Promise
  */
 export async function confirmVenueLink(eventId: string): Promise<void> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
   const actor = await actorFor(session.user)
 
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
     select: { id: true, venue_id: true, venue: { select: { owner_org_id: true, name: true } } },
   })
-  if (!event?.venue_id) throw new Error("This event is not linked to a venue.")
+  if (!event?.venue_id) throw new Refusal("This event is not linked to a venue.")
 
   const ownsVenue =
     event.venue?.owner_org_id !== null &&
     event.venue?.owner_org_id !== undefined &&
     actor.orgIds.includes(event.venue.owner_org_id)
-  if (actor.role !== "app_admin" && !ownsVenue) throw new Error("Forbidden")
+  if (actor.role !== "app_admin" && !ownsVenue) throw new Refusal("Forbidden")
 
   await db.events.update({
     where: { id: eventId },
@@ -220,12 +221,12 @@ export async function confirmVenueLink(eventId: string): Promise<void> {
  */
 export async function unlinkEventVenue(eventId: string, reason: string): Promise<void> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
   const actor = await actorFor(session.user)
 
   const trimmed = reason.trim()
   if (trimmed.length < MIN_REASON) {
-    throw new Error("Give a reason — it is recorded against the venue.")
+    throw new Refusal("Give a reason — it is recorded against the venue.")
   }
 
   const event = await db.events.findUnique({
@@ -238,11 +239,11 @@ export async function unlinkEventVenue(eventId: string, reason: string): Promise
       venue: { select: { name: true } },
     },
   })
-  if (!event?.venue_id) throw new Error("This event is not linked to a venue.")
+  if (!event?.venue_id) throw new Refusal("This event is not linked to a venue.")
 
   const isOrganiser =
     event.organizer_org_id !== null && actor.orgIds.includes(event.organizer_org_id)
-  if (actor.role !== "app_admin" && !isOrganiser) throw new Error("Forbidden")
+  if (actor.role !== "app_admin" && !isOrganiser) throw new Refusal("Forbidden")
 
   await db.events.update({
     where: { id: eventId },

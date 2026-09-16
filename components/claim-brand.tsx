@@ -14,6 +14,7 @@ import {
   type ClaimableBrand,
   type MyClaimRow,
 } from "@/lib/sponsor-claim-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Claim a brand an organiser already added.
@@ -84,7 +85,7 @@ export function ClaimBrand({ claims }: { claims: MyClaimRow[] }) {
         setGstin("")
         router.refresh()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not file that claim")
+        toast.error(refusalMessage(err, "Could not file that claim"))
       }
     })
   }

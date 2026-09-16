@@ -37,6 +37,7 @@ import {
 } from "@/lib/org-actions"
 import type { OrgPermissions } from "@/lib/org-permissions"
 import type { org_role } from "@prisma/client"
+import { refusalMessage } from "@/lib/refusal"
 
 const ROLE_LABEL: Record<org_role, string> = {
   owner: "Owner",
@@ -115,7 +116,7 @@ function Members({
         await setMemberRole(orgId, memberId, role)
         toast.success("Role updated")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not update role")
+        toast.error(refusalMessage(err, "Could not update role"))
       }
     })
   }
@@ -126,7 +127,7 @@ function Members({
         await removeMember(orgId, memberId)
         toast.success(`${name} removed`)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not remove")
+        toast.error(refusalMessage(err, "Could not remove"))
       }
     })
   }
@@ -230,7 +231,7 @@ function Invites({
         setNeedsReason(false)
         setLink(result.link ?? null)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not invite")
+        toast.error(refusalMessage(err, "Could not invite"))
       }
     })
   }
@@ -358,7 +359,7 @@ function JoinRequests({ orgId, requests }: { orgId: string; requests: OrgJoinReq
         await decideJoinRequest(orgId, id, approve)
         toast.success(approve ? "Added as staff" : "Declined")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not decide")
+        toast.error(refusalMessage(err, "Could not decide"))
       }
     })
   }
@@ -412,7 +413,7 @@ function Domains({ orgId, domains }: { orgId: string; domains: MyOrg["domains"] 
         setInstructions(result.instructions ? { host: result.instructions.host, value: result.instructions.value } : null)
         setRaw("")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not claim domain")
+        toast.error(refusalMessage(err, "Could not claim domain"))
       }
     })
   }

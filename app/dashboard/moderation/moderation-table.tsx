@@ -14,6 +14,7 @@ import { formatAge } from "@/lib/dashboard-format"
 import { cn } from "@/lib/utils"
 
 import { resolveFlag, type ModerationRow } from "./actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /** Above this many hours a pending flag reads as overdue. */
 const SLA_HOURS = 24
@@ -40,7 +41,7 @@ export function ModerationTable({
         // Surfaced rather than swallowed: the most likely cause is another
         // admin having already actioned this row, and the reviewer needs to
         // know their click did nothing.
-        toast.error(error instanceof Error ? error.message : "Could not resolve the flag")
+        toast.error(refusalMessage(error, "Could not resolve the flag"))
       } finally {
         setActing(null)
       }

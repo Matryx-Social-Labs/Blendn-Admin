@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { unlinkEventVenue } from "@/lib/venue-link-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Taking an event off a venue it was linked to in error.
@@ -84,7 +85,7 @@ export function EventVenueLink({
                 setOpen(false)
                 router.refresh()
               } catch (error) {
-                toast.error(error instanceof Error ? error.message : "Could not unlink")
+                toast.error(refusalMessage(error, "Could not unlink"))
               }
             })
           }

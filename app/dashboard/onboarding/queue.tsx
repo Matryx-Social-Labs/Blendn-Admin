@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { approveOnboardingRequest, declineOnboardingRequest, type OnboardingRow } from "@/lib/onboarding-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * The review queue.
@@ -153,7 +154,7 @@ function Row({
             onCredential({ name: row.display_name, email: result.email, password: result.password })
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not approve")
+        toast.error(refusalMessage(err, "Could not approve"))
       }
     })
   }
@@ -165,7 +166,7 @@ function Row({
         toast.success("Declined — the applicant has been told why.")
         setDeclining(false)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not decline")
+        toast.error(refusalMessage(err, "Could not decline"))
       }
     })
   }

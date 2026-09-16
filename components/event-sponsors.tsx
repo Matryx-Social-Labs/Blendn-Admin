@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator"
 import { SponsorPicker } from "@/components/sponsor-picker"
 import { SPONSORSHIP } from "@/lib/constants"
 import { getEventSponsors, removePlacement, type EventSponsorRow } from "@/lib/sponsor-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 const PHASE_LABEL: Record<string, string> = {
   draft: "Draft",
@@ -47,7 +48,7 @@ export function EventSponsors({ eventId }: { eventId: string }) {
         toast.success(`${name} removed from this event`)
         load()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not remove that")
+        toast.error(refusalMessage(err, "Could not remove that"))
       }
     })
   }

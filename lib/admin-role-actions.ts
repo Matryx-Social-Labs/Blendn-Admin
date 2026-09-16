@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import crypto from "crypto"
 import { sharePct } from "@/lib/dashboard-format"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
@@ -85,7 +86,7 @@ function generatePassword(length = 12): string {
  */
 export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const users = await db.user.findMany({
     where: { role },
@@ -139,7 +140,7 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
 
 export async function getRoleUserById(id: string): Promise<RoleUserWithEvents | null> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const user = await db.user.findUnique({
     where: { id },
@@ -194,10 +195,10 @@ export async function createRoleUser(
   role: user_role
 ): Promise<{ name: string; email: string; password: string }> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const existing = await db.user.findUnique({ where: { email } })
-  if (existing) throw new Error("Email already in use")
+  if (existing) throw new Refusal("Email already in use")
 
   const plainPassword = generatePassword(12)
   const hashedPassword = await bcrypt.hash(plainPassword, 12)
@@ -214,7 +215,7 @@ export async function createRoleUser(
 
 export async function updateEventStatus(eventId: string, status: event_status) {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   await db.events.update({
     where: { id: eventId },

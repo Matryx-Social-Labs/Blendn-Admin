@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 
 import { auditLog } from "@/lib/audit-log"
@@ -56,7 +57,7 @@ export interface CreativeQueueRow {
 
 export async function getCreativeQueue(): Promise<CreativeQueueRow[]> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const rows = await db.sponsored_creatives.findMany({
     where: { moderation_status: "pending" },
@@ -116,14 +117,14 @@ export async function decideCreative(
   note?: string
 ): Promise<void> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   const admin = session.user
 
   const trimmed = note?.trim() ?? ""
   // A refusal with no reason produces an identical resubmission, and the queue
   // gets the same words again.
   if (decision === "reject" && trimmed.length < 10) {
-    throw new Error("Give a reason — the organiser has to know what to change.")
+    throw new Refusal("Give a reason — the organiser has to know what to change.")
   }
 
   const creative = await db.sponsored_creatives.findUnique({
@@ -141,9 +142,9 @@ export async function decideCreative(
       },
     },
   })
-  if (!creative) throw new Error("Creative not found")
+  if (!creative) throw new Refusal("Creative not found")
   if (creative.moderation_status !== "pending") {
-    throw new Error("This creative has already been reviewed.")
+    throw new Refusal("This creative has already been reviewed.")
   }
 
   const isLatest = creative.message.creatives[0]?.id === creative.id

@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -43,7 +44,7 @@ const DUPLICATE_RADIUS_M = 100
 
 async function requireUser() {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
   return session.user
 }
 
@@ -140,13 +141,13 @@ export interface CreateVenueInput {
 export async function createVenue(input: CreateVenueInput): Promise<{ id: string }> {
   const user = await requireUser()
   if (user.role !== "app_admin" && user.role !== "venue_owner") {
-    throw new Error("Forbidden")
+    throw new Refusal("Forbidden")
   }
 
   const name = input.name.trim()
-  if (name.length < 2) throw new Error("Give the venue a name.")
+  if (name.length < 2) throw new Refusal("Give the venue a name.")
   if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
-    throw new Error("Place the venue on the map first.")
+    throw new Refusal("Place the venue on the map first.")
   }
 
   // Layer 1. Refused rather than warned, because the caller has already been
@@ -154,7 +155,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   if (!input.acknowledgedDuplicates) {
     const nearby = await venuesNear(input.lat, input.lng)
     if (nearby.length > 0) {
-      throw new Error(
+      throw new Refusal(
         `${nearby[0].name} is already listed ${nearby[0].distanceMetres} m away. Claim it instead, or confirm this is a different place.`
       )
     }
@@ -166,7 +167,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   let geofence: Geofence | null = null
   if (input.geofence) {
     const parsed = validateGeofence(input.geofence)
-    if (!parsed.ok) throw new Error(`Check-in area is not valid (${parsed.error}).`)
+    if (!parsed.ok) throw new Refusal(`Check-in area is not valid (${parsed.error}).`)
     geofence = parsed.fence
   } else {
     geofence = {
@@ -189,7 +190,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
       : null
 
   if (user.role === "venue_owner" && !orgId) {
-    throw new Error("Your account is not attached to an organisation yet.")
+    throw new Refusal("Your account is not attached to an organisation yet.")
   }
 
   const venue = await db.venues.create({
@@ -263,7 +264,7 @@ async function venueForWrite(
     where: { id, deleted_at: null },
     select: { id: true, name: true, owner_org_id: true },
   })
-  if (!venue) throw new Error("Venue not found")
+  if (!venue) throw new Refusal("Venue not found")
 
   if (user.role !== "app_admin") {
     const member = venue.owner_org_id
@@ -272,7 +273,7 @@ async function venueForWrite(
           select: { id: true },
         })
       : null
-    if (!member) throw new Error("Forbidden")
+    if (!member) throw new Refusal("Forbidden")
   }
   return venue
 }
@@ -289,22 +290,22 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
    */
   const movingPin = input.lat !== undefined || input.lng !== undefined
   if (movingPin && (input.lat === undefined || input.lng === undefined)) {
-    throw new Error("Give both a latitude and a longitude, or neither.")
+    throw new Refusal("Give both a latitude and a longitude, or neither.")
   }
   if (movingPin) {
     const { lat, lng } = input as { lat: number; lng: number }
     if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
-      throw new Error("Latitude must be between -90 and 90.")
+      throw new Refusal("Latitude must be between -90 and 90.")
     }
     if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
-      throw new Error("Longitude must be between -180 and 180.")
+      throw new Refusal("Longitude must be between -180 and 180.")
     }
   }
 
   let geofence: Geofence | undefined
   if (input.geofence !== undefined) {
     const parsed = validateGeofence(input.geofence)
-    if (!parsed.ok) throw new Error(`Check-in area is not valid (${parsed.error}).`)
+    if (!parsed.ok) throw new Refusal(`Check-in area is not valid (${parsed.error}).`)
     geofence = parsed.fence
   }
 
@@ -372,7 +373,7 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
     where: { venue_id: id, deleted_at: null, end_time: { gte: new Date() } },
   })
   if (upcoming > 0) {
-    throw new Error(
+    throw new Refusal(
       `${upcoming} event${upcoming === 1 ? " is" : "s are"} still booked here. Move or cancel ${upcoming === 1 ? "it" : "them"} first.`
     )
   }
@@ -382,7 +383,7 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
     where: { id, deleted_at: null },
     data: { deleted_at: new Date(), status: "archived" },
   })
-  if (count === 0) throw new Error("That venue is already retired")
+  if (count === 0) throw new Refusal("That venue is already retired")
 
   auditLog({
     userId: user.id,
@@ -405,13 +406,13 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
  */
 export async function restoreVenue(id: string): Promise<void> {
   const user = await requireUser()
-  if (user.role !== "app_admin") throw new Error("Forbidden")
+  if (user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const { count } = await db.venues.updateMany({
     where: { id, deleted_at: { not: null } },
     data: { deleted_at: null, status: "active" },
   })
-  if (count === 0) throw new Error("That venue is not retired")
+  if (count === 0) throw new Refusal("That venue is not retired")
 
   auditLog({
     userId: user.id,
@@ -432,17 +433,17 @@ export async function restoreVenue(id: string): Promise<void> {
  */
 export async function assignVenueOwner(venueId: string, orgId: string): Promise<void> {
   const user = await requireUser()
-  if (user.role !== "app_admin") throw new Error("Forbidden")
+  if (user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const venue = await db.venues.findUnique({
     where: { id: venueId, deleted_at: null },
     select: { name: true, owner_org_id: true },
   })
-  if (!venue) throw new Error("Venue not found")
+  if (!venue) throw new Refusal("Venue not found")
 
   // Layer 3.
   if (venue.owner_org_id && venue.owner_org_id !== orgId) {
-    throw new Error(
+    throw new Refusal(
       "This venue already has an owner. Resolve it as a dispute rather than reassigning silently."
     )
   }

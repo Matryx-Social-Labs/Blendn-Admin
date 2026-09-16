@@ -5,6 +5,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { decidePlacement } from "@/lib/sponsor-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Accept or decline a placement an organiser offered.
@@ -26,7 +27,7 @@ export function PlacementDecision({ placementId }: { placementId: string }) {
         await decidePlacement(placementId, accept)
         toast.success(accept ? "Placement accepted" : "Placement declined")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not save that")
+        toast.error(refusalMessage(err, "Could not save that"))
       }
     })
   }

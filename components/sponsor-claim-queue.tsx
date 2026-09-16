@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { decideSponsorClaim, type SponsorClaimQueueRow } from "@/lib/sponsor-claim-actions"
 import { formatDay } from "@/lib/dashboard-format"
+import { refusalMessage } from "@/lib/refusal"
 
 const DOC_LABELS: Record<string, string> = {
   authorisation: "Authorisation letter",
@@ -70,7 +71,7 @@ function ClaimCard({ claim }: { claim: SponsorClaimQueueRow }) {
         )
         router.refresh()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Could not record the decision.")
+        toast.error(refusalMessage(e, "Could not record the decision."))
       }
     })
   }

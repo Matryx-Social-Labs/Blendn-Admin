@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "@/lib/refusal"
 import { revalidatePath } from "next/cache"
 import type { feedback_sentiment, issue_category } from "@prisma/client"
 
@@ -232,7 +233,7 @@ export async function correctFeedbackLabel(
   category: issue_category
 ) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Not authenticated")
+  if (!session?.user) throw new Refusal("Not authenticated")
 
   const row = await db.event_feedback.findUnique({
     where: { id: feedbackId },
@@ -241,9 +242,9 @@ export async function correctFeedbackLabel(
       event: { select: eventPermissionSelect },
     },
   })
-  if (!row) throw new Error("Feedback not found")
+  if (!row) throw new Refusal("Feedback not found")
   if (!eventPermissions(await actorFor(session.user), row.event).canOperate) {
-    throw new Error("Not authorised to correct this label")
+    throw new Refusal("Not authorised to correct this label")
   }
 
   await db.event_feedback.update({

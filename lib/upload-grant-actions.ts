@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
@@ -79,18 +80,18 @@ export async function requestCreativeUpload(
   input: unknown
 ): Promise<UploadGrant> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
-  if (!isConfigured()) throw new Error("File storage is not configured")
+  if (!isConfigured()) throw new Refusal("File storage is not configured")
 
   const parsed = requestSchema.safeParse(input)
   if (!parsed.success) {
-    throw new Error(parsed.error.issues[0]?.message ?? "Tell us what you are uploading")
+    throw new Refusal(parsed.error.issues[0]?.message ?? "Tell us what you are uploading")
   }
   const { filename, contentType, bytes } = parsed.data
 
   // The rule lives in rbac, not here, so the one table decides it.
-  if (!broadcastMayCarryMedia("sponsored")) throw new Error("Forbidden")
+  if (!broadcastMayCarryMedia("sponsored")) throw new Refusal("Forbidden")
 
   const actor = await actorFor(session.user)
   const grantHolder = await resolveSponsorGrant(actor, eventId)
@@ -100,11 +101,11 @@ export async function requestCreativeUpload(
    * organisation, which is what `resolveSponsorGrant` proves in a single query.
    */
   const orgId = grantHolder?.orgId ?? (actor.role === "app_admin" ? actor.orgIds[0] : undefined)
-  if (!orgId) throw new Error("Forbidden")
+  if (!orgId) throw new Refusal("Forbidden")
 
   const ceiling = ceilingFor(contentType)
   if (bytes > ceiling) {
-    throw new Error(
+    throw new Refusal(
       `That file is ${Math.round(bytes / 1024 / 1024)}MB. The limit is ${Math.round(ceiling / 1024 / 1024)}MB.`
     )
   }
@@ -155,18 +156,18 @@ export async function attachCreativeMedia(
   key: string
 ): Promise<AttachedMedia> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const campaign = await db.event_sponsored_messages.findUnique({
     where: { id: campaignId },
     select: { id: true, event_id: true, content: true, sponsor_id: true },
   })
-  if (!campaign) throw new Error("Campaign not found")
+  if (!campaign) throw new Refusal("Campaign not found")
 
   const actor = await actorFor(session.user)
   const grantHolder = await resolveSponsorGrant(actor, campaign.event_id)
   const orgId = grantHolder?.orgId ?? (actor.role === "app_admin" ? actor.orgIds[0] : undefined)
-  if (!orgId) throw new Error("Forbidden")
+  if (!orgId) throw new Refusal("Forbidden")
 
   const grant = await db.upload_grants.findUnique({
     where: { key },
@@ -179,22 +180,22 @@ export async function attachCreativeMedia(
       consumed_at: true,
     },
   })
-  if (!grant) throw new Error("That upload was not issued by us.")
+  if (!grant) throw new Refusal("That upload was not issued by us.")
 
   /*
    * The org that was granted the key, not the org of whoever is calling now. A
    * key is a capability; letting a second organisation redeem one turns an
    * upload URL into a way to attribute somebody else's artwork to your brand.
    */
-  if (grant.org_id !== orgId) throw new Error("That upload belongs to another organisation.")
-  if (grant.consumed_at) throw new Error("That upload has already been used.")
-  if (grant.expires_at <= new Date()) throw new Error("That upload expired. Try again.")
+  if (grant.org_id !== orgId) throw new Refusal("That upload belongs to another organisation.")
+  if (grant.consumed_at) throw new Refusal("That upload has already been used.")
+  if (grant.expires_at <= new Date()) throw new Refusal("That upload expired. Try again.")
 
   const facts = await headObject(key)
-  if (!facts) throw new Error("We cannot find that file. Did the upload finish?")
+  if (!facts) throw new Refusal("We cannot find that file. Did the upload finish?")
 
   if (facts.bytes > grant.max_bytes) {
-    throw new Error(
+    throw new Refusal(
       `That file is bigger than the ${Math.round(grant.max_bytes / 1024 / 1024)}MB it was cleared for.`
     )
   }
@@ -205,11 +206,11 @@ export async function attachCreativeMedia(
    * control or an inline image.
    */
   if (facts.contentType && facts.contentType !== grant.content_type) {
-    throw new Error("That file is not the type it was cleared for.")
+    throw new Refusal("That file is not the type it was cleared for.")
   }
   // Not a hard failure: an object with no bytes is a failed upload, not an
   // attack, and the recovery is the same as any other incomplete one.
-  if (facts.bytes === 0) throw new Error("That file is empty. Did the upload finish?")
+  if (facts.bytes === 0) throw new Refusal("That file is empty. Did the upload finish?")
 
   const mediaUrl = pinnedUrl(key, facts.versionId)
 

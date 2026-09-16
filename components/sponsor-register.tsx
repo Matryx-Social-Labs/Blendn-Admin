@@ -12,6 +12,7 @@ import {
   type AdminSponsorRow,
   type SponsorRegister,
 } from "@/lib/sponsor-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * The brand register, and the merge that resolves a duplicate.
@@ -109,7 +110,7 @@ function DuplicateCluster({ cluster }: { cluster: AdminSponsorRow[] }) {
         // old, and a merge is not reversible.
         setPreview(await Promise.all(losers.map((l) => mergePreview(l.id))))
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not read what would move")
+        toast.error(refusalMessage(err, "Could not read what would move"))
       }
     })
   }
@@ -129,7 +130,7 @@ function DuplicateCluster({ cluster }: { cluster: AdminSponsorRow[] }) {
         setKeeper(null)
         setNote("")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Merge failed")
+        toast.error(refusalMessage(err, "Merge failed"))
       }
     })
   }

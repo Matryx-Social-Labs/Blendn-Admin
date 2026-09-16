@@ -14,6 +14,7 @@ import {
   findSponsors,
   type SponsorMatch,
 } from "@/lib/sponsor-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Attach a brand to an event.
@@ -110,7 +111,7 @@ export function SponsorPicker({
         setCreating(false)
         onAttached?.()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not add that brand")
+        toast.error(refusalMessage(err, "Could not add that brand"))
       }
     })
   }
@@ -126,7 +127,7 @@ export function SponsorPicker({
         setCreating(false)
         onAttached?.()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not create that brand")
+        toast.error(refusalMessage(err, "Could not create that brand"))
       }
     })
   }

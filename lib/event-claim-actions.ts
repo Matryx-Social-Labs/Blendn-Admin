@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { headers } from "next/headers"
 
 import { auditLog } from "@/lib/audit-log"
@@ -252,7 +253,7 @@ export async function decideEventClaim(
   note?: string
 ): Promise<void> {
   const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Error("Forbidden")
+  if (session?.user?.role !== "app_admin") throw new Refusal("Forbidden")
   const admin = session.user
 
   const claim = await db.event_claims.findUnique({
@@ -266,8 +267,8 @@ export async function decideEventClaim(
       event: { select: { id: true, title: true, ...curationSelect } },
     },
   })
-  if (!claim) throw new Error("Claim not found")
-  if (claim.status !== "pending") throw new Error("This claim has already been decided.")
+  if (!claim) throw new Refusal("Claim not found")
+  if (claim.status !== "pending") throw new Refusal("This claim has already been decided.")
 
   /*
    * A claim filed without an account carries `onboarding_id` and no `org_id`;
@@ -289,7 +290,7 @@ export async function decideEventClaim(
   // again here because this is the write that hands over an event, and a
   // read at filing time is not a guarantee at decision time.
   if (request && request.contact_email.toLowerCase() !== claim.contact_email.toLowerCase()) {
-    throw new Error("The application on this claim belongs to a different email address.")
+    throw new Refusal("The application on this claim belongs to a different email address.")
   }
   const orgId = claim.org_id ?? request?.org_id ?? null
 
@@ -297,12 +298,12 @@ export async function decideEventClaim(
   // the same row again. Same rule as the venue queue.
   const trimmed = note?.trim() ?? ""
   if (decision === "decline" && trimmed.length < 10) {
-    throw new Error("Give a reason — it is sent to the claimant.")
+    throw new Refusal("Give a reason — it is sent to the claimant.")
   }
 
   if (decision === "approve") {
     if (!orgId) {
-      throw new Error(
+      throw new Refusal(
         "Approve their application first — there is no organisation to hand this to yet."
       )
     }
@@ -315,7 +316,7 @@ export async function decideEventClaim(
      */
     const refusal = claimRefusal(claim.event)
     if (refusal) {
-      throw new Error(
+      throw new Refusal(
         refusal === "already_claimed"
           ? "Somebody else's claim was approved first."
           : "This event is running. Decide once the room has closed."
@@ -374,7 +375,7 @@ export async function decideEventClaim(
     })
   } catch (error) {
     if (violatedConstraint(error, "event_claims_one_approved_per_event")) {
-      throw new Error("Somebody else's claim was approved first.")
+      throw new Refusal("Somebody else's claim was approved first.")
     }
     throw error
   }
@@ -428,7 +429,7 @@ export async function getEventClaimQueue(): Promise<{ rows: EventClaimRow[]; tot
    * redirected non-admins and the action that returned the sensitive data did
    * not -- and it is the half that actually serves the data.
    */
-  if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
+  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
 
   // The total alongside the page, so a capped queue can say it is capped.
   const total = await db.event_claims.count({ where: { status: "pending" } })

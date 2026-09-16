@@ -17,6 +17,7 @@ import { ISSUE_CATEGORIES } from "@/lib/sentiment/taxonomy"
 import { cn } from "@/lib/utils"
 
 import { correctFeedbackLabel, type FeedbackMessage } from "./actions"
+import { refusalMessage } from "@/lib/refusal"
 
 const SENTIMENTS: feedback_sentiment[] = ["positive", "neutral", "negative"]
 
@@ -56,7 +57,7 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
         toast.success("Label corrected")
         router.refresh()
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not correct the label")
+        toast.error(refusalMessage(error, "Could not correct the label"))
       } finally {
         setActing(null)
       }

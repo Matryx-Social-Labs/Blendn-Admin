@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "@/lib/refusal"
 import { revalidatePath } from "next/cache"
 import type { moderation_status_type } from "@prisma/client"
 
@@ -66,7 +67,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
   // email, for every flagged message on the platform. The page's redirect
   // guards the view, not this endpoint.
   const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
+  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
 
   const now = Date.now()
 
@@ -210,17 +211,17 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
 export async function resolveFlag(flagId: string, decision: "approve" | "remove") {
   const session = await getAuth()
   if (session?.user?.role !== "app_admin") {
-    throw new Error("Only platform admins can resolve moderation flags")
+    throw new Refusal("Only platform admins can resolve moderation flags")
   }
 
   const flag = await db.moderation_flags.findUnique({
     where: { id: flagId },
     select: { id: true, message_id: true, status: true, chat_group_id: true, user_id: true },
   })
-  if (!flag) throw new Error("Flag not found")
+  if (!flag) throw new Refusal("Flag not found")
   if (flag.status !== "pending") {
     // Two admins working the queue at once would otherwise double-action it.
-    throw new Error("This flag has already been reviewed")
+    throw new Refusal("This flag has already been reviewed")
   }
 
   const reviewedStatus: moderation_status_type = decision === "approve" ? "approved" : "rejected"

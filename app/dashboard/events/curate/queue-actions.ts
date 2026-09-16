@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "@/lib/refusal"
 import { getAuth } from "@/lib/auth"
 import { CURATION_PAGE, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
@@ -48,7 +49,7 @@ export interface CurationQueue {
 
 export async function getCurationQueue(city?: string): Promise<CurationQueue> {
   const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Error("Not authorised")
+  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
 
   const where = {
     curated_at: { not: null },

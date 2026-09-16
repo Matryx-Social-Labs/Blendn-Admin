@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
@@ -19,15 +20,15 @@ import { passwordStrength } from "@/lib/password-strength"
 
 async function requireUser() {
   const session = await getAuth()
-  if (!session?.user?.id) throw new Error("Unauthorized")
+  if (!session?.user?.id) throw new Refusal("Unauthorized")
   return session.user
 }
 
 export async function updateProfile(name: string): Promise<void> {
   const user = await requireUser()
   const trimmed = name.trim()
-  if (trimmed.length < 2) throw new Error("Name is too short.")
-  if (trimmed.length > 120) throw new Error("Name is too long.")
+  if (trimmed.length < 2) throw new Refusal("Name is too short.")
+  if (trimmed.length > 120) throw new Refusal("Name is too long.")
 
   await db.user.update({ where: { id: user.id }, data: { name: trimmed } })
 

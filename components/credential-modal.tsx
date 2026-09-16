@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/sheet"
 import { createRoleUser } from "@/lib/admin-role-actions"
 import type { user_role } from "@prisma/client"
+import { refusalMessage } from "@/lib/refusal"
 
 interface Credentials {
   name: string
@@ -57,7 +58,7 @@ export function CredentialModal({ open, onOpenChange, role, roleLabel }: Credent
       setCredentials(result)
       setStep("result")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create account")
+      toast.error(refusalMessage(err, "Failed to create account"))
     } finally {
       setIsLoading(false)
     }
