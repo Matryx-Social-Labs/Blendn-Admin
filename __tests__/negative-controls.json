@@ -613,9 +613,9 @@
       "date": "2026-09-16"
     },
     "tigris-private-claims.test.ts": {
-      "guards": "that the bucket policy grants anonymous read on PUBLIC_FOLDERS only (never the bucket root, never claims/), that the venue-claim queue reads evidence through reviewableUrl (a signed URL for a private key, the stored URL for a public one), and that the claim form uploads to claims/",
-      "mutation": "in lib/tigris.ts publicReadPolicy, change the Resource back to [`arn:aws:s3:::${bucket}/*`]",
-      "observed": "2 failing ('grants anonymous read on the public folders only', 'leaves claims out'). Green after cp of the saved file",
+      "guards": "that claim evidence is stored in the PRIVATE bucket (bucketFor(\"claims\") !== the media bucket) and read only through a signed GET against it; that the boot path creates the private bucket with CORS and never a public policy; that the media bucket policy names PUBLIC_FOLDERS only; that the form uploads to claims/ and the queue reads through reviewableUrl. (Tigris ignores folder policies and per-object private ACLs in a public bucket — verified on staging — so the bucket is the only lever.)",
+      "mutation": "A: in lib/tigris.ts bucketFor, return TIGRIS_BUCKET for every folder. B (earlier form): the bucket-root wildcard back in publicReadPolicy",
+      "observed": "A: 2 failing (where a claim document goes; signs a private key). B: 2 failing. Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-16"
     }
