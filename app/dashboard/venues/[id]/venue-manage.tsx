@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { assignVenueOwner, restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * The controls a venue record never had.
@@ -87,7 +88,7 @@ export function VenueManage({
         toast.success("Saved")
         router.refresh()
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not save")
+        toast.error(refusalMessage(error, "Could not save"))
       }
     })
 
@@ -100,7 +101,7 @@ export function VenueManage({
       } catch (error) {
         // The refusal names the reason — usually "events are still booked
         // here" — so it is shown rather than replaced with a generic failure.
-        toast.error(error instanceof Error ? error.message : "Could not retire")
+        toast.error(refusalMessage(error, "Could not retire"))
       }
     })
 
@@ -111,7 +112,7 @@ export function VenueManage({
         toast.success("Restored")
         router.refresh()
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not restore")
+        toast.error(refusalMessage(error, "Could not restore"))
       }
     })
 
@@ -124,7 +125,7 @@ export function VenueManage({
       } catch (error) {
         // Re-assigning an owned venue is refused by the action — that is a
         // dispute, and a dispute has a person in it.
-        toast.error(error instanceof Error ? error.message : "Could not assign")
+        toast.error(refusalMessage(error, "Could not assign"))
       }
     })
 

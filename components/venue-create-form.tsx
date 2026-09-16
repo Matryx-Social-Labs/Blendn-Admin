@@ -25,6 +25,7 @@ import { createVenue, venuesNear, type NearbyVenue } from "@/lib/venue-actions"
 import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
 import type { Geofence } from "@/lib/geofence"
 import type { venue_type } from "@prisma/client"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Create a venue.
@@ -195,7 +196,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
         )
         router.push(`/dashboard/venues/${id}`)
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Could not create the venue.")
+        toast.error(refusalMessage(e, "Could not create the venue."))
       }
     })
   }

@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { setOrganisationStatus } from "@/lib/onboarding-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Suspend / reinstate one organisation.
@@ -35,7 +36,7 @@ export function OrgStatusControl({
         setConfirming(false)
         setReason("")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not change status")
+        toast.error(refusalMessage(err, "Could not change status"))
       }
     })
   }

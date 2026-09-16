@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "@/lib/refusal"
 import { revalidatePath } from "next/cache"
 
 import { getAuth } from "@/lib/auth"
@@ -16,13 +17,13 @@ import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
  */
 export async function acknowledgeIssue(issueId: string) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Not authorised")
+  if (!session?.user) throw new Refusal("Not authorised")
 
   const issue = await db.event_issues.findUnique({
     where: { id: issueId },
     select: { id: true, event_id: true, acknowledged_at: true },
   })
-  if (!issue) throw new Error("Issue not found")
+  if (!issue) throw new Refusal("Issue not found")
 
   /*
    * `canOperate`, not `canEdit`. Acknowledging is a live-ops act — the person
@@ -36,10 +37,10 @@ export async function acknowledgeIssue(issueId: string) {
     where: { id: issue.event_id },
     select: { ...eventPermissionSelect },
   })
-  if (!event) throw new Error("Event not found")
+  if (!event) throw new Refusal("Event not found")
 
   const actor = await actorFor(session.user)
-  if (!eventPermissions(actor, event).canOperate) throw new Error("Not authorised")
+  if (!eventPermissions(actor, event).canOperate) throw new Refusal("Not authorised")
 
   // Idempotent, and first-acknowledgement wins: two people on the same alert
   // should not overwrite who actually looked first.

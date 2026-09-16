@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { z } from "zod"
 
 import { revalidatePath } from "next/cache"
@@ -47,7 +48,7 @@ export interface ClaimEvidence {
 
 async function requireHost() {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
   return session.user
 }
 
@@ -88,40 +89,40 @@ export async function fileVenueClaim(
   if (user.role !== "venue_owner" && user.role !== "app_admin") {
     // An organiser has no claim to operational control over other people's
     // events, which is what owning a venue grants.
-    throw new Error("Only a venue owner can claim a venue.")
+    throw new Refusal("Only a venue owner can claim a venue.")
   }
 
   // The trade licence is the one document that names the address, so it is the
   // one that cannot be skipped. The rest vary by venue type — a park has no
   // FSSAI licence and a gallery has no liquor licence.
   if (!input.evidence.tradeLicence) {
-    throw new Error("Attach a trade licence or Shops & Establishments registration.")
+    throw new Refusal("Attach a trade licence or Shops & Establishments registration.")
   }
 
   // After the role and required-document checks: someone who may not file at
   // all should be told that, not handed a critique of their input.
   const evidence = evidenceSchema.safeParse(input.evidence)
-  if (!evidence.success) throw new Error("Evidence links must be http(s) URLs")
+  if (!evidence.success) throw new Refusal("Evidence links must be http(s) URLs")
 
   if (input.gstin) {
     const result = validateGstin(input.gstin)
-    if (!result.valid) throw new Error(gstinMessage(result))
+    if (!result.valid) throw new Refusal(gstinMessage(result))
   }
 
   const membership = await db.organisation_members.findFirst({
     where: { user_id: user.id },
     select: { org_id: true },
   })
-  if (!membership) throw new Error("Your account is not attached to an organisation yet.")
+  if (!membership) throw new Refusal("Your account is not attached to an organisation yet.")
 
   const venue = await db.venues.findUnique({
     where: { id: input.venueId, deleted_at: null },
     select: { id: true, name: true, owner_org_id: true },
   })
-  if (!venue) throw new Error("Venue not found")
+  if (!venue) throw new Refusal("Venue not found")
 
   if (venue.owner_org_id === membership.org_id) {
-    throw new Error("Your organisation already owns this venue.")
+    throw new Refusal("Your organisation already owns this venue.")
   }
 
   const isDispute = venue.owner_org_id !== null
@@ -185,7 +186,7 @@ export interface ClaimQueueRow {
 
 export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const claims = await db.venue_claims.findMany({
     where: { status: "pending" },
@@ -263,7 +264,7 @@ export async function decideVenueClaim(
   note?: string
 ): Promise<void> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   const admin = session.user
 
   const claim = await db.venue_claims.findUnique({
@@ -276,14 +277,14 @@ export async function decideVenueClaim(
       venue: { select: { id: true, name: true, owner_org_id: true } },
     },
   })
-  if (!claim) throw new Error("Claim not found")
-  if (claim.status !== "pending") throw new Error("This claim has already been decided.")
+  if (!claim) throw new Refusal("Claim not found")
+  if (claim.status !== "pending") throw new Refusal("This claim has already been decided.")
 
   // A decline that reaches the claimant with no reason produces an identical
   // re-file, and the queue gets the same row again.
   const trimmed = note?.trim() ?? ""
   if (decision === "decline" && trimmed.length < 10) {
-    throw new Error("Give a reason — it is sent to the claimant.")
+    throw new Refusal("Give a reason — it is sent to the claimant.")
   }
 
   await db.$transaction(async (tx) => {

@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
@@ -52,7 +53,7 @@ const priceSchema = z.object({
 
 async function requireAdmin() {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   return session.user
 }
 
@@ -208,17 +209,17 @@ export async function pricePlacement(placementId: string, input: unknown): Promi
   const admin = await requireAdmin()
 
   const parsed = priceSchema.safeParse(input)
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid amount")
+  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "Invalid amount")
   const { amount, currency, note } = parsed.data
 
   const placement = await db.event_sponsors.findUnique({
     where: { id: placementId },
     select: { id: true, event_id: true, sponsor_id: true, status: true },
   })
-  if (!placement) throw new Error("Placement not found")
+  if (!placement) throw new Refusal("Placement not found")
   if (placement.status !== "approved") {
     // Charging for something nobody agreed to run is a conversation, not a row.
-    throw new Error("That placement is not approved.")
+    throw new Refusal("That placement is not approved.")
   }
 
   const existing = await db.placement_charges.findFirst({
@@ -229,7 +230,7 @@ export async function pricePlacement(placementId: string, input: unknown): Promi
    * Refused here as well as by the partial unique index. The constraint is what
    * makes it true; this is what makes it a sentence rather than a 500.
    */
-  if (existing) throw new Error("This placement already has a charge. Void it first.")
+  if (existing) throw new Refusal("This placement already has a charge. Void it first.")
 
   // Rounded once, here, at the boundary between what a person typed and what is
   // stored. Every read from now on is an integer.
@@ -282,8 +283,8 @@ export async function advanceCharge(
     where: { id: chargeId },
     select: { id: true, status: true, placement_id: true, amount_minor: true, currency: true },
   })
-  if (!charge) throw new Error("Charge not found")
-  if (charge.status === "void") throw new Error("That charge was voided.")
+  if (!charge) throw new Refusal("Charge not found")
+  if (charge.status === "void") throw new Refusal("That charge was voided.")
 
   const allowed: Record<string, string[]> = {
     draft: ["agreed", "void"],
@@ -293,7 +294,7 @@ export async function advanceCharge(
     settled: ["void"],
   }
   if (!allowed[charge.status]?.includes(to)) {
-    throw new Error(`A ${charge.status} charge cannot become ${to}.`)
+    throw new Refusal(`A ${charge.status} charge cannot become ${to}.`)
   }
 
   /*
@@ -302,7 +303,7 @@ export async function advanceCharge(
    */
   const ref = externalRef?.trim() ?? ""
   if (to === "settled" && ref.length < 3) {
-    throw new Error("Record the payment reference — it is what makes this checkable.")
+    throw new Refusal("Record the payment reference — it is what makes this checkable.")
   }
 
   await db.placement_charges.update({

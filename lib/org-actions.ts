@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -45,14 +46,14 @@ async function requireOrgRole(
   check: (p: ReturnType<typeof orgPermissions>) => boolean
 ) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const membership = await db.organisation_members.findUnique({
     where: { org_id_user_id: { org_id: orgId, user_id: session.user.id } },
     select: { role: true },
   })
-  if (!membership) throw new Error("Forbidden")
-  if (!check(orgPermissions(membership.role))) throw new Error("Forbidden")
+  if (!membership) throw new Refusal("Forbidden")
+  if (!check(orgPermissions(membership.role))) throw new Refusal("Forbidden")
 
   return { user: session.user, role: membership.role }
 }
@@ -90,7 +91,7 @@ export interface MyOrg {
  */
 export async function getMyOrgs(): Promise<MyOrg[]> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const memberships = await db.organisation_members.findMany({
     where: { user_id: session.user.id },
@@ -165,12 +166,12 @@ export async function getOrgMembers(orgId: string): Promise<{
   // Reading the member list needs membership, not management — staff should be
   // able to see who their colleagues are.
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
   const mine = await db.organisation_members.findUnique({
     where: { org_id_user_id: { org_id: orgId, user_id: session.user.id } },
     select: { role: true },
   })
-  if (!mine) throw new Error("Forbidden")
+  if (!mine) throw new Refusal("Forbidden")
 
   const canManage = orgPermissions(mine.role).canManageMembers
 
@@ -271,7 +272,7 @@ export async function inviteMember(
   const { user, role: myRole } = await requireOrgRole(orgId, (p) => p.canManageMembers)
 
   if (role === "owner" && myRole !== "owner") {
-    throw new Error("Only an owner can invite another owner.")
+    throw new Refusal("Only an owner can invite another owner.")
   }
 
   const target = email.trim().toLowerCase()
@@ -389,19 +390,19 @@ export async function setMemberRole(orgId: string, memberId: string, role: org_r
     where: { id: memberId, org_id: orgId },
     select: { id: true, role: true, user_id: true },
   })
-  if (!member) throw new Error("Not a member of this organisation")
+  if (!member) throw new Refusal("Not a member of this organisation")
 
   // An admin cannot make owners, nor demote one. Otherwise the admin tier is
   // the owner tier with an extra click.
   if (myRole !== "owner" && (role === "owner" || member.role === "owner")) {
-    throw new Error("Only an owner can change an owner's role.")
+    throw new Refusal("Only an owner can change an owner's role.")
   }
 
   // Losing the last owner leaves an org nobody can administer — including the
   // person who just did it.
   if (member.role === "owner" && role !== "owner") {
     const owners = await db.organisation_members.count({ where: { org_id: orgId, role: "owner" } })
-    if (owners <= 1) throw new Error("Promote another owner first — an organisation needs one.")
+    if (owners <= 1) throw new Refusal("Promote another owner first — an organisation needs one.")
   }
 
   await db.organisation_members.update({ where: { id: memberId }, data: { role } })
@@ -423,12 +424,12 @@ export async function removeMember(orgId: string, memberId: string): Promise<voi
     where: { id: memberId, org_id: orgId },
     select: { role: true, user_id: true },
   })
-  if (!member) throw new Error("Not a member of this organisation")
+  if (!member) throw new Refusal("Not a member of this organisation")
 
   if (member.role === "owner") {
-    if (myRole !== "owner") throw new Error("Only an owner can remove an owner.")
+    if (myRole !== "owner") throw new Refusal("Only an owner can remove an owner.")
     const owners = await db.organisation_members.count({ where: { org_id: orgId, role: "owner" } })
-    if (owners <= 1) throw new Error("This is the last owner. Promote someone else first.")
+    if (owners <= 1) throw new Refusal("This is the last owner. Promote someone else first.")
   }
 
   await db.organisation_members.delete({ where: { id: memberId } })
@@ -512,7 +513,7 @@ export async function verifyDomain(orgId: string, domainId: string): Promise<{ o
   const row = await db.organisation_domains.findFirst({
     where: { id: domainId, org_id: orgId },
   })
-  if (!row) throw new Error("Domain not found")
+  if (!row) throw new Refusal("Domain not found")
   if (row.verified_at) return { ok: true, message: "Already verified." }
 
   const check = await checkDomainTxt(row.domain, row.verification_token)
@@ -589,7 +590,7 @@ export async function sendDomainVerifyEmail(
     where: { id: domainId, org_id: orgId },
     select: { id: true, domain: true, verified_at: true },
   })
-  if (!row) throw new Error("Domain not found")
+  if (!row) throw new Refusal("Domain not found")
   if (row.verified_at) return { ok: true, message: "Already verified." }
 
   if (!isRoleAddressFor(address, row.domain)) {
@@ -673,7 +674,7 @@ export async function decideJoinRequest(
     where: { id: requestId, org_id: orgId, status: "pending" },
     select: { id: true, user_id: true },
   })
-  if (!request) throw new Error("Request not found")
+  if (!request) throw new Refusal("Request not found")
 
   await db.$transaction(async (tx) => {
     await tx.organisation_join_requests.update({

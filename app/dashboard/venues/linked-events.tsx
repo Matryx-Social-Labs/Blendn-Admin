@@ -16,6 +16,7 @@ import {
   disputeVenueLink,
   type VenueLinkedEvent,
 } from "@/lib/venue-link-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Events other organisers are holding at your venue.
@@ -81,7 +82,7 @@ function LinkedEventRow({ event }: { event: VenueLinkedEvent }) {
         setReason("")
         router.refresh()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "That did not work.")
+        toast.error(refusalMessage(e, "That did not work."))
       }
     })
   }

@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -20,7 +21,7 @@ import { auditLog } from "@/lib/audit-log"
 
 async function requireAdmin() {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   return session.user
 }
 
@@ -72,7 +73,7 @@ export async function getCategories(): Promise<CategoryRow[]> {
 export async function renameCategory(id: string, name: string): Promise<void> {
   const admin = await requireAdmin()
   const trimmed = name.trim()
-  if (trimmed.length < 2) throw new Error("Name is too short.")
+  if (trimmed.length < 2) throw new Refusal("Name is too short.")
 
   const before = await db.categories.findUniqueOrThrow({
     where: { id },
@@ -105,7 +106,7 @@ export async function mergeCategory(
   intoId: string
 ): Promise<{ events: number; interests: number }> {
   const admin = await requireAdmin()
-  if (fromId === intoId) throw new Error("Pick two different categories.")
+  if (fromId === intoId) throw new Refusal("Pick two different categories.")
 
   const [from, into] = await Promise.all([
     db.categories.findUniqueOrThrow({
@@ -116,7 +117,7 @@ export async function mergeCategory(
   ])
 
   if (from._count.children > 0) {
-    throw new Error("Move or merge its sub-categories first.")
+    throw new Refusal("Move or merge its sub-categories first.")
   }
 
   const moved = await db.$transaction(async (tx) => {
@@ -217,7 +218,7 @@ export async function mergeCategory(
 export async function createCategory(name: string, parentId: string | null): Promise<void> {
   const admin = await requireAdmin()
   const trimmed = name.trim()
-  if (trimmed.length < 2) throw new Error("Name is too short.")
+  if (trimmed.length < 2) throw new Refusal("Name is too short.")
 
   if (parentId) {
     const parent = await db.categories.findUniqueOrThrow({
@@ -227,7 +228,7 @@ export async function createCategory(name: string, parentId: string | null): Pro
     // Two levels, hard. The mobile filter expands parent → children by one
     // level; a third level would stop matching and nobody would notice until a
     // host asked why their event was invisible.
-    if (parent.parent_id) throw new Error("The taxonomy is two levels — pick a top-level parent.")
+    if (parent.parent_id) throw new Refusal("The taxonomy is two levels — pick a top-level parent.")
   }
 
   /*
@@ -243,7 +244,7 @@ export async function createCategory(name: string, parentId: string | null): Pro
     .replace(/^-+|-+$/g, "")
 
   const clash = await db.categories.findUnique({ where: { slug }, select: { id: true } })
-  if (clash) throw new Error("A category with that slug already exists.")
+  if (clash) throw new Refusal("A category with that slug already exists.")
 
   const created = await db.categories.create({
     data: { name: trimmed, slug, parent_id: parentId },

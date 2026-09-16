@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { decideCreative, type CreativeQueueRow } from "@/lib/creative-review-actions"
 import { formatDay } from "@/lib/dashboard-format"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Sponsored copy awaiting review.
@@ -57,7 +58,7 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
         )
         router.refresh()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Could not record the decision.")
+        toast.error(refusalMessage(e, "Could not record the decision."))
       }
     })
   }

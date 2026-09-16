@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "@/lib/refusal"
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
@@ -62,7 +63,7 @@ export async function getUsers(
   try {
     const session = await getAuth()
     if (!session?.user || session.user.role !== "app_admin") {
-      throw new Error("Forbidden")
+      throw new Refusal("Forbidden")
     }
 
     /*
@@ -161,7 +162,7 @@ export async function getUsers(
     return { users: shaped as unknown as UserWithProfile[], total }
   } catch (error) {
     logger.error("Error fetching users", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to fetch users")
+    throw new Refusal("Failed to fetch users")
   }
 }
 
@@ -182,7 +183,7 @@ export async function updateUser(
   try {
     const session = await getAuth()
     if (!session?.user || session.user.role !== "app_admin") {
-      throw new Error("Forbidden")
+      throw new Refusal("Forbidden")
     }
 
     const normalizedLocation = await normalizeLocationToCity(data.profile?.location)
@@ -241,14 +242,14 @@ export async function updateUser(
     return { success: true, user }
   } catch (error) {
     logger.error("Error updating user", { error: error instanceof Error ? error.message : String(error) })
-    throw new Error("Failed to update user")
+    throw new Refusal("Failed to update user")
   }
 }
 
 export async function updateUserRole(id: string, role: user_role) {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") {
-    throw new Error("Forbidden")
+    throw new Refusal("Forbidden")
   }
   await db.user.update({ where: { id, deletedAt: null }, data: { role } })
   revalidatePath("/dashboard/users")
@@ -308,7 +309,7 @@ export async function getUserStats() {
   try {
     const session = await getAuth()
     if (!session?.user || session.user.role !== "app_admin") {
-      throw new Error("Forbidden")
+      throw new Refusal("Forbidden")
     }
 
     // "Accounts" means people on the platform; an erased row is not one.
@@ -326,6 +327,6 @@ export async function getUserStats() {
     logger.error("Error fetching user stats", {
       error: error instanceof Error ? error.message : String(error),
     })
-    throw new Error("Failed to fetch user stats")
+    throw new Refusal("Failed to fetch user stats")
   }
 }

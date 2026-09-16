@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 
 import { auditLog } from "@/lib/audit-log"
@@ -28,7 +29,7 @@ import { db } from "@/lib/db"
 
 async function requireAdmin() {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   return session.user
 }
 
@@ -117,7 +118,7 @@ async function freeSlug(name: string): Promise<string> {
     const candidate = `${base}-${n}`
     if (!taken.has(candidate)) return candidate
   }
-  throw new Error("Could not find a free slug for that name")
+  throw new Refusal("Could not find a free slug for that name")
 }
 
 export async function createAmenity(input: {
@@ -128,7 +129,7 @@ export async function createAmenity(input: {
 }): Promise<void> {
   const user = await requireAdmin()
   const name = input.name.trim()
-  if (name.length < 2) throw new Error("Name is required")
+  if (name.length < 2) throw new Refusal("Name is required")
 
   /*
    * Same name, refused; same slug from a different name, suffixed. The suffix
@@ -141,7 +142,7 @@ export async function createAmenity(input: {
     select: { is_active: true },
   })
   if (same) {
-    throw new Error(
+    throw new Refusal(
       same.is_active
         ? `"${name}" already exists — rename that one instead`
         : `"${name}" exists but is retired — restore it instead of adding a second`
@@ -188,10 +189,10 @@ export async function updateAmenity(
   const user = await requireAdmin()
 
   const existing = await db.amenities.findUnique({ where: { id }, select: { id: true } })
-  if (!existing) throw new Error("Amenity not found")
+  if (!existing) throw new Refusal("Amenity not found")
 
   const name = input.name?.trim()
-  if (name !== undefined && name.length < 2) throw new Error("Name is required")
+  if (name !== undefined && name.length < 2) throw new Refusal("Name is required")
 
   await db.amenities.update({
     where: { id },
@@ -236,7 +237,7 @@ export async function setAmenityActive(id: string, isActive: boolean): Promise<v
     where: { id },
     select: { id: true, name: true, is_active: true },
   })
-  if (!existing) throw new Error("Amenity not found")
+  if (!existing) throw new Refusal("Amenity not found")
   if (existing.is_active === isActive) return
 
   await db.amenities.update({

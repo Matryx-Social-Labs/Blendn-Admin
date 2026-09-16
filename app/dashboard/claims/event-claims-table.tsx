@@ -13,6 +13,7 @@ import { FLAG_COPY } from "@/lib/claim-flags"
 import { cn } from "@/lib/utils"
 
 import { decideEventClaim, type EventClaimRow } from "@/lib/event-claim-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /** Above this many hours a pending claim reads as overdue. */
 const SLA_HOURS = 48
@@ -56,7 +57,7 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
          * having decided this already, or the event having started since the
          * page loaded — and the reviewer needs to know which.
          */
-        toast.error(error instanceof Error ? error.message : "Could not decide this claim")
+        toast.error(refusalMessage(error, "Could not decide this claim"))
       } finally {
         setActing(null)
       }

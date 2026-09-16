@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 import { formatSince } from "@/lib/dashboard-format"
 import { addLeadNote, assignLead, setLeadStatus, getLeadDetail, type LeadDetail } from "@/lib/lead-actions"
 import type { LeadRow } from "@/lib/lead-queries"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * The lead inbox.
@@ -278,7 +279,7 @@ function LeadDrawer({
         router.refresh()
         getLeadDetail(leadId).then(setDetail).catch(() => {})
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "That did not work.")
+        toast.error(refusalMessage(e, "That did not work."))
       }
     })
   }

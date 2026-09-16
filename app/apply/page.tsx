@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { onboardingTier } from "@/lib/org-invites"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * The public host application.
@@ -102,7 +103,7 @@ export default function ApplyPage() {
       if (!res.ok || !body.success) throw new Error(body.error ?? "Could not submit")
       setDone({ emailSent: body.emailSent, message: body.message })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not submit")
+      toast.error(refusalMessage(err, "Could not submit"))
     } finally {
       setLoading(false)
     }

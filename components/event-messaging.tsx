@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { refusalText } from "@/lib/refusal"
+import { refusalText, refusalMessage } from "@/lib/refusal"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -444,7 +444,7 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
           : "Announcement sent to chatroom"
       )
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to send announcement")
+      toast.error(refusalMessage(err, "Failed to send announcement"))
     } finally {
       setSending(false)
     }

@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import type { Prisma } from "@prisma/client"
@@ -52,7 +53,7 @@ const PAGE_SIZE = 100
 
 export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const isAdmin = session.user.role === "app_admin"
 
@@ -84,7 +85,7 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
       select: { org_id: true, role: true },
     })
     const manageable = myOrgs.filter((m) => m.role === "owner" || m.role === "admin")
-    if (manageable.length === 0) throw new Error("Forbidden")
+    if (manageable.length === 0) throw new Refusal("Forbidden")
 
     const colleagues = await db.organisation_members.findMany({
       where: { org_id: { in: manageable.map((m) => m.org_id) } },

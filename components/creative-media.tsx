@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { SPONSORSHIP } from "@/lib/constants"
 import { attachCreativeMedia, requestCreativeUpload } from "@/lib/upload-grant-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4"
 
@@ -64,7 +65,7 @@ export function CreativeMedia({
         toast.success("Attached. The campaign goes back for review before it runs.")
         onAttached?.()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not attach that file")
+        toast.error(refusalMessage(err, "Could not attach that file"))
       } finally {
         setProgress(null)
         if (input.current) input.current.value = ""

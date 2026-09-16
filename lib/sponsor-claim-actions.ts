@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
@@ -77,7 +78,7 @@ export interface ClaimableBrand {
  */
 export async function findClaimableBrands(query: string): Promise<ClaimableBrand[]> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const q = query.trim()
   if (q.length < 2) return []
@@ -124,47 +125,47 @@ export async function fileSponsorClaim(
   input: FileSponsorClaimInput
 ): Promise<{ id: string; isDispute: boolean }> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
   const user = session.user
 
   if (user.role !== "sponsor" && user.role !== "app_admin") {
-    throw new Error("Only a sponsor account can claim a brand.")
+    throw new Refusal("Only a sponsor account can claim a brand.")
   }
 
   // The document that names the company. The rest vary — a sole proprietor has
   // no certificate of incorporation.
   if (!input.evidence.authorisation) {
-    throw new Error("Attach a letter on company letterhead or a trademark certificate.")
+    throw new Refusal("Attach a letter on company letterhead or a trademark certificate.")
   }
 
   // Role and required-document checks first: someone who may not file at all
   // should be told that, not handed a critique of their links.
   const evidence = evidenceSchema.safeParse(input.evidence)
-  if (!evidence.success) throw new Error("Evidence links must be http(s) URLs")
+  if (!evidence.success) throw new Refusal("Evidence links must be http(s) URLs")
 
   if (input.gstin) {
     const result = validateGstin(input.gstin)
-    if (!result.valid) throw new Error(gstinMessage(result))
+    if (!result.valid) throw new Refusal(gstinMessage(result))
   }
 
   const actor = await actorFor(user)
   const orgId = actor.orgIds[0]
-  if (!orgId) throw new Error("Your account is not attached to an organisation yet.")
+  if (!orgId) throw new Refusal("Your account is not attached to an organisation yet.")
 
   const sponsor = await db.sponsors.findUnique({
     where: { id: input.sponsorId },
     select: { id: true, name: true, org_id: true, deleted_at: true, merged_into: true },
   })
-  if (!sponsor || sponsor.deleted_at || sponsor.merged_into) throw new Error("Brand not found")
+  if (!sponsor || sponsor.deleted_at || sponsor.merged_into) throw new Refusal("Brand not found")
 
-  if (sponsor.org_id === orgId) throw new Error("Your organisation already owns this brand.")
+  if (sponsor.org_id === orgId) throw new Refusal("Your organisation already owns this brand.")
 
   const owned = await db.sponsors.findFirst({
     where: { org_id: orgId, deleted_at: null, merged_into: null },
     select: { name: true },
   })
   if (owned) {
-    throw new Error(
+    throw new Refusal(
       `Your organisation already has a brand (${owned.name}). Ask an admin to merge the two rather than claiming a second one.`
     )
   }
@@ -230,7 +231,7 @@ export interface SponsorClaimQueueRow {
 
 export async function getSponsorClaimQueue(): Promise<SponsorClaimQueueRow[]> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const claims = await db.sponsor_claims.findMany({
     where: { status: "pending" },
@@ -341,7 +342,7 @@ export async function decideSponsorClaim(
   note?: string
 ): Promise<void> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   const admin = session.user
 
   const claim = await db.sponsor_claims.findUnique({
@@ -354,14 +355,14 @@ export async function decideSponsorClaim(
       sponsor: { select: { id: true, name: true, name_key: true, org_id: true } },
     },
   })
-  if (!claim) throw new Error("Claim not found")
-  if (claim.status !== "pending") throw new Error("This claim has already been decided.")
+  if (!claim) throw new Refusal("Claim not found")
+  if (claim.status !== "pending") throw new Refusal("This claim has already been decided.")
 
   // A rejection that reaches the claimant with no reason produces an identical
   // re-file, and the queue gets the same row again.
   const trimmed = note?.trim() ?? ""
   if (decision === "reject" && trimmed.length < 10) {
-    throw new Error("Give a reason — it is sent to the claimant.")
+    throw new Refusal("Give a reason — it is sent to the claimant.")
   }
 
   if (decision === "approve") {
@@ -380,7 +381,7 @@ export async function decideSponsorClaim(
       select: { name: true, name_key: true },
     })
     if (owned) {
-      throw new Error(
+      throw new Refusal(
         owned.name_key === claim.sponsor.name_key
           ? `That organisation already owns ${owned.name}, which normalises to the same name. Merge the two on the Brands screen instead.`
           : `That organisation already owns ${owned.name}. One brand per organisation — merge them instead.`
@@ -455,7 +456,7 @@ export interface MyClaimRow {
  */
 export async function getMyClaims(): Promise<MyClaimRow[]> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const actor = await actorFor(session.user)
   if (actor.orgIds.length === 0) return []

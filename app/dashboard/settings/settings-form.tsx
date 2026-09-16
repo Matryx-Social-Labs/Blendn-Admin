@@ -16,6 +16,7 @@ import {
   signOutEverywhereElse,
   updateProfile,
 } from "@/lib/account-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 interface Account {
   name: string
@@ -132,7 +133,7 @@ function ProfileSection({ account }: { account: Account }) {
                 await updateProfile(name)
                 toast.success("Profile updated")
               } catch (err) {
-                toast.error(err instanceof Error ? err.message : "Could not save")
+                toast.error(refusalMessage(err, "Could not save"))
               }
             })
           }

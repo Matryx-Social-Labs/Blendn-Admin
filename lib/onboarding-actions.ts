@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import crypto from "crypto"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
@@ -36,7 +37,7 @@ function generatePassword(length = 14): string {
 
 async function requireAdmin() {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   return session.user
 }
 
@@ -176,9 +177,9 @@ export async function approveOnboardingRequest(
   const admin = await requireAdmin()
 
   const request = await db.organiser_onboarding_requests.findUnique({ where: { id: requestId } })
-  if (!request) throw new Error("Application not found")
-  if (request.status === "approved") throw new Error("Already approved")
-  if (request.status === "declined") throw new Error("This application was declined")
+  if (!request) throw new Refusal("Application not found")
+  if (request.status === "approved") throw new Refusal("Already approved")
+  if (request.status === "declined") throw new Refusal("This application was declined")
 
   const existing = await db.user.findUnique({
     where: { email: request.contact_email },
@@ -187,7 +188,7 @@ export async function approveOnboardingRequest(
   // An attendee applying to host is ordinary — they already use the app. Their
   // account is promoted rather than duplicated, since email is unique.
   if (existing && existing.role !== "attendee") {
-    throw new Error("That email already has a host account")
+    throw new Refusal("That email already has a host account")
   }
 
   const password = generatePassword()
@@ -331,14 +332,14 @@ export async function declineOnboardingRequest(requestId: string, reason: string
   // A decline that reaches the applicant with no reason is worse than none —
   // they reapply identically and the queue gets the same row again.
   const trimmed = reason.trim()
-  if (trimmed.length < 10) throw new Error("Give a reason — it's sent to the applicant.")
+  if (trimmed.length < 10) throw new Refusal("Give a reason — it's sent to the applicant.")
 
   const request = await db.organiser_onboarding_requests.findUnique({
     where: { id: requestId },
     select: { status: true, contact_email: true, contact_name: true },
   })
-  if (!request) throw new Error("Application not found")
-  if (request.status === "approved") throw new Error("Already approved — suspend the org instead")
+  if (!request) throw new Refusal("Application not found")
+  if (request.status === "approved") throw new Refusal("Already approved — suspend the org instead")
 
   await db.organiser_onboarding_requests.update({
     where: { id: requestId },
@@ -460,7 +461,7 @@ export async function setOrganisationStatus(
   const admin = await requireAdmin()
 
   if (status === "suspended" && (reason ?? "").trim().length < 10) {
-    throw new Error("Give a reason for suspending an organisation.")
+    throw new Refusal("Give a reason for suspending an organisation.")
   }
 
   await db.organisations.update({
@@ -514,7 +515,7 @@ export async function setOrganisationMaySponsor(
   const admin = await requireAdmin()
 
   if ((reason ?? "").trim().length < 10) {
-    throw new Error(
+    throw new Refusal(
       maySponsor
         ? "Record which agreement this grant is under."
         : "Give a reason for revoking sponsorship access."
@@ -525,7 +526,7 @@ export async function setOrganisationMaySponsor(
     where: { id: orgId },
     select: { id: true, status: true, display_name: true },
   })
-  if (!org) throw new Error("Organisation not found")
+  if (!org) throw new Refusal("Organisation not found")
 
   /*
    * A suspended organisation cannot be granted placement.
@@ -535,7 +536,7 @@ export async function setOrganisationMaySponsor(
    * whichever was clicked last winning.
    */
   if (maySponsor && org.status !== "verified") {
-    throw new Error("Only a verified organisation can be granted sponsorship access")
+    throw new Refusal("Only a verified organisation can be granted sponsorship access")
   }
 
   await db.organisations.update({ where: { id: orgId }, data: { may_sponsor: maySponsor } })

@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
@@ -58,17 +59,17 @@ export interface CreatePollResult {
 
 export async function createPoll(eventId: string, input: unknown): Promise<CreatePollResult> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const parsed = pollSchema.safeParse(input)
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid poll")
+  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "Invalid poll")
   const { question, options, closesAt, resultsVisible, kind } = parsed.data
 
   // Two options with the same label make a result nobody can act on, and the
   // position unique would not catch it.
   const labels = options.map((o) => o.toLowerCase())
   if (new Set(labels).size !== labels.length) {
-    throw new Error("Two options say the same thing")
+    throw new Refusal("Two options say the same thing")
   }
 
   const event = await db.events.findUnique({
@@ -81,7 +82,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       ...eventPermissionSelect,
     },
   })
-  if (!event) throw new Error("Event not found")
+  if (!event) throw new Refusal("Event not found")
 
   const actor = await actorFor(session.user)
 
@@ -93,13 +94,13 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
    */
   const grant = kind === "sponsored" ? await resolveSponsorGrant(actor, eventId) : undefined
   if (!canBroadcast(actor, event, kind as BroadcastKind, grant ?? undefined)) {
-    throw new Error("Forbidden")
+    throw new Refusal("Forbidden")
   }
 
-  if (!event.chat_group) throw new Error("This event has no chatroom yet.")
+  if (!event.chat_group) throw new Refusal("This event has no chatroom yet.")
 
   const window = chatWindowState(event, event.chat_group)
-  if (!window.open) throw new Error("The chatroom is not open.")
+  if (!window.open) throw new Refusal("The chatroom is not open.")
 
   /*
    * Defaults to the END OF THE EVENT, not the end of the room.
@@ -109,9 +110,9 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
    * days and collecting votes from people who have gone home.
    */
   const closes = closesAt ?? event.end_time
-  if (closes <= new Date()) throw new Error("That closing time has already passed.")
+  if (closes <= new Date()) throw new Refusal("That closing time has already passed.")
   if (closes > event.end_time) {
-    throw new Error("A poll cannot outlast the event it is in.")
+    throw new Refusal("A poll cannot outlast the event it is in.")
   }
 
   const created = await db.$transaction(async (tx) => {
@@ -207,7 +208,7 @@ export async function getPollResults(pollId: string, viewerId?: string): Promise
       },
     },
   })
-  if (!poll) throw new Error("Poll not found")
+  if (!poll) throw new Refusal("Poll not found")
 
   const closed = poll.closes_at !== null && poll.closes_at <= new Date()
 
@@ -300,19 +301,19 @@ export async function castVote(
       },
     },
   })
-  if (!poll || poll.message.deleted_at) throw new Error("Poll not found")
+  if (!poll || poll.message.deleted_at) throw new Refusal("Poll not found")
 
   // Scoped to this poll, so an option id from another poll cannot be smuggled
   // in — the composite foreign key would reject it, but a clear refusal beats a
   // constraint violation surfacing as a 500.
-  if (poll.options.length === 0) throw new Error("That is not an option on this poll")
+  if (poll.options.length === 0) throw new Refusal("That is not an option on this poll")
 
   if (poll.closes_at && poll.closes_at <= new Date()) {
-    throw new Error("This poll has closed")
+    throw new Refusal("This poll has closed")
   }
 
   const window = chatWindowState(poll.message.chat_group.event, poll.message.chat_group)
-  if (!window.open) throw new Error("The chatroom is not open")
+  if (!window.open) throw new Refusal("The chatroom is not open")
 
   /*
    * Only people in the room.
@@ -329,7 +330,7 @@ export async function castVote(
     },
     select: { id: true },
   })
-  if (!member) throw new Error("You are not in this chatroom")
+  if (!member) throw new Refusal("You are not in this chatroom")
 
   await db.chat_poll_votes.upsert({
     where: { poll_id_user_id: { poll_id: pollId, user_id: userId } },

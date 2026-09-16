@@ -17,6 +17,7 @@ import {
   type ChargeLedger,
 } from "@/lib/charge-actions"
 import { formatDay } from "@/lib/dashboard-format"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Money, as minor units, formatted once.
@@ -98,7 +99,7 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
         setAmount("")
         router.refresh()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not price that")
+        toast.error(refusalMessage(err, "Could not price that"))
       }
     })
   }
@@ -114,7 +115,7 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
         setSettling(false)
         router.refresh()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not update that")
+        toast.error(refusalMessage(err, "Could not update that"))
       }
     })
   }

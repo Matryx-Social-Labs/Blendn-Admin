@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import { resolveReport, type ReportDecision, type ReportRow } from "./actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /** Above this many hours a pending report reads as overdue — same SLA as flags. */
 const SLA_HOURS = 24
@@ -47,7 +48,7 @@ export function ReportsTable({
         // Surfaced rather than swallowed: the likeliest cause is another admin
         // having already actioned this row, and the reviewer needs to know
         // their click did nothing.
-        toast.error(error instanceof Error ? error.message : "Could not resolve the report")
+        toast.error(refusalMessage(error, "Could not resolve the report"))
       } finally {
         setActing(null)
       }

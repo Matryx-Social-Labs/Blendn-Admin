@@ -1,5 +1,6 @@
 "use server"
 
+import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
@@ -59,7 +60,7 @@ export interface SponsorMatch {
  */
 export async function findSponsors(query: string): Promise<SponsorMatch[]> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const q = query.trim()
   if (q.length < 2) return []
@@ -113,7 +114,7 @@ export async function findSponsors(query: string): Promise<SponsorMatch[]> {
  */
 export async function createUnclaimedSponsor(eventId: string, input: unknown) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   /*
    * Authorised against the EVENT this is being created for, not by role.
@@ -132,24 +133,24 @@ export async function createUnclaimedSponsor(eventId: string, input: unknown) {
     where: { id: eventId, deleted_at: null },
     select: { id: true, ...eventPermissionSelect },
   })
-  if (!event) throw new Error("Event not found")
+  if (!event) throw new Refusal("Event not found")
 
   const actor = await actorFor(session.user)
-  if (!eventPermissions(actor, event).canEdit) throw new Error("Forbidden")
+  if (!eventPermissions(actor, event).canEdit) throw new Refusal("Forbidden")
 
   const parsed = brandSchema.safeParse(input)
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid brand")
+  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "Invalid brand")
 
   const { name, website, logo_url } = parsed.data
   const name_key = normaliseSponsorName(name)
-  if (!name_key) throw new Error("That name has no letters or digits in it")
+  if (!name_key) throw new Refusal("That name has no letters or digits in it")
 
   const clash = await db.sponsors.findFirst({
     where: { name_key, deleted_at: null, merged_into: null },
     select: { id: true, name: true },
   })
   if (clash) {
-    throw new Error(`“${clash.name}” already exists — pick it from the list instead`)
+    throw new Refusal(`“${clash.name}” already exists — pick it from the list instead`)
   }
 
   const sponsor = await db.sponsors.create({
@@ -191,22 +192,22 @@ export async function createUnclaimedSponsor(eventId: string, input: unknown) {
  */
 export async function attachSponsorToEvent(eventId: string, sponsorId: string) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
     select: { id: true, ...eventPermissionSelect },
   })
-  if (!event) throw new Error("Event not found")
+  if (!event) throw new Refusal("Event not found")
 
   const actor = await actorFor(session.user)
-  if (!eventPermissions(actor, event).canEdit) throw new Error("Forbidden")
+  if (!eventPermissions(actor, event).canEdit) throw new Refusal("Forbidden")
 
   const sponsor = await db.sponsors.findFirst({
     where: { id: sponsorId, deleted_at: null, merged_into: null, status: "active" },
     select: { id: true, name: true, org_id: true },
   })
-  if (!sponsor) throw new Error("Brand not found")
+  if (!sponsor) throw new Refusal("Brand not found")
 
   /*
    * A room people joined to talk to strangers is not an ad break.
@@ -218,7 +219,7 @@ export async function attachSponsorToEvent(eventId: string, sponsorId: string) {
     where: { event_id: eventId, status: { in: ["proposed", "approved"] } },
   })
   if (live >= SPONSORSHIP.MAX_PLACEMENTS_PER_EVENT) {
-    throw new Error(
+    throw new Refusal(
       `An event may carry ${SPONSORSHIP.MAX_PLACEMENTS_PER_EVENT} sponsors at most`
     )
   }
@@ -256,7 +257,7 @@ export async function attachSponsorToEvent(eventId: string, sponsorId: string) {
     select: { status: true },
   })
   if (prior && prior.status !== "cancelled" && prior.status !== "draft") {
-    throw new Error(`“${sponsor.name}” is already on this event`)
+    throw new Refusal(`“${sponsor.name}” is already on this event`)
   }
 
   const placement = await db.event_sponsors.upsert({
@@ -315,14 +316,14 @@ export async function attachSponsorToEvent(eventId: string, sponsorId: string) {
  */
 export async function mergeSponsors(loserId: string, winnerId: string, note: string) {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
-  if (loserId === winnerId) throw new Error("A brand cannot be merged into itself")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  if (loserId === winnerId) throw new Refusal("A brand cannot be merged into itself")
 
   const [loser, winner] = await Promise.all([
     db.sponsors.findUnique({ where: { id: loserId }, select: { id: true, name: true, org_id: true } }),
     db.sponsors.findUnique({ where: { id: winnerId }, select: { id: true, name: true, org_id: true } }),
   ])
-  if (!loser || !winner) throw new Error("Brand not found")
+  if (!loser || !winner) throw new Refusal("Brand not found")
 
   await db.$transaction(async (tx) => {
     // Placements first. A unique on (event_id, sponsor_id) means the loser may
@@ -396,7 +397,7 @@ export async function mergeSponsors(loserId: string, winnerId: string, note: str
  */
 export async function mergePreview(loserId: string) {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const [placements, campaigns, claims] = await Promise.all([
     db.event_sponsors.count({ where: { sponsor_id: loserId } }),
@@ -465,7 +466,7 @@ export interface SponsorOverview {
  */
 export async function getSponsorOverview(): Promise<SponsorOverview> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const actor = await actorFor(session.user)
   if (actor.orgIds.length === 0) {
@@ -607,10 +608,10 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
 /** Accept or decline a placement somebody proposed to this sponsor. */
 export async function decidePlacement(placementId: string, accept: boolean) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const actor = await actorFor(session.user)
-  if (actor.orgIds.length === 0) throw new Error("Forbidden")
+  if (actor.orgIds.length === 0) throw new Refusal("Forbidden")
 
   /*
    * Scoped in the WHERE, not checked after the read.
@@ -627,7 +628,7 @@ export async function decidePlacement(placementId: string, accept: boolean) {
     },
     select: { id: true, event_id: true, sponsor_id: true },
   })
-  if (!placement) throw new Error("Placement not found")
+  if (!placement) throw new Refusal("Placement not found")
 
   await db.event_sponsors.update({
     where: { id: placement.id },
@@ -661,7 +662,7 @@ export interface MyBrand {
 /** This organisation's brand, if it has one. */
 export async function getMyBrand(): Promise<MyBrand | null> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const actor = await actorFor(session.user)
   if (actor.orgIds.length === 0) return null
@@ -704,7 +705,7 @@ export async function getMyBrand(): Promise<MyBrand | null> {
  */
 export async function saveMyBrand(input: unknown) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   /*
    * A role check, which this had none of.
@@ -715,10 +716,10 @@ export async function saveMyBrand(input: unknown) {
    * the brand-name uniqueness check made that worse: one account could squat a
    * name globally and block every other org from creating a colliding one.
    */
-  if (session.user.role !== "sponsor") throw new Error("Only sponsors can edit a brand")
+  if (session.user.role !== "sponsor") throw new Refusal("Only sponsors can edit a brand")
 
   const parsed = brandSchema.safeParse(input)
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid brand")
+  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "Invalid brand")
 
   const actor = await actorFor(session.user)
   /*
@@ -727,11 +728,11 @@ export async function saveMyBrand(input: unknown) {
    * nothing on the screen would say which one it had chosen.
    */
   const orgId = [...actor.orgIds].sort()[0]
-  if (!orgId) throw new Error("You are not a member of an organisation")
+  if (!orgId) throw new Refusal("You are not a member of an organisation")
 
   const { name, website, logo_url } = parsed.data
   const name_key = normaliseSponsorName(name)
-  if (!name_key) throw new Error("That name has no letters or digits in it")
+  if (!name_key) throw new Refusal("That name has no letters or digits in it")
 
   const existing = await db.sponsors.findFirst({
     where: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
@@ -748,7 +749,7 @@ export async function saveMyBrand(input: unknown) {
     },
     select: { id: true },
   })
-  if (clash) throw new Error("Your organisation already has a brand with that name")
+  if (clash) throw new Refusal("Your organisation already has a brand with that name")
 
   const data = {
     name,
@@ -801,16 +802,16 @@ export interface EventSponsorRow {
 /** Brands attached to one event, for the organiser's panel. */
 export async function getEventSponsors(eventId: string): Promise<EventSponsorRow[]> {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
     select: { start_time: true, end_time: true, ...eventPermissionSelect },
   })
-  if (!event) throw new Error("Event not found")
+  if (!event) throw new Refusal("Event not found")
 
   const actor = await actorFor(session.user)
-  if (!eventPermissions(actor, event).canOperate) throw new Error("Forbidden")
+  if (!eventPermissions(actor, event).canOperate) throw new Refusal("Forbidden")
 
   const rows = await db.event_sponsors.findMany({
     where: { event_id: eventId },
@@ -854,7 +855,7 @@ export async function getEventSponsors(eventId: string): Promise<EventSponsorRow
  */
 export async function removePlacement(placementId: string) {
   const session = await getAuth()
-  if (!session?.user) throw new Error("Unauthorized")
+  if (!session?.user) throw new Refusal("Unauthorized")
 
   const placement = await db.event_sponsors.findUnique({
     where: { id: placementId },
@@ -865,10 +866,10 @@ export async function removePlacement(placementId: string) {
       event: { select: { ...eventPermissionSelect } },
     },
   })
-  if (!placement) throw new Error("Placement not found")
+  if (!placement) throw new Refusal("Placement not found")
 
   const actor = await actorFor(session.user)
-  if (!eventPermissions(actor, placement.event).canEdit) throw new Error("Forbidden")
+  if (!eventPermissions(actor, placement.event).canEdit) throw new Refusal("Forbidden")
 
   /*
    * Charges count as history too, and this only counted campaigns.
@@ -939,7 +940,7 @@ export interface SponsorRegister {
  */
 export async function getSponsorRegister(): Promise<SponsorRegister> {
   const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Error("Forbidden")
+  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
   const rows = await db.sponsors.findMany({
     where: { deleted_at: null, merged_into: null },

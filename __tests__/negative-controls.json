@@ -604,6 +604,13 @@
       "observed": "A: 3 failing. B: 3 failing (the minor's boardPost '403 FORBIDDEN' not '403 AGE_RESTRICTED', the unknown-age boardPost, the draft boardPost 403 not 404). Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-15"
+    },
+    "refusal-reaches-the-screen.test.ts": {
+      "guards": "that no \"use server\" file throws a bare Error at a person (production strips the message; only a Refusal's digest crosses), and that no toast reads err.message (the mask) instead of refusalMessage",
+      "mutation": "A: in lib/org-actions.ts change `throw new Refusal(\"This is the last owner…\")` back to `throw new Error(…)`. B: in app/dashboard/organisation/panel.tsx change `toast.error(refusalMessage(err, \"Could not remove\"))` back to `toast.error(err instanceof Error ? err.message : \"Could not remove\")`",
+      "observed": "A: 1 failing (lib/org-actions.ts listed). B: 1 failing (panel.tsx listed). Green after cp of the saved files",
+      "reverted": true,
+      "date": "2026-09-16"
     }
   },
   "grandfathered": [

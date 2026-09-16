@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { setOrganisationMaySponsor } from "@/lib/onboarding-actions"
+import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Grant or revoke an organisation's right to sell placement.
@@ -43,7 +44,7 @@ export function OrgSponsorControl({
         setConfirming(false)
         setReason("")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not change sponsorship access")
+        toast.error(refusalMessage(err, "Could not change sponsorship access"))
       }
     })
   }
