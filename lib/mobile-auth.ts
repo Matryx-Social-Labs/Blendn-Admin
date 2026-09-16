@@ -40,9 +40,22 @@ const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000 // 30 days in ms
  * only revoke *every* session for the user. Without this window an interrupted
  * refresh on one phone signs the user out on all their devices.
  *
- * A replay long after rotation is still treated as theft.
+ * Sixty seconds was the first value, and it covered a client that retries
+ * at once. The client does not: after a timed-out refresh it keeps the old
+ * token and presents it at the *next* 401, which on an idle phone is one
+ * access-token lifetime later. Driven on staging (SCRUM-138): a rotation at
+ * 20:50 UTC, the phone's replay 869 s later, and every session for the
+ * account revoked as "reuse" — the user found the sign-in screen next morning.
+ *
+ * So the window is the access-token lifetime plus a margin, and it applies
+ * only while the successor has **never been used** (still live, not itself
+ * rotated). A successor that was used means somebody else already holds the
+ * chain, and a replay of its predecessor is the theft signature whatever the
+ * clock says. A stolen token replayed inside the window still costs the thief
+ * nothing they did not already have, and the legitimate device's next refresh
+ * ends the family exactly as before.
  */
-const REFRESH_REUSE_GRACE_MS = 60 * 1000 // 60 seconds
+const REFRESH_REUSE_GRACE_MS = 20 * 60 * 1000 // the 15-minute access token, plus a margin
 /** How long a revoked row outlives its revocation — comfortably past the grace. */
 const REVOKED_TOKEN_RETENTION_MS = 60 * 60 * 1000
 
@@ -241,13 +254,24 @@ export async function verifyRefreshToken(
           })
           return null
         }
-        logger.info("Refresh token replayed just after rotation, re-issuing", {
+        // The lost-response case has one shape: the successor nobody stored
+        // is still live and was never itself rotated. `updateMany` retiring
+        // it returns 0 when it is not — somebody used it — and that is reuse.
+        const retired = await db.mobile_refresh_tokens.updateMany({
+          where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
+          data: { revoked_at: new Date() },
+        })
+        if (retired.count === 0) {
+          logger.error("Refresh token replayed after its successor was used, revoking all refresh tokens", {
+            userId: storedToken.user_id,
+            sinceRevokedMs,
+          })
+          await revokeUserRefreshTokens(storedToken.user_id)
+          return null
+        }
+        logger.info("Refresh token replayed after a lost rotation, re-issuing", {
           userId: storedToken.user_id,
           sinceRevokedMs,
-        })
-        await db.mobile_refresh_tokens.updateMany({
-          where: { id: storedToken.replaced_by, revoked_at: null },
-          data: { revoked_at: new Date() },
         })
       } else {
         logger.error("Refresh token reuse detected, revoking all refresh tokens", {
