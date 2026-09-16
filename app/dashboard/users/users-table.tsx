@@ -403,7 +403,9 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
         email: formData.email,
         profile: {
           phone: formData.phone || null,
-          age: formData.age ? parseInt(formData.age) : null,
+          // Not sent when a birth date decides it: the server refuses a write
+          // to a number nothing reads, and the field is read-only above.
+          ...(user.profile?.ageFromBirthDate ? {} : { age: formData.age ? parseInt(formData.age) : null }),
           location: formData.location || null,
           onboarded: formData.onboarded,
         },
@@ -466,7 +468,14 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
                 type="number"
                 value={formData.age}
                 onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                readOnly={!!user.profile?.ageFromBirthDate}
+                aria-describedby={user.profile?.ageFromBirthDate ? "age-from-birth-date" : undefined}
               />
+              {user.profile?.ageFromBirthDate ? (
+                <p id="age-from-birth-date" className="text-xs text-muted-foreground">
+                  From their birth date — the number the product enforces. Not editable here.
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="space-y-2">
