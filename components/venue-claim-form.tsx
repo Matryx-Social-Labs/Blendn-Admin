@@ -70,7 +70,7 @@ export function VenueClaimForm({
   async function attach(key: keyof ClaimEvidence, file: File) {
     setUploading(key)
     try {
-      const url = await uploadFile(file)
+      const url = await uploadFile(file, undefined, "claims")
       setEvidence((e) => ({ ...e, [key]: url }))
     } catch {
       toast.error("Upload failed. Try again.")

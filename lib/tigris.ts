@@ -1,6 +1,7 @@
 import { SPONSORSHIP } from "./constants"
 import { logger } from "./logger"
 import {
+  GetObjectCommand,
   HeadObjectCommand,
   S3Client,
   PutObjectCommand,
@@ -54,7 +55,21 @@ function getS3Client(): S3Client {
 }
 
 // Folder types for organizing uploads
-export type UploadFolder = "profile" | "chat" | "events" | "sponsored"
+export type UploadFolder = "profile" | "chat" | "events" | "sponsored" | "claims"
+
+/**
+ * The folders the bucket policy makes world-readable.
+ *
+ * Everything the product shows to anyone — covers, avatars, chat media,
+ * sponsored creatives — lives here and needs no signing. `claims` is not in
+ * the list on purpose: a venue claim's trade licence, FSSAI or liquor licence
+ * names an address, a proprietor and often a GSTIN, and the only person who
+ * should read it is the admin deciding the claim. It was uploaded under
+ * `events/` and readable by anyone holding the URL (SCRUM-135). The policy is
+ * re-applied on every boot by `ensureBucketExists`, so a folder missing from
+ * this list is private by construction, not by remembering.
+ */
+export const PUBLIC_FOLDERS: readonly UploadFolder[] = ["profile", "chat", "events", "sponsored"]
 
 /**
  * Generate a unique filename with folder prefix
@@ -106,8 +121,9 @@ export async function getPresignedUploadUrl(
     Key: key,
     ContentType: contentType,
     ...(opts.checksum ? { ChecksumAlgorithm: "SHA256" as const } : {}),
-    // Set cache control for browser caching
-    CacheControl: "public, max-age=31536000",
+    // Set cache control for browser caching. A private document is never
+    // cached by an intermediary.
+    CacheControl: PUBLIC_FOLDERS.includes(folder) ? "public, max-age=31536000" : "private, no-store",
     // Set metadata
     Metadata: {
       "uploaded-by": userId,
@@ -302,6 +318,34 @@ export async function getObjectSize(key: string): Promise<number | null> {
 }
 
 /**
+ * A URL that can read a private object for the next `expiresIn` seconds.
+ *
+ * For anything outside `PUBLIC_FOLDERS`. The reviewer's queue is the one
+ * consumer: it renders each claim's documents through this, so the link in
+ * the page works for the sitting and the stored URL works for nobody.
+ */
+export async function getPresignedReadUrl(key: string, expiresIn = 900): Promise<string> {
+  const client = getS3Client()
+  return getSignedUrl(client, new GetObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }), { expiresIn })
+}
+
+/**
+ * The URL to show a reviewer for a stored evidence reference.
+ *
+ * A key under a private folder is signed; anything else — a public-folder
+ * object, or a link the claimant pasted — is returned unchanged. Evidence
+ * filed before `claims/` existed sits under `events/` and stays readable
+ * through this exactly as it did.
+ */
+export async function reviewableUrl(urlOrKey: string): Promise<string> {
+  const key = extractKeyFromUrl(urlOrKey)
+  if (!key) return urlOrKey
+  const folder = key.split("/")[0] as UploadFolder
+  if ((PUBLIC_FOLDERS as readonly string[]).includes(folder)) return urlOrKey
+  return getPresignedReadUrl(key)
+}
+
+/**
  * Resolve a media URL/key to a publicly-accessible URL.
  * The bucket has a public-read policy so no signing is needed.
  * Non-Tigris URLs are returned unchanged.
@@ -364,6 +408,8 @@ export function validateContentType(contentType: string, folder: UploadFolder): 
      * one every phone plays inline, muted, on demand.
      */
     sponsored: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
+    // A scan or a photo of a licence; nothing that plays.
+    claims: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
   }
 
   return allowedTypes[folder]?.includes(contentType) ?? false
@@ -380,6 +426,7 @@ export function getMaxFileSize(folder: UploadFolder): number {
     // The ceiling for the folder. `lib/upload-grant-actions.ts` narrows it
     // further per content type — an image has no business being 100MB.
     sponsored: SPONSORSHIP.MAX_VIDEO_BYTES,
+    claims: 20 * 1024 * 1024, // 20MB
   }
 
   return maxSizes[folder] ?? 10 * 1024 * 1024
@@ -418,9 +465,9 @@ async function trySetBucketPublicRead(): Promise<void> {
   }
 }
 
-async function setBucketPublicRead(): Promise<void> {
-  const client = getS3Client()
-  const policy = JSON.stringify({
+/** The bucket policy: anonymous read on the public folders and nothing else. */
+function publicReadPolicy(bucket: string) {
+  return {
     Version: "2012-10-17",
     Statement: [
       {
@@ -428,15 +475,18 @@ async function setBucketPublicRead(): Promise<void> {
         Effect: "Allow",
         Principal: "*",
         Action: ["s3:GetObject"],
-        Resource: [`arn:aws:s3:::${TIGRIS_BUCKET}/*`],
+        Resource: PUBLIC_FOLDERS.map((folder) => `arn:aws:s3:::${bucket}/${folder}/*`),
       },
     ],
-  })
+  }
+}
 
+async function setBucketPublicRead(): Promise<void> {
+  const client = getS3Client()
   await client.send(
     new PutBucketPolicyCommand({
       Bucket: TIGRIS_BUCKET,
-      Policy: policy,
+      Policy: JSON.stringify(publicReadPolicy(TIGRIS_BUCKET)),
     })
   )
   logger.info("Public-read policy set for bucket", { bucket: TIGRIS_BUCKET })
