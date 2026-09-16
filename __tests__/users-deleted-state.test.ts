@@ -17,8 +17,9 @@ import { join } from "path"
  * as source text, because what matters is which branch a deleted row takes.
  */
 const mockDb = {
-  user: { findMany: jest.fn(), count: jest.fn(), update: jest.fn() },
+  user: { findMany: jest.fn(), count: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
   profiles: { count: jest.fn() },
+  audit_logs: { create: jest.fn() },
 }
 const mockAuth = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -40,6 +41,10 @@ beforeEach(() => {
   mockDb.user.count.mockResolvedValue(0)
   mockDb.profiles.count.mockResolvedValue(0)
   mockDb.user.update.mockResolvedValue({ id: "u1" })
+  // The pre-write read the audit row is built from; `deletedAt: null` in
+  // its where is what makes an erased row "not found" before any write.
+  mockDb.user.findUnique.mockResolvedValue({ name: "Old", email: "old@x", role: "attendee", profile: null })
+  mockDb.audit_logs.create.mockReturnValue({ catch: () => undefined, then: () => undefined })
 })
 
 const whereOf = (call: jest.Mock) => call.mock.calls[0][0].where as { AND: Record<string, unknown>[] }
@@ -83,6 +88,8 @@ describe("an erased account cannot be edited back into existence", () => {
   it("updateUser scopes its write to live rows", async () => {
     await updateUser("u1", { name: "Resurrected" })
     expect(mockDb.user.update.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
+    // And the read before it, so an erased row is refused before any write.
+    expect(mockDb.user.findUnique.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
   })
 
   it("updateUserRole does too", async () => {

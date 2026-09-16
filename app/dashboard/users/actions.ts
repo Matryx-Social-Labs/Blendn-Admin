@@ -6,6 +6,8 @@ import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
 import { getAuth } from "@/lib/auth"
+import { auditLog } from "@/lib/audit-log"
+import { ageFrom } from "@/lib/age"
 import type { user_role } from "@prisma/client"
 
 export interface UserWithProfile {
@@ -23,7 +25,16 @@ export interface UserWithProfile {
   profile: {
     id: string
     phone: string | null
+    /**
+     * Derived — `ageFrom(profile)`, the number the product enforces — never
+     * the stored column. `profiles.age` is what was typed at sign-up; once a
+     * birth date exists it is ignored everywhere else, and this screen showed
+     * it anyway: an admin set it to 17, the list said "17 years old", and the
+     * product still admitted her to an 18+ event (SCRUM-131).
+     */
     age: number | null
+    /** True when a birth date decides the age — the Age field is then read-only. */
+    ageFromBirthDate: boolean
     location: string | null
     onboarded: boolean
     created_at: Date
@@ -127,6 +138,7 @@ export async function getUsers(
               id: true,
               phone: true,
               age: true,
+              date_of_birth: true,
               location: true,
               onboarded: true,
               created_at: true,
@@ -156,6 +168,16 @@ export async function getUsers(
 
     const shaped = users.map((user) => ({
       ...user,
+      // The birth date itself never leaves the server (lib/age.ts); the
+      // browser gets the derived number and whether a date decided it.
+      profile: user.profile
+        ? {
+            ...user.profile,
+            date_of_birth: undefined,
+            age: ageFrom(user.profile),
+            ageFromBirthDate: user.profile.date_of_birth != null,
+          }
+        : null,
       interests: user.user_interests.map((ui) => ui.category.name),
     }))
 
@@ -186,7 +208,36 @@ export async function updateUser(
       throw new Refusal("Forbidden")
     }
 
-    const normalizedLocation = await normalizeLocationToCity(data.profile?.location)
+    // Only when sent: `normalizeLocationToCity(undefined)` is null, and a null
+    // here would clear the column on a partial edit.
+    const normalizedLocation =
+      data.profile?.location !== undefined ? await normalizeLocationToCity(data.profile.location) : undefined
+
+    // Read before the write, so the audit row carries what changed rather
+    // than only what was sent.
+    const before = await db.user.findUnique({
+      where: { id, deletedAt: null },
+      select: {
+        name: true,
+        email: true,
+        profile: { select: { phone: true, age: true, date_of_birth: true, location: true, onboarded: true } },
+      },
+    })
+    if (!before) throw new Refusal("User not found")
+
+    /*
+     * Age is typed at sign-up and superseded by the birth date the moment one
+     * exists (`ageFrom`, lib/age.ts). Writing the column then would change a
+     * number nothing reads while the screen showed it as if it mattered —
+     * exactly what SCRUM-131 found. Refuse it rather than pretend.
+     */
+    if (
+      data.profile?.age !== undefined &&
+      before.profile?.date_of_birth &&
+      data.profile.age !== before.profile.age
+    ) {
+      throw new Refusal("Their age comes from their birth date and cannot be edited here.")
+    }
 
     const updateData: Record<string, unknown> = {}
     if (data.name !== undefined) updateData.name = data.name
@@ -195,17 +246,26 @@ export async function updateUser(
     if (data.profile) {
       updateData.profile = {
         upsert: {
+          /*
+           * Every optional field is a conditional spread. The dialog sends
+           * them all, but a caller that sends a partial edit — the age is now
+           * omitted when a birth date decides it, and a test drove exactly
+           * that — made this an explicit `undefined`, which is a runtime
+           * error under strictUndefinedChecks: the seventh instance of the
+           * class in this codebase, on the line below a comment about the
+           * sixth.
+           */
           create: {
-            phone: data.profile.phone,
-            age: data.profile.age,
-            location: normalizedLocation,
+            ...(data.profile.phone !== undefined && { phone: data.profile.phone }),
+            ...(data.profile.age !== undefined && { age: data.profile.age }),
+            ...(normalizedLocation !== undefined && { location: normalizedLocation }),
             interests: data.profile.interests || [],
             onboarded: data.profile.onboarded ?? false,
           },
           update: {
-            phone: data.profile.phone,
-            age: data.profile.age,
-            location: normalizedLocation,
+            ...(data.profile.phone !== undefined && { phone: data.profile.phone }),
+            ...(data.profile.age !== undefined && { age: data.profile.age }),
+            ...(normalizedLocation !== undefined && { location: normalizedLocation }),
             /*
              * Conditional, because the only caller never sends it.
              *
@@ -221,7 +281,7 @@ export async function updateUser(
              * this write is assembled in `updateData` first.
              */
             ...(data.profile.interests !== undefined && { interests: data.profile.interests }),
-            onboarded: data.profile.onboarded,
+            ...(data.profile.onboarded !== undefined && { onboarded: data.profile.onboarded }),
           },
         },
       }
@@ -238,9 +298,28 @@ export async function updateUser(
       },
     })
 
+    const changed: Record<string, { from: unknown; to: unknown }> = {}
+    const note = (field: string, from: unknown, to: unknown) => {
+      if (to !== undefined && from !== to) changed[field] = { from: from ?? null, to: to ?? null }
+    }
+    note("name", before.name, data.name)
+    note("email", before.email, data.email)
+    note("phone", before.profile?.phone, data.profile?.phone)
+    note("age", before.profile?.age, data.profile?.age)
+    note("location", before.profile?.location, normalizedLocation)
+    note("onboarded", before.profile?.onboarded, data.profile?.onboarded)
+    auditLog({
+      userId: session.user.id,
+      action: "user.updated",
+      resource: "user",
+      resourceId: id,
+      details: { changed } as never,
+    })
+
     revalidatePath("/dashboard/users")
     return { success: true, user }
   } catch (error) {
+    if (error instanceof Refusal) throw error
     logger.error("Error updating user", { error: error instanceof Error ? error.message : String(error) })
     throw new Refusal("Failed to update user")
   }
@@ -251,7 +330,18 @@ export async function updateUserRole(id: string, role: user_role) {
   if (!session?.user || session.user.role !== "app_admin") {
     throw new Refusal("Forbidden")
   }
+  const before = await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } })
+  if (!before) throw new Refusal("User not found")
   await db.user.update({ where: { id, deletedAt: null }, data: { role } })
+  // A role change is the canonical audited admin action (CLAUDE.md), and it
+  // had no row: an attendee made an admin left nothing behind (SCRUM-131).
+  auditLog({
+    userId: session.user.id,
+    action: "user.role_changed",
+    resource: "user",
+    resourceId: id,
+    details: { from: before.role, to: role },
+  })
   revalidatePath("/dashboard/users")
   return { success: true }
 }

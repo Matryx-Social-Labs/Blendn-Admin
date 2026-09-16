@@ -617,6 +617,13 @@
       "observed": "A: 2 failing (where a claim document goes; signs a private key). B: 2 failing. Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-16"
+    },
+    "integration/admin-user-edit-age-audit.itest.ts": {
+      "guards": "that the Users list carries ageFrom(profile) (derived) and ageFromBirthDate, never the birth date; that updateUser refuses a changed age for an account with a birth date; that updateUser and updateUserRole write audit_logs rows (user.updated {changed}, user.role_changed {from,to})",
+      "mutation": "A: `before.profile?.date_of_birth && false &&` in updateUser. B: rename the role audit action to `user.role_changed_`",
+      "observed": "A: 1 failing (the refusal case). B: 1 failing (the role audit). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-16"
     }
   },
   "grandfathered": [
