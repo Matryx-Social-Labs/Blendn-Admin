@@ -21,7 +21,7 @@ import {
 const presignedUrlSchema = z.object({
   filename: z.string().min(1, "Filename is required").max(255),
   contentType: z.string().min(1, "Content type is required"),
-  folder: z.enum(["profile", "chat", "events"]).default("events"),
+  folder: z.enum(["profile", "chat", "events", "claims"]).default("events"),
 })
 
 export async function POST(request: NextRequest) {

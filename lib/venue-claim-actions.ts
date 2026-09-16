@@ -9,6 +9,7 @@ import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { venueTypeLabel } from "@/lib/venue-types"
+import { reviewableUrl } from "@/lib/tigris"
 
 /**
  * Claiming a venue.
@@ -215,8 +216,15 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
     : []
   const filerName = new Map(filers.map((f) => [f.id, f.name]))
 
-  return claims.map((c) => {
-    const evidence = (c.evidence ?? {}) as ClaimEvidence
+  return Promise.all(claims.map(async (c) => {
+    const stored = (c.evidence ?? {}) as ClaimEvidence
+    // The stored reference is a private key for anything filed since
+    // `claims/` existed; the reviewer gets a signed URL good for the sitting.
+    const evidence = Object.fromEntries(
+      await Promise.all(
+        Object.entries(stored).map(async ([k, url]) => [k, url ? await reviewableUrl(url) : url])
+      )
+    ) as ClaimEvidence
     const flags: string[] = []
 
     if (!evidence.tradeLicence) flags.push("No trade licence attached")
@@ -246,7 +254,7 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
       createdAt: c.created_at,
       flags,
     }
-  })
+  }))
 }
 
 /**

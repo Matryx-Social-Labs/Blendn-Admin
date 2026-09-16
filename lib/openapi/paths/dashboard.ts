@@ -546,7 +546,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: PresignedUrlRequestSchema.extend({
-            folder: z.enum(["profile", "chat", "events"]).default("events"),
+            folder: z.enum(["profile", "chat", "events", "claims"]).default("events"),
           }),
         },
       },

@@ -3,11 +3,13 @@
 // file directly to storage. Uses XMLHttpRequest (instead of fetch) so upload
 // progress can be surfaced in the UI via onProgress.
 
-export async function requestPresignedUrl(file: File) {
+export type UploadFolder = "events" | "claims"
+
+export async function requestPresignedUrl(file: File, folder: UploadFolder = "events") {
   const res = await fetch("/api/uploads/presigned-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename: file.name, contentType: file.type, folder: "events" }),
+    body: JSON.stringify({ filename: file.name, contentType: file.type, folder }),
   })
   if (!res.ok) throw new Error("Failed to request upload URL")
   const payload = await res.json()
@@ -17,9 +19,12 @@ export async function requestPresignedUrl(file: File) {
 
 export async function uploadFile(
   file: File,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  // `claims` is the private folder — a licence is read by the reviewer
+  // through a signed URL and by nobody else (lib/tigris.ts PUBLIC_FOLDERS).
+  folder: UploadFolder = "events"
 ): Promise<string> {
-  const { uploadUrl, publicUrl } = await requestPresignedUrl(file)
+  const { uploadUrl, publicUrl } = await requestPresignedUrl(file, folder)
 
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest()

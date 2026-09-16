@@ -611,6 +611,13 @@
       "observed": "A: 1 failing (lib/org-actions.ts listed). B: 1 failing (panel.tsx listed). Green after cp of the saved files",
       "reverted": true,
       "date": "2026-09-16"
+    },
+    "tigris-private-claims.test.ts": {
+      "guards": "that the bucket policy grants anonymous read on PUBLIC_FOLDERS only (never the bucket root, never claims/), that the venue-claim queue reads evidence through reviewableUrl (a signed URL for a private key, the stored URL for a public one), and that the claim form uploads to claims/",
+      "mutation": "in lib/tigris.ts publicReadPolicy, change the Resource back to [`arn:aws:s3:::${bucket}/*`]",
+      "observed": "2 failing ('grants anonymous read on the public folders only', 'leaves claims out'). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-16"
     }
   },
   "grandfathered": [
