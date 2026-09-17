@@ -249,3 +249,21 @@ row alone could not explain.
 | Organisation membership | outsider → colleague → removed | a staff colleague opens and may edit an event he did not create; role change and removal audited; the removed member is back to 0 events; removing the last owner is refused — as "Minified React error #441" (**SCRUM-139**: every thrown server-action refusal is masked in production) (**SCRUM-140**) |
 | The idle phone overnight | Android | signed out with no message; staging log: a refresh rotated at 20:50 UTC, the phone replayed the old token 869 s later, outside the 60 s grace, and the server revoked every session (**SCRUM-138**) |
 | Privacy toggles | Android settings | `show_online` and `push_enabled` write `false`; nothing reads `show_online` — the switch guards a feature that does not exist (**SCRUM-141**) |
+
+**Sixth drive, 2026-09-17 — the decisions, built and driven.** Each fix was
+promoted to staging and re-driven there before its ticket closed; emails were
+read back from the Resend log (`GET /emails/:id` with the staging key), which
+is the mailbox the seed addresses do not have.
+
+| Journey | Surface | Read back / result |
+|---|---|---|
+| Approve a host (SCRUM-134) | `/apply` as `delivered@resend.dev` → confirmation mail → admin approve → the set-password link → sign in | user created with an undisclosed hash, `password_reset_tokens` 1 live / 24 h, audit `emailSent`; the mail has the link and **no** `Password:` line; the link sets a password once and refuses a second time; the new host lands on `/dashboard` |
+| Decide a claim (SCRUM-117) | admin: venue decline, brand reject | `decision_note` + audit `emailSent: true`; Resend shows "About your claim on the venue Church Street Social" to Fatima and "…the brand Third Wave" to Meera with the reason in the body; toast "the reason has been emailed" |
+| Show online status off (SCRUM-141) | API, Imran hidden, Kavya viewing | Kavya's roster `total 1`, grid without him; back on → `total 2`, grid with him; occupancy counts him throughout |
+| Intent at the first door (SCRUM-77) | API, Imran with no `intent_default` | `intentNeeded: true` → PUT with `rememberIntent` → `{friendship}` on the profile → `false` on re-entry; Kavya (has a default) `false` |
+| Suspend an organisation (SCRUM-8) | admin suspends Nightshift Collective → Kavya on the API → Arjun's dashboard → reinstate | 14 events `draft`/memory `published`, reason on the row, audit `eventsHidden: 14`, one `event_update` notice to the person going; feed/GET/search/RSVP/roster/door all dark; Arjun: banner on every page, 0 events, org page shows the notice, ⌘K empty, create refused; reinstate → 14 published, memory cleared, "15 events", nobody told twice |
+| ⌘K scope (SCRUM-143) | Fatima (venue owner) | events at her venue found; "Sundowner" (another org, another venue) → `[]` |
+| Rate limits (SCRUM-144) | staging boot log | `[INFO] Rate limiting backed by Redis` replaces the `node:crypto` error |
+
+Client half of SCRUM-77/141/142 is in Blendn #258, unbuilt on purpose; the
+device acceptance on both platforms runs on the next client build.
