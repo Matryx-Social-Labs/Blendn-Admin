@@ -25,6 +25,18 @@ jest.mock("next/headers", () => ({ headers: jest.fn().mockResolvedValue({ get: (
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/rate-limit-store", () => ({ hit: jest.fn().mockResolvedValue({ count: 1 }) }))
 jest.mock("@/lib/event-ownership", () => ({ owningOrgFor: jest.fn() }))
+const sent: { to: string; subject: string; text: string }[] = []
+jest.mock("@/lib/email", () => {
+  const actual = jest.requireActual("@/lib/email")
+  return {
+    ...actual,
+    emailConfigured: () => true,
+    sendEmail: jest.fn(async (m: { to: string; subject: string; text: string }) => {
+      sent.push(m)
+      return { sent: true }
+    }),
+  }
+})
 
 import { decideEventClaim, fileEventClaim } from "@/lib/event-claim-actions"
 import { getAuth } from "@/lib/auth"
@@ -53,6 +65,7 @@ const claimable = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  sent.length = 0
   mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise<void>) => fn(mockDb))
 })
 
@@ -124,6 +137,28 @@ describe("a claim that already has an organisation", () => {
     expect(mockDb.events.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ organizer_org_id: "org2" }) })
     )
+  })
+})
+
+describe("the claimant hears the decision (SCRUM-117)", () => {
+  it("a decline reaches the address on the claim with the reason, even with no account", async () => {
+    noAccountClaim()
+    const { notified } = await decideEventClaim("c1", "decline", "The listing is not yours to run.")
+    expect(notified).toBe(true)
+    expect(sent).toEqual([
+      expect.objectContaining({ to: "events@toit.in", subject: "About your claim on the event Indie Sundowner" }),
+    ])
+    expect(sent[0].text).toContain("The listing is not yours to run.")
+    expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ details: expect.objectContaining({ emailSent: true }) }))
+  })
+
+  it("an approval reaches them with a link to the event", async () => {
+    mockDb.event_claims.findUnique.mockResolvedValue({
+      id: "c2", status: "pending", org_id: "org2", onboarding_id: null, contact_email: "x@y.z", event: claimable,
+    })
+    await decideEventClaim("c2", "approve")
+    expect(sent[0]).toMatchObject({ to: "x@y.z", subject: "Your claim on the event Indie Sundowner was approved" })
+    expect(sent[0].text).toContain("/dashboard/events/e1")
   })
 })
 

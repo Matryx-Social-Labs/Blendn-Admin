@@ -10,6 +10,8 @@ import { auditLog } from "@/lib/audit-log"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { reviewableUrl } from "@/lib/tigris"
+import { claimants, notifyClaimant } from "@/lib/claim-decision-notify"
+import { appUrl } from "@/lib/email"
 
 /**
  * Claiming a venue.
@@ -270,7 +272,7 @@ export async function decideVenueClaim(
   claimId: string,
   decision: "approve" | "decline",
   note?: string
-): Promise<void> {
+): Promise<{ notified: boolean }> {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   const admin = session.user
@@ -282,6 +284,7 @@ export async function decideVenueClaim(
       status: true,
       org_id: true,
       is_dispute: true,
+      filed_by: true,
       venue: { select: { id: true, name: true, owner_org_id: true } },
     },
   })
@@ -294,6 +297,15 @@ export async function decideVenueClaim(
   if (decision === "decline" && trimmed.length < 10) {
     throw new Refusal("Give a reason — it is sent to the claimant.")
   }
+
+  // Read before the write: after it, nobody is pending any more.
+  const losers =
+    decision === "approve"
+      ? await db.venue_claims.findMany({
+          where: { venue_id: claim.venue.id, status: "pending", id: { not: claimId } },
+          select: { filed_by: true },
+        })
+      : []
 
   await db.$transaction(async (tx) => {
     await tx.venue_claims.update({
@@ -325,6 +337,8 @@ export async function decideVenueClaim(
     })
   })
 
+  const notified = await tellVenueClaimants(claim, decision, trimmed || null, losers)
+
   auditLog({
     userId: admin.id,
     action: decision === "approve" ? "venue.claim.approved" : "venue.claim.declined",
@@ -336,9 +350,39 @@ export async function decideVenueClaim(
       wasDispute: claim.is_dispute,
       previousOwnerOrgId: claim.venue.owner_org_id,
       note: trimmed || null,
+      emailSent: notified,
     },
   })
 
   revalidatePath("/dashboard/venue-owners")
   revalidatePath(`/dashboard/venues/${claim.venue.id}`)
+  return { notified }
+}
+
+/** The decided claimant hears the reason; on an approval so do the ones it displaced. */
+async function tellVenueClaimants(
+  claim: { filed_by: string; venue: { name: string } },
+  decision: "approve" | "decline",
+  reason: string | null,
+  losers: { filed_by: string }[]
+): Promise<boolean> {
+  const who = await claimants([claim.filed_by, ...losers.map((l) => l.filed_by)])
+  const what = `the venue ${claim.venue.name}`
+  const filer = who.get(claim.filed_by)
+  const notified = filer
+    ? await notifyClaimant({
+        to: filer.email,
+        name: filer.name,
+        what,
+        outcome: decision === "approve" ? "approved" : "declined",
+        reason,
+        link: decision === "approve" ? `${appUrl()}/dashboard/venues` : null,
+      })
+    : false
+  for (const l of losers) {
+    const u = who.get(l.filed_by)
+    if (u && l.filed_by !== claim.filed_by)
+      await notifyClaimant({ to: u.email, name: u.name, what, outcome: "declined", reason: "Another claim on this venue was approved.", link: null })
+  }
+  return notified
 }

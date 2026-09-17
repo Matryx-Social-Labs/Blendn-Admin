@@ -1,6 +1,7 @@
 import { logger } from "./logger"
 import {
   approvedHtml,
+  claimDecisionHtml,
   declinedHtml,
   domainVerifyHtml,
   passwordResetHtml,
@@ -217,6 +218,33 @@ export function declinedEmail(name: string, reason: string) {
       reason,
       "",
       "If you think this is a mistake, reply to this email with more detail about your organisation.",
+    ].join("\n"),
+  }
+}
+
+export function claimDecisionEmail(
+  name: string,
+  what: string,
+  outcome: "approved" | "declined",
+  reason: string | null,
+  link: string | null
+) {
+  const approved = outcome === "approved"
+  return {
+    html: claimDecisionHtml(name, what, outcome, reason, link),
+    subject: approved ? `Your claim on ${what} was approved` : `About your claim on ${what}`,
+    text: [
+      `Hi ${name},`,
+      "",
+      approved
+        ? `Your claim on ${what} has been approved. It now belongs to your organisation.`
+        : `We're not able to approve your claim on ${what}.`,
+      ...(reason ? ["", reason] : []),
+      ...(link ? ["", link] : []),
+      "",
+      approved
+        ? "You can invite colleagues from Organisation → Members."
+        : "If you think this is a mistake, reply to this email with more detail.",
     ].join("\n"),
   }
 }

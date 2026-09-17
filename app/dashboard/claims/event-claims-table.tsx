@@ -48,8 +48,14 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
     setActing(claimId)
     startTransition(async () => {
       try {
-        await decideEventClaim(claimId, decision, notes[claimId])
-        toast.success(decision === "approve" ? "Handed over" : "Claim declined")
+        const { notified } = await decideEventClaim(claimId, decision, notes[claimId])
+        toast.success(
+          decision === "approve"
+            ? "Handed over"
+            : notified
+              ? "Claim declined — the reason has been emailed to the claimant."
+              : "Claim declined — email is not configured, so nothing was sent. Tell them yourself."
+        )
         router.refresh()
       } catch (error) {
         /*
