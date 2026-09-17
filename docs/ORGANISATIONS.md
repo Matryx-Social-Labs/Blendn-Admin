@@ -202,7 +202,7 @@ For a year it changed a badge (SCRUM-8). Now `setOrganisationStatus(id,
   suspended org so the org page — and the banner on every dashboard page — can
   say why, in the admin's own words (`organisations.suspension_reason`).
 
-People who had RSVP'd to an upcoming hidden event are told once, after the
+People who had RSVP'd to a hidden event not yet over are told once, after the
 commit, through `notifyEventUpdate` ("This event is no longer available").
 
 **Reinstating** (`"verified"`) flips back only rows still `draft` with the
