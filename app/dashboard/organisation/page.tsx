@@ -5,6 +5,8 @@ import { getMyOrgs, getOrgMembers } from "@/lib/org-actions"
 import { orgPermissions } from "@/lib/org-permissions"
 import { emailConfigured } from "@/lib/email"
 
+import { OrgSuspendedNotice } from "@/components/org-suspended-notice"
+
 import { JoinRequest } from "./join-request"
 import { OrgPanel } from "./panel"
 
@@ -29,9 +31,16 @@ export default async function OrganisationPage() {
   // was told to contact support about a flow that already existed.
   if (orgs.length === 0) return <JoinRequest />
 
+  // A suspended organisation has no controls to show — its members' access is
+  // gone (`getOrgMembers` would refuse) — only the sentence saying why.
+  const live = orgs.filter((org) => org.status !== "suspended")
+  const suspended = orgs
+    .filter((org) => org.status === "suspended")
+    .map((org) => ({ id: org.id, display_name: org.display_name, reason: org.suspensionReason }))
+
   // An agency belonging to several orgs gets one panel each, loaded in parallel.
   const panels = await Promise.all(
-    orgs.map(async (org) => ({ org, data: await getOrgMembers(org.id) }))
+    live.map(async (org) => ({ org, data: await getOrgMembers(org.id) }))
   )
 
   return (
@@ -42,6 +51,8 @@ export default async function OrganisationPage() {
           but nothing is sent — you&apos;ll get a link to pass on yourself.
         </div>
       ) : null}
+
+      <OrgSuspendedNotice orgs={suspended} />
 
       {panels.map(({ org, data }) => (
         <OrgPanel

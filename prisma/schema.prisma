@@ -376,6 +376,11 @@ model events {
   end_time          DateTime           @db.Timestamptz(6)
   timezone          String
   status            event_status       @default(draft)
+  /// What `status` was before the organiser's suspension hid this event
+  /// (SCRUM-8). Set with `status = draft` on suspend, read back and cleared on
+  /// reinstatement; null at every other moment. An admin who cancels the event
+  /// meanwhile wins — reinstatement restores only rows still `draft`.
+  pre_suspension_status event_status?
   visibility        visibility_type    @default(public)
   max_capacity      Int?
   /// Minimum age to check in. Null — almost every event — means no restriction.
@@ -1403,6 +1408,14 @@ model organisations {
   address      String?
   website      String?
   status       organisation_status @default(pending)
+  /// Suspension means something (SCRUM-8). Setting `status = suspended` also
+  /// flips the org's published events to `draft` (remembered in
+  /// `events.pre_suspension_status`) so every attendee surface goes dark, and
+  /// `actorFor` stops loading the membership so every dashboard door closes.
+  /// The reason is on the row because the members' banner reads it; the audit
+  /// log has it too. Both null on reinstatement, which flips the events back.
+  suspended_at      DateTime? @db.Timestamptz(6)
+  suspension_reason String?
   /// May this organisation mark a broadcast as `sponsored`?
   ///
   /// An organisation-level flag rather than a role, because the permission

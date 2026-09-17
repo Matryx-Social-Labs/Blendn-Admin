@@ -1,4 +1,4 @@
-import type { chat_group_status } from "@prisma/client"
+import type { chat_group_status, event_status } from "@prisma/client"
 
 /**
  * How long an event's chatroom stays open after the event ends.
@@ -33,7 +33,7 @@ export const PRE_EVENT_CHAT_HOURS = 24
 
 export type ChatWindowState =
   | { open: true }
-  | { open: false; reason: "archived" | "locked" | "window_closed" | "not_open_yet" }
+  | { open: false; reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden" }
 
 /**
  * The one rule for whether an event chatroom accepts writes.
@@ -58,10 +58,16 @@ export type ChatWindowState =
  * of its own end time whether or not anything got round to flagging it.
  */
 export function chatWindowState(
-  event: { start_time?: Date | null; end_time: Date },
+  event: { start_time?: Date | null; end_time: Date; status?: event_status },
   group: { status: chat_group_status },
   now: Date = new Date()
 ): ChatWindowState {
+  /*
+   * A hidden event's room is closed (SCRUM-8). Optional for the same reason
+   * `start_time` is: a caller that does not select `status` keeps behaving
+   * exactly as it did. The ones that carry writes do select it.
+   */
+  if (event.status === "draft") return { open: false, reason: "hidden" }
   if (group.status === "locked") return { open: false, reason: "locked" }
   if (group.status === "archived") return { open: false, reason: "archived" }
 
@@ -89,8 +95,9 @@ export function chatWindowState(
 
 /** Message shown to a client that tried to post into a closed room. */
 export function chatClosedMessage(
-  reason: "archived" | "locked" | "window_closed" | "not_open_yet"
+  reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden"
 ): string {
+  if (reason === "hidden") return "This event is no longer available."
   if (reason === "locked") return "This chat has been locked by the organiser"
   // Says when, not just no. "Closed" for a room that has never opened reads as
   // a fault, and the person asking is someone who RSVP'd and is keen.
@@ -105,7 +112,7 @@ export function chatClosesAt(event: { end_time: Date }): Date {
 
 /** Why a member cannot write. `null` from `mayWriteToRoom` means they can. */
 export type WriteDenial =
-  | { reason: "archived" | "locked" | "window_closed" | "not_open_yet" }
+  | { reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden" }
   | { reason: "muted" | "banned" }
 
 /**

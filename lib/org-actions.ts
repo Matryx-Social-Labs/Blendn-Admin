@@ -30,6 +30,7 @@ import {
   emailConfigured,
 } from "@/lib/email"
 import type { org_role } from "@prisma/client"
+import { activeMembership } from "@/lib/org-membership"
 
 /**
  * An organisation managing itself: members, invites, domains, join requests.
@@ -48,8 +49,8 @@ async function requireOrgRole(
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Unauthorized")
 
-  const membership = await db.organisation_members.findUnique({
-    where: { org_id_user_id: { org_id: orgId, user_id: session.user.id } },
+  const membership = await db.organisation_members.findFirst({
+    where: { org_id: orgId, user_id: session.user.id, ...activeMembership },
     select: { role: true },
   })
   if (!membership) throw new Refusal("Forbidden")
@@ -64,6 +65,8 @@ export interface MyOrg {
   legal_name: string | null
   kind: string
   status: string
+  /** The admin's words, shown to the members. Null unless suspended. */
+  suspensionReason: string | null
   myRole: org_role
   domains: {
     id: string
@@ -93,6 +96,8 @@ export async function getMyOrgs(): Promise<MyOrg[]> {
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Unauthorized")
 
+  // Deliberately NOT `activeMembership`: this is the list the org page reads
+  // to say "suspended, and why". Every other membership read is scoped.
   const memberships = await db.organisation_members.findMany({
     where: { user_id: session.user.id },
     select: {
@@ -104,6 +109,7 @@ export async function getMyOrgs(): Promise<MyOrg[]> {
           legal_name: true,
           kind: true,
           status: true,
+          suspension_reason: true,
           domains: {
             select: { id: true, domain: true, verified_at: true, method: true, verification_token: true },
           },
@@ -119,6 +125,7 @@ export async function getMyOrgs(): Promise<MyOrg[]> {
     legal_name: m.org.legal_name,
     kind: m.org.kind,
     status: m.org.status,
+    suspensionReason: m.org.suspension_reason,
     myRole: m.role,
     domains: m.org.domains.map((d) => ({
       id: d.id,
@@ -167,8 +174,8 @@ export async function getOrgMembers(orgId: string): Promise<{
   // able to see who their colleagues are.
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Unauthorized")
-  const mine = await db.organisation_members.findUnique({
-    where: { org_id_user_id: { org_id: orgId, user_id: session.user.id } },
+  const mine = await db.organisation_members.findFirst({
+    where: { org_id: orgId, user_id: session.user.id, ...activeMembership },
     select: { role: true },
   })
   if (!mine) throw new Refusal("Forbidden")

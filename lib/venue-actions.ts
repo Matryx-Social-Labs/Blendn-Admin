@@ -9,6 +9,7 @@ import { haversineDistanceMeters, getBoundingBox } from "@/lib/geo"
 import { validateGeofence, type Geofence } from "@/lib/geofence"
 import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
 import type { venue_type } from "@prisma/client"
+import { activeMembership } from "@/lib/org-membership"
 
 /**
  * Creating and claiming venues — the first write path this table has ever had.
@@ -183,7 +184,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
     user.role === "venue_owner"
       ? (
           await db.organisation_members.findFirst({
-            where: { user_id: user.id },
+            where: { user_id: user.id, ...activeMembership },
             select: { org_id: true },
           })
         )?.org_id ?? null
@@ -269,7 +270,7 @@ async function venueForWrite(
   if (user.role !== "app_admin") {
     const member = venue.owner_org_id
       ? await db.organisation_members.findFirst({
-          where: { user_id: user.id, org_id: venue.owner_org_id },
+          where: { user_id: user.id, org_id: venue.owner_org_id, ...activeMembership },
           select: { id: true },
         })
       : null

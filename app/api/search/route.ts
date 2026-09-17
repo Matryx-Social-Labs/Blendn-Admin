@@ -4,6 +4,8 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { visibleEventsWhere } from "@/lib/event-visibility"
+import { activeMembership } from "@/lib/org-membership"
 
 /**
  * Global search, behind ⌘K.
@@ -46,30 +48,26 @@ export async function GET(req: NextRequest) {
     const isAdmin = role === "app_admin"
     const contains = { contains: q, mode: "insensitive" as const }
 
-    // Which events this person may reach, mirroring eventPermissions.
+    /*
+     * Which events this person may reach: the same answer the events list
+     * gives, from the same module. This route used to build its own copy of
+     * the scope and then spread it under a second `OR` — the search terms —
+     * which REPLACED the scope's `OR`. Every organiser's ⌘K listed every
+     * event on the platform. `AND` keeps both.
+     */
+    const eventScope = await visibleEventsWhere(session.user)
     const orgIds = isAdmin
       ? []
       : (
           await db.organisation_members.findMany({
-            where: { user_id: session.user.id },
+            where: { user_id: session.user.id, ...activeMembership },
             select: { org_id: true },
           })
         ).map((m) => m.org_id)
 
-    const eventScope = isAdmin
-      ? { deleted_at: null }
-      : {
-          deleted_at: null,
-          OR: [
-            { organizer_org_id: { in: orgIds } },
-            { organizer_id: session.user.id },
-            ...(role === "venue_owner" ? [{ venue: { owner_org_id: { in: orgIds } } }] : []),
-          ],
-        }
-
     const [events, users, orgs, venues] = await Promise.all([
       db.events.findMany({
-        where: { ...eventScope, OR: [{ title: contains }, { venue_name: contains }, { city: contains }] },
+        where: { AND: [eventScope, { OR: [{ title: contains }, { venue_name: contains }, { city: contains }] }] },
         orderBy: { start_time: "desc" },
         take: LIMIT,
         select: { id: true, title: true, start_time: true, city: true, status: true },

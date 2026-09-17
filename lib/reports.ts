@@ -4,6 +4,8 @@ import type { user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
 import { distinctAttendeeCounts } from "./attendee-counts"
+import { hostNotSuspended } from "./event-access"
+import { activeMembership } from "./org-membership"
 
 /**
  * Report definitions.
@@ -102,7 +104,7 @@ export function canRunReport(key: string, role: user_role): boolean {
 export async function pseudonymScope(role: user_role, userId: string): Promise<string> {
   if (role === "app_admin") return "platform"
   const memberships = await db.organisation_members.findMany({
-    where: { user_id: userId },
+    where: { user_id: userId, ...activeMembership },
     select: { org_id: true },
   })
   const orgIds = memberships.map((m) => m.org_id).sort()
@@ -113,7 +115,7 @@ export async function eventScopeFor(role: user_role, userId: string) {
   if (role === "app_admin") return { deleted_at: null }
 
   const memberships = await db.organisation_members.findMany({
-    where: { user_id: userId },
+    where: { user_id: userId, ...activeMembership },
     select: { org_id: true },
   })
   const orgIds = memberships.map((m) => m.org_id)
@@ -126,7 +128,8 @@ export async function eventScopeFor(role: user_role, userId: string) {
     deleted_at: null,
     OR: [
       { organizer_org_id: { in: orgIds } },
-      { organizer_id: userId },
+      // The creator floor, gated like `visibleEventsWhere`'s (SCRUM-8).
+      { organizer_id: userId, ...hostNotSuspended },
       ...(role === "venue_owner" ? [{ venue: { owner_org_id: { in: orgIds } } }] : []),
     ],
   }

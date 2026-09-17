@@ -4,6 +4,7 @@ import { VenueClaimForm } from "@/components/venue-claim-form"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { venueTypeLabel } from "@/lib/venue-types"
+import { activeMembership } from "@/lib/org-membership"
 
 export const dynamic = "force-dynamic"
 
@@ -38,7 +39,7 @@ export default async function ClaimVenuePage({
   if (!venue) notFound()
 
   const membership = await db.organisation_members.findFirst({
-    where: { user_id: session.user.id },
+    where: { user_id: session.user.id, ...activeMembership },
     select: { org_id: true },
   })
   if (venue.owner_org_id && venue.owner_org_id === membership?.org_id) {

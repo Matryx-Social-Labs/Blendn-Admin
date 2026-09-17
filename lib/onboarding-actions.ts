@@ -16,6 +16,7 @@ import { isAggregatorDomain } from "@/lib/curation-sources"
 import { emailDomain, isFreeProvider } from "@/lib/org-invites"
 import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/email"
 import { issuePasswordResetLink } from "@/lib/password-reset"
+import { notifyEventUpdate } from "@/lib/push-notifications"
 
 /**
  * Reviewing host applications.
@@ -467,6 +468,27 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
   }))
 }
 
+/**
+ * Suspending an organisation means something (SCRUM-8).
+ *
+ * It used to change a badge: `actorFor` never looked at org status and every
+ * published event stayed listed to every phone. Two things happen now, in one
+ * transaction:
+ *
+ *  - the org's published events flip to `draft`, remembering what they were
+ *    in `pre_suspension_status`. Every attendee surface already hides a draft
+ *    — lists, search, GET, RSVP, the door, reminder pushes, the room — so
+ *    nothing has to be re-derived per surface. RSVPs and check-ins are left
+ *    where they are for the reinstatement;
+ *  - `activeMembership` stops loading the membership, so every dashboard door
+ *    closes and the org page says why.
+ *
+ * Reinstating flips back only rows still `draft` with the memory set: an
+ * admin who cancelled one of them meanwhile wins.
+ *
+ * People who had said they were going to something now hidden are told once,
+ * after the commit, through the same channel an announcement uses.
+ */
 export async function setOrganisationStatus(
   orgId: string,
   status: "pending" | "verified" | "suspended",
@@ -474,18 +496,42 @@ export async function setOrganisationStatus(
 ): Promise<void> {
   const admin = await requireAdmin()
 
-  if (status === "suspended" && (reason ?? "").trim().length < 10) {
+  const trimmed = reason?.trim() || null
+  if (status === "suspended" && (trimmed ?? "").length < 10) {
     throw new Refusal("Give a reason for suspending an organisation.")
   }
 
-  await db.organisations.update({
-    where: { id: orgId },
-    data: {
-      status,
-      ...(status === "verified"
-        ? { verified_at: new Date(), verified_by: admin.id }
-        : { verified_at: null, verified_by: null }),
-    },
+  const hidden = await db.$transaction(async (tx) => {
+    await tx.organisations.update({
+      where: { id: orgId },
+      data: {
+        status,
+        ...(status === "verified"
+          ? { verified_at: new Date(), verified_by: admin.id }
+          : { verified_at: null, verified_by: null }),
+        ...(status === "suspended"
+          ? { suspended_at: new Date(), suspension_reason: trimmed }
+          : { suspended_at: null, suspension_reason: null }),
+      },
+    })
+
+    if (status === "suspended") {
+      const events = await tx.events.findMany({
+        where: { organizer_org_id: orgId, status: "published", deleted_at: null },
+        select: { id: true, title: true, start_time: true },
+      })
+      await tx.events.updateMany({
+        where: { id: { in: events.map((e) => e.id) } },
+        data: { status: "draft", pre_suspension_status: "published" },
+      })
+      return events
+    }
+
+    await tx.events.updateMany({
+      where: { organizer_org_id: orgId, status: "draft", pre_suspension_status: "published", deleted_at: null },
+      data: { status: "published", pre_suspension_status: null },
+    })
+    return []
   })
 
   auditLog({
@@ -493,8 +539,26 @@ export async function setOrganisationStatus(
     action: `organisation.${status}`,
     resource: "organisation",
     resourceId: orgId,
-    details: { reason: reason?.trim() || null },
+    details: { reason: trimmed, eventsHidden: hidden.length },
   })
+
+  // After the commit: a push about a hidden event must never precede the hiding.
+  const now = new Date()
+  for (const event of hidden.filter((e) => e.start_time > now)) {
+    const going = await db.event_rsvps.findMany({
+      where: { event_id: event.id, status: { in: ["going", "maybe", "waitlisted"] } },
+      select: { user_id: true },
+    })
+    if (going.length === 0) continue
+    await notifyEventUpdate(
+      going.map((r) => r.user_id),
+      event.title,
+      "This event is no longer available.",
+      event.id
+    ).catch((err) =>
+      logger.error("Suspension notice failed", { eventId: event.id, error: err instanceof Error ? err.message : String(err) })
+    )
+  }
 
   revalidatePath("/dashboard/organisations")
 }

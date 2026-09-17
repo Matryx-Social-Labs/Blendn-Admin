@@ -6,6 +6,18 @@ import { db } from "./db"
 import { canJoinEvent } from "./socket-auth"
 
 /**
+ * The host is not suspended (SCRUM-8). A suspended organisation's published
+ * events are flipped to `draft`, so every attendee surface already hides
+ * them; this fragment is for the ONE dashboard clause that reads by creator
+ * rather than by status — the `organizer_id` fallback in `visibleEventsWhere`
+ * and its twins — so a member of a suspended org does not see a list full of
+ * rows that do not open. A legacy event with no org passes.
+ */
+export const hostNotSuspended = {
+  OR: [{ organizer_org_id: null }, { organizer_org: { status: { not: "suspended" as const } } }],
+}
+
+/**
  * May this attendee act on ONE event — open it, RSVP, save it, read its board?
  *
  * Discovery (`GET /events`) and the door (`/checkin`) each applied these rules

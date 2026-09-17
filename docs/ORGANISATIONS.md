@@ -176,9 +176,41 @@ not that every address on it should reach the dashboard. Granting more than
 - `app_admin` is **not** silently granted org management. Platform admins use
   `/dashboard/organisations`; an admin acting on the host screen would be
   recorded as though the org's own owner did it.
-- Suspending an org is reversible and **does not cascade**. Deleting a host
+- Suspending an org is reversible and **does not delete**. Deleting a host
   would take every event, check-in and message belonging to the attendees who
   went.
+
+## Suspension means something
+
+For a year it changed a badge (SCRUM-8). Now `setOrganisationStatus(id,
+"suspended", reason)` does two things in one transaction:
+
+- **the org's published events flip to `draft`**, remembered in
+  `events.pre_suspension_status`. Every attendee surface already hides a draft
+  — the feed, the SQL search, `GET /events/:id` (404), RSVP, the door, reminder
+  pushes — so nothing is re-derived per surface. The room closes too: a draft
+  has no joinable chat, counter or roster (`lib/socket-auth.ts`,
+  `chatWindowState` → `hidden`, the REST roster → 404). RSVPs and check-ins
+  are left in place.
+- **the membership stops loading.** `activeMembership` in
+  `lib/org-membership.ts` is spread into every read of a person's memberships
+  (`__tests__/membership-reads-are-scoped.test.ts` fails the build on one that
+  is not), so `actorFor` returns no org, `eventPermissions` denies, the events
+  list is empty (the creator floor is gated by `hostNotSuspended` so their own
+  rows do not come back), exports, ⌘K, venue management, claim filing and event
+  creation all close. `getMyOrgs` is the documented exception: it lists the
+  suspended org so the org page — and the banner on every dashboard page — can
+  say why, in the admin's own words (`organisations.suspension_reason`).
+
+People who had RSVP'd to an upcoming hidden event are told once, after the
+commit, through `notifyEventUpdate` ("This event is no longer available").
+
+**Reinstating** (`"verified"`) flips back only rows still `draft` with the
+memory set — an admin who cancelled one of them meanwhile wins — and clears the
+reason. Nobody is told twice.
+
+Personal suspension (`User.suspended_at`) is the separate thing it always
+was; a suspended host can still sign in and reset a password.
 
 ## Screens
 

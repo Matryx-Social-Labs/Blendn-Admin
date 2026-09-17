@@ -2,6 +2,7 @@
 // __tests__/server-import-boundary.test.ts.
 import type { user_role } from "@prisma/client"
 
+import { hostNotSuspended } from "./event-access"
 import { actorFor } from "./org-membership"
 
 /**
@@ -75,8 +76,13 @@ export async function visibleEventsWhere(user: {
      * `eventPermissions` — seeing a row you cannot open is a smaller failure
      * than a row you created vanishing. Delete it when `organizer_org_id` has
      * been backfilled everywhere, not before.
+     *
+     * Gated on the host not being suspended (SCRUM-8): the org clause above
+     * already drops a suspended org's events because `actorFor` no longer
+     * loads that membership, and this arm would put them straight back for
+     * whoever created them — a list full of rows that do not open.
      */
-    { organizer_id: user.id },
+    { organizer_id: user.id, ...hostNotSuspended },
   ]
   return where
 }
