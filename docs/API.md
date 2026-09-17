@@ -1312,7 +1312,7 @@ back, so everything above applies: absent from `GET /events` and
 `/events/search`, 404 on `GET /events/:id` and every participation write, the
 roster 404, the chat/counter/roster rooms refuse to join, and a message into
 the room is refused with *"This event is no longer available."* RSVPs and
-check-ins survive the suspension. People who had RSVP'd to an upcoming one get
+check-ins survive the suspension. People who had RSVP'd to one not yet over get
 one `event_update` notification saying so.
 
 ---

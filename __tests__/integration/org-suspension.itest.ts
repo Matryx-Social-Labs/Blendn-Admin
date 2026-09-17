@@ -77,8 +77,9 @@ async function fixture() {
   orgs.push(org.id)
   await db.organisation_members.create({ data: { org_id: org.id, user_id: host, role: "owner" } })
 
-  // Two published events of the org (one in the future, with an RSVP), one the
-  // host created before organisations existed, one cancelled by an admin.
+  // Two published events of the org (one upcoming with an RSVP, one live with
+  // someone in the room), one the host created before organisations existed,
+  // one cancelled by an admin.
   const upcoming = await makeEvent(host)
   const live = await makeEvent(host)
   const legacy = await makeEvent(host)
@@ -89,6 +90,8 @@ async function fixture() {
   await db.events.update({ where: { id: live }, data: { organizer_org_id: org.id } })
   await db.events.update({ where: { id: cancelled }, data: { organizer_org_id: org.id, status: "cancelled" } })
   await db.event_rsvps.create({ data: { event_id: upcoming, user_id: stranger, status: "going" } })
+  // Went to the live one too — the room they are in is about to close.
+  await db.event_rsvps.create({ data: { event_id: live, user_id: stranger, status: "going" } })
   // The stranger is in the live room.
   await db.event_check_ins.create({ data: { event_id: live, user_id: stranger, occurrence_id: await occurrenceOf(live), check_in_time: new Date(), status: "checked_in" } })
   const group = await db.chat_groups.create({ data: { event_id: live, name: "room", status: "active" } })
@@ -182,12 +185,11 @@ describe("suspending an organisation", () => {
     expect(await hitsFor(f.admin, "app_admin")).toContain(f.upcoming)
     session = { user: { id: f.admin, role: "app_admin" } }
 
-    // The person who was going was told, once, about the upcoming one only.
-    const notices = await db.notifications.findMany({ where: { user_id: f.stranger, kind: "event_update" } })
-    expect(notices.map((n) => ({ title: n.title, eventId: (n.data as { eventId: string }).eventId }))).toEqual([
-      { title: "Hidden Sundowner", eventId: f.upcoming },
-    ])
-    expect(notices[0].body).toContain("no longer available")
+    // The person who was going was told once per event not yet over — the
+    // upcoming one and the live one; never about anything already finished.
+    const notices = await db.notifications.findMany({ where: { user_id: f.stranger, kind: "event_update" }, orderBy: { title: "asc" } })
+    expect(notices.map((n) => (n.data as { eventId: string }).eventId).sort()).toEqual([f.upcoming, f.live].sort())
+    expect(notices.every((n) => n.body.includes("no longer available"))).toBe(true)
 
     // Meanwhile an admin cancels one of the hidden events. Reinstatement must not resurrect it.
     await db.events.update({ where: { id: f.live }, data: { status: "cancelled" } })
@@ -204,6 +206,6 @@ describe("suspending an organisation", () => {
     expect((await eventRoute.GET(authed(`/api/mobile/events/${f.upcoming}`, f.token), params(f.upcoming))).status).toBe(200)
     expect((await actorFor({ id: f.host, role: "organizer" })).orgIds).toEqual([f.org.id])
     // Nobody is told twice.
-    expect(await db.notifications.count({ where: { user_id: f.stranger, kind: "event_update" } })).toBe(1)
+    expect(await db.notifications.count({ where: { user_id: f.stranger, kind: "event_update" } })).toBe(2)
   })
 })

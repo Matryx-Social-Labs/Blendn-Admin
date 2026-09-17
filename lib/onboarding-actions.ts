@@ -518,7 +518,7 @@ export async function setOrganisationStatus(
     if (status === "suspended") {
       const events = await tx.events.findMany({
         where: { organizer_org_id: orgId, status: "published", deleted_at: null },
-        select: { id: true, title: true, start_time: true },
+        select: { id: true, title: true, end_time: true },
       })
       await tx.events.updateMany({
         where: { id: { in: events.map((e) => e.id) } },
@@ -542,9 +542,11 @@ export async function setOrganisationStatus(
     details: { reason: trimmed, eventsHidden: hidden.length },
   })
 
-  // After the commit: a push about a hidden event must never precede the hiding.
+  // After the commit: a push about a hidden event must never precede the
+  // hiding. Anything not yet over — including a room people are standing in
+  // right now, which has just closed under them.
   const now = new Date()
-  for (const event of hidden.filter((e) => e.start_time > now)) {
+  for (const event of hidden.filter((e) => e.end_time > now)) {
     const going = await db.event_rsvps.findMany({
       where: { event_id: event.id, status: { in: ["going", "maybe", "waitlisted"] } },
       select: { user_id: true },
