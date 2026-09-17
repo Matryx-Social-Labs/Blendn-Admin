@@ -91,6 +91,16 @@ const nextConfig: NextConfig = {
     ];
   },
 
+  /*
+   * Left to Node, not bundled. The bundler inlines `redis`, and its
+   * `node:crypto` import fails inside the bundle ("Unsupported external type
+   * Url for commonjs reference") — so on every boot with REDIS_URL set,
+   * `lib/rate-limit-store.ts` logged "Redis unavailable, using in-process
+   * counters" and every rate limit was per-process and reset on deploy. The
+   * one log line said so, on staging, for as long as Redis has been configured.
+   */
+  serverExternalPackages: ["redis", "@redis/client"],
+
   // Experimental features
   experimental: {
     // Enable server actions
