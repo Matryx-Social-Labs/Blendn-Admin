@@ -263,6 +263,15 @@ export const CheckinResponseSchema = z
      * here?" and a tap applies it.
      */
     revealSuggestion: z.boolean(),
+    /**
+     * Ask "why do you go out?" now, and save the answer as the default.
+     *
+     * True while `profiles.intent_default` is empty and nothing was chosen for
+     * this event. The app sends the answer with `rememberIntent: true` on
+     * `PUT /events/:eventId/matches/preferences`; after that this is false at
+     * every later door.
+     */
+    intentNeeded: z.boolean(),
     message: z.string(),
   })
   .openapi("CheckinResponse")

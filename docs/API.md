@@ -840,6 +840,21 @@ usually join as Sagar. Do that here?"* — applied by a tap. Suggesting rather t
 undoing means there is no window in which somebody is named before they have
 answered, and declining writes nothing at all because the row is already false.
 
+### Intent is asked at the first door
+
+Onboarding never writes `intent_default`, and `profileIsComplete()` needs one
+intent before the board opens — so every account that came through onboarding
+was refused the board for a field it was never asked. The question is asked
+where it makes sense: at the door of the first room.
+
+`POST /events/:eventId/checkin` returns **`intentNeeded: true`** while
+`profiles.intent_default` is empty and nothing was chosen for this event. The
+app asks *"Why do you go out?"* and sends the answer with **`rememberIntent:
+true`** on `PUT /events/:eventId/matches/preferences`, which writes both the
+per-event intent and the default. After that it is `false` at every later door,
+and re-checking in to a room already answered for does not ask again. An
+under-18 profile is refused `dating` on that PUT (403), as everywhere else.
+
 **`remember` on the preferences route is split.** It set *both*
 `intent_default` and `reveal_by_default`, while the app renders that switch
 under the reveal toggle labelled "Do this at future events too" — so agreeing to
@@ -1321,8 +1336,12 @@ variants of the four — nested and camelCased — and matching none of them, so
 
 They are returned **only to the profile's owner**. Whether someone has push on,
 or shares their distance, is a statement about how careful they are being and is
-not other attendees' business. `show_online` is enforced by the endpoints that
-report presence, which read the column directly.
+not other attendees' business. `show_online` is honoured by the two surfaces where another attendee can
+see that you are in a room: `GET /events/:eventId/checkins` (the roster) and
+`GET /events/:eventId/matches` (the grid). With it off you are **counted and
+not listed** — the room's numbers include you, nobody is offered your card, and
+nobody can like you. Chat is unaffected: posting a message is its own choice to
+be seen.
 
 ---
 

@@ -379,7 +379,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * stopped being the same thing the day check-ins became per-occurrence: on
      * a five-day event, every new day was a create.
      */
-    await db.event_match_preferences.upsert({
+    const prefs = await db.event_match_preferences.upsert({
       where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
       create: {
         event_id: eventId,
@@ -402,6 +402,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         revealed: false,
       },
       update: {},
+      select: { intent: true },
     })
 
     // Ensure chat group exists and add user
@@ -576,6 +577,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * and returning it would invite a client to treat it as the answer.
        */
       revealSuggestion: profile?.reveal_by_default === true,
+      /*
+       * "Why do you go out?" — asked at the door of the first room, not at
+       * sign-up (SCRUM-77). Onboarding never wrote `intent_default`, so every
+       * account that came through it was refused the board for a field the
+       * flow never asked for. True while there is no default and nothing was
+       * chosen for this event; the app asks once and saves the answer as the
+       * default, after which this is false at every later door. Re-checking
+       * in to a room you already answered for does not ask again.
+       */
+      intentNeeded: (profile?.intent_default ?? []).length === 0 && prefs.intent.length === 0,
       message: "Successfully checked in",
     })
   } catch (error) {

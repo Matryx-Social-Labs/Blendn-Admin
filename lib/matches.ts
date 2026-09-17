@@ -111,6 +111,11 @@ export async function matchesForEvent(
                 intent_default: true,
                 photos: true,
                 work_field: true,
+                // "Show online status" off: in the room, counted, not listed
+                // (SCRUM-141). Read here and filtered below rather than in the
+                // `where`, so a person with no profile row is not dropped by a
+                // relation filter that reads NULL as false.
+                show_online: true,
                 /*
                  * For the derived age on the card.
                  *
@@ -175,6 +180,7 @@ export async function matchesForEvent(
   const latestPerUser = new Map<string, (typeof checkIns)[number]>()
   for (const c of checkIns) {
     if (c.user_id === viewerId || hidden.has(c.user_id)) continue
+    if (c.user.profile?.show_online === false) continue
     const seen = latestPerUser.get(c.user_id)
     if (!seen || (c.check_in_time?.getTime() ?? 0) > (seen.check_in_time?.getTime() ?? 0)) {
       latestPerUser.set(c.user_id, c)

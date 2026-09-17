@@ -117,10 +117,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      */
     const hidden = await blockCounterparties(authUser.userId)
 
+    /*
+     * "Show online status" off: in the room, counted, not listed (SCRUM-141).
+     *
+     * The switch was written and read by nothing for a year — a privacy
+     * control that changed nothing anyone else saw. This and the grid are the
+     * two places another attendee can see you are here. `is: null` is spelled
+     * out because a relation filter alone reads a missing profile row as
+     * false and would drop that person from the roster.
+     */
     const visibleCheckIns = {
       event_id: eventId,
       status: "checked_in" as const,
       ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
+      user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] },
     }
 
     const totalCount = await db.event_check_ins.count({
