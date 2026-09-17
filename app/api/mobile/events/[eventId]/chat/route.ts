@@ -98,7 +98,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // rejected after the user has typed.
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
-      include: { event: { select: { start_time: true, end_time: true } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true } } },
     })
 
     if (!chatGroup) {
@@ -125,7 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           status: "active",
           member_count: 0,
         },
-        include: { event: { select: { start_time: true, end_time: true } } },
+        include: { event: { select: { start_time: true, end_time: true, status: true } } },
       })
     }
 
@@ -449,7 +449,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // undefined here, so the pre-event floor added in #262 silently did not
       // apply on this path while it did on the GET twin above: one room, two
       // endpoints, opposite answers about whether chat is open.
-      include: { event: { select: { start_time: true, end_time: true } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true } } },
     })
 
     if (!chatGroup) {
@@ -486,7 +486,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           status: "active",
           member_count: 0,
         },
-        include: { event: { select: { start_time: true, end_time: true } } },
+        include: { event: { select: { start_time: true, end_time: true, status: true } } },
       })
     }
 

@@ -25,28 +25,34 @@ beforeEach(() => {
 })
 
 describe("canJoinChat", () => {
+  it("refuses the room of a hidden event, whatever the membership says (SCRUM-8)", async () => {
+    // A suspended organiser's events flip to draft; a draft has no room.
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "draft" } } })
+    await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(false)
+  })
+
   it("denies a non-member", async () => {
     mockDb.chat_group_members.findUnique.mockResolvedValue(null)
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(false)
   })
 
   it("allows an active member", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active" })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "published" } } })
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(true)
   })
 
   it("allows a muted member (muting blocks writes, not reads)", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "muted" })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "muted", chat_group: { event: { status: "published" } } })
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(true)
   })
 
   it("denies a banned member", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "banned" })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "banned", chat_group: { event: { status: "published" } } })
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(false)
   })
 
   it("scopes the lookup to the requesting user, not just the group", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active" })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "published" } } })
     await canJoinChat(USER, CHAT_ID)
     expect(mockDb.chat_group_members.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -92,6 +98,11 @@ describe("canJoinConversation", () => {
 describe("canJoinEvent", () => {
   it("denies a non-existent event", async () => {
     mockDb.events.findFirst.mockResolvedValue(null)
+    await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(false)
+  })
+
+  it("denies a hidden event's counter, public or not (SCRUM-8)", async () => {
+    mockDb.events.findFirst.mockResolvedValue({ visibility: "public", status: "draft", organizer_id: OTHER })
     await expect(canJoinEvent(USER, EVENT_ID)).resolves.toBe(false)
   })
 

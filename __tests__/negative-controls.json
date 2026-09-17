@@ -668,6 +668,18 @@
       "mutation": "Three, one at a time: delete the `user: { OR: [...] }` filter in checkins/route.ts; delete the `show_online === false` skip in lib/matches.ts; drop `&& prefs.intent.length === 0` from intentNeeded in checkin/route.ts.",
       "observed": "1 failing each: the roster lists the hidden person with total 4; the grid offers their card; a room already answered for asks again.",
       "date": "2026-09-17"
+    },
+    "membership-reads-are-scoped.test.ts": {
+      "guards": "every user-keyed read of organisation_members outside lib/org-membership.ts spreads activeMembership, so a suspended organisation's members lose every door and not just the permission resolver (SCRUM-8)",
+      "mutation": "Remove `...activeMembership` from the where in lib/event-ownership.ts owningOrgFor.",
+      "observed": "1 failing: `lib/event-ownership.ts:<line>` listed as an unscoped read.",
+      "date": "2026-09-17"
+    },
+    "integration/org-suspension.itest.ts": {
+      "guards": "suspending an organisation flips its published events to draft (remembered), hides them from the list, the SQL search, GET, RSVP, the roster and the room, empties the member's actor and list (creator fallback gated), tells the people going once, and reinstating restores only what the suspension hid; ⌘K search keeps its scope under the search terms (SCRUM-8)",
+      "mutation": "Six, one at a time: drop `...activeMembership` from actorFor; drop `status: \"draft\"` from the suspend updateMany; drop `...hostNotSuspended` from the creator fallback; make canJoinChat return true; drop `status: \"draft\"` from the reinstate where; restore `{ ...eventScope, OR: [...] }` in app/api/search/route.ts.",
+      "observed": "1 failing each: the host keeps the org; the events stay listed; the host still lists the event they created; the room stays open; the admin-cancelled event comes back published; another organiser's ⌘K lists the hidden event.",
+      "date": "2026-09-17"
     }
   },
   "grandfathered": [

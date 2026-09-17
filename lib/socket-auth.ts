@@ -27,9 +27,12 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
     where: {
       chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId },
     },
-    select: { status: true },
+    // A hidden event has no room (SCRUM-8): its organiser's suspension flips
+    // it to `draft`, and a draft never legitimately has a joinable chat.
+    select: { status: true, chat_group: { select: { event: { select: { status: true } } } } },
   })
-  return membership !== null && membership.status !== "banned"
+  if (!membership || membership.status === "banned") return false
+  return membership.chat_group.event.status !== "draft"
 }
 
 /**
@@ -78,9 +81,11 @@ export async function canJoinConversation(
 export async function canJoinEvent(userId: string, eventId: string): Promise<boolean> {
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
-    select: { visibility: true, organizer_id: true, ...eventPermissionSelect },
+    select: { visibility: true, status: true, organizer_id: true, ...eventPermissionSelect },
   })
   if (!event) return false
+  // A hidden event has no counter either (SCRUM-8) — see `canJoinChat`.
+  if (event.status === "draft") return false
   if (event.visibility !== "private") return true
 
   /*
@@ -128,7 +133,9 @@ export async function canJoinEvent(userId: string, eventId: string): Promise<boo
  */
 export async function canJoinEventRoom(userId: string, eventId: string): Promise<boolean> {
   const checkIn = await db.event_check_ins.findFirst({
-    where: { event_id: eventId, user_id: userId, check_in_time: { not: null } },
+    // `status` on the event, not the check-in: a hidden event's roster
+    // closes with the rest of it (SCRUM-8).
+    where: { event_id: eventId, user_id: userId, check_in_time: { not: null }, event: { status: { not: "draft" } } },
     select: { id: true },
   })
   return checkIn !== null

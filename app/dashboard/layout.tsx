@@ -1,12 +1,14 @@
 import { redirect } from "next/navigation"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { OrgSuspendedNotice } from "@/components/org-suspended-notice"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { attentionQueues } from "@/lib/attention-queues-query"
 import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
 import { logger } from "@/lib/logger"
+import { suspendedOrgsFor } from "@/lib/org-membership"
 import { canAccessDashboard } from "@/lib/rbac"
 
 /**
@@ -55,6 +57,9 @@ export default async function DashboardLayout({
    */
   const isAdmin = session.user.role === "app_admin"
   const badges = isAdmin ? queueBadges(await attentionQueuesOrNone()) : {}
+  // A member of a suspended organisation is told on every page, not left to
+  // work it out from an empty events list (SCRUM-8).
+  const suspended = isAdmin ? [] : await suspendedOrgsFor(session.user.id)
 
   return (
     <SidebarProvider
@@ -90,7 +95,8 @@ export default async function DashboardLayout({
           different points from grids keyed to the container and visibly fall
           out of step with each other.
         */}
-        <main className="@container/main flex flex-1 flex-col px-4 pb-10 pt-5 lg:px-6">
+        <main className="@container/main flex flex-1 flex-col gap-5 px-4 pb-10 pt-5 lg:px-6">
+          <OrgSuspendedNotice orgs={suspended} />
           {children}
         </main>
       </SidebarInset>

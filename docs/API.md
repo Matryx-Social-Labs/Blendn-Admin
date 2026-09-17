@@ -1306,6 +1306,15 @@ shipped `orientation` and `gender` together to any authenticated caller.
 
 Set by the organiser in the dashboard event form, bounded 13–25.
 
+**A suspended organiser's events are drafts** (SCRUM-8). Suspending an
+organisation flips its published events to `draft` and reinstating flips them
+back, so everything above applies: absent from `GET /events` and
+`/events/search`, 404 on `GET /events/:id` and every participation write, the
+roster 404, the chat/counter/roster rooms refuse to join, and a message into
+the room is refused with *"This event is no longer available."* RSVPs and
+check-ins survive the suspension. People who had RSVP'd to an upcoming one get
+one `event_update` notification saying so.
+
 ---
 
 ## Settings

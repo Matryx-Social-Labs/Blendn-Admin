@@ -1,6 +1,7 @@
 import type { user_role } from "@prisma/client"
 
 import { db } from "./db"
+import { activeMembership } from "./org-membership"
 
 /**
  * Which organisation owns an event.
@@ -46,7 +47,7 @@ export async function owningOrgFor(user: {
   if (user.role === "app_admin") return null
 
   const membership = await db.organisation_members.findFirst({
-    where: { user_id: user.id },
+    where: { user_id: user.id, ...activeMembership },
     orderBy: { created_at: "asc" },
     select: { org_id: true },
   })

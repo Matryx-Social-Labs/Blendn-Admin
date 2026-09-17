@@ -4,6 +4,7 @@ import { Refusal } from "./refusal"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import type { Prisma } from "@prisma/client"
+import { activeMembership } from "@/lib/org-membership"
 
 /**
  * Reading the audit log.
@@ -81,7 +82,7 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
     // org admin auditing their own company must not be able to read another
     // company's suspensions out of the same table.
     const myOrgs = await db.organisation_members.findMany({
-      where: { user_id: session.user.id },
+      where: { user_id: session.user.id, ...activeMembership },
       select: { org_id: true, role: true },
     })
     const manageable = myOrgs.filter((m) => m.role === "owner" || m.role === "admin")

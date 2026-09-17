@@ -25,6 +25,7 @@ import { recordRefusal } from "@/lib/check-in-refusals"
 import { resolveOccurrence } from "@/lib/occurrences"
 import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
+import { activeMembership } from "@/lib/org-membership"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -269,7 +270,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // to get at the membership lookup would break the day `actorFor` starts
     // branching on it.
     const memberships = await db.organisation_members.findMany({
-      where: { user_id: authUser.userId },
+      where: { user_id: authUser.userId, ...activeMembership },
       select: { org_id: true },
     })
     const kind = checkInKindFor({ orgIds: memberships.map((m) => m.org_id) }, event)

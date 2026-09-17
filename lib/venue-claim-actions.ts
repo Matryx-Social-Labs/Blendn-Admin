@@ -12,6 +12,7 @@ import { venueTypeLabel } from "@/lib/venue-types"
 import { reviewableUrl } from "@/lib/tigris"
 import { claimants, notifyClaimant } from "@/lib/claim-decision-notify"
 import { appUrl } from "@/lib/email"
+import { activeMembership } from "@/lib/org-membership"
 
 /**
  * Claiming a venue.
@@ -113,7 +114,7 @@ export async function fileVenueClaim(
   }
 
   const membership = await db.organisation_members.findFirst({
-    where: { user_id: user.id },
+    where: { user_id: user.id, ...activeMembership },
     select: { org_id: true },
   })
   if (!membership) throw new Refusal("Your account is not attached to an organisation yet.")

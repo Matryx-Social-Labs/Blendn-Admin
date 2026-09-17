@@ -5,6 +5,35 @@ import { db } from "./db"
 import type { PermissionActor, SponsorGrant } from "./rbac"
 
 /**
+ * The membership filter every read must use: memberships of organisations
+ * that are not suspended.
+ *
+ * Suspending an organisation used to change a badge and nothing else
+ * (SCRUM-8): `actorFor` loaded memberships with no reference to org status,
+ * so members kept every permission. This fragment is what suspension
+ * *means* on the dashboard side, and it is spread into every membership read
+ * outside this module — `__tests__/membership-reads-are-scoped.test.ts` fails
+ * the build on one that does not. `getMyOrgs` is the documented exception:
+ * it lists suspended orgs so the org page can say why the controls are gone.
+ *
+ * `status` is a non-null enum, so `not` is safe here; the NULL trap
+ * (`prisma-not-excludes-null`) is on nullable columns.
+ */
+export const activeMembership = { org: { status: { not: "suspended" as const } } }
+
+/** Which of this person's organisations are suspended, for the banner. */
+export async function suspendedOrgsFor(
+  userId: string
+): Promise<{ id: string; display_name: string; reason: string | null }[]> {
+  const rows = await db.organisation_members.findMany({
+    where: { user_id: userId, org: { status: "suspended" } },
+    select: { org: { select: { id: true, display_name: true, suspension_reason: true } } },
+    orderBy: { created_at: "asc" },
+  })
+  return rows.map((r) => ({ id: r.org.id, display_name: r.org.display_name, reason: r.org.suspension_reason }))
+}
+
+/**
  * Load an actor with the organisations they belong to.
  *
  * `eventPermissions` is pure and takes memberships as data, so every call site
@@ -23,7 +52,7 @@ export async function actorFor(user: {
   if (user.role === "app_admin") return { id: user.id, role: user.role, orgIds: [] }
 
   const memberships = await db.organisation_members.findMany({
-    where: { user_id: user.id },
+    where: { user_id: user.id, ...activeMembership },
     select: { org_id: true },
   })
 

@@ -57,10 +57,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Check if event exists
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true },
+      select: { id: true, status: true },
     })
 
-    if (!event) {
+    // A draft has no room — including one hidden by its organiser's
+    // suspension (SCRUM-8), which is the case this actually answers.
+    if (!event || event.status === "draft") {
       return notFoundResponse("Event not found")
     }
 

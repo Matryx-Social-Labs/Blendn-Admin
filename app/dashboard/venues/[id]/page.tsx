@@ -12,6 +12,7 @@ import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { turnUpPct } from "@/lib/counting"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
+import { activeMembership } from "@/lib/org-membership"
 
 export const dynamic = "force-dynamic"
 
@@ -73,7 +74,7 @@ export default async function VenueDetailPage({
   if (!isAdmin) {
     const membership = venue.owner_org
       ? await db.organisation_members.findFirst({
-          where: { user_id: session.user.id, org_id: venue.owner_org.id },
+          where: { user_id: session.user.id, org_id: venue.owner_org.id, ...activeMembership },
           select: { id: true },
         })
       : null

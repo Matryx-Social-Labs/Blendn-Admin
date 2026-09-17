@@ -78,6 +78,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       id: true,
       start_time: true,
       end_time: true,
+      status: true,
       chat_group: { select: { id: true, status: true } },
       ...eventPermissionSelect,
     },
@@ -294,7 +295,7 @@ export async function castVote(
             select: {
               id: true,
               status: true,
-              event: { select: { start_time: true, end_time: true } },
+              event: { select: { start_time: true, end_time: true, status: true } },
             },
           },
         },
