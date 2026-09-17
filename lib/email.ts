@@ -175,9 +175,13 @@ export function inviteEmail(
   }
 }
 
-export function approvedEmail(name: string, orgName: string, email: string, password: string) {
+/**
+ * `setPasswordLink` is null for an account that already existed and keeps its
+ * password. Never a password: see SCRUM-134.
+ */
+export function approvedEmail(name: string, orgName: string, email: string, setPasswordLink: string | null) {
   return {
-    html: approvedHtml(name, orgName, email, password),
+    html: approvedHtml(name, orgName, email, setPasswordLink),
     subject: "Your Blend'n host account is ready",
     text: [
       `Hi ${name},`,
@@ -185,10 +189,18 @@ export function approvedEmail(name: string, orgName: string, email: string, pass
       `${orgName} has been approved. You can sign in to the Blend'n dashboard now:`,
       `${appUrl()}/login`,
       "",
-      `Email:    ${email}`,
-      `Password: ${password}`,
+      `Email: ${email}`,
+      ...(setPasswordLink
+        ? [
+            "",
+            "Set your password here — the link works once and expires in 24 hours:",
+            setPasswordLink,
+            "",
+            "If it has expired, use \"Forgot password\" on the sign-in page and a fresh one will be sent.",
+          ]
+        : ["", "Sign in with your existing password."]),
       "",
-      "Change the password after your first sign-in. You can invite colleagues from Organisation → Members.",
+      "You can invite colleagues from Organisation → Members.",
     ].join("\n"),
   }
 }

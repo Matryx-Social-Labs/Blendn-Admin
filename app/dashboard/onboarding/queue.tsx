@@ -25,7 +25,7 @@ import { refusalMessage } from "@/lib/refusal"
  * Expanded inline rather than in a modal: the reviewer is comparing several
  * applications and a dialog forces them to close one to look at the next.
  *
- * The generated password is shown once, after approval, and only when email did
+ * The set-password link is shown once, after approval, and only when email did
  * not go out — if the applicant already received it, echoing it on screen is a
  * credential sitting in a browser tab for no reason.
  */
@@ -68,7 +68,7 @@ export function OnboardingQueue({
   /*
    * Held HERE, not in the row. `approveOnboardingRequest` revalidates this
    * path, so the approved row leaves the list in the same round trip that
-   * produced the password — and a row that has unmounted cannot show anything.
+   * produced the link — and a row that has unmounted cannot show anything.
    * Driven locally with email unconfigured: the toast said "approved", the
    * badge went 7 → 6, and the one-time credential the copy promises was on
    * screen for zero frames. It has to outlive the row it came from.
@@ -84,15 +84,15 @@ export function OnboardingQueue({
   )
 }
 
-type Credential = { name: string; email: string; password: string }
+type Credential = { name: string; email: string; setPasswordLink: string }
 
 function CredentialPanel({ credential, onDone }: { credential: Credential; onDone: () => void }) {
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5">
       <h3 className="font-semibold">{credential.name} approved</h3>
       <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-        Email is not configured, so nothing was sent. Pass these on yourself — this is the only
-        time the password is shown.
+        Email is not configured, so nothing was sent. Pass this link on yourself — it works once,
+        expires in 24 hours, and this is the only time it is shown.
       </p>
       <dl className="grid gap-1 border-t border-border pt-3 font-mono text-[0.8125rem]">
         <div className="flex gap-3">
@@ -100,8 +100,8 @@ function CredentialPanel({ credential, onDone }: { credential: Credential; onDon
           <dd>{credential.email}</dd>
         </div>
         <div className="flex gap-3">
-          <dt className="w-20 text-muted-foreground">Password</dt>
-          <dd className="select-all">{credential.password}</dd>
+          <dt className="w-20 text-muted-foreground">Link</dt>
+          <dd className="select-all break-all">{credential.setPasswordLink}</dd>
         </div>
       </dl>
       <Button variant="outline" size="sm" className="self-start" onClick={onDone}>
@@ -150,8 +150,8 @@ function Row({
           toast.success(`${row.display_name} approved — sign-in details emailed.`)
         } else {
           toast.success(`${row.display_name} approved.`)
-          if (result.password)
-            onCredential({ name: row.display_name, email: result.email, password: result.password })
+          if (result.setPasswordLink)
+            onCredential({ name: row.display_name, email: result.email, setPasswordLink: result.setPasswordLink })
         }
       } catch (err) {
         toast.error(refusalMessage(err, "Could not approve"))

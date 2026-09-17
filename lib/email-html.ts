@@ -170,27 +170,35 @@ export function approvedHtml(
   name: string,
   orgName: string,
   email: string,
-  password: string
+  setPasswordLink: string | null
 ): string {
   const signIn = `${appUrl()}/login`
-  // The credential block is visually distinct and monospaced: it is the one
-  // thing in this email the reader has to copy exactly.
-  const credentials = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}<br><br><span style="color:${MUTED};">Password</span><br>${esc(password)}</td></tr></table>`
+  // The sign-in address is monospaced: it is the one thing in this email the
+  // reader has to type exactly. No password travels here (SCRUM-134).
+  const account = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:22px 0 6px;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:16px 18px;font-family:'SF Mono',Consolas,Menlo,monospace;font-size:13px;line-height:22px;color:${INK};" class="dm-text"><span style="color:${MUTED};">Email</span><br>${esc(email)}</td></tr></table>`
 
   return shell({
     title: "Your Blend'n host account is ready",
-    preheader: `${orgName} is approved. Your sign-in details are inside.`,
+    preheader: `${orgName} is approved. ${setPasswordLink ? "Set your password to get in." : "Sign in with your existing password."}`,
     body: [
       heading("You're approved"),
       para(
-        `Hi ${esc(name)}, <b>${esc(orgName)}</b> has been approved. You can sign in to the Blend&#39;n dashboard now.`
+        `Hi ${esc(name)}, <b>${esc(orgName)}</b> has been approved. ${
+          setPasswordLink
+            ? "Set a password and you&#39;re in."
+            : "Sign in to the Blend&#39;n dashboard with your existing password."
+        }`
       ),
-      credentials,
-      note(
-        "&#128274; Change this password after your first sign-in, from Settings. Anyone with this email can read it."
-      ),
-      button(signIn, "Sign in to the dashboard"),
-      fallbackLink(signIn),
+      account,
+      ...(setPasswordLink
+        ? [
+            button(setPasswordLink, "Set your password"),
+            fallbackLink(setPasswordLink),
+            note(
+              "&#128274; The link works once and expires in 24 hours. If it has, use &ldquo;Forgot password&rdquo; on the sign-in page and a fresh one will be sent."
+            ),
+          ]
+        : [button(signIn, "Sign in to the dashboard"), fallbackLink(signIn)]),
       note(
         "Once you&#39;re in, invite your colleagues from Your organisation &rarr; Members."
       ),

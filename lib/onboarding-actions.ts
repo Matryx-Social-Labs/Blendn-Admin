@@ -15,6 +15,7 @@ import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { isAggregatorDomain } from "@/lib/curation-sources"
 import { emailDomain, isFreeProvider } from "@/lib/org-invites"
 import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/email"
+import { issuePasswordResetLink } from "@/lib/password-reset"
 
 /**
  * Reviewing host applications.
@@ -31,8 +32,20 @@ import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/
  * exactly the half-state to avoid.
  */
 
-function generatePassword(length = 14): string {
-  return crypto.randomBytes(length).toString("base64url").slice(0, length)
+/**
+ * A new host never receives a password. The account is created with a random
+ * one nobody is told, and the approval email carries a single-use link to set
+ * their own (SCRUM-134) — the same token the forgot-password flow issues. An
+ * email is the least private channel the product uses; the one credential in
+ * it should be one that expires and can be used once.
+ *
+ * A day, not the reset flow's hour: this mail is not one they asked for a
+ * minute ago, and the link says how to get another.
+ */
+const SET_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000
+
+function undisclosedPassword(): string {
+  return crypto.randomBytes(32).toString("base64url")
 }
 
 async function requireAdmin() {
@@ -164,8 +177,12 @@ export async function getOnboardingRequests(
 
 export interface ApprovalResult {
   email: string
-  /** Shown once. If the email did not go out, this is the only copy. */
-  password: string
+  /**
+   * The set-password link, shown once and only when the email did not go out
+   * — then it is the admin who passes it on. Empty for a promoted account,
+   * which keeps its password.
+   */
+  setPasswordLink: string
   emailSent: boolean
   orgId: string
 }
@@ -191,10 +208,9 @@ export async function approveOnboardingRequest(
     throw new Refusal("That email already has a host account")
   }
 
-  const password = generatePassword()
-  const hashed = await bcrypt.hash(password, 12)
+  const hashed = await bcrypt.hash(undisclosedPassword(), 12)
 
-  const { orgId } = await db.$transaction(async (tx) => {
+  const { orgId, userId } = await db.$transaction(async (tx) => {
     const org = await tx.organisations.create({
       data: {
         kind: request.kind,
@@ -279,19 +295,16 @@ export async function approveOnboardingRequest(
       },
     })
 
-    return { orgId: org.id }
+    return { orgId: org.id, userId: user.id }
   })
+
+  const setPasswordLink = existing ? "" : await issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)
 
   let emailSent = false
   if (emailConfigured()) {
     const result = await sendEmail({
       to: request.contact_email,
-      ...approvedEmail(
-        request.contact_name,
-        request.display_name,
-        request.contact_email,
-        existing ? "(your existing password)" : password
-      ),
+      ...approvedEmail(request.contact_name, request.display_name, request.contact_email, setPasswordLink || null),
     })
     emailSent = result.sent
     if (!result.sent) {
@@ -320,7 +333,8 @@ export async function approveOnboardingRequest(
 
   return {
     email: request.contact_email,
-    password: existing ? "" : password,
+    // Once it has gone out, the browser tab has no business holding it.
+    setPasswordLink: emailSent ? "" : setPasswordLink,
     emailSent,
     orgId,
   }
