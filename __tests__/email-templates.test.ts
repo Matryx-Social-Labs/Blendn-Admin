@@ -18,7 +18,7 @@ import {
 const templates = () => [
   onboardingVerifyEmail("Asha", "https://api.blendn.app/apply/verify?token=t"),
   inviteEmail("Byg Brewski", "Asha", "https://api.blendn.app/invite?token=t"),
-  approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "hunter2"),
+  approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t"),
   declinedEmail("Asha", "We couldn't confirm your venue licence."),
   domainVerifyEmail("bygbrewski.com", "https://api.blendn.app/verify?token=t"),
 ]
@@ -69,11 +69,19 @@ describe("every template carries its link and says how long it lasts", () => {
 })
 
 describe("the approval email", () => {
-  it("carries the credentials and tells them to change the password", () => {
-    const t = approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "hunter2")
+  it("carries the address and a set-password link, and never a password (SCRUM-134)", () => {
+    const link = "https://api.blendn.app/reset-password?token=abc"
+    const t = approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", link)
     expect(t.text).toContain("asha@bygbrewski.com")
-    expect(t.text).toContain("hunter2")
-    expect(t.text).toMatch(/change the password/i)
+    expect(t.text).toContain(link)
+    expect(t.text).toMatch(/expires in 24 hours/i)
+    expect(t.text).not.toMatch(/^Password:/m)
+  })
+
+  it("tells a promoted account to use the password it already has", () => {
+    const t = approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", null)
+    expect(t.text).toMatch(/existing password/i)
+    expect(t.text).not.toContain("reset-password")
   })
 })
 
@@ -184,7 +192,7 @@ describe("HTML escaping", () => {
   it("escapes an organisation name containing markup", () => {
     // Org display names are user-supplied at /apply.
     const html = (
-      approvedEmail("A", '<script>alert(1)</script>', "a@b.com", "pw") as unknown as { html: string }
+      approvedEmail("A", '<script>alert(1)</script>', "a@b.com", null) as unknown as { html: string }
     ).html
     expect(html).not.toContain("<script>")
     expect(html).toContain("&lt;script&gt;")
@@ -223,16 +231,14 @@ describe("no invented compliance footer", () => {
   })
 })
 
-describe("the approval email's credential block", () => {
-  it("carries both credentials and the instruction to change the password", () => {
-    const html = (
-      approvedEmail("Asha", "Byg Brewski", "asha@byg.in", "hunter2-xyz") as unknown as { html: string }
-    ).html
+describe("the approval email's account block", () => {
+  it("carries the address and the set-password button, and no password", () => {
+    const link = "https://api.blendn.app/reset-password?token=abc"
+    const html = (approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link) as unknown as { html: string }).html
     expect(html).toContain("asha@byg.in")
-    expect(html).toContain("hunter2-xyz")
-    expect(html).toMatch(/change this password/i)
-    // And it points at the screen that now exists to do it.
-    expect(html).toMatch(/Settings/)
+    expect(html).toContain(`href="${link}"`)
+    expect(html).toMatch(/Set your password/)
+    expect(html).not.toMatch(/>Password</)
   })
 })
 
@@ -276,7 +282,7 @@ describe("host-facing links can move; session-bound links cannot", () => {
     // 404 at the exact moment they first try to use the product.
     process.env.NEXTAUTH_URL = "https://api.blendn.app"
     process.env.PUBLIC_APPLY_URL = "https://organizers.blendn.app"
-    const t = approvedEmail("Asha", "Byg Brewski", "a@byg.in", "pw")
+    const t = approvedEmail("Asha", "Byg Brewski", "a@byg.in", null)
     expect(t.text).toContain("https://api.blendn.app/login")
     expect(t.text).not.toContain("organizers.blendn.app")
   })

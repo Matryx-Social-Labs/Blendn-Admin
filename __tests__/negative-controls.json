@@ -638,6 +638,12 @@
       "observed": "1 failing (the empty venue absent). Green after cp of the saved file",
       "reverted": true,
       "date": "2026-09-17"
+    },
+    "integration/approval-set-password.itest.ts": {
+      "guards": "approving a host emails a single-use set-password link that expires in 24 hours, never a password; a promoted account keeps its own; with email unconfigured the admin is handed the link once (SCRUM-134)",
+      "mutation": "Replace `issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)` in approveOnboardingRequest with the literal `\"Password: hunter2\"`.",
+      "observed": "2 failing: the mail has no reset-password link to consume, and the offline path hands the admin no link.",
+      "date": "2026-09-17"
     }
   },
   "grandfathered": [

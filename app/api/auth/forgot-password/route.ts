@@ -4,8 +4,9 @@ import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
-import { hashInviteToken, newInviteToken, emailDomain } from "@/lib/org-invites"
-import { sendEmail, passwordResetEmail, appUrl, emailConfigured } from "@/lib/email"
+import { emailDomain } from "@/lib/org-invites"
+import { sendEmail, passwordResetEmail, emailConfigured } from "@/lib/email"
+import { issuePasswordResetLink } from "@/lib/password-reset"
 
 /**
  * Request a password reset.
@@ -79,22 +80,9 @@ export async function POST(req: NextRequest) {
     // Outstanding tokens for this user are spent. Otherwise requesting a second
     // link leaves the first one live, and the older mail is the one more likely
     // to have been forwarded or left sitting somewhere.
-    await db.password_reset_tokens.updateMany({
-      where: { user_id: user.id, used_at: null },
-      data: { used_at: new Date() },
-    })
-
-    const token = newInviteToken()
-    await db.password_reset_tokens.create({
-      data: {
-        token_hash: hashInviteToken(token),
-        user_id: user.id,
-        expires_at: new Date(Date.now() + RESET_TTL_MS),
-      },
-    })
+    const link = await issuePasswordResetLink(user.id, RESET_TTL_MS)
 
     if (emailConfigured()) {
-      const link = `${appUrl()}/reset-password?token=${encodeURIComponent(token)}`
       const result = await sendEmail({
         to: address,
         ...passwordResetEmail(user.name ?? "there", link),

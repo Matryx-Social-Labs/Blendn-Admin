@@ -99,10 +99,13 @@ registered."* Provider lookup is a seam, not a dependency.
 
 ### Approving
 
-Creates the org (status `verified`), the user, and an `owner` membership. If
-the applicant already has an *attendee* account, it is promoted rather than
-duplicated — and their **password is not reset**, since overwriting it would
-lock them out of the mobile app mid-session.
+Creates the org (status `verified`), the user, and an `owner` membership. The
+new user gets a random password nobody is told; the approval email carries a
+**single-use set-password link** (24 h, the forgot-password token) and never a
+password — an email is forwarded, quoted and indexed (SCRUM-134). If the
+applicant already has an *attendee* account, it is promoted rather than
+duplicated — their **password is not reset** and no link is issued, since
+overwriting it would lock them out of the mobile app mid-session.
 
 A verified company-domain email is pre-claimed as an
 `organisation_domains` row, so nobody proves the same thing twice — unless
@@ -199,7 +202,7 @@ EMAIL_FROM="Blend'n" <hello@blendn.app>
 
 Send from **`blendn.app`**, not the parent company domain: the recipient applied
 to Blend'n, and a mail from a domain they have never heard of — asking them to
-click a link, and later carrying a password — reads as phishing.
+click a link to set a password — reads as phishing.
 
 **Not a no-reply address.** The decline template ends *"reply to this email with
 more detail about your organisation"*, and someone declined at onboarding is
@@ -215,8 +218,8 @@ password and invite mail.
 
 **Unconfigured is a first-class state.** Without `RESEND_API_KEY` and
 `EMAIL_FROM` every flow still completes; the caller gets
-`{ sent: false, reason: "not_configured" }` and the dashboard shows the link or
-the generated password to pass on by hand. What must never happen is a silent
+`{ sent: false, reason: "not_configured" }` and the dashboard shows the invite or
+set-password link to pass on by hand. What must never happen is a silent
 swallow — an invite reporting success while nothing was sent leaves someone
 waiting for a mail that is not coming.
 
