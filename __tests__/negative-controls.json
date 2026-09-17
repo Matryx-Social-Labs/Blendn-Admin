@@ -631,6 +631,13 @@
       "observed": "A: 1 failing (future RSVP survived, waiter not promoted). B: 1 failing (PUT /profiles with the dead token 200 and `Ghost` written). Green after cp of the saved files",
       "reverted": true,
       "date": "2026-09-17"
+    },
+    "integration/org-shaped-overviews.itest.ts": {
+      "guards": "that the venue owner overview lists every venue the organisation owns — including one with no events — and not a venue nobody at the org owns; plus the org-shaped visibility cases it already carried",
+      "mutation": "delete the `for (const venue of owned) byVenue.set(...)` seeding line in buildVenueOwnerOverview",
+      "observed": "1 failing (the empty venue absent). Green after cp of the saved file",
+      "reverted": true,
+      "date": "2026-09-17"
     }
   },
   "grandfathered": [
