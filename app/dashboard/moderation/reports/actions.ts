@@ -8,6 +8,7 @@ import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
+import { blockAccountNow } from "@/lib/account-blocklist"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 
 /**
@@ -419,6 +420,8 @@ export async function resolveReport(
   // After the commit, never inside it: see SUSPENSION_WRITE_CHANNELS.
   if (decision === "suspend" && subjectId) {
     evictUserSockets(subjectId)
+    // Their access token stops working now, not one lifetime from now.
+    blockAccountNow(subjectId)
   }
 
   // Fire-and-forget by design (see lib/audit-log.ts): the decision is already

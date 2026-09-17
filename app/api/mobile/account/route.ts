@@ -3,8 +3,10 @@ import { Prisma } from "@prisma/client"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { blockAccountNow } from "@/lib/account-blocklist"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix } from "@/lib/tigris"
+import { promoteFromWaitlist } from "@/lib/waitlist"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // DELETE /api/mobile/account — Delete the authenticated user's own account.
@@ -30,6 +32,23 @@ export async function DELETE(request: NextRequest) {
     if (limited) return limited
 
     const anonymizedEmail = `deleted-${authUser.userId}@deleted.blendn.invalid`
+
+    /*
+     * Where they said they would be, but have not been yet.
+     *
+     * An RSVP on an event still to come is a promise from a person who no
+     * longer exists, and it kept counting: after a deletion the organiser's
+     * overview read "1 going · 1 day to go" for nobody, and their pacing was
+     * measured against it (SCRUM-132). Past events keep their rows — that is
+     * attendance, the organiser's history — but a seat held on a future one is
+     * released, and whoever was waiting for it is promoted, as any withdrawal
+     * would. Read before the transaction so the promotion can run after it.
+     */
+    const openRsvps = await db.event_rsvps.findMany({
+      where: { user_id: authUser.userId, event: { start_time: { gt: new Date() } } },
+      select: { event_id: true },
+    })
+    const openEventIds = [...new Set(openRsvps.map((r) => r.event_id))]
 
     await db.$transaction([
       db.user.update({
@@ -106,6 +125,9 @@ export async function DELETE(request: NextRequest) {
       // deliberately kept — deleting it would cascade other people's chat
       // history and event history along with it.
       db.user_interests.deleteMany({ where: { user_id: authUser.userId } }),
+      db.event_rsvps.deleteMany({
+        where: { user_id: authUser.userId, event_id: { in: openEventIds } },
+      }),
       /*
        * What they were open to, and whether they were named, at each event.
        *
@@ -285,6 +307,20 @@ export async function DELETE(request: NextRequest) {
      * reachable until a retry -- which is the state everything was in
      * before, now visible rather than silent.
      */
+    // The token that made this request is dead from here: without this, it
+    // could put a name back on the profile just erased (SCRUM-132).
+    blockAccountNow(authUser.userId)
+
+    // Seats they held are free now; the waitlist moves, per event.
+    for (const eventId of openEventIds) {
+      await promoteFromWaitlist(eventId).catch((error) =>
+        logger.warn("Account deletion: waitlist promotion failed", {
+          eventId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+
     try {
       const gone = await deletePrefix(`profile/${authUser.userId}/`)
       logger.info("Account deletion: profile photos removed from storage", { userId: authUser.userId, gone })
