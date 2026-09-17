@@ -12,6 +12,18 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+const sent: { to: string; subject: string; text: string }[] = []
+jest.mock("@/lib/email", () => {
+  const actual = jest.requireActual("@/lib/email")
+  return {
+    ...actual,
+    emailConfigured: () => true,
+    sendEmail: jest.fn(async (m: { to: string; subject: string; text: string }) => {
+      sent.push(m)
+      return { sent: true }
+    }),
+  }
+})
 
 import { fileVenueClaim, decideVenueClaim, getVenueClaimQueue } from "@/lib/venue-claim-actions"
 
@@ -169,14 +181,22 @@ describe("re-filing", () => {
 
 describe("deciding a claim", () => {
   beforeEach(() => {
+    sent.length = 0
     signIn("app_admin", "admin_1")
     mockDb.venue_claims.findUnique.mockResolvedValue({
       id: "claim_1",
       status: "pending",
       org_id: MY_ORG,
       is_dispute: false,
+      filed_by: "filer_1",
       venue: { id: VENUE, name: "Toit", owner_org_id: null },
     })
+    // The claim that loses when this one is approved.
+    mockDb.venue_claims.findMany.mockResolvedValue([{ filed_by: "filer_2" }])
+    mockDb.user.findMany.mockResolvedValue([
+      { id: "filer_1", email: "one@example.test", name: "One" },
+      { id: "filer_2", email: "two@example.test", name: "Two" },
+    ])
   })
 
   it("refuses a non-admin", async () => {
@@ -234,6 +254,25 @@ describe("deciding a claim", () => {
     await decideVenueClaim("claim_1", "decline", "The licence names a different address.")
     expect(mockDb.venues.update).not.toHaveBeenCalled()
     expect(mockDb.venue_claims.updateMany).not.toHaveBeenCalled()
+  })
+
+  // The forms say the reason "is sent to the claimant"; for a year nothing sent
+  // it (SCRUM-117).
+  it("emails the reason to the claimant on a decline, and says so", async () => {
+    const { notified } = await decideVenueClaim("claim_1", "decline", "The licence names a different address.")
+    expect(notified).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ to: "one@example.test", subject: "About your claim on the venue Toit" })
+    expect(sent[0].text).toContain("The licence names a different address.")
+  })
+
+  it("on an approval tells the winner, and tells each displaced claimant why", async () => {
+    await decideVenueClaim("claim_1", "approve")
+    expect(sent.map((m) => [m.to, m.subject])).toEqual([
+      ["one@example.test", "Your claim on the venue Toit was approved"],
+      ["two@example.test", "About your claim on the venue Toit"],
+    ])
+    expect(sent[1].text).toContain("Another claim on this venue was approved.")
   })
 })
 

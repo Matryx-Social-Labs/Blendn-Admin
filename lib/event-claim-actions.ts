@@ -13,6 +13,8 @@ import { violatedConstraint } from "@/lib/prisma-errors"
 import { owningOrgFor } from "@/lib/event-ownership"
 import { logger } from "@/lib/logger"
 import { hit } from "@/lib/rate-limit-store"
+import { notifyClaimant } from "@/lib/claim-decision-notify"
+import { appUrl } from "@/lib/email"
 
 /**
  * "This event is mine."
@@ -251,7 +253,7 @@ export async function decideEventClaim(
   claimId: string,
   decision: "approve" | "decline",
   note?: string
-): Promise<void> {
+): Promise<{ notified: boolean }> {
   const session = await getAuth()
   if (session?.user?.role !== "app_admin") throw new Refusal("Forbidden")
   const admin = session.user
@@ -380,13 +382,25 @@ export async function decideEventClaim(
     throw error
   }
 
+  // The claimant may have no account yet — the address on the claim is who
+  // we talk to. Superseded claims are not declines and are not written to.
+  const notified = await notifyClaimant({
+    to: claim.contact_email,
+    name: null,
+    what: `the event ${claim.event.title}`,
+    outcome: decision === "approve" ? "approved" : "declined",
+    reason: trimmed || null,
+    link: decision === "approve" ? `${appUrl()}/dashboard/events/${claim.event.id}` : null,
+  })
+
   auditLog({
     userId: admin.id,
     action: decision === "approve" ? "event_claim.approved" : "event_claim.declined",
     resource: "event_claim",
     resourceId: claimId,
-    details: { eventId: claim.event.id, title: claim.event.title, orgId },
+    details: { eventId: claim.event.id, title: claim.event.title, orgId, emailSent: notified },
   })
+  return { notified }
 }
 
 export interface EventClaimRow {

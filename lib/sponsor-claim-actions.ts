@@ -9,6 +9,8 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { gstinMessage, validateGstin } from "@/lib/gstin"
 import { actorFor } from "@/lib/org-membership"
+import { claimants, notifyClaimant } from "@/lib/claim-decision-notify"
+import { appUrl } from "@/lib/email"
 
 /**
  * Claiming a brand.
@@ -340,7 +342,7 @@ export async function decideSponsorClaim(
   claimId: string,
   decision: "approve" | "reject",
   note?: string
-): Promise<void> {
+): Promise<{ notified: boolean }> {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
   const admin = session.user
@@ -352,6 +354,7 @@ export async function decideSponsorClaim(
       status: true,
       org_id: true,
       is_dispute: true,
+      filed_by: true,
       sponsor: { select: { id: true, name: true, name_key: true, org_id: true } },
     },
   })
@@ -389,6 +392,15 @@ export async function decideSponsorClaim(
     }
   }
 
+  // Read before the write: after it, nobody is pending any more.
+  const losers =
+    decision === "approve"
+      ? await db.sponsor_claims.findMany({
+          where: { sponsor_id: claim.sponsor.id, status: "pending", id: { not: claimId } },
+          select: { filed_by: true },
+        })
+      : []
+
   await db.$transaction(async (tx) => {
     await tx.sponsor_claims.update({
       where: { id: claimId },
@@ -420,6 +432,25 @@ export async function decideSponsorClaim(
     })
   })
 
+  const who = await claimants([claim.filed_by, ...losers.map((l) => l.filed_by)])
+  const what = `the brand ${claim.sponsor.name}`
+  const filer = who.get(claim.filed_by)
+  const notified = filer
+    ? await notifyClaimant({
+        to: filer.email,
+        name: filer.name,
+        what,
+        outcome: decision === "approve" ? "approved" : "declined",
+        reason: trimmed || null,
+        link: decision === "approve" ? `${appUrl()}/dashboard/brand` : null,
+      })
+    : false
+  for (const l of losers) {
+    const u = who.get(l.filed_by)
+    if (u && l.filed_by !== claim.filed_by)
+      await notifyClaimant({ to: u.email, name: u.name, what, outcome: "declined", reason: "Another claim on this brand was approved.", link: null })
+  }
+
   auditLog({
     userId: admin.id,
     action: decision === "approve" ? "sponsor.claim.approved" : "sponsor.claim.rejected",
@@ -431,11 +462,13 @@ export async function decideSponsorClaim(
       wasDispute: claim.is_dispute,
       previousOwnerOrgId: claim.sponsor.org_id,
       note: trimmed || null,
+      emailSent: notified,
     },
   })
 
   revalidatePath("/dashboard/sponsor-claims")
   revalidatePath("/dashboard/sponsors")
+  return { notified }
 }
 
 export interface MyClaimRow {

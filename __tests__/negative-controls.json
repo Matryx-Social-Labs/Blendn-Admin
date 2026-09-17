@@ -644,6 +644,24 @@
       "mutation": "Replace `issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)` in approveOnboardingRequest with the literal `\"Password: hunter2\"`.",
       "observed": "2 failing: the mail has no reset-password link to consume, and the offline path hands the admin no link.",
       "date": "2026-09-17"
+    },
+    "venue-claims.test.ts": {
+      "guards": "deciding a venue claim emails the reason to the claimant, and an approval tells each displaced claimant why (SCRUM-117)",
+      "mutation": "In lib/claim-decision-notify.ts make notifyClaimant return false before sending (`if (true)` in place of the configured check).",
+      "observed": "2 failing: the decline sends nothing and notified is false; the approval sends neither the winner nor the displaced claimant anything.",
+      "date": "2026-09-17"
+    },
+    "event-claim-decision.test.ts": {
+      "guards": "deciding an event claim emails the address on the claim — even with no account — with the reason, and the audit row says emailSent (SCRUM-117)",
+      "mutation": "In lib/claim-decision-notify.ts make notifyClaimant return false before sending (`if (true)` in place of the configured check).",
+      "observed": "2 failing: the decline sends nothing and the audit row says emailSent false; the approval has no mail to read the event link from.",
+      "date": "2026-09-17"
+    },
+    "sponsor-claim-decision.test.ts": {
+      "guards": "deciding a brand claim emails the claimant with the reason; an approval tells the winner and the displaced claimant (SCRUM-117)",
+      "mutation": "In lib/claim-decision-notify.ts make notifyClaimant return false before sending (`if (true)` in place of the configured check).",
+      "observed": "6 failing across the three queues' tests: no mail, notified false, audit emailSent false.",
+      "date": "2026-09-17"
     }
   },
   "grandfathered": [

@@ -223,6 +223,44 @@ export function declinedHtml(name: string, reason: string): string {
   })
 }
 
+/**
+ * A claim decision. `what` is the thing claimed, already phrased — "the venue
+ * Church Street Social". The reason is the whole point of a decline: without it
+ * the claimant re-files identically (SCRUM-117).
+ */
+export function claimDecisionHtml(
+  name: string,
+  what: string,
+  outcome: "approved" | "declined",
+  reason: string | null,
+  link: string | null
+): string {
+  const approved = outcome === "approved"
+  return shell({
+    title: approved ? `Your claim on ${what} was approved` : `About your claim on ${what}`,
+    preheader: approved ? "It's yours — open the dashboard." : "We couldn't approve it — here's why.",
+    body: [
+      heading(approved ? "Claim approved" : "About your claim"),
+      para(
+        approved
+          ? `Hi ${esc(name)}, your claim on <b>${esc(what)}</b> has been approved. It now belongs to your organisation.`
+          : `Hi ${esc(name)}, we&#39;re not able to approve your claim on <b>${esc(what)}</b>.`
+      ),
+      ...(reason
+        ? [
+            `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-codebox dm-border" style="margin:18px 0;background-color:#F7F4F3;border:1px solid #E2DAD7;border-radius:10px;"><tr><td style="padding:14px 18px;font-family:${FONT};font-size:14px;line-height:22px;color:${BODY_TEXT};" class="dm-sub">${esc(reason)}</td></tr></table>`,
+          ]
+        : []),
+      ...(link ? [button(link, "Open the dashboard"), fallbackLink(link)] : []),
+      note(
+        approved
+          ? "You can invite colleagues from Your organisation &rarr; Members."
+          : "Think this is a mistake? Reply to this email with more detail &mdash; a person reads every reply."
+      ),
+    ].join("\n"),
+  })
+}
+
 export function domainVerifyHtml(domain: string, link: string): string {
   return shell({
     title: `Verify ${domain} for Blend'n`,

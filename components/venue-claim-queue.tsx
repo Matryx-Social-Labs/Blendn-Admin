@@ -64,11 +64,13 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
   function decide(decision: "approve" | "decline") {
     startTransition(async () => {
       try {
-        await decideVenueClaim(claim.id, decision, note)
+        const { notified } = await decideVenueClaim(claim.id, decision, note)
         toast.success(
           decision === "approve"
             ? `${claim.orgName} now owns ${claim.venueName}.`
-            : "Claim declined — the reason goes to the claimant."
+            : notified
+              ? "Claim declined — the reason has been emailed to the claimant."
+              : "Claim declined — email is not configured, so nothing was sent. Tell them yourself."
         )
         router.refresh()
       } catch (e) {

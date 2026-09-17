@@ -63,11 +63,13 @@ function ClaimCard({ claim }: { claim: SponsorClaimQueueRow }) {
   function decide(decision: "approve" | "reject") {
     startTransition(async () => {
       try {
-        await decideSponsorClaim(claim.id, decision, note)
+        const { notified } = await decideSponsorClaim(claim.id, decision, note)
         toast.success(
           decision === "approve"
             ? `${claim.orgName} now owns ${claim.brandName}.`
-            : "Claim rejected — the reason goes to the claimant."
+            : notified
+              ? "Claim rejected — the reason has been emailed to the claimant."
+              : "Claim rejected — email is not configured, so nothing was sent. Tell them yourself."
         )
         router.refresh()
       } catch (e) {
