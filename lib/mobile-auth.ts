@@ -4,6 +4,7 @@ import { randomUUID } from "crypto"
 import bcrypt from "bcryptjs"
 import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
+import { recentlyBlocked } from "./account-blocklist"
 import { PRODUCT_EVENTS, record } from "./product-events"
 import { Prisma } from "@prisma/client"
 
@@ -92,12 +93,16 @@ const BCRYPT_ROUNDS = 12
  * indistinguishable from a bug and generates a support thread instead of an
  * appeal.
  *
- * This is checked where tokens are *issued* — sign-in, OAuth, refresh, session
- * — and not in `getAuthenticatedUser`, which is pure JWT verification with no
- * database read. Putting it there would add a query to every mobile request to
- * shorten a 15-minute access token's life. Suspending revokes refresh tokens,
- * so the practical bound is: no new session, and the current one dies within
- * one access-token expiry.
+ * This is checked where tokens are *issued* — sign-in, OAuth, refresh, session.
+ * `getAuthenticatedUser` adds one more, cheap, check: `recentlyBlocked`, a
+ * per-process set of accounts deleted or suspended in the last few minutes,
+ * refreshed from one indexed query every 30 seconds. Because deletion and
+ * suspension revoke refresh tokens, the only access token that can outlive
+ * either is at most one lifetime old — so the set only ever needs the last
+ * twenty minutes, and it is small. Without it, a deleted account's still-valid
+ * token could put a name back on the erased profile and RSVP for it for
+ * fifteen minutes (SCRUM-132), and a suspended one kept a live session for
+ * the same span (SCRUM-119 recorded the bound; this closes it to seconds).
  */
 export function accountBlockReason(
   user: { deletedAt: Date | null; suspended_at: Date | null } | null
@@ -365,6 +370,10 @@ export async function getAuthenticatedUser(
 
   const decoded = verifyAccessToken(token)
   if (!decoded) {
+    return null
+  }
+
+  if (await recentlyBlocked(decoded.userId)) {
     return null
   }
 

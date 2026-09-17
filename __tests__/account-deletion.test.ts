@@ -20,6 +20,8 @@ const mockDb = {
   user: { update: jest.fn() },
   profiles: { update: jest.fn() },
   user_interests: { deleteMany: jest.fn() },
+  // Two open RSVPs on future events, read before the transaction; both go.
+  event_rsvps: { findMany: jest.fn().mockResolvedValue([{ event_id: "ev-1" }, { event_id: "ev-2" }]), deleteMany: jest.fn() },
   event_match_preferences: { deleteMany: jest.fn() },
   mobile_refresh_tokens: { deleteMany: jest.fn() },
   push_tokens: { deleteMany: jest.fn() },
@@ -45,9 +47,13 @@ const mockDb = {
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
 const mockAuth = jest.fn()
+const mockBlockNow = jest.fn()
 jest.mock("@/lib/mobile-auth", () => ({
   getAuthenticatedUser: (...a: unknown[]) => mockAuth(...a),
 }))
+jest.mock("@/lib/account-blocklist", () => ({ blockAccountNow: (...a: unknown[]) => mockBlockNow(...a) }))
+const mockPromote = jest.fn().mockResolvedValue([])
+jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => mockPromote(...a) }))
 
 const mockDeletePrefix = jest.fn().mockResolvedValue(3)
 jest.mock("@/lib/tigris", () => ({ deletePrefix: (...a: unknown[]) => mockDeletePrefix(...a) }))
@@ -142,6 +148,27 @@ describe("deleting an account scrubs the matching inputs", () => {
      * would take the organiser's headcount with it.
      */
     expect((mockDb.event_check_ins as { deleteMany?: unknown }).deleteMany).toBeUndefined()
+  })
+
+  it("releases the seats they held on events still to come, and promotes whoever was waiting", async () => {
+    // The organiser's overview read "1 going · 1 day to go" for a deleted
+    // person, and their pacing was measured against it (SCRUM-132). Past
+    // events keep their rows — attendance is the organiser's history.
+    await del()
+    expect(mockDb.event_rsvps.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { user_id: USER, event: { start_time: { gt: expect.any(Date) } } },
+      })
+    )
+    expect(mockDb.event_rsvps.deleteMany).toHaveBeenCalledWith({
+      where: { user_id: USER, event_id: { in: ["ev-1", "ev-2"] } },
+    })
+    expect(mockPromote.mock.calls.map((c) => c[0])).toEqual(["ev-1", "ev-2"])
+  })
+
+  it("kills the token that made the request, so it cannot write to the erased account for the rest of its life", async () => {
+    await del()
+    expect(mockBlockNow).toHaveBeenCalledWith(USER)
   })
 
   it("does it all in one transaction", async () => {
