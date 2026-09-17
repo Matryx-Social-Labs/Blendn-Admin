@@ -49,6 +49,15 @@ Metro reverse tunnels: staging is a public URL, so Android needs only
 without it the Location-card map is blank on Android (iOS uses Apple Maps).
 Supplied via `app.config.js` — takes effect on a native rebuild only (SCRUM-125).
 
+**A local `assembleRelease` still shows a blank grid, and that is expected.**
+The key is in the manifest (the "Google" watermark draws), but a local build
+without `signingConfigs.release` is signed with the stock debug keystore
+(`5E:8F:16:06…`) and the key is not authorised for that certificate — logcat
+says `Google Maps Android API: Authorization failure`. Not a code defect; do
+not file it. The map is verified on an EAS-built binary (whose certificate the
+key is restricted to), or by adding the debug SHA-1 + package to the key's
+allowed apps in Google Cloud, which needs console access.
+
 ## Screenshots
 `xcrun simctl io <udid> screenshot out.png` (iOS) /
 `adb -s <serial> exec-out screencap -p > out.png` (Android). Downscale large
