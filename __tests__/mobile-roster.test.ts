@@ -95,7 +95,14 @@ describe("GET /events/:id/checkins — who counts as present", () => {
   it("does not filter the roster on profile completeness", async () => {
     await GET(req(), { params })
     const where = mockDb.event_check_ins.findMany.mock.calls[0][0].where
-    expect(where).toEqual({ event_id: EVENT, status: "checked_in" })
+    expect(where).toEqual({
+      event_id: EVENT,
+      status: "checked_in",
+      // The one profile predicate that belongs here: "Show online status" off
+      // is counted and not listed (SCRUM-141) — and a missing profile row is
+      // not "off", so the NULL case is spelled out.
+      user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] },
+    })
     expect(JSON.stringify(where)).not.toMatch(/onboarded|photos/)
   })
 

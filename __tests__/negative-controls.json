@@ -662,6 +662,12 @@
       "mutation": "In lib/claim-decision-notify.ts make notifyClaimant return false before sending (`if (true)` in place of the configured check).",
       "observed": "6 failing across the three queues' tests: no mail, notified false, audit emailSent false.",
       "date": "2026-09-17"
+    },
+    "integration/room-visibility.itest.ts": {
+      "guards": "show_online off is counted and not listed on the roster and the grid, a person with no profile row is still listed; check-in says intentNeeded while there is no default and the room has no answer of its own, and stops after rememberIntent or a one-night answer for that room (SCRUM-141, SCRUM-77)",
+      "mutation": "Three, one at a time: delete the `user: { OR: [...] }` filter in checkins/route.ts; delete the `show_online === false` skip in lib/matches.ts; drop `&& prefs.intent.length === 0` from intentNeeded in checkin/route.ts.",
+      "observed": "1 failing each: the roster lists the hidden person with total 4; the grid offers their card; a room already answered for asks again.",
+      "date": "2026-09-17"
     }
   },
   "grandfathered": [
