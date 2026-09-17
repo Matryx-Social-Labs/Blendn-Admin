@@ -119,6 +119,26 @@ describe("organisation-shaped overviews", () => {
     expect(row).toBeDefined()
   })
 
+  it("the venue owner sees a venue they own that has no events yet — the one a claim was just approved for (SCRUM-136)", async () => {
+    const buildingOrg = (await db.venues.findUniqueOrThrow({ where: { id: venueId }, select: { owner_org_id: true } })).owner_org_id!
+    const empty = await db.venues.create({
+      data: { name: `Empty ${testId("v")}`, owner_org_id: buildingOrg, claimed_at: new Date() },
+    })
+    venues.push(empty.id)
+
+    as("venue_owner", owner)
+    const overview = await getDashboardOverview()
+    if (overview.role !== "venue_owner") throw new Error("expected venue-owner overview")
+    const row = overview.venues.find((v) => v.id === empty.id)
+    expect(row).toMatchObject({ name: empty.name, eventsInWindow: 0, nightsPerWeek: 0, nextBooking: null })
+    // And a venue somebody else owns, with no events at this org, is not theirs.
+    const foreign = await db.venues.create({ data: { name: `Foreign ${testId("v")}` } })
+    venues.push(foreign.id)
+    const again = await getDashboardOverview()
+    if (again.role !== "venue_owner") throw new Error("expected venue-owner overview")
+    expect(again.venues.map((v) => v.id)).not.toContain(foreign.id)
+  })
+
   it("an organiser outside both orgs sees neither", async () => {
     const stranger = await makeUser("stranger", "organizer")
     users.push(stranger)

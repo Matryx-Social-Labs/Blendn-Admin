@@ -13,6 +13,7 @@ import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
+import { actorFor } from "@/lib/org-membership"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
 import { activeSince } from "@/lib/product-events"
@@ -751,7 +752,23 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
    * Normalising case and whitespace fixes "The Loft" vs "the loft" for the
    * unlinked remainder, which the raw-string version never could.
    */
+  /*
+   * Seeded from the venues the organisation OWNS, then folded with the events.
+   *
+   * This map was built from events alone, so a venue with none — the one a
+   * claim was just approved for — was not on the page, and an owner whose
+   * only venue was such a venue saw "No venues yet · Add a venue" the morning
+   * after winning it (SCRUM-136). Ownership is the fact; events are what runs
+   * there. A venue with nothing on renders with its tiles at zero and the
+   * "Nothing booked" line that already exists for it.
+   */
+  const owned = await db.venues.findMany({
+    where: { owner_org_id: { in: (await actorFor({ id: userId, role })).orgIds } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  })
   const byVenue = new Map<string, { id: string | null; label: string; events: typeof events }>()
+  for (const venue of owned) byVenue.set(venue.id, { id: venue.id, label: venue.name, events: [] })
   for (const event of events) {
     const displayName = event.venue?.name ?? event.venue_name ?? "Unnamed venue"
     const key = event.venue_id ?? `name:${normaliseVenueName(displayName)}`
