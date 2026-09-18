@@ -1,6 +1,18 @@
+import { NextRequest } from "next/server"
+
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+
 import { sweepExpiredChats } from "@/lib/chat-lifecycle"
-import { chatWindowState, CHAT_WINDOW_HOURS } from "@/lib/chat-window"
+import { chatClosedMessage, chatWindowState, CHAT_WINDOW_HOURS } from "@/lib/chat-window"
+import { signAccessToken } from "@/lib/mobile-auth"
 import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const messagesRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as
+  typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const reactionsRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/[messageId]/reactions/route") as
+  typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/messages/[messageId]/reactions/route")
 
 /**
  * The sweep against real rows.
@@ -149,5 +161,81 @@ describe("the sweep is not what stops people posting", () => {
     const state = chatWindowState({ end_time: endTime }, group)
     expect(state.open).toBe(false)
     if (!state.open) expect(state.reason).toBe("window_closed")
+  })
+})
+
+/*
+ * A closed room refuses a reaction the way it refuses a message (SCRUM-154).
+ *
+ * Driven on Android: the post got "This chat has closed. Event chats stay open
+ * for 24 hours after the event ends." and `CHAT_CLOSED`; the heart on the last
+ * message got "This room is not open" and no code. Same gate, two answers.
+ */
+describe("a closed room refuses a reaction with the same words as a message", () => {
+  const post = (token: string, groupId: string, body: unknown) =>
+    new NextRequest(`http://localhost/api/mobile/chat/groups/${groupId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+
+  it("window closed → CHAT_CLOSED and the sentence that says when", async () => {
+    const { groupId } = await makeExpiredRoom({ endedHoursAgo: CHAT_WINDOW_HOURS + 5 })
+    const memberId = await makeUser(testId("react_member"), "attendee")
+    users.push(memberId)
+    const member = await db.user.findUniqueOrThrow({ where: { id: memberId }, select: { email: true } })
+    const token = signAccessToken(memberId, member.email)
+    await db.chat_group_members.create({
+      data: { chat_group_id: groupId, user_id: memberId, status: "active", anonymous_name: "Late Owl" },
+    })
+    const message = await db.chat_messages.create({
+      data: { chat_group_id: groupId, user_id: memberId, content: "last word", type: "text" },
+    })
+
+    const msg = await messagesRoute.POST(post(token, groupId, { content: "one more" }), {
+      params: Promise.resolve({ chatGroupId: groupId }),
+    })
+    const react = await reactionsRoute.POST(
+      post(token, `${groupId}/messages/${message.id}/reactions`, { emoji: "🔥" }),
+      { params: Promise.resolve({ chatGroupId: groupId, messageId: message.id }) }
+    )
+    const [m, r] = await Promise.all([msg.json(), react.json()])
+    expect([msg.status, react.status]).toEqual([403, 403])
+    expect(r).toMatchObject({ errorCode: "CHAT_CLOSED", error: chatClosedMessage("window_closed") })
+    expect(r.error).toBe(m.error)
+    expect(await db.message_reactions.count({ where: { message_id: message.id } })).toBe(0)
+  })
+
+  it("muted by the organiser → USER_MUTED and the organiser's sentence", async () => {
+    const { groupId, eventId } = await makeExpiredRoom({ endedHoursAgo: 0.5 })
+    // Not expired for this one — the window is open; only the mute refuses.
+    await db.events.update({ where: { id: eventId }, data: { end_time: new Date(Date.now() + HOUR) } })
+    const memberId = await makeUser(testId("react_muted"), "attendee")
+    users.push(memberId)
+    const member = await db.user.findUniqueOrThrow({ where: { id: memberId }, select: { email: true } })
+    const token = signAccessToken(memberId, member.email)
+    await db.chat_group_members.create({
+      data: {
+        chat_group_id: groupId,
+        user_id: memberId,
+        status: "muted",
+        muted_at: new Date(),
+        muted_by: users[0],
+        anonymous_name: "Quiet Fox",
+      },
+    })
+    const message = await db.chat_messages.create({
+      data: { chat_group_id: groupId, user_id: memberId, content: "before the mute", type: "text" },
+    })
+
+    const react = await reactionsRoute.POST(
+      post(token, `${groupId}/messages/${message.id}/reactions`, { emoji: "🔥" }),
+      { params: Promise.resolve({ chatGroupId: groupId, messageId: message.id }) }
+    )
+    expect(react.status).toBe(403)
+    expect(await react.json()).toMatchObject({
+      errorCode: "USER_MUTED",
+      error: "The organiser has muted you in this room.",
+    })
   })
 })

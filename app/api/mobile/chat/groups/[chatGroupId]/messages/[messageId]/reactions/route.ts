@@ -4,7 +4,8 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { mayWriteToRoom } from "@/lib/chat-window"
+import { chatClosedMessage, mayWriteToRoom } from "@/lib/chat-window"
+import { mutedRefusal } from "@/lib/moderation/actions"
 import { emitChatReaction } from "@/lib/socket-server"
 import {
   ALLOWED_REACTIONS,
@@ -15,6 +16,7 @@ import {
 import {
   successResponse,
   errorResponse,
+  ErrorCode,
   validationErrorResponse,
   unauthorizedResponse,
   forbiddenResponse,
@@ -71,7 +73,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       select: {
         id: true,
         status: true,
-        members: { where: { user_id: user.userId }, select: { status: true } },
+        members: { where: { user_id: user.userId }, select: { status: true, muted_by: true } },
         // Spread of both bounds, not just `end_time`: `chatWindowState` reads a
         // missing start as "no lower bound", which would open a room that has
         // not opened yet.
@@ -83,15 +85,25 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const membership = chatGroup.members[0]
     if (!membership) return forbiddenResponse("You are not a member of this chat group")
 
+    /*
+     * The same sentences and codes as a message, because a reaction is refused
+     * for the same reasons. This said "This room is not open" with no code for
+     * every closed state — a phone that had just been told *when* the chat
+     * closed got a different, vaguer answer for the heart on the last message
+     * (SCRUM-154).
+     */
     const denial = mayWriteToRoom(membership, chatGroup.event, chatGroup)
     if (denial) {
+      if (denial.reason === "banned") {
+        return errorResponse("You have been removed from this chat group", 403, ErrorCode.USER_BANNED)
+      }
+      if (denial.reason === "muted") {
+        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
+      }
       return errorResponse(
-        denial.reason === "banned"
-          ? "You have been removed from this chat group"
-          : denial.reason === "muted"
-            ? "You are muted in this chat group"
-            : "This room is not open",
-        403
+        chatClosedMessage(denial.reason),
+        403,
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
       )
     }
 
