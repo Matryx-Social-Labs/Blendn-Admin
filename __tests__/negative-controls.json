@@ -692,6 +692,12 @@
       "mutation": "In app/api/mobile/events/[eventId]/route.ts PATCH, replace `eventPermissions(actor, event).canEdit` with `event.organizer_id === requester.id`.",
       "observed": "1 failing: the colleague gets 403 on the edit.",
       "date": "2026-09-18"
+    },
+    "members-tab-muted-at.test.ts": {
+      "guards": "the dashboard Members tab dates a mute by chat_group_members.muted_at, the column the mute route writes — not updated_at, which has @default(now()) and no @updatedAt and is therefore the join time (SCRUM-154)",
+      "mutation": "In app/api/events/[id]/chat/messages/route.ts, put back `mutedAt: m.status === \"muted\" ? m.updated_at.toISOString() : null`.",
+      "observed": "1 failing: the shaping matches /mutedAt:[^\\n]*updated_at/.",
+      "date": "2026-09-18"
     }
   },
   "grandfathered": [
