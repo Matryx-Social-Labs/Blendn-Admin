@@ -102,7 +102,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * block that leaves the conversation open is not what anyone means by it.
        *
        * Block implies unmatch, and unmatch is permanent: unblocking restores
-       * profile visibility and the ability to receive a request, never the match.
+       * profile visibility, never the match — and not a new request either,
+       * since a closed pair answers "not found" to one (message-requests
+       * route, SCRUM-113; the app's sheet says "you won't see each other in
+       * rooms again"). Driven 2026-09-18: unblock, ask → 404 (SCRUM-165).
        */
       const conversation = await tx.private_conversations.findUnique({
         where: { user1_id_user2_id: { user1_id, user2_id } },

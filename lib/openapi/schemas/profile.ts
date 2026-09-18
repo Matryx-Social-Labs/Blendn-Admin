@@ -275,7 +275,8 @@ export const MessageRequestSchema = z
     senderId: z.string().optional(),
     recipientId: z.string().optional(),
     sender: z.object({ id: z.string(), name: z.string(), avatar: z.string().nullable() }).optional(),
-    recipient: z.object({ id: z.string(), name: z.string(), avatar: z.string().nullable() }).optional(),
+    /** The id only — the recipient's name and photo are the accept's to give, not the ask's (SCRUM-182). */
+    recipient: z.object({ id: z.string() }).optional(),
     message: z.string().nullable(),
     status: z.string(),
     createdAt: z.string().datetime(),
