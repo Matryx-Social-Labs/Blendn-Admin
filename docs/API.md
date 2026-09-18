@@ -1296,11 +1296,14 @@ shipped `orientation` and `gender` together to any authenticated caller.
   applied the rule, and a 17-year-old could RSVP to, save and read the board
   of an 18+ event by id (SCRUM-130). The rule lives in one place,
   `lib/event-access.ts`, which also answers a **draft** or a stranger's
-  **private** event with 404 on every one of those routes — withdrawals
-  (`DELETE /rsvp`, `DELETE /favorite`) included, though a withdrawal is never
-  refused on age. A private event admits its guests (an RSVP) and the staff of
-  the organisation running it, not only the row's creator — at the door too,
-  since SCRUM-147.
+  **private** event with 404 on every one of those routes. `DELETE /rsvp`
+  included; **`DELETE /favorite` is never refused** — not on age, and since
+  SCRUM-176 not on status either, because an event saved while published and
+  then delisted (or hidden by its organisation's suspension, SCRUM-8) was a
+  card that could be neither opened nor dismissed. It deletes your own row
+  and returns `favoriteCount: 0` for an event you may not see. A private
+  event admits its guests (an RSVP) and the staff of the organisation running
+  it, not only the row's creator — at the door too, since SCRUM-147.
 
 **`private` is not on offer.** With no invite mechanism a private event could
 never gain a guest (seeing it needs an RSVP; RSVPing needs to see it), so the
@@ -1371,7 +1374,7 @@ be seen.
 |--------|----------|-------------|
 | GET | `/users/:userId` | Get user profile |
 | POST | `/users/:userId/block` | Block/unblock user |
-| GET | `/users/:userId/favorites` | Get user's favorites |
+| GET | `/users/:userId/favorites` | Get your saved events — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
 | GET | `/profiles/:userId` | Get full profile |
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests |

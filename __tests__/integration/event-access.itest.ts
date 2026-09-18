@@ -41,6 +41,9 @@ const boardRequestRoute = require("@/app/api/mobile/events/[eventId]/board/[post
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const interestedRoute = require("@/app/api/mobile/events/[eventId]/interested-users/route") as
   typeof import("@/app/api/mobile/events/[eventId]/interested-users/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const favoritesListRoute = require("@/app/api/mobile/users/[userId]/favorites/route") as
+  typeof import("@/app/api/mobile/users/[userId]/favorites/route")
 
 const users: string[] = []
 const events: string[] = []
@@ -267,5 +270,57 @@ describe("events discovery would never list", () => {
     expect((await everyRoute(priv, otherOrganiser.token)).get).toBe("404 NOT_FOUND")
     expect((await everyRoute(priv, guest.token)).get).toBe("ok")
     expect((await everyRoute(priv, colleague.token)).get).toBe("ok")
+  })
+})
+
+/*
+ * A save whose event went dark after the save (SCRUM-176).
+ *
+ * Found driving SCRUM-149: an organiser set a saved event to draft — the flip
+ * an organisation's suspension makes on every published event (SCRUM-8) —
+ * and the saved list still returned it, the event page 404'd, and DELETE
+ * /favorite 404'd through the same door. A card that could be neither opened
+ * nor dismissed. Cancelled is different: history, listed, labelled by `status`.
+ */
+describe("a saved event that went dark", () => {
+  const saved = (userId: string, token: string) =>
+    favoritesListRoute
+      .GET(req("GET", `/api/mobile/users/${userId}/favorites`, token), { params: Promise.resolve({ userId }) })
+      .then((r) => r.json())
+      .then((j: { data: { events: Array<{ id: string; status: string }> } }) => j.data.events)
+
+  it("drops a draft from the saved list and still lets the save be removed", async () => {
+    const host = await makeUser("ea-dark-host", "organizer")
+    users.push(host)
+    const fan = await person("ea-fan", yearsAgo(30))
+    const live = await futureEvent(host)
+    const going = await futureEvent(host)
+    await db.event_favorites.createMany({
+      data: [live, going].map((event_id) => ({ event_id, user_id: fan.id })),
+    })
+    expect((await saved(fan.id, fan.token)).map((e) => e.id).sort()).toEqual([live, going].sort())
+
+    await db.events.update({ where: { id: going }, data: { status: "draft" } })
+    expect((await saved(fan.id, fan.token)).map((e) => e.id)).toEqual([live])
+
+    // The door still says "not found" for the draft itself — that is right.
+    const get = await eventRoute.GET(req("GET", `/api/mobile/events/${going}`, fan.token), params(going))
+    expect(get.status).toBe(404)
+
+    // But a removal is never refused, and it tells the stranger nothing.
+    const del = await favoriteRoute.DELETE(req("DELETE", `/api/mobile/events/${going}/favorite`, fan.token), params(going))
+    expect(del.status).toBe(200)
+    expect(await del.json()).toMatchObject({ data: { isFavorited: false, favoriteCount: 0 } })
+    expect(await db.event_favorites.count({ where: { event_id: going, user_id: fan.id } })).toBe(0)
+  })
+
+  it("keeps a cancelled one, and says so on the row (negative control for the draft rule)", async () => {
+    const host = await makeUser("ea-cancel-host", "organizer")
+    users.push(host)
+    const fan = await person("ea-fan-2", yearsAgo(30))
+    const event = await futureEvent(host)
+    await db.event_favorites.create({ data: { event_id: event, user_id: fan.id } })
+    await db.events.update({ where: { id: event }, data: { status: "cancelled" } })
+    expect(await saved(fan.id, fan.token)).toMatchObject([{ id: event, status: "cancelled" }])
   })
 })
