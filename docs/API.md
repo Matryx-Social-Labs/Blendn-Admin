@@ -123,7 +123,7 @@ not 400 on the events list.
 | Surface | You see |
 |---|---|
 | Event chat, participants, attendee list, sockets | **Pseudonym** — "Cosmic Panda" |
-| Direct messages, message requests | Real name and photo |
+| Direct messages, message requests | Real name and photo — the **sender's**, to the person asked; the person asked stays an id to the sender until they accept (SCRUM-182) |
 
 The pseudonym is one per person per event, stable for the whole event and across
 check-out and check-in, and **different at every event** — there is no

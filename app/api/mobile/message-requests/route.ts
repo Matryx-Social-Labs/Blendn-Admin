@@ -126,10 +126,24 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    /*
+     * A declined request is not a lock on the person who declined it.
+     *
+     * The check ignored `status`, so one declined request froze the pair in
+     * both directions for good: the sender got "already sent" (right — a
+     * rejection is not an invitation to try again, SCRUM-113) and the person
+     * who declined got "this user has already sent you a request, check your
+     * incoming requests" — about a request that no longer appears there. She
+     * had changed her mind and could not say so (SCRUM-182).
+     *
+     * So: a pending or accepted request in either direction still blocks; a
+     * declined one blocks only its sender.
+     */
     if (existingRequest) {
       if (existingRequest.sender_id === authUser.userId) {
         return conflictResponse("You have already sent a request to this user")
-      } else {
+      }
+      if (existingRequest.status !== "declined") {
         return conflictResponse(
           "This user has already sent you a request. Check your incoming requests."
         )
@@ -166,13 +180,7 @@ export async function POST(request: NextRequest) {
         status: "pending",
       },
       include: {
-        recipient: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-          },
-        },
+        recipient: { select: { id: true } },
       },
     })
 
@@ -199,11 +207,15 @@ export async function POST(request: NextRequest) {
         request: {
           id: messageRequest.id,
           recipientId: messageRequest.recipient_id,
-          recipient: {
-            id: messageRequest.recipient.id,
-            name: messageRequest.recipient.name,
-            avatar: messageRequest.recipient.image,
-          },
+          /*
+           * The id only. This carried the recipient's real name and photo back
+           * to the sender at the moment of asking — before she had done
+           * anything. The request is the crossing from pseudonym to real name,
+           * and accepting is what completes it (see the decline route: "the
+           * decliner is never named"). A stranger picked off a pseudonymous
+           * grid should not learn who she is from the act of asking (SCRUM-182).
+           */
+          recipient: { id: messageRequest.recipient.id },
           message: messageRequest.message,
           status: messageRequest.status,
           createdAt: messageRequest.created_at,
