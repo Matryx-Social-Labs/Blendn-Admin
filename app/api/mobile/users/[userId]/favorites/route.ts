@@ -60,8 +60,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ? { end_time: { lt: now } }
         : { end_time: { gte: now } }
 
+    /*
+     * A draft is invisible everywhere else on the product — the feed, search,
+     * the event page, the door — because it is unannounced, or delisted, or
+     * its organisation is suspended (SCRUM-8 flips every published event to
+     * draft). This list was the one place it still showed: a card that 404'd
+     * on tap and, since the removal route read the same door, could not be
+     * unsaved either (SCRUM-176). Cancelled and completed stay — they are
+     * history, and `status` is on the row for the client to label them.
+     */
     const eventWhereClause = {
       deleted_at: null,
+      status: { not: "draft" as const },
       ...eventTimeFilter,
     }
 

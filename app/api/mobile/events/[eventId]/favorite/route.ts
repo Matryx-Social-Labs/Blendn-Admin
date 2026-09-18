@@ -74,12 +74,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "favorite", authUser.userId))
     if (limited) return limited
 
-    // Same answer as POST for a draft or a stranger's private event; removing
-    // a save is never refused on age.
-    const denied = await attendeeEventAccess(authUser.userId, eventId, "view")
-    if (denied?.kind === "not_found") return eventAccessResponse(denied)
-
-    // Remove from favorites
+    /*
+     * A removal is never refused. This answered "not found" for a draft — the
+     * same door as POST — so an event you saved while it was published and
+     * that was then delisted, or whose organisation was suspended (SCRUM-8),
+     * was a card you could neither open nor dismiss (SCRUM-176). Deleting your
+     * own row cannot leak anything; what the door guards is the count below,
+     * which a draft's stranger should not learn, so that is all it gates.
+     */
     await db.event_favorites.deleteMany({
       where: {
         event_id: eventId,
@@ -87,10 +89,10 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Get updated favorite count
-    const favoriteCount = await db.event_favorites.count({
-      where: { event_id: eventId },
-    })
+    const denied = await attendeeEventAccess(authUser.userId, eventId, "view")
+    const favoriteCount = denied?.kind === "not_found"
+      ? 0
+      : await db.event_favorites.count({ where: { event_id: eventId } })
 
     return successResponse({
       isFavorited: false,
