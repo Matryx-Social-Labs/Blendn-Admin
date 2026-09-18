@@ -223,6 +223,17 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
         }
       )
 
+      if (response.status === 401) {
+        /*
+         * The session ended under the editor. This threw the generic sentence
+         * below, so the person retried a save that could never land — and the
+         * page has no other way of telling them (the middleware only guards
+         * navigations). The form keeps its state: nothing they typed is lost,
+         * and a second tab's sign-in makes the next Save work (SCRUM-163).
+         */
+        toast.error("Your session has ended. Sign in again in another tab — your changes are still here.")
+        return
+      }
       if (!response.ok) {
         throw new Error("Failed to save event")
       }
