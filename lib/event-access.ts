@@ -20,8 +20,9 @@ export const hostNotSuspended = {
 /**
  * May this attendee act on ONE event — open it, RSVP, save it, read its board?
  *
- * Discovery (`GET /events`) and the door (`/checkin`) each applied these rules
- * on their own; every other single-event route applied none. So a draft, a
+ * Discovery (`GET /events`) applied these rules on its own and the door
+ * (`/checkin`) applied the status and age halves — never visibility, until
+ * SCRUM-147; every other single-event route applied none. So a draft, a
  * stranger's private event and an 18+ event were all reachable by id — a deep
  * link opened them in full, and a 17-year-old could RSVP, favourite and read
  * the board of a `min_age 18` event while the feed hid it (SCRUM-130). A draft

@@ -9,6 +9,7 @@ import { haversineDistanceMeters, getBoundingBox } from "@/lib/geo"
 import { validateGeofence, type Geofence } from "@/lib/geofence"
 import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
 import type { venue_type } from "@prisma/client"
+import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
 
 /**
@@ -180,15 +181,8 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
     }
   }
 
-  const orgId =
-    user.role === "venue_owner"
-      ? (
-          await db.organisation_members.findFirst({
-            where: { user_id: user.id, ...activeMembership },
-            select: { org_id: true },
-          })
-        )?.org_id ?? null
-      : null
+  // The same "my org" as event creation: oldest live membership (SCRUM-148).
+  const orgId = user.role === "venue_owner" ? await homeOrgIdFor(user) : null
 
   if (user.role === "venue_owner" && !orgId) {
     throw new Refusal("Your account is not attached to an organisation yet.")

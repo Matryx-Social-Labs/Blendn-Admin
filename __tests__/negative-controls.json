@@ -664,9 +664,9 @@
       "date": "2026-09-17"
     },
     "integration/room-visibility.itest.ts": {
-      "guards": "show_online off is counted and not listed on the roster and the grid, a person with no profile row is still listed; check-in says intentNeeded while there is no default and the room has no answer of its own, and stops after rememberIntent or a one-night answer for that room (SCRUM-141, SCRUM-77)",
-      "mutation": "Three, one at a time: delete the `user: { OR: [...] }` filter in checkins/route.ts; delete the `show_online === false` skip in lib/matches.ts; drop `&& prefs.intent.length === 0` from intentNeeded in checkin/route.ts.",
-      "observed": "1 failing each: the roster lists the hidden person with total 4; the grid offers their card; a room already answered for asks again.",
+      "guards": "show_online off is counted and not listed on the roster and the grid, a person with no profile row is still listed; check-in says intentNeeded while there is no default and the room has no answer of its own, and stops after rememberIntent or a one-night answer for that room (SCRUM-141, SCRUM-77); the door answers a private event with 404 for a stranger and 200 for a guest (SCRUM-147)",
+      "mutation": "Three, one at a time: delete the `user: { OR: [...] }` filter in checkins/route.ts; delete the `show_online === false` skip in lib/matches.ts; drop `&& prefs.intent.length === 0` from intentNeeded in checkin/route.ts. Fourth: delete the `visibility === \"private\"` check in checkin/route.ts.",
+      "observed": "1 failing each: the roster lists the hidden person with total 4; the grid offers their card; a room already answered for asks again. The fourth: the stranger checks in.",
       "date": "2026-09-17"
     },
     "membership-reads-are-scoped.test.ts": {
@@ -680,6 +680,18 @@
       "mutation": "Six, one at a time: drop `...activeMembership` from actorFor; drop `status: \"draft\"` from the suspend updateMany; drop `...hostNotSuspended` from the creator fallback; make canJoinChat return true; drop `status: \"draft\"` from the reinstate where; restore `{ ...eventScope, OR: [...] }` in app/api/search/route.ts.",
       "observed": "1 failing each: the host keeps the org; the events stay listed; the host still lists the event they created; the room stays open; the admin-cancelled event comes back published; another organiser's ⌘K lists the hidden event.",
       "date": "2026-09-17"
+    },
+    "private-events-not-on-offer.test.ts": {
+      "guards": "Private is not on offer — the form has no Private item, both write schemas refuse it with a sentence, the editor opens a legacy row as unlisted, the door reads visibility; and 'my org' is one deterministic resolver used by every picker (SCRUM-147, SCRUM-148)",
+      "mutation": "Put `<SelectItem value=\"private\">` back in capacity-settings-section.tsx.",
+      "observed": "1 failing: the form offers Private again.",
+      "date": "2026-09-18"
+    },
+    "integration/mobile-organiser-routes.itest.ts": {
+      "guards": "the app's organiser tray routes (PATCH/DELETE event, POST announce) admit a colleague at the organising org who did not create the row and refuse an ex-member and a stranger (SCRUM-166)",
+      "mutation": "In app/api/mobile/events/[eventId]/route.ts PATCH, replace `eventPermissions(actor, event).canEdit` with `event.organizer_id === requester.id`.",
+      "observed": "1 failing: the colleague gets 403 on the edit.",
+      "date": "2026-09-18"
     }
   },
   "grandfathered": [

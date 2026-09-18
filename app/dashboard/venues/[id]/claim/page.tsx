@@ -38,11 +38,14 @@ export default async function ClaimVenuePage({
   })
   if (!venue) notFound()
 
-  const membership = await db.organisation_members.findFirst({
+  // Any of the person's organisations, not the first Postgres returned: a
+  // two-org member whose second org owns the venue was offered a claim on
+  // their own venue (SCRUM-148).
+  const memberships = await db.organisation_members.findMany({
     where: { user_id: session.user.id, ...activeMembership },
     select: { org_id: true },
   })
-  if (venue.owner_org_id && venue.owner_org_id === membership?.org_id) {
+  if (venue.owner_org_id && memberships.some((m) => m.org_id === venue.owner_org_id)) {
     redirect(`/dashboard/venues/${id}`)
   }
 

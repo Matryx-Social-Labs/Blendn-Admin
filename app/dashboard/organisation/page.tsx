@@ -54,6 +54,20 @@ export default async function OrganisationPage() {
 
       <OrgSuspendedNotice orgs={suspended} />
 
+      {/*
+        Said, because it is otherwise silent: a person in two organisations
+        has no picker on the event and venue forms, and everything they create
+        lands on the one they joined first (SCRUM-148). One sentence until a
+        second membership makes the picker worth building.
+      */}
+      {live.length > 1 ? (
+        <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+          You belong to {live.length} organisations. Events and venues you create belong to{" "}
+          <strong className="font-semibold">{live[0].display_name}</strong>, the one you joined first —
+          ask the platform team to move one if that is wrong.
+        </p>
+      ) : null}
+
       {panels.map(({ org, data }) => (
         <OrgPanel
           key={org.id}
