@@ -20,9 +20,8 @@ import { join, relative, sep } from "path"
  *     ever be checked into**, in the one feature whose entire success metric is
  *     "did anybody get in?". The screen built to catch a wrong pin would have
  *     been reporting this instead, and reporting it as a wrong pin.
- *   - `app/api/mobile/events/[eventId]/clone/route.ts` — invisible because a
- *     clone lands as a draft, and only real once the cloner publishes, by which
- *     point nothing connects the failure to that route.
+ *   - the mobile clone route (retired 2026-09-18, SCRUM-166) — invisible
+ *     because a clone landed as a draft, and only real once published.
  *
  * Measured before the fix: a curated event starting in three days answered
  * `400 {"error":"Event has already ended"}`.

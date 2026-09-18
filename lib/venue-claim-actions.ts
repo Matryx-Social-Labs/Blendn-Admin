@@ -12,7 +12,7 @@ import { venueTypeLabel } from "@/lib/venue-types"
 import { reviewableUrl } from "@/lib/tigris"
 import { claimants, notifyClaimant } from "@/lib/claim-decision-notify"
 import { appUrl } from "@/lib/email"
-import { activeMembership } from "@/lib/org-membership"
+import { homeOrgIdFor } from "@/lib/event-ownership"
 
 /**
  * Claiming a venue.
@@ -113,11 +113,10 @@ export async function fileVenueClaim(
     if (!result.valid) throw new Refusal(gstinMessage(result))
   }
 
-  const membership = await db.organisation_members.findFirst({
-    where: { user_id: user.id, ...activeMembership },
-    select: { org_id: true },
-  })
-  if (!membership) throw new Refusal("Your account is not attached to an organisation yet.")
+  // The same "my org" as everywhere else (SCRUM-148).
+  const orgId = await homeOrgIdFor(user)
+  if (!orgId) throw new Refusal("Your account is not attached to an organisation yet.")
+  const membership = { org_id: orgId }
 
   const venue = await db.venues.findUnique({
     where: { id: input.venueId, deleted_at: null },

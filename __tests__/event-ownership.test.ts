@@ -76,18 +76,6 @@ describe("the write paths set it", () => {
   it("POST /api/events writes organizer_org_id", () => {
     expect(code("app/api/events/route.ts")).toMatch(/organizer_org_id:\s*owningOrgId/)
   })
-
-  it("the clone route writes it too, resolved from the cloner", () => {
-    /*
-     * The clone landed org-less, so cloning produced an event its own cloner
-     * could not edit. Resolved from the cloner rather than copied from the
-     * source: cloning somebody else's event makes it yours, and inheriting
-     * their org would hand them edit rights over your copy.
-     */
-    const src = code("app/api/mobile/events/[eventId]/clone/route.ts")
-    expect(src).toMatch(/organizer_org_id:\s*await owningOrgFor\(/)
-    expect(src).toMatch(/requester\.id/)
-  })
 })
 
 describe("the backfill agrees with the runtime rule", () => {

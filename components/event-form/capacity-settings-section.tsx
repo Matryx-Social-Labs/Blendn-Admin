@@ -48,10 +48,17 @@ export function CapacitySettingsSection({
                     <SelectValue placeholder="Public" />
                   </SelectTrigger>
                 </FormControl>
+                {/*
+                  No "Private". The enum still has it, but a private event
+                  could never gain an attendee — every attendee route needs an
+                  RSVP to see it, and RSVPing needs to see it — and there is no
+                  invite mechanism to hand out (SCRUM-147). Unlisted is the
+                  private-by-link the product actually has. The option returns
+                  with the invite that makes it true.
+                */}
                 <SelectContent>
-                  <SelectItem value="public">Public</SelectItem>
-                  <SelectItem value="unlisted">Unlisted</SelectItem>
-                  <SelectItem value="private">Private</SelectItem>
+                  <SelectItem value="public">Public — in the feed and search</SelectItem>
+                  <SelectItem value="unlisted">Unlisted — only people with the link</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />

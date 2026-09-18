@@ -46,12 +46,6 @@ const ALLOWED = new Set([
   // made the row -- and is indistinguishable from a scope filter by grep.
   "app/api/events/route.ts",
   "app/dashboard/actions.ts",
-  /*
-   * Writes `organizer_id` on clone and does not yet write `organizer_org_id` --
-   * which is A1, the finding W1 exists to fix. Drop this entry when #270 lands
-   * and the refinement below will pass it on its own.
-   */
-  "app/api/mobile/events/[eventId]/clone/route.ts",
 ])
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {

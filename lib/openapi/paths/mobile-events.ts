@@ -19,8 +19,6 @@ import {
   InterestResponseSchema,
   FavoriteResponseSchema,
   RatingResponseSchema,
-  AnalyticsResponseSchema,
-  CloneResponseSchema,
   BatchCheckinsResponseSchema,
   BatchInterestsResponseSchema,
   BatchInterestCountsResponseSchema,
@@ -481,19 +479,6 @@ registry.registerPath({
   },
 })
 
-// GET /api/mobile/events/{eventId}/analytics
-registry.registerPath({
-  method: "get",
-  path: "/api/mobile/events/{eventId}/analytics",
-  tags: ["Mobile Events"],
-  summary: "Get event analytics (organizer/admin)",
-  security: bearerAuth,
-  request: { params: z.object({ eventId: z.string().uuid() }) },
-  responses: {
-    200: { description: "Analytics data", content: { "application/json": { schema: wrap(AnalyticsResponseSchema) } } },
-    ...standardErrors,
-  },
-})
 
 // GET /api/mobile/events/{eventId}/checkins
 registry.registerPath({
@@ -603,19 +588,6 @@ registry.registerPath({
   },
 })
 
-// GET /api/mobile/events/{eventId}/checkins/export
-registry.registerPath({
-  method: "get",
-  path: "/api/mobile/events/{eventId}/checkins/export",
-  tags: ["Mobile Events"],
-  summary: "Export attendees as CSV (organizer/admin)",
-  security: bearerAuth,
-  request: { params: z.object({ eventId: z.string().uuid() }) },
-  responses: {
-    200: { description: "CSV file", content: { "text/csv": { schema: z.string() } } },
-    ...standardErrors,
-  },
-})
 
 // GET /api/mobile/events/{eventId}/interested-users
 registry.registerPath({
@@ -634,19 +606,6 @@ registry.registerPath({
   },
 })
 
-// POST /api/mobile/events/{eventId}/clone
-registry.registerPath({
-  method: "post",
-  path: "/api/mobile/events/{eventId}/clone",
-  tags: ["Mobile Events"],
-  summary: "Clone event (organizer/admin)",
-  security: bearerAuth,
-  request: { params: z.object({ eventId: z.string().uuid() }) },
-  responses: {
-    201: { description: "Cloned event", content: { "application/json": { schema: wrap(CloneResponseSchema) } } },
-    ...standardErrors,
-  },
-})
 
 // POST /api/mobile/events/{eventId}/announce
 registry.registerPath({

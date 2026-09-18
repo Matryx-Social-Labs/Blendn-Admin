@@ -328,52 +328,6 @@ export const RatingResponseSchema = z
   })
   .openapi("RatingResponse")
 
-export const ConnectionMetricsSchema = z
-  .object({
-    attendees: z.number(),
-    /** Mutual likes — pairs where both people said yes. */
-    connections: z.number(),
-    connected: z.number(),
-    /** The industry benchmark figure. Null when suppressed. */
-    perAttendee: z.number().nullable(),
-    connectedPct: z.number().nullable(),
-    /**
-     * Too few attendees for these to be aggregates rather than facts about
-     * named people. Everything derived is null; `attendees` still shows.
-     */
-    suppressed: z.boolean(),
-  })
-  .openapi("ConnectionMetrics")
-
-export const AnalyticsResponseSchema = z
-  .object({
-    eventId: z.string().uuid(),
-    summary: z.object({
-      totalCheckIns: z.number(),
-      checkedInNow: z.number(),
-      totalInterested: z.number(),
-      totalRatings: z.number(),
-      averageRating: z.number().nullable(),
-      conversionRate: z.number(),
-      capacityUsed: z.number(),
-    }),
-    /** Whether anyone actually met anyone. Suppressed for small rooms. */
-    connections: ConnectionMetricsSchema,
-    checkInTimeline: z.array(
-      z.object({ hour: z.string(), count: z.number() })
-    ),
-  })
-  .openapi("AnalyticsResponse")
-
-export const CloneResponseSchema = z
-  .object({
-    id: z.string().uuid(),
-    slug: z.string(),
-    title: z.string(),
-    status: z.literal("draft"),
-  })
-  .openapi("CloneResponse")
-
 export const BatchCheckinsResponseSchema = z
   .object({
     statuses: z.record(
@@ -532,13 +486,10 @@ const schemas = {
   InterestResponse: InterestResponseSchema,
   FavoriteResponse: FavoriteResponseSchema,
   RatingResponse: RatingResponseSchema,
-  AnalyticsResponse: AnalyticsResponseSchema,
-  CloneResponse: CloneResponseSchema,
   BatchCheckinsResponse: BatchCheckinsResponseSchema,
   BatchInterestsResponse: BatchInterestsResponseSchema,
   BatchInterestCountsResponse: BatchInterestCountsResponseSchema,
   AttendeeListResponse: AttendeeListResponseSchema,
-  ConnectionMetrics: ConnectionMetricsSchema,
   PeerRatingRequest: PeerRatingRequestSchema,
   RatablePeersResponse: RatablePeersResponseSchema,
   MatchListResponse: MatchListResponseSchema,

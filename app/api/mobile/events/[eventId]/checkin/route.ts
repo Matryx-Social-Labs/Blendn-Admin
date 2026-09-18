@@ -26,6 +26,7 @@ import { resolveOccurrence } from "@/lib/occurrences"
 import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
 import { activeMembership } from "@/lib/org-membership"
+import { canJoinEvent } from "@/lib/socket-auth"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -103,6 +104,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Check if event is published
     if (event.status !== "published") {
       return errorResponse("Cannot check in to an unpublished event")
+    }
+
+    /*
+     * A private event is not found for a stranger at the door either.
+     *
+     * Every other participation route answers a private event through
+     * `attendeeEventAccess` → `canJoinEvent`; the door never read
+     * `visibility` at all, so anyone holding the id and standing at the
+     * venue checked in, and with the check-in came the roster and the chat
+     * (SCRUM-147). Same rule, same resolver.
+     */
+    if (event.visibility === "private" && !(await canJoinEvent(authUser.userId, eventId))) {
+      return notFoundResponse("Event not found")
     }
 
     /*

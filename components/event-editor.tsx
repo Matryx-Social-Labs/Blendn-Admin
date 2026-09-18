@@ -132,7 +132,9 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
       end_time: formatDateTimeInput(initialEvent.end_time, initialEvent.timezone),
       timezone: initialEvent.timezone,
       status: initialEvent.status,
-      visibility: initialEvent.visibility,
+      // A row that is still "private" (nothing new can be) opens as unlisted —
+      // the nearest thing on offer — and says so when saved (SCRUM-147).
+      visibility: initialEvent.visibility === "private" ? "unlisted" : initialEvent.visibility,
       max_capacity: initialEvent.max_capacity ?? undefined,
       min_age: initialEvent.min_age ?? undefined,
       latitude: initialEvent.latitude ?? undefined,

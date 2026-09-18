@@ -178,7 +178,14 @@ export const eventWriteSchema = z
     end_time: z.union([z.string(), z.date()]),
     timezone: z.string().max(64).nullish(),
     status: z.enum(["draft", "published", "cancelled", "completed"]).nullish(),
-    visibility: z.enum(["public", "private", "unlisted"]).nullish(),
+    // Not "private": there is no invite to hand out, so a private event could
+    // never gain an attendee (SCRUM-147). The column keeps the value for the
+    // rows that have it; nothing new may be written with it.
+    visibility: z
+      .enum(["public", "unlisted"], {
+        message: "Private events aren't available yet — use unlisted, which hides the event and opens it by link.",
+      })
+      .nullish(),
     max_capacity: z.number().int().nullish(),
     door_policy: z.enum(["open", "guest_list", "members_only", "invite_only"]).nullish(),
     /**

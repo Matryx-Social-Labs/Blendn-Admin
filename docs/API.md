@@ -207,9 +207,6 @@ events you went to.
 | GET | `/events/:eventId/interested-users` | List interested users |
 | POST | `/events/:eventId/rating` | Rate an event |
 | POST | `/events/:eventId/rsvp` | RSVP — waitlists when full |
-| GET | `/events/:eventId/analytics` | Organiser analytics |
-| POST | `/events/:eventId/clone` | Clone event (organiser) |
-| GET | `/events/:eventId/checkins/export` | Export attendees CSV |
 | POST | `/events/:eventId/announce` | Send announcement |
 | GET | `/events/:eventId/chat` | Get event chat group |
 | GET | `/events/:eventId/peer-ratings` | Who you can still rate |
@@ -261,7 +258,7 @@ rule that erodes when someone wants a "verified" badge.
 
 ### Connections — did anyone meet anyone
 
-`GET /events/:eventId/analytics` now carries a `connections` object. Attendance
+The organiser's event page (`/dashboard/events/:id`) carries a `connections` block. Attendance
 says people came and ratings say how it felt; neither says whether the thing the
 product exists for happened.
 
@@ -1302,7 +1299,21 @@ shipped `orientation` and `gender` together to any authenticated caller.
   **private** event with 404 on every one of those routes — withdrawals
   (`DELETE /rsvp`, `DELETE /favorite`) included, though a withdrawal is never
   refused on age. A private event admits its guests (an RSVP) and the staff of
-  the organisation running it, not only the row's creator.
+  the organisation running it, not only the row's creator — at the door too,
+  since SCRUM-147.
+
+**`private` is not on offer.** With no invite mechanism a private event could
+never gain a guest (seeing it needs an RSVP; RSVPing needs to see it), so the
+dashboard form and both write schemas refuse `visibility: "private"` with a
+sentence naming `unlisted` — hidden from the feed and search, opened by link.
+The enum keeps the value for rows that already have it; they behave as above.
+It returns with the invite that makes it true (SCRUM-147).
+
+**Retired 2026-09-18 (SCRUM-166):** `GET /events/:id/analytics`,
+`GET /events/:id/checkins/export`, `POST /events/:id/clone` — no client
+called them; the dashboard owns each job. `PATCH`/`DELETE /events/:id` and
+`POST /events/:id/announce` stay: the app's organiser tray calls them, and
+`mobile-organiser-routes.itest.ts` holds their organisation-shaped rules.
 
 Set by the organiser in the dashboard event form, bounded 13–25.
 

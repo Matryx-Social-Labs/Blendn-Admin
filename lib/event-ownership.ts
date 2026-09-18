@@ -40,19 +40,36 @@ import { activeMembership } from "./org-membership"
  * that every permission check then has to special-case — and null already
  * means three things without it.
  */
+/**
+ * The one organisation a person acts for when nothing says which: the oldest
+ * live membership, or null (SCRUM-148).
+ *
+ * Every picker of "my org" goes through this — event creation, venue creation,
+ * venue claims — so a person in two organisations lands on the same one from
+ * every form. Two of those pickers used to do their own `findFirst` with no
+ * `orderBy`, which on a second membership is whichever row Postgres felt like.
+ * An org picker on the forms is the day somebody has two; until then the rule
+ * is stated on the org page.
+ */
+export async function homeOrgIdFor(user: { id: string; role: user_role }): Promise<string | null> {
+  if (user.role === "app_admin") return null
+  const membership = await db.organisation_members.findFirst({
+    where: { user_id: user.id, ...activeMembership },
+    orderBy: { created_at: "asc" },
+    select: { org_id: true },
+  })
+  return membership?.org_id ?? null
+}
+
 export async function owningOrgFor(user: {
   id: string
   role: user_role
 }): Promise<string | null> {
   if (user.role === "app_admin") return null
 
-  const membership = await db.organisation_members.findFirst({
-    where: { user_id: user.id, ...activeMembership },
-    orderBy: { created_at: "asc" },
-    select: { org_id: true },
-  })
+  const orgId = await homeOrgIdFor(user)
 
-  if (!membership) {
+  if (!orgId) {
     /*
      * Loud, not null.
      *
@@ -67,5 +84,5 @@ export async function owningOrgFor(user: {
     )
   }
 
-  return membership.org_id
+  return orgId
 }

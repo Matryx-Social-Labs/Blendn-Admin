@@ -128,6 +128,24 @@ describe("show online status off", () => {
   })
 })
 
+describe("a private event at the door", () => {
+  it("is not found for a stranger holding the id, and open to a guest (SCRUM-147)", async () => {
+    // The door read status, age, occurrence and fence — never visibility —
+    // so anyone with the id who stood at the venue checked in, and with the
+    // check-in came the roster and the chat. Same resolver as every other
+    // participation route now.
+    const eventId = await liveEvent()
+    await db.events.update({ where: { id: eventId }, data: { visibility: "private" } })
+    const stranger = await attendee("rv_priv_stranger")
+    const guest = await attendee("rv_priv_guest")
+    await db.event_rsvps.create({ data: { event_id: eventId, user_id: guest.id, status: "going" } })
+
+    expect((await checkIn(eventId, stranger.token)).status).toBe(404)
+    expect(await db.event_check_ins.count({ where: { event_id: eventId, user_id: stranger.id } })).toBe(0)
+    expect((await checkIn(eventId, guest.token)).status).toBe(200)
+  })
+})
+
 describe("why do you go out, asked at the first door", () => {
   it("is asked while there is no default, saved once, and never asked again", async () => {
     const first = await liveEvent()

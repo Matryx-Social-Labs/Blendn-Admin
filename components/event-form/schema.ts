@@ -45,7 +45,10 @@ export const eventFormSchema = z.object({
   end_time: z.string().min(1, { message: "End time is required." }),
   timezone: z.string().min(1, { message: "Timezone is required." }),
   status: z.enum(["draft", "published", "cancelled", "completed"]),
-  visibility: z.enum(["public", "private", "unlisted"]),
+  // "private" is still in the column's enum; it is not on offer (SCRUM-147).
+  visibility: z.enum(["public", "unlisted"], {
+    message: "Private events aren't available yet — use Unlisted, which hides the event and opens it by link.",
+  }),
   max_capacity: z.number().optional(),
   door_policy: z.enum(["open", "guest_list", "members_only", "invite_only"]).optional(),
   /** Blank for almost every event; 13–25 when it matters. See `lib/age.ts`. */
