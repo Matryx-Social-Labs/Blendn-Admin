@@ -698,6 +698,12 @@
       "mutation": "In app/api/events/[id]/chat/messages/route.ts, put back `mutedAt: m.status === \"muted\" ? m.updated_at.toISOString() : null`.",
       "observed": "1 failing: the shaping matches /mutedAt:[^\\n]*updated_at/.",
       "date": "2026-09-18"
+    },
+    "editor-save-after-session-ends.test.ts": {
+      "guards": "components/event-editor.tsx answers a 401 on save with a sentence about the session and keeps the form, before the generic \"Failed to save event\" throw (SCRUM-163)",
+      "mutation": "Delete the `if (response.status === 401) { ... return }` block in handleSubmit (or neuter it with `&& false`).",
+      "observed": "1 failing: `if (response.status === 401) {` not found.",
+      "date": "2026-09-18"
     }
   },
   "grandfathered": [
