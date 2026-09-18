@@ -9,6 +9,7 @@ import {
   unauthorizedResponse,
   notFoundResponse,
   errorResponse,
+  ErrorCode,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { ratingSchema } from "@/lib/validations/event"
@@ -40,24 +41,39 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { rating, review } = parsed.data
 
-    // Check if event exists
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, status: true },
+      select: { id: true, status: true, end_time: true },
     })
 
     if (!event) {
       return notFoundResponse("Event not found")
     }
 
-    // Check if user was checked in to this event
+    /*
+     * Attendance, not presence — the same distinction `mayWriteToRoom` draws.
+     *
+     * This required `status === "checked_in"`, which is *are you here right
+     * now*: manual check-out and the sweeper's auto-checkout at the end of the
+     * night both flip it to `checked_out`. So the one moment a rating is
+     * meant for — afterwards, on the way home — was the one moment it was
+     * refused. On staging 48 of 48 past check-ins were `checked_out` and
+     * `event_ratings` had never received a row (SCRUM-181).
+     *
+     * And only once the night is over: a rating during the event is leverage
+     * (the peer rating says the same, `docs/API.md`), and the organiser's
+     * Feedback page reads it as a verdict.
+     */
     const checkIn = await db.event_check_ins.findFirst({
       // Event-level: you may rate an event you attended on any of its days.
       where: { event_id: eventId, user_id: authUser.userId },
+      select: { id: true },
     })
-
-    if (!checkIn || checkIn.status !== "checked_in") {
-      return errorResponse("You must check in to an event before rating it")
+    if (!checkIn) {
+      return errorResponse("You can rate an event you checked in to", 403, ErrorCode.FORBIDDEN)
+    }
+    if (event.end_time.getTime() > Date.now()) {
+      return errorResponse("You can rate this event once it has ended", 403, ErrorCode.FORBIDDEN)
     }
 
     // Create or update rating
@@ -68,15 +84,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           user_id: authUser.userId,
         },
       },
+      // `?? null`, not the bare optional: `strictUndefinedChecks` refuses an
+      // explicit undefined, so a stars-only rating — the common one — 500'd.
+      // Found by the itest the day the gate was fixed (SCRUM-181).
       create: {
         event_id: eventId,
         user_id: authUser.userId,
         rating,
-        review,
+        review: review ?? null,
       },
       update: {
         rating,
-        review,
+        review: review ?? null,
         updated_at: new Date(),
       },
     })

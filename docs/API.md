@@ -205,7 +205,7 @@ events you went to.
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
 | GET | `/events/:eventId/interested-users` | List interested users |
-| POST | `/events/:eventId/rating` | Rate an event |
+| POST | `/events/:eventId/rating` | Rate an event — stars 1–5, optional review; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it |
 | POST | `/events/:eventId/rsvp` | RSVP — waitlists when full |
 | POST | `/events/:eventId/announce` | Send announcement |
 | GET | `/events/:eventId/chat` | Get event chat group |

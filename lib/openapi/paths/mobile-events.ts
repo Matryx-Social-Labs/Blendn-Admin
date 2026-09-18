@@ -468,6 +468,8 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/rating",
   tags: ["Mobile Events"],
   summary: "Rate event",
+  description:
+    "Anyone with a check-in row may rate, once the event has ended — attendance, not presence, so leaving the venue does not forfeit it. One row per person; rating again edits it. 403 for no check-in or an event still on.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
