@@ -69,7 +69,7 @@ export async function GET(_: Request, { params }: RouteContext) {
           status: true,
           banned_at: true,
           banned_by: true,
-          updated_at: true,
+          muted_at: true,
         },
       }),
       // Violation counts per user (hidden messages)
@@ -163,7 +163,10 @@ export async function GET(_: Request, { params }: RouteContext) {
         status: m.status,
         bannedAt: m.banned_at?.toISOString() ?? null,
         bannedByName: m.banned_by ? bannedByMap.get(m.banned_by) ?? null : null,
-        mutedAt: m.status === "muted" ? m.updated_at.toISOString() : null,
+        // `muted_at`, not `updated_at`: that column has `@default(now())` and no
+        // `@updatedAt`, so it is the join time, and the Members tab read
+        // "Muted <when they joined>" (SCRUM-154).
+        mutedAt: m.muted_at?.toISOString() ?? null,
         violationCount: violationMap.get(m.user_id) ?? 0,
         recentViolations: (violationsByUser.get(m.user_id) ?? []).slice(0, 5).map((v) => ({
           source: v.source,

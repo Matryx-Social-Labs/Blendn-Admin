@@ -1577,7 +1577,10 @@ The response carries `{ emoji, count, mine }`. The socket broadcast
 client already knows its own reaction from its own request. Gated by
 `mayWriteToRoom`, the same rule as the two message write paths: a reaction is
 participation, so a muted member cannot post a smaller version of what they were
-muted for.
+muted for. A refusal carries the **same sentence and `errorCode`** a message
+would get (`CHAT_CLOSED` / `CHAT_LOCKED` / `USER_MUTED` / `USER_BANNED`) —
+it used to say "This room is not open" with no code for every closed state,
+while the post beside it said when the chat had closed (SCRUM-154).
 
 All three return `201 { reported: true }` and are rate limited per user.
 
