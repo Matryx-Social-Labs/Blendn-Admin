@@ -723,6 +723,12 @@
       "observed": "3 failing: prefers x-real-ip; takes the FIRST forwarded hop; ignores pass-through headers — each returned 152.233.x or 203.0.113.9 instead of 91.9.218.44.",
       "date": "2026-09-21"
     },
+    "integration/password-change-revokes-mobile.itest.ts": {
+      "guards": "changePassword revokes every live mobile refresh token in the same transaction as the new hash (leaving an earlier revocation's timestamp alone), returns revokedSessions, and the phone's next refresh is 401; a wrong current password revokes nothing (SCRUM-169)",
+      "mutation": "In lib/account-actions.ts changePassword, replace the updateMany inside the transaction with `return 0`.",
+      "observed": "1 failing: expected { ok: true, revokedSessions: 2 }, received revokedSessions 0, and the phones' refresh answered 200.",
+      "date": "2026-09-21"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",

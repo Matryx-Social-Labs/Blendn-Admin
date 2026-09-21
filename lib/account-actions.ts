@@ -39,6 +39,8 @@ export async function updateProfile(name: string): Promise<void> {
 export interface PasswordResult {
   ok: boolean
   error?: string
+  /** Phone sessions ended alongside the change — so the screen can say so. */
+  revokedSessions?: number
 }
 
 /**
@@ -92,14 +94,37 @@ export async function changePassword(
     return { ok: false, error: "That is already your password." }
   }
 
-  await db.user.update({
-    where: { id: user.id },
-    data: { password: await bcrypt.hash(newPassword, 12) },
+  /*
+   * The new hash and the end of every phone session, together (SCRUM-169).
+   *
+   * The reset-link path has always revoked the mobile refresh tokens, and says
+   * why: somebody changing a password because they were compromised must not
+   * leave the attacker's phone signed in for up to thirty days. This path is
+   * the same person doing the same thing for the same reason, and until now
+   * it kept every phone alive — five before, five after, read back on staging.
+   * One transaction, so a hash cannot land without the revoke or vice versa.
+   */
+  const revoked = await db.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: { password: await bcrypt.hash(newPassword, 12) },
+    })
+    const { count } = await tx.mobile_refresh_tokens.updateMany({
+      where: { user_id: user.id, revoked_at: null },
+      data: { revoked_at: new Date() },
+    })
+    return count
   })
 
-  auditLog({ userId: user.id, action: "account.password_changed", resource: "user", resourceId: user.id })
+  auditLog({
+    userId: user.id,
+    action: "account.password_changed",
+    resource: "user",
+    resourceId: user.id,
+    details: { revokedSessions: revoked },
+  })
   revalidatePath("/dashboard/settings")
-  return { ok: true }
+  return { ok: true, revokedSessions: revoked }
 }
 
 export interface SessionRow {
