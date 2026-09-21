@@ -168,6 +168,28 @@ describe("createVenue", () => {
     expect(mockDb.venues.create).not.toHaveBeenCalled()
   })
 
+  it("refuses a fence drawn somewhere other than the venue, and names the distance", async () => {
+    // Driven on staging (SCRUM-203): the editor jumped to the city centre on
+    // "Trace outline" and saved a fence 1.3 km from the pin. From any client,
+    // the door would then be judged against a place nobody is standing at.
+    signIn("venue_owner")
+    const far = { type: "polygon" as const, buffer: 20, ring: [
+      [LAT + 0.012, LNG], [LAT + 0.012, LNG + 0.001], [LAT + 0.011, LNG + 0.001], [LAT + 0.011, LNG],
+    ] as [number, number][] }
+    await expect(
+      createVenue({ name: "Toit", venueType: "brewery", lat: LAT, lng: LNG, geofence: far })
+    ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
+    expect(mockDb.venues.create).not.toHaveBeenCalled()
+
+    // 60 m off is a fence drawn around the building, not somewhere else.
+    const near = { type: "polygon" as const, buffer: 20, ring: [
+      [LAT + 0.0005, LNG], [LAT + 0.0005, LNG + 0.0005], [LAT, LNG + 0.0005], [LAT, LNG],
+    ] as [number, number][] }
+    mockDb.venues.findMany.mockResolvedValue([])
+    await createVenue({ name: "Toit", venueType: "brewery", lat: LAT, lng: LNG, geofence: near })
+    expect(mockDb.venues.create).toHaveBeenCalled()
+  })
+
   it("owns the venue from creation for a venue owner, and leaves it unclaimed for an admin", async () => {
     // A venue owner describing their own place should not have to create it
     // then claim it — that is ceremony with no safety value.

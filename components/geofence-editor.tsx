@@ -160,7 +160,7 @@ export function GeofenceEditor({
       const centre =
         fence.type === "circle"
           ? ([fence.lat, fence.lng] as [number, number])
-          : centroid(fence.ring)
+          : centroid(fence.ring, [fallbackCentre.lat, fallbackCentre.lng])
       // A stadium at z18 fills the screen with one corner of itself.
       const wide = fence.type === "circle" ? fence.radius > 100 : spanOf(fence.ring) > 150
       map.setView(centre, wide ? 16 : 18)
@@ -398,17 +398,19 @@ export function GeofenceEditor({
      * edge does not yank the map out from under the cursor.
      */
     const map = mapRef.current
-    if (map) {
+    // An empty ring has no centre to follow; the map stays where the person
+    // is about to draw.
+    if (map && !(fence.type === "polygon" && fence.ring.length === 0)) {
       const centre =
         fence.type === "circle"
           ? ([fence.lat, fence.lng] as [number, number])
-          : centroid(fence.ring)
+          : centroid(fence.ring, [fallbackCentre.lat, fallbackCentre.lng])
       if (!map.getBounds().contains(L.latLng(centre[0], centre[1]))) {
         const wide = fence.type === "circle" ? fence.radius > 100 : spanOf(fence.ring) > 150
         map.setView(centre, wide ? 16 : 18)
       }
     }
-  }, [fence, showAccuracy, overlap, editable, drawing, crossed, onChange])
+  }, [fence, showAccuracy, overlap, editable, drawing, crossed, onChange, fallbackCentre.lat, fallbackCentre.lng])
 
   /* ------------------------------------------------------ OSM footprint --- */
 
@@ -422,7 +424,9 @@ export function GeofenceEditor({
    */
   const importFootprint = useCallback(async () => {
     const centre =
-      fence.type === "circle" ? [fence.lat, fence.lng] : centroid(fence.ring)
+      fence.type === "circle"
+        ? [fence.lat, fence.lng]
+        : centroid(fence.ring, [fallbackCentre.lat, fallbackCentre.lng])
     setImporting(true)
     setImportNote(null)
     try {
@@ -459,7 +463,7 @@ export function GeofenceEditor({
     } finally {
       setImporting(false)
     }
-  }, [fence, onChange])
+  }, [fence, onChange, fallbackCentre.lat, fallbackCentre.lng])
 
   /* --------------------------------------------------------------- view --- */
 
@@ -474,7 +478,9 @@ export function GeofenceEditor({
     } else {
       setDrawing(false)
       const centre =
-        fence.type === "polygon" && fence.ring.length ? centroid(fence.ring) : [fallbackCentre.lat, fallbackCentre.lng]
+        fence.type === "polygon" && fence.ring.length
+          ? centroid(fence.ring, [fallbackCentre.lat, fallbackCentre.lng])
+          : [fallbackCentre.lat, fallbackCentre.lng]
       onChange({
         type: "circle",
         lat: centre[0],
@@ -687,9 +693,19 @@ function Legend({ token, dash, label }: { token: string; dash: string; label: st
  * with no points, because a guessed coordinate is harmless when it decides
  * where to point a camera and a lie when it lands in a database column.
  */
-function centroid(ring: [number, number][]): [number, number] {
+/**
+ * The ring's centre, or `fallback` when there is no ring yet.
+ *
+ * This returned a hardcoded Bengaluru centre for an empty ring, and the
+ * moment somebody chose "Trace outline" the recentre effect below saw that
+ * point outside the map's bounds and jumped the map to it — 1.3 km from the
+ * pin they had just searched for, with nothing on screen saying so. The
+ * venue was saved with its pin at Church Street and its fence at the city
+ * centre (SCRUM-203). The only honest centre for nothing is the pin.
+ */
+function centroid(ring: [number, number][], fallback: [number, number]): [number, number] {
   const centre = fenceCentre({ type: "polygon", ring, buffer: 0 })
-  return centre ? [centre.lat, centre.lng] : [12.9716, 77.5946]
+  return centre ? [centre.lat, centre.lng] : fallback
 }
 
 const R = 6_371_000
@@ -721,7 +737,7 @@ function metresPerPixel(lat: number, zoom: number): number {
 /** Widest span across a ring, in metres. */
 function spanOf(ring: [number, number][]): number {
   if (ring.length < 2) return 0
-  const c = centroid(ring)
+  const c = centroid(ring, ring[0])
   return ring.reduce((m, p) => Math.max(m, metresBetween(c, p)), 0) * 2
 }
 
