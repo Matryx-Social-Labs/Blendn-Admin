@@ -194,3 +194,95 @@ export async function refusalsByReason(range: {
       .sort((a, b) => b.people - a.people || a.reason.localeCompare(b.reason)),
   }
 }
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A fix this good or better is the phone telling the truth about where it is.
+ *
+ * The app refuses to send anything worse than 50 m (EventDetailScreen: "GPS
+ * accuracy too low"), so on the server every refusal with an accuracy at all
+ * should be under it; the threshold is here so a client that stops doing that
+ * changes the verdict rather than silently passing as "good". Above the cap
+ * the server's own allowance (`DEFAULT_ACCURACY_POLICY.cap`) stops growing,
+ * which is the other reason a poor fix is the phone's problem and not the pin's.
+ */
+export const GOOD_FIX_METRES = 50
+
+export type FenceVerdict = "fence" | "phones" | "mixed" | null
+
+export interface EventRefusals {
+  /** Distinct people turned away, across every reason. */
+  people: number
+  attempts: number
+  byReason: Array<{ reason: refusal_reason; label: string; people: number }>
+  /** Median shortfall of the out-of-range refusals, metres. */
+  medianShortfallMetres: number | null
+  /** Accuracy range of the out-of-range refusals that reported one. */
+  accuracy: { min: number; max: number; count: number } | null
+  /**
+   * What the out-of-range refusals say about the door. `fence` when every
+   * reported fix was good — the phones knew where they were and the fence
+   * did not contain them. `phones` when every fix was poor. `mixed` when
+   * both. Null when nobody was refused out of range, or none reported an
+   * accuracy: without one, the pin and the phones cannot be told apart, and
+   * the panel must not pretend they can.
+   */
+  verdict: FenceVerdict
+}
+
+/**
+ * What an organiser needs to know about their own door (SCRUM-196).
+ *
+ * `refusalSummary` above is the curation queue's one-line diagnosis for events
+ * an admin pinned from a listing. This is the organiser's, and it answers the
+ * question the `accuracy_metres` column was added for: a cluster of refusals
+ * at good fixes is the pin's fault, a cluster at poor fixes is the phones', and
+ * only one of those should make anybody move a pin.
+ *
+ * People, not attempts, for the reason the two readers above give. The verdict
+ * looks only at `out_of_range`: a person refused before doors or on age says
+ * nothing about where the pin is.
+ */
+export async function eventRefusals(eventId: string): Promise<EventRefusals> {
+  const rows = await db.check_in_refusals.findMany({
+    where: { event_id: eventId },
+    select: { user_id: true, reason: true, shortfall_metres: true, accuracy_metres: true },
+    take: 1_000,
+    orderBy: { created_at: "desc" },
+  })
+  const perReason = new Map<refusal_reason, Set<string>>()
+  for (const r of rows) {
+    const set = perReason.get(r.reason) ?? new Set<string>()
+    set.add(r.user_id)
+    perReason.set(r.reason, set)
+  }
+  const out = rows.filter((r) => r.reason === "out_of_range")
+  const shortfalls = out
+    .map((r) => r.shortfall_metres)
+    .filter((n): n is number => n !== null)
+    .sort((a, b) => a - b)
+  const accuracies = out.map((r) => r.accuracy_metres).filter((n): n is number => n !== null)
+
+  let verdict: FenceVerdict = null
+  if (accuracies.length > 0) {
+    const good = accuracies.filter((a) => a <= GOOD_FIX_METRES).length
+    verdict = good === accuracies.length ? "fence" : good === 0 ? "phones" : "mixed"
+  }
+
+  return {
+    people: new Set(rows.map((r) => r.user_id)).size,
+    attempts: rows.length,
+    byReason: [...perReason.entries()]
+      .map(([reason, set]) => ({ reason, label: REFUSAL_LABEL[reason], people: set.size }))
+      .sort((a, b) => b.people - a.people || a.reason.localeCompare(b.reason)),
+    medianShortfallMetres:
+      shortfalls.length === 0 ? null : shortfalls[Math.floor((shortfalls.length - 1) / 2)],
+    accuracy:
+      accuracies.length === 0
+        ? null
+        : { min: Math.min(...accuracies), max: Math.max(...accuracies), count: accuracies.length },
+    verdict,
+  }
+}
+

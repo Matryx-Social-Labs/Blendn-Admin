@@ -723,6 +723,18 @@
       "observed": "3 failing: prefers x-real-ip; takes the FIRST forwarded hop; ignores pass-through headers — each returned 152.233.x or 203.0.113.9 instead of 91.9.218.44.",
       "date": "2026-09-21"
     },
+    "integration/event-refusals.itest.ts": {
+      "guards": "eventRefusals counts distinct people, and its fence/phones/mixed/null verdict follows the out-of-range fixes' accuracy against GOOD_FIX_METRES (SCRUM-196)",
+      "mutation": "In lib/check-in-refusals.ts eventRefusals, replace the verdict expression with `verdict = \"fence\"`.",
+      "observed": "2 failing: 'phones' expected, received 'fence'; 'mixed' expected, received 'fence'.",
+      "date": "2026-09-21"
+    },
+    "turned-away-on-every-event.test.ts": {
+      "guards": "the event page loads eventRefusals in the live/over branch beside attendance (not the curated gate), the Overview renders TurnedAwayPanel between Attendance and Connections only when people > 0, and the panel links to the editor only when the fence is at fault and canEdit (SCRUM-196)",
+      "mutation": "In app/dashboard/events/[id]/page.tsx replace `eventRefusals(event.id)` in the Promise.all with `Promise.resolve(null)`.",
+      "observed": "1 failing: loads the organiser's refusals — `eventRefusals(event.id)` not found.",
+      "date": "2026-09-21"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",
