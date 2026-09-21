@@ -35,9 +35,17 @@ export async function GET(request: NextRequest) {
     const totalCount = await db.chat_group_members.count({
       where: {
         user_id: authUser.userId,
-        status: "active",
+        /*
+         * A mute silences; it does not banish (SCRUM-178). `active` alone
+         * dropped a muted member's room out of the only list the phone has,
+         * while the room itself still let them read — "you were never here"
+         * beside "you can read but not write". Banned and left stay out:
+         * those are removals. Likewise a locked room is still the member's
+         * room, read-only; only an archived one is over.
+         */
+        status: { in: ["active", "muted"] },
         chat_group: {
-          status: "active",
+          status: { in: ["active", "locked"] },
         },
       },
     })
@@ -46,9 +54,17 @@ export async function GET(request: NextRequest) {
     const memberships = await db.chat_group_members.findMany({
       where: {
         user_id: authUser.userId,
-        status: "active",
+        /*
+         * A mute silences; it does not banish (SCRUM-178). `active` alone
+         * dropped a muted member's room out of the only list the phone has,
+         * while the room itself still let them read — "you were never here"
+         * beside "you can read but not write". Banned and left stay out:
+         * those are removals. Likewise a locked room is still the member's
+         * room, read-only; only an archived one is over.
+         */
+        status: { in: ["active", "muted"] },
         chat_group: {
-          status: "active",
+          status: { in: ["active", "locked"] },
         },
       },
       include: {
@@ -265,7 +281,11 @@ export async function GET(request: NextRequest) {
         membership: {
           role: membership.role,
           joinedAt: membership.joined_at,
+          /** `muted`: the room is readable, posting is refused. Label it. */
+          status: membership.status,
         },
+        /** `locked`: read-only for everyone until the organiser reopens it. */
+        status: membership.chat_group.status,
         /** The user is checked in and has not checked out — this room is live. */
         isCheckedIn: checkedInEventIds.has(membership.chat_group.event.id),
       }

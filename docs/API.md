@@ -496,6 +496,9 @@ Body: `{ "eventIds": ["uuid", ...] }` (max 50)
 |--------|----------|-------------|
 | GET | `/chat/groups` | List user's chat groups |
 
+### GET /chat/groups
+Lists every room the caller is still a member of: `active` and **`muted`** memberships (a mute silences, it does not banish — the room stays readable and a post is refused with the reason), in `active` and **`locked`** rooms (read-only until the organiser reopens it). Each row carries `membership.status` and the room's `status` so the client can label _Muted_ / _Locked_. Banned and left memberships, and archived rooms, are not listed.
+
 ### POST /message-requests
 **`message` is required.** A request with no message is indistinguishable from a
 like with a reveal stapled to it, and the two are separate actions:
