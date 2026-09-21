@@ -219,6 +219,7 @@ was; a suspended host can still sign in and reset a password.
 | `/apply` | public | the application form |
 | `/apply/verify` | applicant | confirms the email token |
 | `/invite` | invitee | accepts an invitation |
+| `/verify-domain` | whoever reads the role mailbox, no sign-in | confirms the domain token (`POST /api/org/domains/verify`) |
 | `/dashboard/onboarding` | platform admin | the review queue |
 | `/dashboard/organisations` | platform admin | every org, suspend/reinstate |
 | `/dashboard/organisation` | host | members, invites, domains, join requests |

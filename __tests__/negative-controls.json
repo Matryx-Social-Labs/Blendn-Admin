@@ -699,6 +699,18 @@
       "observed": "1 failing: the shaping matches /mutedAt:[^\\n]*updated_at/.",
       "date": "2026-09-18"
     },
+    "integration/domain-email-verify.itest.ts": {
+      "guards": "two clicks on one domain-verification link write exactly one org.domain.verified audit row — the audit call is gated on the transaction having spent the token (SCRUM-190)",
+      "mutation": "In app/api/org/domains/verify/route.ts, delete `if (!verified) return NextResponse.json(...)` so auditLog runs for both requests.",
+      "observed": "1 failing: survives two clicks arriving together — Expected: 1, Received: 2.",
+      "date": "2026-09-21"
+    },
+    "verify-domain-page.test.ts": {
+      "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
+      "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",
+      "observed": "2 failing (page renamed): the path exists check and the POST check. 1 failing (path changed): expected \"/verify-domain\", got \"/verify\".",
+      "date": "2026-09-21"
+    },
     "editor-save-after-session-ends.test.ts": {
       "guards": "components/event-editor.tsx answers a 401 on save with a sentence about the session and keeps the form, before the generic \"Failed to save event\" throw (SCRUM-163)",
       "mutation": "Delete the `if (response.status === 401) { ... return }` block in handleSubmit (or neuter it with `&& false`).",
