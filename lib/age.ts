@@ -61,6 +61,34 @@ export function datingAgeRefusal(
 }
 
 /**
+ * Why orientation and "interested in" are refused for this account, or `null`.
+ *
+ * They exist for dating, and dating is 18+ — so under 18 the app never asks
+ * (SCRUM-200) and this refuses a write that arrives anyway. Special-category
+ * data from a child, held for a feature they cannot use, is the one field
+ * worth being strict about. `show_orientation` is consent to show a value
+ * that must not exist; refused on the same rule.
+ */
+export function orientationAgeRefusal(
+  input: {
+    orientations?: readonly string[]
+    interested_in?: readonly string[]
+    show_orientation?: boolean
+  },
+  age: number | null | undefined
+): string | null {
+  const carries =
+    (input.orientations?.length ?? 0) > 0 ||
+    (input.interested_in?.length ?? 0) > 0 ||
+    input.show_orientation === true
+  if (!carries) return null
+  if (mayDate(age)) return null
+  return age == null
+    ? "Add your age to your profile first."
+    : `Orientation and who you're interested in are for ${DATING_MIN_AGE}+ only.`
+}
+
+/**
  * The same intents with `dating` removed when the account may not carry it.
  *
  * For the paths that seed rather than accept — check-in copies
