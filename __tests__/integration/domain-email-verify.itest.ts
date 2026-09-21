@@ -163,10 +163,17 @@ describe("confirming from the emailed link", () => {
     })
     expect(spent.filter((t) => t.used_at !== null)).toHaveLength(1)
 
+    /*
+     * Exactly one. This said `≤ 2` from the day it was written, and the route
+     * wrote two — the `return` inside the transaction callback never reached
+     * the audit call after it (SCRUM-190). Audit writes are fire-and-forget,
+     * so give them a moment to land before counting.
+     */
+    await new Promise((r) => setTimeout(r, 300))
     const entries = await db.audit_logs.count({
       where: { action: "org.domain.verified", resource_id: (await db.organisation_domains.findUniqueOrThrow({ where: { id: domain.id }, select: { org_id: true } })).org_id },
     })
-    expect(entries).toBeLessThanOrEqual(2)
+    expect(entries).toBe(1)
   })
 
   it("refuses an expired link", async () => {

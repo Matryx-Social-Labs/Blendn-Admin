@@ -77,12 +77,14 @@ export async function POST(req: NextRequest) {
      * and both write — harmless here, but it would put two rows in the audit
      * log for one act, and the audit log is the thing that has to be true.
      */
-    await db.$transaction(async (tx) => {
+    const verified = await db.$transaction(async (tx) => {
       const { count } = await tx.domain_email_tokens.updateMany({
         where: { token_hash: row.token_hash, used_at: null },
         data: { used_at: new Date() },
       })
-      if (count === 0) return
+      // `return` here leaves the callback, not the handler — the audit write
+      // below has to be gated on this value or the loser still writes a row.
+      if (count === 0) return false
 
       await tx.organisation_domains.update({
         where: { id: row.domain.id },
@@ -96,10 +98,13 @@ export async function POST(req: NextRequest) {
            */
         },
       })
+      return true
     })
 
+    if (!verified) return NextResponse.json({ success: true, domain: row.domain.domain })
+
     auditLog({
-      // No signed-in actor: the mailbox is the proof, and it is in .
+      // No signed-in actor: the mailbox is the proof, and it is in `details`.
       userId: undefined,
       action: "org.domain.verified",
       resource: "organisation",
