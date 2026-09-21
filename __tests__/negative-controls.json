@@ -723,6 +723,12 @@
       "observed": "3 failing: prefers x-real-ip; takes the FIRST forwarded hop; ignores pass-through headers — each returned 152.233.x or 203.0.113.9 instead of 91.9.218.44.",
       "date": "2026-09-21"
     },
+    "integration/password-change-revokes-mobile.itest.ts": {
+      "guards": "changePassword revokes every live mobile refresh token in the same transaction as the new hash (leaving an earlier revocation's timestamp alone), returns revokedSessions, and the phone's next refresh is 401; a wrong current password revokes nothing (SCRUM-169)",
+      "mutation": "In lib/account-actions.ts changePassword, replace the updateMany inside the transaction with `return 0`.",
+      "observed": "1 failing: expected { ok: true, revokedSessions: 2 }, received revokedSessions 0, and the phones' refresh answered 200.",
+      "date": "2026-09-21"
+    },
     "integration/event-refusals.itest.ts": {
       "guards": "eventRefusals counts distinct people, and its fence/phones/mixed/null verdict follows the out-of-range fixes' accuracy against GOOD_FIX_METRES (SCRUM-196)",
       "mutation": "In lib/check-in-refusals.ts eventRefusals, replace the verdict expression with `verdict = \"fence\"`.",

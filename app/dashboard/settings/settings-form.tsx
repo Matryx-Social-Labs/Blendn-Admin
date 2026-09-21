@@ -258,7 +258,11 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
                 setCurrent("")
                 setNext("")
                 setConfirm("")
-                toast.success("Password changed")
+                toast.success(
+                  result.revokedSessions
+                    ? `Password changed. ${result.revokedSessions === 1 ? "Your phone" : "Your phones"} will need to sign in again.`
+                    : "Password changed"
+                )
               } else {
                 toast.error(result.error ?? "Could not change password")
               }
