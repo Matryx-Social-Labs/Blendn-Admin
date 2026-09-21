@@ -60,6 +60,18 @@ async function claimed(overrides: Record<string, unknown> = {}) {
   return { org: org.id, domain, token }
 }
 
+const where = (org: string) => ({ action: "org.domain.verified", resource_id: org })
+
+/** Fire-and-forget audit rows for an org: wait up to 3 s for the first, a beat for a twin, count. */
+async function auditRows(org: string): Promise<number> {
+  const until = Date.now() + 3000
+  while ((await db.audit_logs.count({ where: where(org) })) === 0 && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  await new Promise((r) => setTimeout(r, 150))
+  return db.audit_logs.count({ where: where(org) })
+}
+
 const post = (body: unknown) =>
   POST(
     new Request("http://localhost/api/org/domains/verify", {
@@ -166,13 +178,16 @@ describe("confirming from the emailed link", () => {
     /*
      * Exactly one. This said `≤ 2` from the day it was written, and the route
      * wrote two — the `return` inside the transaction callback never reached
-     * the audit call after it (SCRUM-190). Audit writes are fire-and-forget,
-     * so give them a moment to land before counting.
+     * the audit call after it (SCRUM-190). Audit writes are fire-and-forget:
+     * wait for the first to land (a fixed sleep is a flake under a busy CI
+     * pool), then a beat for a second one that was fired in the same
+     * millisecond, then count.
      */
-    await new Promise((r) => setTimeout(r, 300))
-    const entries = await db.audit_logs.count({
-      where: { action: "org.domain.verified", resource_id: (await db.organisation_domains.findUniqueOrThrow({ where: { id: domain.id }, select: { org_id: true } })).org_id },
+    const { org_id } = await db.organisation_domains.findUniqueOrThrow({
+      where: { id: domain.id },
+      select: { org_id: true },
     })
+    const entries = await auditRows(org_id)
     expect(entries).toBe(1)
   })
 
@@ -192,8 +207,10 @@ describe("confirming from the emailed link", () => {
      * forwarding it to a colleague who also clicks, has not done anything
      * wrong — and an error there reads as "your verification failed".
      */
-    const { token } = await claimed({ verified_at: new Date() })
+    const { org, token } = await claimed({ verified_at: new Date() })
     expect((await post({ token })).status).toBe(200)
+    // And it performed no act, so it records none.
+    expect(await auditRows(org)).toBe(0)
   })
 
   it("says the same thing for every failure", async () => {
