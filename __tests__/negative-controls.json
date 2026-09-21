@@ -747,6 +747,12 @@
       "observed": "1 failing: the muted room is missing from the list (expected 'muted', received undefined).",
       "date": "2026-09-21"
     },
+    "password-changed-copy.test.ts": {
+      "guards": "the Settings success block after a password change reports the phones as signed out (from result.revokedSessions) and never claims other sessions stayed signed in (SCRUM-169)",
+      "mutation": "In app/dashboard/settings/settings-form.tsx put back `Your other sessions stay signed in` and `setDone(true)`.",
+      "observed": "1 failing: the stale sentence is present and the setDone shape is wrong.",
+      "date": "2026-09-22"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",
