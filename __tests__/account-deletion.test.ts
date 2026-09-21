@@ -23,6 +23,8 @@ const mockDb = {
   // Two open RSVPs on future events, read before the transaction; both go.
   event_rsvps: { findMany: jest.fn().mockResolvedValue([{ event_id: "ev-1" }, { event_id: "ev-2" }]), deleteMany: jest.fn() },
   event_match_preferences: { deleteMany: jest.fn() },
+  // Memberships are marked left, never deleted: the pseudonym lives on the row.
+  chat_group_members: { updateMany: jest.fn() },
   mobile_refresh_tokens: { deleteMany: jest.fn() },
   push_tokens: { deleteMany: jest.fn() },
   photo_checks: { deleteMany: jest.fn() },
@@ -148,6 +150,17 @@ describe("deleting an account scrubs the matching inputs", () => {
      * would take the organiser's headcount with it.
      */
     expect((mockDb.event_check_ins as { deleteMany?: unknown }).deleteMany).toBeUndefined()
+  })
+
+  it("leaves the rooms they were in, keeps a ban, and never deletes the membership row", async () => {
+    // Driven on staging (SCRUM-193): the row stayed `active`, so the room's
+    // people list and headcount kept them under their pseudonym.
+    await del()
+    expect(mockDb.chat_group_members.updateMany).toHaveBeenCalledWith({
+      where: { user_id: USER, status: { in: ["active", "muted"] } },
+      data: { status: "left" },
+    })
+    expect((mockDb.chat_group_members as { deleteMany?: unknown }).deleteMany).toBeUndefined()
   })
 
   it("releases the seats they held on events still to come, and promotes whoever was waiting", async () => {

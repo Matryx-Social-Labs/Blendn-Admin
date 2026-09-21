@@ -97,3 +97,48 @@ it("releases open RSVPs, keeps attendance, and refuses the token that did it", a
   expect((await db.profiles.findUniqueOrThrow({ where: { id } })).name).toBeNull()
   expect(await db.event_rsvps.count({ where: { user_id: id, event_id: future } })).toBe(0)
 })
+
+it("leaves every room they were in, and keeps a ban", async () => {
+  /*
+   * Driven on staging (SCRUM-193): after "Delete my account" the membership
+   * row was still `active`, so the room's participants list and headcount
+   * kept a person who no longer existed, under their pseudonym.
+   */
+  const host = await makeUser("dep-host2", "organizer")
+  users.push(host)
+  const [inRoom, inBannedRoom] = await Promise.all([makeEvent(host), makeEvent(host)])
+  events.push(inRoom, inBannedRoom)
+  const groups = await Promise.all(
+    [inRoom, inBannedRoom].map((event_id) =>
+      db.chat_groups.create({ data: { event_id, name: "room", status: "active" }, select: { id: true } })
+    )
+  )
+
+  const id = await makeUser("dep-leaver2")
+  users.push(id)
+  await db.profiles.create({ data: { id, name: "Leaver", date_of_birth: new Date("1996-05-12") } })
+  await db.chat_group_members.createMany({
+    data: [
+      { chat_group_id: groups[0].id, user_id: id, status: "active", anonymous_name: "Quiet Heron" },
+      { chat_group_id: groups[1].id, user_id: id, status: "banned", anonymous_name: "Quiet Heron" },
+    ],
+  })
+  const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
+
+  const res = await accountRoute.DELETE(req("DELETE", "/api/mobile/account", signAccessToken(id, email)))
+  expect(res.status).toBe(200)
+
+  const rows = await db.chat_group_members.findMany({
+    where: { user_id: id },
+    select: { chat_group_id: true, status: true, anonymous_name: true },
+    orderBy: { chat_group_id: "asc" },
+  })
+  const byGroup = Object.fromEntries(rows.map((r) => [r.chat_group_id, r]))
+  expect(byGroup[groups[0].id].status).toBe("left")
+  expect(byGroup[groups[1].id].status).toBe("banned")
+  // The pseudonym stays, so the transcript still reads.
+  expect(rows.every((r) => r.anonymous_name === "Quiet Heron")).toBe(true)
+
+  await db.chat_group_members.deleteMany({ where: { user_id: id } })
+  await db.chat_groups.deleteMany({ where: { id: { in: groups.map((g) => g.id) } } })
+})

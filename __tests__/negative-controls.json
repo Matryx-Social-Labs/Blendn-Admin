@@ -626,11 +626,11 @@
       "date": "2026-09-16"
     },
     "integration/deletion-erases-participation.itest.ts": {
-      "guards": "that account deletion removes RSVPs on events still to come (and promotes the waitlist) while keeping attendance on past ones, and that the access token that made the deletion is refused immediately afterwards (blocklist in getAuthenticatedUser)",
-      "mutation": "A: `openEventIds = []` in the deletion route. B: `if (false && (await recentlyBlocked(...)))` in getAuthenticatedUser (lib/mobile-auth.ts; the set itself lives in lib/account-blocklist.ts)",
-      "observed": "A: 1 failing (future RSVP survived, waiter not promoted). B: 1 failing (PUT /profiles with the dead token 200 and `Ghost` written). Green after cp of the saved files",
+      "guards": "that account deletion removes RSVPs on events still to come (and promotes the waitlist) while keeping attendance on past ones, that the access token that made the deletion is refused immediately afterwards (blocklist in getAuthenticatedUser), and that active/muted room memberships are marked `left` with the pseudonym kept while a ban stays (SCRUM-193)",
+      "mutation": "A: `openEventIds = []` in the deletion route. B: `if (false && (await recentlyBlocked(...)))` in getAuthenticatedUser (lib/mobile-auth.ts; the set itself lives in lib/account-blocklist.ts). C: delete the `chat_group_members.updateMany({ ... status: \"left\" })` step of the deletion transaction.",
+      "observed": "A: 1 failing (future RSVP survived, waiter not promoted). B: 1 failing (PUT /profiles with the dead token 200 and `Ghost` written). C: 1 failing (leaves every room they were in — expected \"left\", received \"active\"). Green after cp of the saved files",
       "reverted": true,
-      "date": "2026-09-17"
+      "date": "2026-09-21"
     },
     "integration/org-shaped-overviews.itest.ts": {
       "guards": "that the venue owner overview lists every venue the organisation owns — including one with no events — and not a venue nobody at the org owns; plus the org-shaped visibility cases it already carried",

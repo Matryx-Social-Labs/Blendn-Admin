@@ -136,6 +136,18 @@ export async function DELETE(request: NextRequest) {
        * them still hold a conversation. The *choices* are personal and go.
        */
       db.event_match_preferences.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * Out of every room they were in. `left`, not deleted, for the reason
+       * the sweeper gives (lib/chat-lifecycle.ts): the pseudonym lives on the
+       * row and the transcript resolves through it. Without this they stayed
+       * `active` — listed in the room's people and counted in its headcount,
+       * under their pseudonym, for ever (SCRUM-193). A ban is a moderation
+       * record and outlives the account, as it outlives the room.
+       */
+      db.chat_group_members.updateMany({
+        where: { user_id: authUser.userId, status: { in: ["active", "muted"] } },
+        data: { status: "left" },
+      }),
       db.mobile_refresh_tokens.deleteMany({ where: { user_id: authUser.userId } }),
       db.push_tokens.deleteMany({ where: { user_id: authUser.userId } }),
       // The keys carry the user id, and the profile they described has just
