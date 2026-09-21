@@ -723,10 +723,29 @@
       "observed": "3 failing: prefers x-real-ip; takes the FIRST forwarded hop; ignores pass-through headers — each returned 152.233.x or 203.0.113.9 instead of 91.9.218.44.",
       "date": "2026-09-21"
     },
+<<<<<<< HEAD
     "integration/password-change-revokes-mobile.itest.ts": {
       "guards": "changePassword revokes every live mobile refresh token in the same transaction as the new hash (leaving an earlier revocation's timestamp alone), returns revokedSessions, and the phone's next refresh is 401; a wrong current password revokes nothing (SCRUM-169)",
       "mutation": "In lib/account-actions.ts changePassword, replace the updateMany inside the transaction with `return 0`.",
       "observed": "1 failing: expected { ok: true, revokedSessions: 2 }, received revokedSessions 0, and the phones' refresh answered 200.",
+=======
+    "integration/event-refusals.itest.ts": {
+      "guards": "eventRefusals counts distinct people, and its fence/phones/mixed/null verdict follows the out-of-range fixes' accuracy against GOOD_FIX_METRES (SCRUM-196)",
+      "mutation": "In lib/check-in-refusals.ts eventRefusals, replace the verdict expression with `verdict = \"fence\"`.",
+      "observed": "2 failing: 'phones' expected, received 'fence'; 'mixed' expected, received 'fence'.",
+      "date": "2026-09-21"
+    },
+    "turned-away-on-every-event.test.ts": {
+      "guards": "the event page loads eventRefusals in the live/over branch beside attendance (not the curated gate), the Overview renders TurnedAwayPanel between Attendance and Connections only when people > 0, and the panel links to the editor only when the fence is at fault and canEdit (SCRUM-196)",
+      "mutation": "In app/dashboard/events/[id]/page.tsx replace `eventRefusals(event.id)` in the Promise.all with `Promise.resolve(null)`.",
+      "observed": "1 failing: loads the organiser's refusals — `eventRefusals(event.id)` not found.",
+      "date": "2026-09-21"
+    },
+    "integration/muted-still-listed.itest.ts": {
+      "guards": "GET /chat/groups lists a muted membership (membership.status = muted) and a locked room (status = locked) and leaves banned, left and archived out (SCRUM-178)",
+      "mutation": "In app/api/mobile/chat/groups/route.ts, put back `status: \"active\"` for the membership filter.",
+      "observed": "1 failing: the muted room is missing from the list (expected 'muted', received undefined).",
+>>>>>>> origin/dev
       "date": "2026-09-21"
     },
     "verify-domain-page.test.ts": {

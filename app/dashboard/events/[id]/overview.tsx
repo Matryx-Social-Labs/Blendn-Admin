@@ -3,9 +3,11 @@ import { IconAlertTriangle, IconEdit, IconMessage2, IconUsers } from "@tabler/ic
 
 import { AttendancePanel } from "@/components/dashboard/attendance-panel"
 import { ConnectionsPanel } from "@/components/dashboard/connections-panel"
+import { TurnedAwayPanel } from "@/components/dashboard/turned-away-panel"
 import { HeroMetric, MetricTile } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import type { EventAttendance } from "@/lib/attendance"
+import type { EventRefusals } from "@/lib/check-in-refusals"
 import type { ConnectionMetrics } from "@/lib/connection-metrics"
 import { STATE_QUESTION } from "@/lib/event-phase"
 import type { EventOverview } from "@/lib/event-overview"
@@ -31,6 +33,7 @@ export function Overview({
   venueName,
   attendance,
   connections,
+  turnedAway,
 }: {
   overview: EventOverview
   eventId: string
@@ -39,6 +42,8 @@ export function Overview({
   /** Null before the event has run — there is nothing to count yet. */
   attendance: EventAttendance | null
   connections: ConnectionMetrics | null
+  /** Null before the event has run, like attendance. */
+  turnedAway: EventRefusals | null
 }) {
   const { state, hero, tiles, blockers, publishable } = overview
   const blocking = blockers.filter((b) => b.blocking)
@@ -78,6 +83,15 @@ export function Overview({
       {attendance ? (
         <section className="border-t border-border pt-5">
           <AttendancePanel attendance={attendance} live={state === "live"} />
+        </section>
+      ) : null}
+
+      {/* Between who came and who met: who could not get in. Rendered only when
+          somebody was refused — "0 turned away" is a panel asserting the absence
+          of a problem nobody asked about. */}
+      {turnedAway && turnedAway.people > 0 ? (
+        <section className="border-t border-border pt-5">
+          <TurnedAwayPanel refusals={turnedAway} eventId={eventId} canEdit={canEdit} />
         </section>
       ) : null}
 

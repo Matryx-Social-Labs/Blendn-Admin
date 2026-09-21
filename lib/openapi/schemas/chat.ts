@@ -111,7 +111,13 @@ export const ChatGroupSchema = z
     membership: z.object({
       role: z.string(),
       joinedAt: z.string().datetime(),
+      status: z
+        .enum(["active", "muted"])
+        .describe("`muted`: the caller can read this room but a post is refused. Banned and left memberships are not listed."),
     }),
+    status: z
+      .enum(["active", "locked"])
+      .describe("`locked`: read-only for everyone until the organiser reopens it. Archived rooms are not listed."),
     isCheckedIn: z
       .boolean()
       .describe(
