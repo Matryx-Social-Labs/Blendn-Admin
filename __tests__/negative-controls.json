@@ -711,6 +711,12 @@
       "observed": "1 failing: names the address when the provider refused it — message matched /isn't configured/.",
       "date": "2026-09-21"
     },
+    "dashboard-signin-limit-runs-in-node.test.ts": {
+      "guards": "POST /api/auth/callback/credentials is rate limited in the NextAuth route (Node runtime, Redis-backed) before NextAuth sees the password, and middleware.ts no longer carries the limiter — on the Edge runtime it let five of six attempts through (SCRUM-194)",
+      "mutation": "In app/api/auth/[...nextauth]/route.ts, `if (limited && false) return limited`.",
+      "observed": "1 failing: returns the limiter's 429 and never reaches NextAuth — expected 429, received 302.",
+      "date": "2026-09-21"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",

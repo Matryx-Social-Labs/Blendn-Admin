@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
-import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { canAccessDashboard } from "@/lib/rbac"
 import type { user_role } from "@prisma/client"
 
@@ -124,15 +123,6 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  // Rate limit the dashboard credentials sign-in (NextAuth has no built-in
-  // rate limiting; this mirrors the limits already applied to mobile auth)
-  if (pathname === "/api/auth/callback/credentials" && req.method === "POST") {
-    const rateLimited = rateLimit(req, createAuthRateLimit("dashboard-signin"))
-    if (rateLimited) {
-      return rateLimited
-    }
-  }
-
   // Handle CORS for mobile API routes
   if (pathname.startsWith("/api/mobile")) {
     const corsHeaders = getCorsHeaders(origin)
@@ -225,7 +215,6 @@ export const config = {
     "/dashboard/:path*",
     "/api/mobile/:path*",
     "/login",
-    "/api/auth/callback/credentials",
     // Internal documentation, admin-only — see the gate above.
     "/api-docs",
     "/api/docs",
