@@ -69,6 +69,20 @@ An account created through Google or Apple has no password and returns the same
 generic `401` as a wrong password — deliberately, so the response is not an
 account-existence oracle.
 
+### A staff account
+
+The app is for attendees. Organisers, venue owners, sponsors and admins sign in
+at the dashboard; an operator app is planned for after the launch. `signin`,
+`google`, `apple`, `refresh` and `session` return **403** for any account whose role is
+not `attendee`, checked after the password so the route is not an oracle:
+
+```json
+{ "success": false, "error": "This app is for attendees. Organisers, venue owners and sponsors sign in at the dashboard." }
+```
+
+A staff session that existed before this rule ends at its next refresh — at
+most one access-token lifetime (15 minutes) after deploy.
+
 ### A suspended account
 
 Every route that issues a token — `signin`, `google`, `apple`, `refresh` and

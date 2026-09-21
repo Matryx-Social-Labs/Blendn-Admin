@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
-import { accountBlockReason, getAuthenticatedUser, SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
+import { accountBlockReason, getAuthenticatedUser, STAFF_MESSAGE, SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
     // screen that silently fails to load.
     const blocked = accountBlockReason(user)
     if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
+    if (blocked === "staff") return forbiddenResponse(STAFF_MESSAGE)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
     if (blocked || !user) return notFoundResponse("User not found")

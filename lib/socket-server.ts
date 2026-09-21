@@ -639,7 +639,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
          */
         const account = await db.user.findUnique({
           where: { id: decoded.userId },
-          select: { deletedAt: true, suspended_at: true },
+          select: { deletedAt: true, suspended_at: true, role: true },
         })
         if (accountBlockReason(account)) {
           return next(new Error("Authentication required"))
