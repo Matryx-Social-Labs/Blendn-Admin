@@ -92,20 +92,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    /*
-     * SCRUM-195 diagnostic, one release only: the audit rows show Railway's
-     * edge address where the client's should be, and nothing in the app can
-     * see the raw chain. Logged here because this route is unauthenticated
-     * and audited, so one curl proves both the format and the reader.
-     */
-    logger.info("Client address headers", {
-      xff: req.headers.get("x-forwarded-for"),
-      envoyExternal: req.headers.get("x-envoy-external-address"),
-      realIp: req.headers.get("x-real-ip"),
-      cfConnecting: req.headers.get("cf-connecting-ip"),
-      picked: getRequestIp(req),
-    })
-
     auditLog({
       userId: user.id,
       action: "auth.password_reset_requested",

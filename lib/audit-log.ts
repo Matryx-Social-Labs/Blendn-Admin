@@ -43,10 +43,9 @@ export function auditLog(entry: AuditLogEntry): void {
 }
 
 /**
- * The address written onto an audit row. Same reader as the rate limiters:
- * the last hop is the one the platform's edge added, the first is whatever
- * the client sent, and an audit trail that records a spoofable address is
- * evidence of nothing.
+ * The address written onto an audit row. Same reader as the rate limiters —
+ * see lib/client-ip.ts for what Railway's edge actually sends. Until
+ * SCRUM-195 this recorded the edge node (152.233.x), which identified nobody.
  */
 export function getRequestIp(request: Request): string {
   return clientIpFrom(request.headers)

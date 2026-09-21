@@ -717,6 +717,12 @@
       "observed": "1 failing: returns the limiter's 429 and never reaches NextAuth — expected 429, received 302.",
       "date": "2026-09-21"
     },
+    "client-ip.test.ts": {
+      "guards": "clientIpFrom returns the client as Railway's edge presents it — x-real-ip first (edge-set, not client-settable), else the FIRST x-forwarded-for hop — and ignores x-envoy-external-address / cf-connecting-ip, which the edge passes through as sent; the previous last-hop reader keyed every per-network limit and audit row on Railway's own edge node (SCRUM-195)",
+      "mutation": "In lib/client-ip.ts, drop the x-real-ip branch and return `hops[hops.length - 1]` (the old reader).",
+      "observed": "3 failing: prefers x-real-ip; takes the FIRST forwarded hop; ignores pass-through headers — each returned 152.233.x or 203.0.113.9 instead of 91.9.218.44.",
+      "date": "2026-09-21"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",
