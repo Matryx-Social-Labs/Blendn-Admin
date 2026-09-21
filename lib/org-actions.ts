@@ -254,8 +254,10 @@ export interface InviteResult {
   /** Set when the address is outside a verified domain and no reason was given. */
   needsReason?: boolean
   message: string
-  /** Only when email is unconfigured — the link to pass on by hand. */
+  /** Only when nothing was emailed — the link to pass on by hand. */
   link?: string
+  /** Why nothing was emailed: no provider at all, or the provider refused this address. */
+  emailFailure?: "not_configured" | "provider_error"
 }
 
 /**
@@ -336,13 +338,23 @@ export async function inviteMember(
 
   const link = `${appUrl()}/invite?token=${encodeURIComponent(token)}`
   let sent = false
+  /*
+   * "Not configured" and "the provider refused this address" are different
+   * news. The first is about the platform; the second is about the address
+   * they typed, and telling them the platform has no email sends them off
+   * to hand-deliver a link to a mailbox that may not exist (SCRUM-192).
+   */
+  let emailFailure: NonNullable<InviteResult["emailFailure"]> = "not_configured"
   if (emailConfigured()) {
     const result = await sendEmail({
       to: target,
       ...inviteEmail(org.display_name, user.name ?? "A colleague", link, ROLE_LABELS[role]),
     })
     sent = result.sent
-    if (!result.sent) logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })
+    if (!result.sent) {
+      emailFailure = result.reason ?? "provider_error"
+      logger.error("Invite email failed", { inviteId: invite.id, reason: result.reason })
+    }
   }
 
   auditLog({
@@ -356,17 +368,23 @@ export async function inviteMember(
       role,
       reason: policy.requiresReason ? (reason ?? "").trim() : null,
       emailSent: sent,
+      ...(sent ? {} : { emailFailure }),
     },
   })
 
   revalidatePath("/dashboard/organisation")
 
+  if (sent) return { ok: true, message: `Invite sent to ${target}.` }
   return {
     ok: true,
-    message: sent ? `Invite sent to ${target}.` : `Invite created. Email isn't configured — send them this link.`,
+    message:
+      emailFailure === "not_configured"
+        ? "Invite created. Email isn't configured — send them this link."
+        : `Invite created, but the mail to ${target} was refused. Check the address, or send them this link.`,
     // Returned only when nothing was emailed, so there is no other way to
     // deliver it. Once the mail goes out, the token stays in the mailbox.
-    ...(sent ? {} : { link }),
+    link,
+    emailFailure,
   }
 }
 
