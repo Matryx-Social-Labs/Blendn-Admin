@@ -37,14 +37,17 @@ const refresh = (refreshToken: string) =>
   )
 
 it("revokes every live mobile session with the hash, and the phone's next refresh is refused", async () => {
-  const id = await makeUser("pw-change", "organizer")
+  // An attendee: the app is attendees-only (SCRUM-198), so a staff phone token
+  // is refused before this revoke could be the reason — which would make the
+  // control below vacuous. The action itself does not care who is changing.
+  const id = await makeUser("pw-change")
   users.push(id)
   const { email } = await db.user.update({
     where: { id },
     data: { password: await bcrypt.hash("Old-Password-2026!", 12) },
     select: { email: true },
   })
-  mockAuth.mockResolvedValue({ user: { id, email, role: "organizer" } })
+  mockAuth.mockResolvedValue({ user: { id, email, role: "attendee" } })
 
   // One session that had already ended and must stay as it was, then two phones.
   const earlier = signRefreshToken(id, email)
@@ -84,14 +87,14 @@ it("revokes every live mobile session with the hash, and the phone's next refres
 })
 
 it("revokes nothing, and says so, when the current password is wrong", async () => {
-  const id = await makeUser("pw-change-wrong", "organizer")
+  const id = await makeUser("pw-change-wrong")
   users.push(id)
   const { email } = await db.user.update({
     where: { id },
     data: { password: await bcrypt.hash("Old-Password-2026!", 12) },
     select: { email: true },
   })
-  mockAuth.mockResolvedValue({ user: { id, email, role: "organizer" } })
+  mockAuth.mockResolvedValue({ user: { id, email, role: "attendee" } })
   const phone = signRefreshToken(id, email)
   await storeRefreshToken(id, phone)
 
