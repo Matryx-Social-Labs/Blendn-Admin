@@ -13,7 +13,7 @@ import { getEventOverview } from "@/lib/event-overview"
 import { EventTabs, eventTabsFor, type EventTabKey } from "./event-tabs"
 import { Overview } from "./overview"
 import { curationSelect, curationState } from "@/lib/curation"
-import { refusalSummary } from "@/lib/check-in-refusals"
+import { eventRefusals, refusalSummary } from "@/lib/check-in-refusals"
 import { CurationHealth } from "./curation-health"
 import { EventVenueLink } from "./venue-link"
 import { EventLifecycle } from "@/components/dashboard/event-lifecycle"
@@ -193,10 +193,22 @@ export default async function EventDetailPage({
    * check-ins by definition, and "0 came" against an event that has not
    * happened reads as a failure rather than as a date in the future.
    */
-  const [attendance, connections] =
+  const [attendance, connections, turnedAway] =
     overview.state === "live" || overview.state === "over"
-      ? await Promise.all([getEventAttendance(event.id), getConnectionMetrics(event.id)])
-      : [null, null]
+      ? await Promise.all([
+          getEventAttendance(event.id),
+          getConnectionMetrics(event.id),
+          /*
+           * The organiser's half of the door (SCRUM-196). `refusalSummary`
+           * below is the curation queue's diagnosis and stays gated on
+           * curated events; this one is for whoever operates the event, and
+           * an organiser whose pin is on the wrong building was the person
+           * with no way to find out. One bounded read, only once the event
+           * has run — a future event has refused nobody by definition.
+           */
+          eventRefusals(event.id),
+        ])
+      : [null, null, null]
 
   /*
    * The per-event half of curation health.
@@ -209,10 +221,19 @@ export default async function EventDetailPage({
    * Loaded only for curated events, so an organiser's own event pays nothing.
    */
   const state = curationState(event)
-  const refusals =
-    state === "curated_open" || state === "curated_claimed"
-      ? await refusalSummary(event.id)
-      : null
+  const curated = state === "curated_open" || state === "curated_claimed"
+  const refusals = !curated
+    ? null
+    : turnedAway
+      ? // A claimed listing that has started would otherwise read the same
+        // rows twice; the organiser's read already has everything this needs.
+        {
+          distinctPeopleRefused: turnedAway.people,
+          attempts: turnedAway.attempts,
+          medianShortfallMetres: turnedAway.medianShortfallMetres,
+          topReason: turnedAway.byReason[0]?.reason ?? null,
+        }
+      : await refusalSummary(event.id)
 
   return (
     <div className="flex flex-col gap-5">
@@ -227,6 +248,7 @@ export default async function EventDetailPage({
         venueName={venueName}
         attendance={attendance}
         connections={connections}
+        turnedAway={turnedAway}
       />
     </div>
   )
