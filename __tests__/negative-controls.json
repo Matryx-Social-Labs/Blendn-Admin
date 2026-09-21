@@ -759,6 +759,12 @@
       "observed": "2 failing: every staff role signed in with 200; the organiser's refresh answered 200.",
       "date": "2026-09-22"
     },
+    "integration/no-orientation-under-18.itest.ts": {
+      "guards": "PUT /profiles/:id refuses orientations, interested_in and show_orientation for a profile under 18 (403, '18+ only') and writes nothing, stores them for an adult, and clears the stored ones when the age drops below 18 (SCRUM-200)",
+      "mutation": "In app/api/mobile/profiles/[userId]/route.ts, delete `if (orientationRefusal) return forbiddenResponse(orientationRefusal)`.",
+      "observed": "1 failing: the 17-year-old's write answered 200 and the row held {gay,bisexual}.",
+      "date": "2026-09-22"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",

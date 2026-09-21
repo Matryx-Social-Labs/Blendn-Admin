@@ -3,7 +3,7 @@ import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
 import { checkProfilePhoto, moderateProfilePhoto } from "@/lib/photos"
 import { recordPhotoCheck } from "@/lib/photo-checks"
-import { ageFrom, datingAgeRefusal, parseDateOfBirth, stripDating } from "@/lib/age"
+import { ageFrom, datingAgeRefusal, mayDate, orientationAgeRefusal, parseDateOfBirth, stripDating } from "@/lib/age"
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
@@ -269,6 +269,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const touchesAgeGate =
       intent_default !== undefined || age !== undefined || dateOfBirth !== undefined
     const touchesDating = gender !== undefined || orientations !== undefined
+    // `interested_in` and the consent switch are gated on age too, and the
+    // gate needs the stored age when the request does not carry one.
+    const touchesOrientationGate = interested_in !== undefined || show_orientation !== undefined
     // `photos` joins the reasons to fetch: the moderation pass below only
     // checks URLs that are not already on the profile, so re-saving a profile
     // does not re-fetch and re-moderate the same three photos every time.
@@ -281,7 +284,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      */
     const touchesExpertise = work_field !== undefined || expertise !== undefined
     const existing =
-      touchesAgeGate || touchesDating || touchesExpertise || photos !== undefined
+      touchesAgeGate || touchesDating || touchesOrientationGate || touchesExpertise || photos !== undefined
         ? await db.profiles.findUnique({
             where: { id: userId },
             select: {
@@ -290,6 +293,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               intent_default: true,
               gender: true,
               orientations: true,
+              show_orientation: true,
               photos: true,
               work_field: true,
               expertise: true,
@@ -329,6 +333,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const refusal = datingAgeRefusal(intent_default, effectiveAge)
     if (refusal) return forbiddenResponse(refusal)
+    const orientationRefusal = orientationAgeRefusal(
+      { orientations, interested_in, show_orientation },
+      effectiveAge
+    )
+    if (orientationRefusal) return forbiddenResponse(orientationRefusal)
 
     /*
      * Lowering your age has to take the tag with it.
@@ -347,6 +356,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         : null
     const stripsDating =
       demotedIntents !== null && demotedIntents.length !== existing?.intent_default.length
+    /*
+     * The same rule for orientation: an age that drops below 18 takes the
+     * stored orientation, "interested in" and the consent to show them with
+     * it. Otherwise "set 25, pick an orientation, set 15" leaves a child's
+     * special-category data on the row (SCRUM-200).
+     */
+    const stripsOrientation =
+      (age !== undefined || dateOfBirth !== undefined) &&
+      !mayDate(effectiveAge) &&
+      ((existing?.orientations?.length ?? 0) > 0 || existing?.show_orientation === true)
 
     /*
      * `interested_in` is derived from gender and orientation — but only when
@@ -526,6 +545,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(intent_default !== undefined && { intent_default }),
         // Only when an age change has invalidated a tag they already had.
         ...(stripsDating && { intent_default: demotedIntents! }),
+        ...(stripsOrientation && { orientations: [], interested_in: [], show_orientation: false }),
         ...(gender !== undefined && { gender }),
         ...(interested_in !== undefined && { interested_in }),
         // Only when the request did not supply it — client-supplied wins, and

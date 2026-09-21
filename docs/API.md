@@ -894,6 +894,13 @@ Compatibility is **mutual**: `A.gender ∈ B.interested_in && B.gender ∈
 A.interested_in`. Anything undeclared **fails closed** — no tag, person still
 listed.
 
+**Under 18, none of this is collected.** `orientations`, `interested_in` and
+`show_orientation` exist for dating, and dating is 18+, so `PUT /profiles/:id`
+answers **403** `Orientation and who you're interested in are for 18+ only.` for
+a profile under 18 (`Add your age to your profile first.` when the age is
+unknown), and an age that drops below 18 clears all three on the row. The app
+does not show the Orientation step to a minor.
+
 **`interested_in` is what matching reads; `orientations` is what someone calls
 themselves.** Both are stored, because the labels only *sometimes* imply the
 set:
