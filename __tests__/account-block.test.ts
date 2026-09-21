@@ -35,7 +35,7 @@ import { accountBlockReason } from "@/lib/mobile-auth"
 import { POST as signin } from "@/app/api/mobile/auth/signin/route"
 
 describe("accountBlockReason", () => {
-  const live = { deletedAt: null, suspended_at: null }
+  const live = { deletedAt: null, suspended_at: null, role: "attendee" }
 
   it("lets a live account through", () => {
     expect(accountBlockReason(live)).toBeNull()
@@ -58,7 +58,20 @@ describe("accountBlockReason", () => {
   it("reports deletion ahead of suspension when both are set", () => {
     // A deleted account must never be told it is suspended: that confirms the
     // address exists to whoever is asking.
-    expect(accountBlockReason({ deletedAt: new Date(), suspended_at: new Date() })).toBe("deleted")
+    expect(accountBlockReason({ deletedAt: new Date(), suspended_at: new Date(), role: "attendee" })).toBe("deleted")
+  })
+
+  it("blocks every staff role — the app is for attendees (SCRUM-198)", () => {
+    for (const role of ["organizer", "venue_owner", "sponsor", "app_admin"]) {
+      expect(accountBlockReason({ ...live, role })).toBe("staff")
+    }
+  })
+
+  it("reports suspension ahead of staff", () => {
+    // A suspended organiser is told they are suspended, which is the fact
+    // that needs acting on; "use the dashboard" would send them to a door
+    // that is also shut.
+    expect(accountBlockReason({ ...live, role: "organizer", suspended_at: new Date() })).toBe("suspended")
   })
 })
 
@@ -79,13 +92,14 @@ describe("POST /auth/signin — a suspended account", () => {
       headers: { "content-type": "application/json" },
     })
 
-  const user = (over: Partial<{ suspended_at: Date | null; deletedAt: Date | null }> = {}) => ({
+  const user = (over: Partial<{ suspended_at: Date | null; deletedAt: Date | null; role: string }> = {}) => ({
     id: "u1",
     email: "a@b.com",
     name: "A",
     password: hash,
     deletedAt: null,
     suspended_at: null,
+    role: "attendee",
     profile: null,
     ...over,
   })
@@ -120,5 +134,18 @@ describe("POST /auth/signin — a suspended account", () => {
   it("still signs in a live account", async () => {
     mockDb.user.findUnique.mockResolvedValue(user())
     expect((await signin(req(PASSWORD))).status).toBe(200)
+  })
+
+  it("refuses an organiser with the right password, and sends them to the dashboard", async () => {
+    // SCRUM-198: the app is for attendees. After the password, like suspension.
+    mockDb.user.findUnique.mockResolvedValue(user({ role: "organizer" }))
+    const res = await signin(req(PASSWORD))
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toMatch(/for attendees.*dashboard/i)
+    expect(mockDb.mobile_refresh_tokens.create).not.toHaveBeenCalled()
+
+    const wrong = await signin(req("wrong password entirely"))
+    expect(wrong.status).toBe(401)
+    expect((await wrong.json()).error).not.toMatch(/dashboard/i)
   })
 })

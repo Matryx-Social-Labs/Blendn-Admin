@@ -105,16 +105,28 @@ const BCRYPT_ROUNDS = 12
  * the same span (SCRUM-119 recorded the bound; this closes it to seconds).
  */
 export function accountBlockReason(
-  user: { deletedAt: Date | null; suspended_at: Date | null } | null
-): "deleted" | "suspended" | null {
+  user: { deletedAt: Date | null; suspended_at: Date | null; role: string } | null
+): "deleted" | "suspended" | "staff" | null {
   if (!user || user.deletedAt) return "deleted"
   if (user.suspended_at) return "suspended"
+  /*
+   * The app is for attendees (SCRUM-198). Organisers, venue owners, sponsors
+   * and admins have the dashboard, and an operator app is planned for after
+   * the launch; until then a staff account in the attendee app is a person
+   * checking in to their own event and rating it. Read from the row, never
+   * the token — a role change must not outlive a 30-day refresh cycle.
+   */
+  if (user.role !== "attendee") return "staff"
   return null
 }
 
 /** What a suspended account is told, in the app, at every entry point. */
 export const SUSPENDED_MESSAGE =
   "This account has been suspended. Contact support@blendn.app if you think that's a mistake."
+
+/** What a staff account is told, in the app, at every entry point. */
+export const STAFF_MESSAGE =
+  "This app is for attendees. Organisers, venue owners and sponsors sign in at the dashboard."
 
 /**
  * Sign an access token (15 min expiry)

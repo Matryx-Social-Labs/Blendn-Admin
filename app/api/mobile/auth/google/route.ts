@@ -8,6 +8,7 @@ import {
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
+  STAFF_MESSAGE,
   SUSPENDED_MESSAGE,
 } from "@/lib/mobile-auth"
 import { profileForSelfResponse } from "@/lib/self-profile"
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest) {
         createdAt: true,
         deletedAt: true,
         suspended_at: true,
+        role: true,
         profile: {
           select: {
             phone: true,
@@ -94,6 +96,7 @@ export async function POST(request: NextRequest) {
 
     const blocked = accountBlockReason(user)
     if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
+    if (blocked === "staff") return forbiddenResponse(STAFF_MESSAGE)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
     if (blocked || !user) return errorResponse("Account not found", 401)

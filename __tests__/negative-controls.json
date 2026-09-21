@@ -747,6 +747,12 @@
       "observed": "1 failing: the muted room is missing from the list (expected 'muted', received undefined).",
       "date": "2026-09-21"
     },
+    "integration/attendees-only-app.itest.ts": {
+      "guards": "the mobile sign-in and refresh routes refuse organizer, venue_owner, sponsor and app_admin accounts with STAFF_MESSAGE (403) and still admit an attendee — the client app is attendees-only (SCRUM-198)",
+      "mutation": "In lib/mobile-auth.ts accountBlockReason, delete `if (user.role !== \"attendee\") return \"staff\"`.",
+      "observed": "2 failing: every staff role signed in with 200; the organiser's refresh answered 200.",
+      "date": "2026-09-22"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",

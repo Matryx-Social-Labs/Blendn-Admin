@@ -8,6 +8,7 @@ import {
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
+  STAFF_MESSAGE,
   SUSPENDED_MESSAGE,
 } from "@/lib/mobile-auth"
 import {
@@ -93,6 +94,7 @@ export async function POST(request: NextRequest) {
      */
     const blocked = accountBlockReason(user)
     if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
+    if (blocked === "staff") return forbiddenResponse(STAFF_MESSAGE)
     if (blocked) return unauthorizedResponse("Invalid email or password")
 
     // Generate tokens
