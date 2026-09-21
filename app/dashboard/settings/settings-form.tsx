@@ -149,7 +149,7 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
   const [current, setCurrent] = useState("")
   const [next, setNext] = useState("")
   const [confirm, setConfirm] = useState("")
-  const [done, setDone] = useState(false)
+  const [done, setDone] = useState<null | { revokedSessions: number }>(null)
   const [pending, start] = useTransition()
 
   const strength = passwordStrength(next, { email, name })
@@ -162,8 +162,13 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
         <div className="flex items-center gap-2.5 rounded-lg border border-success px-3.5 py-3 text-sm">
           <IconCircleCheck className="size-5 shrink-0 text-success" />
           <span>
-            Password changed. Your other sessions stay signed in — end them below if that
-            wasn&apos;t you.
+            {/* The phones were ended with the change (SCRUM-169); the other
+                dashboard sessions were not, and that is still the person's call. */}
+            Password changed.{" "}
+            {done.revokedSessions > 0
+              ? `${done.revokedSessions === 1 ? "Your phone was" : `Your ${done.revokedSessions} phones were`} signed out and will need the new password. `
+              : ""}
+            Other dashboard sessions stay signed in — end them below if that wasn&apos;t you.
           </span>
         </div>
       </Section>
@@ -254,7 +259,7 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
             start(async () => {
               const result = await changePassword(current, next)
               if (result.ok) {
-                setDone(true)
+                setDone({ revokedSessions: result.revokedSessions ?? 0 })
                 setCurrent("")
                 setNext("")
                 setConfirm("")

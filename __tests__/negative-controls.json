@@ -747,6 +747,12 @@
       "observed": "1 failing: the muted room is missing from the list (expected 'muted', received undefined).",
       "date": "2026-09-21"
     },
+    "password-changed-copy.test.ts": {
+      "guards": "the Settings success block after a password change reports the phones as signed out (from result.revokedSessions) and never claims other sessions stayed signed in (SCRUM-169)",
+      "mutation": "In app/dashboard/settings/settings-form.tsx put back `Your other sessions stay signed in` and `setDone(true)`.",
+      "observed": "1 failing: the stale sentence is present and the setDone shape is wrong.",
+      "date": "2026-09-22"
+    },
     "integration/attendees-only-app.itest.ts": {
       "guards": "the mobile sign-in and refresh routes refuse organizer, venue_owner, sponsor and app_admin accounts with STAFF_MESSAGE (403) and still admit an attendee — the client app is attendees-only (SCRUM-198)",
       "mutation": "In lib/mobile-auth.ts accountBlockReason, delete `if (user.role !== \"attendee\") return \"staff\"`.",
