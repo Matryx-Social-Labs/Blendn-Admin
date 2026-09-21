@@ -606,8 +606,8 @@
     },
     "refusal-reaches-the-screen.test.ts": {
       "guards": "that no \"use server\" file throws a bare Error at a person (production strips the message; only a Refusal's digest crosses), and that no toast reads err.message (the mask) instead of refusalMessage",
-      "mutation": "A: in lib/org-actions.ts change `throw new Refusal(\"This is the last owner…\")` back to `throw new Error(…)`. B: in app/dashboard/organisation/panel.tsx change `toast.error(refusalMessage(err, \"Could not remove\"))` back to `toast.error(err instanceof Error ? err.message : \"Could not remove\")`",
-      "observed": "A: 1 failing (lib/org-actions.ts listed). B: 1 failing (panel.tsx listed). Green after cp of the saved files",
+      "mutation": "A: in lib/org-actions.ts change `throw new Refusal(\"This is the last owner…\")` back to `throw new Error(…)`. B: in app/dashboard/organisation/panel.tsx change `toast.error(refusalMessage(err, \"Could not remove\"))` back to `toast.error(err instanceof Error ? err.message : \"Could not remove\")`. C: in lib/refusal.ts delete `if (isStaleServerAction(err.message)) return STALE_PAGE_MESSAGE` (SCRUM-202).",
+      "observed": "A: 1 failing (lib/org-actions.ts listed). B: 1 failing (panel.tsx listed). C: 1 failing (the docs-link message is shown verbatim). Green after cp of the saved files",
       "reverted": true,
       "date": "2026-09-16"
     },

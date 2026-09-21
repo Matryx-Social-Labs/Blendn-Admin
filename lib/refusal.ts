@@ -91,13 +91,29 @@ export class Refusal extends Error {
  * right — unless the message is the production mask itself, which is the one
  * sentence that must never reach a toast again.
  */
+/**
+ * A page open across a deploy holds the previous build's server-action ids.
+ * Next answers the next submit with this, and the message it carries is a
+ * documentation link — which a venue owner read verbatim in a toast, with a
+ * traced fence still on screen and no way to send it (SCRUM-202).
+ */
+export const STALE_PAGE_MESSAGE =
+  "The dashboard was updated while this page was open. Reload the page and try again."
+
+function isStaleServerAction(message: string): boolean {
+  return message.includes("failed-to-find-server-action") || message.includes("Failed to find Server Action")
+}
+
 export function refusalMessage(err: unknown, fallback: string): string {
   if (!err || typeof err !== "object") return fallback
   const digest = (err as { digest?: unknown }).digest
   if (typeof digest === "string" && digest.startsWith(REFUSAL_DIGEST)) {
     return digest.slice(REFUSAL_DIGEST.length) || fallback
   }
-  if (err instanceof Error && err.message && !isProductionMask(err.message)) return err.message
+  if (err instanceof Error && err.message) {
+    if (isStaleServerAction(err.message)) return STALE_PAGE_MESSAGE
+    if (!isProductionMask(err.message)) return err.message
+  }
   return fallback
 }
 
