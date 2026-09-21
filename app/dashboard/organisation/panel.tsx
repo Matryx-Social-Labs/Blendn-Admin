@@ -213,7 +213,7 @@ function Invites({
   const [role, setRole] = useState<org_role>("staff")
   const [reason, setReason] = useState("")
   const [needsReason, setNeedsReason] = useState(false)
-  const [link, setLink] = useState<string | null>(null)
+  const [link, setLink] = useState<{ href: string; refused: boolean } | null>(null)
   const [pending, start] = useTransition()
 
   function send() {
@@ -229,7 +229,7 @@ function Invites({
         setEmail("")
         setReason("")
         setNeedsReason(false)
-        setLink(result.link ?? null)
+        setLink(result.link ? { href: result.link, refused: result.emailFailure === "provider_error" } : null)
       } catch (err) {
         toast.error(refusalMessage(err, "Could not invite"))
       }
@@ -295,9 +295,11 @@ function Invites({
       {link ? (
         <div className="flex flex-col gap-1 rounded-lg border border-border bg-muted/40 p-3">
           <p className="text-[0.8125rem] text-muted-foreground">
-            Email isn&apos;t configured, so send them this link yourself:
+            {link.refused
+              ? "The mail was refused — check the address, or send them this link yourself:"
+              : "Email isn't configured, so send them this link yourself:"}
           </p>
-          <code className="select-all break-all text-[0.8125rem]">{link}</code>
+          <code className="select-all break-all text-[0.8125rem]">{link.href}</code>
         </div>
       ) : null}
 

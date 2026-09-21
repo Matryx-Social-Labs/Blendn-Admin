@@ -705,6 +705,12 @@
       "observed": "1 failing: survives two clicks arriving together — Expected: 1, Received: 2.",
       "date": "2026-09-21"
     },
+    "invite-mail-refused.test.ts": {
+      "guards": "inviteMember tells the provider-refused case apart from the not-configured case — the message names the address, the result carries emailFailure, and the audit details say why (SCRUM-192)",
+      "mutation": "In lib/org-actions.ts inviteMember, delete `emailFailure = result.reason ?? \"provider_error\"` so every unsent invite reads as not configured.",
+      "observed": "1 failing: names the address when the provider refused it — message matched /isn't configured/.",
+      "date": "2026-09-21"
+    },
     "verify-domain-page.test.ts": {
       "guards": "the link sendDomainVerifyEmail puts in the mail (/verify-domain?token=) has a page at that path, and the page spends the token with a POST to /api/org/domains/verify rather than on load (SCRUM-189)",
       "mutation": "Rename app/verify-domain/ (or change the path in lib/org-actions.ts to /verify?token=).",
