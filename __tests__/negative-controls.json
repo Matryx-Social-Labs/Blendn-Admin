@@ -765,8 +765,14 @@
       "observed": "1 failing: the 17-year-old's write answered 200 and the row held {gay,bisexual}.",
       "date": "2026-09-22"
     },
-    "venue-actions.test.ts": {
-    "guards": "createVenue and updateVenue refuse a check-in area drawn more than 500 m from the venue's pin, so a fence traced on the wrong part of the map cannot be saved (SCRUM-203)",
+    "venue-checkin-area-editable.test.ts": {
+    "guards": "the venue page mounts GeofenceEditor, loads the stored area, sends it on Save, and keeps a circle's centre and the pin together \u2014 so a fence drawn in the wrong place can be corrected at all (SCRUM-204)",
+    "mutation": "In app/dashboard/venues/[id]/venue-manage.tsx, drop the `...(fence ? { geofence: fence } : {})` line from the updateVenue call.",
+    "observed": "1 failing, 2 passing: the form mounts an editor whose result is never sent.",
+    "date": "2026-09-22"
+  },
+  "venue-actions.test.ts": {
+    "guards": "createVenue and updateVenue refuse a check-in area drawn more than 500 m from the venue's pin, and refuse a pin move that would leave the stored area that far behind (SCRUM-203, SCRUM-204)",
     "mutation": "In lib/venue-actions.ts, delete the `refuseIfFenceDrifted(...)` call in createVenue.",
     "observed": "1 failing, 26 passing: the far ring was accepted.",
     "date": "2026-09-22"

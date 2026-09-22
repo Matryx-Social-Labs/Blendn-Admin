@@ -4,11 +4,13 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
+import { GeofenceEditor } from "@/components/geofence-editor"
 import { SectionTitle } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { assignVenueOwner, restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
+import { validateGeofence, type Geofence } from "@/lib/geofence"
 import { refusalMessage } from "@/lib/refusal"
 
 /**
@@ -23,6 +25,12 @@ import { refusalMessage } from "@/lib/refusal"
  * Coordinates matter most. They were write-once at creation, and a venue's
  * wrong pin is wrong for every event ever held there rather than for one night
  * — and it never ages out, because a place has no end date.
+ *
+ * The check-in area was write-once for the same reason and for longer: the
+ * editor lived only in the create wizard, so a fence drawn in the wrong place
+ * could be corrected by nobody (SCRUM-204). It decides who gets through the
+ * door at every event here, which makes it the least forgivable field on the
+ * page to leave unwritable.
  */
 export function VenueManage({
   venue,
@@ -38,6 +46,8 @@ export function VenueManage({
     capacity: number | null
     lat: number | null
     lng: number | null
+    /** Whatever is stored. Unparseable rows are shown as "none yet". */
+    geofence: unknown
     retired: boolean
     ownerOrg: string | null
   }
@@ -48,6 +58,8 @@ export function VenueManage({
   const router = useRouter()
   const [pending, start] = useTransition()
   const [org, setOrg] = useState("")
+  const parsed = validateGeofence(venue.geofence)
+  const [fence, setFence] = useState<Geofence | null>(parsed.ok ? parsed.fence : null)
   const [form, setForm] = useState({
     name: venue.name,
     address: venue.address ?? "",
@@ -84,6 +96,7 @@ export function VenueManage({
           city: form.city.trim() || null,
           capacity: form.capacity.trim() ? Number(form.capacity) : null,
           ...(hasLat ? { lat: Number(form.lat), lng: Number(form.lng) } : {}),
+          ...(fence ? { geofence: fence } : {}),
         })
         toast.success("Saved")
         router.refresh()
@@ -157,6 +170,33 @@ export function VenueManage({
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="lng">Longitude</Label>
           <Input {...field("lng")} inputMode="decimal" />
+        </div>
+
+        {/*
+          Under the coordinates, because they are one fact: the place, and the
+          ground it covers. A circle's centre drags the pin with it — the same
+          rule the create wizard uses — so the two cannot drift apart here.
+        */}
+        <div className="flex flex-col gap-1.5 @2xl/main:col-span-3">
+          <Label>Check-in area</Label>
+          <GeofenceEditor
+            value={fence}
+            editable={!venue.retired}
+            onChange={(next) => {
+              setFence(next)
+              if (next.type === "circle") {
+                setForm((f) => ({ ...f, lat: String(next.lat), lng: String(next.lng) }))
+              }
+            }}
+            fallbackCentre={
+              Number.isFinite(Number(form.lat)) && form.lat.trim() !== "" && form.lng.trim() !== ""
+                ? { lat: Number(form.lat), lng: Number(form.lng) }
+                : undefined
+            }
+          />
+          <p className="text-[0.78125rem] text-muted-foreground">
+            Events here inherit this, and may narrow it for one night on the event itself.
+          </p>
         </div>
 
         {/*

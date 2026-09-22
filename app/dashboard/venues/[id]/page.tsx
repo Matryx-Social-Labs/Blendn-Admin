@@ -65,6 +65,7 @@ export default async function VenueDetailPage({
       latitude: true,
       longitude: true,
       venue_type: true,
+      geofence: true,
       owner_org: { select: { id: true, display_name: true } },
     },
   })
@@ -250,6 +251,7 @@ export default async function VenueDetailPage({
           capacity: venue.capacity,
           lat: venue.latitude,
           lng: venue.longitude,
+          geofence: venue.geofence,
           retired: venue.deleted_at !== null,
           ownerOrg: venue.owner_org?.display_name ?? null,
         }}
