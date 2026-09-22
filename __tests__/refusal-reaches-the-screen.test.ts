@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 
-import { Refusal, refusalMessage } from "@/lib/refusal"
+import { Refusal, refusalMessage, STALE_PAGE_MESSAGE } from "@/lib/refusal"
 
 import { stripComments } from "./support/strip-comments"
 
@@ -65,6 +65,17 @@ describe("the transport", () => {
     expect(refusalMessage(undefined, "fallback")).toBe("fallback")
     expect(refusalMessage("a string", "fallback")).toBe("fallback")
     expect(refusalMessage(new Refusal(""), "fallback")).toBe("fallback")
+  })
+
+  it("tells a page that outlived a deploy to reload, instead of quoting Next's docs link (SCRUM-202)", () => {
+    // Driven on staging: a venue owner with a traced fence on screen read
+    // "Read more: https://nextjs.org/docs/messages/failed-to-find-server-action".
+    for (const message of [
+      "Failed to find Server Action \"7f3a…\". This request might be from an older or newer deployment. Read more: https://nextjs.org/docs/messages/failed-to-find-server-action",
+      "Read more: https://nextjs.org/docs/messages/failed-to-find-server-action",
+    ]) {
+      expect(refusalMessage(new Error(message), "Could not create the venue.")).toBe(STALE_PAGE_MESSAGE)
+    }
   })
 })
 
