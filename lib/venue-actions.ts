@@ -6,7 +6,31 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters, getBoundingBox } from "@/lib/geo"
-import { validateGeofence, type Geofence } from "@/lib/geofence"
+import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
+
+/**
+ * How far a fence's centre may sit from the venue's pin.
+ *
+ * A fence describes the venue; the pin *is* the venue. When the two drift the
+ * door is judged against a place nobody is standing at, and every check-in
+ * there is refused with a distance in the hundreds of metres. It happened
+ * from the editor itself (SCRUM-203: "Trace outline" jumped the map to the
+ * city centre), and it can happen from any client, so the write refuses it.
+ * 500 m is generous for the largest venue on the platform and still a
+ * different street for the smallest.
+ */
+const FENCE_DRIFT_LIMIT_METRES = 500
+
+function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }): void {
+  const centre = fenceCentre(fence)
+  if (!centre) return
+  const metres = haversineDistanceMeters(pin.lat, pin.lng, centre.lat, centre.lng)
+  if (metres > FENCE_DRIFT_LIMIT_METRES) {
+    throw new Refusal(
+      `The check-in area is ${Math.round(metres)} m from the venue's pin. Draw it around the venue, or move the pin.`
+    )
+  }
+}
 import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
 import type { venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
@@ -170,6 +194,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   if (input.geofence) {
     const parsed = validateGeofence(input.geofence)
     if (!parsed.ok) throw new Refusal(`Check-in area is not valid (${parsed.error}).`)
+    refuseIfFenceDrifted(parsed.fence, { lat: input.lat, lng: input.lng })
     geofence = parsed.fence
   } else {
     geofence = {
@@ -301,6 +326,16 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
   if (input.geofence !== undefined) {
     const parsed = validateGeofence(input.geofence)
     if (!parsed.ok) throw new Refusal(`Check-in area is not valid (${parsed.error}).`)
+    if (parsed.fence) {
+      // Against the pin as it will be after this request.
+      const pin = movingPin
+        ? (input as { lat: number; lng: number })
+        : await db.venues
+            .findUniqueOrThrow({ where: { id }, select: { latitude: true, longitude: true } })
+            .then((v) => (v.latitude !== null && v.longitude !== null ? { lat: v.latitude, lng: v.longitude } : null))
+      // A venue with no pin yet has nothing for the fence to drift from.
+      if (pin) refuseIfFenceDrifted(parsed.fence, pin)
+    }
     geofence = parsed.fence
   }
 
