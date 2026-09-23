@@ -96,6 +96,9 @@ export function VenueManage({
           city: form.city.trim() || null,
           capacity: form.capacity.trim() ? Number(form.capacity) : null,
           ...(hasLat ? { lat: Number(form.lat), lng: Number(form.lng) } : {}),
+          // Always the area on screen, touched or not — so a venue whose
+          // stored area has drifted from its pin cannot be saved around, even
+          // for a rename, until the area is put back (SCRUM-204).
           ...(fence ? { geofence: fence } : {}),
         })
         toast.success("Saved")
