@@ -522,9 +522,9 @@
       "note": "The defect this guards was found by joining a room from a socket.io client, posting through the REST route, and receiving nothing — in dev and against the production build."
     },
     "integration/banned-cannot-read-the-room.itest.ts": {
-      "guards": "messages GET, participants GET and the event-chat GET all refuse a banned member with the true sentence, still serve active, muted and left members, and 404 a draft event's room (SCRUM-205)",
+      "guards": "messages GET, participants GET and the event-chat GET all refuse a banned member with the true sentence, still serve active, muted and left members, 404 a draft event's room, and never create a room row for a draft event (SCRUM-205)",
       "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
-      "observed": "2 failing, 2 passing: all three reads answer 200 to the banned member.",
+      "observed": "2 failing, 3 passing: all three reads answer 200 to the banned member. Separately, dropping the draft check before the event-chat GET's lazy chat_groups.create leaves 1 failing, 4 passing: a room row is written for a draft event.",
       "date": "2026-09-24"
     },
     "integration/room-send.itest.ts": {
@@ -771,7 +771,13 @@
       "observed": "1 failing: the 17-year-old's write answered 200 and the row held {gay,bisexual}.",
       "date": "2026-09-22"
     },
-    "room-read-denial.test.ts": {
+    "ban-leaves-the-socket-room.test.ts": {
+    "guards": "emitChatMemberBanned removes every socket the banned person holds from chat:<room>, after the notice, and removes nobody on an unban \u2014 so a ban mid-evening stops the live feed as well as the posts (SCRUM-205)",
+    "mutation": "In lib/socket-server.ts, delete the `if (banned) io.in(`user:${userId}`).socketsLeave(...)` line from emitChatMemberBanned.",
+    "observed": "1 failing, 1 passing: the banned person's sockets stay in the room.",
+    "date": "2026-09-24"
+  },
+  "room-read-denial.test.ts": {
     "guards": "roomReadDenial refuses a banned member and hides a draft event's room while leaving active, muted and left members reading; bannedRefusal names the organiser only when banned_by is set (SCRUM-205)",
     "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
     "observed": "1 failing, 6 passing: a banned member is let in.",

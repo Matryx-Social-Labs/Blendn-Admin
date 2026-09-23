@@ -128,3 +128,22 @@ it("hides a draft event's room from its own members", async () => {
   expect(res.participants.status).toBe(404)
   expect(res.eventChat.status).toBe(404)
 })
+
+it("never creates a room for a draft event, even for somebody entitled to one", async () => {
+  // Found by the security pass: the lazy creation ran before the draft check,
+  // so the 404 concealed a room row that should never have been written.
+  const host = await makeUser(testId("bcr-host5"), "organizer")
+  const guest = await makeUser(testId("bcr-rsvp"))
+  users.push(host, guest)
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+  await db.event_rsvps.create({ data: { event_id: eventId, user_id: guest, status: "going" } })
+  await db.events.update({ where: { id: eventId }, data: { status: "draft" } })
+
+  const token = await tokenFor(guest)
+  const res = await eventChat.GET(get(`/api/mobile/events/${eventId}/chat`, token), {
+    params: Promise.resolve({ eventId }),
+  })
+  expect(res.status).toBe(404)
+  expect(await db.chat_groups.count({ where: { event_id: eventId } })).toBe(0)
+})

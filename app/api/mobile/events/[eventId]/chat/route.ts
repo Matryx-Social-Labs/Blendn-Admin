@@ -115,14 +115,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
       const event = await db.events.findUnique({
         where: { id: eventId, deleted_at: null },
-        select: { title: true },
+        select: { title: true, status: true },
       })
+      // No room is ever made for a missing or hidden event — refusing it only
+      // after creation left a row the 404 concealed (SCRUM-205).
+      if (!event || event.status === "draft") {
+        return notFoundResponse("Chat not available for this event")
+      }
 
       chatGroup = await db.chat_groups.create({
         data: {
           event_id: eventId,
-          name: `${event?.title || "Event"} Chat`,
-          description: `Chat for ${event?.title || "Event"}`,
+          name: `${event.title || "Event"} Chat`,
+          description: `Chat for ${event.title || "Event"}`,
           status: "active",
           member_count: 0,
         },
@@ -485,9 +490,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // pulled anyway because `chatWindowState` treats a missing start as "no
         // floor" rather than erroring, so an event object in this file that
         // lacks it is one edit away from silently opening a room early.
-        select: { title: true, start_time: true, end_time: true },
+        select: { title: true, start_time: true, end_time: true, status: true },
       })
-      if (!event) {
+      if (!event || event.status === "draft") {
         return notFoundResponse("Chat not available for this event")
       }
 
