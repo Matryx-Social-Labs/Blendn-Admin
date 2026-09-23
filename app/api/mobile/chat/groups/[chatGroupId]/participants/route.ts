@@ -3,12 +3,15 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
+import { roomReadDenial } from "@/lib/chat-window"
+import { bannedRefusal } from "@/lib/moderation/actions"
 import {
   successResponse,
   unauthorizedResponse,
   notFoundResponse,
   errorResponse,
   serverErrorResponse,
+  ErrorCode,
 } from "@/lib/api-response"
 
 interface RouteParams {
@@ -39,7 +42,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Check if chat group exists
     const chatGroup = await db.chat_groups.findUnique({
       where: { id: chatGroupId, deleted_at: null },
-      select: { id: true },
+      select: { id: true, event: { select: { status: true } } },
     })
 
     if (!chatGroup) {
@@ -56,9 +59,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    if (!membership) {
-      return errorResponse("You are not a member of this chat group", 403)
-    }
+    // The roster is part of reading the room; same rule (SCRUM-205).
+    const denial = roomReadDenial(membership, chatGroup.event)
+    if (denial === "hidden") return notFoundResponse("Chat group not found")
+    if (denial === "not_member") return errorResponse("You are not a member of this chat group", 403)
+    if (denial === "banned") return errorResponse(bannedRefusal(membership!), 403, ErrorCode.USER_BANNED)
 
     /*
      * A block is a safety promise, not a mute.

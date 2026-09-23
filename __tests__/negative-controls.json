@@ -521,6 +521,12 @@
       "date": "2026-09-12",
       "note": "The defect this guards was found by joining a room from a socket.io client, posting through the REST route, and receiving nothing — in dev and against the production build."
     },
+    "integration/banned-cannot-read-the-room.itest.ts": {
+      "guards": "messages GET, participants GET and the event-chat GET all refuse a banned member with the true sentence, still serve active, muted and left members, and 404 a draft event's room (SCRUM-205)",
+      "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
+      "observed": "2 failing, 2 passing: all three reads answer 200 to the banned member.",
+      "date": "2026-09-24"
+    },
     "integration/room-send.itest.ts": {
       "guards": "that a plain text message (no metadata, no parent) is written by both send routes against real Postgres, and that a message with contact details is hidden on write and flagged (without an auto-mute) on both, with the sender served a placeholder",
       "mutation": "(a) in app/api/mobile/events/[eventId]/chat/route.ts, change `parent_id: parentId ?? null` back to `parent_id: parentId`; (b) in lib/moderation/contact-info.ts, change the verdict's `action: \"hide\"` back to `\"flag\"`",
@@ -765,7 +771,13 @@
       "observed": "1 failing: the 17-year-old's write answered 200 and the row held {gay,bisexual}.",
       "date": "2026-09-22"
     },
-    "venue-checkin-area-editable.test.ts": {
+    "room-read-denial.test.ts": {
+    "guards": "roomReadDenial refuses a banned member and hides a draft event's room while leaving active, muted and left members reading; bannedRefusal names the organiser only when banned_by is set (SCRUM-205)",
+    "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
+    "observed": "1 failing, 6 passing: a banned member is let in.",
+    "date": "2026-09-24"
+  },
+  "venue-checkin-area-editable.test.ts": {
     "guards": "the venue page mounts GeofenceEditor, loads the stored area, sends it on Save, and keeps a circle's centre and the pin together \u2014 so a fence drawn in the wrong place can be corrected at all (SCRUM-204)",
     "mutation": "In app/dashboard/venues/[id]/venue-manage.tsx, drop the `...(fence ? { geofence: fence } : {})` line from the updateVenue call.",
     "observed": "1 failing, 2 passing: the form mounts an editor whose result is never sent.",

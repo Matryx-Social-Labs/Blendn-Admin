@@ -8,7 +8,7 @@ import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
-import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
+import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import {
   successResponse,
@@ -20,7 +20,7 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
-import { chatClosedMessage, mayWriteToRoom } from "@/lib/chat-window"
+import { chatClosedMessage, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
@@ -59,6 +59,7 @@ export async function GET(
         members: {
           where: { user_id: user.userId },
         },
+        event: { select: { status: true } },
       },
     })
 
@@ -66,11 +67,12 @@ export async function GET(
       return notFoundResponse("Chat group not found")
     }
 
-    // Check if user is a member
-    const isMember = chatGroup.members.length > 0
-    if (!isMember) {
-      return forbiddenResponse("You are not a member of this chat group")
-    }
+    // Any membership row used to pass, `banned` included (SCRUM-205).
+    const membership = chatGroup.members[0]
+    const denial = roomReadDenial(membership, chatGroup.event)
+    if (denial === "hidden") return notFoundResponse("Chat group not found")
+    if (denial === "not_member") return forbiddenResponse("You are not a member of this chat group")
+    if (denial === "banned") return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
 
     // Build query for messages — include moderation-hidden messages
     // so the sender can see "This message was removed" placeholders
@@ -322,11 +324,7 @@ export async function POST(
     )
     if (denial) {
       if (denial.reason === "banned") {
-        return errorResponse(
-          "You have been banned from this chat group due to repeated policy violations.",
-          403,
-          ErrorCode.USER_BANNED
-        )
+        return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
       }
       if (denial.reason === "muted") {
         return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)

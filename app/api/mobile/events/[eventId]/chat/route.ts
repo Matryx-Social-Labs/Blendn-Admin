@@ -23,13 +23,14 @@ import {
   entitlementAdmits,
   mayWriteToRoom,
   roomEntitlement,
+  roomReadDenial,
   type RoomEntitlement,
 } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
-import { checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
+import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 
 interface RouteParams {
@@ -138,6 +139,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
       },
     })
+
+    /*
+     * The same read rule as the socket and the room's other reads (SCRUM-205).
+     * A banned member skipped the join below and fell straight through to the
+     * history — the ban stopped their posts and served them the room. A
+     * non-member is not refused here: the join below is how they get in.
+     */
+    const readDenial = roomReadDenial(membership, chatGroup.event)
+    if (readDenial === "hidden") return notFoundResponse("Chat not available for this event")
+    if (readDenial === "banned" && membership) {
+      return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+    }
 
     /*
      * Auto-join, but never a resurrection.
@@ -522,11 +535,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // User was auto-unmuted, proceed with sending
     }
     if (membership?.status === "banned") {
-      return errorResponse(
-        "You have been banned from this chat due to repeated policy violations.",
-        403,
-        ErrorCode.USER_BANNED
-      )
+      return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
     }
 
     /*
@@ -607,11 +616,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       const denial = mayWriteToRoom(membershipFresh, chatGroup.event, chatGroup)
       if (denial) {
         if (denial.reason === "banned") {
-          return errorResponse(
-            "You have been banned from this chat.",
-            403,
-            ErrorCode.USER_BANNED
-          )
+          return errorResponse(bannedRefusal(membershipFresh), 403, ErrorCode.USER_BANNED)
         }
         if (denial.reason === "muted") {
           return errorResponse(
