@@ -337,6 +337,19 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
       if (pin) refuseIfFenceDrifted(parsed.fence, pin)
     }
     geofence = parsed.fence
+  } else if (movingPin) {
+    /*
+     * The pin can move on its own — the venue page's other supported edit —
+     * and the stored fence stays exactly where it was. Moving the pin across
+     * town therefore drifted the door by the whole distance, unchecked,
+     * because the drift test only ran on a fence that came with the request
+     * (SCRUM-204). Same limit, same message, against what is already stored.
+     */
+    const stored = await db.venues.findUniqueOrThrow({ where: { id }, select: { geofence: true } })
+    const existing = validateGeofence(stored.geofence)
+    if (existing.ok && existing.fence) {
+      refuseIfFenceDrifted(existing.fence, input as { lat: number; lng: number })
+    }
   }
 
   await db.venues.update({

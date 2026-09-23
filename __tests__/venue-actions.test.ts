@@ -2,6 +2,7 @@ const mockDb = {
   venues: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -46,6 +47,8 @@ beforeEach(() => {
     owner_org_id: MY_ORG,
   })
   mockDb.venues.updateMany.mockResolvedValue({ count: 1 })
+  // A venue with no area drawn yet: the pin can move freely.
+  mockDb.venues.findUniqueOrThrow.mockResolvedValue({ geofence: null, latitude: LAT, longitude: LNG })
   mockDb.events.count.mockResolvedValue(0)
 })
 
@@ -335,6 +338,68 @@ describe("correcting the pin", () => {
     const data = mockDb.venues.update.mock.calls[0][0].data
     expect(data.latitude).toBe(19.076)
     expect(data.longitude).toBe(72.877)
+  })
+
+  it("refuses a pin move that would leave the stored check-in area behind", async () => {
+    /*
+     * The pin moves on its own — the venue page's other supported edit — and
+     * the stored fence stays where it was, so the door ends up the whole
+     * distance away from the place (SCRUM-204). Mumbai is 840 km from Toit.
+     */
+    signIn("app_admin")
+    mockDb.venues.findUniqueOrThrow.mockResolvedValue({
+      geofence: { type: "circle", lat: LAT, lng: LNG, radius: 30, buffer: 20 },
+    })
+    await expect(updateVenue("venue_1", { lat: 19.076, lng: 72.877 })).rejects.toThrow(
+      /check-in area is \d+ m from the venue's pin/i
+    )
+    expect(mockDb.venues.update).not.toHaveBeenCalled()
+
+    // 40 m along the street is a correction, not a move to another city.
+    await updateVenue("venue_1", { lat: LAT + 0.0004, lng: LNG })
+    expect(mockDb.venues.update).toHaveBeenCalled()
+  })
+
+  describe("with an area in the request — what the venue page sends on every Save", () => {
+    const circleAt = (lat: number, lng: number) => ({ type: "circle" as const, lat, lng, radius: 30, buffer: 20 })
+
+    it("judges it against the pin as it will be after the save", async () => {
+      signIn("app_admin")
+      // Pin and area moved together to Mumbai: consistent, so accepted.
+      await updateVenue("venue_1", { lat: 19.076, lng: 72.877, geofence: circleAt(19.076, 72.877) })
+      expect(mockDb.venues.update).toHaveBeenCalled()
+
+      // Pin to Mumbai, area left at Toit: refused.
+      mockDb.venues.update.mockClear()
+      await expect(
+        updateVenue("venue_1", { lat: 19.076, lng: 72.877, geofence: circleAt(LAT, LNG) })
+      ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
+      expect(mockDb.venues.update).not.toHaveBeenCalled()
+    })
+
+    it("refuses even a rename while the stored area is a kilometre from the pin", async () => {
+      /*
+       * Deliberate. The page resends the stored area with every Save, so a
+       * venue like QA Polygon Yard (ring 1.2 km from its pin) cannot be
+       * renamed until its area is corrected — and the editor that corrects it
+       * is on the same screen, under the message. A fence in the wrong place
+       * turns away everyone standing at the real door; saving around it would
+       * let that go unnoticed for another night.
+       */
+      signIn("venue_owner")
+      mockDb.venues.findUniqueOrThrow.mockResolvedValue({ latitude: LAT, longitude: LNG })
+      await expect(
+        updateVenue("venue_1", { name: "Toit Brewpub", geofence: circleAt(LAT + 0.011, LNG) })
+      ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
+      expect(mockDb.venues.update).not.toHaveBeenCalled()
+    })
+
+    it("accepts any area on a venue that has no pin yet", async () => {
+      signIn("app_admin")
+      mockDb.venues.findUniqueOrThrow.mockResolvedValue({ latitude: null, longitude: null })
+      await updateVenue("venue_1", { geofence: circleAt(19.076, 72.877) })
+      expect(mockDb.venues.update.mock.calls[0][0].data.geofence).toMatchObject({ type: "circle" })
+    })
   })
 
   it("leaves the pin alone when neither is given", async () => {
