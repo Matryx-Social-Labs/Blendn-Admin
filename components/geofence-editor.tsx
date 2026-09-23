@@ -87,11 +87,16 @@ export interface GeofenceEditorProps {
 export function GeofenceEditor({
   value,
   onChange,
-  fallbackCentre = { lat: 12.9716, lng: 77.5946 },
+  fallbackCentre: givenCentre,
   overlap = null,
   editable = true,
   height = 420,
 }: GeofenceEditorProps) {
+  const fallbackCentre = givenCentre ?? { lat: 12.9716, lng: 77.5946 }
+  // As numbers, so a hook can depend on the pin without re-running every render:
+  // callers pass it as an inline object.
+  const pinLat = givenCentre?.lat
+  const pinLng = givenCentre?.lng
   /*
    * Resolved in the body rather than at module scope: `getComputedStyle` needs a
    * document, and at module scope this would evaluate once during SSR and bake
@@ -423,10 +428,11 @@ export function GeofenceEditor({
    * skill to learn. Tracing by hand stays for everywhere OSM does not cover.
    */
   const importFootprint = useCallback(async () => {
-    const centre =
-      fence.type === "circle"
-        ? [fence.lat, fence.lng]
-        : centroid(fence.ring, [fallbackCentre.lat, fallbackCentre.lng])
+    const centre = anchor(
+      fence,
+      pinLat !== undefined && pinLng !== undefined ? { lat: pinLat, lng: pinLng } : undefined,
+      { lat: fallbackCentre.lat, lng: fallbackCentre.lng }
+    )
     setImporting(true)
     setImportNote(null)
     try {
@@ -463,7 +469,7 @@ export function GeofenceEditor({
     } finally {
       setImporting(false)
     }
-  }, [fence, onChange, fallbackCentre.lat, fallbackCentre.lng])
+  }, [fence, onChange, pinLat, pinLng, fallbackCentre.lat, fallbackCentre.lng])
 
   /* --------------------------------------------------------------- view --- */
 
@@ -477,10 +483,7 @@ export function GeofenceEditor({
       onChange({ type: "polygon", ring: [], buffer: fence.buffer })
     } else {
       setDrawing(false)
-      const centre =
-        fence.type === "polygon" && fence.ring.length
-          ? centroid(fence.ring, [fallbackCentre.lat, fallbackCentre.lng])
-          : [fallbackCentre.lat, fallbackCentre.lng]
+      const centre = anchor(fence, givenCentre, fallbackCentre)
       onChange({
         type: "circle",
         lat: centre[0],
@@ -703,6 +706,27 @@ function Legend({ token, dash, label }: { token: string; dash: string; label: st
  * venue was saved with its pin at Church Street and its fence at the city
  * centre (SCRUM-203). The only honest centre for nothing is the pin.
  */
+/**
+ * Where a shape nobody drew should start — a circle from a mode switch, the
+ * search area for "Use building outline".
+ *
+ * The caller's pin when it gave one. The shape already on the map can be the
+ * thing that is wrong: on the venue page a ring stored 1.2 km off seeded the
+ * switched-to circle on itself, the pin follows a circle, and the correct pin
+ * was dragged to the wrong place (SCRUM-204). Where the caller keeps its pin on
+ * the drawn shape — the event form — the two are the same point anyway. Only
+ * without a pin does the current shape stand in for the venue.
+ */
+function anchor(
+  fence: Geofence,
+  pin: { lat: number; lng: number } | undefined,
+  fallback: { lat: number; lng: number }
+): [number, number] {
+  if (pin) return [pin.lat, pin.lng]
+  if (fence.type === "circle") return [fence.lat, fence.lng]
+  return centroid(fence.ring, [fallback.lat, fallback.lng])
+}
+
 function centroid(ring: [number, number][], fallback: [number, number]): [number, number] {
   const centre = fenceCentre({ type: "polygon", ring, buffer: 0 })
   return centre ? [centre.lat, centre.lng] : fallback

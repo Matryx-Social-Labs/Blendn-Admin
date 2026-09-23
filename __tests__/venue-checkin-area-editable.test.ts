@@ -29,3 +29,24 @@ it("keeps a circle's centre and the pin together", () => {
   expect(manage).toMatch(/if \(next\.type === "circle"\) \{/)
   expect(manage).toMatch(/lat: String\(next\.lat\), lng: String\(next\.lng\)/)
 })
+
+/*
+ * A shape nobody drew starts on the caller's pin (SCRUM-204, driven on
+ * staging). On QA Polygon Yard, choosing Circle seeded the circle on the
+ * drifted ring 1.2 km away; the pin follows a circle, so the correct pin was
+ * dragged to the wrong place and Save would have passed the drift check by
+ * moving the venue. "Use building outline" searched around the same wrong spot.
+ */
+const editor = readFileSync(join(__dirname, "..", "components", "geofence-editor.tsx"), "utf8")
+
+it("seeds a switched-to circle and the building search on the pin, not on the shape being replaced", () => {
+  const fn = editor.slice(editor.indexOf("function anchor("), editor.indexOf("function centroid("))
+  // The pin is consulted first — before either shape.
+  expect(fn.indexOf("if (pin) return [pin.lat, pin.lng]")).toBeGreaterThan(-1)
+  expect(fn.indexOf("if (pin)")).toBeLessThan(fn.indexOf('fence.type === "circle"'))
+
+  const switchMode = editor.slice(editor.indexOf("function switchMode("), editor.indexOf("return (", editor.indexOf("function switchMode(")))
+  expect(switchMode).toContain("anchor(fence, givenCentre, fallbackCentre)")
+  const importer = editor.slice(editor.indexOf("const importFootprint"), editor.indexOf("setImporting(true)"))
+  expect(importer).toMatch(/anchor\(\s*fence,\s*pinLat !== undefined && pinLng !== undefined \? \{ lat: pinLat, lng: pinLng \} : undefined,/)
+})
