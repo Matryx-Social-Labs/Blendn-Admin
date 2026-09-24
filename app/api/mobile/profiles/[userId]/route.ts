@@ -266,8 +266,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      */
     const parsedDob = dateOfBirth !== undefined ? parseDateOfBirth(dateOfBirth) : null
 
+    // `looking_for` too: "dating" there is gated like the intent (SCRUM-294).
     const touchesAgeGate =
-      intent_default !== undefined || age !== undefined || dateOfBirth !== undefined
+      intent_default !== undefined ||
+      looking_for !== undefined ||
+      age !== undefined ||
+      dateOfBirth !== undefined
     const touchesDating = gender !== undefined || orientations !== undefined
     // `interested_in` and the consent switch are gated on age too, and the
     // gate needs the stored age when the request does not carry one.
@@ -291,6 +295,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               age: true,
               date_of_birth: true,
               intent_default: true,
+              looking_for: true,
               gender: true,
               orientations: true,
               show_orientation: true,
@@ -331,7 +336,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       age: age !== undefined ? age : (existing?.age ?? null),
     })
 
-    const refusal = datingAgeRefusal(intent_default, effectiveAge)
+    /*
+     * "Looking for: dating" is the same choice in free text. Onboarding offered
+     * a 17-year-old the Dating card and this route stored it while refusing the
+     * intent (SCRUM-294); same rule, same sentence.
+     */
+    const refusal =
+      datingAgeRefusal(intent_default, effectiveAge) ?? datingAgeRefusal(looking_for, effectiveAge)
     if (refusal) return forbiddenResponse(refusal)
     const orientationRefusal = orientationAgeRefusal(
       { orientations, interested_in, show_orientation },
@@ -356,6 +367,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         : null
     const stripsDating =
       demotedIntents !== null && demotedIntents.length !== existing?.intent_default.length
+    // And from "looking for", on the same correction.
+    const demotedLookingFor =
+      (age !== undefined || dateOfBirth !== undefined) &&
+      looking_for === undefined &&
+      existing?.looking_for?.length
+        ? stripDating(existing.looking_for, effectiveAge)
+        : null
+    const stripsLookingFor =
+      demotedLookingFor !== null && demotedLookingFor.length !== existing?.looking_for.length
     /*
      * The same rule for orientation: an age that drops below 18 takes the
      * stored orientation, "interested in" and the consent to show them with
@@ -538,6 +558,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(photos !== undefined && { photos }),
         ...(goals !== undefined && { goals }),
         ...(looking_for !== undefined && { looking_for }),
+        ...(stripsLookingFor && { looking_for: demotedLookingFor! }),
         ...(onboarded !== undefined && { onboarded }),
         // A suggestion the room re-asks by way of a tap — check-in still
         // creates the row with `revealed: false` whatever this says.

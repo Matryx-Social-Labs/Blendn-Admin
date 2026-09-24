@@ -1224,7 +1224,11 @@ the data must not become the thing that leaks it.
 Enforced on **both** write paths — `PUT /profiles/:userId` and
 `PUT /events/:eventId/matches/preferences` — because a gate on one of two is not
 a gate, and the per-event route also writes the profile default via
-`remember: true`. Refused with **403** and a message that names the rule:
+`remember: true`. `PUT /profiles/:userId` applies it to `looking_for` as well:
+that field is free text, so `"dating"` is matched in any case and spacing, and
+an age that drops below 18 takes it out of `looking_for` (the other choices
+stay) as it does out of `intent_default` (SCRUM-294). Refused with **403** and a
+message that names the rule:
 
 ```json
 { "success": false, "error": "Dating is for 18+ only. Your other choices are fine." }

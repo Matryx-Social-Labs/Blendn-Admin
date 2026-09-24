@@ -31,6 +31,12 @@ registry.registerPath({
   path: "/api/mobile/profiles/{userId}",
   tags: ["Mobile Profiles"],
   summary: "Update own profile",
+  description:
+    "Dating is 18+: for a profile under 18 (or with no age), a dating `intent_default` or a `looking_for` " +
+    "containing \"dating\" (any case) is refused with 403 \"Dating is for 18+ only. Your other choices are fine.\", " +
+    "and `orientations`, `interested_in` or `show_orientation: true` with 403 \"Orientation and who you're " +
+    "interested in are for 18+ only.\" An age correction below 18 clears the stored dating intent, the " +
+    "\"dating\" in `looking_for`, and the orientation fields.",
   security: bearerAuth,
   request: {
     params: z.object({ userId: z.string().uuid() }),

@@ -49,11 +49,19 @@ export function mayDate(age: number | null | undefined): boolean {
  * different actions from the user — one adds their age, the other cannot
  * proceed at all.
  */
+/**
+ * Whether a choice is dating, however it was written. The intent is an enum,
+ * but `looking_for` is free text — "Dating", " dating " — and a gate that only
+ * matched the exact lowercase word would be one capital letter wide (SCRUM-294).
+ */
+const isAgeGated = (value: string) =>
+  (AGE_GATED_INTENTS as readonly string[]).includes(value.trim().toLowerCase())
+
 export function datingAgeRefusal(
   intents: readonly string[] | undefined,
   age: number | null | undefined
 ): string | null {
-  if (!intents?.some((i) => (AGE_GATED_INTENTS as readonly string[]).includes(i))) return null
+  if (!intents?.some(isAgeGated)) return null
   if (mayDate(age)) return null
   return age == null
     ? "Add your age to your profile before choosing dating."
@@ -102,7 +110,7 @@ export function stripDating<T extends string>(
   age: number | null | undefined
 ): T[] {
   if (mayDate(age)) return [...intents]
-  return intents.filter((i) => !(AGE_GATED_INTENTS as readonly string[]).includes(i))
+  return intents.filter((i) => !isAgeGated(i))
 }
 
 /**
