@@ -393,7 +393,7 @@ async function refreshTimes() {
  */
 async function reviveCopiedCovers() {
   const events = await db.events.findMany({
-    where: { cover_image_url: { contains: RETIRED_COVER_HOST } },
+    where: { cover_image_url: { contains: RETIRED_COVER_HOST, mode: "insensitive" } },
     select: { id: true, slug: true, cover_image_url: true },
   })
   for (const e of events) {
@@ -403,7 +403,7 @@ async function reviveCopiedCovers() {
     console.log(`  ${e.slug.padEnd(34)} cover revived`)
   }
   const posters = await db.event_media.findMany({
-    where: { thumbnail_url: { contains: RETIRED_COVER_HOST } },
+    where: { thumbnail_url: { contains: RETIRED_COVER_HOST, mode: "insensitive" } },
     select: { id: true, thumbnail_url: true },
   })
   for (const m of posters) {

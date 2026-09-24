@@ -32,6 +32,7 @@ describe("seed covers", () => {
     // staging, 2026-09-24).
     expect(revivedCover("https://loremflickr.com/1600/1600/rooftop,party,sunset?lock=7521")).toBe(cover("rooftop"))
     expect(revivedCover("https://loremflickr.com/1600/1600/concert")).toBe(cover("concert"))
+    expect(revivedCover("http://LoremFlickr.com/1600/1600/Concert")).toBe(cover("concert"))
     expect(revivedCover("https://blendn-media-staging.fly.storage.tigris.dev/seed/x/cover.jpg")).toBeNull()
     expect(revivedCover("https://example.com/loremflickr.com/1/1/a")).toBeNull()
     expect(revivedCover(null)).toBeNull()
@@ -42,7 +43,8 @@ describe("seed covers", () => {
     const url = await mirrorToTigris("https://picsum.photos/x", "seed/founders-filter-coffee/cover.jpg", "image/jpeg", {})
 
     expect(url).toBe(`https://${SEED_BUCKET}.fly.storage.tigris.dev/seed/founders-filter-coffee/cover.jpg`)
-    expect(global.fetch).toHaveBeenCalledWith(url, { method: "HEAD" })
+    // Bounded: a host that never answers must not stall the whole refresh.
+    expect(global.fetch).toHaveBeenCalledWith(url, expect.objectContaining({ method: "HEAD", signal: expect.any(AbortSignal) }))
   })
 
   it("hotlinks when the bucket does not have it and there are no credentials to put it there", async () => {

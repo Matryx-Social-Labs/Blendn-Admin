@@ -35,7 +35,7 @@ export const cover = (subject: string): string =>
 
 /** The host seeded covers came from until it bot-checked the phone. */
 export const RETIRED_COVER_HOST = "loremflickr.com"
-const RETIRED_COVER = /^https:\/\/loremflickr\.com\/\d+\/\d+\/([a-z]+)/
+const RETIRED_COVER = /^https?:\/\/loremflickr\.com\/\d+\/\d+\/([a-z]+)/i
 
 /**
  * The live equivalent of a cover still on the retired host, or null. A
@@ -45,12 +45,15 @@ const RETIRED_COVER = /^https:\/\/loremflickr\.com\/\d+\/\d+\/([a-z]+)/
  */
 export const revivedCover = (url: string | null): string | null => {
   const subject = url?.match(RETIRED_COVER)?.[1]
-  return subject ? cover(subject) : null
+  return subject ? cover(subject.toLowerCase()) : null
 }
+
+/** Long enough for a slow host, short enough that one cannot stall a refresh. */
+const FETCH_TIMEOUT_MS = 10_000
 
 async function inBucket(url: string): Promise<boolean> {
   try {
-    return (await fetch(url, { method: "HEAD" })).ok
+    return (await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok
   } catch {
     return false
   }
@@ -85,7 +88,7 @@ export async function mirrorToTigris(
   }
 
   try {
-    const res = await fetch(sourceUrl, { redirect: "follow" })
+    const res = await fetch(sourceUrl, { redirect: "follow", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`source ${res.status}`)
     const body = Buffer.from(await res.arrayBuffer())
 
