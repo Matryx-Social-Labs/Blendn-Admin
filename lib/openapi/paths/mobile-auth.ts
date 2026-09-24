@@ -107,7 +107,10 @@ registry.registerPath({
   path: "/api/mobile/auth/refresh",
   tags: ["Mobile Auth"],
   summary: "Refresh access token",
-  description: "Exchange a refresh token for a new access/refresh token pair. Rate limited: 20 requests per 15 minutes.",
+  description:
+    "Exchange a refresh token for a new access/refresh token pair. Rate limited: 20 requests per 15 minutes. " +
+    "403 with a sentence to show when the account is suspended or is a staff account — for a suspension, also " +
+    "for the token the suspension revoked (signed by us, unexpired); 401 for any other refused token.",
   request: {
     body: {
       content: { "application/json": { schema: RefreshTokenRequestSchema } },

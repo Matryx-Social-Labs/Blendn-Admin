@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import {
   accountBlockReason,
+  revokedBySuspension,
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
@@ -43,6 +44,10 @@ export async function POST(request: NextRequest) {
     // Verify the refresh token
     const decoded = await verifyRefreshToken(oldRefreshToken)
     if (!decoded) {
+      // A session the suspension ended is told why, not just refused: the
+      // suspension revoked this very token, so without it the suspended check
+      // below is unreachable (SCRUM-290). Scoped in `revokedBySuspension`.
+      if (await revokedBySuspension(oldRefreshToken)) return forbiddenResponse(SUSPENDED_MESSAGE)
       return unauthorizedResponse("Invalid or expired refresh token")
     }
 

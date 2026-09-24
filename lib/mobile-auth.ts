@@ -215,6 +215,43 @@ export async function storeRefreshToken(
 }
 
 /**
+ * Whether this refused refresh token is one a **suspension** ended — so the
+ * route can say "This account has been suspended" instead of a bare 401.
+ *
+ * Suspension revokes every refresh token, which is why the route's suspended
+ * check was unreachable and a suspended phone could only say "You were signed
+ * out" (SCRUM-290). The answer is scoped as tightly as that case allows: a
+ * token we signed, not expired, whose stored row was revoked **at or after**
+ * the account's `suspended_at` — i.e. a session that was live when the
+ * suspension landed. A token revoked earlier (sign-out, a replayed-and-killed
+ * family) or forged or expired tells its holder nothing, so an old leaked
+ * token is not a 30-day oracle for the account's standing.
+ */
+export async function revokedBySuspension(token: string): Promise<boolean> {
+  let claim: DecodedToken
+  try {
+    claim = jwt.verify(token, getJwtSecret()) as DecodedToken
+  } catch {
+    return false
+  }
+  if (claim.type !== "refresh" || !claim.jti) return false
+
+  const row = await db.mobile_refresh_tokens.findUnique({
+    where: { id: claim.jti },
+    select: { user_id: true, revoked_at: true, user: { select: { suspended_at: true, deletedAt: true } } },
+  })
+  const suspendedAt = row?.user.suspended_at
+  return Boolean(
+    row &&
+      row.user_id === claim.userId &&
+      !row.user.deletedAt &&
+      suspendedAt &&
+      row.revoked_at &&
+      row.revoked_at >= suspendedAt
+  )
+}
+
+/**
  * Verify a refresh token against the database
  * Returns the decoded token if valid, null otherwise
  */
