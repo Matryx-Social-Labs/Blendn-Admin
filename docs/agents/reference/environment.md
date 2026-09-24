@@ -14,19 +14,29 @@ Production (`dashboard.blendn.app` / `api.blendn.app`) is **out of bounds** for
 writes; read-only, and only when explicitly required.
 
 ## Seed accounts (staging)
-Same set as local, seeded by `scripts/seed-qa.ts`. Sign in with the **staging
-seed password** (held out-of-band — the session/owner, not this repo).
+One account per dashboard role, written on **every staging deploy** by
+`scripts/test-accounts.ts` (the Railway pre-deploy step). The password is the
+`SEED_PASSWORD` variable on the staging `Blendn-Admin` service — read it with
+`railway variables --environment staging --service Blendn-Admin`, never copy it
+into a file. Change the variable to rotate it; Railway redeploys. To re-seed
+staging from a laptop, `RAILWAY_ENVIRONMENT_NAME=staging` must be set as well —
+the seed refuses any database that is not staging or `localhost`.
 
-| Email | Role |
-|---|---|
-| `sagar.kishore@blendn.app` | app_admin |
-| `arjun.rao@blendn.app` | organizer (Nightshift Collective) |
-| `fatima.sheikh@blendn.app` | venue_owner |
-| `meera.iyer@blendn.app` | sponsor (Blue Tokai) |
-| `ananya.b@blendn.app`, `rohan.d@blendn.app`, `sneha.p@blendn.app`, … | attendees |
+| Email | Role | Persona |
+|---|---|---|
+| `admin@blendn.app` | app_admin | Priya Menon |
+| `organizer@blendn.app` | organizer | Arjun Rao, Nightshift Collective |
+| `venue.owner@blendn.app` | venue_owner | Fatima Sheikh, Indiranagar Hospitality Group |
+| `sponsor@blendn.app` | sponsor | Meera Iyer, Blue Tokai Coffee Roasters |
 
-Resolve ids against the staging DB rather than hardcoding — a reseed changes
-them (staging ids are `cmt…`, distinct from local).
+The personas were renamed in place from `priya.menon@`, `arjun.rao@`,
+`fatima.sheikh@` and `meera.iyer@` — same ids, same history. Also seeded by
+`seed-qa.ts`, same password: `sagar.kishore@`, `hemanth.ramesh@`,
+`likhith.gowda@` (named admins), `daniel.weber@` (organiser with no org — the
+negative control), and the attendees `ananya.b@`, `rohan.d@`, `sneha.p@`, ….
+
+Resolve ids against the staging DB rather than hardcoding (staging ids are
+`cmt…`, distinct from local).
 
 ## Staging database (read freely; write through the API)
 The public connection string is a Railway variable, not a constant:

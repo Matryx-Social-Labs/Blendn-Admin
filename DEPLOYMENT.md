@@ -79,6 +79,26 @@ railway run npx prisma migrate deploy
 
 Railway also runs this automatically on deploy, so you rarely need it by hand.
 
+#### The test accounts are written by the same step
+
+`railway.json`'s pre-deploy command is `npm run railway:predeploy`: the
+migrations, then `scripts/test-accounts.ts`. That creates or repairs one
+dashboard account per role — `admin@`, `organizer@`, `venue.owner@` and
+`sponsor@blendn.app` — with their organisations and memberships, and sets their
+password to `SEED_PASSWORD`.
+
+- **Staging only.** It writes nothing when `SEED_PASSWORD` is unset, and nothing
+  on any Railway environment but `staging` even when it is set — production and
+  PR environments deploy untouched. The check is an allow-list inside the shared
+  function, so `seed:qa` and `db:seed` refuse the same way.
+- **From a laptop**, only a `localhost` database passes. To seed staging through
+  its public URL, say so: `RAILWAY_ENVIRONMENT_NAME=staging SEED_PASSWORD=…
+  DATABASE_URL=<staging public URL> npm run seed:qa -- --apply`.
+- **Rotation is changing the variable.** Railway redeploys and the step rehashes.
+- **A password `checkPassword` refuses fails the deploy**, with the reason in the
+  deploy log. Better than an account nobody can sign in to.
+- It prints the addresses, never the password.
+
 #### `migrate status` reports two missing migration files. That is expected.
 
 On production and staging you will see something like:
@@ -165,6 +185,10 @@ fresh account, since this one is deliberately already onboarded.
 SEED_ROOM=yes SEED_ROOM_PASSWORD=<pick one> DATABASE_URL=<staging> npm run seed:room
 SEED_ROOM=yes SEED_ROOM_PASSWORD=<same one> DATABASE_URL=<staging> npm run seed:room -- --clean
 ```
+
+The room's organiser is `organizer@blendn.app` in Nightshift Collective, so it
+is on the dashboard people already sign in to. The script only looks that
+account up and refuses if a deploy has not created it yet.
 
 `SEED_ROOM_PASSWORD` has **no default** and the script refuses to run without at
 least twelve characters. It was a constant in the file until the repositories
@@ -266,6 +290,7 @@ so it is never related to session or login state.
 | `PUBLIC_APPLY_URL` | No | Host for the public apply flow, e.g. `https://organizers.blendn.app`. Only the apply/confirm emails follow it — invite, approval and domain links stay on `NEXTAUTH_URL` because they need a session. Unset, everything uses `NEXTAUTH_URL` |
 | `EMAIL_FOOTER_ADDRESS` | No | Registered office, shown in the email footer. Omitted entirely when unset — a made-up address in a compliance footer is worse than none. Set it before any bulk sending |
 | `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
+| `SEED_PASSWORD` | Staging only | Password for the dashboard test accounts, set on every deploy by `scripts/test-accounts.ts`. Never on production — the step refuses there anyway |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |
 | `PORT` | No | Server port (Railway sets this) |

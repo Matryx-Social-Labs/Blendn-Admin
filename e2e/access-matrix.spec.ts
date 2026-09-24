@@ -46,8 +46,8 @@ const DASHBOARD_ROLES: RoleKey[] = ["admin", "organizer", "venue", "sponsor"]
  */
 const ROW_MARKER: Record<string, string> = {
   "/dashboard/users": "hemanth.ramesh@blendn.app",
-  "/dashboard/organisers": "arjun.rao@blendn.app",
-  "/dashboard/venue-owners": "fatima.sheikh@blendn.app",
+  "/dashboard/organisers": "organizer@blendn.app",
+  "/dashboard/venue-owners": "venue.owner@blendn.app",
   "/dashboard/organisations": "Nightshift Collective",
   "/dashboard/onboarding": "founder@thehummingtree.com",
   "/dashboard/claims": "events@toit.in",

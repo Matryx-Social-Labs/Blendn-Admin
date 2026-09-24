@@ -318,7 +318,7 @@ every table header — under AA on nearly every screen.
 
 | Seeded | Why it is there |
 |---|---|
-| 4 admins, organiser, venue owner, sponsor, attendee | the 5 × 38 route matrix |
+| `admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app` (from `scripts/test-accounts.ts`), 3 named admins, the no-org organiser, attendees | the 5 × 38 route matrix |
 | `teen.tester@blendn.app`, under 18 | the age gate has something to refuse |
 | 3 curated events — open / dead / claimed, **5 refusals on the dead one** | curation health, and the only refusal data in the product |
 | Multi-day `design-week-bengaluru` | occurrences, and the person-days-vs-people trap |
@@ -682,12 +682,15 @@ npx tsx scripts/seed-categories.ts
 npm run dev                  # 3100, so it never collides with anything on 3000
 ```
 
-Sign in as `sagar.kishore@blendn.app`.
+Sign in as `admin@blendn.app`, `organizer@blendn.app`, `venue.owner@blendn.app`
+or `sponsor@blendn.app`, with the `SEED_PASSWORD` above. On staging it is the
+Railway variable of the same name.
 
 Three traps that have each cost time:
 
 - **`seed:qa` is a dry run without `--apply`**, and prints the accounts either
-  way — so the login looks seeded and is not.
+  way — so the login looks seeded and is not. With `--apply` it refuses to run
+  without `SEED_PASSWORD`.
 - `browse` refuses `file://` and screenshot paths outside the repo or
   `/private/tmp`. Serve the mockup instead — `python3 -m http.server 8765` from
   its design directory — and screenshot to `/private/tmp`, then copy back.
