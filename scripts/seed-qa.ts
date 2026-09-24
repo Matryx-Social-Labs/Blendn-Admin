@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
-import { ensureTestAccounts, TEST_ACCOUNTS } from "./test-accounts"
+import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS } from "./test-accounts"
 
 /**
  * A world the QA team can actually test against.
@@ -43,8 +43,9 @@ import { ensureTestAccounts, TEST_ACCOUNTS } from "./test-accounts"
  * a suite where everything passes by default is not a suite.
  *
  * Run:
- *   DATABASE_URL=... npx tsx scripts/seed-qa.ts            # dry run
+ *   DATABASE_URL=... npx tsx scripts/seed-qa.ts                   # dry run
  *   DATABASE_URL=... npx tsx scripts/seed-qa.ts --apply
+ *   DATABASE_URL=... npx tsx scripts/seed-qa.ts --refresh-times   # a live event again, nothing reset
  *
  * Idempotent: emails and slugs are stable, so re-running resets passwords and
  * leaves the world where it was rather than duplicating it.
@@ -58,6 +59,7 @@ const db = new PrismaClient({
 })
 
 const APPLY = process.argv.includes("--apply")
+const REFRESH_TIMES = process.argv.includes("--refresh-times")
 
 /**
  * One password for every seeded account, and **required** to write.
@@ -407,6 +409,50 @@ const CLIPS: Record<string, string> = {
   "basement-six-residents":
     "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4",
 }
+/**
+ * `--refresh-times`: put the seeded events back at their offsets from now, and
+ * touch nothing else.
+ *
+ * An event is live for three hours after a seed run, and `--apply` resets
+ * every room's memberships, bans and moderation state under whoever is testing
+ * (docs/agents/TEST-PLAN.md §4). This gives the sessions a live event back
+ * without resetting anyone's world. Occurrences go through the product's own
+ * writer, so check-in can resolve the day. A room the archive sweep closed is
+ * reopened with its `left` members active again: the sweep moved active and
+ * muted members alike to `left`, so a mute from before the close is not
+ * restored. Bans are never touched — the sweep leaves them, and so does this.
+ */
+async function refreshTimes() {
+  for (const spec of EVENTS) {
+    const event = await db.events.findUnique({
+      where: { slug: spec.slug },
+      select: { id: true, timezone: true },
+    })
+    if (!event) {
+      console.log(`  !  ${spec.slug} is not seeded yet — run --apply once`)
+      continue
+    }
+    const start = hoursFromNow(spec.startsIn)
+    const end = hoursFromNow(spec.startsIn + spec.hours)
+    await db.events.update({ where: { id: event.id }, data: { start_time: start, end_time: end } })
+    await syncOccurrences(event.id, start, end, event.timezone)
+
+    const archived = await db.chat_groups.findMany({
+      where: { event_id: event.id, status: "archived" },
+      select: { id: true },
+    })
+    if (archived.length && end > new Date()) {
+      const ids = archived.map((g) => g.id)
+      await db.chat_groups.updateMany({ where: { id: { in: ids } }, data: { status: "active" } })
+      await db.chat_group_members.updateMany({
+        where: { chat_group_id: { in: ids }, status: "left" },
+        data: { status: "active" },
+      })
+    }
+    console.log(`  ${spec.slug.padEnd(34)} ${start.toISOString()}${archived.length ? "  (room reopened)" : ""}`)
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 
 async function main() {
@@ -419,7 +465,24 @@ async function main() {
   })()
 
   console.log(`\ndatabase: ${host}`)
-  console.log(APPLY ? "mode:     APPLY — this will write\n" : "mode:     dry run\n")
+  console.log(
+    REFRESH_TIMES
+      ? "mode:     REFRESH TIMES — event times and closed rooms only\n"
+      : APPLY
+        ? "mode:     APPLY — this will write\n"
+        : "mode:     dry run\n"
+  )
+
+  if (REFRESH_TIMES) {
+    const refusal = environmentRefusal(process.env)
+    if (refusal) {
+      console.error(`REFUSING: ${refusal}`)
+      process.exitCode = 1
+      return
+    }
+    await refreshTimes()
+    return
+  }
 
   if (!APPLY) {
     console.log("Would create:")

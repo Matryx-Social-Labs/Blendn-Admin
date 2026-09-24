@@ -141,8 +141,21 @@ few hours after a re-seed. Check first:
 npm run -s qa world     # live now and within 48 h, odd room memberships, device locks
 ```
 
-**Re-seed only when** no unit labelled `needs-live-event` is In Progress
-(the *Needs a live event* view), and log it on SCRUM-208:
+**No live event? Refresh the times — this is safe with others testing:**
+
+```bash
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" \
+  npx tsx scripts/seed-qa.ts --refresh-times
+```
+
+It moves every seeded event back to its offset from now (Founders & Filter
+Coffee is live for the next ~2.5 h) and reopens a room the archive sweep closed.
+Nothing else changes: memberships, bans, profiles, claims stay as they are. Post
+one line on SCRUM-208.
+
+**A full re-seed (`--apply`) resets memberships and moderation state.** Run it
+only when no unit labelled `needs-live-event` is In Progress (the *Needs a live
+event* view), and log it on SCRUM-208 with `npm run -s qa world` from after:
 
 ```bash
 SEED_PASSWORD="$(railway variables --environment staging --service Blendn-Admin --json | jq -r .SEED_PASSWORD)" \
@@ -150,8 +163,9 @@ RAILWAY_ENVIRONMENT_NAME=staging \
 DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" npm run seed:qa -- --apply
 ```
 
-Then paste `npm run -s qa world` into a comment on SCRUM-208. A re-seed resets
-memberships and moderation state, which is why it has to be announced.
+Every seeded person shares `SEED_PASSWORD`: the deploy step re-asserts it on
+the role accounts **and** on `SEED_PERSONAS` (the attendees, named admins, the
+no-org control), so a rotation on Railway reaches all of them on the next deploy.
 
 ---
 

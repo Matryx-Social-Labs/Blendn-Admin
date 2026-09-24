@@ -777,6 +777,12 @@
     "observed": "1 failing, 1 passing: the banned person's sockets stay in the room.",
     "date": "2026-09-24"
   },
+  "seed-personas-listed.test.ts": {
+    "guards": "every @blendn.app person seed-qa makes with the shared password is in SEED_PERSONAS, so the deploy step re-asserts their password after a rotation",
+    "mutation": "In scripts/test-accounts.ts, delete \"teen.tester@blendn.app\" from SEED_PERSONAS.",
+    "observed": "1 failing, 1 passing: the teen tester is seeded and not re-asserted.",
+    "date": "2026-09-24"
+  },
   "qa-tool.test.ts": {
     "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts",
     "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS.",
