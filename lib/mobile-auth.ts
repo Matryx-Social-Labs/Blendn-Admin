@@ -215,22 +215,40 @@ export async function storeRefreshToken(
 }
 
 /**
- * Whose refresh token this is, if we signed it and it has not expired —
- * whether or not it is still live.
+ * Whether this refused refresh token is one a **suspension** ended — so the
+ * route can say "This account has been suspended" instead of a bare 401.
  *
- * Only for choosing what to *tell* someone whose refresh was refused, never
- * for issuing anything: suspension revokes every refresh token, so without
- * this the refresh route could only ever answer a suspended person with 401
- * and the phone had no way to say why (SCRUM-290). A forged or expired token
- * names nobody.
+ * Suspension revokes every refresh token, which is why the route's suspended
+ * check was unreachable and a suspended phone could only say "You were signed
+ * out" (SCRUM-290). The answer is scoped as tightly as that case allows: a
+ * token we signed, not expired, whose stored row was revoked **at or after**
+ * the account's `suspended_at` — i.e. a session that was live when the
+ * suspension landed. A token revoked earlier (sign-out, a replayed-and-killed
+ * family) or forged or expired tells its holder nothing, so an old leaked
+ * token is not a 30-day oracle for the account's standing.
  */
-export function refreshTokenOwner(token: string): string | null {
+export async function revokedBySuspension(token: string): Promise<boolean> {
+  let claim: DecodedToken
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as DecodedToken
-    return decoded.type === "refresh" && decoded.userId ? decoded.userId : null
+    claim = jwt.verify(token, getJwtSecret()) as DecodedToken
   } catch {
-    return null
+    return false
   }
+  if (claim.type !== "refresh" || !claim.jti) return false
+
+  const row = await db.mobile_refresh_tokens.findUnique({
+    where: { id: claim.jti },
+    select: { user_id: true, revoked_at: true, user: { select: { suspended_at: true, deletedAt: true } } },
+  })
+  const suspendedAt = row?.user.suspended_at
+  return Boolean(
+    row &&
+      row.user_id === claim.userId &&
+      !row.user.deletedAt &&
+      suspendedAt &&
+      row.revoked_at &&
+      row.revoked_at >= suspendedAt
+  )
 }
 
 /**

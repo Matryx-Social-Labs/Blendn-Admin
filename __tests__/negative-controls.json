@@ -790,9 +790,9 @@
     "date": "2026-09-24"
   },
   "refresh-after-suspension.itest.ts": {
-    "guards": "POST /api/mobile/auth/refresh answers a revoked token with 403 SUSPENDED_MESSAGE / STAFF_MESSAGE when the account behind it is suspended or staff (suspension revokes every refresh token, so the 403 was unreachable), and names nobody for a forged or expired token (SCRUM-290)",
-    "mutation": "M1: in the route, replace `return (owner && refusalFor(accountBlockReason(owner))) || unauthorizedResponse(...)` with `return unauthorizedResponse(...)`. M2: in refreshTokenOwner, `jwt.decode(token)` instead of `jwt.verify(token, getJwtSecret())`. M3: `jwt.verify(token, getJwtSecret(), { ignoreExpiration: true })`.",
-    "observed": "M1: 2 failing ('tells a suspended person why…', 'tells a person whose account became staff why…'), 2 passing. M2: 1 failing ('says nothing about an account to a token that is not ours or has expired': the forged token got 403), 3 passing. M3: 1 failing (same test: the expired token got 403), 3 passing.",
+    "guards": "POST /api/mobile/auth/refresh answers a refresh token that the suspension revoked with 403 SUSPENDED_MESSAGE (suspension revokes every token, so the 403 was unreachable) — and only that token: one revoked before the suspension, a staff account's revoked token, a deleted account, and a forged or expired token all stay 401 (SCRUM-290)",
+    "mutation": "M1: drop `if (await revokedBySuspension(oldRefreshToken)) return forbiddenResponse(SUSPENDED_MESSAGE)` from the route. M2: `jwt.decode(token)` instead of `jwt.verify(token, getJwtSecret())` in revokedBySuspension. M3: `{ ignoreExpiration: true }`. M4: drop `row.revoked_at >= suspendedAt`. M5: drop `!row.user.deletedAt`.",
+    "observed": "Each fails exactly 1 of 7, all distinct: M1 'tells a suspended person why…'; M2 and M3 'says nothing about an account to a token that is not ours or has expired'; M4 'says nothing for a token revoked before the suspension'; M5 'does not confirm a deleted account…'.",
     "date": "2026-09-24"
   },
   "qa-tool.test.ts": {
