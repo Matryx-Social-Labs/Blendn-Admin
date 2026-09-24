@@ -31,6 +31,10 @@ Screen: /dashboard/<x>
 3 · Mockup:     <path>  (or: skipped — copy-only change, no layout effect)
 ```
 
+**Testing sessions start at `docs/agents/TEST-PLAN.md`** — the shared Jira
+queue (label `tq`), claims, attendee lanes, the staging world log — and run
+through `/tq-setup`, `/tq-next`, `/tq-fix` (`.claude/commands/`).
+
 `docs/TESTING-PLAYBOOK.md` starts once the screen exists: driving it in a
 browser and measuring it, the six gates, the specialist fan-out (coverage EVERY
 time, plus schema, latency, API, security, comment-rot, a11y by trigger), how to
