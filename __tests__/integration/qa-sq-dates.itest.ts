@@ -26,3 +26,17 @@ it("leaves every other type as it was", async () => {
   const rows = await sq("SELECT 17::int AS n, 'x'::text AS s, NULL::date AS nd, ARRAY['a','b']::text[] AS arr, true AS b")
   expect(formatRows(rows)).toEqual(['17|x|null|["a","b"]|true'])
 })
+
+it("prints arrays of dates and timestamps as stored too", async () => {
+  const rows = await sq(
+    "SELECT ARRAY['2010-01-01','2009-06-15']::date[] AS ds, ARRAY['2026-09-24 20:27:19.217', NULL]::timestamp[] AS ts"
+  )
+  expect(formatRows(rows)).toEqual(['["2010-01-01","2009-06-15"]|["2026-09-24T20:27:19.217Z",null]'])
+})
+
+it("passes infinity and BC through as stored rather than mangling them", async () => {
+  const rows = await sq(
+    "SELECT 'infinity'::timestamp AS inf, '-infinity'::timestamp AS ninf, '0044-03-15 12:00:00 BC'::timestamp AS bc, 'infinity'::date AS dinf"
+  )
+  expect(formatRows(rows)).toEqual(["infinity|-infinity|0044-03-15 12:00:00 BC|infinity"])
+})

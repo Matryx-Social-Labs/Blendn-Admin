@@ -93,6 +93,13 @@ function databaseUrl(): string {
  */
 const PG_DATE = 1082
 const PG_TIMESTAMP = 1114
+const PG_DATE_ARRAY = 1182
+const PG_TIMESTAMP_ARRAY = 1115
+const PG_TEXT_ARRAY = 1009
+// Only an ordinary finite timestamp becomes ISO-with-Z; `infinity` and BC
+// values are passed through as stored rather than mangled into "infinityZ".
+const FINITE_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/
+const asStoredUtc = (value: string) => (FINITE_TIMESTAMP.test(value) ? `${value.replace(" ", "T")}Z` : value)
 
 export async function sq(sql: string): Promise<Record<string, unknown>[]> {
   const { Client, types } = await import("pg")
@@ -102,7 +109,15 @@ export async function sq(sql: string): Promise<Record<string, unknown>[]> {
     types: {
       getTypeParser: ((oid: number, format?: "text" | "binary") => {
         if (oid === PG_DATE) return (value: string) => value
-        if (oid === PG_TIMESTAMP) return (value: string) => `${value.replace(" ", "T")}Z`
+        if (oid === PG_TIMESTAMP) return asStoredUtc
+        // The array types have parsers of their own that bypass the two above.
+        // pg's typings list scalar OIDs only; text[] (1009) is a real registered parser.
+        const textArray = types.getTypeParser(
+          PG_TEXT_ARRAY as unknown as Parameters<typeof types.getTypeParser>[0],
+          "text"
+        ) as (v: string) => (string | null)[]
+        if (oid === PG_DATE_ARRAY) return textArray
+        if (oid === PG_TIMESTAMP_ARRAY) return (value: string) => textArray(value).map((v) => (v === null ? null : asStoredUtc(v)))
         return types.getTypeParser(oid, format)
       }) as typeof types.getTypeParser,
     },
