@@ -193,7 +193,7 @@ no-org control), so a rotation on Railway reaches all of them on the next deploy
   `blendn/.maestro/`. After typing, tap the keyboard's bottom-right key.
 - Dashboard: gstack `browse`, signed in as the role the unit names.
 - API: curl with `$(npm run -s qa token <email>)`.
-- Sockets: `npm run -s qa probe <chatGroupId> <email> [seconds] [--post-as <email> <text>]`.
+- Sockets: `npm run -s qa probe <chatGroupId> <email> [seconds] [post-as <email> <text>]`.
 - Read every row back: `npm run -s qa sq "SELECT …"` (read-only by construction:
   writes go through the product).
 - A finding is its **own** ticket, labelled `found-in-<unit key>` and its

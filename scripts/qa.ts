@@ -10,7 +10,7 @@ import { join } from "node:path"
  *   npm run -s qa sq "SELECT …"          read-only query, pipe-separated rows
  *   npm run -s qa token <email>          a live access token, cached and refreshed
  *   npm run -s qa world                  what is live, soon, and who holds a device
- *   npm run -s qa probe <chatGroupId> <email> [seconds] [--post-as <email> <text>]
+ *   npm run -s qa probe <chatGroupId> <email> [seconds] [post-as <email> <text>]
  *   npm run -s qa lock <device> <tag>    npm run -s qa unlock <device>
  *
  * Scratch lives in ~/.blendn-qa, not /tmp: macOS purges /tmp, and on
@@ -225,6 +225,46 @@ function lock(device: string, tag: string) {
 
 /* ------------------------------------------------------------------- probe */
 
+const PROBE_USAGE = "usage: qa probe <chatGroupId> <email> [seconds] [post-as <email> <text>]"
+const PROBE_DEFAULT_SECONDS = 20
+
+export interface ProbeArgs {
+  groupId: string
+  email: string
+  seconds: number
+  postAs?: string
+  text?: string
+}
+
+/**
+ * `probe`'s arguments, refusing any it would otherwise ignore.
+ *
+ * `npm run -s qa probe … --post-as rohan@ hi` hands this `… rohan@ hi`: npm 11
+ * keeps `--post-as` as its own config flag. This used to parse that as a
+ * listen-only probe without a word, and a probe exists to show a banned socket
+ * hearing nothing — so it passed whether or not the ban evicted anyone
+ * (SCRUM-284). The keyword is `post-as`, which npm passes through; the flag
+ * still works where npm is not in the way (`npm run -s qa -- probe …`).
+ */
+export function probeArgs(args: readonly string[]): ProbeArgs {
+  const [groupId, email, ...rest] = args
+  if (!groupId || !email) throw new Error(PROBE_USAGE)
+  // Seconds are optional, so only a positive whole number is taken as them —
+  // `Number("--post-as")` was NaN, which closed the socket as it posted.
+  const hasSeconds = /^[1-9]\d*$/.test(rest[0] ?? "")
+  const seconds = hasSeconds ? Number(rest[0]) : PROBE_DEFAULT_SECONDS
+  const tail = hasSeconds ? rest.slice(1) : rest
+  if (tail.length === 0) return { groupId, email, seconds }
+
+  const [keyword, postAs, ...words] = tail
+  if ((keyword === "post-as" || keyword === "--post-as") && postAs?.includes("@") && words.length > 0) {
+    return { groupId, email, seconds, postAs, text: words.join(" ") }
+  }
+  throw new Error(
+    `probe: will not ignore "${tail.join(" ")}". npm drops --flags, so a post is "post-as <email> <text>". ${PROBE_USAGE}`
+  )
+}
+
 /**
  * Hold a real socket in a room and print everything it hears. Live delivery is
  * a socket probe, not a screenshot (TESTING-PLAYBOOK §8): a REST 201 does not
@@ -277,12 +317,12 @@ async function main() {
       console.log(`unlocked ${args[0]}`)
       break
     case "probe": {
-      const postAt = args.indexOf("--post-as")
-      await probe(args[0], args[1], Number(args[2] ?? 20), postAt > 0 ? args[postAt + 1] : undefined, postAt > 0 ? args.slice(postAt + 2).join(" ") : undefined)
+      const p = probeArgs(args)
+      await probe(p.groupId, p.email, p.seconds, p.postAs, p.text)
       break
     }
     default:
-      console.log("usage: qa bootstrap | sq <sql> | token <email> | world | lock <device> <tag> | unlock <device> | probe <group> <email> [s] [--post-as <email> <text>]")
+      console.log("usage: qa bootstrap | sq <sql> | token <email> | world | lock <device> <tag> | unlock <device> | probe <group> <email> [s] [post-as <email> <text>]")
       process.exitCode = cmd ? 1 : 0
   }
 }
