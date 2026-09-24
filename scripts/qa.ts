@@ -83,10 +83,30 @@ function databaseUrl(): string {
   return readFileSync(scratch("pgurl"), "utf8").trim()
 }
 
-async function sq(sql: string): Promise<Record<string, unknown>[]> {
-  const { Client } = await import("pg")
+/*
+ * `date` and zone-less `timestamp` come back as stored, not through the
+ * machine's zone. The driver parses both as local time, so on a Mac at UTC+2 a
+ * birth date of 2010-01-01 read 2009-12-31T23:00:00.000Z and a 20:27Z
+ * `deletedAt` read 18:27Z — a read-back that invents defects (SCRUM-295).
+ * Prisma writes zone-less timestamps as UTC, hence the `Z`. Per client, not
+ * `pg.types.setTypeParser`: nothing else in the process is changed.
+ */
+const PG_DATE = 1082
+const PG_TIMESTAMP = 1114
+
+export async function sq(sql: string): Promise<Record<string, unknown>[]> {
+  const { Client, types } = await import("pg")
   // The connection string decides TLS, exactly as seed-qa's does.
-  const client = new Client({ connectionString: databaseUrl() })
+  const client = new Client({
+    connectionString: databaseUrl(),
+    types: {
+      getTypeParser: ((oid: number, format?: "text" | "binary") => {
+        if (oid === PG_DATE) return (value: string) => value
+        if (oid === PG_TIMESTAMP) return (value: string) => `${value.replace(" ", "T")}Z`
+        return types.getTypeParser(oid, format)
+      }) as typeof types.getTypeParser,
+    },
+  })
   await client.connect()
   try {
     await client.query("BEGIN READ ONLY")
@@ -98,14 +118,16 @@ async function sq(sql: string): Promise<Record<string, unknown>[]> {
   }
 }
 
+export function formatRows(rows: Record<string, unknown>[]): string[] {
+  return rows.map((row) =>
+    Object.values(row)
+      .map((v) => (v instanceof Date ? v.toISOString() : v !== null && typeof v === "object" ? JSON.stringify(v) : String(v)))
+      .join("|")
+  )
+}
+
 function printRows(rows: Record<string, unknown>[]) {
-  for (const row of rows) {
-    console.log(
-      Object.values(row)
-        .map((v) => (v instanceof Date ? v.toISOString() : v !== null && typeof v === "object" ? JSON.stringify(v) : String(v)))
-        .join("|")
-    )
-  }
+  for (const line of formatRows(rows)) console.log(line)
 }
 
 /* ------------------------------------------------------------------ tokens */
