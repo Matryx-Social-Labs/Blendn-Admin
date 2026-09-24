@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "qa-sq-dates.itest.ts": {
+      "guards": "`npm run -s qa sq` returns date columns and zone-less timestamp columns as stored (2010-01-01, 2026-09-24T20:27:19.217Z) under TZ=Asia/Kolkata, timestamptz unchanged, other types untouched (SCRUM-295)",
+      "mutation": "M1: drop the date (1082) parser. M2: drop the timestamp (1114) parser. M3: timestamp parser returns the raw value (no T, no Z).",
+      "observed": "Each leaves 1 of 2 tests failing ('prints a date, a zone-less timestamp and a timestamptz as the database holds them'): M1 prints 2009-12-31T18:30:00.000Z for the date, M2 prints 14:57Z for the 20:27Z timestamp, M3 prints '2026-09-24 20:27:19.217'.",
+      "date": "2026-09-25"
+    },
     "age.test.ts": {
       "guards": "datingAgeRefusal/stripDating catch free-text dating however it is written — DATİNG, dat\\u200bing, fullwidth, combining accent, 'casual dating', 'Dating!' — refused under 18 and stripped on an age drop, while 'updating' and 'candidates' are not mistaken for it (SCRUM-294, security review)",
       "mutation": "M1: isAgeGated normalises with value.trim().toLowerCase() only (no NFKD, no \\p{M}\\p{Cf} removal, exact match).",
