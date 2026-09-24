@@ -45,8 +45,9 @@ next-env.d.ts
 # build output
 dist/
 
-# dev tool config
-.claude/
+# dev tool config — except the shared slash commands (docs/agents/TEST-PLAN.md §8)
+.claude/*
+!.claude/commands/
 .gstack/
 
 # Playwright

@@ -118,6 +118,11 @@ other's rooms, bans and profile edits. Take a lane and state it in your claim:
 | B | `vikram.s@`, `kavya.n@` |
 | C | `sneha.p@`, `imran.q@` |
 
+Lanes are held across machines, so they're claimed where every machine can see
+them: a comment on SCRUM-208, `LANE B → <tag>`, and `LANE B released` when
+you stop. The latest comment for a lane decides who holds it. Device locks
+(`qa lock`) are local files and only keep sessions on one machine apart.
+
 **Shared controls, read-only:** `teen.tester@` (16, the minor), `daniel.weber@`
 (organiser with no org). **Never touch** `appreview@` (the App Store reviewer).
 
@@ -230,3 +235,46 @@ its `surf-*` labels, and the right Epic as parent.
 | `npm run -s qa …` | `scripts/qa.ts` | bootstrap · sq · token · world · probe · lock/unlock. Staging or localhost only; queries run `READ ONLY` |
 | Maestro flows | `blendn/.maestro/` | Parameterised with `-e`; no credentials in any file |
 | World log | SCRUM-208 | Every re-seed and shared-fixture change |
+
+---
+
+## 8 · A new developer, and more than one of you
+
+The routine is in three slash commands in `.claude/commands/`, so nobody has to
+remember it. In Claude Code, from this repo:
+
+| Command | When |
+|---|---|
+| `/tq-setup <initials>` | Once per machine. Checks the repos, CLIs, the Railway login and `SEED_PASSWORD`, the atlassian and maestro MCP servers, and the skills and agents the programme uses (gstack, ECC); lists what's missing. |
+| `/tq-next <tag> [SCRUM-key] [lane]` | Again and again. One unit per run: sync, pick (TQ-V first), claim, drive every surface, read back, file findings, close or release, report. |
+| `/tq-fix <SCRUM-key> <tag>` | For a finding worth fixing now. Root cause, failing test first, mutation + register, specialist reviews, PR, merge, staging, then drive the fix where it was found. |
+
+So a working session is:
+
+```
+/tq-setup sk                 # first time on this machine
+/tq-next sk-0924a            # a unit, end to end
+/tq-fix SCRUM-290 sk-0924a   # if it found something to fix now
+/tq-next sk-0924a            # the next unit (fixed tickets come back through TQ-V)
+```
+
+`/loop /tq-next sk-0924a` repeats it unattended. Only do that on a machine
+kept awake and on power, and read the reports: every run claims, drives and
+files on shared staging.
+
+**Several developers at once.** Everything shared is coordinated in Jira, so
+it works across machines:
+
+- **Session tags** are unique per person and session: `<initials>-<MMDD><letter>`.
+- **Units**: the claim protocol (§2) keeps two people off one unit.
+- **Attendees**: one lane per person, claimed on SCRUM-208 (§3). Three lanes →
+  three people driving the app at once; a fourth works the dashboard, API,
+  sockets or jobs units, which need no lane.
+- **Shared accounts**: the four role accounts are read-and-operate for everyone.
+  Nobody changes their password, role or org.
+- **The world**: `--refresh-times` is safe any time; `--apply` only per §4.
+- **Sign-in limit** is per IP, so it's per machine — each developer has their own
+  5 per 15 minutes, shared by their own sessions.
+- **Fixes**: `/tq-fix` comments `FIXING <tag>` first; promotion to staging is
+  fast-forward only, so a push rejected because someone promoted first means
+  fetch and look, never force.
