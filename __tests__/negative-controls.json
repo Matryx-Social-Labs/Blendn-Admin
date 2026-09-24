@@ -772,54 +772,54 @@
       "date": "2026-09-22"
     },
     "ban-leaves-the-socket-room.test.ts": {
-    "guards": "emitChatMemberBanned removes every socket the banned person holds from chat:<room>, after the notice, and removes nobody on an unban \u2014 so a ban mid-evening stops the live feed as well as the posts (SCRUM-205)",
-    "mutation": "In lib/socket-server.ts, delete the `if (banned) io.in(`user:${userId}`).socketsLeave(...)` line from emitChatMemberBanned.",
-    "observed": "1 failing, 1 passing: the banned person's sockets stay in the room.",
-    "date": "2026-09-24"
-  },
-  "seed-personas-listed.test.ts": {
-    "guards": "every @blendn.app person seed-qa makes with the shared password is in SEED_PERSONAS, so the deploy step re-asserts their password after a rotation",
-    "mutation": "In scripts/test-accounts.ts, delete \"teen.tester@blendn.app\" from SEED_PERSONAS.",
-    "observed": "1 failing, 1 passing: the teen tester is seeded and not re-asserted.",
-    "date": "2026-09-24"
-  },
-  "seed-media.test.ts": {
-    "guards": "seeded covers hotlink a host that serves the phone (picsum), not the bot-checked loremflickr; and mirrorToTigris keeps an object already in the bucket even without Tigris credentials, so a re-seed never downgrades a bucket URL to a hotlink; and a copy of a seeded cover left on the retired host is revived (SCRUM-285)",
-    "mutation": "M1: in scripts/seed-media.ts, point `cover` back at `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${subject}`. M2: delete `if (await inBucket(hosted)) return hosted`. M3: make `revivedCover` always `return null`.",
-    "observed": "M1: 1 failing ('hotlinks a host that serves a phone, not a bot-checked one'), 3 passing. M2: 1 failing ('keeps a cover that is already in our bucket, even with no Tigris credentials': expected the blendn-media-staging URL, received the hotlink, which is the SCRUM-285 downgrade), 3 passing. M3: 1 failing ('revives a copy of a seeded cover left on the retired host…'), 4 passing.",
-    "date": "2026-09-24"
-  },
-  "refresh-after-suspension.itest.ts": {
-    "guards": "POST /api/mobile/auth/refresh answers a refresh token that the suspension revoked with 403 SUSPENDED_MESSAGE (suspension revokes every token, so the 403 was unreachable) — and only that token: one revoked before the suspension, a staff account's revoked token, a deleted account, and a forged or expired token all stay 401 (SCRUM-290)",
-    "mutation": "M1: drop `if (await revokedBySuspension(oldRefreshToken)) return forbiddenResponse(SUSPENDED_MESSAGE)` from the route. M2: `jwt.decode(token)` instead of `jwt.verify(token, getJwtSecret())` in revokedBySuspension. M3: `{ ignoreExpiration: true }`. M4: drop `row.revoked_at >= suspendedAt`. M5: drop `!row.user.deletedAt`.",
-    "observed": "Each fails exactly 1 of 7, all distinct: M1 'tells a suspended person why…'; M2 and M3 'says nothing about an account to a token that is not ours or has expired'; M4 'says nothing for a token revoked before the suspension'; M5 'does not confirm a deleted account…'.",
-    "date": "2026-09-24"
-  },
-  "qa-tool.test.ts": {
-    "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts. And probeArgs refuses any argument it would ignore: what npm leaves of `--post-as` is an error, not a listen-only probe, and seconds are never NaN (SCRUM-284)",
-    "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS. (SCRUM-284) M1: replace probeArgs' final `throw new Error(\"probe: will not ignore …\")` with `return { groupId, email, seconds }`. M2: set `const hasSeconds = rest[0] !== undefined`.",
-    "observed": "1 failing, 1 passing: production is accepted. M1: 2 failing ('refuses what npm leaves of `--post-as`…', 'refuses a post with no poster or no text…'), 4 passing. M2: 2 failing ('posts with the bare keyword…', 'listens for the default… never for NaN'), 4 passing.",
-    "date": "2026-09-24"
-  },
-  "room-read-denial.test.ts": {
-    "guards": "roomReadDenial refuses a banned member and hides a draft event's room while leaving active, muted and left members reading; bannedRefusal names the organiser only when banned_by is set (SCRUM-205)",
-    "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
-    "observed": "1 failing, 6 passing: a banned member is let in.",
-    "date": "2026-09-24"
-  },
-  "venue-checkin-area-editable.test.ts": {
-    "guards": "the venue page mounts GeofenceEditor, loads the stored area, sends it on Save, and keeps a circle's centre and the pin together; a shape nobody drew (mode switch, building import) starts on the caller's pin \u2014 so a fence drawn in the wrong place can be corrected without moving the venue to it (SCRUM-204)",
-    "mutation": "In app/dashboard/venues/[id]/venue-manage.tsx, drop the `...(fence ? { geofence: fence } : {})` line from the updateVenue call; or in components/geofence-editor.tsx, drop `if (pin) return [pin.lat, pin.lng]` from anchor().",
-    "observed": "1 failing each: the form mounts an editor whose result is never sent; a switched-to circle seeds on the drifted ring and drags the pin to it.",
-    "date": "2026-09-22"
-  },
-  "venue-actions.test.ts": {
-    "guards": "createVenue and updateVenue refuse a check-in area drawn more than 500 m from the venue's pin, and refuse a pin move that would leave the stored area that far behind (SCRUM-203, SCRUM-204)",
-    "mutation": "In lib/venue-actions.ts, delete the `refuseIfFenceDrifted(...)` call in createVenue.",
-    "observed": "1 failing, 26 passing: the far ring was accepted.",
-    "date": "2026-09-22"
-  },
-  "trace-outline-keeps-the-pin.test.ts": {
+      "guards": "emitChatMemberBanned removes every socket the banned person holds from chat:<room>, after the notice, and removes nobody on an unban — so a ban mid-evening stops the live feed as well as the posts (SCRUM-205)",
+      "mutation": "In lib/socket-server.ts, delete the `if (banned) io.in(`user:${userId}`).socketsLeave(...)` line from emitChatMemberBanned.",
+      "observed": "1 failing, 1 passing: the banned person's sockets stay in the room.",
+      "date": "2026-09-24"
+    },
+    "seed-personas-listed.test.ts": {
+      "guards": "every @blendn.app person seed-qa makes with the shared password is in SEED_PERSONAS, so the deploy step re-asserts their password after a rotation",
+      "mutation": "In scripts/test-accounts.ts, delete \"teen.tester@blendn.app\" from SEED_PERSONAS.",
+      "observed": "1 failing, 1 passing: the teen tester is seeded and not re-asserted.",
+      "date": "2026-09-24"
+    },
+    "seed-media.test.ts": {
+      "guards": "seeded covers hotlink a host that serves the phone (picsum), not the bot-checked loremflickr; and mirrorToTigris keeps an object already in the bucket even without Tigris credentials, so a re-seed never downgrades a bucket URL to a hotlink; and a copy of a seeded cover left on the retired host is revived (SCRUM-285)",
+      "mutation": "M1: in scripts/seed-media.ts, point `cover` back at `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${subject}`. M2: delete `if (await inBucket(hosted)) return hosted`. M3: make `revivedCover` always `return null`.",
+      "observed": "M1: 1 failing ('hotlinks a host that serves a phone, not a bot-checked one'), 3 passing. M2: 1 failing ('keeps a cover that is already in our bucket, even with no Tigris credentials': expected the blendn-media-staging URL, received the hotlink, which is the SCRUM-285 downgrade), 3 passing. M3: 1 failing ('revives a copy of a seeded cover left on the retired host…'), 4 passing.",
+      "date": "2026-09-24"
+    },
+    "refresh-after-suspension.itest.ts": {
+      "guards": "POST /api/mobile/auth/refresh answers a refresh token that the suspension revoked with 403 SUSPENDED_MESSAGE (suspension revokes every token, so the 403 was unreachable) — and only that token: one revoked before the suspension, a staff account's revoked token, a deleted account, and a forged or expired token all stay 401 (SCRUM-290)",
+      "mutation": "M1: drop `if (await revokedBySuspension(oldRefreshToken)) return forbiddenResponse(SUSPENDED_MESSAGE)` from the route. M2: `jwt.decode(token)` instead of `jwt.verify(token, getJwtSecret())` in revokedBySuspension. M3: `{ ignoreExpiration: true }`. M4: drop `row.revoked_at >= suspendedAt`. M5: drop `!row.user.deletedAt`.",
+      "observed": "Each fails exactly 1 of 7, all distinct: M1 'tells a suspended person why…'; M2 and M3 'says nothing about an account to a token that is not ours or has expired'; M4 'says nothing for a token revoked before the suspension'; M5 'does not confirm a deleted account…'.",
+      "date": "2026-09-24"
+    },
+    "qa-tool.test.ts": {
+      "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts. And probeArgs refuses any argument it would ignore: what npm leaves of `--post-as` is an error, not a listen-only probe, and seconds are never NaN (SCRUM-284)",
+      "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS. (SCRUM-284) M1: replace probeArgs' final `throw new Error(\"probe: will not ignore …\")` with `return { groupId, email, seconds }`. M2: set `const hasSeconds = rest[0] !== undefined`.",
+      "observed": "1 failing, 1 passing: production is accepted. M1: 2 failing ('refuses what npm leaves of `--post-as`…', 'refuses a post with no poster or no text…'), 4 passing. M2: 2 failing ('posts with the bare keyword…', 'listens for the default… never for NaN'), 4 passing.",
+      "date": "2026-09-24"
+    },
+    "room-read-denial.test.ts": {
+      "guards": "roomReadDenial refuses a banned member and hides a draft event's room while leaving active, muted and left members reading; bannedRefusal names the organiser only when banned_by is set (SCRUM-205)",
+      "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
+      "observed": "1 failing, 6 passing: a banned member is let in.",
+      "date": "2026-09-24"
+    },
+    "venue-checkin-area-editable.test.ts": {
+      "guards": "the venue page mounts GeofenceEditor, loads the stored area, sends it on Save, and keeps a circle's centre and the pin together; a shape nobody drew (mode switch, building import) starts on the caller's pin — so a fence drawn in the wrong place can be corrected without moving the venue to it (SCRUM-204)",
+      "mutation": "In app/dashboard/venues/[id]/venue-manage.tsx, drop the `...(fence ? { geofence: fence } : {})` line from the updateVenue call; or in components/geofence-editor.tsx, drop `if (pin) return [pin.lat, pin.lng]` from anchor().",
+      "observed": "1 failing each: the form mounts an editor whose result is never sent; a switched-to circle seeds on the drifted ring and drags the pin to it.",
+      "date": "2026-09-22"
+    },
+    "venue-actions.test.ts": {
+      "guards": "createVenue and updateVenue refuse a check-in area drawn more than 500 m from the venue's pin, and refuse a pin move that would leave the stored area that far behind (SCRUM-203, SCRUM-204)",
+      "mutation": "In lib/venue-actions.ts, delete the `refuseIfFenceDrifted(...)` call in createVenue.",
+      "observed": "1 failing, 26 passing: the far ring was accepted.",
+      "date": "2026-09-22"
+    },
+    "trace-outline-keeps-the-pin.test.ts": {
       "guards": "the geofence editor has no hardcoded city centre, centroid() falls back to the pin, and the recentre effect skips an empty ring — so choosing Trace outline does not move the map away from the searched address (SCRUM-203)",
       "mutation": "In components/geofence-editor.tsx, put back `: [12.9716, 77.5946]` as centroid's fallback (or drop the empty-ring guard in the recentre effect).",
       "observed": "1 failing each: the constant is found; the guard line is missing.",
@@ -836,6 +836,12 @@
       "mutation": "Delete the `if (response.status === 401) { ... return }` block in handleSubmit (or neuter it with `&& false`).",
       "observed": "1 failing: `if (response.status === 401) {` not found.",
       "date": "2026-09-18"
+    },
+    "no-dating-looking-for-under-18.itest.ts": {
+      "guards": "PUT /api/mobile/profiles/:userId refuses looking_for containing \"dating\" (any case and spacing) for a profile under 18 with 403 \"Dating is for 18+ only. Your other choices are fine.\" and writes nothing; still stores it for an adult; an age correction below 18 strips \"dating\" from the stored looking_for and keeps the other choices (SCRUM-294)",
+      "mutation": "M1: refusal = datingAgeRefusal(intent_default) only (drop the looking_for check). M2: isAgeGated compares the raw value, not trim().toLowerCase(). M3: drop `...(stripsLookingFor && { looking_for: demotedLookingFor! })`. M4: drop `looking_for !== undefined` from touchesAgeGate.",
+      "observed": "M1 fails 1 of 3 ('refuses … from a 17-year-old'); M2 fails 2 ('refuses …' on \"Dating\"/\" DATING \", and the age-drop test on \"Dating\"); M3 fails 1 ('takes dating out … when the age drops'); M4 fails all 3 (no stored age is fetched, so the adult is refused too).",
+      "date": "2026-09-25"
     }
   },
   "grandfathered": [
