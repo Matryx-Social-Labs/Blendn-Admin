@@ -784,9 +784,9 @@
     "date": "2026-09-24"
   },
   "qa-tool.test.ts": {
-    "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts",
-    "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS.",
-    "observed": "1 failing, 1 passing: production is accepted.",
+    "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts. And probeArgs refuses any argument it would ignore: what npm leaves of `--post-as` is an error, not a listen-only probe, and seconds are never NaN (SCRUM-284)",
+    "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS. (SCRUM-284) M1: replace probeArgs' final `throw new Error(\"probe: will not ignore …\")` with `return { groupId, email, seconds }`. M2: set `const hasSeconds = rest[0] !== undefined`.",
+    "observed": "1 failing, 1 passing: production is accepted. M1: 2 failing ('refuses what npm leaves of `--post-as`…', 'refuses a post with no poster or no text…'), 4 passing. M2: 2 failing ('posts with the bare keyword…', 'listens for the default… never for NaN'), 4 passing.",
     "date": "2026-09-24"
   },
   "room-read-denial.test.ts": {

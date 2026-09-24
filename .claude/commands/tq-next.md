@@ -51,7 +51,7 @@ Use the tool each surface needs:
 | iOS / Android app | Maestro MCP (`list_devices` → `inspect_screen` → `run`), or the Maestro CLI with the journeys in `blendn/.maestro/`. Credentials only via `-e`. After typing, the keyboard's bottom-right key (`keyboard-done` subflow). iOS first, then shut it and do Android. |
 | Dashboard | gstack **browse**, signed in as the role the unit names. |
 | Mobile API | `curl` with `$(npm run -s qa token <email>)` — never sign in by hand (5 per IP per 15 min, successes count). |
-| Sockets | `npm run -s qa probe <chatGroupId> <email> [s] [--post-as <email> <text>]`. |
+| Sockets | `npm run -s qa probe <chatGroupId> <email> [s] [post-as <email> <text>]`. |
 | Background jobs | arrange the rows, wait a tick, `railway logs --environment staging --service Blendn-Admin`. |
 | Email | the Resend API log (key from Railway, never printed). |
 
