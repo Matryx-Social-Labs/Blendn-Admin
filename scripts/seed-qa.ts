@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto"
-
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { PrismaClient, type user_role, type connection_intent } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
@@ -7,6 +5,7 @@ import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
+import { ensureTestAccounts, TEST_ACCOUNTS } from "./test-accounts"
 
 /**
  * A world the QA team can actually test against.
@@ -26,7 +25,8 @@ import { storedBodyFor } from "../lib/push-notifications"
  * organisation. So an organiser account made with it is denied on every event,
  * sees empty screens throughout, and looks exactly like a broken dashboard.
  *
- * This seeds the orgs and the memberships, which is what actually grants access:
+ * `scripts/test-accounts.ts` seeds the orgs and the memberships, which is what
+ * actually grants access, for the four role accounts people sign in as:
  *
  *     Nightshift Collective   ← organiser is a member.   Runs the events.
  *     Indiranagar Hospitality Group   ← venue owner is a member. Owns the buildings.
@@ -60,23 +60,16 @@ const db = new PrismaClient({
 const APPLY = process.argv.includes("--apply")
 
 /**
- * Same generator and cost as `create-dashboard-user.ts`, deliberately.
+ * One password for every seeded account, and **required** to write.
  *
- * `SEED_PASSWORD` overrides it with one fixed value for every account.
- *
- * Random-per-run is right for a real credential and wrong for this one. Every
- * re-seed rotated all four passwords, which meant the Jira ticket testers read
- * them from (SCRUM-1) went stale the moment anybody refreshed the world — and a
- * tester whose password silently stopped working files a bug against sign-in.
- * The rotation was protecting staging accounts that exist only on staging and
- * whose passwords are already written down in a ticket.
- *
- * Still opt-in: without the variable this behaves exactly as before, so nothing
- * acquires a fixed password by accident. **Staging only** — the script refuses
- * to be pointed anywhere else by printing its host first.
+ * This used to fall back to a random password per run. On 2026-09-22 a run
+ * without the variable gave every account a fresh random one, and every tester
+ * reading SCRUM-1 was locked out for ~27 hours. The role accounts' password
+ * now lives on Railway staging as `SEED_PASSWORD` and is re-asserted on every
+ * deploy (`scripts/test-accounts.ts`); a seed run that rotated it anyway would
+ * lock everybody out until the next deploy. The dry run needs no password.
  */
-const generatePassword = () =>
-  process.env.SEED_PASSWORD?.trim() || randomBytes(18).toString("base64url")
+const SEED_PASSWORD = process.env.SEED_PASSWORD?.trim() ?? ""
 const HASH_COST = 12
 
 /* -------------------------------------------------------------------------- */
@@ -93,18 +86,15 @@ const CITY = {
 
 const ACCOUNTS = [
   /*
-   * The three product owners, by name.
-   *
-   * A shared generic admin means a board full of actions nobody can attribute
-   * -- the audit log records who did a thing, and "Priya Menon" is nobody.
-   * These are the accounts the people running the product actually sign in as.
+   * The three product owners, by name — their own admin accounts, so the audit
+   * log can say who did a thing. Seed data is attributed to `admin@`, not to
+   * them; testing is done as the role accounts in `test-accounts.ts`.
    */
   {
     key: "sagar",
     email: "sagar.kishore@blendn.app",
     name: "Sagar Kishore",
     role: "app_admin" as user_role,
-    org: null,
     note: "Product owner. Full admin.",
   },
   {
@@ -112,7 +102,6 @@ const ACCOUNTS = [
     email: "hemanth.ramesh@blendn.app",
     name: "Hemanth Ramesh",
     role: "app_admin" as user_role,
-    org: null,
     note: "Product owner. Full admin.",
   },
   {
@@ -120,39 +109,13 @@ const ACCOUNTS = [
     email: "likhith.gowda@blendn.app",
     name: "Likhith Gowda",
     role: "app_admin" as user_role,
-    org: null,
     note: "Product owner. Full admin.",
-  },
-  {
-    key: "admin",
-    email: "priya.menon@blendn.app",
-    name: "Priya Menon",
-    role: "app_admin" as user_role,
-    org: null,
-    note: "Sees everything. eventPermissions short-circuits before org checks.",
-  },
-  {
-    key: "organiser",
-    email: "arjun.rao@blendn.app",
-    name: "Arjun Rao",
-    role: "organizer" as user_role,
-    org: "events" as const,
-    note: "Member of the org that RUNS the events. May edit and operate them.",
-  },
-  {
-    key: "venue",
-    email: "fatima.sheikh@blendn.app",
-    name: "Fatima Sheikh",
-    role: "venue_owner" as user_role,
-    org: "venues" as const,
-    note: "Member of the org that OWNS the buildings. May operate, must NOT edit.",
   },
   {
     key: "outsider",
     email: "daniel.weber@blendn.app",
     name: "Daniel Weber",
     role: "organizer" as user_role,
-    org: null,
     /**
      * The negative control, and the account most likely to be mistaken for a
      * bug. It has a dashboard role and no organisation, so every event denies
@@ -161,22 +124,6 @@ const ACCOUNTS = [
      * "some other organiser cannot".
      */
     note: "NEGATIVE CONTROL. Dashboard role, no org — must be denied on every event.",
-  },
-  /*
-   * The fifth role, and the one with no fixture at all until now.
-   *
-   * `getDashboardOverview` branches on app_admin and venue_owner, then falls
-   * through to the organiser query scoped to `organizer_id = <this user>` — so
-   * a sponsor's home screen is permanently all-zero. That cannot be seen, let
-   * alone fixed, without an account to sign in as.
-   */
-  {
-    key: "sponsor",
-    email: "meera.iyer@blendn.app",
-    name: "Meera Iyer",
-    role: "sponsor" as user_role,
-    org: "brands" as const,
-    note: "Member of the org that BUYS placements. Brand, placements, charges.",
   },
 ] as const
 
@@ -476,29 +423,35 @@ async function main() {
 
   if (!APPLY) {
     console.log("Would create:")
-    console.log(`  3 organisations, ${ACCOUNTS.length} dashboard accounts, ${ATTENDEES.length} attendees,`)
+    console.log(`  3 organisations, ${TEST_ACCOUNTS.length + ACCOUNTS.length} dashboard accounts, ${ATTENDEES.length} attendees,`)
     console.log(`  3 venues, ${EVENTS.length} events, plus curated events, claims in every state,`)
     console.log(`  applications in every state, check-ins, chat, sponsors and city demand`)
-    for (const a of ACCOUNTS) console.log(`    ${a.role.padEnd(12)} ${a.email}`)
+    for (const a of [...TEST_ACCOUNTS, ...ACCOUNTS]) console.log(`    ${a.role.padEnd(12)} ${a.email}`)
     for (const e of EVENTS) console.log(`    ${e.slug.padEnd(22)} ${e.why}`)
     console.log("\nRe-run with --apply to write.\n")
     return
   }
 
-  // ── organisations ────────────────────────────────────────────────────────
-  const orgs = {
-    events: await upsertOrg("Nightshift Collective"),
-    venues: await upsertOrg("Indiranagar Hospitality Group"),
-    brands: await upsertOrg("Blue Tokai Coffee Roasters"),
+  if (!SEED_PASSWORD) {
+    console.error("REFUSING: set SEED_PASSWORD — the same value as on Railway staging for staging.")
+    process.exitCode = 1
+    return
   }
 
-  // ── accounts ─────────────────────────────────────────────────────────────
-  const created: { email: string; password: string; role: string; org: string; note: string }[] = []
-  const users: Record<string, string> = {}
+  // ── the role accounts, their organisations and memberships ───────────────
+  const { users: roleUsers, orgs } = await ensureTestAccounts(db, SEED_PASSWORD)
+  const users: Record<string, string> = { ...roleUsers }
+  const created: { email: string; role: string; org: string; note: string }[] =
+    TEST_ACCOUNTS.map((a) => ({
+      email: a.email,
+      role: a.role,
+      org: a.org ? orgs[a.org].display_name : "— none —",
+      note: a.note,
+    }))
 
+  // ── the named accounts ───────────────────────────────────────────────────
   for (const account of ACCOUNTS) {
-    const password = generatePassword()
-    const hashed = await bcrypt.hash(password, HASH_COST)
+    const hashed = await bcrypt.hash(SEED_PASSWORD, HASH_COST)
 
     const user = await db.user.upsert({
       where: { email: account.email },
@@ -526,22 +479,7 @@ async function main() {
       create: { id: user.id, name: account.name, age: 30 },
     })
 
-    if (account.org) {
-      const orgId = orgs[account.org].id
-      await db.organisation_members.upsert({
-        where: { org_id_user_id: { org_id: orgId, user_id: user.id } },
-        update: { role: "owner" },
-        create: { org_id: orgId, user_id: user.id, role: "owner", is_primary_contact: true },
-      })
-    }
-
-    created.push({
-      email: account.email,
-      password,
-      role: account.role,
-      org: account.org ? orgs[account.org].display_name : "— none —",
-      note: account.note,
-    })
+    created.push({ email: account.email, role: account.role, org: "— none —", note: account.note })
   }
 
   // ── venues ───────────────────────────────────────────────────────────────
@@ -766,7 +704,7 @@ async function main() {
 
   for (let ai = 0; ai < ATTENDEES.length; ai++) {
     const a = ATTENDEES[ai]
-    const hashed = await bcrypt.hash(generatePassword(), HASH_COST)
+    const hashed = await bcrypt.hash(SEED_PASSWORD, HASH_COST)
     const u = await db.user.upsert({
       where: { email: a.email },
       // `password` here too. The dashboard upsert above resets it on every
@@ -1065,7 +1003,7 @@ async function main() {
     const start = hoursFromNow(c.dead ? -120 : 90)
     const ev = await db.events.upsert({
       where: { slug: c.slug },
-      update: { deleted_at: null },
+      update: { deleted_at: null, organizer_id: users.admin },
       create: {
         slug: c.slug,
         title: c.title,
@@ -1080,7 +1018,7 @@ async function main() {
         longitude: CITY.bengaluru.lng,
         check_in_radius: 250,
         venue_name: c.title.split(" at ")[1] ?? null,
-        organizer_id: users.sagar,
+        organizer_id: users.admin,
         organizer_org_id: c.claimed ? orgs.events.id : null,
         curated_at: hoursFromNow(-400),
         claimed_at: c.claimed ? hoursFromNow(-40) : null,
@@ -1206,7 +1144,7 @@ async function main() {
         flags: spec.flags,
         org_id: spec.status === "approved" ? orgs.events.id : null,
         onboarding_id: onboardingId,
-        reviewed_by: spec.status === "pending" ? null : users.sagar,
+        reviewed_by: spec.status === "pending" ? null : users.admin,
         reviewed_at: spec.status === "pending" ? null : hoursFromNow(-20),
         decision_note: spec.status === "declined" ? "Personal address, no proof of connection." : null,
       },
@@ -1233,7 +1171,7 @@ async function main() {
         name_key: brandName.toLowerCase(),
         org_id: orgs.brands.id,
         claimed_at: hoursFromNow(-300),
-        created_by: users.sagar,
+        created_by: users.admin,
       },
     })
   }
@@ -1241,7 +1179,7 @@ async function main() {
   let unclaimedBrand = await db.sponsors.findFirst({ where: { name_key: "third wave" } })
   if (!unclaimedBrand) {
     unclaimedBrand = await db.sponsors.create({
-      data: { name: "Third Wave", name_key: "third wave", org_id: null, created_by: users.sagar },
+      data: { name: "Third Wave", name_key: "third wave", org_id: null, created_by: users.admin },
     })
   }
   const existingBrandClaim = await db.sponsor_claims.findFirst({
@@ -1300,7 +1238,7 @@ async function main() {
         tier: a.tier,
         status: a.status,
         email_verified_at: a.status === "email_pending" ? null : hoursFromNow(-50),
-        reviewed_by: a.status === "approved" || a.status === "declined" ? users.sagar : null,
+        reviewed_by: a.status === "approved" || a.status === "declined" ? users.admin : null,
         reviewed_at: a.status === "approved" || a.status === "declined" ? hoursFromNow(-30) : null,
         decline_reason: a.status === "declined" ? "No verifiable connection to the events listed." : null,
       },
@@ -1409,11 +1347,12 @@ async function main() {
   for (const c of created) {
     console.log(`${c.role}`)
     console.log(`  email     ${c.email}`)
-    console.log(`  password  ${c.password}`)
     console.log(`  org       ${c.org}`)
     console.log(`  ${c.note}\n`)
   }
-  console.log("Passwords are shown once and are not recoverable. Re-run to reset.")
+  // The addresses, never the password: it is the SEED_PASSWORD you passed, and
+  // printing it puts it in a scrollback and a CI log.
+  console.log("Password: the SEED_PASSWORD this ran with (on staging, the Railway variable).")
   console.log(`\nVenues: ${circle.name} (circle), ${polygon.name} (polygon), ${unclaimed.name} (unclaimed)`)
   console.log(`Events: ${EVENTS.length} across ${Object.keys(CITY).length} cities`)
   console.log(`\nAttendees (mobile only, same password): ${ATTENDEES.map((a) => a.email).join(", ")}`)
@@ -1447,24 +1386,6 @@ async function main() {
   console.log(`  applications     ${appTotal} across pending, email_pending, approved, declined`)
   console.log(`  demand           ${demandTotal} rows — Pune has demand and no events`)
   console.log(`  brands           Blue Tokai (claimed), Third Wave (unclaimed, claim pending)\n`)
-}
-
-async function upsertOrg(displayName: string) {
-  const existing = await db.organisations.findFirst({ where: { display_name: displayName } })
-  if (existing) {
-    return db.organisations.update({
-      where: { id: existing.id },
-      data: { status: "verified", verified_at: new Date() },
-    })
-  }
-  return db.organisations.create({
-    data: {
-      display_name: displayName,
-      kind: "company",
-      status: "verified",
-      verified_at: new Date(),
-    },
-  })
 }
 
 async function upsertVenue(input: {

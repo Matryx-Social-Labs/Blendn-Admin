@@ -60,6 +60,7 @@ import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
+import { TEST_ACCOUNTS, TEST_ORG_NAMES } from "./test-accounts"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -106,14 +107,11 @@ const CITY = {
 const PASSWORD = process.env.SEED_ROOM_PASSWORD
 
 /**
- * A fixed id so re-seeding updates the organisation rather than accumulating a
- * new one each run. `organisations` has no natural unique key to upsert on —
- * `display_name` is not unique, and should not be.
- *
- * Spelled `5eed…` so it is recognisable as seed data in a table someone is
- * scanning by eye, and in a foreign key on an event.
+ * The organisation this script used to create for its own organiser, before
+ * the room moved to `organizer@blendn.app`. Only `--clean` still reads it, to
+ * remove what an earlier run left behind.
  */
-const ORG_ID = "5eed0000-0000-4000-8000-000000000001"
+const LEGACY_ORG_ID = "5eed0000-0000-4000-8000-000000000001"
 
 type Gender = "woman" | "man" | "non_binary" | "prefer_not_to_say"
 type Intent = "dating" | "networking" | "friendship" | "just_here"
@@ -228,11 +226,10 @@ async function clean() {
   await db.user_interests.deleteMany({ where: { user_id: { in: ids } } })
   await db.profiles.deleteMany({ where: { id: { in: ids } } })
   await db.user.deleteMany({ where: { id: { in: ids } } })
+  // The organiser and organisation earlier runs created. The room's organiser
+  // is now the persistent `organizer@`, which --clean never touches.
   await db.user.deleteMany({ where: { id: `${TAG}_organiser` } })
-  // Members cascade from the user delete above; the organisation does not, so
-  // it would survive --clean and be re-adopted by the next run with whatever
-  // state it had drifted into.
-  await db.organisations.deleteMany({ where: { id: ORG_ID } })
+  await db.organisations.deleteMany({ where: { id: LEGACY_ORG_ID } })
   console.log("done.")
 }
 
@@ -272,73 +269,38 @@ async function main() {
   const hashed = await bcrypt.hash(PASSWORD, 10)
 
   /*
-   * The organiser needs THREE things to be usable, and having one or two of
-   * them fails in a way that reads like a broken dashboard rather than a
-   * missing row.
-   *
-   *   1. a password       — without it there is no way to sign in at all
-   *   2. an organisation   — `status: verified`; pending and suspended are not
-   *                          working hosts
-   *   3. a membership row  — `lib/org-membership.ts` builds `orgIds` from it,
-   *                          and `eventPermissions` returns DENIED on an empty
-   *                          set before it looks at the event
-   *
-   * Miss (3) and the sign-in *succeeds* and the dashboard is empty. That is the
-   * expensive one: an empty page looks like a bug in the page.
-   *
-   * The password is re-asserted on update, like the attendees, so re-running
-   * with a fresh SEED_ROOM_PASSWORD moves every account including this one.
+   * The room belongs to `organizer@blendn.app` in Nightshift Collective — the
+   * account people already sign in as — so it is on their dashboard rather
+   * than behind a login nobody has. That account and its membership are
+   * `scripts/test-accounts.ts`'s job; this only looks them up.
    */
-  const organiser = await db.user.upsert({
-    where: { id: `${TAG}_organiser` },
-    update: { password: hashed, emailVerified: new Date() },
-    create: {
-      id: `${TAG}_organiser`,
-      email: `${TAG}-organiser@blendn.invalid`,
-      name: "Room Seed Organiser",
-      role: "organizer",
-      password: hashed,
-      emailVerified: new Date(),
-    },
+  const organiserEmail = TEST_ACCOUNTS.find((a) => a.key === "organiser")?.email ?? ""
+  const organiser = await db.user.findUnique({ where: { email: organiserEmail }, select: { id: true } })
+  const org = await db.organisations.findFirst({
+    where: { display_name: TEST_ORG_NAMES.events },
+    select: { id: true, display_name: true },
   })
-
-  const org = await db.organisations.upsert({
-    where: { id: ORG_ID },
-    update: { status: "verified" },
-    create: {
-      id: ORG_ID,
-      kind: "company",
-      display_name: "Seed Events Co (seed)",
-      legal_name: "Seed Events Private Limited",
-      status: "verified",
-      verified_at: new Date(),
-      address: `MG Road, ${CITY.name}`,
-    },
-  })
-
-  await db.organisation_members.upsert({
-    where: { org_id_user_id: { org_id: org.id, user_id: organiser.id } },
-    update: {},
-    create: {
-      org_id: org.id,
-      user_id: organiser.id,
-      role: "owner",
-      is_primary_contact: true,
-    },
-  })
+  if (!organiser || !org) {
+    console.error(
+      `REFUSING: ${organiserEmail} or "${TEST_ORG_NAMES.events}" does not exist here.\n` +
+        "Run `SEED_PASSWORD=... npm run seed:accounts` first (a staging deploy does it)."
+    )
+    process.exit(1)
+  }
 
   const start = new Date(Date.now() - 2 * 60 * 60 * 1000)
   const end = new Date(start.getTime() + DAYS * 24 * 60 * 60 * 1000)
 
   const event = await db.events.upsert({
     where: { slug: EVENT_SLUG },
-    // `organizer_org_id` is re-asserted on update so an event seeded before
-    // this script grew an organisation picks one up on the next run, rather
-    // than staying uneditable for reasons nothing on screen explains.
+    // The owner is re-asserted on update so a room seeded under an earlier
+    // organiser moves to the current one on the next run, rather than staying
+    // uneditable for reasons nothing on screen explains.
     update: {
       start_time: start,
       end_time: end,
       status: "published",
+      organizer_id: organiser.id,
       organizer_org_id: org.id,
     },
     create: {
@@ -553,8 +515,8 @@ async function main() {
   // this, and printing it puts it in a scrollback and a CI log.
   console.log(`sign in as   ${TAG}-aisha@blendn.invalid … password: $SEED_ROOM_PASSWORD`)
   console.log("")
-  console.log(`organiser    ${TAG}-organiser@blendn.invalid … same password`)
-  console.log(`             org "${org.display_name}" (${org.id}), verified, owner`)
+  console.log(`organiser    ${organiserEmail} … password: $SEED_PASSWORD`)
+  console.log(`             org "${org.display_name}" (${org.id})`)
   console.log(`             dashboard: the event above should be EDITABLE, not just visible`)
   console.log("")
   console.log(`remove it    SEED_ROOM=yes npx tsx scripts/seed-room.ts --clean`)

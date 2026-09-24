@@ -1,9 +1,9 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
-import bcrypt from "bcryptjs"
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 import fs from "fs"
 import path from "path"
+import { ensureTestAccounts } from "../scripts/test-accounts"
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -109,59 +109,19 @@ async function uploadSeedImages(): Promise<(string | null)[]> {
 async function main() {
   console.log("🌱 Starting seed...")
 
-  // Create admin user
-  const hashedPassword = await bcrypt.hash("Matrix@2025", 12)
-  const adminUser = await prisma.user.upsert({
-    where: { email: "contact@matrixsociallabs.com" },
-    update: {},
-    create: {
-      email: "contact@matrixsociallabs.com",
-      name: "Admin",
-      password: hashedPassword,
-      image: null,
-    },
-  })
-  console.log("✅ Created admin user:", adminUser.email)
-
-  // Create test users
-  const testUsers = [
-    { email: "john@test.com", name: "John Smith", image: null },
-    { email: "jane@test.com", name: "Jane Doe", image: null },
-    { email: "mike@test.com", name: "Mike Johnson", image: null },
-    { email: "sarah@test.com", name: "Sarah Williams", image: null },
-    { email: "alex@test.com", name: "Alex Brown", image: null },
-  ]
-
-  const users = []
-  for (const userData of testUsers) {
-    const user = await prisma.user.upsert({
-      where: { email: userData.email },
-      update: {},
-      create: {
-        ...userData,
-        password: await bcrypt.hash("Test@123", 12),
-      },
-    })
-    users.push(user)
-    console.log("✅ Created user:", user.email)
-  }
-
-  // Create profiles for users
-  for (const user of users) {
-    await prisma.profiles.upsert({
-      where: { id: user.id },
-      update: {},
-      create: {
-        id: user.id,
-        name: user.name,
-        age: Math.floor(Math.random() * 20) + 22,
-        location: "Bangalore, KA",
-        interests: ["Music", "Tech", "Food", "Sports", "Art"].slice(0, Math.floor(Math.random() * 3) + 2),
-        onboarded: true,
-      },
-    })
-  }
-  console.log("✅ Created profiles for all users")
+  /*
+   * The role accounts people sign in as (`scripts/test-accounts.ts`), and the
+   * organiser the events below belong to.
+   *
+   * This used to create `contact@matrixsociallabs.com` — a real person's
+   * address — and five `@test.com` users, with their passwords written here in
+   * plain text. It also left the events without an organisation, so no
+   * organiser could see them: access is organisation-shaped (`lib/rbac.ts`).
+   */
+  const password = process.env.SEED_PASSWORD?.trim()
+  if (!password) throw new Error("Set SEED_PASSWORD — the seeded accounts' password.")
+  const { users, orgs } = await ensureTestAccounts(prisma, password)
+  console.log("✅ Role accounts ready: admin@, organizer@, venue.owner@, sponsor@blendn.app")
 
   // Create categories
   const categoriesData = [
@@ -185,23 +145,6 @@ async function main() {
     categories.push(category)
   }
   console.log("✅ Created", categories.length, "categories")
-
-  // Clean up old seed events (created by seed test users)
-  const seedUserIds = users.map(u => u.id)
-  const oldEvents = await prisma.events.findMany({
-    where: { organizer_id: { in: seedUserIds } },
-    select: { id: true },
-  })
-  if (oldEvents.length > 0) {
-    const oldEventIds = oldEvents.map(e => e.id)
-    await prisma.chat_messages.deleteMany({ where: { chat_group: { event_id: { in: oldEventIds } } } })
-    await prisma.chat_groups.deleteMany({ where: { event_id: { in: oldEventIds } } })
-    await prisma.event_categories.deleteMany({ where: { event_id: { in: oldEventIds } } })
-    await prisma.event_check_ins.deleteMany({ where: { event_id: { in: oldEventIds } } })
-    await prisma.event_favorites.deleteMany({ where: { event_id: { in: oldEventIds } } })
-    await prisma.events.deleteMany({ where: { id: { in: oldEventIds } } })
-    console.log(`🧹 Cleaned up ${oldEvents.length} old seed events`)
-  }
 
   // Upload seed images to Tigris (or get nulls if not configured)
   const coverImages = await uploadSeedImages()
@@ -308,6 +251,23 @@ async function main() {
     },
   ]
 
+  // Clean up this seed's previous events: same organiser, same titles. Never
+  // everything the organiser owns — `seed:qa` puts its world there too.
+  const oldEvents = await prisma.events.findMany({
+    where: { organizer_id: users.organiser, title: { in: eventsData.map((e) => e.title) } },
+    select: { id: true },
+  })
+  if (oldEvents.length > 0) {
+    const oldEventIds = oldEvents.map(e => e.id)
+    await prisma.chat_messages.deleteMany({ where: { chat_group: { event_id: { in: oldEventIds } } } })
+    await prisma.chat_groups.deleteMany({ where: { event_id: { in: oldEventIds } } })
+    await prisma.event_categories.deleteMany({ where: { event_id: { in: oldEventIds } } })
+    await prisma.event_check_ins.deleteMany({ where: { event_id: { in: oldEventIds } } })
+    await prisma.event_favorites.deleteMany({ where: { event_id: { in: oldEventIds } } })
+    await prisma.events.deleteMany({ where: { id: { in: oldEventIds } } })
+    console.log(`🧹 Cleaned up ${oldEvents.length} old seed events`)
+  }
+
   const createdEvents = []
   for (let i = 0; i < eventsData.length; i++) {
     const eventData = eventsData[i]
@@ -336,7 +296,8 @@ async function main() {
         visibility: "public",
         max_capacity: eventData.capacity,
         current_capacity: Math.floor(Math.random() * Math.min(30, eventData.capacity)),
-        organizer_id: users[i % users.length].id,
+        organizer_id: users.organiser,
+        organizer_org_id: orgs.events.id,
         cover_image_url: coverImages[i] ?? null,
         is_featured: eventData.is_featured,
         check_in_radius: 100,
@@ -369,7 +330,6 @@ async function main() {
   }
 
   console.log("\n🎉 Seed completed!")
-  console.log(`   - ${users.length + 1} users created`)
   console.log(`   - ${categories.length} categories created`)
   console.log(`   - ${createdEvents.length} events created`)
   console.log(`   - ${coverImages.filter(Boolean).length} cover images uploaded`)

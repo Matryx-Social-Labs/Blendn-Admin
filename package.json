@@ -13,6 +13,7 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate deploy",
+    "railway:predeploy": "prisma migrate deploy && tsx scripts/test-accounts.ts",
     "db:seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
     "postinstall": "prisma generate",
     "test": "jest",
@@ -26,6 +27,7 @@
     "seed:room": "tsx scripts/seed-room.ts",
     "backfill:cities": "tsx scripts/backfill-event-cities.ts",
     "seed:qa": "tsx scripts/seed-qa.ts",
+    "seed:accounts": "tsx scripts/test-accounts.ts",
     "test:e2e": "playwright test",
     "test:e2e:local": "tsx scripts/e2e-local.ts",
     "test:e2e:ui": "playwright test --ui"

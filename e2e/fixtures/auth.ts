@@ -27,10 +27,10 @@ export const SEED_PASSWORD = process.env.SEED_PASSWORD ?? "Blendn-QA-2026!"
  * different* organiser cannot.
  */
 export const ROLE_ACCOUNTS = {
-  admin: { email: "sagar.kishore@blendn.app", role: "app_admin" },
-  organizer: { email: "arjun.rao@blendn.app", role: "organizer" },
-  venue: { email: "fatima.sheikh@blendn.app", role: "venue_owner" },
-  sponsor: { email: "meera.iyer@blendn.app", role: "sponsor" },
+  admin: { email: "admin@blendn.app", role: "app_admin" },
+  organizer: { email: "organizer@blendn.app", role: "organizer" },
+  venue: { email: "venue.owner@blendn.app", role: "venue_owner" },
+  sponsor: { email: "sponsor@blendn.app", role: "sponsor" },
   outsider: { email: "daniel.weber@blendn.app", role: "organizer" },
   attendee: { email: "ananya.b@blendn.app", role: "attendee" },
 } as const
