@@ -49,6 +49,13 @@ describe("probe arguments", () => {
       postAs: "rohan.d@blendn.app",
       text: "hi",
     })
+    // What `npm run -s qa -- probe … 8 --post-as …` delivers: the form the
+    // workaround for SCRUM-284 was written in, before `post-as` existed.
+    expect(probeArgs([G, "fixture@blendn.app", "8", "--post-as", "rohan.d@blendn.app", "hi"])).toMatchObject({
+      seconds: 8,
+      postAs: "rohan.d@blendn.app",
+      text: "hi",
+    })
   })
 
   it("listens for the default when no seconds are given, never for NaN", () => {
