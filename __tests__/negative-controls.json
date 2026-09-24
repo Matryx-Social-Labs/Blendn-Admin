@@ -784,9 +784,9 @@
     "date": "2026-09-24"
   },
   "venue-checkin-area-editable.test.ts": {
-    "guards": "the venue page mounts GeofenceEditor, loads the stored area, sends it on Save, and keeps a circle's centre and the pin together \u2014 so a fence drawn in the wrong place can be corrected at all (SCRUM-204)",
-    "mutation": "In app/dashboard/venues/[id]/venue-manage.tsx, drop the `...(fence ? { geofence: fence } : {})` line from the updateVenue call.",
-    "observed": "1 failing, 2 passing: the form mounts an editor whose result is never sent.",
+    "guards": "the venue page mounts GeofenceEditor, loads the stored area, sends it on Save, and keeps a circle's centre and the pin together; a shape nobody drew (mode switch, building import) starts on the caller's pin \u2014 so a fence drawn in the wrong place can be corrected without moving the venue to it (SCRUM-204)",
+    "mutation": "In app/dashboard/venues/[id]/venue-manage.tsx, drop the `...(fence ? { geofence: fence } : {})` line from the updateVenue call; or in components/geofence-editor.tsx, drop `if (pin) return [pin.lat, pin.lng]` from anchor().",
+    "observed": "1 failing each: the form mounts an editor whose result is never sent; a switched-to circle seeds on the drifted ring and drags the pin to it.",
     "date": "2026-09-22"
   },
   "venue-actions.test.ts": {
