@@ -33,6 +33,18 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "age.test.ts": {
+      "guards": "datingAgeRefusal/stripDating catch free-text dating however it is written — DATİNG, dat\\u200bing, fullwidth, combining accent, 'casual dating', 'Dating!' — refused under 18 and stripped on an age drop, while 'updating' and 'candidates' are not mistaken for it (SCRUM-294, security review)",
+      "mutation": "M1: isAgeGated normalises with value.trim().toLowerCase() only (no NFKD, no \\p{M}\\p{Cf} removal, exact match).",
+      "observed": "8 of 46 tests failing: the look-alike variants in both 'refuses … under 18' and 'strips … when the age is under 18'.",
+      "date": "2026-09-25"
+    },
+    "no-dating-looking-for-under-18.itest.ts": {
+      "guards": "PUT /api/mobile/profiles/:userId refuses looking_for containing \"dating\" (any case and spacing) for a profile under 18 with 403 \"Dating is for 18+ only. Your other choices are fine.\" and writes nothing; still stores it for an adult; an age correction below 18 strips \"dating\" from the stored looking_for and keeps the other choices (SCRUM-294)",
+      "mutation": "M1: refusal = datingAgeRefusal(intent_default) only (drop the looking_for check). M2: isAgeGated compares the raw value, not trim().toLowerCase(). M3: drop `...(stripsLookingFor && { looking_for: demotedLookingFor! })`. M4: drop `looking_for !== undefined` from touchesAgeGate.",
+      "observed": "M1 fails 1 of 3 ('refuses … from a 17-year-old'); M2 fails 2 ('refuses …' on \"Dating\"/\" DATING \", and the age-drop test on \"Dating\"); M3 fails 1 ('takes dating out … when the age drops'); M4 fails all 3 (no stored age is fetched, so the adult is refused too).",
+      "date": "2026-09-25"
+    },
     "event-notifications-reachable.test.ts": {
       "guards": "notifyEventCancelled and notifyEventDetailsChanged have real callers; the audience is RSVP union favourites; the reminder claims `reminded_at` BEFORE sending, is scheduled by lib/background.ts, and the service reaches server.ts with no @/ alias",
       "mutation": "A: delete the `reminded_at` claim from sendEventReminders. B: remove startReminderSweeper() from lib/background.ts. (original) delete the notifyEventCancelled call in the cancellation route",

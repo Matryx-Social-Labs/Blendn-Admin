@@ -230,3 +230,21 @@ describe("parseDateOfBirth", () => {
     expect(parseDateOfBirth("1850-01-01", NOW)).toBeNull()
   })
 })
+
+describe("free-text dating is caught however it is written (SCRUM-294, security review)", () => {
+  // `looking_for` is free text: an exact match after trim and lowercase let
+  // look-alikes through for a minor, and failed to strip them on an age drop.
+  const variants = ["DATİNG", "dat​ing", "ｄａｔｉｎｇ", "dáting", "casual dating", "Dating!"]
+
+  it.each(variants)("refuses %j under 18", (value) => {
+    expect(datingAgeRefusal([value], 17)).toBe("Dating is for 18+ only. Your other choices are fine.")
+  })
+
+  it.each(variants)("strips %j when the age is under 18", (value) => {
+    expect(stripDating([value, "travel"], 16)).toEqual(["travel"])
+  })
+
+  it("does not mistake a word that merely contains it", () => {
+    expect(datingAgeRefusal(["updating my photos", "candidates"], 17)).toBeNull()
+  })
+})
