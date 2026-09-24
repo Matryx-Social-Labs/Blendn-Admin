@@ -73,3 +73,27 @@ it("takes 'dating' out of looking-for when the age drops below 18, and keeps the
   expect((await put(id, token, { dateOfBirth: yearsAgo(17) })).status).toBe(200)
   expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual(["travel"])
 })
+
+// No date of birth: the age is the stored number, or unknown (OAuth accounts).
+async function personByAge(label: string, age: number | null) {
+  const id = await makeUser(label)
+  users.push(id)
+  await db.profiles.create({ data: { id, name: label, age } })
+  const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
+  return { id, token: signAccessToken(id, email) }
+}
+
+it("strips it when the stored age number is lowered below 18", async () => {
+  const { id, token } = await personByAge("ndl-agenum", 25)
+  expect((await put(id, token, { looking_for: ["dating", "networking"] })).status).toBe(200)
+  expect((await put(id, token, { age: 15 })).status).toBe(200)
+  expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual(["networking"])
+})
+
+it("asks for an age first when there is none", async () => {
+  const { id, token } = await personByAge("ndl-noage", null)
+  const res = await put(id, token, { looking_for: ["Dating"] })
+  expect(res.status).toBe(403)
+  expect((await res.json()).error).toBe("Add your age to your profile before choosing dating.")
+  expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual([])
+})
