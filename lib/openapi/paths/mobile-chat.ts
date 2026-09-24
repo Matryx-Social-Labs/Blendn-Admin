@@ -81,7 +81,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/messages",
   tags: ["Mobile Chat"],
   summary: "Get group messages",
-  description: "Cursor-based pagination. Pass `before` (message UUID) to load older messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders.",
+  description: "Cursor-based pagination. Pass `before` (message UUID) to load older messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),
@@ -131,6 +131,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/participants",
   tags: ["Mobile Chat"],
   summary: "List group participants",
+  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),

@@ -1,4 +1,5 @@
 import { db } from "./db"
+import { roomReadDenial } from "./chat-window"
 import { actorFor } from "./org-membership"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 
@@ -16,11 +17,8 @@ import { eventPermissionSelect, eventPermissions } from "./rbac"
  */
 
 /**
- * Chat rooms: caller must be a member and not banned.
- *
- * Note: the REST read path
- * (app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts) still lets a
- * banned member read history — only writes are blocked there. This is stricter.
+ * Chat rooms: the same read rule as every HTTP read of the room —
+ * `roomReadDenial` in lib/chat-window.ts (SCRUM-205).
  */
 export async function canJoinChat(userId: string, chatGroupId: string): Promise<boolean> {
   const membership = await db.chat_group_members.findUnique({
@@ -31,8 +29,8 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
     // it to `draft`, and a draft never legitimately has a joinable chat.
     select: { status: true, chat_group: { select: { event: { select: { status: true } } } } },
   })
-  if (!membership || membership.status === "banned") return false
-  return membership.chat_group.event.status !== "draft"
+  if (!membership) return false
+  return roomReadDenial(membership, membership.chat_group.event) === null
 }
 
 /**

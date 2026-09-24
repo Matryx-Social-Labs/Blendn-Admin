@@ -276,3 +276,16 @@ export function mutedRefusal(membership: { muted_by: string | null }): string {
     ? "The organiser has muted you in this room."
     : "You are muted in this room. Your messages have been flagged for policy violations."
 }
+
+/**
+ * Why a banned person cannot read or post, in words that are true.
+ *
+ * The same untruth `mutedRefusal` fixed, on the other status: every send
+ * route told an organiser-banned person it was "due to repeated policy
+ * violations". `banned_by` is set by a person and left null by the pipeline.
+ */
+export function bannedRefusal(membership: { banned_by: string | null }): string {
+  return membership.banned_by
+    ? "The organiser has removed you from this room."
+    : "You have been removed from this room after repeated policy violations."
+}
