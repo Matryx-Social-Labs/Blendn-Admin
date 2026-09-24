@@ -1,10 +1,10 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { PrismaClient, type user_role, type connection_intent } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
+import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS } from "./test-accounts"
 
 /**
@@ -294,109 +294,6 @@ const TIGRIS_HOSTED = new Set([
 ])
 
 /**
- * Copy a remote asset into our bucket and hand back the public URL.
- *
- * Returns the original URL unchanged when Tigris is not configured or the copy
- * fails, and says so. A seed that dies because an object store was unreachable
- * would leave the world half-built, which is worse than a world where six
- * events are hotlinked and the log explains why.
- */
-async function mirrorToTigris(
-  sourceUrl: string,
-  key: string,
-  contentType: string
-): Promise<string> {
-  const endpoint = process.env.TIGRIS_ENDPOINT
-  const accessKeyId = process.env.TIGRIS_ACCESS_KEY
-  const secretAccessKey = process.env.TIGRIS_SECRET_KEY
-  const bucket = process.env.TIGRIS_BUCKET || "blendn-media"
-  if (!endpoint || !accessKeyId || !secretAccessKey) {
-    console.log(`  ~  Tigris not configured — ${key} stays hotlinked`)
-    return sourceUrl
-  }
-
-  try {
-    const res = await fetch(sourceUrl, { redirect: "follow" })
-    if (!res.ok) throw new Error(`source ${res.status}`)
-    const body = Buffer.from(await res.arrayBuffer())
-
-    const client = new S3Client({
-      endpoint,
-      region: process.env.TIGRIS_REGION || "auto",
-      credentials: { accessKeyId, secretAccessKey },
-      forcePathStyle: false,
-    })
-    await client.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: body,
-        ContentType: contentType,
-        // Long, because a seeded asset never changes under its key — the key
-        // carries the event slug, so a new asset is a new key.
-        CacheControl: "public, max-age=31536000, immutable",
-      })
-    )
-    return `https://${bucket}.fly.storage.tigris.dev/${key}`
-  } catch (error) {
-    console.log(`  ~  mirror failed for ${key} (${String(error)}) — staying hotlinked`)
-    return sourceUrl
-  }
-}
-
-/**
- * A square 2048 master per `docs/MEDIA.md`, chosen **by subject**.
- *
- * This was `picsum.photos` seeded by name: unique per event and stable across
- * runs, which caught a broken crop and nothing else — the photographs are
- * arbitrary stock, so "Speed Dating on Church Street" showed a landscape and
- * the cards could not be judged as design at all.
- *
- * `loremflickr` takes keywords, so a nightclub event gets a photograph of a
- * nightclub. `lock` is derived from the subject, so the same event keeps the
- * same photograph and a screenshot diff still means something.
- *
- * `source.unsplash.com` was the obvious choice and is retired — it 503s. Worth
- * recording so nobody reaches for it again.
- *
- * **Staging only, and third-party.** These are Flickr photographs chosen by a
- * keyword, so what comes back is not curated by us. Fine for a test environment
- * that only internal testers see; production media is what an organiser
- * uploads.
- *
- * **1600, not 2048, and every subject probed.** The host answers HTTP 500 —
- * not 404 — for two different things: a size it will not render (2048×2048,
- * checked 2026-09-11) and a tag set no photograph carries. `nightclub,neon,
- * lights` and `concert,classical,music` were the second kind; `rooftop,party`
- * fails with two tags and works with three, so there is no rule beyond
- * "check". Every subject in the table above answered 302-to-image on
- * 2026-09-11. A placeholder that does not load is worse than none — the
- * card's fallback is designed, the red "Image onError" toast is not.
- */
-export const SEED_COVER_SIZE = 1600
-const cover = (seed: string) =>
-  `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${MEDIA_SUBJECT[seed] ?? "event"}?lock=${lockFor(seed)}`
-
-/** A stable number per subject, so the same slug gets the same photograph. */
-const lockFor = (seed: string) =>
-  [...seed].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 9973, 7)
-
-/** What each event's photograph should be *of*. */
-const MEDIA_SUBJECT: Record<string, string> = {
-  rooftop: "rooftop,party,sunset",
-  stadium: "stadium,football,crowd",
-  neon: "nightclub,neon",
-  club: "dj,nightclub,dancing",
-  recital: "concert,classical",
-  coffee: "cafe,coffee,people",
-  market: "market,street,stalls",
-  supper: "dinner,restaurant,table",
-  language: "cafe,conversation,friends",
-  design: "exhibition,gallery,design",
-  social: "friends,bar,conversation",
-}
-
-/**
  * Clips, on two events rather than all of them.
  *
  * A feed where every card plays is not the feed anybody will have, and it hides
@@ -409,9 +306,34 @@ const CLIPS: Record<string, string> = {
   "basement-six-residents":
     "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4",
 }
+
+/**
+ * An event's cover and clip, resolved the same way by `--apply` and
+ * `--refresh-times`. Half the world serves its media from our bucket, half
+ * from someone else's — see `TIGRIS_HOSTED`. Both paths exist in the product
+ * and they fail differently, so a world seeded entirely one way tests half of
+ * it. The clip's poster is the event's own cover: a Tigris-hosted clip with a
+ * hotlinked poster would be a mixed case nobody asked for.
+ */
+async function seededMedia(spec: (typeof EVENTS)[number]) {
+  if (!spec.media) return { coverUrl: null, clipUrl: null }
+  const ours = TIGRIS_HOSTED.has(spec.slug)
+  const coverUrl = ours
+    ? await mirrorToTigris(cover(spec.media), `seed/${spec.slug}/cover.jpg`, "image/jpeg")
+    : cover(spec.media)
+  const clip = CLIPS[spec.slug]
+  const clipUrl = !clip ? null : ours ? await mirrorToTigris(clip, `seed/${spec.slug}/clip.mp4`, "video/mp4") : clip
+  return { coverUrl, clipUrl }
+}
+
 /**
  * `--refresh-times`: put the seeded events back at their offsets from now, and
- * touch nothing else.
+ * their covers and clips back on the seed's current source — nothing else.
+ *
+ * The media is here because a cover host can die under a running world
+ * (loremflickr, 2026-09-24, SCRUM-285), and the only other way to re-point the
+ * rows was `--apply`, which resets everyone's rooms. Covers are the seed's, not
+ * a tester's: a cover changed on the dashboard is put back, as `--apply` would.
  *
  * An event is live for three hours after a seed run, and `--apply` resets
  * every room's memberships, bans and moderation state under whoever is testing
@@ -434,7 +356,17 @@ async function refreshTimes() {
     }
     const start = hoursFromNow(spec.startsIn)
     const end = hoursFromNow(spec.startsIn + spec.hours)
-    await db.events.update({ where: { id: event.id }, data: { start_time: start, end_time: end } })
+    const { coverUrl, clipUrl } = await seededMedia(spec)
+    await db.events.update({
+      where: { id: event.id },
+      data: { start_time: start, end_time: end, cover_image_url: coverUrl },
+    })
+    if (clipUrl) {
+      await db.event_media.updateMany({
+        where: { event_id: event.id, type: "video" },
+        data: { url: clipUrl, thumbnail_url: coverUrl },
+      })
+    }
     await syncOccurrences(event.id, start, end, event.timezone)
 
     const archived = await db.chat_groups.findMany({
@@ -450,6 +382,33 @@ async function refreshTimes() {
       })
     }
     console.log(`  ${spec.slug.padEnd(34)} ${start.toISOString()}${archived.length ? "  (room reopened)" : ""}`)
+  }
+  await reviveCopiedCovers()
+}
+
+/**
+ * Copies of seeded covers that are not the seed's rows — dashboard duplicates,
+ * hand-made test events — still pointing at the retired host. Nothing else
+ * about those events is touched.
+ */
+async function reviveCopiedCovers() {
+  const events = await db.events.findMany({
+    where: { cover_image_url: { contains: RETIRED_COVER_HOST } },
+    select: { id: true, slug: true, cover_image_url: true },
+  })
+  for (const e of events) {
+    const url = revivedCover(e.cover_image_url)
+    if (!url) continue
+    await db.events.update({ where: { id: e.id }, data: { cover_image_url: url } })
+    console.log(`  ${e.slug.padEnd(34)} cover revived`)
+  }
+  const posters = await db.event_media.findMany({
+    where: { thumbnail_url: { contains: RETIRED_COVER_HOST } },
+    select: { id: true, thumbnail_url: true },
+  })
+  for (const m of posters) {
+    const url = revivedCover(m.thumbnail_url)
+    if (url) await db.event_media.update({ where: { id: m.id }, data: { thumbnail_url: url } })
   }
 }
 
@@ -467,7 +426,7 @@ async function main() {
   console.log(`\ndatabase: ${host}`)
   console.log(
     REFRESH_TIMES
-      ? "mode:     REFRESH TIMES — event times and closed rooms only\n"
+      ? "mode:     REFRESH TIMES — event times, closed rooms and seeded media only\n"
       : APPLY
         ? "mode:     APPLY — this will write\n"
         : "mode:     dry run\n"
@@ -588,16 +547,7 @@ async function main() {
 
   // ── events ───────────────────────────────────────────────────────────────
   for (const spec of EVENTS) {
-    /*
-     * Half the world serves its media from our bucket, half from someone
-     * else's — see `TIGRIS_HOSTED`. Both paths exist in the product and they
-     * fail differently, so a world seeded entirely one way tests half of it.
-     */
-    const coverUrl = spec.media
-      ? TIGRIS_HOSTED.has(spec.slug) && APPLY
-        ? await mirrorToTigris(cover(spec.media), `seed/${spec.slug}/cover.jpg`, "image/jpeg")
-        : cover(spec.media)
-      : null
+    const { coverUrl, clipUrl } = await seededMedia(spec)
 
     const city = CITY[spec.city as keyof typeof CITY]
     const venue = spec.venue === "circle" ? circle : spec.venue === "polygon" ? polygon : null
@@ -694,22 +644,14 @@ async function main() {
      * `feedClip` refuses to play a clip it cannot poster, so a video row seeded
      * without one would simply never appear and look like a broken player.
      */
-    const clip = CLIPS[spec.slug]
-    if (clip && spec.media) {
+    if (clipUrl) {
       const existing = await db.event_media.findFirst({
         where: { event_id: event.id, type: "video" },
       })
-      const clipUrl =
-        TIGRIS_HOSTED.has(spec.slug) && APPLY
-          ? await mirrorToTigris(clip, `seed/${spec.slug}/clip.mp4`, "video/mp4")
-          : clip
       const data = {
         event_id: event.id,
         type: "video" as const,
         url: clipUrl,
-        // The poster is the event's own cover, resolved the same way — a
-        // Tigris-hosted clip with a hotlinked poster would be a mixed case
-        // nobody asked for.
         thumbnail_url: coverUrl,
         order: 0,
       }

@@ -154,9 +154,10 @@ RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" \
 ```
 
 It moves every seeded event back to its offset from now (Founders & Filter
-Coffee is live for the next ~2.5 h) and reopens a room the archive sweep closed.
-Nothing else changes: memberships, bans, profiles, claims stay as they are. Post
-one line on SCRUM-208.
+Coffee is live for the next ~2.5 h), reopens a room the archive sweep closed,
+and puts the seeded covers and clips back on the seed's current source (a cover
+changed on the dashboard is put back). Nothing else changes: memberships, bans,
+profiles, claims stay as they are. Post one line on SCRUM-208.
 
 **A full re-seed (`--apply`) resets memberships and moderation state.** Run it
 only when no unit labelled `needs-live-event` is In Progress (the *Needs a live
