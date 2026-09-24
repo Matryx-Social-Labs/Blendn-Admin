@@ -95,7 +95,15 @@ failure: a silent refusal to sign in is indistinguishable from a bug.
 ```
 
 On `signin` it is checked **after** the password, so the response cannot be used
-to discover which addresses are suspended. Suspending also revokes the account's
+to discover which addresses are suspended.
+
+On `refresh` it is answered even for the token the suspension **revoked** — which
+is every token, since suspending revokes them all. A token we signed that has not
+expired names its account, and that account's refusal (suspended, or staff) is
+returned as 403 with the sentence above; nothing is issued. A forged or expired
+token still gets `401` and names nobody. Before this (SCRUM-290) the revocation
+was checked first, so a suspended phone got `401` and could only say "You were
+signed out". Suspending also revokes the account's
 refresh tokens, so an existing session stops working within one 15-minute access
 token — `getAuthenticatedUser` verifies the JWT without a database read, and
 adding one there would cost a query on every mobile request to shorten that

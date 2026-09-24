@@ -789,6 +789,12 @@
     "observed": "M1: 1 failing ('hotlinks a host that serves a phone, not a bot-checked one'), 3 passing. M2: 1 failing ('keeps a cover that is already in our bucket, even with no Tigris credentials': expected the blendn-media-staging URL, received the hotlink, which is the SCRUM-285 downgrade), 3 passing. M3: 1 failing ('revives a copy of a seeded cover left on the retired host…'), 4 passing.",
     "date": "2026-09-24"
   },
+  "refresh-after-suspension.itest.ts": {
+    "guards": "POST /api/mobile/auth/refresh answers a revoked token with 403 SUSPENDED_MESSAGE / STAFF_MESSAGE when the account behind it is suspended or staff (suspension revokes every refresh token, so the 403 was unreachable), and names nobody for a forged or expired token (SCRUM-290)",
+    "mutation": "M1: in the route, replace `return (owner && refusalFor(accountBlockReason(owner))) || unauthorizedResponse(...)` with `return unauthorizedResponse(...)`. M2: in refreshTokenOwner, `jwt.decode(token)` instead of `jwt.verify(token, getJwtSecret())`. M3: `jwt.verify(token, getJwtSecret(), { ignoreExpiration: true })`.",
+    "observed": "M1: 2 failing ('tells a suspended person why…', 'tells a person whose account became staff why…'), 2 passing. M2: 1 failing ('says nothing about an account to a token that is not ours or has expired': the forged token got 403), 3 passing. M3: 1 failing (same test: the expired token got 403), 3 passing.",
+    "date": "2026-09-24"
+  },
   "qa-tool.test.ts": {
     "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts. And probeArgs refuses any argument it would ignore: what npm leaves of `--post-as` is an error, not a listen-only probe, and seconds are never NaN (SCRUM-284)",
     "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS. (SCRUM-284) M1: replace probeArgs' final `throw new Error(\"probe: will not ignore …\")` with `return { groupId, email, seconds }`. M2: set `const hasSeconds = rest[0] !== undefined`.",

@@ -215,6 +215,25 @@ export async function storeRefreshToken(
 }
 
 /**
+ * Whose refresh token this is, if we signed it and it has not expired —
+ * whether or not it is still live.
+ *
+ * Only for choosing what to *tell* someone whose refresh was refused, never
+ * for issuing anything: suspension revokes every refresh token, so without
+ * this the refresh route could only ever answer a suspended person with 401
+ * and the phone had no way to say why (SCRUM-290). A forged or expired token
+ * names nobody.
+ */
+export function refreshTokenOwner(token: string): string | null {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret()) as DecodedToken
+    return decoded.type === "refresh" && decoded.userId ? decoded.userId : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Verify a refresh token against the database
  * Returns the decoded token if valid, null otherwise
  */
