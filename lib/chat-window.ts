@@ -181,6 +181,33 @@ export function mayWriteToRoom(
   return null
 }
 
+/**
+ * Why somebody may not read a room — its history, its member list, its feed.
+ *
+ * One rule for the socket join and every HTTP read (SCRUM-205). The socket
+ * refused a banned member from the day it had a join check; the three GETs
+ * checked only that *a* membership row existed, so a ban stopped somebody
+ * posting and left them free to keep reading what their target said, by
+ * reloading. Driven on staging: banned from the dashboard, then
+ * `GET /chat/groups/:id/messages` with the banned person's token → 200.
+ *
+ * `left` stays readable. It is what every member of an archived room becomes,
+ * and the event-chat route rejoins it on purpose. `muted` reads: a mute
+ * silences, it does not banish (SCRUM-178). A draft event has no room
+ * (SCRUM-8) — "hidden", so a caller can answer 404 rather than confirm it.
+ */
+export type ReadDenial = "hidden" | "not_member" | "banned"
+
+export function roomReadDenial(
+  membership: { status: string } | null | undefined,
+  event: { status: string }
+): ReadDenial | null {
+  if (event.status === "draft") return "hidden"
+  if (!membership) return "not_member"
+  if (membership.status === "banned") return "banned"
+  return null
+}
+
 /* -------------------------------------------------------------------------- */
 /* Who may be in the room at all                                               */
 /* -------------------------------------------------------------------------- */

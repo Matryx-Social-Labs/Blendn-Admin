@@ -1069,6 +1069,15 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
   const io = currentIo()
   if (!io) return
   io.to(`chat:${chatGroupId}`).emit("chat:memberBanned", { chatGroupId, userId, banned })
+  /*
+   * And out of the room, on every instance — after the notice, so their own
+   * client hears it. `canJoinChat` refuses a banned *rejoin*; a socket already
+   * in `chat:<room>` kept every message, reaction and typing tick until it
+   * happened to disconnect, so a ban mid-evening stopped the posts and not the
+   * reading (SCRUM-205). `evictUserSockets`, scoped to one room: the person
+   * keeps the rest of the app.
+   */
+  if (banned) io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
 }
 
 /**
