@@ -783,6 +783,12 @@
     "observed": "1 failing, 1 passing: the teen tester is seeded and not re-asserted.",
     "date": "2026-09-24"
   },
+  "qa-tool.test.ts": {
+    "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts",
+    "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS.",
+    "observed": "1 failing, 1 passing: production is accepted.",
+    "date": "2026-09-24"
+  },
   "room-read-denial.test.ts": {
     "guards": "roomReadDenial refuses a banned member and hides a draft event's room while leaving active, muted and left members reading; bannedRefusal names the organiser only when banned_by is set (SCRUM-205)",
     "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
