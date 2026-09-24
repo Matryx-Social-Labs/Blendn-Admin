@@ -61,6 +61,13 @@ the UI cannot make (e.g. a check-in the emulator's dead GPS blocks).
   constraints that exist in every deployed environment.
 
 ## Token / scratch files
+
+`npm run -s qa bootstrap | sq | token | world | probe | lock` (`scripts/qa.ts`)
+does all of the below: the DB URL in `~/.blendn-qa/pgurl` (600, not `/tmp`,
+which macOS purges), read-only queries through the repo's `pg`, cached and
+refreshed mobile tokens (the sign-in limit counts successes), and socket probes.
+See `../TEST-PLAN.md`.
+
 Short-lived access tokens (15 min) and the secure DB-URL file live under a
 gitignored scratch dir (this session used `/tmp/mflows/`). Re-sign-in via
 `POST /api/mobile/auth/signin` when a token expires; vary `X-Forwarded-For` to

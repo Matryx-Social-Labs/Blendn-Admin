@@ -26,6 +26,8 @@ real person uses** and the **row it wrote has been read back**. Green unit +
 integration + a screenshot is not that. One Jira ticket per finding.
 
 ## Read in this order
+0. **`TEST-PLAN.md` — the programme: the Jira queue (`tq`), how to claim a unit,
+   attendee lanes, the world log. Start every testing session here.**
 1. `routines/testing.md` — how a drive actually runs, staging-first.
 2. `routines/driving-the-app.md` — iOS sim, Android emulator, Maestro, the GPS fact.
 3. `routines/landing-and-staging.md` — PR → dev → staging promotion.

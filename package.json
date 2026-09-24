@@ -27,6 +27,7 @@
     "seed:room": "tsx scripts/seed-room.ts",
     "backfill:cities": "tsx scripts/backfill-event-cities.ts",
     "seed:qa": "tsx scripts/seed-qa.ts",
+    "qa": "tsx scripts/qa.ts",
     "seed:accounts": "tsx scripts/test-accounts.ts",
     "test:e2e": "playwright test",
     "test:e2e:local": "tsx scripts/e2e-local.ts",
