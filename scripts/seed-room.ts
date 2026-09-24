@@ -283,7 +283,7 @@ async function main() {
   if (!organiser || !org) {
     console.error(
       `REFUSING: ${organiserEmail} or "${TEST_ORG_NAMES.events}" does not exist here.\n` +
-        "Run `SEED_PASSWORD=... npm run seed:accounts` first (a staging deploy does it)."
+        "A staging deploy creates it; locally, run `SEED_PASSWORD=... npm run seed:accounts` first."
     )
     process.exit(1)
   }

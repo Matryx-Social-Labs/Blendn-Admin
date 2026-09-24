@@ -18,7 +18,9 @@ One account per dashboard role, written on **every staging deploy** by
 `scripts/test-accounts.ts` (the Railway pre-deploy step). The password is the
 `SEED_PASSWORD` variable on the staging `Blendn-Admin` service — read it with
 `railway variables --environment staging --service Blendn-Admin`, never copy it
-into a file. Change the variable to rotate it; Railway redeploys.
+into a file. Change the variable to rotate it; Railway redeploys. To re-seed
+staging from a laptop, `RAILWAY_ENVIRONMENT_NAME=staging` must be set as well —
+the seed refuses any database that is not staging or `localhost`.
 
 | Email | Role | Persona |
 |---|---|---|

@@ -88,7 +88,12 @@ dashboard account per role — `admin@`, `organizer@`, `venue.owner@` and
 password to `SEED_PASSWORD`.
 
 - **Staging only.** It writes nothing when `SEED_PASSWORD` is unset, and nothing
-  on the `production` environment even when it is set.
+  on any Railway environment but `staging` even when it is set — production and
+  PR environments deploy untouched. The check is an allow-list inside the shared
+  function, so `seed:qa` and `db:seed` refuse the same way.
+- **From a laptop**, only a `localhost` database passes. To seed staging through
+  its public URL, say so: `RAILWAY_ENVIRONMENT_NAME=staging SEED_PASSWORD=…
+  DATABASE_URL=<staging public URL> npm run seed:qa -- --apply`.
 - **Rotation is changing the variable.** Railway redeploys and the step rehashes.
 - **A password `checkPassword` refuses fails the deploy**, with the reason in the
   deploy log. Better than an account nobody can sign in to.

@@ -21,15 +21,25 @@ import { checkPassword } from "../lib/password"
  * ran `seed-qa`. On 2026-09-22 a run without it gave every account a random
  * one, and testers were locked out for ~27 hours before anyone noticed.
  *
- * Each run also puts back whatever a tester broke: the role, a suspension, a
- * deletion, the organisation membership. A role is not access — see the
- * header of `seed-qa.ts` — so an organiser without the membership signs in to
- * an empty dashboard that looks exactly like a bug.
+ * A role is not access — see the header of `seed-qa.ts` — so this seeds the
+ * memberships too: an organiser without one signs in to an empty dashboard that
+ * looks exactly like a bug.
  *
- * ## Never on production
+ * ## Staging, or a database on this machine — nothing else
  *
- * `skipReason` refuses there even with the variable set. A shared-password
- * app_admin on production reads every real user's data.
+ * `environmentRefusal` is an allow-list, checked inside `ensureTestAccounts`
+ * so every caller gets it — the deploy step, `seed-qa` and `prisma/seed.ts`.
+ * A shared-password app_admin on production reads every real user's data, and
+ * a deny-list of the name "production" let through both an environment renamed
+ * out from under it and a production URL pasted into a laptop shell.
+ *
+ * ## What a run puts back, and what it does not
+ *
+ * Access: the role, a suspension, a deletion, the membership, the password.
+ * Not names or profile fields — a tester editing those is testing the editor.
+ * And the accounts are found by address, so an account whose email is changed
+ * in the dashboard is left where it is and a fresh one is made at the address.
+ * Access is organisation-shaped, so the fresh one sees the same events.
  *
  * ## The personas were renamed, not recreated
  *
@@ -133,13 +143,32 @@ const WORLD: TestAccountsWorld = {
 /** Same cost as `create-dashboard-user.ts` and `seed-qa.ts`. */
 const HASH_COST = 12
 
-/** Why the pre-deploy step should write nothing, or null to go ahead. */
-export function skipReason(env: Record<string, string | undefined>): string | null {
-  if (env.RAILWAY_ENVIRONMENT_NAME === "production") {
-    return "production — test accounts are staging-only"
+type Env = Record<string, string | undefined>
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+function hostOf(url: string | undefined): string {
+  try {
+    return new URL(url ?? "").hostname
+  } catch {
+    return "(unparseable DATABASE_URL)"
   }
-  if (!env.SEED_PASSWORD?.trim()) return "SEED_PASSWORD is not set"
-  return null
+}
+
+/** Why this database must not get the accounts, or null when it may. */
+export function environmentRefusal(env: Env): string | null {
+  const name = env.RAILWAY_ENVIRONMENT_NAME
+  if (name === "staging") return null
+  if (!name && LOCAL_HOSTS.has(hostOf(env.DATABASE_URL))) return null
+  return (
+    `${name ? `Railway environment "${name}"` : hostOf(env.DATABASE_URL)} is neither staging nor a local database. ` +
+    "If this really is staging, set RAILWAY_ENVIRONMENT_NAME=staging."
+  )
+}
+
+/** Why the pre-deploy step should write nothing, or null to go ahead. */
+export function skipReason(env: Env): string | null {
+  return environmentRefusal(env) ?? (env.SEED_PASSWORD?.trim() ? null : "SEED_PASSWORD is not set")
 }
 
 /**
@@ -155,6 +184,9 @@ export async function ensureTestAccounts(
   password: string,
   world: TestAccountsWorld = WORLD
 ): Promise<{ users: Record<AccountKey, string>; orgs: Record<OrgKey, organisations> }> {
+  const refusal = environmentRefusal(process.env)
+  if (refusal) throw new Error(`REFUSING to write test accounts: ${refusal}`)
+
   for (const account of world.accounts) {
     const check = checkPassword(password, account.email)
     if (!check.ok) throw new Error(`SEED_PASSWORD refused for ${account.email}: ${check.message}`)
@@ -266,7 +298,9 @@ async function retire(db: PrismaClient, emails: readonly string[], organiserId: 
   })
   const adopted = await db.events.updateMany({
     where: { organizer_id: { in: ids }, deleted_at: null },
-    data: { organizer_id: organiserId, organizer_org_id: orgId, updated_at: new Date() },
+    // The suspension memory belonged to the old organisation. Carried over, a
+    // later reinstate of this one would republish an event it never had.
+    data: { organizer_id: organiserId, organizer_org_id: orgId, pre_suspension_status: null, updated_at: new Date() },
   })
   if (suspended.count || adopted.count) {
     console.log(`  retired ${suspended.count} old test account(s), moved ${adopted.count} live event(s) to the organiser`)
@@ -289,14 +323,9 @@ async function upsertOrg(db: PrismaClient, displayName: string) {
 /* -------------------------------------------------------------------------- */
 
 async function main() {
-  const host = (() => {
-    try {
-      return new URL(process.env.DATABASE_URL ?? "").host
-    } catch {
-      return "(unparseable DATABASE_URL)"
-    }
-  })()
-  console.log(`test accounts → ${host} (${process.env.RAILWAY_ENVIRONMENT_NAME ?? "no Railway environment"})`)
+  console.log(
+    `test accounts → ${hostOf(process.env.DATABASE_URL)} (${process.env.RAILWAY_ENVIRONMENT_NAME ?? "no Railway environment"})`
+  )
 
   const skip = skipReason(process.env)
   if (skip) {

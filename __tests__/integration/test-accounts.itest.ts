@@ -4,6 +4,7 @@ import { actorFor } from "@/lib/org-membership"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
 import {
   ensureTestAccounts,
+  environmentRefusal,
   skipReason,
   TEST_ACCOUNTS,
   type TestAccountsWorld,
@@ -64,25 +65,59 @@ afterAll(async () => {
   await closeDb()
 })
 
+const LOCAL_DB = "postgresql://postgres:postgres@localhost:55433/blendn_test"
+const REMOTE_DB = "postgresql://postgres:x@shuttle.proxy.rlwy.net:41234/railway"
+
+describe("environmentRefusal — an allow-list, not a deny-list", () => {
+  it("allows staging, and a database on this machine", () => {
+    expect(environmentRefusal({ RAILWAY_ENVIRONMENT_NAME: "staging", DATABASE_URL: REMOTE_DB })).toBeNull()
+    expect(environmentRefusal({ DATABASE_URL: LOCAL_DB })).toBeNull()
+    expect(environmentRefusal({ DATABASE_URL: "postgresql://u:p@127.0.0.1:5432/db" })).toBeNull()
+  })
+
+  it("refuses production — a shared-password admin there reads real people's data", () => {
+    expect(environmentRefusal({ RAILWAY_ENVIRONMENT_NAME: "production", DATABASE_URL: REMOTE_DB })).toMatch(/production/)
+    expect(environmentRefusal({ RAILWAY_ENVIRONMENT_NAME: "production", DATABASE_URL: LOCAL_DB })).not.toBeNull()
+  })
+
+  it("refuses what a deny-list let through: a renamed environment, and a remote URL in a laptop shell", () => {
+    expect(environmentRefusal({ RAILWAY_ENVIRONMENT_NAME: "prod", DATABASE_URL: REMOTE_DB })).toMatch(/prod/)
+    expect(environmentRefusal({ DATABASE_URL: REMOTE_DB })).toMatch(/shuttle\.proxy\.rlwy\.net/)
+  })
+})
+
 describe("skipReason — when the pre-deploy step writes nothing", () => {
   it("skips without a password, so an environment that never set one is untouched", () => {
     expect(skipReason({ RAILWAY_ENVIRONMENT_NAME: "staging" })).toMatch(/SEED_PASSWORD/)
-    expect(skipReason({ SEED_PASSWORD: "   " })).toMatch(/SEED_PASSWORD/)
+    expect(skipReason({ DATABASE_URL: LOCAL_DB, SEED_PASSWORD: "   " })).toMatch(/SEED_PASSWORD/)
   })
 
-  it("skips on production even with a password — a shared-password admin there reads real people's data", () => {
-    expect(
-      skipReason({ RAILWAY_ENVIRONMENT_NAME: "production", SEED_PASSWORD: PASSWORD })
-    ).toMatch(/production/)
+  it("skips any environment that is not staging — production and PR environments deploy untouched", () => {
+    expect(skipReason({ RAILWAY_ENVIRONMENT_NAME: "production", SEED_PASSWORD: PASSWORD })).toMatch(/production/)
+    expect(skipReason({ RAILWAY_ENVIRONMENT_NAME: "blendn-pr-42", SEED_PASSWORD: PASSWORD })).toMatch(/pr-42/)
   })
 
-  it("runs on staging, and locally where Railway sets no environment name", () => {
+  it("runs on staging with a password", () => {
     expect(skipReason({ RAILWAY_ENVIRONMENT_NAME: "staging", SEED_PASSWORD: PASSWORD })).toBeNull()
-    expect(skipReason({ SEED_PASSWORD: PASSWORD })).toBeNull()
   })
 })
 
 describe("ensureTestAccounts", () => {
+  it("refuses from every caller on production, not only the deploy step", async () => {
+    const world = worldFor("prod")
+    const saved = process.env.RAILWAY_ENVIRONMENT_NAME
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+    try {
+      await expect(ensureTestAccounts(db, PASSWORD, world)).rejects.toThrow(/REFUSING/)
+    } finally {
+      if (saved === undefined) delete process.env.RAILWAY_ENVIRONMENT_NAME
+      else process.env.RAILWAY_ENVIRONMENT_NAME = saved
+    }
+
+    const written = await db.user.count({ where: { email: { in: world.accounts.map((a) => a.email) } } })
+    expect(written).toBe(0)
+  })
+
   it("refuses a password the product would refuse, before writing anything", async () => {
     const world = worldFor("weak")
 
@@ -160,6 +195,8 @@ describe("ensureTestAccounts", () => {
     const live = await makeEvent(retiredId)
     const gone = await makeEvent(retiredId, { deleted_at: new Date() })
     eventIds.push(live, gone)
+    // Remembered by a suspension of the OLD organisation.
+    await db.events.update({ where: { id: live }, data: { pre_suspension_status: "published" } })
 
     const { users, orgs } = await ensureTestAccounts(db, PASSWORD, world)
 
@@ -173,6 +210,8 @@ describe("ensureTestAccounts", () => {
     })
     expect(adopted.organizer_id).toBe(users.organiser)
     expect(adopted.organizer_org_id).toBe(orgs.events.id)
+    const memory = await db.events.findUniqueOrThrow({ where: { id: live }, select: { pre_suspension_status: true } })
+    expect(memory.pre_suspension_status).toBeNull()
 
     // Through the real resolver: moving the row is only half of it if the
     // organiser still cannot touch the event.
@@ -183,7 +222,7 @@ describe("ensureTestAccounts", () => {
     expect(untouched.organizer_id).toBe(retiredId)
   })
 
-  it("puts back an account a tester broke, and leaves an unchanged password's hash alone", async () => {
+  it("puts back the access a tester broke — role, suspension, membership — and leaves an unchanged password's hash alone", async () => {
     const world = worldFor("repair")
     const { users } = await ensureTestAccounts(db, PASSWORD, world)
     const before = await db.user.findUniqueOrThrow({ where: { id: users.venue } })
