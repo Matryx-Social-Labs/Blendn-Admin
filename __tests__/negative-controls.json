@@ -36,7 +36,7 @@
     "age.test.ts": {
       "guards": "datingAgeRefusal/stripDating catch free-text dating however it is written — DATİNG, dat\\u200bing, fullwidth, combining accent, 'casual dating', 'Dating!' — refused under 18 and stripped on an age drop, while 'updating' and 'candidates' are not mistaken for it (SCRUM-294, security review)",
       "mutation": "M1: isAgeGated normalises with value.trim().toLowerCase() only (no NFKD, no \\p{M}\\p{Cf} removal, exact match).",
-      "observed": "8 of 46 tests fail: the look-alike variants in both 'refuses … under 18' and 'strips … when the age is under 18'.",
+      "observed": "8 of 46 tests failing: the look-alike variants in both 'refuses … under 18' and 'strips … when the age is under 18'.",
       "date": "2026-09-25"
     },
     "no-dating-looking-for-under-18.itest.ts": {
