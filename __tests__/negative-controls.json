@@ -783,6 +783,12 @@
     "observed": "1 failing, 1 passing: the teen tester is seeded and not re-asserted.",
     "date": "2026-09-24"
   },
+  "seed-media.test.ts": {
+    "guards": "seeded covers hotlink a host that serves the phone (picsum), not the bot-checked loremflickr; and mirrorToTigris keeps an object already in the bucket even without Tigris credentials, so a re-seed never downgrades a bucket URL to a hotlink; and a copy of a seeded cover left on the retired host is revived (SCRUM-285)",
+    "mutation": "M1: in scripts/seed-media.ts, point `cover` back at `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${subject}`. M2: delete `if (await inBucket(hosted)) return hosted`. M3: make `revivedCover` always `return null`.",
+    "observed": "M1: 1 failing ('hotlinks a host that serves a phone, not a bot-checked one'), 3 passing. M2: 1 failing ('keeps a cover that is already in our bucket, even with no Tigris credentials': expected the blendn-media-staging URL, received the hotlink, which is the SCRUM-285 downgrade), 3 passing. M3: 1 failing ('revives a copy of a seeded cover left on the retired host…'), 4 passing.",
+    "date": "2026-09-24"
+  },
   "qa-tool.test.ts": {
     "guards": "scripts/qa.ts (the testing programme's token, probe and query tool) accepts only the staging API and localhost, refusing production and look-alike hosts. And probeArgs refuses any argument it would ignore: what npm leaves of `--post-as` is an error, not a listen-only probe, and seconds are never NaN (SCRUM-284)",
     "mutation": "In scripts/qa.ts, add \"api.blendn.app\" to ALLOWED_API_HOSTS. (SCRUM-284) M1: replace probeArgs' final `throw new Error(\"probe: will not ignore …\")` with `return { groupId, email, seconds }`. M2: set `const hasSeconds = rest[0] !== undefined`.",
