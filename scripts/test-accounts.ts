@@ -128,16 +128,43 @@ export const RETIRED_TEST_ACCOUNTS: readonly string[] = [
   "roomseed-organiser@blendn.invalid",
 ]
 
+/**
+ * `seed-qa`'s other people, who share the role accounts' password: the named
+ * admins, the no-org organiser (the negative control) and the attendees.
+ *
+ * #402 re-asserted only the four role accounts on deploy, so once
+ * SEED_PASSWORD moved to Railway these kept whatever the last `seed:qa` run
+ * gave them — every attendee sign-in in the testing programme answered 401
+ * (2026-09-24). Kept in step with `seed-qa.ts` by
+ * `__tests__/seed-personas-listed.test.ts`. `appreview@` is not here on
+ * purpose: the App Store reviewer's password is its own.
+ */
+export const SEED_PERSONAS: readonly string[] = [
+  "sagar.kishore@blendn.app",
+  "hemanth.ramesh@blendn.app",
+  "likhith.gowda@blendn.app",
+  "daniel.weber@blendn.app",
+  "ananya.b@blendn.app",
+  "rohan.d@blendn.app",
+  "kavya.n@blendn.app",
+  "imran.q@blendn.app",
+  "sneha.p@blendn.app",
+  "vikram.s@blendn.app",
+  "teen.tester@blendn.app",
+]
+
 export interface TestAccountsWorld {
   accounts: readonly TestAccount[]
   orgNames: Record<OrgKey, string>
   retired: readonly string[]
+  personas: readonly string[]
 }
 
 const WORLD: TestAccountsWorld = {
   accounts: TEST_ACCOUNTS,
   orgNames: TEST_ORG_NAMES,
   retired: RETIRED_TEST_ACCOUNTS,
+  personas: SEED_PERSONAS,
 }
 
 /** Same cost as `create-dashboard-user.ts` and `seed-qa.ts`. */
@@ -225,8 +252,32 @@ export async function ensureTestAccounts(
   }
 
   await retire(db, world.retired, users.organiser, orgs.events.id)
+  await reassertPersonaPasswords(db, world.personas, password)
 
   return { users, orgs }
+}
+
+/**
+ * The password, and nothing else. Never created here — that is `seed-qa`'s
+ * job, with the profile and interests that make an attendee usable — and
+ * never unsuspended or un-banned: a tester may be halfway through doing that
+ * to one on purpose.
+ */
+async function reassertPersonaPasswords(db: PrismaClient, emails: readonly string[], password: string) {
+  const people = await db.user.findMany({
+    where: { email: { in: [...emails] } },
+    select: { id: true, password: true },
+  })
+  const stale: string[] = []
+  for (const person of people) {
+    if (!person.password || !(await bcrypt.compare(password, person.password))) stale.push(person.id)
+  }
+  if (stale.length === 0) return
+  await db.user.updateMany({
+    where: { id: { in: stale } },
+    data: { password: await bcrypt.hash(password, HASH_COST) },
+  })
+  console.log(`  password re-asserted on ${stale.length} seed persona(s)`)
 }
 
 async function renameFormer(db: PrismaClient, account: TestAccount) {

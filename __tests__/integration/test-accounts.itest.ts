@@ -37,6 +37,7 @@ function worldFor(label: string): TestAccountsWorld {
     })),
     orgNames: { events: `${tag} events`, venues: `${tag} venues`, brands: `${tag} brands` },
     retired: [`${tag}-retired@itest.invalid`],
+    personas: [`${tag}-attendee@itest.invalid`, `${tag}-absent@itest.invalid`],
   }
 }
 
@@ -258,6 +259,33 @@ describe("ensureTestAccounts", () => {
 
     const org = await db.organisations.findUniqueOrThrow({ where: { id: orgs.events.id } })
     expect(org.status).toBe("suspended")
+  })
+
+  it("gives seed-qa's other people the same password, without creating or reinstating them", async () => {
+    // 2026-09-24: the role accounts moved to Railway's SEED_PASSWORD and the
+    // attendees kept the last seed run's — every attendee sign-in was a 401.
+    const world = worldFor("personas")
+    const [present, absent] = world.personas
+    const suspendedAt = new Date("2026-09-20T12:00:00Z")
+    await db.user.create({
+      data: {
+        email: present,
+        name: "Seeded attendee",
+        role: "attendee",
+        password: await bcrypt.hash("the-last-seed-runs-password", 4),
+        suspended_at: suspendedAt,
+      },
+    })
+
+    await ensureTestAccounts(db, PASSWORD, world)
+
+    const after = await db.user.findUniqueOrThrow({ where: { email: present } })
+    expect(await bcrypt.compare(PASSWORD, after.password ?? "")).toBe(true)
+    // A tester may be mid-way through suspending one on purpose.
+    expect(after.suspended_at).toEqual(suspendedAt)
+    expect(after.role).toBe("attendee")
+    // Making people is seed-qa's job, with the profile that makes them usable.
+    expect(await db.user.count({ where: { email: absent } })).toBe(0)
   })
 
   it("moves every account to a new password when the variable changes", async () => {

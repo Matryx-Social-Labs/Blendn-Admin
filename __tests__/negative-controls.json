@@ -777,6 +777,12 @@
     "observed": "1 failing, 1 passing: the banned person's sockets stay in the room.",
     "date": "2026-09-24"
   },
+  "seed-personas-listed.test.ts": {
+    "guards": "every @blendn.app person seed-qa makes with the shared password is in SEED_PERSONAS, so the deploy step re-asserts their password after a rotation",
+    "mutation": "In scripts/test-accounts.ts, delete \"teen.tester@blendn.app\" from SEED_PERSONAS.",
+    "observed": "1 failing, 1 passing: the teen tester is seeded and not re-asserted.",
+    "date": "2026-09-24"
+  },
   "room-read-denial.test.ts": {
     "guards": "roomReadDenial refuses a banned member and hides a draft event's room while leaving active, muted and left members reading; bannedRefusal names the organiser only when banned_by is set (SCRUM-205)",
     "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial.",
