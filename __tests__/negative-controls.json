@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "org-less-organiser-refused-server-side.itest.ts": {
+      "guards": "an organiser in no organisation (daniel.weber@'s shape) is refused server-side by the real handlers on another organisation's event: PATCH and DELETE the event, POST an announcement, ban a room member, delete a room message; every row unchanged (SCRUM-251 item 3)",
+      "mutation": "M1: `if (false && …canEdit)` on the event PATCH permission check. M2: the same on the announcements POST check.",
+      "observed": "M1: 1 failing of 2 (the event case: the title was taken over). M2: 1 failing of 2 (the room case: the announcement was posted).",
+      "date": "2026-09-25"
+    },
     "create-event-offered-only-to-publishers.test.ts": {
       "guards": "/events/new redirects a non-publisher to /dashboard/organisation, the Events page and the organiser Overview both take canCreate from mayCreateEvents, and the Overview swaps both of its Create-event buttons (SCRUM-145)",
       "mutation": "M2: the /events/new redirect replaced by `void 0`. M3: the Overview's first `createAction ??` dropped.",
