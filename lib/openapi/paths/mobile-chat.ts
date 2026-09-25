@@ -202,14 +202,21 @@ registry.registerPath({
     "- if exactly one option would remain visible, that one is hidden as well",
     "",
     "Treat `null` as \"not reportable\". It is never zero.",
+    "",
+    "Read by the room, with the room's own read rule: **404** when the poll is not in the event",
+    "named in the URL, its message was deleted, or the event is a draft; **403** for somebody who",
+    "was never in the room and for a member who was banned from it. `muted` and `left` members",
+    "still read.",
   ].join("\n"),
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid(), pollId: z.string().uuid() }),
   },
   responses: {
-    200: { description: "Poll", content: { "application/json": { schema: wrap(PollResultsSchema) } } },
     ...standardErrors,
+    200: { description: "Poll", content: { "application/json": { schema: wrap(PollResultsSchema) } } },
+    403: { description: "Not in the room, or removed from it" },
+    404: { description: "No such poll in this event, its message deleted, or the event is a draft" },
   },
 })
 
@@ -242,8 +249,9 @@ registry.registerPath({
     },
   },
   responses: {
-    200: { description: "Updated poll", content: { "application/json": { schema: wrap(PollResultsSchema) } } },
-    409: { description: "Poll closed, room closed, not a member, or unknown option" },
     ...standardErrors,
+    200: { description: "Updated poll", content: { "application/json": { schema: wrap(PollResultsSchema) } } },
+    404: { description: "No such poll in this event" },
+    409: { description: "Poll closed, room closed, not a member, or unknown option" },
   },
 })

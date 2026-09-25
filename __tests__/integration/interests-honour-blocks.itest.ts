@@ -51,6 +51,8 @@ async function readInterests(ownerId: string, asUserId: string) {
 }
 
 it("answers the person you blocked with 404, and nothing about your interests", async () => {
+  // The caller is the blocked party, so this is the case that needs the
+  // reverse arm of blockedEitherWay (blocker_id: them, blocked_id: you).
   const owner = await personWithInterest("ihb-owner")
   const blocked = await personWithInterest("ihb-blocked")
   await db.blocked_users.create({ data: { blocker_id: owner, blocked_id: blocked } })
@@ -61,7 +63,7 @@ it("answers the person you blocked with 404, and nothing about your interests", 
   expect(JSON.stringify(r.body)).not.toContain(INTEREST)
 })
 
-it("works both ways: the person who blocked you cannot read yours either", async () => {
+it("answers the blocker with 404 too, reading the person they blocked", async () => {
   const blocker = await personWithInterest("ihb-blocker")
   const target = await personWithInterest("ihb-target")
   await db.blocked_users.create({ data: { blocker_id: blocker, blocked_id: target } })
