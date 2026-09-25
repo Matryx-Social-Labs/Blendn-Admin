@@ -59,6 +59,21 @@ async function inBucket(url: string): Promise<boolean> {
   }
 }
 
+/** The public URL of a key in the seed bucket. */
+export function seedBucketUrl(key: string): string {
+  return `https://${SEED_BUCKET}.fly.storage.tigris.dev/${key}`
+}
+
+/**
+ * Which objects meant for our bucket came back on someone else's host
+ * (SCRUM-288). The documented `--apply` passed no Tigris variables, so each
+ * one stayed hotlinked with a single log line among hundreds; a run now ends
+ * by naming them, so a missing credential is not a quiet downgrade.
+ */
+export function stayedHotlinked(objects: readonly { key: string; url: string | null }[]): string[] {
+  return objects.filter((o) => o.url !== null && o.url !== seedBucketUrl(o.key)).map((o) => o.key)
+}
+
 /**
  * Copy a remote asset into our bucket and hand back the public URL.
  *
@@ -78,7 +93,7 @@ export async function mirrorToTigris(
   contentType: string,
   env: Record<string, string | undefined> = process.env
 ): Promise<string> {
-  const hosted = `https://${SEED_BUCKET}.fly.storage.tigris.dev/${key}`
+  const hosted = seedBucketUrl(key)
   if (await inBucket(hosted)) return hosted
 
   const { TIGRIS_ENDPOINT: endpoint, TIGRIS_ACCESS_KEY: accessKeyId, TIGRIS_SECRET_KEY: secretAccessKey } = env

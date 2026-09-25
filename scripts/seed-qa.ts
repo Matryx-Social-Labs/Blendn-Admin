@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
-import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover } from "./seed-media"
+import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS } from "./test-accounts"
 
 /**
@@ -316,14 +316,25 @@ const CLIPS: Record<string, string> = {
  * hotlinked poster would be a mixed case nobody asked for.
  */
 async function seededMedia(spec: (typeof EVENTS)[number]) {
-  if (!spec.media) return { coverUrl: null, clipUrl: null }
+  if (!spec.media) return { coverUrl: null, clipUrl: null, hotlinked: [] as string[] }
   const ours = TIGRIS_HOSTED.has(spec.slug)
-  const coverUrl = ours
-    ? await mirrorToTigris(cover(spec.media), `seed/${spec.slug}/cover.jpg`, "image/jpeg")
-    : cover(spec.media)
+  const coverKey = `seed/${spec.slug}/cover.jpg`
+  const clipKey = `seed/${spec.slug}/clip.mp4`
+  const coverUrl = ours ? await mirrorToTigris(cover(spec.media), coverKey, "image/jpeg") : cover(spec.media)
   const clip = CLIPS[spec.slug]
-  const clipUrl = !clip ? null : ours ? await mirrorToTigris(clip, `seed/${spec.slug}/clip.mp4`, "video/mp4") : clip
-  return { coverUrl, clipUrl }
+  const clipUrl = !clip ? null : ours ? await mirrorToTigris(clip, clipKey, "video/mp4") : clip
+  // Only ours can have stayed hotlinked; the rest are meant to be.
+  const hotlinked = ours ? stayedHotlinked([{ key: coverKey, url: coverUrl }, { key: clipKey, url: clipUrl }]) : []
+  return { coverUrl, clipUrl, hotlinked }
+}
+
+/** Say it once, loudly, at the end of a run — see `stayedHotlinked` (SCRUM-288). */
+function reportHotlinked(keys: readonly string[]): void {
+  if (keys.length === 0) return
+  console.log(
+    `\n!! ${keys.length} object(s) meant for ${SEED_BUCKET} stayed hotlinked:\n     ${keys.join("\n     ")}\n` +
+      `   Run again with the Tigris variables from Railway — docs/agents/TEST-PLAN.md §4.\n`
+  )
 }
 
 /**
@@ -345,6 +356,7 @@ async function seededMedia(spec: (typeof EVENTS)[number]) {
  * restored. Bans are never touched — the sweep leaves them, and so does this.
  */
 async function refreshTimes() {
+  const hotlinked: string[] = []
   for (const spec of EVENTS) {
     const event = await db.events.findUnique({
       where: { slug: spec.slug },
@@ -356,7 +368,8 @@ async function refreshTimes() {
     }
     const start = hoursFromNow(spec.startsIn)
     const end = hoursFromNow(spec.startsIn + spec.hours)
-    const { coverUrl, clipUrl } = await seededMedia(spec)
+    const { coverUrl, clipUrl, hotlinked: left } = await seededMedia(spec)
+    hotlinked.push(...left)
     await db.events.update({
       where: { id: event.id },
       data: { start_time: start, end_time: end, cover_image_url: coverUrl },
@@ -384,6 +397,7 @@ async function refreshTimes() {
     console.log(`  ${spec.slug.padEnd(34)} ${start.toISOString()}${archived.length ? "  (room reopened)" : ""}`)
   }
   await reviveCopiedCovers()
+  reportHotlinked(hotlinked)
 }
 
 /**
@@ -546,8 +560,10 @@ async function main() {
   })
 
   // ── events ───────────────────────────────────────────────────────────────
+  const hotlinked: string[] = []
   for (const spec of EVENTS) {
-    const { coverUrl, clipUrl } = await seededMedia(spec)
+    const { coverUrl, clipUrl, hotlinked: left } = await seededMedia(spec)
+    hotlinked.push(...left)
 
     const city = CITY[spec.city as keyof typeof CITY]
     const venue = spec.venue === "circle" ? circle : spec.venue === "polygon" ? polygon : null
@@ -1391,6 +1407,7 @@ async function main() {
   console.log(`  applications     ${appTotal} across pending, email_pending, approved, declined`)
   console.log(`  demand           ${demandTotal} rows — Pune has demand and no events`)
   console.log(`  brands           Blue Tokai (claimed), Third Wave (unclaimed, claim pending)\n`)
+  reportHotlinked(hotlinked)
 }
 
 async function upsertVenue(input: {

@@ -149,8 +149,11 @@ npm run -s qa world     # live now and within 48 h, odd room memberships, device
 **No live event? Refresh the times — this is safe with others testing:**
 
 ```bash
+RV="$(railway variables --environment staging --service Blendn-Admin --json)"
+TIGRIS_ENDPOINT="$(jq -r .TIGRIS_ENDPOINT <<<"$RV")" TIGRIS_REGION="$(jq -r .TIGRIS_REGION <<<"$RV")" \
+TIGRIS_ACCESS_KEY="$(jq -r .TIGRIS_ACCESS_KEY <<<"$RV")" TIGRIS_SECRET_KEY="$(jq -r .TIGRIS_SECRET_KEY <<<"$RV")" \
 RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" \
-  npx tsx scripts/seed-qa.ts --refresh-times
+  npx tsx scripts/seed-qa.ts --refresh-times; unset RV
 ```
 
 It moves every seeded event back to its offset from now (Founders & Filter
@@ -164,10 +167,20 @@ only when no unit labelled `needs-live-event` is In Progress (the *Needs a live
 event* view), and log it on SCRUM-208 with `npm run -s qa world` from after:
 
 ```bash
-SEED_PASSWORD="$(railway variables --environment staging --service Blendn-Admin --json | jq -r .SEED_PASSWORD)" \
+RV="$(railway variables --environment staging --service Blendn-Admin --json)"
+SEED_PASSWORD="$(jq -r .SEED_PASSWORD <<<"$RV")" \
+TIGRIS_ENDPOINT="$(jq -r .TIGRIS_ENDPOINT <<<"$RV")" TIGRIS_REGION="$(jq -r .TIGRIS_REGION <<<"$RV")" \
+TIGRIS_ACCESS_KEY="$(jq -r .TIGRIS_ACCESS_KEY <<<"$RV")" TIGRIS_SECRET_KEY="$(jq -r .TIGRIS_SECRET_KEY <<<"$RV")" \
 RAILWAY_ENVIRONMENT_NAME=staging \
-DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" npm run seed:qa -- --apply
+DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" npm run seed:qa -- --apply; unset RV
 ```
+
+**The Tigris variables are what put half the world's media in our own bucket**
+(`TIGRIS_HOSTED` in `scripts/seed-qa.ts`). Without them, an object that isn't
+already in `blendn-media-staging` stays hotlinked. Either run ends with a loud
+`!! N object(s) … stayed hotlinked` naming each one (SCRUM-288); if you see it,
+run again with the variables. Nothing is printed: `RV` holds the Railway JSON
+for that one command and is unset after it.
 
 Every seeded person shares `SEED_PASSWORD`: the deploy step re-asserts it on
 the role accounts **and** on `SEED_PERSONAS` (the attendees, named admins, the

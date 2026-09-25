@@ -982,10 +982,10 @@
     "date": "2026-09-24"
   },
   "seed-media.test.ts": {
-    "guards": "seeded covers hotlink a host that serves the phone (picsum), not the bot-checked loremflickr; and mirrorToTigris keeps an object already in the bucket even without Tigris credentials, so a re-seed never downgrades a bucket URL to a hotlink; and a copy of a seeded cover left on the retired host is revived (SCRUM-285)",
-    "mutation": "M1: in scripts/seed-media.ts, point `cover` back at `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${subject}`. M2: delete `if (await inBucket(hosted)) return hosted`. M3: make `revivedCover` always `return null`.",
-    "observed": "M1: 1 failing ('hotlinks a host that serves a phone, not a bot-checked one'), 3 passing. M2: 1 failing ('keeps a cover that is already in our bucket, even with no Tigris credentials': expected the blendn-media-staging URL, received the hotlink, which is the SCRUM-285 downgrade), 3 passing. M3: 1 failing ('revives a copy of a seeded cover left on the retired host…'), 4 passing.",
-    "date": "2026-09-24"
+    "guards": "seeded covers hotlink a host that serves the phone (picsum), not the bot-checked loremflickr; and mirrorToTigris keeps an object already in the bucket even without Tigris credentials, so a re-seed never downgrades a bucket URL to a hotlink; and a copy of a seeded cover left on the retired host is revived (SCRUM-285) stayedHotlinked names every object meant for the seed bucket that came back on another host, so a run without Tigris credentials ends by saying so (SCRUM-288).",
+    "mutation": "M1: in scripts/seed-media.ts, point `cover` back at `https://loremflickr.com/${SEED_COVER_SIZE}/${SEED_COVER_SIZE}/${subject}`. M2: delete `if (await inBucket(hosted)) return hosted`. M3: make `revivedCover` always `return null`. SCRUM-288 (2026-09-25): stayedHotlinked returns [].",
+    "observed": "M1: 1 failing ('hotlinks a host that serves a phone, not a bot-checked one'), 3 passing. M2: 1 failing ('keeps a cover that is already in our bucket, even with no Tigris credentials': expected the blendn-media-staging URL, received the hotlink, which is the SCRUM-285 downgrade), 3 passing. M3: 1 failing ('revives a copy of a seeded cover left on the retired host…'), 4 passing. SCRUM-288: 1 failing of 7 (the hotlinked cover is not named).",
+    "date": "2026-09-25"
   },
   "refresh-after-suspension.itest.ts": {
     "guards": "POST /api/mobile/auth/refresh answers a refresh token that the suspension revoked with 403 SUSPENDED_MESSAGE (suspension revokes every token, so the 403 was unreachable) — and only that token: one revoked before the suspension, a staff account's revoked token, a deleted account, and a forged or expired token all stay 401 (SCRUM-290)",
