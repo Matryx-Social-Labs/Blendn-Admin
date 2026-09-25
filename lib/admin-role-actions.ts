@@ -33,6 +33,8 @@ export interface RoleUser {
   }
   /** Live supply. This is the number a list of hosts is about. */
   published: number
+  /** A suspended account is listed but is not supply (SCRUM-310). */
+  suspended: boolean
   /** Intent, not supply — see `getRoleUsers`. */
   drafts: number
   /** Most recent PUBLISHED event, ISO. Null when they have never shipped one. */
@@ -98,8 +100,9 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
+  // A deleted account is not a host, whatever role it kept (SCRUM-310).
   const users = await db.user.findMany({
-    where: { role },
+    where: { role, deletedAt: null },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -108,6 +111,7 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
       image: true,
       createdAt: true,
       role: true,
+      suspended_at: true,
       _count: { select: { organized_events: true } },
     },
   })
@@ -138,8 +142,9 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
 
   const totalPublished = [...published.values()].reduce((n, v) => n + v, 0)
 
-  return users.map((user) => ({
+  return users.map(({ suspended_at, ...user }) => ({
     ...user,
+    suspended: suspended_at !== null,
     published: published.get(user.id) ?? 0,
     drafts: drafts.get(user.id) ?? 0,
     lastEventAt: last.get(user.id)?.toISOString() ?? null,

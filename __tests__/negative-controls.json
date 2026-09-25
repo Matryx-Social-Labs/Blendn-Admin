@@ -33,6 +33,18 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "never-published.test.ts": {
+      "guards": "neverPublished leaves suspended accounts out, and the host table shows 'Suspended' for a suspended row ahead of its last event (SCRUM-310)",
+      "mutation": "M2: neverPublished counts suspended accounts. M3: `{false ? (` in place of `{user.suspended ? (` in role-users-table.tsx.",
+      "observed": "M2: 1 failing of 2 (received 2). M3: 1 failing of 2 (the Suspended cell is gone).",
+      "date": "2026-09-25"
+    },
+    "role-users-live-hosts.itest.ts": {
+      "guards": "getRoleUsers (/dashboard/organisers, /dashboard/venue-owners) leaves out deleted accounts, carries `suspended`, and neverPublished counts only live accounts (SCRUM-310)",
+      "mutation": "M1: `where: { role }` without deletedAt: null. M2: neverPublished counts suspended accounts.",
+      "observed": "M1: 1 failing of 1 (the deleted organiser is listed). M2: 1 failing of 1 (never published reads 2).",
+      "date": "2026-09-25"
+    },
     "refusals-reach-the-screen-client.test.ts": {
       "guards": "requestPresignedUrl throws a Refusal carrying the upload route's own sentence, the three upload catches show a Refusal's words, and no dashboard component throws a bare `new Error()` on a failed response (the chat delete, ban/mute and sponsored-message delete toast the route's sentence) (SCRUM-317)",
       "mutation": "M1: `throw new Error(\"Failed to request upload URL\")` in upload.ts. M2: restore `if (!res.ok) throw new Error()` in chat-feed.tsx. M3: the cover-image catch back to its generic toast.",

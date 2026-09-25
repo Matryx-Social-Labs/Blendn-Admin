@@ -134,7 +134,10 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath }: RoleU
                         never changes again; "never published" is the row that
                         wants a nudge.
                       */}
-                      {user.lastEventAt ? (
+                      {/* Suspended first: such a row is not a lead to nudge (SCRUM-310). */}
+                      {user.suspended ? (
+                        <span className="font-bold text-destructive">Suspended</span>
+                      ) : user.lastEventAt ? (
                         format(new Date(user.lastEventAt), "d MMM yyyy")
                       ) : (
                         <span className="text-faint-foreground">Never published</span>
