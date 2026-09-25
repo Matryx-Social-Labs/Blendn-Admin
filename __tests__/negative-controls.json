@@ -33,6 +33,18 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "format-since-future.test.ts": {
+      "guards": "formatSince says a future date as tomorrow / in Nd, not today (SCRUM-314)",
+      "mutation": "M3: `if (ms > 0 && false) {`.",
+      "observed": "M3: 2 failing of 6 (in 7d and tomorrow read as today).",
+      "date": "2026-09-25"
+    },
+    "overview-hosts-are-organisers.itest.ts": {
+      "guards": "the admin Overview's supply counts organisers only (hostSupply filters organizer.role = organizer, not deleted) and Hosts publishing divides by live organiser accounts (SCRUM-314, the owner's ruling)",
+      "mutation": "M1: drop `organizer: { role: \"organizer\", deletedAt: null }` from hostSupply. M2: the denominator back to `role in (organizer, venue_owner)` with no filters.",
+      "observed": "M1: 1 failing of 1 (publishing +2: the admin counted). M2: 1 failing of 1 (total +2: the suspended organiser counted).",
+      "date": "2026-09-25"
+    },
     "loop-closure.itest.ts": {
       "guards": "came back counts an onboarded, RSVP'd, checked-in person who attended two distinct events, without requiring a match or a conversation (SCRUM-313, owner's ruling)",
       "mutation": "M1: restore `AND s_matched AND s_conversed` in the returned FILTER.",

@@ -61,8 +61,8 @@ export function AttentionStrip({ queues, now }: { queues: AttentionQueue[]; now:
                */
               `Oldest first. ${breaches[0].labelPlural.charAt(0).toUpperCase()}${breaches[0].labelPlural.slice(1)} have been waiting longer than ${
                 breaches[0].slaHours >= 24
-                  ? `${Math.round(breaches[0].slaHours / 24)} days`
-                  : `${breaches[0].slaHours} hours`
+                  ? `${Math.round(breaches[0].slaHours / 24)} day${Math.round(breaches[0].slaHours / 24) === 1 ? "" : "s"}`
+                  : `${breaches[0].slaHours} hour${breaches[0].slaHours === 1 ? "" : "s"}`
               }.`
             : "Oldest first. Nothing is past its window."}
         </p>
