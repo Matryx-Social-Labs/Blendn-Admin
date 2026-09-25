@@ -116,6 +116,35 @@ it("rates a connected peer with no note and writes the row", async () => {
   expect(row).toMatchObject({ rated_id: them.id, rating: 4, issue: "none", note: null })
 })
 
+it("refuses a rating across a block, as for someone never connected with (SCRUM-304)", async () => {
+  const host = await makeUser("sw-host-blk", "organizer")
+  users.push(host)
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+  const now = Date.now()
+  await db.events.update({
+    where: { id: eventId },
+    data: { start_time: new Date(now - 4 * 3600_000), end_time: new Date(now - 3600_000) },
+  })
+  const blocker = await person("sw-blocker")
+  const blocked = await person("sw-blocked")
+  await db.event_likes.createMany({
+    data: [
+      { event_id: eventId, liker_id: blocker.id, liked_id: blocked.id },
+      { event_id: eventId, liker_id: blocked.id, liked_id: blocker.id },
+    ],
+  })
+  await db.blocked_users.create({ data: { blocker_id: blocker.id, blocked_id: blocked.id } })
+
+  const res = await ratingRoute.POST(
+    post(`/api/mobile/events/${eventId}/peer-ratings`, blocked.token, { userId: blocker.id, rating: 1, issue: "harassment" }),
+    { params: Promise.resolve({ eventId }) }
+  )
+  expect(res.status).toBe(403)
+  expect(await db.peer_ratings.count({ where: { event_id: eventId } })).toBe(0)
+  expect(await db.user_reports.count({ where: { reporter_id: blocked.id } })).toBe(0)
+})
+
 it("blocks and reports from a conversation with no description, in one transaction", async () => {
   /*
    * "Block and report" on the phone sends `{ action: "block", report: { reason:

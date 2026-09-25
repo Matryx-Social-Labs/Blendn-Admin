@@ -1,3 +1,4 @@
+import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 
 /**
@@ -151,6 +152,12 @@ export async function trustSignalsFor(
  *
  * Returns an empty list before the event ends: asked during the night, a rating
  * is leverage; asked afterwards, it is reflection.
+ *
+ * A block, either way, takes each person off the other's list (SCRUM-304), as
+ * it does on the profile, in matches and in the room roster. The blocked
+ * person's rating would be retaliation; the one who blocked still has the
+ * report route. A rating given before the block stands. The POST rates only
+ * from this list, so the list and the write cannot disagree.
  */
 export async function ratablePeers(
   eventId: string,
@@ -163,7 +170,7 @@ export async function ratablePeers(
   })
   if (!event || event.end_time > now) return []
 
-  const [mine, theirs, already] = await Promise.all([
+  const [mine, theirs, already, blocks] = await Promise.all([
     db.event_likes.findMany({
       where: { event_id: eventId, liker_id: raterId },
       select: { liked_id: true },
@@ -176,12 +183,14 @@ export async function ratablePeers(
       where: { event_id: eventId, rater_id: raterId },
       select: { rated_id: true },
     }),
+    blockCounterparties(raterId),
   ])
 
   const likedBack = new Set(theirs.map((l) => l.liker_id))
   const rated = new Set(already.map((r) => r.rated_id))
+  const blocked = new Set(blocks)
 
   return mine
     .map((l) => l.liked_id)
-    .filter((id) => likedBack.has(id) && !rated.has(id))
+    .filter((id) => likedBack.has(id) && !rated.has(id) && !blocked.has(id))
 }
