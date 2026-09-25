@@ -165,7 +165,8 @@ export async function attachCreativeMedia(
   if (!campaign) throw new Refusal("Campaign not found")
 
   const actor = await actorFor(session.user)
-  const grantHolder = await resolveSponsorGrant(actor, campaign.event_id)
+  // The campaign's own brand, not any brand placed at its event (SCRUM-319).
+  const grantHolder = await resolveSponsorGrant(actor, campaign.event_id, campaign.sponsor_id)
   const orgId = grantHolder?.orgId ?? (actor.role === "app_admin" ? actor.orgIds[0] : undefined)
   if (!orgId) throw new Refusal("Forbidden")
 

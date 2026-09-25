@@ -89,16 +89,25 @@ export async function actorFor(user: {
  * Returns `null` when no org of this actor's both holds the flag and has an
  * approved placement here — which `canBroadcast` treats as a refusal.
  *
+ * `sponsorId` narrows it to one brand: the organisation must own that brand,
+ * and that brand must hold the placement. Pass it whenever the thing being
+ * changed already belongs to a brand — a campaign. Without it, any brand
+ * placed at the event satisfies the grant, and each could edit the others'
+ * campaigns there (SCRUM-319).
+ *
  * `app_admin` deliberately gets no grant: `canBroadcast` short-circuits them
  * before this is consulted, and manufacturing a synthetic org id for them would
  * put a lie in the audit trail.
  */
 export async function resolveSponsorGrant(
   actor: { role: user_role; orgIds: string[] },
-  eventId: string
+  eventId: string,
+  sponsorId?: string | null
 ): Promise<SponsorGrant | null> {
   if (actor.role === "app_admin") return null
   if (actor.orgIds.length === 0) return null
+  // A campaign with no brand belongs to no organisation that could hold a grant.
+  if (sponsorId === null) return null
 
   const org = await db.organisations.findFirst({
     where: {
@@ -109,6 +118,7 @@ export async function resolveSponsorGrant(
       // cannot come from two different rows.
       sponsors: {
         some: {
+          ...(sponsorId ? { id: sponsorId } : {}),
           deleted_at: null,
           merged_into: null,
           placements: { some: { event_id: eventId, status: "approved" } },
