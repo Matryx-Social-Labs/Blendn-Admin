@@ -186,3 +186,12 @@ export function bulkDeleteMessage(
 export function sharePct(part: number, whole: number): number {
   return whole === 0 ? 0 : Math.round((part / whole) * 100)
 }
+
+/**
+ * Hosts who were recruited and never shipped: the acquisition number on the
+ * organiser and venue-owner lists. A suspended account was never supply and is
+ * not a lead to chase, so it is not counted (SCRUM-310).
+ */
+export function neverPublished(users: { published: number; suspended: boolean }[]): number {
+  return users.filter((u) => u.published === 0 && !u.suspended).length
+}

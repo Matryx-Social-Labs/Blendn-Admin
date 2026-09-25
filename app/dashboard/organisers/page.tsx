@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { getAuth } from "@/lib/auth"
 import { getRoleUsers } from "@/lib/admin-role-actions"
+import { neverPublished } from "@/lib/dashboard-format"
 import { RoleUsersTable } from "@/components/role-users-table"
 
 export default async function OrganisersPage() {
@@ -26,7 +27,7 @@ export default async function OrganisersPage() {
     (top, u) => (top === null || u.published > top.published ? u : top),
     null
   )
-  const dormant = users.filter((u) => u.published === 0).length
+  const dormant = neverPublished(users)
 
   return (
     <div className="flex flex-col gap-4">

@@ -2,6 +2,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getAuth } from "@/lib/auth"
 import { getRoleUsers } from "@/lib/admin-role-actions"
+import { neverPublished } from "@/lib/dashboard-format"
 import { RoleUsersTable } from "@/components/role-users-table"
 import { Button } from "@/components/ui/button"
 
@@ -14,7 +15,7 @@ export default async function VenueOwnersPage() {
   const users = await getRoleUsers("venue_owner")
 
   const published = users.reduce((sum, u) => sum + u.published, 0)
-  const dormant = users.filter((u) => u.published === 0).length
+  const dormant = neverPublished(users)
 
   return (
     <div className="flex flex-col gap-4">
