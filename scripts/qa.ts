@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import type { Socket } from "socket.io-client"
 
 /**
  * The testing programme's toolbelt — see docs/agents/TEST-PLAN.md.
@@ -307,16 +308,30 @@ export function probeArgs(args: readonly string[]): ProbeArgs {
  * a socket probe, not a screenshot (TESTING-PLAYBOOK §8): a REST 201 does not
  * prove the room heard it, and a ban's eviction can only be seen from inside.
  */
-async function probe(groupId: string, email: string, seconds: number, postAs?: string, text?: string) {
-  const { io } = await import("socket.io-client")
-  const socket = io(apiBase(), { auth: { token: await token(email) }, transports: ["websocket"] })
-  const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a)
+/**
+ * What the probe prints. Split out of `probe` so the handlers can be checked
+ * without a server.
+ *
+ * `onAny` never sees reserved events, and socket.io does not reconnect after
+ * `io server disconnect`, so without the `disconnect` line a server-side
+ * eviction (a ban, a suspension) read exactly like silence (SCRUM-305).
+ * Payloads are cut at 200 characters; read a late field from the history API.
+ */
+export function logProbe(socket: Socket, log: (...a: unknown[]) => void, email: string, groupId: string): void {
   socket.on("connect", () => {
     log(`connected as ${email}`)
     socket.emit("join:chat", groupId)
   })
   socket.on("connect_error", (e: Error) => log("connect_error", e.message))
+  socket.on("disconnect", (reason: string) => log("disconnect", reason))
   socket.onAny((event: string, payload: unknown) => log(event, JSON.stringify(payload).slice(0, 200)))
+}
+
+async function probe(groupId: string, email: string, seconds: number, postAs?: string, text?: string) {
+  const { io } = await import("socket.io-client")
+  const socket = io(apiBase(), { auth: { token: await token(email) }, transports: ["websocket"] })
+  const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a)
+  logProbe(socket, log, email, groupId)
   if (postAs && text) {
     await new Promise((r) => setTimeout(r, 3000))
     const r = await post(`/api/mobile/chat/groups/${groupId}/messages`, { content: text }, await token(postAs))

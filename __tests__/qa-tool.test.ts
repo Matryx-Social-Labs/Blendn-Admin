@@ -1,4 +1,5 @@
-import { apiRefusal, probeArgs, secondsLeft, STAGING_API } from "../scripts/qa"
+import type { Socket } from "socket.io-client"
+import { apiRefusal, logProbe, probeArgs, secondsLeft, STAGING_API } from "../scripts/qa"
 
 /*
  * The testing programme's tool (docs/agents/TEST-PLAN.md) signs in, reads and
@@ -70,4 +71,19 @@ describe("probe arguments", () => {
     expect(() => probeArgs([G, "fixture@blendn.app", "8", "post-as", "rohan.d@blendn.app"])).toThrow(/post-as/)
     expect(() => probeArgs([G])).toThrow(/usage/)
   })
+})
+
+it("prints the socket's own disconnect, so an eviction is not silence (SCRUM-305)", () => {
+  // `onAny` never sees reserved events, and socket.io does not reconnect after
+  // `io server disconnect` — a suspension's eviction used to read as quiet.
+  const handlers = new Map<string, (...a: unknown[]) => void>()
+  const socket = {
+    on: (event: string, fn: (...a: unknown[]) => void) => handlers.set(event, fn),
+    onAny: () => undefined,
+    emit: () => undefined,
+  } as unknown as Socket
+  const lines: unknown[][] = []
+  logProbe(socket, (...a) => lines.push(a), "someone@blendn.app", "group-1")
+  handlers.get("disconnect")?.("io server disconnect")
+  expect(lines).toContainEqual(["disconnect", "io server disconnect"])
 })
