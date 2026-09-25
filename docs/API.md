@@ -57,6 +57,12 @@ derived, never remembered* below for why the number alone is not enough.
 `profile` is returned so the client can decide where to route without a second
 call — it carries `onboarded`, which is what that decision reads.
 
+**The address is stored lowercase.** One inbox is one account whatever its
+case: `Priya@Example.com` is saved as `priya@example.com`, and `user.email` in
+the response is the lowercase form. A second signup in another case gets the
+same **409** as any taken address. `signin`, Google, Apple, the dashboard and
+password reset all lowercase what they are given too (SCRUM-328).
+
 **Password rules.** At least **12 characters**, and rejected if it is an obvious
 choice (`password1234` is twelve characters and fails) or built from the local
 part of the address. This is `checkPassword` in `lib/password.ts`, the same

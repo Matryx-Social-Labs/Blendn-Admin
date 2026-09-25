@@ -2,7 +2,8 @@ import { z } from "zod"
 import { MIN_PASSWORD_LENGTH } from "@/lib/password"
 
 export const signupSchema = z.object({
-  email: z.string().email("Invalid email address"),
+  // Lowercased: one address is one account whatever its case (SCRUM-328).
+  email: z.string().trim().toLowerCase().email("Invalid email address"),
   /*
    * The same floor the reset form enforces, imported rather than retyped.
    *
@@ -47,7 +48,8 @@ export const signupSchema = z.object({
 })
 
 export const signinSchema = z.object({
-  email: z.string().email("Invalid email address"),
+  // Lowercased: one address is one account whatever its case (SCRUM-328).
+  email: z.string().trim().toLowerCase().email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
   deviceInfo: z
     .object({

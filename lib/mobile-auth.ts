@@ -670,13 +670,14 @@ export async function findOrCreateGoogleUser(
     }
   }
 
-  // Check if a user exists with this email
+  // Check if a user exists with this email. Stored lowercase (SCRUM-328).
+  const email = googlePayload.email.trim().toLowerCase()
   const existingUser = await db.user.findUnique({
-    where: { email: googlePayload.email },
+    where: { email },
   })
 
   if (existingUser) {
-    await linkVerifiedOAuthIdentity(existingUser, "google", googlePayload.sub, googlePayload.email)
+    await linkVerifiedOAuthIdentity(existingUser, "google", googlePayload.sub, email)
 
     return {
       userId: existingUser.id,
@@ -688,7 +689,7 @@ export async function findOrCreateGoogleUser(
   // Create a new user with the Google account
   const newUser = await db.user.create({
     data: {
-      email: googlePayload.email,
+      email,
       name: googlePayload.name || googlePayload.given_name || null,
       /*
        * The Google avatar is deliberately NOT taken.
@@ -715,7 +716,7 @@ export async function findOrCreateGoogleUser(
         create: {
           provider: "google",
           provider_id: googlePayload.sub,
-          email: googlePayload.email,
+          email,
         },
       },
     },
@@ -796,7 +797,7 @@ export async function findOrCreateAppleUser(
   // case Apple guarantees `sub` is stable so the OAuth-account lookup above
   // is the source of truth. A missing email at this point only happens on
   // a genuinely new user, which Apple does not allow without an email scope.
-  const email = applePayload.email
+  const email = applePayload.email?.trim().toLowerCase()
 
   if (email) {
     const existingUser = await db.user.findUnique({ where: { email } })

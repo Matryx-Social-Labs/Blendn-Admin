@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "email-is-one-identity.itest.ts": {
+      "guards": "one address is one account whatever its case (SCRUM-328): a mixed-case mobile signup is stored lowercase and signs in typed any way; a case-variant signup is 409; forgot-password as typed at signup issues a token; dashboard authorize, Google and Apple find the lowercase account from a mixed-case address; createRoleUser stores lowercase and refuses a case-variant; the migration refuses (and changes nothing) while two accounts share an address once case is ignored, then trims and lowercases every address",
+      "mutation": "M1 signupSchema without .trim().toLowerCase(); M2 signinSchema without it; M3 lib/auth.ts authorize looks up credentials.email as typed; M4 Google lookup uses googlePayload.email as given; M5 Apple uses applePayload.email as given; M6 the migration without its DO-block guard; M8 createRoleUser without the lowercase; M9 the migration folds with lower() and no btrim() (all 2026-09-25). Not covered: the LOCK TABLE, which guards a race with the old deployment that a single-process test cannot stage.",
+      "observed": "M1: 4 failing (stores, signs in, 409, reset). M2, M3, M4, M5, M8: 1 each (sign-in any case, dashboard, Google made a new user, Apple made a new user, operator account). M6: the refusal test fails, the UPDATE raising 23505 on the pair instead of the named refusal. M9: the fold test fails on the padded address.",
+      "date": "2026-09-25"
+    },
     "api-response.test.ts": {
       "guards": "the response envelope helpers: successResponse's status, errorResponse's default 400 and explicit codes, and (SCRUM-324) the code a bare 401/403/404/409/429/5xx stands for, an explicit code winning, and a bare 400/422 left uncoded",
       "mutation": "M1 (2026-09-25): `errorCode ?? defaultErrorCode(status)` reduced to `errorCode` in lib/api-response.ts.",

@@ -104,7 +104,7 @@ const BASELINE: Record<string, string[]> = {
   "app/dashboard/events/[id]/feedback/actions.ts": ["category", "sentiment"],
   "app/dashboard/events/curate/actions.ts": ["geofence"],
   "app/dashboard/users/actions.ts": ["role"],
-  "lib/admin-role-actions.ts": ["email", "name", "role", "status"],
+  "lib/admin-role-actions.ts": ["name", "role", "status"],
   "lib/amenity-actions.ts": ["name"],
   "lib/category-actions.ts": ["slug"],
   "lib/charge-actions.ts": ["currency"],
