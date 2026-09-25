@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "poll-read-room-gate.itest.ts": {
+      "guards": "GET /events/:eventId/polls/:pollId applies the room's read rule (roomReadDenial): 403 to somebody never in the room and to a banned member (the ban sentence), 404 when the URL names another event, when the poll's message is deleted, or the event is a draft; active, muted and left members still read; POST …/vote through another event's URL is 404 and writes no vote (SCRUM-298)",
+      "mutation": "In lib/polls.ts (moved out of the \"use server\" poll-actions.ts) — M1: drop the not_member and banned throws after roomReadDenial in getPollResults. M2: drop `room?.event_id !== reader.eventId` from the read's not-found check. M3: drop `poll.message.chat_group.event_id !== eventId` from castVote. M4: drop `poll.message.deleted_at` from the read's not-found check. M5: drop only the `denial === \"hidden\"` throw.",
+      "observed": "M1: 2 failing of 6 (never in the room; banned). M2: 1 failing (the URL names a different event). M3: 1 failing (vote through a different event's URL — 200 and a vote row). M4: 1 failing (the deleted-message half). M5: 1 failing (the draft half — makeEvent is published, so the update is a real transition). All received 200 with the question.",
+      "date": "2026-09-25"
+    },
     "qa-sq-dates.itest.ts": {
       "guards": "`npm run -s qa sq` returns date columns and zone-less timestamp columns as stored (2010-01-01, 2026-09-24T20:27:19.217Z) under TZ=Asia/Kolkata, timestamptz unchanged, other types untouched (SCRUM-295)",
       "mutation": "M1: drop the date (1082) parser. M2: drop the timestamp (1114) parser. M3: timestamp parser returns the raw value (no T, no Z). M4: drop the date[] (1182) parser. M5: drop the finite-timestamp check (infinity → infinityZ).",

@@ -1114,6 +1114,15 @@ the room. The question doubles as the message `content`, which means a client
 that does not yet know the `poll` type still renders something meaningful rather
 than an empty bubble.
 
+**Who may read or vote is the room.** The poll must belong to the event in the
+URL, and its message must not be deleted: otherwise `404 Poll not found`, as it
+is for a draft event. The read then applies the room's own read rule
+(`roomReadDenial`, the same one the history, roster and socket use): somebody
+who was never in the room gets `403 You are not in this chatroom`, a banned
+member gets `403` with the room's ban sentence, and `muted` and `left` members
+still read. A vote additionally needs an `active` or `muted` membership and an
+open room (`409`). Before SCRUM-298 the read loaded the poll by id alone.
+
 Who may post one is the same table as above: an `announcement` poll needs
 `canOperate`, a `sponsored` poll needs the same grant a sponsored message needs.
 A poll from a brand carries that brand's name into the room and takes the same
