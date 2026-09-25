@@ -43,6 +43,29 @@ describe("errorResponse", () => {
     expect(body.errorCode).toBe("EVENT_FULL")
     expect(body.success).toBe(false)
   })
+
+  // SCRUM-324: the envelope promises an errorCode on every error; a bare
+  // status left it off (the Google and Apple sign-in 401s among them).
+  it.each([
+    [401, "UNAUTHORIZED"],
+    [403, "FORBIDDEN"],
+    [404, "NOT_FOUND"],
+    [409, "CONFLICT"],
+    [429, "RATE_LIMITED"],
+    [500, "SERVER_ERROR"],
+    [503, "SERVER_ERROR"],
+  ])("defaults a bare %i to %s", async (status, code) => {
+    expect((await errorResponse("x", status).json()).errorCode).toBe(code)
+  })
+
+  it("lets an explicit code win over the default", async () => {
+    expect((await errorResponse("x", 403, ErrorCode.USER_BANNED).json()).errorCode).toBe("USER_BANNED")
+  })
+
+  it("leaves a bare 400 or 422 uncoded — too many meanings to name one", async () => {
+    expect((await errorResponse("x", 400).json()).errorCode).toBeUndefined()
+    expect((await errorResponse("x", 422).json()).errorCode).toBeUndefined()
+  })
 })
 
 describe("validationErrorResponse", () => {

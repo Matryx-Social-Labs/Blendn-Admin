@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "api-response.test.ts": {
+      "guards": "the response envelope helpers: successResponse's status, errorResponse's default 400 and explicit codes, and (SCRUM-324) the code a bare 401/403/404/409/429/5xx stands for, an explicit code winning, and a bare 400/422 left uncoded",
+      "mutation": "M1 (2026-09-25): `errorCode ?? defaultErrorCode(status)` reduced to `errorCode` in lib/api-response.ts.",
+      "observed": "M1: 7 failing of 21 (every status default).",
+      "date": "2026-09-25"
+    },
     "csp-report.test.ts": {
       "guards": "sentryCspReportUri derives Sentry's CSP security endpoint (host, project, public key, optional environment) from the DSN and returns null for a missing or malformed one, so the report-only CSP's report-uri points at a real intake or nowhere (SCRUM-321)",
       "mutation": "M1: `/security/` replaced by `/store/` in the derived endpoint.",
