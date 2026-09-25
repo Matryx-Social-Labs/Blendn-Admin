@@ -278,7 +278,7 @@ export async function POST(
         // only `end_time` would leave this path silently un-floored --
         // `chatWindowState` treats a missing start as "no lower bound", which
         // is the right default for old callers and the wrong one here.
-        event: { select: { start_time: true, end_time: true, status: true } },
+        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
       },
     })
 

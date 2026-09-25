@@ -27,7 +27,7 @@ beforeEach(() => {
 describe("canJoinChat", () => {
   it("refuses the room of a hidden event, whatever the membership says (SCRUM-8)", async () => {
     // A suspended organiser's events flip to draft; a draft has no room.
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "draft" } } })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "draft", deleted_at: null } } })
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(false)
   })
 
@@ -37,22 +37,22 @@ describe("canJoinChat", () => {
   })
 
   it("allows an active member", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "published" } } })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "published", deleted_at: null } } })
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(true)
   })
 
   it("allows a muted member (muting blocks writes, not reads)", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "muted", chat_group: { event: { status: "published" } } })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "muted", chat_group: { event: { status: "published", deleted_at: null } } })
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(true)
   })
 
   it("denies a banned member", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "banned", chat_group: { event: { status: "published" } } })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "banned", chat_group: { event: { status: "published", deleted_at: null } } })
     await expect(canJoinChat(USER, CHAT_ID)).resolves.toBe(false)
   })
 
   it("scopes the lookup to the requesting user, not just the group", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "published" } } })
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ status: "active", chat_group: { event: { status: "published", deleted_at: null } } })
     await canJoinChat(USER, CHAT_ID)
     expect(mockDb.chat_group_members.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({

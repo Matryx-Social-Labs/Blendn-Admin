@@ -33,9 +33,15 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "deleted-event-room-is-closed.itest.ts": {
+      "guards": "after an event is soft-deleted its room refuses a post on both send routes, a reaction and a changed vote, writing nothing, and leaves the member's conversation list; each door is shown open before the delete (SCRUM-303)",
+      "mutation": "M1: `eventHidesRoom` in lib/chat-window.ts reduced to `event.status === \"draft\"`. M2: the `event: { deleted_at: null, status: { not: \"draft\" } }` filter removed from both queries in app/api/mobile/chat/groups/route.ts.",
+      "observed": "M1: 3 failing of 4 (post 201, reaction 200, vote written). M2: 1 failing of 4 (the room stays listed).",
+      "date": "2026-09-25"
+    },
     "banned-cannot-read-the-room.itest.ts": {
       "guards": "the three HTTP room reads (messages, participants, event chat) refuse a banned member with who-did-it wording and 404 a draft or soft-deleted event's room, and getPollResults refuses a deleted event's poll that it served before the delete (SCRUM-205, SCRUM-303)",
-      "mutation": "M1 (2026-09-25): drop `|| event.deleted_at` from roomReadDenial's hidden check in lib/chat-window.ts.",
+      "mutation": "M1 (2026-09-25): `eventHidesRoom` in lib/chat-window.ts reduced to `event.status === \"draft\"`.",
       "observed": "M1: 1 failing of 6 (the deleted event's room answers 200 and its poll resolves).",
       "date": "2026-09-25"
     },
@@ -959,8 +965,8 @@
   },
   "room-read-denial.test.ts": {
     "guards": "roomReadDenial refuses a banned member and hides a draft or deleted event's room while leaving active, muted and left members reading; bannedRefusal names the organiser only when banned_by is set (SCRUM-205, SCRUM-303)",
-    "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial. Separately (2026-09-25), drop `|| event.deleted_at` from its hidden check.",
-    "observed": "1 failing, 6 passing: a banned member is let in. The deleted_at mutation: 1 failing of 8 (the deleted event's room is readable).",
+    "mutation": "In lib/chat-window.ts, delete `if (membership.status === \"banned\") return \"banned\"` from roomReadDenial. Separately (2026-09-25), reduce `eventHidesRoom` to `event.status === \"draft\"`.",
+    "observed": "1 failing, 6 passing: a banned member is let in. The eventHidesRoom mutation: 1 failing of 8 (the deleted event's room is readable).",
     "date": "2026-09-25"
   },
   "venue-checkin-area-editable.test.ts": {

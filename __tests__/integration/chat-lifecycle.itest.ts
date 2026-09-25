@@ -158,7 +158,7 @@ describe("the sweep is not what stops people posting", () => {
     const group = await db.chat_groups.findUniqueOrThrow({ where: { id: groupId } })
     expect(group.status).toBe("active")
 
-    const state = chatWindowState({ end_time: endTime }, group)
+    const state = chatWindowState({ end_time: endTime, deleted_at: null }, group)
     expect(state.open).toBe(false)
     if (!state.open) expect(state.reason).toBe("window_closed")
   })

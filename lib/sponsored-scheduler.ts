@@ -289,8 +289,9 @@ async function sendOne(
     select: {
       start_time: true,
       end_time: true,
-      // A hidden event's room is closed to placements too (SCRUM-8).
+      // A hidden or deleted event's room is closed to placements too (SCRUM-8, SCRUM-303).
       status: true,
+      deleted_at: true,
       organizer_id: true,
       chat_group: { select: { id: true, status: true } },
     },

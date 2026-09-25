@@ -77,7 +77,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // Spread of both bounds, not just `end_time`: `chatWindowState` reads a
         // missing start as "no lower bound", which would open a room that has
         // not opened yet.
-        event: { select: { start_time: true, end_time: true, status: true } },
+        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
       },
     })
     if (!chatGroup) return notFoundResponse("Chat group not found")

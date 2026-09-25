@@ -21,7 +21,7 @@ import {
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 
 const ENDS = new Date("2026-08-16T22:00:00Z")
-const EVENT = { end_time: ENDS }
+const EVENT = { end_time: ENDS, deleted_at: null }
 const OPEN_GROUP = { status: "active" as const }
 const MEMBER = { status: "active" }
 
@@ -133,6 +133,11 @@ describe("the rules that still bite", () => {
     })
   })
 
+  it("refuses a deleted event's room, whatever its status says (SCRUM-303)", () => {
+    const deleted = { ...EVENT, status: "published" as const, deleted_at: new Date("2026-08-16T12:00:00Z") }
+    expect(mayWriteToRoom(MEMBER, deleted, OPEN_GROUP, at(-1))).toEqual({ reason: "hidden" })
+  })
+
   it("puts standing before the clock", () => {
     // A banned member past the window should read as banned, not as "the room
     // closed" — the second invites them to come back tomorrow.
@@ -188,7 +193,7 @@ describe("one rule, and it cannot fork again", () => {
 
 describe("the room has a floor now, not only a ceiling", () => {
   const STARTS = new Date("2026-08-16T18:00:00Z")
-  const TIMED = { start_time: STARTS, end_time: ENDS }
+  const TIMED = { start_time: STARTS, end_time: ENDS, deleted_at: null }
   const before = (hours: number) =>
     new Date(STARTS.getTime() - hours * 60 * 60 * 1000)
 
@@ -231,7 +236,7 @@ describe("the room has a floor now, not only a ceiling", () => {
      * close rooms that used to open, and read as the chat being broken rather
      * than as a rule — so the absence of a start means the absence of a floor.
      */
-    expect(chatWindowState({ end_time: ENDS }, OPEN_GROUP, before(48)).open).toBe(true)
+    expect(chatWindowState({ end_time: ENDS, deleted_at: null }, OPEN_GROUP, before(48)).open).toBe(true)
   })
 })
 

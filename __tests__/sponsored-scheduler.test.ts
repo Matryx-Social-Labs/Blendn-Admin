@@ -61,6 +61,7 @@ beforeEach(() => {
     start_time: new Date("2026-08-17T19:00:00.000Z"),
     end_time: new Date("2026-08-17T22:00:00.000Z"),
     organizer_id: "organiser-1",
+    deleted_at: null,
     chat_group: { id: GROUP, status: "active" },
   })
   mockDb.sponsored_message_sends.findFirst.mockResolvedValue(null)
@@ -224,6 +225,7 @@ describe("things that stop a campaign", () => {
       start_time: new Date("2026-08-17T19:00:00.000Z"),
       end_time: new Date("2026-08-17T22:00:00.000Z"),
       organizer_id: "organiser-1",
+      deleted_at: null,
       chat_group: { id: GROUP, status: "archived" },
     })
 
@@ -249,6 +251,7 @@ describe("things that stop a campaign", () => {
       start_time: new Date("2026-08-20T19:00:00.000Z"),
       end_time: new Date("2026-08-20T22:00:00.000Z"),
       organizer_id: "organiser-1",
+      deleted_at: null,
       chat_group: { id: GROUP, status: "active" },
     })
 
@@ -265,6 +268,7 @@ describe("things that stop a campaign", () => {
       // so people can give feedback on the way home — but the placement is over.
       end_time: new Date("2026-08-17T18:00:00.000Z"),
       organizer_id: "organiser-1",
+      deleted_at: null,
       chat_group: { id: GROUP, status: "active" },
     })
 
@@ -331,6 +335,7 @@ describe("things that stop a campaign", () => {
       start_time: new Date("2026-08-17T19:00:00.000Z"),
       end_time: new Date("2026-08-17T22:00:00.000Z"),
       organizer_id: "organiser-1",
+      deleted_at: null,
       chat_group: { id: GROUP, status: "active" },
     })
     mockDb.sponsored_message_sends.findFirst.mockResolvedValue(null)

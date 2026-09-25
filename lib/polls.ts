@@ -178,7 +178,7 @@ export async function castVote(
               id: true,
               event_id: true,
               status: true,
-              event: { select: { start_time: true, end_time: true, status: true } },
+              event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
             },
           },
         },
