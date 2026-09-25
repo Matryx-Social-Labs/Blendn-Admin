@@ -20,6 +20,7 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
+import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { chatClosedMessage, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
 
 const sendMessageSchema = z.object({
@@ -59,7 +60,7 @@ export async function GET(
         members: {
           where: { user_id: user.userId },
         },
-        event: { select: { status: true, deleted_at: true } },
+        event: { select: { status: true, deleted_at: true, ...broadcastAuthorSelect } },
       },
     })
 
@@ -128,6 +129,7 @@ export async function GET(
         parent_message: {
           select: {
             id: true,
+            type: true,
             content: true,
             user: {
               select: {
@@ -200,7 +202,7 @@ export async function GET(
           moderation_hidden: isHidden,
           user: {
             id: m.user.id,
-            name: anonMap.get(m.user.id) || "Attendee",
+            name: roomSenderName(m.type, anonMap.get(m.user.id), chatGroup.event),
             image: null,
           },
           parent_message: m.parent_message
@@ -208,7 +210,7 @@ export async function GET(
                 ...m.parent_message,
                 user: {
                   id: m.parent_message.user.id,
-                  name: anonMap.get(m.parent_message.user.id) || "Attendee",
+                  name: roomSenderName(m.parent_message.type, anonMap.get(m.parent_message.user.id), chatGroup.event),
                 },
               }
             : null,
@@ -435,6 +437,7 @@ export async function POST(
         parent_message: {
           select: {
             id: true,
+            type: true,
             content: true,
             user: {
               select: {

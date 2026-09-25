@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "poll-live-and-signed.itest.ts": {
+      "guards": "createPoll emits the new poll to its room as it is created, signed with the organisation's name; both room histories name a staff poll and a staff announcement after the organisation while attendees keep their pseudonyms (SCRUM-307)",
+      "mutation": "M1: createPoll's emitChatMessage call replaced by a no-op function taking the same arguments. M2: roomSenderName's broadcast branch reduced to `return \"Attendee\"`.",
+      "observed": "M1: 1 failing of 2 (no emit). M2: 1 failing of 2 (the poll and the announcement read \"Attendee\" in both histories).",
+      "date": "2026-09-25"
+    },
     "board-text-recheck.test.ts": {
       "guards": "checkBoardText reports a timed-out OpenAI pass as unchecked (and a no-key pass as final), and hideBoardPostIfFlagged takes a post down marked hidden only when the second look refuses it (SCRUM-301 review)",
       "mutation": "M5: checkBoardText's unchecked branch returns `unchecked: false`. M6: `deleted_at: null` dropped from hideBoardPostIfFlagged's where.",

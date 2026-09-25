@@ -6,10 +6,12 @@ import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
+import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
 import { chatWindowState } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { canBroadcast, eventPermissionSelect, type BroadcastKind } from "@/lib/rbac"
+import { emitChatMessage } from "@/lib/socket-server"
 
 /**
  * Polls in an event room.
@@ -81,6 +83,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       deleted_at: true,
       chat_group: { select: { id: true, status: true } },
       ...eventPermissionSelect,
+      ...broadcastAuthorSelect,
     },
   })
   if (!event) throw new Refusal("Event not found")
@@ -149,7 +152,20 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       data: { last_message_at: message.created_at },
     })
 
-    return { messageId: message.id, pollId: poll.id }
+    return { messageId: message.id, pollId: poll.id, createdAt: message.created_at }
+  })
+
+  /*
+   * Delivered as an announcement is (SCRUM-307): the room sees it now, signed
+   * by the organisation, rather than on its next history load as "Attendee".
+   */
+  emitChatMessage(event.chat_group.id, {
+    id: created.messageId,
+    content: question,
+    type: "poll",
+    userId: session.user.id,
+    userName: broadcastAuthorName(event),
+    createdAt: created.createdAt.toISOString(),
   })
 
   auditLog({
@@ -161,5 +177,5 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
   })
 
   revalidatePath(`/dashboard/events/${eventId}/messaging`)
-  return created
+  return { messageId: created.messageId, pollId: created.pollId }
 }

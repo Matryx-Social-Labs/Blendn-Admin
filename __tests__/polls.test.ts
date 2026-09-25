@@ -25,6 +25,7 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
+jest.mock("@/lib/socket-server", () => ({ emitChatMessage: jest.fn() }))
 
 mockDb.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(mockDb))
 

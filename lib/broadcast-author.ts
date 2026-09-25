@@ -63,3 +63,20 @@ export const GENERIC_AUTHOR = "Organiser"
 export function broadcastAuthorName(event: BroadcastAuthorEvent): string {
   return event.organizer_org?.display_name?.trim() || GENERIC_AUTHOR
 }
+
+/** The message types only staff can write. An attendee sends text, image or video. */
+const BROADCAST_TYPES = new Set(["announcement", "poll"])
+
+/**
+ * The name a room's history shows for a message's sender (SCRUM-307).
+ *
+ * A room member is their pseudonym. An announcement or a poll from someone who
+ * is not in the room — staff — is the organisation that posted it, the name an
+ * announcement already carries in its text; it read "Attendee", and a poll has
+ * only its question to go on. Decided by type, which a client cannot set, and
+ * never by `metadata`, which it can. Anyone else is the old fallback.
+ */
+export function roomSenderName(type: string, pseudonym: string | undefined, event: BroadcastAuthorEvent): string {
+  if (pseudonym) return pseudonym
+  return BROADCAST_TYPES.has(type) ? broadcastAuthorName(event) : "Attendee"
+}
