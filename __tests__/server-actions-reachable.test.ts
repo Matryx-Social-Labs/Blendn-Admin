@@ -67,6 +67,8 @@ const CALLER_FILES = [
   "instrumentation-client.ts",
   "sentry.server.config.ts",
   "sentry.edge.config.ts",
+  // Builds the response headers — the CSP's report endpoint comes from lib/ (SCRUM-321).
+  "next.config.ts",
   "prisma/seed.ts",
 ]
 
