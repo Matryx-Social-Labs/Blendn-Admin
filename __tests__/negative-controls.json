@@ -832,10 +832,10 @@
     "date": "2026-09-22"
   },
   "venue-actions.test.ts": {
-    "guards": "createVenue and updateVenue refuse a check-in area drawn more than 500 m from the venue's pin, and refuse a pin move that would leave the stored area that far behind (SCRUM-203, SCRUM-204)",
-    "mutation": "In lib/venue-actions.ts, delete the `refuseIfFenceDrifted(...)` call in createVenue.",
-    "observed": "1 failing, 26 passing: the far ring was accepted.",
-    "date": "2026-09-22"
+    "guards": "createVenue and updateVenue refuse a check-in area drawn more than 500 m from the venue's pin, and refuse a pin move that would leave the stored area that far behind (SCRUM-203, SCRUM-204); and they refuse an invalid area with the event form's sentence (GEOFENCE_MESSAGES), never the validator's code (SCRUM-297)",
+    "mutation": "In lib/venue-actions.ts, delete the `refuseIfFenceDrifted(...)` call in createVenue. SCRUM-297 M1: put back ``throw new Refusal(`Check-in area is not valid (${parsed.error}).`)`` in createVenue; M2: the same in updateVenue.",
+    "observed": "1 failing, 26 passing: the far ring was accepted. SCRUM-297: M1 2 failing of 33 (the radius refusal, and 'says what is wrong … in words'); M2 1 failing ('refuses an unfinished or tangled outline in words'), received \"Check-in area is not valid (ring_too_short).\"",
+    "date": "2026-09-25"
   },
   "trace-outline-keeps-the-pin.test.ts": {
       "guards": "the geofence editor has no hardcoded city centre, centroid() falls back to the pin, and the recentre effect skips an empty ring — so choosing Trace outline does not move the map away from the searched address (SCRUM-203)",
