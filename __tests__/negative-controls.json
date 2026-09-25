@@ -35,8 +35,8 @@
   "verified": {
     "org-counts-exclude-deleted.itest.ts": {
       "guards": "getOrganisations (/dashboard/organisations) and the organisations CSV in lib/reports.ts count an org's events and venues with deleted_at null, not every row (SCRUM-167)",
-      "mutation": "M1: `events: true` in getOrganisations' _count. M2: the same in lib/reports.ts. M3: `venues: true` in getOrganisations.",
-      "observed": "Each: 1 failing of 2 (M1 and M3 the page test, M2 the CSV test): 2 counted where the org runs 1.",
+      "mutation": "M1: `events: true` in getOrganisations' _count. M2: the same in lib/reports.ts. M3: `venues: true` in getOrganisations. M4: `venues: true` in lib/reports.ts.",
+      "observed": "Each: 1 failing of 2 (M1 and M3 the page test, M2 and M4 the CSV test): 2 counted where the org runs 1.",
       "date": "2026-09-25"
     },
     "dashboard-signin-app-only.test.ts": {

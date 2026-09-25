@@ -55,7 +55,7 @@ it("the organisations page counts the live event and the live venue, not the del
 
 it("the organisations CSV says the same", async () => {
   const csv = await buildReport("organisations", "app_admin", adminId, { key: "custom", from: new Date(0), to: new Date() })
-  const [header, ...rows] = csv.trim().split("\n")
+  const [header, ...rows] = csv.trim().split(/\r?\n/)
   const columns = header.split(",")
   const row = rows.find((r) => r.startsWith(orgId))!.split(",")
   expect(row[columns.indexOf("Members")]).toBe("1")
