@@ -3,6 +3,7 @@ import { NextAuthOptions, getServerSession, User } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
+import { APP_ONLY_SIGNIN, canAccessDashboard } from "./rbac"
 import type { user_role } from "@prisma/client"
 
 export const authOptions: NextAuthOptions = {
@@ -49,6 +50,19 @@ export const authOptions: NextAuthOptions = {
          */
         if (user.deletedAt || user.suspended_at) {
           return null
+        }
+
+        /*
+         * An attendee is refused here, by name, rather than let through.
+         *
+         * Returning them minted a dashboard cookie the middleware then refused
+         * on every page, so the form reappeared with nothing on it and they
+         * typed a right password until the sign-in limit said "too many
+         * attempts" (SCRUM-172). Naming the role is safe only after the
+         * password check above; a wrong password never reaches this line.
+         */
+        if (!canAccessDashboard(user.role)) {
+          throw new Error(APP_ONLY_SIGNIN)
         }
 
         return { id: user.id, email: user.email, name: user.name, role: user.role }
