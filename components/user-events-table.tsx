@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/table"
 import { IconDotsVertical } from "@tabler/icons-react"
 import { updateEventStatus } from "@/lib/admin-role-actions"
+import { refusalMessage } from "@/lib/refusal"
 import type { event_status } from "@prisma/client"
 
 interface EventRow {
@@ -60,8 +61,10 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
         prev.map((e) => (e.id === eventId ? { ...e, status } : e))
       )
       toast.success(`Event ${status}`)
-    } catch {
-      toast.error("Failed to update event status")
+    } catch (err) {
+      // The refusal's own sentence: a cancelled event cannot be revived, an
+      // event with no pin cannot be published (SCRUM-318).
+      toast.error(refusalMessage(err, "Failed to update event status"))
     } finally {
       setLoadingId(null)
     }
