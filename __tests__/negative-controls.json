@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "board-moderated-and-withdrawable.itest.ts": {
+      "guards": "POST /events/{id}/board refuses a phone number (422, says so) and a keyword hit (422, generic) and stores neither, while an ordinary post is stored; DELETE /events/{id}/board/{postId} withdraws the author's own post (deleted_at set, gone from the board GET) and 404s anyone else's (SCRUM-301)",
+      "mutation": "M1: the POST's `if (refused) return errorResponse(refused, 422)` disabled with `false &&`. M2: `author_id: user.userId` removed from the DELETE's where.",
+      "observed": "M1: 2 failing of 5 (the phone number and the slur are stored, 201). M2: 1 failing of 5 (a stranger withdraws the author's post).",
+      "date": "2026-09-25"
+    },
     "trust.itest.ts": {
       "guards": "ratablePeers offers only mutually-connected people after the event, drops those already rated, and drops anyone blocked either way, with the pair shown ratable before the block (SCRUM-304); safety-writes.itest.ts pins the POST refusing a blocked person's rating (403, no rating and no harassment report written)",
       "mutation": "M1 (2026-09-25): `&& !blocked.has(id)` removed from ratablePeers' filter in lib/trust.ts.",

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, standardErrors } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -89,7 +89,10 @@ registry.registerPath({
     "Requires RSVP 'going' (not merely committed — offering a seat in a car you " +
     "may not be driving to is worse than not offering), a complete profile, and " +
     "room under both request caps. Closes when the doors open: after that the " +
-    "room is the place, and it is gated on presence rather than intent.",
+    "room is the place, and it is gated on presence rather than intent. The " +
+    "text gets the room's checks before it is stored (keywords, contact " +
+    "details, OpenAI); a hit is a 422 and nothing is stored — contact details " +
+    "say so, anything else reads \"This can't go on the board.\"",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string() }),
@@ -119,6 +122,36 @@ registry.registerPath({
               createdAt: z.string(),
             })
           ),
+        },
+      },
+    },
+    ...standardErrors,
+    422: {
+      description: "Refused by moderation; nothing stored",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+  },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/events/{eventId}/board/{postId}",
+  tags: ["Mobile Events"],
+  summary: "Withdraw your own board post",
+  description:
+    "Soft — the post leaves every board read, and requests filed against it " +
+    "stop counting toward their senders' caps. Somebody else's post, or one " +
+    "already withdrawn, is a 404.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string(), postId: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Withdrawn",
+      content: {
+        "application/json": {
+          schema: wrap(z.object({ id: z.string(), withdrawn: z.literal(true) })),
         },
       },
     },

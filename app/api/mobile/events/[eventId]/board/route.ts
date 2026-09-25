@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { boardDenialMessage, mayReadBoard } from "@/lib/board"
-import { boardPseudonyms, boardWriteDenial, entitlementFor } from "@/lib/board-access"
+import { boardPseudonyms, boardTextRefusal, boardWriteDenial, entitlementFor } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
@@ -156,6 +156,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const denial = await boardWriteDenial(eventId, user.userId)
     if (denial) return forbiddenResponse(boardDenialMessage(denial))
+
+    // Checked before it is stored, as a room message is (SCRUM-301).
+    const refused = await boardTextRefusal(input.body)
+    if (refused) return errorResponse(refused, 422)
 
     const created = await db.board_posts.create({
       data: {

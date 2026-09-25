@@ -9,6 +9,9 @@ import {
 } from "./board"
 import { BOARD } from "./constants"
 import { db } from "./db"
+import { checkContactInfo } from "./moderation/contact-info"
+import { checkKeywords } from "./moderation/keyword-filter"
+import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
 
 /**
  * The database half of the board's gates.
@@ -178,4 +181,34 @@ export async function boardPseudonyms(
   )
 
   return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id)]))
+}
+
+/** What a refused post is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
+export const BOARD_REFUSAL = "This can't go on the board."
+
+/**
+ * Why this text may not go on the board, or null (SCRUM-301).
+ *
+ * The same checks a room message gets before anyone else can see it: the
+ * keyword filter, contact details, then OpenAI within the room's one-second
+ * bound. The room stores a hit hidden and counts it toward a mute; the board
+ * has no moderation queue and nothing that could take a post back, so a hit is
+ * refused and never stored. Contact details say which — the fix is the
+ * poster's to make. An unchecked OpenAI call (no key, error, timeout) passes,
+ * as it does in the room.
+ */
+export async function boardTextRefusal(body: string): Promise<string | null> {
+  if (checkKeywords(body)?.action === "hide") return BOARD_REFUSAL
+  const contact = checkContactInfo(body)
+  if (contact) return `${contact.reason} The board is anonymous, so a post with contact details can't go up.`
+
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const check = await Promise.race([
+    checkTextContent(body),
+    new Promise<ModerationCheck>((resolve) => {
+      timeout = setTimeout(() => resolve(notChecked("timeout")), 1000)
+    }),
+  ]).finally(() => clearTimeout(timeout))
+  if (check.checked && check.result?.action === "hide") return BOARD_REFUSAL
+  return null
 }
