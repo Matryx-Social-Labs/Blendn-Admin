@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "refusals-reach-the-screen-client.test.ts": {
+      "guards": "requestPresignedUrl throws a Refusal carrying the upload route's own sentence, the three upload catches show a Refusal's words, and no dashboard component throws a bare `new Error()` on a failed response (the chat delete, ban/mute and sponsored-message delete toast the route's sentence) (SCRUM-317)",
+      "mutation": "M1: `throw new Error(\"Failed to request upload URL\")` in upload.ts. M2: restore `if (!res.ok) throw new Error()` in chat-feed.tsx. M3: the cover-image catch back to its generic toast.",
+      "observed": "Each: 1 failing of 3 (M1 the Refusal test: received Error; M2 the bare-throw guard lists chat-feed.tsx; M3 the upload-catch test).",
+      "date": "2026-09-25"
+    },
     "admin-status-door-rules.itest.ts": {
       "guards": "updateEventStatus (the admin's Publish/Unpublish/Cancel dropdown) keeps the rules the PATCH routes keep: a cancel runs cancelEventCheckIns and notifyEventCancelled; Publish refuses a cancelled event with UNCANCEL_REFUSAL and an event with no pin with canPublish's reason (SCRUM-318)",
       "mutation": "M1: delete `await cancelEventCheckIns(eventId)`. M2: delete `await notifyEventCancelled(...)`. M3: delete the isUncancellingEvent refusal. M4: `if (!gate.ok && false) throw`. M5: `throw new Error(UNCANCEL_REFUSAL)` instead of `new Refusal(...)` (the sentence would be masked in production).",

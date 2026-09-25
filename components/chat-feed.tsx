@@ -17,6 +17,7 @@ import {
   IconShieldCheck,
   IconSpeakerphone,
 } from "@tabler/icons-react"
+import { refusalText } from "@/lib/refusal"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -178,7 +179,10 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       const res = await fetch(`/api/events/${eventId}/chat/messages/${messageId}`, {
         method: "DELETE",
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        toast.error(await refusalText(res, "Failed to delete message"))
+        return
+      }
       setData((prev) =>
         prev
           ? { ...prev, messages: prev.messages.filter((m) => m.id !== messageId) }
@@ -202,7 +206,12 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       })
-      if (!res.ok) throw new Error()
+      // The route's own sentence: a moderator who cannot ban here is told
+      // why, not "Failed to update member status" (SCRUM-317).
+      if (!res.ok) {
+        toast.error(await refusalText(res, "Failed to update member status"))
+        return
+      }
 
       const statusMap = { ban: "banned", unban: "active", mute: "muted", unmute: "active" }
       setData((prev) =>

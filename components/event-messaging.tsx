@@ -199,7 +199,10 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
       const res = await fetch(`/api/events/${eventId}/sponsored-messages/${id}`, {
         method: "DELETE",
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        toast.error(await refusalText(res, "Failed to delete"))
+        return
+      }
       setMessages((prev) => prev.filter((m) => m.id !== id))
       toast.success("Deleted")
     } catch {

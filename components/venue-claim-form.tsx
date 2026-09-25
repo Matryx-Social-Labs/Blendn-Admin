@@ -18,6 +18,7 @@ import { uploadFile } from "@/components/event-form/upload"
 import { fileVenueClaim, type ClaimEvidence } from "@/lib/venue-claim-actions"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { refusalMessage } from "@/lib/refusal"
+import { Refusal } from "@/lib/refusal"
 
 /**
  * Filing a claim.
@@ -72,8 +73,8 @@ export function VenueClaimForm({
     try {
       const url = await uploadFile(file, undefined, "claims")
       setEvidence((e) => ({ ...e, [key]: url }))
-    } catch {
-      toast.error("Upload failed. Try again.")
+    } catch (err) {
+      toast.error(err instanceof Refusal ? err.message : "Upload failed. Try again.")
     } finally {
       setUploading(null)
     }
