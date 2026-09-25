@@ -35,8 +35,8 @@
   "verified": {
     "admin-status-door-rules.itest.ts": {
       "guards": "updateEventStatus (the admin's Publish/Unpublish/Cancel dropdown) keeps the rules the PATCH routes keep: a cancel runs cancelEventCheckIns and notifyEventCancelled; Publish refuses a cancelled event with UNCANCEL_REFUSAL and an event with no pin with canPublish's reason (SCRUM-318)",
-      "mutation": "M1: delete `await cancelEventCheckIns(eventId)`. M2: delete `await notifyEventCancelled(...)`. M3: delete the isUncancellingEvent refusal. M4: `if (!gate.ok && false) throw`.",
-      "observed": "Each: 1 failing of 3. M1 and M2 the cancel case (a live check-in; no notification), M3 the revive case (received null), M4 the no-pin case (received null).",
+      "mutation": "M1: delete `await cancelEventCheckIns(eventId)`. M2: delete `await notifyEventCancelled(...)`. M3: delete the isUncancellingEvent refusal. M4: `if (!gate.ok && false) throw`. M5: `throw new Error(UNCANCEL_REFUSAL)` instead of `new Refusal(...)` (the sentence would be masked in production).",
+      "observed": "Each: 1 failing of 3. M1 and M2 the cancel case (a live check-in; no notification), M3 the revive case (received null), M4 the no-pin case (received null), M5 the revive case (digest undefined, expected /^refusal:/).",
       "date": "2026-09-25"
     },
     "event-lifecycle-audited.itest.ts": {
