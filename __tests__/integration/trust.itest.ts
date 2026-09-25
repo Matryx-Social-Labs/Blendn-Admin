@@ -41,6 +41,7 @@ async function connect(eventId: string, a: string, b: string) {
 }
 
 afterAll(async () => {
+  await db.blocked_users.deleteMany({ where: { blocker_id: { in: users } } })
   await cleanup(users, events)
   await closeDb()
 })
@@ -101,6 +102,22 @@ describe("who you may rate", () => {
       data: { event_id: eventId, rater_id: me, rated_id: them, rating: 5 },
     })
     expect(await ratablePeers(eventId, me)).toEqual([])
+  })
+
+  it("not someone you blocked, nor someone who blocked you (SCRUM-304)", async () => {
+    // A block hides each from the other on the profile, in matches and in the
+    // room roster. A ratable list is one more place to see someone, and a
+    // rating from the blocked person is retaliation into the other's trust
+    // signal. The one who blocked still has the report route.
+    const eventId = await pastEvent()
+    const [blocker, blocked, friend] = await Promise.all([guest("tr-j"), guest("tr-k"), guest("tr-l")])
+    await connect(eventId, blocker, blocked)
+    await connect(eventId, blocker, friend)
+    expect(await ratablePeers(eventId, blocked)).toEqual([blocker]) // connected, so ratable — until:
+
+    await db.blocked_users.create({ data: { blocker_id: blocker, blocked_id: blocked } })
+    expect(await ratablePeers(eventId, blocked)).toEqual([])
+    expect(await ratablePeers(eventId, blocker)).toEqual([friend])
   })
 })
 

@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "trust.itest.ts": {
+      "guards": "ratablePeers offers only mutually-connected people after the event, drops those already rated, and drops anyone blocked either way, with the pair shown ratable before the block (SCRUM-304); safety-writes.itest.ts pins the POST refusing a blocked person's rating (403, no rating and no harassment report written)",
+      "mutation": "M1 (2026-09-25): `&& !blocked.has(id)` removed from ratablePeers' filter in lib/trust.ts.",
+      "observed": "M1: 2 failing of 15 across trust.itest.ts and safety-writes.itest.ts (the blocked person still sees and rates the blocker; the harassment rating is accepted, 200).",
+      "date": "2026-09-25"
+    },
     "deleted-event-room-is-closed.itest.ts": {
       "guards": "after an event is soft-deleted its room refuses a post on both send routes, a reaction and a changed vote, writing nothing, and leaves the member's conversation list; each door is shown open before the delete (SCRUM-303)",
       "mutation": "M1: `eventHidesRoom` in lib/chat-window.ts reduced to `event.status === \"draft\"`. M2: the `event: { deleted_at: null, status: { not: \"draft\" } }` filter removed from both queries in app/api/mobile/chat/groups/route.ts.",
