@@ -90,15 +90,21 @@ it("refuses all three reads to a member an organiser banned, and says who did it
   }
 })
 
-it("names the pipeline, not the organiser, when nobody pressed Ban", async () => {
+it("tells a restored account how to get back in when nobody pressed Ban (SCRUM-291)", async () => {
+  // The only ban with no `banned_by` is the one a suspension leaves behind, and
+  // lifting the suspension leaves it — re-entry is checking in, as for anyone.
   const host = await makeUser(testId("bcr-host2"), "organizer")
   users.push(host)
   const { eventId, groupId } = await room(host)
-  const auto = await member(groupId, "bcr-auto", "banned", null)
+  const restored = await member(groupId, "bcr-restored", "banned", null)
 
-  const { messages: r } = await readAll(groupId, eventId, auto)
-  expect(r.status).toBe(403)
-  expect((await r.json()).error).toMatch(/after repeated policy violations/)
+  const res = await readAll(groupId, eventId, restored)
+  for (const r of Object.values(res)) {
+    expect(r.status).toBe(403)
+    const { error } = await r.json()
+    expect(error).toMatch(/check in at the event/i)
+    expect(error).not.toMatch(/policy violations/)
+  }
 })
 
 it("still serves the room to an active, a muted and a left member", async () => {

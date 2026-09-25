@@ -600,7 +600,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 | before | uuid | Cursor: message ID to fetch before |
 | limit | int | Messages per page (default 50) |
 
-**Who may read (SCRUM-205):** an `active`, `muted` or `left` member. A `banned` member gets `403 USER_BANNED` — "The organiser has removed you from this room." when a person pressed Ban, "…after repeated policy violations." when the pipeline did. A draft event's room answers `404`. The same rule (`roomReadDenial`, `lib/chat-window.ts`) governs `GET …/participants`, `GET /events/:eventId/chat` and the socket's `join:chat`; before it, the three GETs served the room to anybody with a membership row, banned included.
+**Who may read (SCRUM-205):** an `active`, `muted` or `left` member. A `banned` member gets `403 USER_BANNED` — "The organiser has removed you from this room." when a person pressed Ban. A ban nobody pressed is the one a suspension leaves behind, and only a restored account can reach this point, so it reads "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it." Checking in lifts that ban (SCRUM-291). A draft or deleted event's room answers `404`. The same rule (`roomReadDenial`, `lib/chat-window.ts`) governs `GET …/participants`, `GET /events/:eventId/chat` and the socket's `join:chat`; before it, the three GETs served the room to anybody with a membership row, banned included.
 
 ### POST /chat/groups/:chatGroupId/messages
 ```json
