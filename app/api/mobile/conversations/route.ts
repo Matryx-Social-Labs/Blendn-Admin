@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { NextRequest } from "next/server"
-import { blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
+import { ConversationClosedError, blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { db } from "@/lib/db"
@@ -14,6 +14,7 @@ import {
   unauthorizedResponse,
   notFoundResponse,
   serverErrorResponse,
+  conflictResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
 
@@ -276,6 +277,12 @@ export async function POST(request: NextRequest) {
       isNew: !conversation.last_message_at,
     })
   } catch (error) {
+    // One of them left before, and leaving is permanent. The respond route
+    // answers the same pair 409 with this sentence; this one said 500 and
+    // logged an ERROR for an expected refusal (SCRUM-300).
+    if (error instanceof ConversationClosedError) {
+      return conflictResponse("This conversation was closed and cannot be reopened")
+    }
     logger.error("Create conversation error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to create conversation")
   }
