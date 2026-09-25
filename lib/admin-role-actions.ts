@@ -8,6 +8,8 @@ import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
+import { auditLog } from "@/lib/audit-log"
+import { eventWriteAction } from "@/lib/event-cancellation"
 import type { user_role, event_status } from "@prisma/client"
 
 export interface RoleUser {
@@ -217,9 +219,23 @@ export async function updateEventStatus(eventId: string, status: event_status) {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
+  const before = await db.events.findUnique({ where: { id: eventId }, select: { status: true, title: true } })
+  if (!before) throw new Refusal("Event not found")
+
   await db.events.update({
     where: { id: eventId },
     data: { status },
+  })
+
+  // The admin's status dropdown is a fourth door onto the same transitions
+  // (SCRUM-89). It still skips the cancel cascade and the notification; that is
+  // tracked separately rather than changed here.
+  auditLog({
+    userId: session.user.id,
+    action: eventWriteAction(status, before.status),
+    resource: "event",
+    resourceId: eventId,
+    details: { title: before.title, from: before.status, to: status, via: "admin" },
   })
 
   revalidatePath("/dashboard/organisers")

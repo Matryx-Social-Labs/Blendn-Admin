@@ -12,6 +12,7 @@ import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
+import { auditLog } from "@/lib/audit-log"
 import { getOccupancies } from "@/lib/occupancy"
 
 const parseJsonField = (value: unknown) => {
@@ -356,6 +357,17 @@ export async function POST(req: Request) {
             }
           : {}),
       },
+    })
+
+    // Who put an event on the platform, and as what. No event write was audited
+    // but DELETE (SCRUM-89). Written before anything below can throw: the row
+    // is committed either way.
+    auditLog({
+      userId: session.user.id,
+      action: "event.created",
+      resource: "event",
+      resourceId: event.id,
+      details: { title: event.title, status: event.status, orgId: owningOrgId },
     })
 
     // Every event has at least one occurrence, and check-in resolves through

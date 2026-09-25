@@ -32,6 +32,8 @@ jest.mock("@/lib/org-membership", () => ({
 
 jest.mock("@/lib/venue-link", () => ({ resolveVenueLink: jest.fn().mockResolvedValue({}) }))
 jest.mock("@/lib/occurrences", () => ({ syncOccurrences: jest.fn().mockResolvedValue(undefined) }))
+// The event routes audit create, publish and cancel now (SCRUM-89); the db mock has no audit table.
+jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 
 import { NextRequest } from "next/server"
 

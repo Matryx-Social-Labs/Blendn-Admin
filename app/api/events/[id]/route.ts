@@ -8,7 +8,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { cancelEventCheckIns, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, eventWriteAction, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
@@ -466,6 +466,19 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       },
     })
 
+    // Who published, cancelled or moved it, with the material changes the
+    // attendees were told about (SCRUM-89). Straight after the write: the
+    // occurrence sync and the cancel cascade below can throw, and the row is
+    // committed either way.
+    const changes = materialEventChanges(event, updatedEvent)
+    auditLog({
+      userId: session.user.id,
+      action: eventWriteAction(status ?? undefined, event.status),
+      resource: "event",
+      resourceId: updatedEvent.id,
+      details: { title: updatedEvent.title, from: event.status, to: updatedEvent.status, changes },
+    })
+
     // Reconcile the days whenever the schedule moves. Idempotent — a day that
     // survives the change keeps its id, and therefore its check-ins.
     if (start_time !== undefined || end_time !== undefined || timezone !== undefined) {
@@ -493,11 +506,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     if (isCancelling) {
       await notifyEventCancelled(updatedEvent.id, updatedEvent.title)
     } else {
-      await notifyEventDetailsChanged(
-        updatedEvent.id,
-        updatedEvent.title,
-        materialEventChanges(event, updatedEvent)
-      )
+      await notifyEventDetailsChanged(updatedEvent.id, updatedEvent.title, changes)
     }
 
     return NextResponse.json(updatedEvent)
