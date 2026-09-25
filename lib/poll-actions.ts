@@ -6,9 +6,10 @@ import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
-import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
+import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { chatWindowState } from "@/lib/chat-window"
 import { db } from "@/lib/db"
+import { logger } from "@/lib/logger"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { canBroadcast, eventPermissionSelect, type BroadcastKind } from "@/lib/rbac"
 import { emitChatMessage } from "@/lib/socket-server"
@@ -156,17 +157,27 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
   })
 
   /*
-   * Delivered as an announcement is (SCRUM-307): the room sees it now, signed
-   * by the organisation, rather than on its next history load as "Attendee".
+   * Delivered as an announcement is (SCRUM-307): the room sees it now, named
+   * as its history will name it, rather than on its next load as "Attendee".
+   * The poll is committed; a failed emit must not report it as failed — a
+   * retry would post it twice — so it is logged, as room-delivery does.
    */
-  emitChatMessage(event.chat_group.id, {
-    id: created.messageId,
-    content: question,
-    type: "poll",
-    userId: session.user.id,
-    userName: broadcastAuthorName(event),
-    createdAt: created.createdAt.toISOString(),
-  })
+  try {
+    emitChatMessage(event.chat_group.id, {
+      id: created.messageId,
+      content: question,
+      type: "poll",
+      ...(kind === "sponsored" ? { kind: "sponsored" as const } : {}),
+      userId: session.user.id,
+      userName: roomSenderName({ type: "poll", metadata: { kind } }, undefined, event),
+      createdAt: created.createdAt.toISOString(),
+    })
+  } catch (error) {
+    logger.error("Poll emit failed", {
+      pollId: created.pollId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
 
   auditLog({
     userId: session.user.id,

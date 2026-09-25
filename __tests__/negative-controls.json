@@ -33,10 +33,16 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "room-sender-name.test.ts": {
+      "guards": "roomSenderName names an announcement or poll after the organisation whatever the sender's pseudonym, names a sponsored poll Sponsored, and never lets an attendee's metadata change their name (SCRUM-307)",
+      "mutation": "M3: `if (pseudonym) return pseudonym` moved above the broadcast branch. M6: the sponsored-poll branch removed.",
+      "observed": "M3: 1 failing of 3. M6: 1 failing of 3 (the sponsored poll is signed as the organiser).",
+      "date": "2026-09-25"
+    },
     "poll-live-and-signed.itest.ts": {
-      "guards": "createPoll emits the new poll to its room as it is created, signed with the organisation's name; both room histories name a staff poll and a staff announcement after the organisation while attendees keep their pseudonyms (SCRUM-307)",
-      "mutation": "M1: createPoll's emitChatMessage call replaced by a no-op function taking the same arguments. M2: roomSenderName's broadcast branch reduced to `return \"Attendee\"`.",
-      "observed": "M1: 1 failing of 2 (no emit). M2: 1 failing of 2 (the poll and the announcement read \"Attendee\" in both histories).",
+      "guards": "createPoll emits the new poll to its room as it is created, signed with the organisation's name, and still returns the committed poll when the emit throws; both room histories name a staff poll and announcement after the organisation even when the staff sender is a room member, while attendees keep their pseudonyms; the organiser's own feed badges the poll as a poll (SCRUM-307)",
+      "mutation": "M1: createPoll's emitChatMessage call replaced by a no-op function taking the same arguments. M2: roomSenderName's broadcast branch reduced to `return \"Attendee\"`. M3: `if (pseudonym) return pseudonym` moved above the broadcast branch. M4: feedKind's poll branch removed. M5: the try/catch around the emit removed.",
+      "observed": "M1: 1 failing of 4 (no emit). M2: 1 failing of 4 (\"Attendee\" in both histories). M3: 1 failing of 4 (the poll reads as the host's pseudonym). M4: 1 failing of 4 (the poll is badged a user message). M5: 1 failing of 4 (a thrown emit rejects the committed poll).",
       "date": "2026-09-25"
     },
     "board-text-recheck.test.ts": {

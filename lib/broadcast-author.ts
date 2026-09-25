@@ -67,16 +67,31 @@ export function broadcastAuthorName(event: BroadcastAuthorEvent): string {
 /** The message types only staff can write. An attendee sends text, image or video. */
 const BROADCAST_TYPES = new Set(["announcement", "poll"])
 
+/** How a sponsored send names itself — the scheduler's word (SCRUM-309 is naming the brand). */
+export const SPONSORED_AUTHOR = "Sponsored"
+
 /**
- * The name a room's history shows for a message's sender (SCRUM-307).
+ * The name a room shows for a message's sender (SCRUM-307) — in both
+ * histories and, through `createPoll`, on the socket, so the three agree.
  *
- * A room member is their pseudonym. An announcement or a poll from someone who
- * is not in the room — staff — is the organisation that posted it, the name an
- * announcement already carries in its text; it read "Attendee", and a poll has
- * only its question to go on. Decided by type, which a client cannot set, and
- * never by `metadata`, which it can. Anyone else is the old fallback.
+ * An announcement or a poll is the room's own voice: named after the
+ * organisation that posted it, even when the staff member who pressed send is
+ * also in the room under a pseudonym. A sponsored poll is "Sponsored", as a
+ * sponsored send is — never the organiser, whose content it is not.
+ *
+ * Decided by `type`, which a client cannot set (attendees send text, image or
+ * video). `metadata.kind` is read only on a poll, whose metadata only
+ * `createPoll` writes; on anything else a client could have put it there.
+ * Everyone else is their pseudonym, or the old "Attendee".
  */
-export function roomSenderName(type: string, pseudonym: string | undefined, event: BroadcastAuthorEvent): string {
-  if (pseudonym) return pseudonym
-  return BROADCAST_TYPES.has(type) ? broadcastAuthorName(event) : "Attendee"
+export function roomSenderName(
+  message: { type: string; metadata?: unknown },
+  pseudonym: string | undefined,
+  event: BroadcastAuthorEvent
+): string {
+  if (message.type === "poll" && (message.metadata as { kind?: string } | null)?.kind === "sponsored") {
+    return SPONSORED_AUTHOR
+  }
+  if (BROADCAST_TYPES.has(message.type)) return broadcastAuthorName(event)
+  return pseudonym ?? "Attendee"
 }

@@ -25,6 +25,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 const { createPoll } = require("@/lib/poll-actions") as typeof import("@/lib/poll-actions")
 const groupHistory = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route")
 const eventChat = require("@/app/api/mobile/events/[eventId]/chat/route") as typeof import("@/app/api/mobile/events/[eventId]/chat/route")
+const dashboardFeed = require("@/app/api/events/[id]/chat/messages/route") as typeof import("@/app/api/events/[id]/chat/messages/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -57,6 +58,8 @@ beforeAll(async () => {
   await db.events.update({ where: { id: eventId }, data: { organizer_org_id: org.id } })
   groupId = (await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" }, select: { id: true } })).id
   await db.chat_group_members.create({ data: { chat_group_id: groupId, user_id: guest, status: "active", anonymous_name: PSEUDONYM } })
+  // The host is in the room too, under a pseudonym — the room's own voice must still read as the organisation.
+  await db.chat_group_members.create({ data: { chat_group_id: groupId, user_id: host, status: "active", anonymous_name: testId("Kestrel") } })
   await db.chat_messages.create({ data: { chat_group_id: groupId, user_id: guest, content: "who else is here?" } })
   await db.chat_messages.create({ data: { chat_group_id: groupId, user_id: host, type: "announcement", content: `📢 [Announcement from ${ORG}]\ndoors at 7` } })
   const { email } = await db.user.findUniqueOrThrow({ where: { id: guest }, select: { email: true } })
@@ -86,4 +89,20 @@ it("names staff posts after the organisation in both histories, and attendees by
     expect(names[`📢 [Announcement from ${ORG}]\ndoors at 7`]).toBe(ORG)
     expect(names["who else is here?"]).toBe(PSEUDONYM)
   }
+})
+
+it("badges the poll as a poll in the organiser's own feed", async () => {
+  const res = await dashboardFeed.GET(new Request(`http://localhost/api/events/${eventId}/chat/messages`), { params: Promise.resolve({ id: eventId }) })
+  const body = (await res.json()) as { messages: { content: string; kind: string }[] }
+  const kinds = Object.fromEntries(body.messages.map((m) => [m.content, m.kind]))
+  expect(kinds["Best brew method?"]).toBe("poll")
+  expect(kinds["who else is here?"]).toBe("user")
+})
+
+it("returns the committed poll even when the emit throws — a retry would post it twice", async () => {
+  mockEmit.mockImplementationOnce(() => {
+    throw new Error("adapter down")
+  })
+  const { pollId } = await createPoll(eventId, { question: "Second round?", options: ["Yes", "No"] })
+  expect(await db.chat_polls.count({ where: { id: pollId } })).toBe(1)
 })

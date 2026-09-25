@@ -416,7 +416,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           replyCount: m._count.replies,
           user: {
             id: m.user.id,
-            name: roomSenderName(m.type, anonMap.get(m.user.id), chatGroup.event),
+            name: roomSenderName(m, anonMap.get(m.user.id), chatGroup.event),
             image: null,
           },
           reactions: isHidden ? [] : tallyReactions(m.reactions, authUser.userId),

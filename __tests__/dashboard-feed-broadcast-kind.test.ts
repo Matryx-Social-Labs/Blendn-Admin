@@ -20,17 +20,20 @@ const read = (rel: string) =>
     .replace(/^\s*\/\/.*$/gm, "")
 
 describe("the dashboard feed knows a broadcast from a person", () => {
-  it("derives `kind` from the sponsored marker and the announcement type", () => {
+  it("derives `kind` from the sponsored marker, the announcement type and the poll type", () => {
     const route = read("app/api/events/[id]/chat/messages/route.ts")
-    expect(route).toMatch(/kind:\s*\(m\.metadata as[^)]*\)\?\.sponsored_message_id\s*\?\s*"sponsored"/)
-    expect(route).toMatch(/m\.type === "announcement"\s*\?\s*"announcement"\s*:\s*"user"/)
+    expect(route).toContain("kind: feedKind(m)")
+    expect(route).toMatch(/if \(meta\?\.sponsored_message_id\) return "sponsored"/)
+    // A poll is the room's own voice too (SCRUM-307); a sponsored one is sponsored.
+    expect(route).toMatch(/if \(m\.type === "poll"\) return meta\?\.kind === "sponsored" \? "sponsored" : "poll"/)
+    expect(route).toMatch(/if \(m\.type === "announcement"\) return "announcement"\s*return "user"/)
   })
 
   it("labels the row instead of naming an Attendee", () => {
     const feed = read("components/chat-feed.tsx")
     expect(feed).toContain('const broadcast = msg.kind !== "user"')
     // The label is the word the phone shows, in the sender's place.
-    expect(feed).toMatch(/broadcast \? \([\s\S]{0,300}\{msg\.kind === "sponsored" \? "Sponsored" : "Announcement"\}[\s\S]{0,300}\) : \([\s\S]{0,200}anonymousName \?\? "Attendee"/)
+    expect(feed).toMatch(/broadcast \? \([\s\S]{0,300}\{msg\.kind === "sponsored" \? "Sponsored" : msg\.kind === "poll" \? "Poll" : "Announcement"\}[\s\S]{0,300}\) : \([\s\S]{0,200}anonymousName \?\? "Attendee"/)
     // And the server's label line is dropped, not printed under the badge.
     expect(feed).toContain("{body}")
     expect(feed).not.toContain("{msg.content}</p>")
