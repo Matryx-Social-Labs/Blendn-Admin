@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "editor-shows-server-refusal.test.ts": {
+      "guards": "components/event-editor.tsx shows refusalText(response, \"Failed to save event\") for a refused save and returns, so the route's own sentence (no organisation, capacity, …) reaches the organiser; refusalText reads both shapes the event routes send (SCRUM-315)",
+      "mutation": "M1: `toast.error(\"Failed to save event\")` in the !response.ok branch. M2: drop the `return` after the toast.",
+      "observed": "M1: 1 failing of 3 (the editor wiring test). M2: 1 failing of 3 (the same test; the branch no longer returns).",
+      "date": "2026-09-25"
+    },
     "venue-hosted-events-live.itest.ts": {
       "guards": "the venue claim form's hostedEvents (app/dashboard/venues/[id]/claim/page.tsx) and the claim queue's currentOwnerEventCount and dispute flag (lib/venue-claim-actions.ts) count a venue's events with deleted_at null (SCRUM-312)",
       "mutation": "M1: `_count: { select: { events: true } }` in the claim page. M2: the same in getVenueClaimQueue.",
