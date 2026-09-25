@@ -1,5 +1,12 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
+import { sentryCspReportUri } from "./lib/csp-report";
+
+// Where the report-only CSP reports to. See lib/csp-report.ts and the policy below.
+const cspReportUri = sentryCspReportUri(
+  process.env.NEXT_PUBLIC_SENTRY_DSN,
+  process.env.RAILWAY_ENVIRONMENT_NAME
+);
 
 const nextConfig: NextConfig = {
   // Image optimization
@@ -68,6 +75,11 @@ const nextConfig: NextConfig = {
              * Swagger bundle both need them; tightening those is the work that
              * turns this into an enforcing policy, and it needs a report
              * endpoint and a week of data first.
+             *
+             * The endpoint is Sentry's (SCRUM-321): without a reporting
+             * directive the policy blocked nothing and collected nothing, so
+             * the week of data could never start. No DSN, no directive — as
+             * before.
              */
             key: "Content-Security-Policy-Report-Only",
             value: [
@@ -80,6 +92,7 @@ const nextConfig: NextConfig = {
               "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
+              ...(cspReportUri ? [`report-uri ${cspReportUri}`] : []),
             ].join("; "),
           },
         ],

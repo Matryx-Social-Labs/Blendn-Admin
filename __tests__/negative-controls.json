@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "csp-report.test.ts": {
+      "guards": "sentryCspReportUri derives Sentry's CSP security endpoint (host, project, public key, optional environment) from the DSN and returns null for a missing or malformed one, so the report-only CSP's report-uri points at a real intake or nowhere (SCRUM-321)",
+      "mutation": "M1: `/security/` replaced by `/store/` in the derived endpoint.",
+      "observed": "M1: 2 failing of 3 (both derivation cases).",
+      "date": "2026-09-25"
+    },
     "room-sender-name.test.ts": {
       "guards": "roomSenderName names an announcement or poll after the organisation whatever the sender's pseudonym, names a sponsored poll Sponsored, and never lets an attendee's metadata change their name (SCRUM-307)",
       "mutation": "M3: `if (pseudonym) return pseudonym` moved above the broadcast branch. M6: the sponsored-poll branch removed.",
