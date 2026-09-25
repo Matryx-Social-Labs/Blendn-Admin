@@ -215,12 +215,21 @@ export function mayWriteToRoom(
  *
  * The same untruth `mutedRefusal` fixed, on the other status: every send
  * route told an organiser-banned person it was "due to repeated policy
- * violations". `banned_by` is set by a person and left null by the pipeline.
+ * violations". `banned_by` is set when a person presses Ban.
+ *
+ * It is null on exactly one writer's rows: `applySuspension`, which bans every
+ * room a suspended account was in. The pipeline mutes; it never bans. And a
+ * suspended account is refused at sign-in before it reaches a room — so
+ * whoever reads the null branch has been restored, and lifting a suspension
+ * deliberately leaves the bans: the way back is checking in, which lifts a ban
+ * nobody pressed (the check-in route's `humanBanned`). This said "after
+ * repeated policy violations" — a verdict nobody made, hiding the one thing
+ * that works (SCRUM-291).
  */
 export function bannedRefusal(membership: { banned_by: string | null }): string {
   return membership.banned_by
     ? "The organiser has removed you from this room."
-    : "You have been removed from this room after repeated policy violations."
+    : "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it."
 }
 
 export type ReadDenial = "hidden" | "not_member" | "banned"

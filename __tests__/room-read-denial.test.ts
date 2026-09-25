@@ -34,5 +34,13 @@ it("hides a deleted event's room even from an active member (SCRUM-303)", () => 
 
 it("says who removed them", () => {
   expect(bannedRefusal({ banned_by: "user_organiser" })).toBe("The organiser has removed you from this room.")
-  expect(bannedRefusal({ banned_by: null })).toMatch(/after repeated policy violations/)
+})
+
+it("tells a restored account the way back in, not a verdict nobody made (SCRUM-291)", () => {
+  // A ban with nobody behind it is a suspension's, and a suspended account never
+  // gets this far — so whoever reads it has been restored, and checking in lifts it.
+  const sentence = bannedRefusal({ banned_by: null })
+  expect(sentence).toMatch(/restored/i)
+  expect(sentence).toMatch(/check in at the event/i)
+  expect(sentence).not.toMatch(/policy violations/)
 })
