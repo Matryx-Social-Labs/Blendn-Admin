@@ -44,14 +44,16 @@ registry.registerPath({
   path: "/api/mobile/conversations",
   tags: ["Mobile Conversations"],
   summary: "Create or get conversation",
-  description: "Start a conversation with another user. Returns existing one if already exists.",
+  description:
+    "Start a conversation with another user. Returns existing one if already exists. Needs an accepted message request. A pair that was closed (unmatch, leave, block) stays closed: **409**.",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: CreateConversationRequestSchema } } },
   },
   responses: {
-    200: { description: "Conversation", content: { "application/json": { schema: wrap(CreateConversationResponseSchema) } } },
     ...standardErrors,
+    200: { description: "Conversation", content: { "application/json": { schema: wrap(CreateConversationResponseSchema) } } },
+    409: { description: "This conversation was closed and cannot be reopened" },
   },
 })
 

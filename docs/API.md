@@ -626,7 +626,7 @@ Same moderation pipeline and error codes apply.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/conversations` | List conversations |
-| POST | `/conversations` | Open a conversation — **requires an accepted request** |
+| POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
 | POST | `/conversations/:id/messages` | Send message |

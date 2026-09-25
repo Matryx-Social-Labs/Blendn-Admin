@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "conversation-closed-pair.itest.ts": {
+      "guards": "POST /conversations answers a closed pair (accepted request, conversation closed by unmatch) 409 with the respond route's sentence, from either side, and writes no second row; a live pair still opens (SCRUM-300)",
+      "mutation": "In app/api/mobile/conversations/route.ts, neuter the ConversationClosedError branch in the catch (`if (false && …)`).",
+      "observed": "1 failing of 2 (the closed pair) — received 500 \"Failed to create conversation\", as staging did.",
+      "date": "2026-09-25"
+    },
     "interests-honour-blocks.itest.ts": {
       "guards": "GET /profiles/:userId/interests answers 404 (no data, no interest names) when either side has blocked the other, as GET /profiles/:userId and /users/:userId do; a stranger with no block and the owner still read (SCRUM-299)",
       "mutation": "In app/api/mobile/profiles/[userId]/interests/route.ts, neuter the blockedEitherWay check (`if (false && …)`). Review: make lib/conversations.ts blockedEitherWay one-directional.",
