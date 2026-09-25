@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
 import { readFileSync } from "fs"
+import { Client } from "pg"
 import { join } from "path"
 import type { NextAuthOptions } from "next-auth"
 
@@ -127,28 +128,57 @@ it("creates an operator account in lowercase, and refuses the same inbox in anot
   await expect(createRoleUser("Role", typed.toUpperCase(), "organizer")).rejects.toThrow("Email already in use")
 })
 
-describe("the migration that lowercases what is already stored", () => {
-  it("lowercases an address, but leaves one whose lowercase twin already exists for a person to merge", async () => {
+describe("the migration that folds what is already stored", () => {
+  /*
+   * As Prisma applies it: the whole script in one round trip, so Postgres runs
+   * it as one transaction and a raised exception undoes the lot.
+   */
+  async function migrate() {
     const sql = readFileSync(
       join(__dirname, "../../prisma/migrations/20260925210000_email_is_one_identity/migration.sql"),
       "utf8"
     )
-    const solo = mixedCase("eio-solo")
+    const client = new Client({ connectionString: process.env.DATABASE_URL })
+    await client.connect()
+    try {
+      await client.query(sql)
+    } finally {
+      await client.end()
+    }
+  }
+  const email = async (id: string) => (await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })).email
+
+  const lone = mixedCase("eio-lone")
+  const padded = mixedCase("eio-pad")
+  let loneId = ""
+  let paddedId = ""
+
+  it("refuses while two accounts share an address, and changes nothing", async () => {
+    loneId = await passwordUser(lone)
+    paddedId = await passwordUser(` ${padded} `)
+    // A twin, and two spellings with no lowercase row: both are one inbox twice.
     const twin = mixedCase("eio-twin")
-    const soloId = await passwordUser(solo)
-    const twinId = await passwordUser(twin)
-    const lowerTwinId = await passwordUser(twin.toLowerCase())
-    // Two spellings and no lowercase row: lowercasing both would collide on
-    // the unique constraint and fail the deploy.
     const pair = mixedCase("eio-pair")
-    const pairIds = [await passwordUser(pair), await passwordUser(pair.toUpperCase())]
+    const shared = [
+      await passwordUser(twin),
+      await passwordUser(twin.toLowerCase()),
+      await passwordUser(pair),
+      await passwordUser(pair.toUpperCase()),
+    ]
 
-    await db.$executeRawUnsafe(sql)
+    try {
+      await expect(migrate()).rejects.toThrow("SCRUM-328: 2 address(es)")
+      expect(await email(loneId)).toBe(lone)
+    } finally {
+      // Left behind, the pair would make every later run refuse too.
+      await db.user.deleteMany({ where: { id: { in: shared } } })
+    }
+  })
 
-    const email = async (id: string) => (await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })).email
-    expect(await email(soloId)).toBe(solo.toLowerCase())
-    expect(await email(twinId)).toBe(twin)
-    expect(await email(lowerTwinId)).toBe(twin.toLowerCase())
-    expect([await email(pairIds[0]), await email(pairIds[1])]).toEqual([pair, pair.toUpperCase()])
+  it("folds every address once none are shared", async () => {
+    await migrate()
+    expect(await email(loneId)).toBe(lone.toLowerCase())
+    // The app trims as well as lowercasing, so the migration does too.
+    expect(await email(paddedId)).toBe(padded.toLowerCase())
   })
 })
