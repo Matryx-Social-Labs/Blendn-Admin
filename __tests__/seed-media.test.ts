@@ -1,4 +1,4 @@
-import { cover, mirrorToTigris, revivedCover, SEED_BUCKET } from "../scripts/seed-media"
+import { cover, mirrorToTigris, revivedCover, SEED_BUCKET, seedBucketUrl, stayedHotlinked } from "../scripts/seed-media"
 
 /*
  * SCRUM-285. Every seeded cover on staging went blank on 2026-09-24:
@@ -59,5 +59,25 @@ describe("seed covers", () => {
     await expect(mirrorToTigris("https://picsum.photos/x", "seed/new/cover.jpg", "image/jpeg", {})).resolves.toBe(
       "https://picsum.photos/x"
     )
+  })
+})
+
+describe("naming what stayed hotlinked (SCRUM-288)", () => {
+  // The documented --apply passed no Tigris variables, so every object meant
+  // for our bucket that was not already there stayed hotlinked — one log line
+  // among hundreds. The run now ends by naming them.
+  it("names the objects meant for our bucket that came back on someone else's host", () => {
+    const key = "seed/founders-filter-coffee/cover.jpg"
+    expect(
+      stayedHotlinked([
+        { key, url: "https://images.example.com/founders.jpg" },
+        { key: "seed/nightshift/cover.jpg", url: seedBucketUrl("seed/nightshift/cover.jpg") },
+        { key: "seed/nightshift/clip.mp4", url: null },
+      ])
+    ).toEqual([key])
+  })
+
+  it("puts a key at the bucket's public URL", () => {
+    expect(seedBucketUrl("seed/x/cover.jpg")).toBe(`https://${SEED_BUCKET}.fly.storage.tigris.dev/seed/x/cover.jpg`)
   })
 })
