@@ -35,8 +35,8 @@
   "verified": {
     "board-text-recheck.test.ts": {
       "guards": "checkBoardText reports a timed-out OpenAI pass as unchecked (and a no-key pass as final), and hideBoardPostIfFlagged takes a post down marked hidden only when the second look refuses it (SCRUM-301 review)",
-      "mutation": "M5: checkBoardText's unchecked branch returns `unchecked: false`.",
-      "observed": "M5: 1 failing of 5 (a timed-out pass is reported as final, so nothing looks again).",
+      "mutation": "M5: checkBoardText's unchecked branch returns `unchecked: false`. M6: `deleted_at: null` dropped from hideBoardPostIfFlagged's where.",
+      "observed": "M5: 1 failing of 5 (a timed-out pass is reported as final, so nothing looks again). M6: 1 failing of 5 (the second look would relabel a post its author withdrew meanwhile).",
       "date": "2026-09-25"
     },
     "board-moderated-and-withdrawable.itest.ts": {

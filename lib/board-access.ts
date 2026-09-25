@@ -238,8 +238,10 @@ export async function checkBoardText(text: string): Promise<BoardTextVerdict> {
 export async function hideBoardPostIfFlagged(postId: string, body: string): Promise<void> {
   const check = await checkTextContent(body)
   if (!check.checked || check.result?.action !== "hide") return
-  await db.board_posts.update({
-    where: { id: postId },
+  // Only a post still up: one its author withdrew meanwhile keeps its own
+  // timestamp and reads as a withdrawal, not as something we caught.
+  await db.board_posts.updateMany({
+    where: { id: postId, deleted_at: null },
     data: { deleted_at: new Date(), moderation_status: "hidden", updated_at: new Date() },
   })
 }

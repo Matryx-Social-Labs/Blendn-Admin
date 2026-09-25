@@ -9,7 +9,7 @@
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 const mockUpdate = jest.fn()
-jest.mock("@/lib/db", () => ({ db: { board_posts: { update: (...a: unknown[]) => mockUpdate(...a) } } }))
+jest.mock("@/lib/db", () => ({ db: { board_posts: { updateMany: (...a: unknown[]) => mockUpdate(...a) } } }))
 const mockCheck = jest.fn()
 jest.mock("@/lib/moderation/openai-moderation", () => ({
   checkTextContent: (...a: unknown[]) => mockCheck(...a),
@@ -51,7 +51,8 @@ describe("hideBoardPostIfFlagged", () => {
     mockCheck.mockResolvedValue(HIDE)
     await hideBoardPostIfFlagged("post-1", "something vile")
     expect(mockUpdate).toHaveBeenCalledWith({
-      where: { id: "post-1" },
+      // `deleted_at: null` — a post its author withdrew meanwhile keeps its own record.
+      where: { id: "post-1", deleted_at: null },
       data: expect.objectContaining({ moderation_status: "hidden", deleted_at: expect.any(Date) }),
     })
   })
