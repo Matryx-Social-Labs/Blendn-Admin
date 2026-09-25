@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "venue-owner-hosts-own-event.itest.ts": {
+      "guards": "POST /api/events saves a venue owner's draft owned by their organisation, and still refuses a sponsor, gating on canCreateEvents like every other create door (SCRUM-320)",
+      "mutation": "M1: the gate restored to `role !== \"app_admin\" && role !== \"organizer\"`. M2: the gate replaced by `if (false)`.",
+      "observed": "M1: 1 failing of 2 (the venue owner is refused with 403). M2: 1 failing of 2 (the sponsor's draft saves).",
+      "date": "2026-09-25"
+    },
     "campaign-belongs-to-its-brand.itest.ts": {
       "guards": "a sponsor whose brand is placed at an event cannot pause or rewrite another brand's campaign there (sponsored-messages PATCH) or put its own upload on it (attachCreativeMedia); the other brand's own member still can (SCRUM-319)",
       "mutation": "M1: the `id: sponsorId` narrowing removed from resolveSponsorGrant's relation filter. M2: the PATCH route's campaign-brand check replaced by `if (false)`.",

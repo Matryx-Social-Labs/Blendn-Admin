@@ -8,6 +8,7 @@ import { resolveEventCity } from "@/lib/location"
 import { visibleEventsWhere } from "@/lib/event-visibility"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
+import { canCreateEvents } from "@/lib/rbac"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
@@ -81,8 +82,10 @@ export async function POST(req: Request) {
       return errorResponse("Unauthorized", 401)
     }
 
-    const { role } = session.user
-    if (role !== "app_admin" && role !== "organizer") {
+    // The allowlist every other create door uses. This gate predated venue
+    // owners hosting their own events, and refused them after the dashboard
+    // had offered the whole editor (SCRUM-320).
+    if (!canCreateEvents(session.user.role)) {
       return errorResponse("Forbidden", 403)
     }
 
