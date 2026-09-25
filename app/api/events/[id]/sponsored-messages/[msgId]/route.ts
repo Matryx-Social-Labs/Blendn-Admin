@@ -52,6 +52,16 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     if (!existing) return errorResponse("Not found", 404)
 
     /*
+     * The grant above is for the event; this campaign belongs to one brand.
+     * Every brand placed here passes that check, and the room history serves
+     * each ad's campaign id — so without this one brand could pause or
+     * rewrite another's campaign (SCRUM-319). An admin needs no grant.
+     */
+    if (actor.role !== "app_admin" && !(await resolveSponsorGrant(actor, eventId, existing.sponsor_id))) {
+      return errorResponse("Forbidden", 403)
+    }
+
+    /*
      * An edit to the creative is a NEW creative, and cannot inherit approval.
      *
      * This route re-armed the scheduler on any PATCH where `is_active` was

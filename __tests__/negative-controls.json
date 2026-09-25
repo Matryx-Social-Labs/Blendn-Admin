@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "campaign-belongs-to-its-brand.itest.ts": {
+      "guards": "a sponsor whose brand is placed at an event cannot pause or rewrite another brand's campaign there (sponsored-messages PATCH) or put its own upload on it (attachCreativeMedia); the other brand's own member still can (SCRUM-319)",
+      "mutation": "M1: the `id: sponsorId` narrowing removed from resolveSponsorGrant's relation filter. M2: the PATCH route's campaign-brand check replaced by `if (false)`.",
+      "observed": "M1: 2 failing of 3 (both refusals). M2: 2 failing of 3 (the PATCH refusal, and the attach test's row check, because the unrefused PATCH had already paused and rewritten B's campaign).",
+      "date": "2026-09-25"
+    },
     "org-less-organiser-refused-server-side.itest.ts": {
       "guards": "an organiser in no organisation (daniel.weber@'s shape) is refused server-side by the real handlers on another organisation's event: PATCH and DELETE the event, POST an announcement, ban a room member, delete a room message; every row unchanged (SCRUM-251 item 3)",
       "mutation": "M1: `if (false && …canEdit)` on the event PATCH permission check. M2: the same on the announcements POST check.",
