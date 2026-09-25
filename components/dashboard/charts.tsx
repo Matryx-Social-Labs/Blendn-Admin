@@ -237,7 +237,13 @@ export function PacingChart({
 
 /* -------------------------------------------------------------------------- */
 
-export type FunnelStage = { label: string; value: number; detail?: string }
+export type FunnelStage = {
+  label: string
+  value: number
+  detail?: string
+  /** The stage this one is a share of, when it is not the one above it (SCRUM-313). */
+  base?: string
+}
 
 /**
  * Horizontal funnel. Deliberately not a chart library component — a stage that
@@ -266,7 +272,12 @@ export function Funnel({
     >
       <div className="flex flex-col gap-2">
         {stages.map((stage, index) => {
-          const previous = index === 0 ? null : stages[index - 1].value
+          const previous =
+            index === 0
+              ? null
+              : stage.base
+                ? (stages.find((s) => s.label === stage.base)?.value ?? null)
+                : stages[index - 1].value
           const conversion =
             previous && previous > 0 ? Math.round((stage.value / previous) * 100) : null
           return (

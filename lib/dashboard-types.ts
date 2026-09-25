@@ -186,7 +186,7 @@ export interface AdminOverview {
   upcomingEvents: number
   /** Events we listed ourselves. Never host liquidity — see `hostSupply`. */
   curated: { published: number; unclaimed: number }
-  funnel: Array<{ label: string; value: number }>
+  funnel: Array<{ label: string; value: number; base?: string }>
   supply: OrganiserSupplyRow[]
   cities: CityRow[]
 }

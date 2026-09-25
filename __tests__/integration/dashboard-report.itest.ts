@@ -291,14 +291,18 @@ describe("admin overview", () => {
       "onboarded",
       "RSVP'd",
       "checked in",
+      "came back",
       "matched",
       "conversed",
-      "came back",
     ])
 
-    // Nested subsets, or the shape lies: no stage may exceed the one above it.
-    const values = overview.funnel.map((s) => s.value)
-    expect(values).toEqual([...values].sort((a, b) => b - a))
+    // Nested subsets, or the shape lies: no stage may exceed the one it is a
+    // share of — the stage above it, or its declared base (SCRUM-313).
+    for (const [i, stage] of overview.funnel.entries()) {
+      if (i === 0) continue
+      const base = stage.base ? overview.funnel.find((s) => s.label === stage.base) : overview.funnel[i - 1]
+      expect(stage.value).toBeLessThanOrEqual(base!.value)
+    }
     /*
      * All four queues, always — including the empty ones.
      *
@@ -338,11 +342,13 @@ describe("admin overview", () => {
     const overview = (as("app_admin"), await getDashboardOverview())
     if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
-    // Each stage is a subset of the one above it. If this ever inverts, the
-    // stages are counting different populations and the funnel is a lie.
-    const values = overview.funnel.map((s) => s.value)
-    for (let i = 1; i < values.length; i++) {
-      expect(values[i]).toBeLessThanOrEqual(values[i - 1])
+    // Each stage is a subset of the one it is a share of — the stage above,
+    // or its declared base. If this ever inverts, the stages are counting
+    // different populations and the funnel is a lie.
+    for (const [i, stage] of overview.funnel.entries()) {
+      if (i === 0) continue
+      const base = stage.base ? overview.funnel.find((s) => s.label === stage.base) : overview.funnel[i - 1]
+      expect(stage.value).toBeLessThanOrEqual(base!.value)
     }
   })
 })
