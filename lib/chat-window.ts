@@ -194,7 +194,10 @@ export function mayWriteToRoom(
  * `left` stays readable. It is what every member of an archived room becomes,
  * and the event-chat route rejoins it on purpose. `muted` reads: a mute
  * silences, it does not banish (SCRUM-178). A draft event has no room
- * (SCRUM-8) — "hidden", so a caller can answer 404 rather than confirm it.
+ * (SCRUM-8), and neither has a deleted one (SCRUM-303) — "hidden", so a caller
+ * can answer 404 rather than confirm it. `deleted_at` is required so that no
+ * caller can forget to select it; the socket filtered it and the HTTP reads
+ * did not.
  */
 /**
  * Why a banned person cannot read or post, in words that are true.
@@ -213,9 +216,9 @@ export type ReadDenial = "hidden" | "not_member" | "banned"
 
 export function roomReadDenial(
   membership: { status: string } | null | undefined,
-  event: { status: string }
+  event: { status: string; deleted_at: Date | null }
 ): ReadDenial | null {
-  if (event.status === "draft") return "hidden"
+  if (event.status === "draft" || event.deleted_at) return "hidden"
   if (!membership) return "not_member"
   if (membership.status === "banned") return "banned"
   return null

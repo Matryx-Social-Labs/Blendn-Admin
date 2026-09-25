@@ -99,7 +99,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // rejected after the user has typed.
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
-      include: { event: { select: { start_time: true, end_time: true, status: true } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
     })
 
     if (!chatGroup) {
@@ -131,7 +131,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           status: "active",
           member_count: 0,
         },
-        include: { event: { select: { start_time: true, end_time: true, status: true } } },
+        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
       })
     }
 

@@ -8,7 +8,7 @@ import { bannedRefusal } from "@/lib/moderation/actions"
  * Who may read a room (SCRUM-205). One rule for the socket join and every
  * HTTP read; the integration test drives it through the three routes.
  */
-const published = { status: "published" }
+const published = { status: "published", deleted_at: null }
 
 it.each([
   ["active", null],
@@ -25,7 +25,11 @@ it("refuses somebody with no membership row", () => {
 })
 
 it("hides a draft event's room even from an active member", () => {
-  expect(roomReadDenial({ status: "active" }, { status: "draft" })).toBe("hidden")
+  expect(roomReadDenial({ status: "active" }, { status: "draft", deleted_at: null })).toBe("hidden")
+})
+
+it("hides a deleted event's room even from an active member (SCRUM-303)", () => {
+  expect(roomReadDenial({ status: "active" }, { status: "published", deleted_at: new Date() })).toBe("hidden")
 })
 
 it("says who removed them", () => {

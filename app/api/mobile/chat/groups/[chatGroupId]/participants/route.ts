@@ -42,7 +42,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Check if chat group exists
     const chatGroup = await db.chat_groups.findUnique({
       where: { id: chatGroupId, deleted_at: null },
-      select: { id: true, event: { select: { status: true } } },
+      select: { id: true, event: { select: { status: true, deleted_at: true } } },
     })
 
     if (!chatGroup) {

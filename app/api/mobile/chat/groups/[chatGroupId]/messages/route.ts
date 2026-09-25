@@ -59,7 +59,7 @@ export async function GET(
         members: {
           where: { user_id: user.userId },
         },
-        event: { select: { status: true } },
+        event: { select: { status: true, deleted_at: true } },
       },
     })
 
