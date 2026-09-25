@@ -119,7 +119,8 @@ export async function GET(request: NextRequest) {
         /** The pseudonym, never the name. Accepting is what exchanges those. */
         counterpart: resolved.get(r.event_id)?.get(counterpart) ?? "Attendee",
         event: { id: r.event.id, title: r.event.title, startTime: r.event.start_time },
-        post: { id: r.post.id, kind: r.post.kind, body: r.post.body },
+        // A withdrawn or removed post's words leave with it (SCRUM-301).
+        post: { id: r.post.id, kind: r.post.kind, body: r.post.deleted_at ? null : r.post.body },
       }
     }
 

@@ -1498,7 +1498,8 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | Method | Endpoint | Gate |
 |--------|----------|------|
 | GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited |
-| POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps |
+| POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps; the text passes moderation |
+| DELETE | `/events/:eventId/board/:postId` | Your own post (anyone else's is a 404) |
 | POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked and not already declined |
 | GET | `/board/requests` | Yours, both directions |
 | PATCH | `/board/requests/:requestId` | `{ action: accept \| decline \| withdraw }` |
@@ -1536,6 +1537,26 @@ browsing.
 **The board closes at doors.** After that the room is the place, and it is gated
 on presence rather than intent — a board that stayed open would be a second room
 with a weaker gate running beside the real one.
+
+**A post is checked before it is stored** (SCRUM-301). The text gets the room's
+checks: the keyword filter, contact details, then OpenAI within one second. A
+room message that fails is stored hidden and counted toward a mute. The board has
+no moderation queue, so a failing post is refused with **422** and never stored.
+Contact details say what was found (*"This looks like a phone number. The board is
+anonymous, so contact details can't go on it."*). Anything else reads
+*"This can't go on the board."*, which tells a poster nothing about the filter.
+
+If OpenAI doesn't answer inside the second, the post goes up, as a room message
+does. Then, as in the room, it is looked at again without the time limit, and
+taken down (`moderation_status = "hidden"`) if it would have been refused. A
+request's `message` gets the same checks as a post and returns the same **422**.
+It has no second look, because a request has nowhere to be hidden later.
+
+**An author can withdraw their own post** with `DELETE /events/:eventId/board/:postId`.
+It is soft (`deleted_at`): the post leaves every board read, requests filed against
+it stop counting toward their senders' caps, and `GET /board/requests` returns its
+`body` as `null`. Removal by a moderator, and reporting a post, come with the
+board's dashboard surface (SCRUM-322).
 
 #### Asking somebody
 
