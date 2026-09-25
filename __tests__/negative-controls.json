@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "event-save-refusal-words.itest.ts": {
+      "guards": "the real PATCH /api/events/[id] and POST /api/events handlers refuse capacity 0 and a creator with no organisation in a shape refusalText reads as a sentence, so the editor's toast shows the route's words and never silently falls back (SCRUM-315)",
+      "mutation": "M3: answer capacity 0 with `NextResponse.json({ error: { message: \"…\" } }, { status: 400 })` in app/api/events/[id]/route.ts.",
+      "observed": "M3: 1 failing of 2 (the PATCH case; refusalText fell back to \"Failed to save event\").",
+      "date": "2026-09-25"
+    },
     "editor-shows-server-refusal.test.ts": {
       "guards": "components/event-editor.tsx shows refusalText(response, \"Failed to save event\") for a refused save and returns, so the route's own sentence (no organisation, capacity, …) reaches the organiser; refusalText reads both shapes the event routes send (SCRUM-315)",
       "mutation": "M1: `toast.error(\"Failed to save event\")` in the !response.ok branch. M2: drop the `return` after the toast.",
