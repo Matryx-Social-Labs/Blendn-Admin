@@ -33,6 +33,18 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "create-event-offered-only-to-publishers.test.ts": {
+      "guards": "/events/new redirects a non-publisher to /dashboard/organisation, the Events page and the organiser Overview both take canCreate from mayCreateEvents, and the Overview swaps both of its Create-event buttons (SCRUM-145)",
+      "mutation": "M2: the /events/new redirect replaced by `void 0`. M3: the Overview's first `createAction ??` dropped.",
+      "observed": "M2: 1 failing of 3. M3: 1 failing of 3 (one of the two buttons no longer swaps).",
+      "date": "2026-09-25"
+    },
+    "may-create-events.itest.ts": {
+      "guards": "mayCreateEvents: yes for an admin and an organiser in a live organisation; no for an organiser in no organisation, a member of a suspended one, or an attendee (SCRUM-145)",
+      "mutation": "M1: `return true` in place of the homeOrgIdFor check.",
+      "observed": "M1: 1 failing of 3 (the no-organisation and suspended cases read true).",
+      "date": "2026-09-25"
+    },
     "format-since-future.test.ts": {
       "guards": "formatSince says a future date as tomorrow / in Nd, not today (SCRUM-314)",
       "mutation": "M3: `if (ms > 0 && false) {`.",
