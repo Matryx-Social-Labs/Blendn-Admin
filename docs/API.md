@@ -1418,7 +1418,7 @@ be seen.
 | GET | `/users/:userId/favorites` | Get your saved events — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
 | GET | `/profiles/:userId` | Get full profile |
 | PUT | `/profiles/:userId` | Update profile |
-| GET | `/profiles/:userId/interests` | Get category interests |
+| GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299) |
 | PUT | `/profiles/:userId/interests` | Update interests |
 
 ---
