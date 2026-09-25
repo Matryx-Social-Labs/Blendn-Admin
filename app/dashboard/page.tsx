@@ -5,6 +5,8 @@ import { OverviewVenue } from "@/components/dashboard/overview-venue"
 import { resolveRange } from "@/lib/date-range"
 
 import { getDashboardOverview } from "./actions"
+import { getAuth } from "@/lib/auth"
+import { mayCreateEvents } from "@/lib/event-ownership"
 
 export const dynamic = "force-dynamic"
 
@@ -26,5 +28,8 @@ export default async function Page({
   if (overview.role === "app_admin") return <OverviewAdmin data={overview} />
   if (overview.role === "venue_owner") return <OverviewVenue data={overview} />
   if (overview.role === "sponsor") return <OverviewSponsor data={overview} />
-  return <OverviewOrganizer data={overview} />
+  // "Create event" only for an account that could save one (SCRUM-145).
+  const session = await getAuth()
+  const canCreate = session?.user ? await mayCreateEvents(session.user) : false
+  return <OverviewOrganizer data={overview} canCreate={canCreate} />
 }

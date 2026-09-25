@@ -3,6 +3,7 @@ import { EventEditor } from "@/components/event-editor"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { canCreateEvents } from "@/lib/rbac"
+import { mayCreateEvents } from "@/lib/event-ownership"
 
 export const dynamic = "force-dynamic"
 
@@ -23,6 +24,11 @@ export default async function NewEventPage() {
    */
   if (!session?.user || !canCreateEvents(session.user.role)) {
     redirect("/dashboard/events")
+  }
+  // No organisation to own the event, or only a suspended one: the page that
+  // says so, not a form that can never be saved (SCRUM-145).
+  if (!(await mayCreateEvents(session.user))) {
+    redirect("/dashboard/organisation")
   }
 
   /*

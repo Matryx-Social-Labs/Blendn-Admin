@@ -1,6 +1,7 @@
 import type { user_role } from "@prisma/client"
 
 import { db } from "./db"
+import { canCreateEvents } from "./rbac"
 import { activeMembership } from "./org-membership"
 
 /**
@@ -85,4 +86,18 @@ export async function owningOrgFor(user: {
   }
 
   return orgId
+}
+
+/**
+ * Whether to offer this person "Create event" at all (SCRUM-145).
+ *
+ * The role allows it, and — for anyone but an admin — there is a live home
+ * organisation for the event to belong to: exactly what `owningOrgFor` will
+ * insist on at save. An organiser in no organisation, or only in a suspended
+ * one, was offered the whole form and refused at the end of it.
+ */
+export async function mayCreateEvents(user: { id: string; role: user_role }): Promise<boolean> {
+  if (!canCreateEvents(user.role)) return false
+  if (user.role === "app_admin") return true
+  return (await homeOrgIdFor(user)) !== null
 }

@@ -32,7 +32,14 @@ import { formatDay, formatNumber, formatPct, statusTone } from "@/lib/dashboard-
  * The previous version led with four 30-day lookback cards, so the one question
  * an organiser actually arrives with was not on the screen at all.
  */
-export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
+export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerOverview; canCreate?: boolean }) {
+  // Where "Create event" would be, for an account that cannot save one: the
+  // page that explains why (SCRUM-145).
+  const createAction = canCreate ? null : (
+    <Button asChild size="sm" variant="outline">
+      <Link href="/dashboard/organisation">Join an organisation to create events</Link>
+    </Button>
+  )
   const { nextEvent } = data
 
   const columns: Column<EventRow>[] = [
@@ -106,12 +113,14 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
           value="—"
           description="No upcoming event. Publish one and RSVPs, saves and the pacing curve appear here."
           action={
-            <Button asChild size="sm">
-              <Link href="/dashboard/events/new">
-                <IconPlus className="size-4" />
-                Create event
-              </Link>
-            </Button>
+            createAction ?? (
+              <Button asChild size="sm">
+                <Link href="/dashboard/events/new">
+                  <IconPlus className="size-4" />
+                  Create event
+                </Link>
+              </Button>
+            )
           }
         />
       )}
@@ -177,9 +186,11 @@ export function OverviewOrganizer({ data }: { data: OrganizerOverview }) {
               title="No events yet"
               description="Create your first event — pacing, attendance and ratings all start here."
               action={
-                <Button asChild size="sm">
-                  <Link href="/dashboard/events/new">Create event</Link>
-                </Button>
+                createAction ?? (
+                  <Button asChild size="sm">
+                    <Link href="/dashboard/events/new">Create event</Link>
+                  </Button>
+                )
               }
             />
           }

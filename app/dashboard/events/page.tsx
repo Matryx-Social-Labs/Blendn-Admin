@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 
 import { EventsTable, type EventRow } from "./events-table"
 import { getAuth } from "@/lib/auth"
+import { mayCreateEvents } from "@/lib/event-ownership"
 import { curationState } from "@/lib/curation"
 import { whenLabel } from "@/lib/dashboard-format"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
@@ -98,7 +99,8 @@ export default async function EventsPage() {
     checkInReady: event.latitude !== null || event.geofence !== null,
   }))
 
-  const canCreate = session.user.role === "app_admin" || session.user.role === "organizer"
+  // Only an account that could save the event is offered the button (SCRUM-145).
+  const canCreate = await mayCreateEvents(session.user)
 
   return <EventsTable rows={rows} total={total} canCreate={canCreate} />
 }
