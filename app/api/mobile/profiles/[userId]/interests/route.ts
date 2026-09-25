@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { blockedEitherWay } from "@/lib/conversations"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -27,6 +28,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
+    }
+
+    // The same answer as the profile and the card: a block, either way, and
+    // this person does not exist to you (SCRUM-299). This read never asked, so
+    // the person you blocked could still see what you are into, and when you
+    // added it.
+    if (authUser.userId !== userId && (await blockedEitherWay(authUser.userId, userId))) {
+      return notFoundResponse("User not found")
     }
 
     // Fetch user interests
