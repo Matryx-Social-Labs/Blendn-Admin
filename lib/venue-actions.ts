@@ -7,6 +7,7 @@ import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters, getBoundingBox } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
+import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
 
 /**
  * How far a fence's centre may sit from the venue's pin.
@@ -193,7 +194,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   let geofence: Geofence | null = null
   if (input.geofence) {
     const parsed = validateGeofence(input.geofence)
-    if (!parsed.ok) throw new Refusal(`Check-in area is not valid (${parsed.error}).`)
+    if (!parsed.ok) throw new Refusal(GEOFENCE_MESSAGES[parsed.error])
     refuseIfFenceDrifted(parsed.fence, { lat: input.lat, lng: input.lng })
     geofence = parsed.fence
   } else {
@@ -325,7 +326,7 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
   let geofence: Geofence | undefined
   if (input.geofence !== undefined) {
     const parsed = validateGeofence(input.geofence)
-    if (!parsed.ok) throw new Refusal(`Check-in area is not valid (${parsed.error}).`)
+    if (!parsed.ok) throw new Refusal(GEOFENCE_MESSAGES[parsed.error])
     if (parsed.fence) {
       // Against the pin as it will be after this request.
       const pin = movingPin

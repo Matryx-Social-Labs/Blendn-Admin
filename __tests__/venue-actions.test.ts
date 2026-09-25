@@ -167,7 +167,24 @@ describe("createVenue", () => {
         // Above the 2000 m server cap.
         geofence: { type: "circle", lat: LAT, lng: LNG, radius: 100000, buffer: 20 },
       })
-    ).rejects.toThrow(/not valid/i)
+    ).rejects.toThrow(/Geofence radius must be between 1 and \d+ m\./)
+    expect(mockDb.venues.create).not.toHaveBeenCalled()
+  })
+
+  it("says what is wrong with a refused area in words, not the validator's code (SCRUM-297)", async () => {
+    // Driven on staging: Trace outline, no corners, Save → the toast read
+    // "Check-in area is not valid (ring_too_short)." The event form has always
+    // said this in a sentence; the venue writes are the same area.
+    signIn("venue_owner")
+    const refusal = createVenue({
+      name: "Toit",
+      venueType: "brewery",
+      lat: LAT,
+      lng: LNG,
+      geofence: { type: "polygon", buffer: 20, ring: [[LAT, LNG], [LAT + 0.0005, LNG]] },
+    })
+    await expect(refusal).rejects.toThrow("A polygon geofence needs at least three points.")
+    await expect(refusal).rejects.not.toThrow(/ring_too_short/)
     expect(mockDb.venues.create).not.toHaveBeenCalled()
   })
 
@@ -391,6 +408,24 @@ describe("correcting the pin", () => {
       await expect(
         updateVenue("venue_1", { name: "Toit Brewpub", geofence: circleAt(LAT + 0.011, LNG) })
       ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
+      expect(mockDb.venues.update).not.toHaveBeenCalled()
+    })
+
+    it("refuses an unfinished or tangled outline in words, not the validator's code (SCRUM-297)", async () => {
+      // Trace outline with no corners yet, Save: what staging showed as
+      // "Check-in area is not valid (ring_too_short)."
+      signIn("venue_owner")
+      const empty = updateVenue("venue_1", { geofence: { type: "polygon", buffer: 20, ring: [] } })
+      await expect(empty).rejects.toThrow("A polygon geofence needs at least three points.")
+      await expect(empty).rejects.not.toThrow(/ring_too_short/)
+
+      // A figure-of-eight: the editor warns, the save must say the same thing.
+      const bowtie = updateVenue("venue_1", {
+        geofence: { type: "polygon", buffer: 20, ring: [
+          [LAT, LNG], [LAT + 0.0005, LNG + 0.0005], [LAT + 0.0005, LNG], [LAT, LNG + 0.0005],
+        ] },
+      })
+      await expect(bowtie).rejects.toThrow(/^The outline crosses itself\./)
       expect(mockDb.venues.update).not.toHaveBeenCalled()
     })
 

@@ -1,4 +1,4 @@
-import { GEOFENCE_LIMITS, validateGeofence, type Geofence } from "./geofence"
+import { GEOFENCE_LIMITS, validateGeofence, type Geofence, type GeofenceError } from "./geofence"
 
 /**
  * Server-side bounds for what an event may claim as its check-in area.
@@ -62,7 +62,12 @@ export function validateLocationInput(input: LocationInput): LocationResult {
   return { ok: true, values }
 }
 
-const GEOFENCE_MESSAGES: Record<string, string> = {
+/**
+ * What a refused area is told, in words. Also the venue writes' refusal
+ * (`lib/venue-actions.ts`), which showed the bare code before SCRUM-297:
+ * "Check-in area is not valid (ring_too_short)."
+ */
+export const GEOFENCE_MESSAGES: Record<GeofenceError, string> = {
   bad_type: "Geofence must be a circle or a polygon.",
   bad_coordinates: "Geofence coordinates are not valid latitude/longitude pairs.",
   radius_out_of_range: `Geofence radius must be between 1 and ${GEOFENCE_LIMITS.MAX_RADIUS} m.`,
