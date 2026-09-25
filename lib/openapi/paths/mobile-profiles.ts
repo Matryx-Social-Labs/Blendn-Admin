@@ -54,11 +54,13 @@ registry.registerPath({
   path: "/api/mobile/profiles/{userId}/interests",
   tags: ["Mobile Profiles"],
   summary: "Get user interests",
+  description: "A block, either way, answers **404** — the same as the profile itself (SCRUM-299).",
   security: bearerAuth,
   request: { params: z.object({ userId: z.string().uuid() }) },
   responses: {
-    200: { description: "Interests", content: { "application/json": { schema: wrap(InterestsResponseSchema) } } },
     ...standardErrors,
+    200: { description: "Interests", content: { "application/json": { schema: wrap(InterestsResponseSchema) } } },
+    404: { description: "No such user, or a block between you" },
   },
 })
 
