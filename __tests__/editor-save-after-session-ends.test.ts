@@ -17,8 +17,9 @@ describe("the event editor's save", () => {
     // The exact condition, so `&& false` or a second operand fails it too.
     const branch = src.indexOf("if (response.status === 401) {")
     expect(branch).toBeGreaterThan(-1)
-    // The generic sentence comes AFTER the 401 branch, so a 401 never reaches it.
-    expect(src.indexOf('throw new Error("Failed to save event")')).toBeGreaterThan(branch)
+    // Every other refusal is read AFTER the 401 branch, so a 401 never reaches it
+    // (SCRUM-315 replaced the generic throw with the route's own sentence).
+    expect(src.indexOf("if (!response.ok) {")).toBeGreaterThan(branch)
     expect(src.slice(branch, branch + 700)).toMatch(/Your session has ended[^"]*changes are still here/)
     // No navigation on 401 — navigating away is how the changes would be lost.
     expect(src.slice(branch, branch + 700)).not.toMatch(/router\.(push|replace)/)

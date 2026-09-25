@@ -3,6 +3,7 @@
 import type { CategoryOption } from "@/components/event-form/basic-info-section"
 
 import { logger } from "@/lib/logger"
+import { refusalText } from "@/lib/refusal"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
@@ -235,7 +236,11 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
         return
       }
       if (!response.ok) {
-        throw new Error("Failed to save event")
+        // The route's own sentence: no organisation, a capacity it refuses, a
+        // missing description. This threw one generic line for all of them, so
+        // an organiser never learned what to change (SCRUM-315).
+        toast.error(await refusalText(response, "Failed to save event"))
+        return
       }
 
       const saved = await response.json()
