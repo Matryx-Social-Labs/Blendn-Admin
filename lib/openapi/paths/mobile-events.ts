@@ -764,7 +764,8 @@ registry.registerPath({
     "asked at all. Same gates as posting: RSVP 'going', a complete profile, " +
     "and room under both caps. Refused if they have already declined you on " +
     "this post, if one of you has blocked the other, or if the doors have " +
-    "opened. A second pending request to the same post is a 409.",
+    "opened. A second pending request to the same post is a 409. A `message` " +
+    "gets the post's moderation checks; a hit is a 422 and nothing is sent.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string(), postId: z.string() }),
@@ -794,6 +795,10 @@ registry.registerPath({
       },
     },
     ...standardErrors,
+    422: {
+      description: "The message was refused by moderation; nothing sent",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
   },
 })
 
@@ -809,7 +814,8 @@ const boardRequest = z.object({
   post: z.object({
     id: z.string(),
     kind: z.enum(["offer", "seeking", "chat"]),
-    body: z.string(),
+    /** Null once the post is withdrawn or removed — its words leave with it. */
+    body: z.string().nullable(),
   }),
 })
 

@@ -183,32 +183,63 @@ export async function boardPseudonyms(
   return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id)]))
 }
 
-/** What a refused post is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
+/** What refused board text is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
 export const BOARD_REFUSAL = "This can't go on the board."
 
+export interface BoardTextVerdict {
+  /** The sentence to refuse with, or null to let it through. */
+  refusal: string | null
+  /** OpenAI was asked and did not answer in time (or erred), so the pass is provisional. */
+  unchecked: boolean
+}
+
 /**
- * Why this text may not go on the board, or null (SCRUM-301).
+ * Whether this text may go on the board, and how sure we are (SCRUM-301).
  *
  * The same checks a room message gets before anyone else can see it: the
  * keyword filter, contact details, then OpenAI within the room's one-second
  * bound. The room stores a hit hidden and counts it toward a mute; the board
- * has no moderation queue and nothing that could take a post back, so a hit is
- * refused and never stored. Contact details say which — the fix is the
- * poster's to make. An unchecked OpenAI call (no key, error, timeout) passes,
- * as it does in the room.
+ * has no moderation queue, so a hit is refused and never stored. Contact
+ * details say which — the fix is the poster's to make.
+ *
+ * A timeout passes, as in the room, but provisionally: `unchecked` tells the
+ * caller to look again without the bound (`hideBoardPostIfFlagged`), which is
+ * what the room's `moderateMessage` does after it stores. No key is not
+ * `unchecked` — a second look would not have one either.
  */
-export async function boardTextRefusal(body: string): Promise<string | null> {
-  if (checkKeywords(body)?.action === "hide") return BOARD_REFUSAL
-  const contact = checkContactInfo(body)
-  if (contact) return `${contact.reason} The board is anonymous, so a post with contact details can't go up.`
+export async function checkBoardText(text: string): Promise<BoardTextVerdict> {
+  if (checkKeywords(text)?.action === "hide") return { refusal: BOARD_REFUSAL, unchecked: false }
+  const contact = checkContactInfo(text)
+  if (contact) {
+    return {
+      refusal: `${contact.reason} The board is anonymous, so contact details can't go on it.`,
+      unchecked: false,
+    }
+  }
 
   let timeout: ReturnType<typeof setTimeout> | undefined
   const check = await Promise.race([
-    checkTextContent(body),
+    checkTextContent(text),
     new Promise<ModerationCheck>((resolve) => {
       timeout = setTimeout(() => resolve(notChecked("timeout")), 1000)
     }),
   ]).finally(() => clearTimeout(timeout))
-  if (check.checked && check.result?.action === "hide") return BOARD_REFUSAL
-  return null
+  if (check.checked) {
+    return { refusal: check.result?.action === "hide" ? BOARD_REFUSAL : null, unchecked: false }
+  }
+  return { refusal: null, unchecked: check.reason !== "no_key" }
+}
+
+/**
+ * The second look for a post whose first one ran out of time: OpenAI without
+ * the bound, and down it comes if it would have been refused. Marked
+ * `moderation_status = "hidden"` so it reads differently from a withdrawal.
+ */
+export async function hideBoardPostIfFlagged(postId: string, body: string): Promise<void> {
+  const check = await checkTextContent(body)
+  if (!check.checked || check.result?.action !== "hide") return
+  await db.board_posts.update({
+    where: { id: postId },
+    data: { deleted_at: new Date(), moderation_status: "hidden", updated_at: new Date() },
+  })
 }

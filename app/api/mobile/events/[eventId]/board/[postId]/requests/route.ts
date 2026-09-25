@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { boardDenialMessage } from "@/lib/board"
-import { boardWriteDenial } from "@/lib/board-access"
+import { boardWriteDenial, checkBoardText } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
@@ -131,6 +131,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       select: { id: true },
     })
     if (refused) return conflictResponse("They have already answered this one")
+
+    /*
+     * The message is read by one person the sender chose — riskier than a
+     * post, not less — so it gets the post's checks (SCRUM-301). A request has
+     * nowhere to be hidden later, so there is no second look on a timeout.
+     */
+    if (message) {
+      const verdict = await checkBoardText(message)
+      if (verdict.refusal) return errorResponse(verdict.refusal, 422)
+    }
 
     let created
     try {

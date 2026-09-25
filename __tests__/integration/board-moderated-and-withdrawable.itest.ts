@@ -15,6 +15,8 @@ import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 /* eslint-disable @typescript-eslint/no-require-imports */
 const boardRoute = require("@/app/api/mobile/events/[eventId]/board/route") as typeof import("@/app/api/mobile/events/[eventId]/board/route")
 const postRoute = require("@/app/api/mobile/events/[eventId]/board/[postId]/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/route")
+const requestRoute = require("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route")
+const myRequests = require("@/app/api/mobile/board/requests/route") as typeof import("@/app/api/mobile/board/requests/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -25,6 +27,7 @@ let author = { id: "", token: "" }
 let stranger = { id: "", token: "" }
 
 afterAll(async () => {
+  await db.board_requests.deleteMany({ where: { event_id: { in: events } } })
   await db.board_posts.deleteMany({ where: { event_id: { in: events } } })
   await db.event_rsvps.deleteMany({ where: { event_id: { in: events } } })
   await db.user_interests.deleteMany({ where: { user_id: { in: users } } })
@@ -56,6 +59,11 @@ const req = (method: string, url: string, token: string, body?: object) =>
 const post = (token: string, body: string) =>
   boardRoute.POST(req("POST", `/api/mobile/events/${eventId}/board`, token, { kind: "seeking", body }), {
     params: Promise.resolve({ eventId }),
+  })
+
+const ask = (token: string, postId: string, message: string) =>
+  requestRoute.POST(req("POST", `/api/mobile/events/${eventId}/board/${postId}/requests`, token, { message }), {
+    params: Promise.resolve({ eventId, postId }),
   })
 
 const withdraw = (token: string, postId: string) =>
@@ -113,5 +121,28 @@ describe("the author can take a post back", () => {
     const created = (await (await post(author.token, "sharing an auto after")).json()) as { data: { id: string } }
     expect((await withdraw(stranger.token, created.data.id)).status).toBe(404)
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: created.data.id } })).deleted_at).toBeNull()
+  })
+})
+
+describe("a request's message gets the same checks, and a withdrawn post's words leave with it", () => {
+  it("refuses a message with a phone number, and sends nothing", async () => {
+    const created = (await (await post(author.token, "two seats from Koramangala")).json()) as { data: { id: string } }
+    const res = await ask(stranger.token, created.data.id, "text me on 98765 43210")
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toMatch(/phone number/i)
+    expect(await db.board_requests.count({ where: { post_id: created.data.id } })).toBe(0)
+  })
+
+  it("stops showing a withdrawn post's body in the requester's list", async () => {
+    const created = (await (await post(author.token, "leaving MG Road at 7, 2 seats")).json()) as { data: { id: string } }
+    expect((await ask(stranger.token, created.data.id, "could I join?")).status).toBe(201)
+    const theirs = async () => {
+      const res = await myRequests.GET(req("GET", "/api/mobile/board/requests", stranger.token))
+      const body = (await res.json()) as { data: { outgoing: { post: { id: string; body: string | null } }[] } }
+      return body.data.outgoing.find((r) => r.post.id === created.data.id)?.post.body
+    }
+    expect(await theirs()).toBe("leaving MG Road at 7, 2 seats")
+    expect((await withdraw(author.token, created.data.id)).status).toBe(200)
+    expect(await theirs()).toBeNull()
   })
 })

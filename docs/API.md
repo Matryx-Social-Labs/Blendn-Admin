@@ -1543,13 +1543,20 @@ checks: the keyword filter, contact details, then OpenAI within one second. A
 room message that fails is stored hidden and counted toward a mute. The board has
 no moderation queue, so a failing post is refused with **422** and never stored.
 Contact details say what was found (*"This looks like a phone number. The board is
-anonymous, so a post with contact details can't go up."*). Anything else reads
+anonymous, so contact details can't go on it."*). Anything else reads
 *"This can't go on the board."*, which tells a poster nothing about the filter.
 
+If OpenAI doesn't answer inside the second, the post goes up, as a room message
+does. Then, as in the room, it is looked at again without the time limit, and
+taken down (`moderation_status = "hidden"`) if it would have been refused. A
+request's `message` gets the same checks as a post and returns the same **422**.
+It has no second look, because a request has nowhere to be hidden later.
+
 **An author can withdraw their own post** with `DELETE /events/:eventId/board/:postId`.
-It is soft (`deleted_at`): the post leaves every board read, and requests filed
-against it stop counting toward their senders' caps. Removal by a moderator, and
-reporting a post, come with the board's dashboard surface.
+It is soft (`deleted_at`): the post leaves every board read, requests filed against
+it stop counting toward their senders' caps, and `GET /board/requests` returns its
+`body` as `null`. Removal by a moderator, and reporting a post, come with the
+board's dashboard surface (SCRUM-322).
 
 #### Asking somebody
 

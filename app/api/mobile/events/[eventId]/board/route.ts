@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { boardDenialMessage, mayReadBoard } from "@/lib/board"
-import { boardPseudonyms, boardTextRefusal, boardWriteDenial, entitlementFor } from "@/lib/board-access"
+import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
@@ -158,8 +158,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (denial) return forbiddenResponse(boardDenialMessage(denial))
 
     // Checked before it is stored, as a room message is (SCRUM-301).
-    const refused = await boardTextRefusal(input.body)
-    if (refused) return errorResponse(refused, 422)
+    const verdict = await checkBoardText(input.body)
+    if (verdict.refusal) return errorResponse(verdict.refusal, 422)
 
     const created = await db.board_posts.create({
       data: {
@@ -171,6 +171,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
       select: { id: true, kind: true, body: true, spaces_left: true, created_at: true },
     })
+
+    // OpenAI ran out of time: look again without the bound, as the room does.
+    if (verdict.unchecked) {
+      void hideBoardPostIfFlagged(created.id, created.body).catch((error) =>
+        logger.error("Board post recheck failed", {
+          postId: created.id,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
 
     return successResponse(
       {

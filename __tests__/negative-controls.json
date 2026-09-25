@@ -33,10 +33,16 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "board-text-recheck.test.ts": {
+      "guards": "checkBoardText reports a timed-out OpenAI pass as unchecked (and a no-key pass as final), and hideBoardPostIfFlagged takes a post down marked hidden only when the second look refuses it (SCRUM-301 review)",
+      "mutation": "M5: checkBoardText's unchecked branch returns `unchecked: false`.",
+      "observed": "M5: 1 failing of 5 (a timed-out pass is reported as final, so nothing looks again).",
+      "date": "2026-09-25"
+    },
     "board-moderated-and-withdrawable.itest.ts": {
-      "guards": "POST /events/{id}/board refuses a phone number (422, says so) and a keyword hit (422, generic) and stores neither, while an ordinary post is stored; DELETE /events/{id}/board/{postId} withdraws the author's own post (deleted_at set, gone from the board GET) and 404s anyone else's (SCRUM-301)",
-      "mutation": "M1: the POST's `if (refused) return errorResponse(refused, 422)` disabled with `false &&`. M2: `author_id: user.userId` removed from the DELETE's where.",
-      "observed": "M1: 2 failing of 5 (the phone number and the slur are stored, 201). M2: 1 failing of 5 (a stranger withdraws the author's post).",
+      "guards": "POST /events/{id}/board refuses a phone number (422, says so) and a keyword hit (422, generic) and stores neither, while an ordinary post is stored; a board request message gets the same check; GET /board/requests serves null for a withdrawn post's body; DELETE /events/{id}/board/{postId} withdraws the author's own post (deleted_at set, gone from the board GET) and 404s anyone else's (SCRUM-301)",
+      "mutation": "M1: the POST's refusal disabled with `false &&`. M2: `author_id: user.userId` removed from the DELETE's where. M3: the request route's message refusal disabled with `false &&`. M4: GET /board/requests returns `r.post.body` regardless of deleted_at.",
+      "observed": "M1: 2 failing of 7 (the phone number and the slur are stored, 201). M2: 1 failing of 7 (a stranger withdraws the author's post). M3: 1 failing of 7 (a phone number in a request message is sent). M4: 1 failing of 7 (the withdrawn post's body is still served).",
       "date": "2026-09-25"
     },
     "trust.itest.ts": {
