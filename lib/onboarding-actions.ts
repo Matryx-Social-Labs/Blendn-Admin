@@ -445,7 +445,19 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
         take: 1,
         select: { user: { select: { name: true, email: true } } },
       },
-      _count: { select: { members: true, events: true, venues: true } },
+      /*
+       * What the organisation runs, not every row it ever had. A bare `events:
+       * true` counts soft-deleted rows too: Nightshift read "39 events" while
+       * running 26 (SCRUM-167). The organisations CSV in lib/reports.ts asks
+       * the same question and carries the same filter.
+       */
+      _count: {
+        select: {
+          members: true,
+          events: { where: { deleted_at: null } },
+          venues: { where: { deleted_at: null } },
+        },
+      },
     },
   })
 

@@ -311,7 +311,14 @@ export async function buildReport(
         take: REPORT_ROW_LIMIT,
         include: {
           domains: { select: { domain: true, verified_at: true } },
-          _count: { select: { members: true, events: true, venues: true } },
+          // Live rows only, as on /dashboard/organisations (SCRUM-167).
+          _count: {
+            select: {
+              members: true,
+              events: { where: { deleted_at: null } },
+              venues: { where: { deleted_at: null } },
+            },
+          },
         },
       })
       return toCsv(
