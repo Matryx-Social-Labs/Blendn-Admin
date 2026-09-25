@@ -212,20 +212,22 @@ export async function createRoleUser(
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
-  const existing = await db.user.findUnique({ where: { email } })
+  // Stored lowercase (SCRUM-328): one address is one account whatever its case.
+  const address = email.trim().toLowerCase()
+  const existing = await db.user.findUnique({ where: { email: address } })
   if (existing) throw new Refusal("Email already in use")
 
   const plainPassword = generatePassword(12)
   const hashedPassword = await bcrypt.hash(plainPassword, 12)
 
   await db.user.create({
-    data: { name, email, password: hashedPassword, role },
+    data: { name, email: address, password: hashedPassword, role },
   })
 
   revalidatePath(`/dashboard/organisers`)
   revalidatePath(`/dashboard/venue-owners`)
 
-  return { name, email, password: plainPassword }
+  return { name, email: address, password: plainPassword }
 }
 
 export async function updateEventStatus(eventId: string, status: event_status) {

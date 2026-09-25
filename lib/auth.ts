@@ -24,8 +24,9 @@ export const authOptions: NextAuthOptions = {
           return null
         }
 
+        // Stored lowercase (SCRUM-328), so the lookup is too.
         const user = await db.user.findUnique({
-          where: { email: credentials.email },
+          where: { email: credentials.email.trim().toLowerCase() },
         })
 
         if (!user || !user.password) {

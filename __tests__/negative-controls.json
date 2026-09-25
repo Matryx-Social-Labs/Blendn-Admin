@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "email-is-one-identity.itest.ts": {
+      "guards": "one address is one account whatever its case (SCRUM-328): a mixed-case mobile signup is stored lowercase and signs in typed any way; a case-variant signup is 409; forgot-password as typed at signup issues a token; dashboard authorize, Google and Apple find the lowercase account from a mixed-case address; createRoleUser stores lowercase and refuses a case-variant; the migration lowercases a lone mixed-case row but leaves a row with a lowercase twin, and two spellings with no lowercase row, untouched",
+      "mutation": "M1 signupSchema without .trim().toLowerCase(); M2 signinSchema without it; M3 lib/auth.ts authorize looks up credentials.email as typed; M4 Google lookup uses googlePayload.email as given; M5 Apple uses applePayload.email as given; M6 the migration as a bare UPDATE ... SET email = lower(email); M7 the migration guarded only against an exact lowercase twin; M8 createRoleUser without the lowercase (all 2026-09-25).",
+      "observed": "M1: 4 of 8 failing (stores, signs in, 409, reset). M2: 1 (signs in whatever case). M3: 1 (dashboard). M4: 1 (Google made a new user). M5: 1 (Apple made a new user). M6 and M7: the migration test fails on 23505 duplicate key User_email_key, M7 from the two-spellings pair alone. M8: 1 (operator account).",
+      "date": "2026-09-25"
+    },
     "api-response.test.ts": {
       "guards": "the response envelope helpers: successResponse's status, errorResponse's default 400 and explicit codes, and (SCRUM-324) the code a bare 401/403/404/409/429/5xx stands for, an explicit code winning, and a bare 400/422 left uncoded",
       "mutation": "M1 (2026-09-25): `errorCode ?? defaultErrorCode(status)` reduced to `errorCode` in lib/api-response.ts.",
