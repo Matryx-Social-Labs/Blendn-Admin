@@ -1,3 +1,5 @@
+import { Refusal, refusalText } from "@/lib/refusal"
+
 // ── Upload helpers ──────────────────────────────────────────────────────────
 // Requests a presigned Tigris/S3 upload URL from the admin API, then PUTs the
 // file directly to storage. Uses XMLHttpRequest (instead of fetch) so upload
@@ -11,7 +13,10 @@ export async function requestPresignedUrl(file: File, folder: UploadFolder = "ev
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename: file.name, contentType: file.type, folder }),
   })
-  if (!res.ok) throw new Error("Failed to request upload URL")
+  // The route refuses in words — a content type it will not take, the rate
+  // limit, storage switched off — and every caller showed a generic line
+  // (SCRUM-317). A Refusal, so callers can tell it from a network failure.
+  if (!res.ok) throw new Refusal(await refusalText(res, "Failed to request upload URL"))
   const payload = await res.json()
   if (!payload?.success || !payload?.data?.uploadUrl) throw new Error("No upload URL")
   return payload.data as { uploadUrl: string; publicUrl: string }

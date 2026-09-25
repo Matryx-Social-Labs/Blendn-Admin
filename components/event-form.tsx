@@ -24,6 +24,7 @@ import { AdvancedSection } from "@/components/event-form/advanced-section"
 import { uploadFile } from "@/components/event-form/upload"
 import { captureVideoPoster } from "@/lib/video-poster"
 import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
+import { Refusal } from "@/lib/refusal"
 
 export type { EventFormValues } from "@/components/event-form/schema"
 
@@ -153,8 +154,8 @@ export function EventForm({
       }
 
       toast.success("Media uploaded")
-    } catch {
-      toast.error("Failed to upload media")
+    } catch (err) {
+      toast.error(err instanceof Refusal ? err.message : "Failed to upload media")
     } finally {
       setMediaUploadProgress((p) => {
         const next = { ...p }

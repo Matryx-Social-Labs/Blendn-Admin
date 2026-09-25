@@ -17,6 +17,7 @@ import { DevicePreview } from "@/components/event-form/device-preview"
 import { renderableImageUrl } from "@/components/event-form/publish-rail"
 import { uploadFile } from "@/components/event-form/upload"
 import type { EventFormValues } from "@/components/event-form/schema"
+import { Refusal } from "@/lib/refusal"
 
 export function CoverImageSection({
   form,
@@ -78,8 +79,8 @@ export function CoverImageSection({
                       const url = await uploadFile(file, setCoverUploadProgress)
                       form.setValue("cover_image_url", url, { shouldValidate: true })
                       toast.success("Cover image uploaded")
-                    } catch {
-                      toast.error("Failed to upload cover image")
+                    } catch (err) {
+                      toast.error(err instanceof Refusal ? err.message : "Failed to upload cover image")
                     } finally {
                       setIsUploadingCover(false)
                       setCoverUploadProgress(0)
