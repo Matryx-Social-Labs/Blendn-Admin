@@ -45,6 +45,8 @@ import { db } from "./db"
 export interface LoopStage {
   label: string
   value: number
+  /** The stage this one is a share of, when it is not the one above it. */
+  base?: string
 }
 
 export async function loopClosure(): Promise<LoopStage[]> {
@@ -110,7 +112,9 @@ export async function loopClosure(): Promise<LoopStage[]> {
                                                                    AS matched,
       COUNT(*) FILTER (WHERE s_onboarded AND s_rsvpd AND s_checked_in AND s_matched AND s_conversed)
                                                                    AS conversed,
-      COUNT(*) FILTER (WHERE s_onboarded AND s_rsvpd AND s_checked_in AND s_matched AND s_conversed AND s_returned)
+      -- Coming back is attending a second event; it does not wait on a match
+      -- or a conversation (the owner's ruling, SCRUM-313).
+      COUNT(*) FILTER (WHERE s_onboarded AND s_rsvpd AND s_checked_in AND s_returned)
                                                                    AS returned
     FROM stages
   `
@@ -121,8 +125,10 @@ export async function loopClosure(): Promise<LoopStage[]> {
     { label: "onboarded", value: n(row?.onboarded) },
     { label: "RSVP'd", value: n(row?.rsvpd) },
     { label: "checked in", value: n(row?.checked_in) },
-    { label: "matched", value: n(row?.matched) },
-    { label: "conversed", value: n(row?.conversed) },
+    // Right after the stage it is a share of. It sat under `conversed`, so three
+    // people who had come back read as none because none of them had matched.
     { label: "came back", value: n(row?.returned) },
+    { label: "matched", value: n(row?.matched), base: "checked in" },
+    { label: "conversed", value: n(row?.conversed) },
   ]
 }

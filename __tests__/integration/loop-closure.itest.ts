@@ -118,7 +118,7 @@ describe("the loop, stage by stage", () => {
     })
 
     const after = await baseline()
-    const [signedUp, onboarded, rsvpd, checkedInCount, matched, conversed, returned] = delta(
+    const [signedUp, onboarded, rsvpd, checkedInCount, returned, matched, conversed] = delta(
       after,
       before
     )
@@ -200,7 +200,7 @@ describe("the loop, stage by stage", () => {
       data: { conversation_id: conversation.id, sender_id: speaker, message_text: "hello" },
     })
 
-    const [, , , , matched, conversed] = delta(await baseline(), before)
+    const [, , , , , matched, conversed] = delta(await baseline(), before)
     expect(matched).toBe(2)
     // Only the one who wrote.
     expect(conversed).toBe(1)
@@ -225,10 +225,9 @@ describe("the loop, stage by stage", () => {
     events.push(first, second)
 
     /*
-     * Both are carried all the way to `conversed`, because the stages are
-     * nested: `came back` is a subset of `conversed`, so anybody stopping short
-     * of it would be filtered out before the return is ever examined and the
-     * assertion would pass for the wrong reason.
+     * Both are carried all the way to `conversed`, so this case is about the
+     * distinct-event rule alone. Since SCRUM-313 `came back` no longer requires
+     * a match or a conversation; the case below covers that.
      */
     const loyal = await onboardedUser("lc3-loyal")
     const conference = await onboardedUser("lc3-conf")
@@ -291,10 +290,37 @@ describe("the loop, stage by stage", () => {
       })
     }
 
-    const [, , , , matched, conversed, returned] = delta(await baseline(), before)
+    const [, , , , returned, matched, conversed] = delta(await baseline(), before)
     // Both reached the stage above; only one of them came back.
     expect(matched).toBe(2)
     expect(conversed).toBe(2)
     expect(returned).toBe(1)
   })
+
+  it("counts somebody who came to two events as back, whether or not they matched (SCRUM-313)", async () => {
+    /*
+     * The owner's ruling: coming back is attending a second event. On staging
+     * three real attendees had come back (5, 3 and 2 events) while the hero
+     * said "Nobody has been back for a second event yet", because the stage
+     * sat below `matched` and `conversed` and none of them had matched.
+     */
+    const before = await baseline()
+    const host = await makeUser(testId("lc4-host"), "organizer")
+    users.push(host)
+    const first = await makeEvent(host)
+    const second = await makeEvent(host)
+    events.push(first, second)
+
+    const regular = await onboardedUser("lc4-regular")
+    await db.event_rsvps.create({ data: { event_id: first, user_id: regular, status: "going" } })
+    await putInRoom({ eventId: first, occurrenceId: await occurrenceOf(first), userId: regular })
+    await putInRoom({ eventId: second, occurrenceId: await occurrenceOf(second), userId: regular })
+
+    const [, , , checkedIn, returned, matched, conversed] = delta(await baseline(), before)
+    expect(checkedIn).toBe(1)
+    expect(returned).toBe(1)
+    expect(matched).toBe(0)
+    expect(conversed).toBe(0)
+  })
+
 })

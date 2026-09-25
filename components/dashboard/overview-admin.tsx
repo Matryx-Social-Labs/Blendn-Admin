@@ -124,7 +124,8 @@ const cityColumns: Column<CityRow & { id: string }>[] = [
 ]
 
 export function OverviewAdmin({ data }: { data: AdminOverview }) {
-  const metStage = data.funnel[data.funnel.length - 1]
+  // By name: "came back" follows "checked in" now, not the last stage (SCRUM-313).
+  const metStage = data.funnel.find((stage) => stage.label === "came back")
   const matched = data.funnel.find((stage) => stage.label.toLowerCase().startsWith("match"))
   const signedUp = data.funnel[0]?.value ?? 0
   const topHost = data.supply[0]

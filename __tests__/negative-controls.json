@@ -33,6 +33,18 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "loop-closure.itest.ts": {
+      "guards": "came back counts an onboarded, RSVP'd, checked-in person who attended two distinct events, without requiring a match or a conversation (SCRUM-313, owner's ruling)",
+      "mutation": "M1: restore `AND s_matched AND s_conversed` in the returned FILTER.",
+      "observed": "M1: 1 failing of 5 (the two-events-no-match case reads 0).",
+      "date": "2026-09-25"
+    },
+    "loop-stage-order.test.ts": {
+      "guards": "loopClosure orders came back right after checked in with matched based on checked in, and the admin hero reads the 'came back' stage by name (SCRUM-313)",
+      "mutation": "M2: drop `base: \"checked in\"` from matched. M3: `const metStage = data.funnel[data.funnel.length - 1]`.",
+      "observed": "M2: 1 failing of 2 (base undefined). M3: 1 failing of 2 (the hero source no longer finds came back by name).",
+      "date": "2026-09-25"
+    },
     "never-published.test.ts": {
       "guards": "neverPublished leaves suspended accounts out, and the host table shows 'Suspended' for a suspended row ahead of its last event (SCRUM-310)",
       "mutation": "M2: neverPublished counts suspended accounts. M3: `{false ? (` in place of `{user.suspended ? (` in role-users-table.tsx.",
