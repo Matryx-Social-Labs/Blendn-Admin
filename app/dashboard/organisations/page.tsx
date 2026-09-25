@@ -61,8 +61,8 @@ export default async function OrganisationsPage() {
             </p>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
               <span>{org.memberCount} member{org.memberCount === 1 ? "" : "s"}</span>
-              <span>{org.eventCount} events</span>
-              <span>{org.venueCount} venues</span>
+              <span>{org.eventCount} event{org.eventCount === 1 ? "" : "s"}</span>
+              <span>{org.venueCount} venue{org.venueCount === 1 ? "" : "s"}</span>
               <span>since {formatDay(org.created_at.toISOString())}</span>
               {org.domains.map((d) => (
                 <span key={d.domain} className="inline-flex items-center gap-1">
