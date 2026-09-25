@@ -61,16 +61,44 @@ export function successResponse<T>(
 /**
  * Create an error response
  */
+/**
+ * The code a bare status stands for, when the caller named none (SCRUM-324).
+ *
+ * The documented envelope promises an `errorCode` on every error, and a bare
+ * `errorResponse(msg, 401)` left it off — the Google and Apple sign-in
+ * refusals among them. Only statuses with one meaning get a default: a bare
+ * 400 or 422 covers everything from a missing field to "only an offer has
+ * spaces", and `VALIDATION_FAILED` promises field errors it would not carry.
+ */
+function defaultErrorCode(status: number): string | undefined {
+  if (status >= 500) return ErrorCode.SERVER_ERROR
+  switch (status) {
+    case 401:
+      return ErrorCode.UNAUTHORIZED
+    case 403:
+      return ErrorCode.FORBIDDEN
+    case 404:
+      return ErrorCode.NOT_FOUND
+    case 409:
+      return ErrorCode.CONFLICT
+    case 429:
+      return ErrorCode.RATE_LIMITED
+    default:
+      return undefined
+  }
+}
+
 export function errorResponse(
   message: string,
   status: number = 400,
   errorCode?: string
 ): NextResponse<ApiResponse> {
+  const code = errorCode ?? defaultErrorCode(status)
   return NextResponse.json(
     {
       success: false,
       error: message,
-      ...(errorCode && { errorCode }),
+      ...(code && { errorCode: code }),
     },
     { status }
   )

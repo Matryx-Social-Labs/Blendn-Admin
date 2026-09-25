@@ -19,6 +19,11 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 
 Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`
 
+A refusal that names no specific code carries the one its status stands for:
+401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
+429 `RATE_LIMITED`, 5xx `SERVER_ERROR` (SCRUM-324). A bare 400 or 422 has no
+default, because it covers too many different mistakes to name one.
+
 ---
 
 ## Authentication
