@@ -10,6 +10,20 @@ interface RouteContext {
   params: Promise<{ id: string }>
 }
 
+/**
+ * What the organiser's feed badges a message as. The room's own voice — an
+ * announcement, a poll, a sponsored send — is badged rather than named. A poll
+ * fell through to "user" and read "Attendee" here while the phones named it
+ * after the organisation (SCRUM-307). A sponsored poll is sponsored.
+ */
+function feedKind(m: { type: string; metadata: unknown }): "user" | "announcement" | "poll" | "sponsored" {
+  const meta = m.metadata as { sponsored_message_id?: string; kind?: string } | null
+  if (meta?.sponsored_message_id) return "sponsored"
+  if (m.type === "poll") return meta?.kind === "sponsored" ? "sponsored" : "poll"
+  if (m.type === "announcement") return "announcement"
+  return "user"
+}
+
 export async function GET(_: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
@@ -140,12 +154,7 @@ export async function GET(_: Request, { params }: RouteContext) {
          * showed their announcement and the sponsor's ad as messages from
          * "Attendee" (K3.10) — the same string an attendee could type.
          */
-        kind:
-          (m.metadata as { sponsored_message_id?: string } | null)?.sponsored_message_id
-            ? "sponsored"
-            : m.type === "announcement"
-              ? "announcement"
-              : "user",
+        kind: feedKind(m),
         createdAt: m.created_at.toISOString(),
         user: {
           id: m.user.id,

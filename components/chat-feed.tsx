@@ -25,7 +25,7 @@ interface ChatMessage {
   id: string
   content: string
   type: string
-  kind: "user" | "announcement" | "sponsored"
+  kind: "user" | "announcement" | "poll" | "sponsored"
   createdAt: string
   user: {
     id: string
@@ -367,7 +367,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                       <div className="flex items-baseline gap-1.5 flex-wrap">
                         {broadcast ? (
                           <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 uppercase tracking-wide">
-                            {msg.kind === "sponsored" ? "Sponsored" : "Announcement"}
+                            {msg.kind === "sponsored" ? "Sponsored" : msg.kind === "poll" ? "Poll" : "Announcement"}
                           </Badge>
                         ) : (
                           <span className="text-xs font-medium truncate">

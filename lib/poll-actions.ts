@@ -6,10 +6,13 @@ import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
+import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { chatWindowState } from "@/lib/chat-window"
 import { db } from "@/lib/db"
+import { logger } from "@/lib/logger"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { canBroadcast, eventPermissionSelect, type BroadcastKind } from "@/lib/rbac"
+import { emitChatMessage } from "@/lib/socket-server"
 
 /**
  * Polls in an event room.
@@ -81,6 +84,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       deleted_at: true,
       chat_group: { select: { id: true, status: true } },
       ...eventPermissionSelect,
+      ...broadcastAuthorSelect,
     },
   })
   if (!event) throw new Refusal("Event not found")
@@ -149,8 +153,31 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       data: { last_message_at: message.created_at },
     })
 
-    return { messageId: message.id, pollId: poll.id }
+    return { messageId: message.id, pollId: poll.id, createdAt: message.created_at }
   })
+
+  /*
+   * Delivered as an announcement is (SCRUM-307): the room sees it now, named
+   * as its history will name it, rather than on its next load as "Attendee".
+   * The poll is committed; a failed emit must not report it as failed — a
+   * retry would post it twice — so it is logged, as room-delivery does.
+   */
+  try {
+    emitChatMessage(event.chat_group.id, {
+      id: created.messageId,
+      content: question,
+      type: "poll",
+      ...(kind === "sponsored" ? { kind: "sponsored" as const } : {}),
+      userId: session.user.id,
+      userName: roomSenderName({ type: "poll", metadata: { kind } }, undefined, event),
+      createdAt: created.createdAt.toISOString(),
+    })
+  } catch (error) {
+    logger.error("Poll emit failed", {
+      pollId: created.pollId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
 
   auditLog({
     userId: session.user.id,
@@ -161,5 +188,5 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
   })
 
   revalidatePath(`/dashboard/events/${eventId}/messaging`)
-  return created
+  return { messageId: created.messageId, pollId: created.pollId }
 }

@@ -63,3 +63,35 @@ export const GENERIC_AUTHOR = "Organiser"
 export function broadcastAuthorName(event: BroadcastAuthorEvent): string {
   return event.organizer_org?.display_name?.trim() || GENERIC_AUTHOR
 }
+
+/** The message types only staff can write. An attendee sends text, image or video. */
+const BROADCAST_TYPES = new Set(["announcement", "poll"])
+
+/** How a sponsored send names itself — the scheduler's word (SCRUM-309 is naming the brand). */
+export const SPONSORED_AUTHOR = "Sponsored"
+
+/**
+ * The name a room shows for a message's sender (SCRUM-307) — in both
+ * histories and, through `createPoll`, on the socket, so the three agree.
+ *
+ * An announcement or a poll is the room's own voice: named after the
+ * organisation that posted it, even when the staff member who pressed send is
+ * also in the room under a pseudonym. A sponsored poll is "Sponsored", as a
+ * sponsored send is — never the organiser, whose content it is not.
+ *
+ * Decided by `type`, which a client cannot set (attendees send text, image or
+ * video). `metadata.kind` is read only on a poll, whose metadata only
+ * `createPoll` writes; on anything else a client could have put it there.
+ * Everyone else is their pseudonym, or the old "Attendee".
+ */
+export function roomSenderName(
+  message: { type: string; metadata?: unknown },
+  pseudonym: string | undefined,
+  event: BroadcastAuthorEvent
+): string {
+  if (message.type === "poll" && (message.metadata as { kind?: string } | null)?.kind === "sponsored") {
+    return SPONSORED_AUTHOR
+  }
+  if (BROADCAST_TYPES.has(message.type)) return broadcastAuthorName(event)
+  return pseudonym ?? "Attendee"
+}
