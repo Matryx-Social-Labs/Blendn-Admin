@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "venue-hosted-events-live.itest.ts": {
+      "guards": "the venue claim form's hostedEvents (app/dashboard/venues/[id]/claim/page.tsx) and the claim queue's currentOwnerEventCount and dispute flag (lib/venue-claim-actions.ts) count a venue's events with deleted_at null (SCRUM-312)",
+      "mutation": "M1: `_count: { select: { events: true } }` in the claim page. M2: the same in getVenueClaimQueue.",
+      "observed": "M1: 1 failing of 2 (the claim form test; received 2). M2: 1 failing of 2 (the queue test; received 2).",
+      "date": "2026-09-25"
+    },
     "org-counts-exclude-deleted.itest.ts": {
       "guards": "getOrganisations (/dashboard/organisations) and the organisations CSV in lib/reports.ts count an org's events and venues with deleted_at null, not every row (SCRUM-167)",
       "mutation": "M1: `events: true` in getOrganisations' _count. M2: the same in lib/reports.ts. M3: `venues: true` in getOrganisations. M4: `venues: true` in lib/reports.ts.",

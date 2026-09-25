@@ -206,7 +206,8 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
           venue_type: true,
           owner_org_id: true,
           owner_org: { select: { display_name: true } },
-          _count: { select: { events: true } },
+          // Live events only, as on the claim form (SCRUM-312).
+          _count: { select: { events: { where: { deleted_at: null } } } },
         },
       },
     },

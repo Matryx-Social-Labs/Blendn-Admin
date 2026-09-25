@@ -33,7 +33,9 @@ export default async function ClaimVenuePage({
       venue_type: true,
       owner_org_id: true,
       owner_org: { select: { display_name: true } },
-      _count: { select: { events: true } },
+      // What the owner hosted, not every row: the form calls it evidence in a
+      // dispute, and QA Circle Venue read 32 while hosting 11 (SCRUM-312).
+      _count: { select: { events: { where: { deleted_at: null } } } },
     },
   })
   if (!venue) notFound()
