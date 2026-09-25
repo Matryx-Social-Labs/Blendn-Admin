@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "admin-status-door-rules.itest.ts": {
+      "guards": "updateEventStatus (the admin's Publish/Unpublish/Cancel dropdown) keeps the rules the PATCH routes keep: a cancel runs cancelEventCheckIns and notifyEventCancelled; Publish refuses a cancelled event with UNCANCEL_REFUSAL and an event with no pin with canPublish's reason (SCRUM-318)",
+      "mutation": "M1: delete `await cancelEventCheckIns(eventId)`. M2: delete `await notifyEventCancelled(...)`. M3: delete the isUncancellingEvent refusal. M4: `if (!gate.ok && false) throw`. M5: `throw new Error(UNCANCEL_REFUSAL)` instead of `new Refusal(...)` (the sentence would be masked in production).",
+      "observed": "Each: 1 failing of 3. M1 and M2 the cancel case (a live check-in; no notification), M3 the revive case (received null), M4 the no-pin case (received null), M5 the revive case (digest undefined, expected /^refusal:/).",
+      "date": "2026-09-25"
+    },
     "event-lifecycle-audited.itest.ts": {
       "guards": "POST /api/events writes event.created; the dashboard PATCH, the mobile PATCH and the admin status dropdown (updateEventStatus) write event.published / event.updated / event.cancelled via eventWriteAction, and the mobile DELETE writes delete, each with the acting user, straight after the write (SCRUM-89 item 1)",
       "mutation": "M1: delete the auditLog call in POST /api/events. M2: PATCH records every save as `event.updated`. M3: delete the auditLog call in the mobile PATCH. M4: delete the auditLog call in the mobile DELETE. M5: delete the auditLog call in updateEventStatus (the admin status dropdown).",

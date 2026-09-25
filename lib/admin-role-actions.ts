@@ -9,7 +9,15 @@ import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
-import { eventWriteAction } from "@/lib/event-cancellation"
+import {
+  cancelEventCheckIns,
+  eventWriteAction,
+  isCancellingEvent,
+  isUncancellingEvent,
+  UNCANCEL_REFUSAL,
+} from "@/lib/event-cancellation"
+import { canPublish } from "@/lib/geofence-input"
+import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import type { user_role, event_status } from "@prisma/client"
 
 export interface RoleUser {
@@ -219,17 +227,30 @@ export async function updateEventStatus(eventId: string, status: event_status) {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
 
-  const before = await db.events.findUnique({ where: { id: eventId }, select: { status: true, title: true } })
+  const before = await db.events.findUnique({
+    where: { id: eventId },
+    select: { status: true, title: true, latitude: true, longitude: true, geofence: true },
+  })
   if (!before) throw new Refusal("Event not found")
+
+  /*
+   * The same rules the dashboard and mobile PATCH routes keep (SCRUM-318).
+   * This dropdown wrote the status and nothing else: Publish revived a
+   * cancelled event and published one with no pin, and Cancel left check-ins
+   * live and told nobody.
+   */
+  if (isUncancellingEvent(status, before.status)) throw new Refusal(UNCANCEL_REFUSAL)
+  if (status === "published" && before.status !== "published") {
+    const gate = canPublish(before)
+    if (!gate.ok) throw new Refusal(gate.reason ?? "This event cannot be published yet")
+  }
 
   await db.events.update({
     where: { id: eventId },
     data: { status },
   })
 
-  // The admin's status dropdown is a fourth door onto the same transitions
-  // (SCRUM-89). It still skips the cancel cascade and the notification; that is
-  // tracked separately rather than changed here.
+  // A fourth door onto the same transitions, audited like the others (SCRUM-89).
   auditLog({
     userId: session.user.id,
     action: eventWriteAction(status, before.status),
@@ -237,6 +258,11 @@ export async function updateEventStatus(eventId: string, status: event_status) {
     resourceId: eventId,
     details: { title: before.title, from: before.status, to: status, via: "admin" },
   })
+
+  if (isCancellingEvent(status, before.status)) {
+    await cancelEventCheckIns(eventId)
+    await notifyEventCancelled(eventId, before.title)
+  }
 
   revalidatePath("/dashboard/organisers")
   revalidatePath("/dashboard/venue-owners")
