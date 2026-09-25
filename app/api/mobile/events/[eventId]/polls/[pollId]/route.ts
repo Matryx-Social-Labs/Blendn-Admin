@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-response"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { getPollResults } from "@/lib/poll-actions"
+import { getPollResults } from "@/lib/polls"
 import { Refusal } from "@/lib/refusal"
 
 interface RouteParams {

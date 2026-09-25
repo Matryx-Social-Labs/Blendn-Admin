@@ -29,7 +29,8 @@ jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 mockDb.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(mockDb))
 
 import { SPONSORSHIP } from "@/lib/constants"
-import { castVote, createPoll, getPollResults } from "@/lib/poll-actions"
+import { createPoll } from "@/lib/poll-actions"
+import { castVote, getPollResults } from "@/lib/polls"
 
 const EVENT = "11111111-1111-4111-8111-111111111111"
 const GROUP = "22222222-2222-4222-8222-222222222222"

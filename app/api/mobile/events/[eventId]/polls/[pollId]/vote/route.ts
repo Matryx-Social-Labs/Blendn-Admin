@@ -11,7 +11,7 @@ import {
 } from "@/lib/api-response"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { castVote, getPollResults } from "@/lib/poll-actions"
+import { castVote, getPollResults } from "@/lib/polls"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
 interface RouteParams {

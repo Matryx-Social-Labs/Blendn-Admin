@@ -115,6 +115,7 @@ it("refuses somebody who was never in the room, and says nothing about the poll"
   const res = await read(r.eventId, r.pollId, outsider)
   const body = await res.json()
   expect(res.status).toBe(403)
+  expect(body.data).toBeUndefined()
   expect(JSON.stringify(body)).not.toContain(QUESTION)
 })
 
@@ -123,8 +124,10 @@ it("refuses a member the organiser banned, with the room's own sentence", async 
   const banned = await person("prg-banned", { groupId: r.groupId, status: "banned", bannedBy: r.host })
 
   const res = await read(r.eventId, r.pollId, banned)
+  const body = await res.json()
   expect(res.status).toBe(403)
-  expect((await res.json()).error).toBe("The organiser has removed you from this room.")
+  expect(body.error).toBe("The organiser has removed you from this room.")
+  expect(body.data).toBeUndefined()
 })
 
 it("answers 404 when the URL names a different event, even to a member of the poll's room", async () => {
@@ -134,8 +137,10 @@ it("answers 404 when the URL names a different event, even to a member of the po
   events.push(other)
 
   const res = await read(other, r.pollId, member)
+  const body = await res.json()
   expect(res.status).toBe(404)
-  expect(JSON.stringify(await res.json())).not.toContain(QUESTION)
+  expect(body.data).toBeUndefined()
+  expect(JSON.stringify(body)).not.toContain(QUESTION)
 })
 
 it("does not take a vote through a URL that names a different event", async () => {
