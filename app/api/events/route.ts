@@ -12,6 +12,7 @@ import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
 import { resolveVenueLink } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
+import { auditLog } from "@/lib/audit-log"
 import { getOccupancies } from "@/lib/occupancy"
 
 const parseJsonField = (value: unknown) => {
@@ -361,6 +362,16 @@ export async function POST(req: Request) {
     // Every event has at least one occurrence, and check-in resolves through
     // them — an event created without one could not be checked into at all.
     await syncOccurrences(event.id, new Date(start_time), new Date(end_time), timezone)
+
+    // Who put an event on the platform, and as what. No event write was audited
+    // but DELETE (SCRUM-89).
+    auditLog({
+      userId: session.user.id,
+      action: "event.created",
+      resource: "event",
+      resourceId: event.id,
+      details: { title: event.title, status: event.status, orgId: owningOrgId },
+    })
 
     return NextResponse.json(event)
   } catch (error) {

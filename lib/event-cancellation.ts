@@ -47,6 +47,22 @@ export function isCancellingEvent(
 }
 
 /**
+ * The audit action for an event write, named by the transition it makes.
+ *
+ * Publish and cancel are the edits people outside the organisation feel, and
+ * no event write but DELETE was audited (SCRUM-89). One answer for both doors,
+ * the dashboard PATCH and the mobile one, as the cancel cascade already is.
+ */
+export function eventWriteAction(
+  nextStatus: string | undefined,
+  currentStatus: string
+): "event.cancelled" | "event.published" | "event.updated" {
+  if (isCancellingEvent(nextStatus, currentStatus)) return "event.cancelled"
+  if (nextStatus === "published" && currentStatus !== "published") return "event.published"
+  return "event.updated"
+}
+
+/**
  * Whether this write would take an event back OUT of cancelled.
  *
  * Cancelling is terminal: the check-ins were closed, the room archived, and

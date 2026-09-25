@@ -6,7 +6,8 @@ import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PRODUCT_EVENTS, record } from "@/lib/product-events"
-import { cancelEventCheckIns, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { auditLog } from "@/lib/audit-log"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
@@ -487,6 +488,15 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       await notifyEventCancelled(updated.id, updated.title)
     }
 
+    // The other door writes the same trail as the dashboard (SCRUM-89).
+    auditLog({
+      userId: authUser.userId,
+      action: eventWriteAction(status, event.status),
+      resource: "event",
+      resourceId: updated.id,
+      details: { title: updated.title, from: event.status, to: updated.status, via: "mobile" },
+    })
+
     return successResponse({
       id: updated.id,
       title: updated.title,
@@ -562,6 +572,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       where: { id: eventId },
       data: { deleted_at: new Date() },
     })
+
+    // The dashboard DELETE has always been audited; this door was not (SCRUM-89).
+    auditLog({ userId: authUser.userId, action: "delete", resource: "event", resourceId: eventId, details: { via: "mobile" } })
 
     return successResponse({ success: true })
   } catch (error) {

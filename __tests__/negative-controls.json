@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "event-lifecycle-audited.itest.ts": {
+      "guards": "POST /api/events writes event.created, and PATCH /api/events/[id] writes event.published / event.updated (with the material changes) / event.cancelled, each with the acting user (SCRUM-89 item 1)",
+      "mutation": "M1: delete the auditLog call in POST /api/events. M2: PATCH records every save as `event.updated`. M3: delete the auditLog call in the mobile PATCH. M4: delete the auditLog call in the mobile DELETE.",
+      "observed": "M1: both failing (no event.created row). M2: 1 failing of 2 (the sequence reads created, updated, updated, updated). M3 and M4: 1 failing of 2 each (the phone case misses published, then delete).",
+      "date": "2026-09-25"
+    },
     "event-save-refusal-words.itest.ts": {
       "guards": "the real PATCH /api/events/[id] and POST /api/events handlers refuse capacity 0 and a creator with no organisation in a shape refusalText reads as a sentence, so the editor's toast shows the route's words and never silently falls back (SCRUM-315)",
       "mutation": "M3: answer capacity 0 with `NextResponse.json({ error: { message: \"…\" } }, { status: 400 })` in app/api/events/[id]/route.ts.",

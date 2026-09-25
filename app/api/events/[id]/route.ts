@@ -8,7 +8,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { cancelEventCheckIns, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, eventWriteAction, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
@@ -483,6 +483,17 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       await cancelEventCheckIns(resolvedParams.id)
     }
 
+    // Who published, cancelled or moved it, with the material changes the
+    // attendees were told about (SCRUM-89).
+    const changes = materialEventChanges(event, updatedEvent)
+    auditLog({
+      userId: session.user.id,
+      action: eventWriteAction(status ?? undefined, event.status),
+      resource: "event",
+      resourceId: updatedEvent.id,
+      details: { title: updatedEvent.title, from: event.status, to: updatedEvent.status, changes },
+    })
+
     // Tell the people who were going.
     //
     // Both of these were written, correct, and called by nobody — an event could
@@ -493,11 +504,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     if (isCancelling) {
       await notifyEventCancelled(updatedEvent.id, updatedEvent.title)
     } else {
-      await notifyEventDetailsChanged(
-        updatedEvent.id,
-        updatedEvent.title,
-        materialEventChanges(event, updatedEvent)
-      )
+      await notifyEventDetailsChanged(updatedEvent.id, updatedEvent.title, changes)
     }
 
     return NextResponse.json(updatedEvent)
