@@ -470,6 +470,15 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       },
     })
 
+    // The other door writes the same trail as the dashboard (SCRUM-89).
+    auditLog({
+      userId: authUser.userId,
+      action: eventWriteAction(status, event.status),
+      resource: "event",
+      resourceId: updated.id,
+      details: { title: updated.title, from: event.status, to: updated.status, via: "mobile" },
+    })
+
     /*
      * The same cascade the dashboard route runs (Fix #35). Cancelling here used
      * to leave every pending and checked_in row live, so a cancelled event
@@ -487,15 +496,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       // house for. Time and venue are dashboard-only edits.
       await notifyEventCancelled(updated.id, updated.title)
     }
-
-    // The other door writes the same trail as the dashboard (SCRUM-89).
-    auditLog({
-      userId: authUser.userId,
-      action: eventWriteAction(status, event.status),
-      resource: "event",
-      resourceId: updated.id,
-      details: { title: updated.title, from: event.status, to: updated.status, via: "mobile" },
-    })
 
     return successResponse({
       id: updated.id,

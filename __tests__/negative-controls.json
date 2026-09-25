@@ -34,9 +34,9 @@
   ],
   "verified": {
     "event-lifecycle-audited.itest.ts": {
-      "guards": "POST /api/events writes event.created, and PATCH /api/events/[id] writes event.published / event.updated (with the material changes) / event.cancelled, each with the acting user (SCRUM-89 item 1)",
-      "mutation": "M1: delete the auditLog call in POST /api/events. M2: PATCH records every save as `event.updated`. M3: delete the auditLog call in the mobile PATCH. M4: delete the auditLog call in the mobile DELETE.",
-      "observed": "M1: both failing (no event.created row). M2: 1 failing of 2 (the sequence reads created, updated, updated, updated). M3 and M4: 1 failing of 2 each (the phone case misses published, then delete).",
+      "guards": "POST /api/events writes event.created; the dashboard PATCH, the mobile PATCH and the admin status dropdown (updateEventStatus) write event.published / event.updated / event.cancelled via eventWriteAction, and the mobile DELETE writes delete, each with the acting user, straight after the write (SCRUM-89 item 1)",
+      "mutation": "M1: delete the auditLog call in POST /api/events. M2: PATCH records every save as `event.updated`. M3: delete the auditLog call in the mobile PATCH. M4: delete the auditLog call in the mobile DELETE. M5: delete the auditLog call in updateEventStatus (the admin status dropdown).",
+      "observed": "M1: both failing (no event.created row). M2: 1 failing of 2 (the sequence reads created, updated, updated, updated). M3 and M4: 1 failing each (the phone case misses published, then delete). M5: 1 failing of 3 (the admin cancel leaves only event.created).",
       "date": "2026-09-25"
     },
     "event-save-refusal-words.itest.ts": {

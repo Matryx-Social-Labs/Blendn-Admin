@@ -359,12 +359,9 @@ export async function POST(req: Request) {
       },
     })
 
-    // Every event has at least one occurrence, and check-in resolves through
-    // them — an event created without one could not be checked into at all.
-    await syncOccurrences(event.id, new Date(start_time), new Date(end_time), timezone)
-
     // Who put an event on the platform, and as what. No event write was audited
-    // but DELETE (SCRUM-89).
+    // but DELETE (SCRUM-89). Written before anything below can throw: the row
+    // is committed either way.
     auditLog({
       userId: session.user.id,
       action: "event.created",
@@ -372,6 +369,10 @@ export async function POST(req: Request) {
       resourceId: event.id,
       details: { title: event.title, status: event.status, orgId: owningOrgId },
     })
+
+    // Every event has at least one occurrence, and check-in resolves through
+    // them — an event created without one could not be checked into at all.
+    await syncOccurrences(event.id, new Date(start_time), new Date(end_time), timezone)
 
     return NextResponse.json(event)
   } catch (error) {

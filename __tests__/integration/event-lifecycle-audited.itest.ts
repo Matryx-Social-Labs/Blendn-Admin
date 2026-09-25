@@ -19,6 +19,8 @@ const eventRoute = require("@/app/api/events/[id]/route") as typeof import("@/ap
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventsRoute = require("@/app/api/events/route") as typeof import("@/app/api/events/route")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const adminActions = require("@/lib/admin-role-actions") as typeof import("@/lib/admin-role-actions")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const mobileEventRoute = require("@/app/api/mobile/events/[eventId]/route") as typeof import("@/app/api/mobile/events/[eventId]/route")
 
 const users: string[] = []
@@ -130,4 +132,25 @@ it("records a publish and a delete made from the phone, marked as such", async (
   expect(rows.map((r) => r.action)).toEqual(["event.created", "event.published", "delete"])
   expect(rows[1].details).toMatchObject({ via: "mobile", from: "draft", to: "published" })
   expect(rows[2].details).toMatchObject({ via: "mobile" })
+})
+
+it("records a cancel from the admin's status dropdown, the fourth door, by the admin", async () => {
+  const res = await eventsRoute.POST(
+    new Request("http://localhost/api/events", { method: "POST", body: JSON.stringify(payload({ status: "published" })) }) as never
+  )
+  const { id } = (await res.json()) as { id: string }
+  events.push(id)
+  const admin = await makeUser(testId("ela-admin"), "app_admin")
+  users.push(admin)
+  mockGetAuth.mockResolvedValue({ user: { id: admin, role: "app_admin" } })
+  try {
+    await adminActions.updateEventStatus(id, "cancelled")
+  } finally {
+    mockGetAuth.mockResolvedValue({ user: { id: host, role: "organizer" } })
+  }
+
+  const rows = await actionsFor(id, 2)
+  expect(rows.map((r) => r.action)).toEqual(["event.created", "event.cancelled"])
+  expect(rows[1].user_id).toBe(admin)
+  expect(rows[1].details).toMatchObject({ via: "admin", from: "published", to: "cancelled" })
 })
