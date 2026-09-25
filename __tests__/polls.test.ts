@@ -36,6 +36,8 @@ const GROUP = "22222222-2222-4222-8222-222222222222"
 const POLL = "33333333-3333-4333-8333-333333333333"
 const ORG = "44444444-4444-4444-8444-444444444444"
 const USER = "user-1"
+/** A member of the poll's room, reading through that event's URL. */
+const READER = { userId: USER, eventId: EVENT }
 
 const NOW = Date.now()
 const HOUR = 60 * 60 * 1000
@@ -56,6 +58,10 @@ function pollWith(counts: number[], over: Record<string, unknown> = {}) {
     closes_at: new Date(NOW - HOUR),
     results_visible: false,
     options: optionRows(counts.length),
+    message: {
+      deleted_at: null,
+      chat_group: { event_id: EVENT, event: { status: "published" }, members: [{ status: "active", banned_by: null }] },
+    },
     ...over,
   })
   mockDb.chat_poll_votes.groupBy.mockResolvedValue(
@@ -86,7 +92,7 @@ describe("disclosure is actually applied", () => {
     // The subtraction leak: 142 - 98 - 41 recovers the 3.
     pollWith([98, 41, 3])
 
-    const results = await getPollResults(POLL)
+    const results = await getPollResults(POLL, READER)
 
     expect(results.options.map((o) => o.votes)).toEqual([98, 41, null])
     expect(results.total).toBeNull()
@@ -99,7 +105,7 @@ describe("disclosure is actually applied", () => {
     // standing, and the 42 IS the answer.
     pollWith([42, 3])
 
-    const results = await getPollResults(POLL)
+    const results = await getPollResults(POLL, READER)
 
     expect(results.options.map((o) => o.votes)).toEqual([null, null])
     expect(results.total).toBeNull()
@@ -108,7 +114,7 @@ describe("disclosure is actually applied", () => {
   it("publishes everything once every option clears the floor", async () => {
     pollWith([12, 9, 7])
 
-    const results = await getPollResults(POLL)
+    const results = await getPollResults(POLL, READER)
 
     expect(results.options.map((o) => o.votes)).toEqual([12, 9, 7])
     expect(results.total).toBe(28)
@@ -120,7 +126,7 @@ describe("disclosure is actually applied", () => {
     const floor = SPONSORSHIP.MIN_REPORTABLE
     pollWith([20, floor, floor - 1])
 
-    const results = await getPollResults(POLL)
+    const results = await getPollResults(POLL, READER)
 
     expect(results.options[1].votes).toBe(floor)
     expect(results.options[2].votes).toBeNull()
@@ -134,7 +140,7 @@ describe("disclosure is actually applied", () => {
      */
     pollWith([30, 0])
 
-    const results = await getPollResults(POLL)
+    const results = await getPollResults(POLL, READER)
 
     expect(results.options[1].votes).toBeNull()
     expect(results.options.map((o) => o.votes)).not.toContain(0)
@@ -145,7 +151,7 @@ describe("results before close", () => {
   it("returns nothing at all while the poll is open", async () => {
     pollWith([98, 41, 12], { closes_at: new Date(NOW + HOUR), results_visible: false })
 
-    const results = await getPollResults(POLL)
+    const results = await getPollResults(POLL, READER)
 
     /*
      * Not the numbers blurred — the absence IS the protection. A running total
@@ -161,7 +167,7 @@ describe("results before close", () => {
   it("publishes early only when the poll opted in, and still applies the floor", async () => {
     pollWith([98, 41, 3], { closes_at: new Date(NOW + HOUR), results_visible: true })
 
-    const results = await getPollResults(POLL)
+    const results = await getPollResults(POLL, READER)
 
     expect(results.closed).toBe(false)
     expect(results.options.map((o) => o.votes)).toEqual([98, 41, null])
@@ -174,7 +180,7 @@ describe("results before close", () => {
     pollWith([98, 41, 3], { closes_at: new Date(NOW + HOUR), results_visible: false })
     mockDb.chat_poll_votes.findUnique.mockResolvedValue({ option_id: "option-2" })
 
-    const results = await getPollResults(POLL, USER)
+    const results = await getPollResults(POLL, READER)
 
     expect(results.myVote).toBe("option-2")
     expect(results.options.map((o) => o.votes)).toEqual([null, null, null])
@@ -291,6 +297,7 @@ describe("voting", () => {
         deleted_at: null,
         chat_group: {
           id: GROUP,
+          event_id: EVENT,
           status: "active",
           event: { start_time: new Date(NOW - HOUR), end_time: new Date(NOW + 3 * HOUR) },
         },
@@ -303,7 +310,7 @@ describe("voting", () => {
   it("upserts, so one person cannot stack votes", async () => {
     votable()
 
-    await castVote(POLL, "option-0", USER)
+    await castVote(POLL, "option-0", USER, EVENT)
 
     // The unique on (poll_id, user_id) makes this a database fact. An insert
     // would raise instead, and a misclick would be permanent.
@@ -317,7 +324,7 @@ describe("voting", () => {
   it("refuses a closed poll", async () => {
     votable({ closes_at: new Date(NOW - HOUR) })
 
-    await expect(castVote(POLL, "option-0", USER)).rejects.toThrow(/closed/i)
+    await expect(castVote(POLL, "option-0", USER, EVENT)).rejects.toThrow(/closed/i)
     expect(mockDb.chat_poll_votes.upsert).not.toHaveBeenCalled()
   })
 
@@ -326,7 +333,7 @@ describe("voting", () => {
     // violation is not an answer anybody can act on.
     votable({ options: [] })
 
-    await expect(castVote(POLL, "option-99", USER)).rejects.toThrow(/not an option/i)
+    await expect(castVote(POLL, "option-99", USER, EVENT)).rejects.toThrow(/not an option/i)
     expect(mockDb.chat_poll_votes.upsert).not.toHaveBeenCalled()
   })
 
@@ -334,13 +341,13 @@ describe("voting", () => {
     votable()
     mockDb.chat_group_members.findFirst.mockResolvedValue(null)
 
-    await expect(castVote(POLL, "option-0", USER)).rejects.toThrow(/not in this chatroom/i)
+    await expect(castVote(POLL, "option-0", USER, EVENT)).rejects.toThrow(/not in this chatroom/i)
     expect(mockDb.chat_poll_votes.upsert).not.toHaveBeenCalled()
   })
 
   it("counts a muted member as present, and somebody who left as absent", async () => {
     votable()
-    await castVote(POLL, "option-0", USER)
+    await castVote(POLL, "option-0", USER, EVENT)
 
     const where = mockDb.chat_group_members.findFirst.mock.calls[0][0].where
     // A muted member still reads the room, and a poll is not speech. Someone who
@@ -351,6 +358,6 @@ describe("voting", () => {
   it("refuses a vote on a deleted message", async () => {
     votable({ message: { chat_group_id: GROUP, deleted_at: new Date(), chat_group: null } })
 
-    await expect(castVote(POLL, "option-0", USER)).rejects.toThrow(/not found/i)
+    await expect(castVote(POLL, "option-0", USER, EVENT)).rejects.toThrow(/not found/i)
   })
 })

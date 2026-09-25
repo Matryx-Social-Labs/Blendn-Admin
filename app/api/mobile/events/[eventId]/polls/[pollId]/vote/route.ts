@@ -29,7 +29,7 @@ const voteSchema = z.object({ optionId: z.string().uuid() })
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { pollId } = await params
+    const { eventId, pollId } = await params
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
@@ -40,9 +40,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const parsed = voteSchema.safeParse(await request.json())
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
-    await castVote(pollId, parsed.data.optionId, authUser.userId)
+    await castVote(pollId, parsed.data.optionId, authUser.userId, eventId)
 
-    return successResponse(await getPollResults(pollId, authUser.userId))
+    return successResponse(await getPollResults(pollId, { userId: authUser.userId, eventId }))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     if (message === "Poll not found") return notFoundResponse(message)

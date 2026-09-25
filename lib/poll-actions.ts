@@ -6,7 +6,7 @@ import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
-import { chatWindowState } from "@/lib/chat-window"
+import { bannedRefusal, chatWindowState, roomReadDenial } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { discloseBreakdown, suppressedLabel, type Disclosed } from "@/lib/disclosure"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
@@ -195,7 +195,10 @@ export interface PollResults {
  * bug across the codebase was a helper that returned the truth and trusted every
  * caller to blur it.
  */
-export async function getPollResults(pollId: string, viewerId?: string): Promise<PollResults> {
+export async function getPollResults(
+  pollId: string,
+  reader: { userId: string; eventId: string }
+): Promise<PollResults> {
   const poll = await db.chat_polls.findUnique({
     where: { id: pollId },
     select: {
@@ -207,9 +210,38 @@ export async function getPollResults(pollId: string, viewerId?: string): Promise
         select: { id: true, label: true, position: true },
         orderBy: { position: "asc" },
       },
+      message: {
+        select: {
+          deleted_at: true,
+          chat_group: {
+            select: {
+              event_id: true,
+              event: { select: { status: true } },
+              members: { where: { user_id: reader.userId }, select: { status: true, banned_by: true } },
+            },
+          },
+        },
+      },
     },
   })
-  if (!poll) throw new Refusal("Poll not found")
+
+  /*
+   * A poll is a message in the room, so it is read by the room's rule
+   * (SCRUM-298). This loaded the poll by id alone: anybody with a token read
+   * the question and options of a room they were never in, a member the
+   * organiser had banned kept reading, and the event in the URL was ignored.
+   * The same read rule as the room's history, roster and socket (SCRUM-205);
+   * a poll outside the event named in the URL does not exist there.
+   */
+  const room = poll?.message.chat_group
+  if (!poll || poll.message.deleted_at || room?.event_id !== reader.eventId) {
+    throw new Refusal("Poll not found")
+  }
+  const membership = room.members[0]
+  const denial = roomReadDenial(membership, room.event)
+  if (denial === "hidden") throw new Refusal("Poll not found")
+  if (denial === "not_member") throw new Refusal("You are not in this chatroom")
+  if (denial === "banned") throw new Refusal(bannedRefusal(membership))
 
   const closed = poll.closes_at !== null && poll.closes_at <= new Date()
 
@@ -220,14 +252,13 @@ export async function getPollResults(pollId: string, viewerId?: string): Promise
   })
   const countFor = new Map(grouped.map((g) => [g.option_id, g._count._all]))
 
-  const myVote = viewerId
-    ? (
-        await db.chat_poll_votes.findUnique({
-          where: { poll_id_user_id: { poll_id: pollId, user_id: viewerId } },
-          select: { option_id: true },
-        })
-      )?.option_id ?? null
-    : null
+  const myVote =
+    (
+      await db.chat_poll_votes.findUnique({
+        where: { poll_id_user_id: { poll_id: pollId, user_id: reader.userId } },
+        select: { option_id: true },
+      })
+    )?.option_id ?? null
 
   /*
    * Nothing at all while it is open, unless the poll opted in.
@@ -279,7 +310,8 @@ export async function getPollResults(pollId: string, viewerId?: string): Promise
 export async function castVote(
   pollId: string,
   optionId: string,
-  userId: string
+  userId: string,
+  eventId: string
 ): Promise<void> {
   const poll = await db.chat_polls.findUnique({
     where: { id: pollId },
@@ -294,6 +326,7 @@ export async function castVote(
           chat_group: {
             select: {
               id: true,
+              event_id: true,
               status: true,
               event: { select: { start_time: true, end_time: true, status: true } },
             },
@@ -302,7 +335,11 @@ export async function castVote(
       },
     },
   })
-  if (!poll || poll.message.deleted_at) throw new Refusal("Poll not found")
+  // The event in the URL, as the read checks it: a vote does not travel
+  // through another event's address (SCRUM-298).
+  if (!poll || poll.message.deleted_at || poll.message.chat_group.event_id !== eventId) {
+    throw new Refusal("Poll not found")
+  }
 
   // Scoped to this poll, so an option id from another poll cannot be smuggled
   // in — the composite foreign key would reject it, but a clear refusal beats a

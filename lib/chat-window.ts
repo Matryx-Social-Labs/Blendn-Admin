@@ -196,6 +196,19 @@ export function mayWriteToRoom(
  * silences, it does not banish (SCRUM-178). A draft event has no room
  * (SCRUM-8) — "hidden", so a caller can answer 404 rather than confirm it.
  */
+/**
+ * Why a banned person cannot read or post, in words that are true.
+ *
+ * The same untruth `mutedRefusal` fixed, on the other status: every send
+ * route told an organiser-banned person it was "due to repeated policy
+ * violations". `banned_by` is set by a person and left null by the pipeline.
+ */
+export function bannedRefusal(membership: { banned_by: string | null }): string {
+  return membership.banned_by
+    ? "The organiser has removed you from this room."
+    : "You have been removed from this room after repeated policy violations."
+}
+
 export type ReadDenial = "hidden" | "not_member" | "banned"
 
 export function roomReadDenial(
