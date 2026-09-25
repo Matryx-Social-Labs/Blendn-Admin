@@ -18,11 +18,11 @@ import {
  */
 
 const HOUR = 60 * 60 * 1000
-const ended = (hoursAgo: number) => ({ end_time: new Date(Date.now() - hoursAgo * HOUR) })
+const ended = (hoursAgo: number) => ({ end_time: new Date(Date.now() - hoursAgo * HOUR), deleted_at: null })
 
 describe("chatWindowState", () => {
   it("is open while the event is running", () => {
-    expect(chatWindowState({ end_time: new Date(Date.now() + HOUR) }, { status: "active" }).open).toBe(
+    expect(chatWindowState({ end_time: new Date(Date.now() + HOUR), deleted_at: null }, { status: "active" }).open).toBe(
       true
     )
   })
@@ -50,7 +50,7 @@ describe("chatWindowState", () => {
   })
 
   it("closes an archived room even if the window has somehow not elapsed", () => {
-    const state = chatWindowState({ end_time: new Date(Date.now() + HOUR) }, { status: "archived" })
+    const state = chatWindowState({ end_time: new Date(Date.now() + HOUR), deleted_at: null }, { status: "archived" })
     expect(state.open).toBe(false)
     if (!state.open) expect(state.reason).toBe("archived")
   })
@@ -58,7 +58,7 @@ describe("chatWindowState", () => {
   it("reports locked separately from closed", () => {
     // Different words on screen: an organiser silenced this room, versus the
     // window simply ran out.
-    const state = chatWindowState({ end_time: new Date(Date.now() + HOUR) }, { status: "locked" })
+    const state = chatWindowState({ end_time: new Date(Date.now() + HOUR), deleted_at: null }, { status: "locked" })
     expect(state.open).toBe(false)
     if (!state.open) expect(state.reason).toBe("locked")
   })
@@ -66,9 +66,9 @@ describe("chatWindowState", () => {
   it("closes exactly at the boundary, not a moment after", () => {
     const end = new Date("2026-08-05T20:00:00.000Z")
     const closes = chatClosesAt({ end_time: end })
-    expect(chatWindowState({ end_time: end }, { status: "active" }, closes).open).toBe(false)
+    expect(chatWindowState({ end_time: end, deleted_at: null }, { status: "active" }, closes).open).toBe(false)
     expect(
-      chatWindowState({ end_time: end }, { status: "active" }, new Date(closes.getTime() - 1)).open
+      chatWindowState({ end_time: end, deleted_at: null }, { status: "active" }, new Date(closes.getTime() - 1)).open
     ).toBe(true)
   })
 })

@@ -61,7 +61,7 @@ function pollWith(counts: number[], over: Record<string, unknown> = {}) {
     options: optionRows(counts.length),
     message: {
       deleted_at: null,
-      chat_group: { event_id: EVENT, event: { status: "published" }, members: [{ status: "active", banned_by: null }] },
+      chat_group: { event_id: EVENT, event: { status: "published", deleted_at: null }, members: [{ status: "active", banned_by: null }] },
     },
     ...over,
   })
@@ -82,6 +82,7 @@ beforeEach(() => {
     end_time: new Date(NOW + 3 * HOUR),
     organizer_org_id: ORG,
     venue: null,
+    deleted_at: null,
     chat_group: { id: GROUP, status: "active" },
   })
   mockDb.chat_messages.create.mockResolvedValue({ id: "message-1", created_at: new Date(NOW) })
@@ -247,6 +248,7 @@ describe("creating a poll", () => {
       end_time: new Date(NOW + 3 * HOUR),
       organizer_org_id: ORG,
       venue: null,
+      deleted_at: null,
       chat_group: { id: GROUP, status: "archived" },
     })
 
@@ -300,7 +302,7 @@ describe("voting", () => {
           id: GROUP,
           event_id: EVENT,
           status: "active",
-          event: { start_time: new Date(NOW - HOUR), end_time: new Date(NOW + 3 * HOUR) },
+          event: { start_time: new Date(NOW - HOUR), end_time: new Date(NOW + 3 * HOUR), deleted_at: null },
         },
       },
       ...over,

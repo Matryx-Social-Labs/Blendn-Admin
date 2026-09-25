@@ -27,7 +27,7 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
     },
     // A hidden event has no room (SCRUM-8): its organiser's suspension flips
     // it to `draft`, and a draft never legitimately has a joinable chat.
-    select: { status: true, chat_group: { select: { event: { select: { status: true } } } } },
+    select: { status: true, chat_group: { select: { event: { select: { status: true, deleted_at: true } } } } },
   })
   if (!membership) return false
   return roomReadDenial(membership, membership.chat_group.event) === null

@@ -18,6 +18,8 @@ const messages = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/ro
 const participants = require("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventChat = require("@/app/api/mobile/events/[eventId]/chat/route") as typeof import("@/app/api/mobile/events/[eventId]/chat/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { getPollResults } = require("@/lib/polls") as typeof import("@/lib/polls")
 
 const users: string[] = []
 const events: string[] = []
@@ -127,6 +129,34 @@ it("hides a draft event's room from its own members", async () => {
   expect(res.messages.status).toBe(404)
   expect(res.participants.status).toBe(404)
   expect(res.eventChat.status).toBe(404)
+})
+
+it("hides a deleted event's room from its own members, its polls included (SCRUM-303)", async () => {
+  // The dashboard's delete sets `deleted_at` and leaves `status` alone. The
+  // socket join already refused a deleted event (socket-auth filters it); the
+  // HTTP reads went by status only, so a member kept reading the room.
+  const host = await makeUser(testId("bcr-host6"), "organizer")
+  users.push(host)
+  const { eventId, groupId } = await room(host)
+  const who = await member(groupId, "bcr-deleted", "active")
+  const pollMessage = await db.chat_messages.create({
+    data: { chat_group_id: groupId, user_id: host, content: "Which talk next?" },
+    select: { id: true },
+  })
+  const poll = await db.chat_polls.create({
+    data: { message_id: pollMessage.id, question: "Which talk next?", options: { create: [{ label: "A", position: 0 }, { label: "B", position: 1 }] } },
+    select: { id: true },
+  })
+  // Readable while the event stands, so the refusal below is the delete's doing.
+  await expect(getPollResults(poll.id, { userId: who, eventId })).resolves.toMatchObject({ question: "Which talk next?" })
+
+  await db.events.update({ where: { id: eventId }, data: { deleted_at: new Date() } })
+
+  const res = await readAll(groupId, eventId, who)
+  expect(res.messages.status).toBe(404)
+  expect(res.participants.status).toBe(404)
+  expect(res.eventChat.status).toBe(404)
+  await expect(getPollResults(poll.id, { userId: who, eventId })).rejects.toThrow("Poll not found")
 })
 
 it("never creates a room for a draft event, even for somebody entitled to one", async () => {

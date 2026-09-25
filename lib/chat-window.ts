@@ -57,17 +57,28 @@ export type ChatWindowState =
  * row; a room whose event ended three months ago must be closed on the strength
  * of its own end time whether or not anything got round to flagging it.
  */
+/**
+ * A draft event has no room (SCRUM-8), and neither has a deleted one
+ * (SCRUM-303). The dashboard's delete sets `deleted_at` and leaves `status`
+ * alone, and this lived as a draft check in three places — so a deleted
+ * event's room stayed readable and writable to its members. One predicate,
+ * used by the read rule and the write rule alike.
+ *
+ * `deleted_at` is required wherever it is taken, so a caller that forgets to
+ * select it fails to compile rather than silently letting the room through.
+ */
+function eventHidesRoom(event: { status?: string; deleted_at: Date | null }): boolean {
+  return event.status === "draft" || event.deleted_at !== null
+}
+
 export function chatWindowState(
-  event: { start_time?: Date | null; end_time: Date; status?: event_status },
+  event: { start_time?: Date | null; end_time: Date; status?: event_status; deleted_at: Date | null },
   group: { status: chat_group_status },
   now: Date = new Date()
 ): ChatWindowState {
-  /*
-   * A hidden event's room is closed (SCRUM-8). Optional for the same reason
-   * `start_time` is: a caller that does not select `status` keeps behaving
-   * exactly as it did. The ones that carry writes do select it.
-   */
-  if (event.status === "draft") return { open: false, reason: "hidden" }
+  // `status` stays optional (a caller that does not select it behaves as it
+  // did); `deleted_at` does not — see `eventHidesRoom`.
+  if (eventHidesRoom(event)) return { open: false, reason: "hidden" }
   if (group.status === "locked") return { open: false, reason: "locked" }
   if (group.status === "archived") return { open: false, reason: "archived" }
 
@@ -168,7 +179,7 @@ export type WriteDenial =
  */
 export function mayWriteToRoom(
   membership: { status: string },
-  event: { start_time?: Date | null; end_time: Date },
+  event: { start_time?: Date | null; end_time: Date; status?: event_status; deleted_at: Date | null },
   group: { status: chat_group_status },
   now: Date = new Date()
 ): WriteDenial | null {
@@ -194,7 +205,10 @@ export function mayWriteToRoom(
  * `left` stays readable. It is what every member of an archived room becomes,
  * and the event-chat route rejoins it on purpose. `muted` reads: a mute
  * silences, it does not banish (SCRUM-178). A draft event has no room
- * (SCRUM-8) — "hidden", so a caller can answer 404 rather than confirm it.
+ * (SCRUM-8), and neither has a deleted one (SCRUM-303) — "hidden", so a caller
+ * can answer 404 rather than confirm it. `deleted_at` is required so that no
+ * caller can forget to select it; the socket filtered it and the HTTP reads
+ * did not.
  */
 /**
  * Why a banned person cannot read or post, in words that are true.
@@ -213,9 +227,9 @@ export type ReadDenial = "hidden" | "not_member" | "banned"
 
 export function roomReadDenial(
   membership: { status: string } | null | undefined,
-  event: { status: string }
+  event: { status: string; deleted_at: Date | null }
 ): ReadDenial | null {
-  if (event.status === "draft") return "hidden"
+  if (eventHidesRoom(event)) return "hidden"
   if (!membership) return "not_member"
   if (membership.status === "banned") return "banned"
   return null

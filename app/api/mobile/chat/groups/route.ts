@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
         status: { in: ["active", "muted"] },
         chat_group: {
           status: { in: ["active", "locked"] },
+          // A draft or deleted event has no room (SCRUM-8, SCRUM-303) — the
+          // same rule as `eventHidesRoom`, so the list agrees with the room.
+          event: { deleted_at: null, status: { not: "draft" } },
         },
       },
     })
@@ -65,6 +68,9 @@ export async function GET(request: NextRequest) {
         status: { in: ["active", "muted"] },
         chat_group: {
           status: { in: ["active", "locked"] },
+          // A draft or deleted event has no room (SCRUM-8, SCRUM-303) — the
+          // same rule as `eventHidesRoom`, so the list agrees with the room.
+          event: { deleted_at: null, status: { not: "draft" } },
         },
       },
       include: {

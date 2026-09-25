@@ -78,6 +78,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       start_time: true,
       end_time: true,
       status: true,
+      deleted_at: true,
       chat_group: { select: { id: true, status: true } },
       ...eventPermissionSelect,
     },

@@ -66,7 +66,7 @@ export async function getPollResults(
           chat_group: {
             select: {
               event_id: true,
-              event: { select: { status: true } },
+              event: { select: { status: true, deleted_at: true } },
               members: { where: { user_id: reader.userId }, select: { status: true, banned_by: true } },
             },
           },
@@ -178,7 +178,7 @@ export async function castVote(
               id: true,
               event_id: true,
               status: true,
-              event: { select: { start_time: true, end_time: true, status: true } },
+              event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
             },
           },
         },
