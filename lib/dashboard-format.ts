@@ -47,7 +47,13 @@ export function formatAge(hours: number | null) {
 /** Relative "time since", or null for never. */
 export function formatSince(iso: string | null) {
   if (!iso) return "never"
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 60 * 60 * 1000))
+  const ms = new Date(iso).getTime() - Date.now()
+  // Ahead is said as ahead: a next-week event read "today" (SCRUM-314).
+  if (ms > 0) {
+    const ahead = Math.floor(ms / (24 * 60 * 60 * 1000))
+    return ahead === 0 ? "today" : ahead === 1 ? "tomorrow" : `in ${ahead}d`
+  }
+  const days = Math.floor(-ms / (24 * 60 * 60 * 1000))
   if (days <= 0) return "today"
   if (days === 1) return "yesterday"
   if (days < 30) return `${days}d ago`

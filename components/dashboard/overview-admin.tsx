@@ -241,7 +241,7 @@ function TurnUp({ data }: { data: AdminOverview }) {
           {formatCompact(data.checkIns)}
         </span>
         <span className="text-[0.8125rem] text-muted-foreground">
-          arrivals
+          {data.checkIns === 1 ? "arrival" : "arrivals"}
           {data.deltas.checkIns.delta !== undefined
             ? ` · ${data.deltas.checkIns.delta > 0 ? "+" : ""}${data.deltas.checkIns.delta}% on the window before`
             : ""}

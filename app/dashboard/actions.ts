@@ -78,7 +78,9 @@ function eventScope(userId?: string) {
  * says the same thing: the curating admin is never the host.
  */
 function hostSupply(userId?: string) {
-  return { ...eventScope(userId), curated_at: null }
+  // Hosts are organisers (the owner's ruling, SCRUM-314): an admin's own events
+  // are seeded supply, not a host's, whether or not they carry `curated_at`.
+  return { ...eventScope(userId), curated_at: null, organizer: { role: "organizer" as const, deletedAt: null } }
 }
 
 function pct(part: number, whole: number) {
@@ -436,7 +438,8 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
     db.events.count({
       where: { ...eventScope(), status: "published", end_time: { gte: now } },
     }),
-    db.user.count({ where: { role: { in: ["organizer", "venue_owner"] } } }),
+    // Live organiser accounts: the population "Hosts publishing" is a share of (SCRUM-314).
+    db.user.count({ where: { role: "organizer", deletedAt: null, suspended_at: null } }),
     db.events
       .findMany({
         where: { ...hostSupply(), status: "published" },
@@ -444,8 +447,10 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
         distinct: ["organizer_id"],
       })
       .then((rows) => rows.length),
+    // Upcoming only: the clause sits in "N events still to come · M of ours
+    // unclaimed", and both of staging's unclaimed curated events were past (SCRUM-314).
     db.events.count({
-      where: { ...eventScope(), status: "published", curated_at: { not: null } },
+      where: { ...eventScope(), status: "published", curated_at: { not: null }, end_time: { gte: now } },
     }),
     db.events.count({
       where: {
@@ -453,6 +458,7 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
         status: "published",
         curated_at: { not: null },
         claimed_at: null,
+        end_time: { gte: now },
       },
     }),
     /*

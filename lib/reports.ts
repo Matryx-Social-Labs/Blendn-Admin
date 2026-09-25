@@ -49,7 +49,7 @@ export const REPORTS: ReportDef[] = [
   {
     key: "attendees",
     label: "Attendees",
-    description: "Who attended, how often, and their no-show count. Pseudonymous.",
+    description: "Who attended and how often. Pseudonymous.",
     roles: ["app_admin", "organizer"],
   },
   {
