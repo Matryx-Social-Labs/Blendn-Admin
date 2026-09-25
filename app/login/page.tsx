@@ -9,6 +9,7 @@ import { signIn, useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { APP_ONLY_SIGNIN, canAccessDashboard } from "@/lib/rbac"
 import { safeRedirect } from "@/lib/safe-redirect"
 
 /**
@@ -29,11 +30,11 @@ import { safeRedirect } from "@/lib/safe-redirect"
  */
 function SignInForm() {
   const router = useRouter()
-  const { status } = useSession()
+  const { status, data: session } = useSession()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<React.ReactNode>(null)
 
   /*
    * `/invite?token=…` sends people here and expects them back afterwards.
@@ -49,9 +50,15 @@ function SignInForm() {
     setCallbackUrl(safeRedirect(new URLSearchParams(window.location.search).get("callbackUrl")))
   }, [])
 
+  /*
+   * Only a session the dashboard will take. A suspended operator's live cookie
+   * is re-read as `attendee`, and pushing it to /dashboard only earned a
+   * bounce back here (SCRUM-172).
+   */
+  const role = session?.user?.role
   useEffect(() => {
-    if (status === "authenticated") router.push(callbackUrl)
-  }, [status, router, callbackUrl])
+    if (status === "authenticated" && role && canAccessDashboard(role)) router.push(callbackUrl)
+  }, [status, role, router, callbackUrl])
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -69,6 +76,12 @@ function SignInForm() {
        */
       if (result?.status === 429) {
         setError(RATE_LIMITED)
+        return
+      }
+      // The password was right and the account is an attendee's: no session
+      // was made, so say so instead of reappearing blank (SCRUM-172).
+      if (result?.error === APP_ONLY_SIGNIN) {
+        setError(APP_ONLY)
         return
       }
       if (result?.error || !result?.ok) {
@@ -185,6 +198,17 @@ function SignInForm() {
     </div>
   )
 }
+
+const APP_ONLY = (
+  <>
+    This account is for the Blend&apos;n app. The dashboard is for people who run events and
+    venues &mdash;{" "}
+    <Link href="/apply" className="underline">
+      apply here
+    </Link>
+    .
+  </>
+)
 
 const RATE_LIMITED =
   "Too many sign-in attempts from this network. Wait fifteen minutes and try again."

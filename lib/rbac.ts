@@ -9,6 +9,13 @@ export function canAccessDashboard(role: user_role): boolean {
   )
 }
 
+/**
+ * The error a dashboard sign-in reports when the password is right and
+ * `canAccessDashboard` says no. NextAuth hands a thrown message to the form as
+ * `result.error`; the login page turns this one into a sentence (SCRUM-172).
+ */
+export const APP_ONLY_SIGNIN = "AppOnlyAccount"
+
 export function canSendSystemMessages(role: user_role): boolean {
   return role === "app_admin"
 }
