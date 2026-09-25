@@ -10,7 +10,7 @@ import { join } from "path"
 jest.mock("@/lib/db", () => ({
   db: {
     $queryRaw: jest.fn().mockResolvedValue([
-      { signed_up: 125n, onboarded: 78n, rsvpd: 11n, checked_in: 7n, matched: 0n, conversed: 0n, returned: 3n },
+      { signed_up: BigInt(125), onboarded: BigInt(78), rsvpd: BigInt(11), checked_in: BigInt(7), matched: BigInt(0), conversed: BigInt(0), returned: BigInt(3) },
     ]),
   },
 }))
