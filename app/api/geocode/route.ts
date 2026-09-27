@@ -4,6 +4,7 @@ import { errorResponse } from "@/lib/api-response"
 import { getAuth } from "@/lib/auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { logger } from "@/lib/logger"
+import { OSM_USER_AGENT } from "@/lib/outline"
 
 export const dynamic = "force-dynamic"
 
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic"
  */
 
 const NOMINATIM = "https://nominatim.openstreetmap.org"
-const UA = "blendn-admin (https://blendn.app; ops@blendn.app)"
+const UA = OSM_USER_AGENT
 
 /**
  * Cached for a day.
@@ -69,8 +70,15 @@ export async function GET(req: NextRequest) {
     // do. It is still declared in `lib/env.ts`, which is what documents it and
     // validates it at boot.
     const countries = (process.env.GEOCODE_COUNTRY_CODES ?? "in").trim()
+    /*
+     * `polygon_geojson`: a place OSM holds as an area (a stadium, a palace, a
+     * park) comes back with its own outline, so typing the venue can draw it
+     * (SCRUM-351, `lib/outline.ts`). Simplified server-side so a hit stays small;
+     * a bar or a restaurant is a pin and still arrives as one.
+     */
     upstream =
       `${NOMINATIM}/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1` +
+      `&polygon_geojson=1&polygon_threshold=0.00002` +
       (countries ? `&countrycodes=${encodeURIComponent(countries)}` : "")
   } else if (lat && lon && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))) {
     upstream = `${NOMINATIM}/reverse?lat=${Number(lat)}&lon=${Number(lon)}&format=json&addressdetails=1`

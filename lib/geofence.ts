@@ -519,7 +519,7 @@ export function validateGeofence(value: unknown): { ok: true; fence: Geofence } 
   return { ok: false, error: "bad_type" }
 }
 
-function isValidLatLng(lat: number, lng: number): boolean {
+export function isValidLatLng(lat: number, lng: number): boolean {
   return (
     Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
   )
