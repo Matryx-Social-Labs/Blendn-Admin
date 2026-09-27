@@ -18,6 +18,8 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+const mockOverLimit = jest.fn()
+jest.mock("@/lib/rate-limit", () => ({ overUserLimit: (...a: unknown[]) => mockOverLimit(...a) }))
 
 import {
   venuesNear,
@@ -39,6 +41,7 @@ function signIn(role: string) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockOverLimit.mockResolvedValue(false)
   mockDb.organisation_members.findFirst.mockResolvedValue({ org_id: MY_ORG })
   mockDb.venues.create.mockResolvedValue({ id: "venue_new" })
   mockDb.$queryRaw.mockResolvedValue([])
@@ -475,5 +478,34 @@ describe("correcting the pin", () => {
     const data = mockDb.venues.update.mock.calls[0][0].data
     expect(data).not.toHaveProperty("latitude")
     expect(data).not.toHaveProperty("longitude")
+  })
+})
+
+describe("rate limits on the venue actions (SCRUM-360)", () => {
+  it("refuses a create over the limit, before anything is written", async () => {
+    signIn("organizer")
+    mockOverLimit.mockImplementation(async (_policy: string, scope: string) => scope === "venue-create")
+    await expect(
+      createVenue({ name: "Toit", venueType: "pub_bar", lat: LAT, lng: LNG, acknowledgedDuplicates: true })
+    ).rejects.toThrow(/too many venues/i)
+    expect(mockDb.venues.create).not.toHaveBeenCalled()
+    // The tier matters: a create is "heavy" (10 a minute), not an ordinary write.
+    expect(mockOverLimit).toHaveBeenCalledWith("heavy", "venue-create", expect.any(String))
+  })
+
+  it("refuses a look-up over the limit, before any query", async () => {
+    signIn("organizer")
+    mockOverLimit.mockImplementation(async (_policy: string, scope: string) => scope === "venues-near")
+    await expect(venuesNear(LAT, LNG)).rejects.toThrow(/too many look-ups/i)
+    expect(mockDb.$queryRaw).not.toHaveBeenCalled()
+    expect(mockOverLimit).toHaveBeenCalledWith("write", "venues-near", expect.any(String))
+  })
+
+  it("a create's own duplicate check is not a look-up: it spends only the create allowance", async () => {
+    signIn("organizer")
+    await createVenue({ name: "Toit", venueType: "pub_bar", lat: LAT, lng: LNG })
+    const scopes = mockOverLimit.mock.calls.map((c) => c[1])
+    expect(scopes).toEqual(["venue-create"])
+    expect(mockDb.$queryRaw).toHaveBeenCalled()
   })
 })

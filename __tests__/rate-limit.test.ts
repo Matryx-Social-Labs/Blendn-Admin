@@ -159,3 +159,15 @@ describe("createUserRateLimit", () => {
     expect(blocked!.status).toBe(429)
   })
 })
+
+describe("overUserLimit — the per-user policy for a server action (SCRUM-360)", () => {
+  it("allows the policy's count in a window, and refuses the next", async () => {
+    const { overUserLimit } = await import("@/lib/rate-limit")
+    const user = `u-${Math.random()}`
+    for (let i = 0; i < 10; i++) expect(await overUserLimit("heavy", "venue-create", user)).toBe(false)
+    expect(await overUserLimit("heavy", "venue-create", user)).toBe(true)
+    // Another scope, and another user, have their own buckets.
+    expect(await overUserLimit("heavy", "venues-near", user)).toBe(false)
+    expect(await overUserLimit("heavy", "venue-create", `${user}-other`)).toBe(false)
+  })
+})

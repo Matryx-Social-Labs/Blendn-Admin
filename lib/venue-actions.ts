@@ -36,6 +36,7 @@ import { defaultExtentMetres, VENUE_TYPES, venueTypeLabel } from "@/lib/venue-ty
 import { Prisma, type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
+import { overUserLimit } from "@/lib/rate-limit"
 
 /**
  * Creating and claiming venues — the first write path this table has ever had.
@@ -114,7 +115,16 @@ export interface NearbyVenue {
  */
 export async function venuesNear(lat: number, lng: number): Promise<NearbyVenue[]> {
   const user = await requireUser()
-  const isAdmin = user.role === "app_admin"
+  // Asked on every pick and pin move; a script asking faster than a person
+  // drags is mapping the directory (SCRUM-360). The create path below asks
+  // through `nearbyVenues` and is limited as a create instead.
+  if (await overUserLimit("write", "venues-near", user.id)) {
+    throw new Refusal("Too many look-ups at once. Wait a minute and try again.")
+  }
+  return nearbyVenues(lat, lng, user.role === "app_admin")
+}
+
+async function nearbyVenues(lat: number, lng: number, isAdmin: boolean): Promise<NearbyVenue[]> {
 
   // Bounding boxes first so the lat/lng index does the coarse filter, then
   // exact distances in memory. Nearest first *before* the LIMIT: a busy
@@ -205,6 +215,11 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   if (user.role !== "app_admin" && user.role !== "venue_owner" && user.role !== "organizer") {
     throw new Refusal("Forbidden")
   }
+  // Every event save with a newly picked place lists one (SCRUM-353c); ten a
+  // minute is more places than a person adds, and fewer than a script would.
+  if (await overUserLimit("heavy", "venue-create", user.id)) {
+    throw new Refusal("Too many venues added at once. Wait a minute and try again.")
+  }
 
   const name = input.name.trim()
   if (name.length < 2) throw new Refusal("Give the venue a name.")
@@ -216,7 +231,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   // Layer 1. Refused rather than warned, because the caller has already been
   // shown the neighbours by `venuesNear` and has to say it meant it.
   if (!input.acknowledgedDuplicates) {
-    const nearby = await venuesNear(input.lat, input.lng)
+    const nearby = await nearbyVenues(input.lat, input.lng, user.role === "app_admin")
     if (nearby.length > 0) {
       throw new Refusal(
         `${nearby[0].name} is already listed ${nearby[0].distanceMetres} m away. Claim it instead, or confirm this is a different place.`
@@ -351,7 +366,13 @@ function refuseUnknownVenueType(type: venue_type | null | undefined): void {
   if (type != null && !VENUE_TYPES.includes(type)) throw new Refusal("That is not a venue type this list knows.")
 }
 
-/** Edit a venue. Owners edit their own; admins edit any. */
+/**
+ * Edit a venue. Owners edit their own; admins edit any.
+ *
+ * Not rate limited, deliberately (SCRUM-360): an edit reaches only venues the
+ * caller's organisation may write, so it cannot flood the directory or map it
+ * the way a create or a look-up can.
+ */
 export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
   const user = await requireUser()
   await venueForWrite(id, user)
