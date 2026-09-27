@@ -35,8 +35,8 @@
   "verified": {
     "participation-needs-onboarding.itest.ts": {
       "guards": "SCRUM-331: a profile that is neither onboarded nor of a known adult age cannot RSVP, save, read the board, check in, start a conversation, send a message request or send a DM (403 FINISH_ONBOARDING, nothing written) but can still view the event; an onboarded no-age account, an adult mid-onboarding and an onboarded pre-ruling under-18 can take part; an under-18 who never finished onboarding cannot",
-      "mutation": "M1 attendeeEventAccess's participate gate disabled; M2 the check-in gate disabled; M3 participationRefusal returns null; M4 mayParticipate = onboarded only; M5 mayParticipate = isAdult only; M6 the gate applied to `view` too (all 2026-09-27).",
-      "observed": "M1: 4 failing (RSVP, save, board, the under-18 still onboarding). M2: 1 (check-in). M3: 1 (the DM test — conversations, requests and DM send are asserted in sequence). M4: 1 (adult mid-onboarding refused). M5: 2 (onboarded no-age and onboarded under-18 refused). M6: 1 (viewing the event refused).",
+      "mutation": "M1 attendeeEventAccess's participate gate disabled; M2 the check-in gate disabled; M3 participationRefusal returns null; M4 mayParticipate = onboarded only; M5 mayParticipate = isAdult only; M6 the gate applied to `view` too; M7 the interest route asks `view` instead of `participate`; M8 mayParticipate lets a missing profile through (all 2026-09-27).",
+      "observed": "M1: 4 failing (RSVP, save, board, the under-18 still onboarding). M2: 1 (check-in). M3: 1 (the DM test — conversations, requests and DM send are asserted in sequence). M4: 1 (adult mid-onboarding refused). M5: 2 (onboarded no-age and onboarded under-18 refused). M6: 1 (viewing the event refused). M7: 1 (interest / board post / board request). M8: 1 in __tests__/age.test.ts (no profile at all says yes).",
       "date": "2026-09-27"
     },
     "adults-only.itest.ts": {
