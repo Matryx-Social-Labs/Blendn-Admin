@@ -78,6 +78,35 @@ export function cityFrom(address: NominatimAddress | undefined): string | null {
   return null
 }
 
+export interface AddressFields {
+  address: string
+  city: string
+}
+
+/**
+ * The address and city a new search should leave in a form (SCRUM-341).
+ *
+ * A search moves the pin, so it replaces what the *previous* search wrote and
+ * keeps only what the person typed. The venue wizard kept any non-empty value,
+ * which could not tell a typed address from the last search's: a second
+ * search moved the pin and left the first address behind, and venues were
+ * saved kilometres from the place their pin marks.
+ *
+ * `previous` is what the last search filled in. A field that still equals it,
+ * or is empty, was not typed.
+ */
+export function fillFromSearch(
+  current: AddressFields,
+  previous: AddressFields,
+  found: AddressFields
+): AddressFields {
+  const typed = (key: keyof AddressFields) => current[key] !== "" && current[key] !== previous[key]
+  return {
+    address: typed("address") ? current.address : found.address,
+    city: typed("city") ? current.city : found.city,
+  }
+}
+
 /**
  * Read a whole address out of a geocoder result.
  *

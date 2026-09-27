@@ -1,4 +1,4 @@
-import { cityFrom, cityKey, extractAddress, groupCities } from "@/lib/address"
+import { cityFrom, cityKey, extractAddress, fillFromSearch, groupCities } from "@/lib/address"
 
 /**
  * Reading a geocoder response.
@@ -156,5 +156,41 @@ describe("groupCities", () => {
 
   it("is empty for no events at all", () => {
     expect(groupCities([])).toEqual([])
+  })
+})
+
+/*
+ * What a new address search leaves in the venue wizard's address and city
+ * (SCRUM-341). The wizard kept any non-empty address, so a second search moved
+ * the pin and left the first search's address: two venues on staging were
+ * saved kilometres from the place their pin marks.
+ */
+describe("fillFromSearch", () => {
+  const empty = { address: "", city: "" }
+  const churchStreet = { address: "Church Street, Ashok Nagar, Bengaluru", city: "Bengaluru" }
+  const cubbonPark = { address: "Cubbon Park, Sampangi Rama Nagara, Bengaluru", city: "Bengaluru" }
+  const lisbon = { address: "Praça do Comércio, Lisboa", city: "Lisboa" }
+
+  it("fills both on the first search", () => {
+    expect(fillFromSearch(empty, empty, churchStreet)).toEqual(churchStreet)
+  })
+
+  it("replaces what the previous search filled in — the bug", () => {
+    expect(fillFromSearch(churchStreet, churchStreet, cubbonPark)).toEqual(cubbonPark)
+    expect(fillFromSearch(churchStreet, churchStreet, lisbon)).toEqual(lisbon)
+  })
+
+  it("keeps an address the person typed, and still moves the city on", () => {
+    const typed = { address: "Unit 4, Brewery Lane", city: "Bengaluru" }
+    expect(fillFromSearch(typed, churchStreet, lisbon)).toEqual({ address: "Unit 4, Brewery Lane", city: "Lisboa" })
+  })
+
+  it("keeps a city the person typed", () => {
+    const typed = { address: churchStreet.address, city: "Bangalore" }
+    expect(fillFromSearch(typed, churchStreet, cubbonPark)).toEqual({ address: cubbonPark.address, city: "Bangalore" })
+  })
+
+  it("refills a field the person cleared", () => {
+    expect(fillFromSearch({ address: "", city: "" }, churchStreet, cubbonPark)).toEqual(cubbonPark)
   })
 })

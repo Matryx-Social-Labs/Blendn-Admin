@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState, useTransition } from "react"
+import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -15,7 +15,7 @@ import {
 
 import { GeofenceEditor } from "@/components/geofence-editor"
 import { VenueTypePicker } from "@/components/venue-type-picker"
-import { cityFrom } from "@/lib/address"
+import { cityFrom, fillFromSearch, type AddressFields } from "@/lib/address"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -76,6 +76,9 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
   const [ackFor, setAckFor] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
+  // What the last search wrote into address and city, so the next one can tell
+  // its own fill from what the person typed (SCRUM-341).
+  const lastFill = useRef<AddressFields>({ address: "", city: "" })
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }))
@@ -145,16 +148,20 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
         return
       }
       const hit = hits[0]
+      // Was `city || town || state_district`, which skipped village and
+      // municipality entirely — so a venue in a village was filed under its
+      // district here and under the village name from the event form. Same
+      // pin, two cities, and neither screen looked wrong on its own.
+      const found = { address: hit.display_name, city: cityFrom(hit.address) || "" }
+      const previous = lastFill.current
+      lastFill.current = found
       setDraft((d) => ({
         ...d,
         lat: Number(hit.lat),
         lng: Number(hit.lon),
-        address: d.address || hit.display_name,
-        // Was `city || town || state_district`, which skipped village and
-        // municipality entirely — so a venue in a village was filed under its
-        // district here and under the village name from the event form. Same
-        // pin, two cities, and neither screen looked wrong on its own.
-        city: d.city || cityFrom(hit.address) || "",
+        // The pin moves, so the address it filled moves with it; only what the
+        // person typed stays.
+        ...fillFromSearch(d, previous, found),
         geofence: null,
       }))
     } catch {
