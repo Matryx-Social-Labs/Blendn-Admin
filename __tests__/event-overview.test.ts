@@ -66,7 +66,7 @@ describe("getEventOverview — upcoming", () => {
     expect(o?.tiles[3].value).toBe("60 m")
   })
 
-  it("the fence tile shows the radius that covers an outline, not the 60 m the row stored (SCRUM-350)", async () => {
+  it("the fence tile shows the radius that covers the event's outline, not the 60 m the row stored (SCRUM-350)", async () => {
     // ~265 m square outline on the pin, +20 m buffer: the phone gets ~207 m.
     const d = 0.0012
     const outline = {
@@ -83,9 +83,10 @@ describe("getEventOverview — upcoming", () => {
     const fromOwn = (await getEventOverview("e1"))?.tiles[3].value
     expect(Number(fromOwn?.replace(" m", ""))).toBeGreaterThanOrEqual(206)
 
+    // A venue's area is never read live — events copy it on save (SCRUM-352
+    // security review) — so an event without its own shows its stored radius.
     arrange({ event: { venue: { geofence: outline } } })
-    const fromVenue = (await getEventOverview("e1"))?.tiles[3].value
-    expect(fromVenue).toBe(fromOwn)
+    expect((await getEventOverview("e1"))?.tiles[3].value).toBe("60 m")
   })
 
   it("says fill when a capacity is set", async () => {

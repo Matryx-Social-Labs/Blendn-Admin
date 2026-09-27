@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { fenceVenueSelect, phoneCheckInRadius } from "@/lib/geofence"
+import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
 import { eventStateFor, publishBlockers, type EventState, type PublishBlocker } from "@/lib/event-phase"
@@ -45,9 +45,8 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
       venue_id: true,
       max_capacity: true,
       check_in_radius: true,
-      // The area the radius below is derived from — the event's own, else its venue's.
+      // The area the radius below is derived from — the event's own copy.
       geofence: true,
-      venue: { select: fenceVenueSelect },
       cover_image_url: true,
       _count: { select: { categories: true, favorites: true } },
     },

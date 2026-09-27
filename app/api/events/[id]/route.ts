@@ -13,7 +13,7 @@ import { cancelEventCheckIns, eventWriteAction, isUncancellingEvent, UNCANCEL_RE
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
-import { resolveVenueLink } from "@/lib/venue-link"
+import { resolveVenueLink, venueFenceToCopy } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
 import {
   notifyEventCancelled,
@@ -228,6 +228,15 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             venue_link_status: event.venue_link_status,
           })
 
+    // An event linked to a venue keeps a copy of its area, never a live
+    // reference another organisation could move (owner's ruling 3). Copied
+    // when this save would leave the event linked and without an area of its own.
+    const linkedVenueId =
+      venue_id === undefined ? event.venue_id : (venueLink as { venue_id: string | null }).venue_id
+    const endsWithoutOwnArea =
+      location.values.geofence === null || (location.values.geofence === undefined && event.geofence == null)
+    const copiedFence = endsWithoutOwnArea ? await venueFenceToCopy(linkedVenueId) : null
+
     /*
      * Re-resolve the city when the pin moves.
      *
@@ -360,6 +369,16 @@ export async function PATCH(req: Request, { params }: RouteContext) {
            */
           geofence:
             location.values.geofence === null ? Prisma.DbNull : location.values.geofence,
+        }),
+        // After the line above, so a venue's copy wins over a clear.
+        ...(copiedFence && {
+          geofence: copiedFence,
+          check_in_radius:
+            phoneCheckInRadius({
+              geofence: copiedFence,
+              latitude: latitude ?? event.latitude,
+              longitude: longitude ?? event.longitude,
+            }) ?? event.check_in_radius,
         }),
         /*
          * `parseJsonField` returns `undefined` for an empty or unparseable

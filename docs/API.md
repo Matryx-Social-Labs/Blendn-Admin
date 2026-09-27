@@ -431,8 +431,8 @@ now. Only `city` scopes a list, and only the check-in area refuses anyone, at
 the door where refusing is the point.
 
 **`checkInRadius` on `GET /events/:eventId` covers the whole check-in area**
-(SCRUM-350). The door judges the event's real area — its own geofence, else its
-venue's, a circle or an outline, plus its buffer. The app knows only a circle,
+(SCRUM-350). The door judges the event's real area — its own geofence (a copy of its
+venue's, taken when the event is saved), a circle or an outline, plus its buffer. The app knows only a circle,
 so `checkInRadius` is the radius around `latitude`/`longitude` that holds all of
 that area: the farthest corner of an outline, or a circle's radius, plus the
 buffer. It used to be the stored column, which only circles kept in step — a

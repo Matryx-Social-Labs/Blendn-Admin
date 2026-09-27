@@ -86,7 +86,7 @@ describe("the mobile event detail's checkInRadius covers the check-in area", () 
     expect(await checkInRadius(eventId, token)).toBeGreaterThanOrEqual(coversStadium)
   })
 
-  it("covers the venue's outline when the event inherits it", async () => {
+  it("does not read a venue's outline live — an event without its own copy keeps its radius (SCRUM-352 security review)", async () => {
     const token = await attendeeToken()
     const venue = await db.venues.create({
       data: { name: testId("venue"), latitude: pin.lat, longitude: pin.lng, geofence: stadium },
@@ -94,7 +94,7 @@ describe("the mobile event detail's checkInRadius covers the check-in area", () 
     })
     venues.push(venue.id)
     const eventId = await hostedEvent({ venue: { connect: { id: venue.id } }, check_in_radius: 30 })
-    expect(await checkInRadius(eventId, token)).toBeGreaterThanOrEqual(coversStadium)
+    expect(await checkInRadius(eventId, token)).toBe(30)
   })
 
   it("leaves a pin-and-radius event's radius as it was", async () => {

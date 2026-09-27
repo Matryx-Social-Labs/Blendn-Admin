@@ -30,11 +30,13 @@ import { join, sep } from "path"
  *
  * ## The latent one this guard is really for
  *
- * `eventPermissionSelect` claims `venue`. `fenceSelect` also claims `venue`.
- * Nothing spreads both today, and the day something does, whichever goes second
- * wins and the other resolver quietly loses a relation. That is the CLAUDE.md
- * trap arriving through collision instead of omission, and there would be no
- * type error and no failing test.
+ * `eventPermissionSelect` claims `venue`. `fenceSelect` used to as well, for the
+ * check-in door's live fallback to the venue's area — removed when events began
+ * copying that area (SCRUM-352 security review), so that pair no longer
+ * collides. The rule stands for the next fragment that claims a relation:
+ * whichever goes second wins and the other resolver quietly loses it. That is
+ * the CLAUDE.md trap arriving through collision instead of omission, and there
+ * would be no type error and no failing test.
  */
 
 const ROOT = join(__dirname, "..")
@@ -183,7 +185,7 @@ describe("select fragments do not overwrite each other", () => {
      * expected to be clean apart from one allowlisted site, so "found nothing"
      * is the pass condition and a broken detector looks exactly like success.
      */
-    const body = "{ ...eventPermissionSelect, ...fenceSelect, id: true }"
+    const body = "{ ...eventPermissionSelect, ...eventPermissionSelect, id: true }"
     const found = braceBody(body, 0)!
     const entries = topLevelEntries(found.body)
     const claimed: Record<string, string[]> = {}
@@ -191,8 +193,8 @@ describe("select fragments do not overwrite each other", () => {
       if (e.kind === "key") (claimed[e.name] ??= []).push("inline")
       else if (e.name in fragments) for (const k of fragments[e.name]) (claimed[k] ??= []).push(e.name)
     }
-    // `venue` is claimed by both — the latent collision this guard exists for.
-    expect(claimed.venue).toEqual(["eventPermissionSelect", "fenceSelect"])
+    // `venue` is claimed twice — the shape of collision this guard exists for.
+    expect(claimed.venue).toEqual(["eventPermissionSelect", "eventPermissionSelect"])
   })
 
   it("has no unallowed collision", () => {
