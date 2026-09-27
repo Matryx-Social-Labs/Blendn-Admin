@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, LayerGroup, TileLayer } from "leaflet"
+// Its own, not LocationPicker's runtime <link>: pages without that picker got
+// stacked, unclipped tiles and a circle drawn off the map (SCRUM-344).
+import "leaflet/dist/leaflet.css"
 import {
   IconBuildingCommunity,
   IconCircleDashed,

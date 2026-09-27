@@ -75,20 +75,19 @@ test.describe("the venue picker and the pin agree", () => {
     await expect(marker.first()).toBeVisible({ timeout: 15_000 })
 
     /*
-     * And the map is actually centred there, not merely carrying a marker
-     * somewhere off-screen. Read from Leaflet rather than from a CSS transform,
-     * which is a pixel offset and tells you nothing about where on earth it is.
+     * And the pin is on the map, not merely in the DOM. Without Leaflet's
+     * stylesheet (SCRUM-344) the container did not clip and the tiles stacked,
+     * so every marker still counted as "visible" — about 3,000 px below the
+     * map's top edge. Inside the map's box is what a person can see.
      */
-    const centre = await page.evaluate(() => {
-      const el = document.querySelector(".leaflet-container") as
-        | (HTMLElement & { _leaflet_map?: { getCenter(): { lat: number; lng: number } } })
-        | null
-      // Leaflet does not expose the map off the element in every version, so
-      // fall back to the marker's own position, which is the thing under test.
-      const icon = document.querySelector(".leaflet-marker-icon") as HTMLElement | null
-      return { hasMap: Boolean(el?._leaflet_map), hasMarker: Boolean(icon) }
-    })
-    expect(centre.hasMarker).toBe(true)
+    const mapBox = await picker.boundingBox()
+    const pinBox = await marker.first().boundingBox()
+    expect(mapBox).not.toBeNull()
+    expect(pinBox).not.toBeNull()
+    expect(pinBox!.x).toBeGreaterThanOrEqual(mapBox!.x)
+    expect(pinBox!.y).toBeGreaterThanOrEqual(mapBox!.y)
+    expect(pinBox!.x + pinBox!.width).toBeLessThanOrEqual(mapBox!.x + mapBox!.width)
+    expect(pinBox!.y + pinBox!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height)
 
     // The form's own coordinates are the same fact. The redesign cut the
     // human-readable lat/lng line (the pin and the address say it), so the
