@@ -9,6 +9,8 @@ import {
   boundingCircle,
   fenceCentre,
   followPin,
+  areaAfterPick,
+  DEFAULT_BUFFER_M,
   samePlace,
   phoneCheckInRadius,
   sameShape,
@@ -543,6 +545,44 @@ describe("followPin", () => {
     const before = { ...circle }
     followPin(circle, palace)
     expect(circle).toEqual(before)
+  })
+})
+
+describe("areaAfterPick — a pick with no outline of its own (SCRUM-353b)", () => {
+  const cubbon = { lat: 12.97634, lng: 77.59286 }
+  const palace = { lat: 12.9986, lng: 77.59201 } // ~2.5 km north
+  const d = 0.0003
+  const outline = (buffer: number) => ({
+    type: "polygon" as const,
+    buffer,
+    ring: [
+      [cubbon.lat - d, cubbon.lng - d],
+      [cubbon.lat - d, cubbon.lng + d],
+      [cubbon.lat + d, cubbon.lng + d],
+      [cubbon.lat + d, cubbon.lng - d],
+    ] as [number, number][],
+  })
+
+  it("gives a new event a circle on the pin at the default buffer — it saved no area before", () => {
+    expect(areaAfterPick(null, palace)).toEqual({
+      fence: { type: "circle", lat: palace.lat, lng: palace.lng, radius: 30, buffer: DEFAULT_BUFFER_M },
+      movedKm: null,
+    })
+  })
+
+  it("keeps an outline re-picked in place, custom buffer and all (React review)", () => {
+    const custom = outline(50)
+    const nudged = { lat: cubbon.lat + 0.0002, lng: cubbon.lng }
+    expect(areaAfterPick(custom, nudged).fence).toBe(custom)
+  })
+
+  it("starts a new place at the default buffer, not the last place's", () => {
+    const venueCircle = { type: "circle" as const, lat: cubbon.lat, lng: cubbon.lng, radius: 45, buffer: 25 }
+    expect(areaAfterPick(venueCircle, palace).fence).toEqual({ ...venueCircle, lat: palace.lat, lng: palace.lng, buffer: DEFAULT_BUFFER_M })
+
+    const { fence, movedKm } = areaAfterPick(outline(50), palace)
+    expect(fence).toEqual({ type: "circle", lat: palace.lat, lng: palace.lng, radius: 30, buffer: DEFAULT_BUFFER_M })
+    expect(movedKm).toBeGreaterThan(2.3)
   })
 })
 

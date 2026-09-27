@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import {
   DEFAULT_ACCURACY_POLICY,
   DEFAULT_BUFFER_M,
+  DEFAULT_CIRCLE_M,
   GEOFENCE_LIMITS,
   fenceCentre,
   ringSelfIntersects,
@@ -89,6 +90,25 @@ export interface GeofenceEditorProps {
   height?: number
   /** Directly under the map: the event form's address, written by the pin. */
   caption?: ReactNode
+  /**
+   * Replaces the built-in toolbar and panel. The event form draws its own
+   * buffer choice and "Adjust area" from these tools (SCRUM-353); the venue
+   * pages keep the built-in ones until SCRUM-354.
+   */
+  controls?: (tools: AreaTools) => ReactNode
+  /** The legend's first two lines, when the caller can say whose they are. */
+  legend?: { extent: string; buffer: string }
+}
+
+/** What a caller's own controls can ask of the map. */
+export interface AreaTools {
+  /** Trace the outline by hand, on the satellite layer. */
+  draw: () => void
+  /** A circle at the pin instead of an outline. */
+  circle: () => void
+  /** Ask OpenStreetMap for the building at the pin. */
+  findBuilding: () => void
+  finding: boolean
 }
 
 export function GeofenceEditor({
@@ -99,6 +119,8 @@ export function GeofenceEditor({
   editable = true,
   height = 420,
   caption,
+  controls,
+  legend,
 }: GeofenceEditorProps) {
   const fallbackCentre = givenCentre ?? { lat: 12.9716, lng: 77.5946 }
   // As numbers, so a hook can depend on the pin without re-running every render:
@@ -142,7 +164,7 @@ export function GeofenceEditor({
         type: "circle",
         lat: fallbackCentre.lat,
         lng: fallbackCentre.lng,
-        radius: 30,
+        radius: DEFAULT_CIRCLE_M,
         buffer: DEFAULT_BUFFER_M,
       },
     [value, fallbackCentre.lat, fallbackCentre.lng]
@@ -175,6 +197,10 @@ export function GeofenceEditor({
       setImportNote(null)
     }
   }
+
+  // Editing switched off mid-trace (the event form's Adjust closed): stop
+  // tracing, so reopening it shows a shape rather than a hidden trace mode.
+  if (!editable && drawing) setDrawing(false)
 
   const crossed = fence.type === "polygon" && ringSelfIntersects(fence.ring)
 
@@ -494,12 +520,17 @@ export function GeofenceEditor({
 
   const mode = fence.type === "circle" ? "circle" : "polygon"
 
+  /** Trace by hand, on the satellite layer where a building's edges show. */
+  function draw() {
+    setDrawing(true)
+    setLayer("sat")
+    onChange({ type: "polygon", ring: [], buffer: fence.buffer })
+  }
+
   function switchMode(next: string) {
     if (next === mode) return
     if (next === "polygon") {
-      setDrawing(true)
-      setLayer("sat")
-      onChange({ type: "polygon", ring: [], buffer: fence.buffer })
+      draw()
     } else {
       setDrawing(false)
       const centre = anchor(fence, givenCentre, fallbackCentre)
@@ -507,15 +538,17 @@ export function GeofenceEditor({
         type: "circle",
         lat: centre[0],
         lng: centre[1],
-        radius: 30,
+        radius: DEFAULT_CIRCLE_M,
         buffer: fence.buffer,
       })
     }
   }
 
+  const tools: AreaTools = { draw, circle: () => switchMode("circle"), findBuilding: importFootprint, finding: importing }
+
   return (
     <div className="flex flex-col gap-3">
-      {editable ? (
+      {editable && !controls ? (
         <div className="flex flex-wrap items-center gap-2.5">
           <Tabs value={mode} onValueChange={switchMode}>
             <TabsList>
@@ -585,8 +618,8 @@ export function GeofenceEditor({
         ) : null}
 
         <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
-          <Legend token="--chart-1" dash="solid" label="Extent — the venue itself" />
-          <Legend token="--chart-2" dash="dashed" label={`Buffer — your tolerance (${fence.buffer} m)`} />
+          <Legend token="--chart-1" dash="solid" label={legend?.extent ?? "Extent — the venue itself"} />
+          <Legend token="--chart-2" dash="dashed" label={legend?.buffer ?? `Buffer — your tolerance (${fence.buffer} m)`} />
           {showAccuracy ? (
             <Legend
               token="--muted-foreground"
@@ -606,7 +639,7 @@ export function GeofenceEditor({
         <p className="text-[0.75rem] text-muted-foreground">{importNote}</p>
       ) : null}
 
-      {editable ? (
+      {controls ? <ControlsSlot render={controls} tools={tools} /> : editable ? (
         <div className="grid gap-4 @2xl/main:grid-cols-2 @2xl/main:gap-7">
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center gap-2 text-[0.8125rem]">
@@ -702,6 +735,16 @@ function Legend({ token, dash, label }: { token: string; dash: string; label: st
       <span>{label}</span>
     </span>
   )
+}
+
+/**
+ * The caller's controls, rendered as a component of their own. The tools reach
+ * the map's refs, but only from the handlers the controls attach — never while
+ * rendering — and calling `controls(tools)` inline in the editor's render could
+ * not show that.
+ */
+function ControlsSlot({ render, tools }: { render: (tools: AreaTools) => ReactNode; tools: AreaTools }) {
+  return render(tools)
 }
 
 /* ------------------------------------------------------------- helpers --- */
