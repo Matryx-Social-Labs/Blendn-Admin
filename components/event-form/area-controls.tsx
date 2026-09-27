@@ -19,12 +19,17 @@ const SLIDER_MAX_M = 100
  * between the base (the venue's, else the default) and Custom, and reshaping
  * sits behind "Adjust area" — the map shows no handles until it is open.
  * There is no radius to set for an outline: the ring grows and shrinks with it.
+ *
+ * On the venue pages (`mode="venue"`, SCRUM-354) the buffer is not a choice
+ * between two numbers: it IS the default every event there starts with, so the
+ * slider is always out and labelled that way.
  */
 export function AreaControls({
+  mode = "event",
   fence,
-  base,
-  baseIsVenue,
-  custom,
+  base = 0,
+  baseIsVenue = false,
+  custom = false,
   onBase,
   onCustom,
   onBuffer,
@@ -33,12 +38,13 @@ export function AreaControls({
   adjustLabel,
   tools,
 }: {
+  mode?: "event" | "venue"
   fence: Geofence | null
-  base: number
-  baseIsVenue: boolean
-  custom: boolean
-  onBase: () => void
-  onCustom: () => void
+  base?: number
+  baseIsVenue?: boolean
+  custom?: boolean
+  onBase?: () => void
+  onCustom?: () => void
   onBuffer: (metres: number) => void
   adjusting: boolean
   onAdjusting: (open: boolean) => void
@@ -53,7 +59,11 @@ export function AreaControls({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
-        {fence ? (
+        {fence && mode === "venue" ? (
+          <span id={`${id}-buffer`} className="text-[0.8125rem] font-semibold">
+            Buffer for every event here
+          </span>
+        ) : fence ? (
           <>
             <span id={`${id}-buffer`} className="text-[0.8125rem] font-semibold">
               Buffer
@@ -63,10 +73,10 @@ export function AreaControls({
               aria-labelledby={`${id}-buffer`}
               className="flex overflow-hidden rounded-lg border border-border-strong p-0.5"
             >
-              <Choice pressed={!custom} onClick={onBase}>
+              <Choice pressed={!custom} onClick={() => onBase?.()}>
                 {baseIsVenue ? "Venue's" : "Default"} · {base} m
               </Choice>
-              <Choice pressed={custom} onClick={onCustom}>
+              <Choice pressed={custom} onClick={() => onCustom?.()}>
                 Custom
               </Choice>
             </div>
@@ -78,7 +88,7 @@ export function AreaControls({
         </LinkButton>
       </div>
 
-      {fence && custom ? (
+      {fence && (custom || mode === "venue") ? (
         <div className="flex flex-col gap-1.5 pt-1">
           <Slider
             min={0}
@@ -92,6 +102,7 @@ export function AreaControls({
             <span>0 m</span>
             <span>
               {fence.buffer} m beyond the {shape}
+              {mode === "venue" ? " — events here start with this, and may change it for one night" : ""}
             </span>
             <span>{max} m</span>
           </div>

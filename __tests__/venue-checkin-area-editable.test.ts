@@ -14,7 +14,8 @@ const manage = readFileSync(join(__dirname, "..", "app", "dashboard", "venues", 
 const page = readFileSync(join(__dirname, "..", "app", "dashboard", "venues", "[id]", "page.tsx"), "utf8")
 
 it("puts the area editor on the venue page and sends what is drawn", () => {
-  expect(manage).toMatch(/<GeofenceEditor/)
+  // Through the shared place-and-area block since SCRUM-354.
+  expect(manage).toMatch(/<VenueArea/)
   expect(manage).toMatch(/\.\.\.\(fence \? \{ geofence: fence \} : \{\}\)/)
 })
 
@@ -24,10 +25,16 @@ it("loads the stored area to edit rather than starting from blank", () => {
   expect(manage).toMatch(/validateGeofence\(venue\.geofence\)/)
 })
 
-it("keeps a circle's centre and the pin together", () => {
-  // The rule the create wizard already follows: a circle is its own pin.
-  expect(manage).toMatch(/if \(next\.type === "circle"\) \{/)
-  expect(manage).toMatch(/lat: String\(next\.lat\), lng: String\(next\.lng\)/)
+it("keeps the pin on the area's centre — any area, once it is a place (SCRUM-354)", () => {
+  // Was: a circle is its own pin, and an outline left the pin where it was.
+  // With the latitude and longitude boxes gone, the pin is the area's centre,
+  // sent with the area only when the area moved.
+  expect(manage).toMatch(/onArea=\{\(next, centre\) => \{\s*setFence\(next\)\s*if \(centre\) \{\s*setPin\(centre\)\s*setMoved\(true\)/)
+  expect(manage).toMatch(/\.\.\.\(moved && pin \? \{ lat: pin\.lat, lng: pin\.lng \} : \{\}\)/)
+  expect(manage).not.toMatch(/\{\.\.\.field\("lat"\)\}/)
+  const area = readFileSync(join(__dirname, "..", "components", "venue-area.tsx"), "utf8")
+  // A ring still being drawn is not a place: the pin waits for three corners.
+  expect(area).toMatch(/const unfinished = next\.type === "polygon" && next\.ring\.length < 3\s*onArea\(next, unfinished \? null : fenceCentre\(next\)\)/)
 })
 
 /*

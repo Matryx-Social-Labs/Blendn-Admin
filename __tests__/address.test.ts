@@ -212,8 +212,14 @@ describe("the venue wizard goes through fillFromSearch, and only its newest sear
 
   it("drops a search that a newer one superseded", () => {
     // Two quick searches can resolve out of order; the older must not put its
-    // pin and address back (review finding on SCRUM-341).
-    expect(src).toMatch(/const seq = \+\+searchSeq\.current/)
-    expect(src).toMatch(/if \(seq !== searchSeq\.current\) return/)
+    // pin and address back (review finding on SCRUM-341). Since SCRUM-354 the
+    // wizard searches through VenueArea → WhereSearch, which keeps the guard.
+    expect(src).toMatch(/<VenueArea/)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const read = (f: string) => require("fs").readFileSync(require("path").join(__dirname, f), "utf8") as string
+    expect(read("../components/venue-area.tsx")).toMatch(/<WhereSearch/)
+    const search = read("../components/event-form/where-search.tsx")
+    expect(search).toMatch(/const mine = \+\+seq\.current/)
+    expect(search).toMatch(/if \(mine !== seq\.current\) return/)
   })
 })

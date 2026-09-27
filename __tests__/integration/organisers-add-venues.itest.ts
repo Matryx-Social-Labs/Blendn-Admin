@@ -3,7 +3,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
-import { createVenue, updateVenue } from "@/lib/venue-actions"
+import { createVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
 import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 
 /*
@@ -136,6 +136,18 @@ describe("who may edit an unclaimed venue (owner's ruling 2)", () => {
     rival.as()
     await expect(updateVenue(id, { name: "Hijacked" })).rejects.toThrow(/forbidden/i)
     expect((await row(id)).name).toBe("Renamed by its creator")
+  })
+
+  it("its creating organisation may not retire it — it corrects the place, an admin removes it (SCRUM-361)", async () => {
+    const host = await member("oav-retire-host", "organizer")
+    const admin = await member("oav-retire-admin", "app_admin", false)
+    host.as()
+    const id = await added({ lat: base.lat + 0.035, lng: base.lng })
+    await expect(retireVenue(id)).rejects.toThrow(/only an admin/i)
+    expect((await db.venues.findUniqueOrThrow({ where: { id }, select: { deleted_at: true } })).deleted_at).toBeNull()
+    admin.as()
+    await retireVenue(id)
+    expect((await db.venues.findUniqueOrThrow({ where: { id }, select: { deleted_at: true } })).deleted_at).not.toBeNull()
   })
 
   it("once claimed, the owner decides — the creating organisation no longer edits", async () => {

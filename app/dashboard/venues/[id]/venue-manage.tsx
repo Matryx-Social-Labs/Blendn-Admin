@@ -4,14 +4,17 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
-import { GeofenceEditor } from "@/components/geofence-editor"
+import type { venue_type } from "@prisma/client"
+
 import { SectionTitle } from "@/components/dashboard/primitives"
+import { VenueArea } from "@/components/venue-area"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { assignVenueOwner, restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
 import { validateGeofence, type Geofence } from "@/lib/geofence"
 import { refusalMessage } from "@/lib/refusal"
+import { VENUE_TYPE_GROUPS } from "@/lib/venue-types"
 
 /**
  * The controls a venue record never had.
@@ -31,16 +34,22 @@ import { refusalMessage } from "@/lib/refusal"
  * could be corrected by nobody (SCRUM-204). It decides who gets through the
  * door at every event here, which makes it the least forgivable field on the
  * page to leave unwritable.
+ *
+ * Since SCRUM-354 the place is found, not typed: one search, its outline
+ * arriving on its own, the buffer labelled as the default every event here
+ * starts with — the event form's flow. The latitude and longitude boxes went:
+ * the pin is the area's centre, so the two cannot drift apart (SCRUM-204).
  */
 export function VenueManage({
   venue,
   isAdmin,
   orgs,
+  canRetire = true,
 }: {
   venue: {
     id: string
     name: string
-    venueType: string | null
+    venueType: venue_type | null
     address: string | null
     city: string | null
     capacity: number | null
@@ -54,6 +63,11 @@ export function VenueManage({
   isAdmin: boolean
   /** Owner candidates. Empty for a non-admin, and for an already-owned venue. */
   orgs: { rows: { id: string; name: string }[]; total: number }
+  /**
+   * False for the organisation that added an unclaimed venue (SCRUM-361): it
+   * may correct the place, not remove it from under other organisers' events.
+   */
+  canRetire?: boolean
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
@@ -65,9 +79,13 @@ export function VenueManage({
     address: venue.address ?? "",
     city: venue.city ?? "",
     capacity: venue.capacity?.toString() ?? "",
-    lat: venue.lat?.toString() ?? "",
-    lng: venue.lng?.toString() ?? "",
   })
+  const [venueType, setVenueType] = useState<venue_type | null>(venue.venueType)
+  /** The area's centre once the area changes; the stored pin until then. */
+  const [pin, setPin] = useState<{ lat: number; lng: number } | null>(
+    venue.lat !== null && venue.lng !== null ? { lat: venue.lat, lng: venue.lng } : null
+  )
+  const [moved, setMoved] = useState(false)
 
   const field = (key: keyof typeof form) => ({
     id: key,
@@ -79,23 +97,14 @@ export function VenueManage({
   const save = () =>
     start(async () => {
       try {
-        /*
-         * Both coordinates or neither, decided here as well as in the action.
-         * The action refuses half a pair — this stops the round trip that would
-         * only be told so afterwards.
-         */
-        const hasLat = form.lat.trim() !== ""
-        const hasLng = form.lng.trim() !== ""
-        if (hasLat !== hasLng) {
-          toast.error("Give both a latitude and a longitude, or neither.")
-          return
-        }
         await updateVenue(venue.id, {
           name: form.name.trim(),
+          venueType,
           address: form.address.trim() || null,
           city: form.city.trim() || null,
           capacity: form.capacity.trim() ? Number(form.capacity) : null,
-          ...(hasLat ? { lat: Number(form.lat), lng: Number(form.lng) } : {}),
+          // The pin moves only with the area, as its centre — both at once.
+          ...(moved && pin ? { lat: pin.lat, lng: pin.lng } : {}),
           // Always the area on screen, touched or not — so a venue whose
           // stored area has drifted from its pin cannot be saved around, even
           // for a rename, until the area is put back (SCRUM-204).
@@ -149,57 +158,75 @@ export function VenueManage({
     <section className="flex flex-col gap-3 border-t border-border pt-5">
       <SectionTitle hint="what events here inherit">Record</SectionTitle>
 
-      <div className="grid gap-3 @2xl/main:grid-cols-3">
-        <div className="flex flex-col gap-1.5 @2xl/main:col-span-3">
-          <Label htmlFor="name">Name</Label>
-          <Input {...field("name")} />
-        </div>
+      <div className="grid gap-3 @2xl/main:grid-cols-4">
         <div className="flex flex-col gap-1.5 @2xl/main:col-span-2">
-          <Label htmlFor="address">Address</Label>
-          <Input {...field("address")} />
+          <Label htmlFor="name">Name</Label>
+          <Input {...field("name")} disabled={venue.retired} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="city">City</Label>
-          <Input {...field("city")} />
+          <Label htmlFor="venue-type">Type</Label>
+          <select
+            id="venue-type"
+            value={venueType ?? ""}
+            onChange={(e) => setVenueType((e.target.value || null) as venue_type | null)}
+            disabled={venue.retired}
+            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+          >
+            <option value="">Unclassified</option>
+            {VENUE_TYPE_GROUPS.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.types.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="capacity">Capacity</Label>
-          <Input {...field("capacity")} inputMode="numeric" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="lat">Latitude</Label>
-          <Input {...field("lat")} inputMode="decimal" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="lng">Longitude</Label>
-          <Input {...field("lng")} inputMode="decimal" />
+          <Input {...field("capacity")} inputMode="numeric" disabled={venue.retired} />
         </div>
 
-        {/*
-          Under the coordinates, because they are one fact: the place, and the
-          ground it covers. A circle's centre drags the pin with it — the same
-          rule the create wizard uses — so the two cannot drift apart here.
-        */}
-        <div className="flex flex-col gap-1.5 @2xl/main:col-span-3">
-          <Label>Check-in area</Label>
-          <GeofenceEditor
-            value={fence}
+        <div className="flex flex-col gap-1.5 @2xl/main:col-span-4">
+          <VenueArea
+            fence={fence}
+            venueType={venueType}
             editable={!venue.retired}
-            onChange={(next) => {
+            fallbackCentre={pin ?? undefined}
+            onPlace={({ location }) =>
+              setForm((f) => ({ ...f, address: location.address, city: location.city ?? f.city }))
+            }
+            onArea={(next, centre) => {
               setFence(next)
-              if (next.type === "circle") {
-                setForm((f) => ({ ...f, lat: String(next.lat), lng: String(next.lng) }))
+              if (centre) {
+                setPin(centre)
+                setMoved(true)
               }
             }}
-            fallbackCentre={
-              Number.isFinite(Number(form.lat)) && form.lat.trim() !== "" && form.lng.trim() !== ""
-                ? { lat: Number(form.lat), lng: Number(form.lng) }
-                : undefined
+            caption={
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="address" className="sr-only">
+                  Address
+                </Label>
+                <Input
+                  {...field("address")}
+                  disabled={venue.retired}
+                  placeholder="The address — written by the place; edit if the street is wrong"
+                />
+                <p className="text-[0.8125rem] text-muted-foreground">
+                  {form.city ? (
+                    <>
+                      <span className="text-foreground">{form.city}</span> — from the place
+                    </>
+                  ) : (
+                    "The city comes from the place."
+                  )}
+                </p>
+              </div>
             }
           />
-          <p className="text-[0.78125rem] text-muted-foreground">
-            Events here inherit this, and may narrow it for one night on the event itself.
-          </p>
         </div>
 
         {/*
@@ -209,7 +236,7 @@ export function VenueManage({
           the action refuses it.
         */}
         {isAdmin && !venue.ownerOrg && !venue.retired ? (
-          <div className="flex flex-col gap-1.5 @2xl/main:col-span-3">
+          <div className="flex flex-col gap-1.5 @2xl/main:col-span-4">
             <Label htmlFor="owner">Owner</Label>
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -237,7 +264,7 @@ export function VenueManage({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2 @2xl/main:col-span-3">
+        <div className="flex flex-wrap items-center gap-2 @2xl/main:col-span-4">
           <Button size="sm" onClick={save} disabled={pending || venue.retired}>
             Save
           </Button>
@@ -247,11 +274,11 @@ export function VenueManage({
                 Restore
               </Button>
             ) : null
-          ) : (
+          ) : canRetire ? (
             <Button size="sm" variant="outline" onClick={retire} disabled={pending}>
               Retire
             </Button>
-          )}
+          ) : null}
         </div>
       </div>
     </section>
