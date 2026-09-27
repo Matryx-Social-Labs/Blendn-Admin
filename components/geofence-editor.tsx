@@ -470,29 +470,18 @@ export function GeofenceEditor({
     setImporting(true)
     setImportNote(null)
     try {
-      const query = `[out:json][timeout:20];(way["building"](around:60,${centre[0]},${centre[1]});way["leisure"="stadium"](around:250,${centre[0]},${centre[1]}););out geom 8;`
-      const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: new URLSearchParams({ data: query }),
-        signal: AbortSignal.timeout(25_000),
+      // Through our server (SCRUM-351): Overpass asked from the browser had no
+      // User-Agent, against OSM's policy, and the main instance is often busy.
+      const res = await fetch(`/api/footprint?lat=${centre[0]}&lon=${centre[1]}`, {
+        signal: AbortSignal.timeout(20_000),
       })
-      const body = (await res.json()) as {
-        elements?: { geometry?: { lat: number; lon: number }[] }[]
-      }
-      // Largest footprint wins — a stadium's own outline beats a kiosk inside it.
-      const best = (body.elements ?? [])
-        .map((e) => (e.geometry ?? []).map((g) => [g.lat, g.lon] as [number, number]))
-        .filter((ring) => ring.length >= 4)
-        .sort((a, b) => spanOf(b) - spanOf(a))[0]
-
-      if (!best) {
-        setImportNote("No building outline here in OpenStreetMap — trace it by hand.")
+      if (!res.ok) {
+        setImportNote("OpenStreetMap is busy right now — try again in a minute, or trace it by hand.")
         return
       }
-      // Overpass closes ways by repeating the first point; our ring must not.
-      const ring = best.slice(0, -1).slice(0, GEOFENCE_LIMITS.MAX_RING)
-      if (ringSelfIntersects(ring)) {
-        setImportNote("That outline crosses itself — trace it by hand instead.")
+      const { ring } = (await res.json()) as { ring: [number, number][] | null }
+      if (!ring) {
+        setImportNote("No building outline here in OpenStreetMap — trace it by hand.")
         return
       }
       onChange({ type: "polygon", ring, buffer: fence.buffer })
@@ -501,7 +490,7 @@ export function GeofenceEditor({
       mapRef.current?.fitBounds(ring, { padding: [24, 24] })
       setImportNote(`Imported a ${ring.length}-corner outline. Drag any corner to adjust.`)
     } catch {
-      setImportNote("Couldn't reach OpenStreetMap. Trace it by hand, or try again.")
+      setImportNote("OpenStreetMap is busy right now — try again in a minute, or trace it by hand.")
     } finally {
       setImporting(false)
     }

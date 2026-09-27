@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
-import { fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, type Geofence } from "@/lib/geofence"
+import { DEFAULT_BUFFER_M, fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
 import { AddressSearch } from "@/components/event-form/address-search"
 import { FormSection } from "@/components/event-form/form-section"
@@ -75,6 +75,18 @@ export function LocationSection({
    * why their outline went.
    */
   function moveTo(location: LocationData) {
+    // A place OSM holds as an area comes with its outline (SCRUM-351): that is
+    // the check-in area, with the buffer it already had, and the pin is its
+    // centre. The address the search wrote stays.
+    if (location.outline) {
+      const current = form.getValues("geofence") as Geofence | null
+      const fence: Geofence = { type: "polygon", ring: location.outline, buffer: current?.buffer ?? DEFAULT_BUFFER_M }
+      const centre = fenceCentre(fence) ?? { lat: location.lat, lng: location.lng }
+      onLocationChange({ ...location, lat: centre.lat, lng: centre.lng })
+      setFence(fence)
+      setMovedKm(null)
+      return
+    }
     onLocationChange(location)
     const { fence, movedKm: moved } = followPin(
       (form.getValues("geofence") as Geofence | null) ?? null,
