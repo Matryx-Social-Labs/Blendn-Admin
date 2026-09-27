@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
   const limited = await rateLimit(req, userLimit("write", "geocode", session.user.id))
   if (limited) return limited
 
+  // Configuration, so CI's e2e can point it at recorded answers (SCRUM-357).
+  const nominatim = process.env.GEOCODE_UPSTREAM?.trim() || NOMINATIM
   const sp = req.nextUrl.searchParams
   const q = sp.get("q")?.trim()
   const lat = sp.get("lat")
@@ -77,11 +79,11 @@ export async function GET(req: NextRequest) {
      * a bar or a restaurant is a pin and still arrives as one.
      */
     upstream =
-      `${NOMINATIM}/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1` +
+      `${nominatim}/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1` +
       `&polygon_geojson=1&polygon_threshold=0.00002` +
       (countries ? `&countrycodes=${encodeURIComponent(countries)}` : "")
   } else if (lat && lon && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))) {
-    upstream = `${NOMINATIM}/reverse?lat=${Number(lat)}&lon=${Number(lon)}&format=json&addressdetails=1`
+    upstream = `${nominatim}/reverse?lat=${Number(lat)}&lon=${Number(lon)}&format=json&addressdetails=1`
   } else {
     return NextResponse.json({ error: "q, or lat and lon, are required" }, { status: 400 })
   }
