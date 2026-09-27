@@ -6,7 +6,7 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters, getBoundingBox } from "@/lib/geo"
-import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
+import { DEFAULT_BUFFER_M, fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
 import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
 
 /**
@@ -203,7 +203,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
       lat: input.lat,
       lng: input.lng,
       radius: defaultExtentMetres(input.venueType),
-      buffer: 20,
+      buffer: DEFAULT_BUFFER_M,
     }
   }
 

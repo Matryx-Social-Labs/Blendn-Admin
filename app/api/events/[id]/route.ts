@@ -148,7 +148,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       geofence,
     } = parsed.data
 
-    const location = validateLocationInput({ check_in_radius, geofence })
+    const location = validateLocationInput({ check_in_radius, geofence, latitude, longitude })
     if (!location.ok) {
       return NextResponse.json({ error: location.error }, { status: 400 })
     }

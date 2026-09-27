@@ -131,3 +131,34 @@ describe("canPublish — an event with no location has no geofence", () => {
     ).toBe(true)
   })
 })
+
+describe("the stored check_in_radius follows a saved area (SCRUM-350)", () => {
+  const pin = { latitude: 12.97886, longitude: 77.5995 }
+  const d = 0.0012
+  const stadium = {
+    type: "polygon",
+    buffer: 20,
+    ring: [
+      [pin.latitude - d, pin.longitude - d],
+      [pin.latitude - d, pin.longitude + d],
+      [pin.latitude + d, pin.longitude + d],
+      [pin.latitude + d, pin.longitude - d],
+    ],
+  }
+
+  it("stores the radius that covers an outline, whatever the form sent", () => {
+    const r = validateLocationInput({ check_in_radius: 100, geofence: stadium, ...pin })
+    expect(r.ok).toBe(true)
+    expect(r.values.check_in_radius).toBeGreaterThanOrEqual(206)
+  })
+
+  it("stores radius plus buffer for a circle on the pin", () => {
+    const circle = { type: "circle", lat: pin.latitude, lng: pin.longitude, radius: 30, buffer: 20 }
+    expect(validateLocationInput({ check_in_radius: 12, geofence: circle, ...pin }).values.check_in_radius).toBe(50)
+  })
+
+  it("keeps a sent radius when no area is saved", () => {
+    expect(validateLocationInput({ check_in_radius: 75, ...pin }).values.check_in_radius).toBe(75)
+  })
+})
+

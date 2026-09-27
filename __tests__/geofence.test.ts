@@ -1,3 +1,4 @@
+import { haversineDistanceMeters } from "@/lib/geo"
 import {
   pointInPolygon,
   distanceToPolygon,
@@ -9,6 +10,7 @@ import {
   fenceCentre,
   followPin,
   samePlace,
+  phoneCheckInRadius,
   eventCentre,
   fencesOverlap,
   validateGeofence,
@@ -575,6 +577,58 @@ describe("samePlace — whether the form's address still describes the area", ()
 
   it("does not keep it for an outline traced a kilometre away", () => {
     expect(samePlace(pin, square(pin.lat + 0.009, pin.lng, 0.0003))).toBe(false)
+  })
+})
+
+describe("phoneCheckInRadius — the circle the app judges with must cover the whole area (SCRUM-350)", () => {
+  // The app approximates the area as `checkInRadius` metres around the event's
+  // pin (PresenceMonitor, the check-in button). It must never be stricter than
+  // the door, which judges the real polygon.
+  const pin = { lat: 12.97886, lng: 77.5995 }
+  const d = 0.0012 // ~133 m north-south, ~130 m east-west: the Chinnaswamy outline's size
+  const stadium = {
+    type: "polygon" as const,
+    buffer: 20,
+    ring: [
+      [pin.lat - d, pin.lng - d],
+      [pin.lat - d, pin.lng + d],
+      [pin.lat + d, pin.lng + d],
+      [pin.lat + d, pin.lng - d],
+    ] as [number, number][],
+  }
+  const cornerMetres = haversineDistanceMeters(pin.lat, pin.lng, pin.lat + d, pin.lng + d)
+
+  it("covers every corner of an outline, plus its buffer — not the 60–100 m a polygon event stored", () => {
+    const r = phoneCheckInRadius({ geofence: stadium, latitude: pin.lat, longitude: pin.lng, check_in_radius: 100 })
+    expect(r).toBeGreaterThanOrEqual(cornerMetres + 20)
+    expect(r).toBeLessThan(cornerMetres + 22)
+  })
+
+  it("measures from the event's pin, which older events did not keep at the outline's centre", () => {
+    const off = { lat: pin.lat + 0.0009, lng: pin.lng } // ~100 m north of the centre
+    const r = phoneCheckInRadius({ geofence: stadium, latitude: off.lat, longitude: off.lng, check_in_radius: 60 })!
+    const farthest = Math.max(
+      ...stadium.ring.map(([lat, lng]) => haversineDistanceMeters(off.lat, off.lng, lat, lng))
+    )
+    expect(r).toBeGreaterThanOrEqual(farthest + 20)
+  })
+
+  it("is radius plus buffer for a circle on the pin — what the form already wrote", () => {
+    const circle = { type: "circle" as const, lat: pin.lat, lng: pin.lng, radius: 30, buffer: 20 }
+    expect(phoneCheckInRadius({ geofence: circle, latitude: pin.lat, longitude: pin.lng, check_in_radius: 50 })).toBe(50)
+  })
+
+  it("uses the venue's area when the event has none of its own", () => {
+    const r = phoneCheckInRadius({ geofence: null, venue: { geofence: stadium }, latitude: pin.lat, longitude: pin.lng, check_in_radius: 30 })
+    expect(r).toBeGreaterThanOrEqual(cornerMetres + 20)
+  })
+
+  it("keeps the stored radius for an event with only a pin and a radius", () => {
+    expect(phoneCheckInRadius({ geofence: null, latitude: pin.lat, longitude: pin.lng, check_in_radius: 100 })).toBe(100)
+  })
+
+  it("keeps the stored radius when there is nowhere to measure from", () => {
+    expect(phoneCheckInRadius({ geofence: null, latitude: null, longitude: null, check_in_radius: 45 })).toBe(45)
   })
 })
 

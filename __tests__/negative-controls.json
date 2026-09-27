@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "phone-radius-covers-outline.itest.ts": {
+      "guards": "The app judges the check-in area as a circle of checkInRadius around the pin (PresenceMonitor, the check-in button). It must hold the whole area and its buffer — outline or circle, the event's own or its venue's — so the app is never stricter than the door (SCRUM-350). phoneCheckInRadius (lib/geofence.ts) is pinned in geofence.test.ts; validateLocationInput stores the same value on save (geofence-input.test.ts); the event form keeps it in step for outlines too (event-where-one-map.test.ts).",
+      "mutation": "M14: location-section.tsx setFence back to circles only. M15: validateLocationInput no longer derives check_in_radius from a saved fence. M16: the mobile detail sends the stored check_in_radius column.",
+      "observed": "M14: event-where-one-map.test.ts 1 of 13 failing. M15: geofence-input.test.ts 2 of 21 failing. M16: phone-radius-covers-outline.itest.ts 2 of 3 failing (received 100 and 30 where >= 206.3 was expected).",
+      "date": "2026-09-27"
+    },
     "dm-delivered-once.test.ts": {
       "guards": "SCRUM-337: with a real socket.io server installed as the app's io, one DM reaches each socket exactly once — the recipient with the chat open (conversation + user rooms), the recipient on the chat list (user room only), and the sender with the chat open",
       "mutation": "M1: in lib/socket-server.ts emitPrivateMessage, the single `io.to(conversation).to(user:recipient).emit(...)` split back into two emits, one per room.",

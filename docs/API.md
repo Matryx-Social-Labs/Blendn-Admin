@@ -427,8 +427,18 @@ any request carrying coordinates — which the home screen sends in order to sor
 by distance — was silently cut to a 10 km box. Every section of that screen
 reads from one such query, so a user outside the box saw an entirely blank page
 telling them to "explore with location enabled". Distance is a sort and a label
-now. Only `city` scopes a list, and only `check_in_radius` refuses anyone, at
+now. Only `city` scopes a list, and only the check-in area refuses anyone, at
 the door where refusing is the point.
+
+**`checkInRadius` on `GET /events/:eventId` covers the whole check-in area**
+(SCRUM-350). The door judges the event's real area — its own geofence, else its
+venue's, a circle or an outline, plus its buffer. The app knows only a circle,
+so `checkInRadius` is the radius around `latitude`/`longitude` that holds all of
+that area: the farthest corner of an outline, or a circle's radius, plus the
+buffer. It used to be the stored column, which only circles kept in step — a
+~260 m stadium outline sent 60 or 100, and a phone inside the stadium read as
+outside. The field's name and type are unchanged; for an outline it is larger
+than before, which only ever makes the app more lenient than the door.
 
 **Each category on an event now carries its `parent`** (or `null` at top level).
 Events are tagged to **leaves** — an event is "Classical and Carnatic", never
