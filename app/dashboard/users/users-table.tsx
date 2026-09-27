@@ -5,14 +5,16 @@ import { useRouter, useSearchParams } from "next/navigation"
 import {
   ColumnDef,
   ColumnFiltersState,
-  SortingState,
-  VisibilityState,
+  ColumnVisibilityState,
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  createFilteredRowModel,
+  createPaginatedRowModel,
   flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  tableFeatures,
+  useTable,
 } from "@tanstack/react-table"
 import {
   IconChevronDown,
@@ -161,7 +163,23 @@ const STATUS_FILTERS = [
   { value: "deleted", label: "Deleted" },
 ]
 
-const columns: ColumnDef<UserWithProfile>[] = [
+/*
+ * TanStack Table 9 includes only the features a table declares. This one
+ * selects, hides columns and pages. Column filtering stays only because the
+ * selection count reads the filtered row model; nothing sets a column filter
+ * (search is server-side — see the comment in UsersTable). v8's sorting state
+ * was never driven by anything and was dropped with the upgrade.
+ */
+const features = tableFeatures({
+  rowSelectionFeature,
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  rowPaginationFeature,
+  filteredRowModel: createFilteredRowModel(),
+  paginatedRowModel: createPaginatedRowModel(),
+})
+
+const columns: ColumnDef<typeof features, UserWithProfile>[] = [
   {
     id: "select",
     header: ({ table }) => (
@@ -185,7 +203,6 @@ const columns: ColumnDef<UserWithProfile>[] = [
         />
       </div>
     ),
-    enableSorting: false,
     enableHiding: false,
   },
   {
@@ -590,11 +607,10 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
 
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] =
-    React.useState<VisibilityState>({})
+    React.useState<ColumnVisibilityState>({})
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     []
   )
-  const [sorting, setSorting] = React.useState<SortingState>([])
   const [pagination, setPagination] = React.useState({
     pageIndex: 0,
     // 20, not 10. Thirty-five accounts over four pages made paging the primary
@@ -602,11 +618,11 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
     pageSize: 20,
   })
 
-  const table = useReactTable({
+  const table = useTable({
+    features,
     data,
     columns,
     state: {
-      sorting,
       columnVisibility,
       rowSelection,
       columnFilters,
@@ -615,14 +631,9 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
     getRowId: (row) => row.id,
     enableRowSelection: true,
     onRowSelectionChange: setRowSelection,
-    onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     meta: {
       onRefresh,
       currentUserRole,
@@ -755,14 +766,14 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
               Rows per page
             </Label>
             <Select
-              value={`${table.getState().pagination.pageSize}`}
+              value={`${table.state.pagination.pageSize}`}
               onValueChange={(value) => {
                 table.setPageSize(Number(value))
               }}
             >
               <SelectTrigger size="sm" className="w-20" id="rows-per-page">
                 <SelectValue
-                  placeholder={table.getState().pagination.pageSize}
+                  placeholder={table.state.pagination.pageSize}
                 />
               </SelectTrigger>
               <SelectContent side="top">
@@ -775,7 +786,7 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
             </Select>
           </div>
           <div className="flex w-fit items-center justify-center text-sm font-medium">
-            Page {table.getState().pagination.pageIndex + 1} of{" "}
+            Page {table.state.pagination.pageIndex + 1} of{" "}
             {table.getPageCount()}
           </div>
           <div className="ml-auto flex items-center gap-2 @2xl/main:ml-0">
