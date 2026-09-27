@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { createVenue, venuesNear, type NearbyVenue } from "@/lib/venue-actions"
-import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
+import { followType, venueTypeLabel } from "@/lib/venue-types"
 import type { Geofence } from "@/lib/geofence"
 import type { venue_type } from "@prisma/client"
 import { refusalMessage } from "@/lib/refusal"
@@ -74,8 +74,9 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
 
   const [nearby, setNearby] = useState<NearbyVenue[]>([])
   const [checking, setChecking] = useState(false)
-  // Keyed on the pin, not a boolean: moving the pin invalidates the
-  // acknowledgement without a reset that could race the next lookup.
+  // Keyed on the neighbours it answered, not a boolean and not the pin: a new
+  // neighbour asks again, while nudging a corner — which moves the centre a
+  // metre — does not undo the answer (React review, SCRUM-354).
   const [ackFor, setAckFor] = useState<string | null>(null)
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -112,20 +113,9 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
     }
   }, [draft.lat, draft.lng])
 
-  // The pin seeds a circle sized for the type, so most venues never draw
-  // anything. Derived rather than stored — an effect that writes it back would
-  // fight the editor's own null handling.
-  const fence: Geofence | null =
-    draft.geofence ??
-    (draft.lat !== null && draft.lng !== null
-      ? {
-          type: "circle",
-          lat: draft.lat,
-          lng: draft.lng,
-          radius: defaultExtentMetres(draft.venueType),
-          buffer: 20,
-        }
-      : null)
+  // The pin only ever arrives with its area (`onArea`): a place picked brings
+  // an outline, or a circle sized for the type.
+  const fence: Geofence | null = draft.geofence
 
   /**
    * A picked place brings its words; the pin comes with its area (`onArea`),
@@ -138,8 +128,8 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
     setDraft((d) => ({ ...d, ...fillFromSearch(d, found) }))
   }
 
-  const pinKey = draft.lat !== null && draft.lng !== null ? `${draft.lat},${draft.lng}` : null
-  const acknowledged = ackFor !== null && ackFor === pinKey
+  const nearbyKey = nearby.map((v) => v.id).sort().join(",")
+  const acknowledged = ackFor !== null && ackFor === nearbyKey
   const blockingDuplicate = nearby.length > 0 && !acknowledged
   const stageValid: Record<Stage, boolean> = {
     Basics: draft.name.trim().length >= 2 && draft.venueType !== null,
@@ -233,7 +223,9 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
               <Label>What kind of venue is it?</Label>
               <VenueTypePicker
                 value={draft.venueType}
-                onChange={(t) => set("venueType", t)}
+                onChange={(t) =>
+                  setDraft((d) => ({ ...d, venueType: t, geofence: followType(d.geofence, d.venueType, t) }))
+                }
               />
             </div>
           </div>
@@ -326,7 +318,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
                   <input
                     type="checkbox"
                     checked={acknowledged}
-                    onChange={(e) => setAckFor(e.target.checked ? pinKey : null)}
+                    onChange={(e) => setAckFor(e.target.checked ? nearbyKey : null)}
                     className="mt-0.5 size-4 accent-[var(--color-primary)]"
                   />
                   <span>

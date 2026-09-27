@@ -34,6 +34,13 @@ test.describe("a venue owner adds a venue: the outline arrives with the place", 
     const next = (stage: string) => page.getByRole("button", { name: new RegExp(`^${stage}`) }).last()
     await next("Location").click()
 
+    // Nothing picked yet: "Find the building" has no place to look at, and
+    // must not search the map's default centre (React review).
+    await page.getByRole("button", { name: "Adjust area" }).click()
+    await expect(page.getByRole("button", { name: "Draw it yourself" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Find the building again" })).toHaveCount(0)
+    await page.getByRole("button", { name: "Adjust area" }).click()
+
     await page.getByRole("combobox", { name: "Place or address" }).fill("M Chinnaswamy Stadium")
     // Places only: a listed venue here is a duplicate to claim, not a pick.
     await expect(page.getByText("Listed venues")).toHaveCount(0)
@@ -70,6 +77,38 @@ test.describe("a venue owner adds a venue: the outline arrives with the place", 
     await page.goto(`/dashboard/venues/${id}`)
     await expect(page.locator('[data-area-source="saved"]:visible')).toContainText("The venue's outline", { timeout: 30_000 })
     await expect(page.locator(".leaflet-container path.leaflet-interactive").first()).toBeAttached({ timeout: 15_000 })
+  })
+})
+
+test.describe("a building found late keeps the buffer changed meanwhile", () => {
+  test.use({ storageState: "e2e/.auth/venue.json" })
+
+  test("the slider moves while the lookup is out; the outline arrives with the slider's value (React review)", async ({ page }) => {
+    // The stub finds no buildings, so this answer is the browser's, held back.
+    await page.route("**/api/footprint**", async (route) => {
+      await new Promise((r) => setTimeout(r, 2500))
+      const d = 0.0001
+      await route.fulfill({
+        json: { ring: [[12.9794 - d, 77.6406 - d], [12.9794 - d, 77.6406 + d], [12.9794 + d, 77.6406 + d], [12.9794 + d, 77.6406 - d]] },
+      })
+    })
+    await page.goto("/dashboard/venues/new")
+    await page.getByLabel("Venue name").fill(`e2e Late ${Date.now()}`)
+    await page.getByLabel("Search venue types").fill("pub")
+    await page.getByRole("button", { name: "Pub or bar", exact: true }).click()
+    await page.getByRole("button", { name: /^Location/ }).last().click()
+
+    await page.getByRole("combobox", { name: "Place or address" }).fill("Toit Indiranagar")
+    await page.getByRole("option", { name: /^Toit, 298/ }).click()
+    await expect(page.locator('[data-area-source="circle"]')).toBeVisible({ timeout: 15_000 })
+    const slider = page.getByRole("slider", { name: "Buffer, metres beyond the area" })
+    await slider.focus()
+    await page.keyboard.press("ArrowRight")
+    await expect(slider).toHaveAttribute("aria-valuenow", "25")
+
+    const cite = page.locator('[data-area-source="building"]')
+    await expect(cite).toBeVisible({ timeout: 15_000 })
+    await expect(cite).toContainText("+25 m")
   })
 })
 

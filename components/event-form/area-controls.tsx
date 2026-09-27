@@ -116,9 +116,13 @@ export function AreaControls({
       >
         {fence?.type === "polygon" ? <LinkButton onClick={tools.circle}>Use a circle instead</LinkButton> : null}
         <LinkButton onClick={tools.draw}>Draw it yourself</LinkButton>
-        <LinkButton onClick={tools.findBuilding} disabled={tools.finding}>
-          {tools.finding ? "Looking…" : "Find the building again"}
-        </LinkButton>
+        {/* Only with a place to look at: with no area yet it would search the
+            map's default centre and could save a stranger's building (React review). */}
+        {fence ? (
+          <LinkButton onClick={tools.findBuilding} disabled={tools.finding}>
+            {tools.finding ? "Looking…" : "Find the building again"}
+          </LinkButton>
+        ) : null}
         <p className="w-full text-[0.75rem] text-muted-foreground">
           {fence?.type === "circle"
             ? "Drag the centre to move it and the white handle to size it — the place as it is, not bigger to be safe."

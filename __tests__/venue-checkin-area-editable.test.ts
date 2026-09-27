@@ -57,3 +57,22 @@ it("seeds a switched-to circle and the building search on the pin, not on the sh
   const importer = editor.slice(editor.indexOf("const importFootprint"), editor.indexOf("setImporting(true)"))
   expect(importer).toMatch(/anchor\(\s*fence,\s*pinLat !== undefined && pinLng !== undefined \? \{ lat: pinLat, lng: pinLng \} : undefined,/)
 })
+
+it("keeps the \"different place\" answer while the same neighbours are near (React review, SCRUM-354)", () => {
+  // Keyed on the pin, nudging one corner moved the centre and undid the answer.
+  const create = readFileSync(join(__dirname, "..", "components", "venue-create-form.tsx"), "utf8")
+  expect(create).toMatch(/const nearbyKey = nearby\.map\(\(v\) => v\.id\)\.sort\(\)\.join\(","\)/)
+  expect(create).toMatch(/const acknowledged = ackFor !== null && ackFor === nearbyKey/)
+  expect(create).not.toMatch(/pinKey/)
+})
+
+it("a type change resizes a stand-in circle, on both venue pages (React review, SCRUM-354)", () => {
+  const create = readFileSync(join(__dirname, "..", "components", "venue-create-form.tsx"), "utf8")
+  expect(create).toMatch(/geofence: followType\(d\.geofence, d\.venueType, t\)/)
+  expect(manage).toMatch(/setFence\(\(f\) => followType\(f, venueType, next\)\)/)
+})
+
+it("a building lookup that lands late keeps a buffer changed meanwhile (React review, SCRUM-354)", () => {
+  const area = readFileSync(join(__dirname, "..", "components", "venue-area.tsx"), "utf8")
+  expect(area).toMatch(/setArea\(\{ type: "polygon", ring, buffer: latest\.current\?\.buffer \?\? buffer \}\)/)
+})

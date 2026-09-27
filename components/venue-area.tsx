@@ -53,6 +53,11 @@ export function VenueArea({
   useEffect(() => () => {
     footprintSeq.current++
   }, [])
+  /** The area as it is now: a lookup that lands late keeps a buffer changed meanwhile (React review). */
+  const latest = useRef(fence)
+  useEffect(() => {
+    latest.current = fence
+  }, [fence])
 
   function setArea(next: Geofence) {
     // A ring still being drawn is not a place: the pin waits for three corners.
@@ -79,7 +84,7 @@ export function VenueArea({
       .then((res) => (res.ok ? (res.json() as Promise<{ ring: [number, number][] | null }>) : { ring: null }))
       .then(({ ring }) => {
         if (mine !== footprintSeq.current || !ring) return
-        setArea({ type: "polygon", ring, buffer })
+        setArea({ type: "polygon", ring, buffer: latest.current?.buffer ?? buffer })
         setSource("building")
       })
       .catch(() => {

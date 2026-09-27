@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label"
 import { assignVenueOwner, restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
 import { validateGeofence, type Geofence } from "@/lib/geofence"
 import { refusalMessage } from "@/lib/refusal"
-import { VENUE_TYPE_GROUPS } from "@/lib/venue-types"
+import { followType, VENUE_TYPE_GROUPS } from "@/lib/venue-types"
 
 /**
  * The controls a venue record never had.
@@ -168,7 +168,11 @@ export function VenueManage({
           <select
             id="venue-type"
             value={venueType ?? ""}
-            onChange={(e) => setVenueType((e.target.value || null) as venue_type | null)}
+            onChange={(e) => {
+              const next = (e.target.value || null) as venue_type | null
+              setFence((f) => followType(f, venueType, next))
+              setVenueType(next)
+            }}
             disabled={venue.retired}
             className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
           >
