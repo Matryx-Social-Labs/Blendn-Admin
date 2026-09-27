@@ -138,15 +138,15 @@ describe("only one claim on an event can be approved", () => {
     /*
      * The production predicate, run against a real violation.
      *
-     * `error.message` is "Unique constraint failed on the fields: (`event_id`)"
-     * — the fields, never the index name — so the handler's original
-     * `message.includes("event_claims_one_approved_per_event")` could not match
-     * and the graceful path was unreachable. The name lives in
-     * `meta.driverAdapterError.cause.originalMessage`, which is what
-     * `violatedConstraint` reads.
+     * Up to Prisma 7.9 `error.message` was "Unique constraint failed on the
+     * fields: (`event_id`)" — the fields, never the index name — so the
+     * handler's original `message.includes("event_claims_one_approved_per_event")`
+     * could not match and the graceful path was unreachable; the name lived
+     * only in `meta.driverAdapterError.cause.originalMessage`. Prisma 7.10 names
+     * the constraint in the message too. `violatedConstraint` reads both, so it
+     * holds on either side of that change — which is why this asserts the
+     * predicate and not the message wording.
      */
-    const message = error instanceof Error ? error.message : String(error)
-    expect(message).not.toContain("event_claims_one_approved_per_event")
     expect(violatedConstraint(error, "event_claims_one_approved_per_event")).toBe(true)
 
     // And it does not answer yes to a different index on the same table.
