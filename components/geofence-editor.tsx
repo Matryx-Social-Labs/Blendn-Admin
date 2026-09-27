@@ -128,6 +128,10 @@ export function GeofenceEditor({
   const [drawing, setDrawing] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importNote, setImportNote] = useState<string | null>(null)
+  // Leaflet loads after the first render, so the draw effect's first run finds
+  // no map. This redraws once it exists; nothing else would on a page that
+  // renders once — the venue page never drew its saved area (SCRUM-345).
+  const [mapReady, setMapReady] = useState(false)
 
   /*
    * Memoised, because the draw effect below keys on it. As a bare `value ?? {…}`
@@ -171,7 +175,10 @@ export function GeofenceEditor({
   const [prevType, setPrevType] = useState(fence.type)
   if (fence.type !== prevType) {
     setPrevType(fence.type)
-    if (fence.type !== "polygon") setDrawing(false)
+    if (fence.type !== "polygon") {
+      setDrawing(false)
+      setImportNote(null)
+    }
   }
 
   const crossed = fence.type === "polygon" && ringSelfIntersects(fence.ring)
@@ -218,6 +225,7 @@ export function GeofenceEditor({
       })
 
       mapRef.current = map
+      setMapReady(true)
       setTimeout(() => map.invalidateSize(), 50)
       const observer = new ResizeObserver(() => map.invalidateSize())
       observer.observe(containerRef.current)
@@ -440,7 +448,7 @@ export function GeofenceEditor({
         map.setView(centre, wide ? 16 : 18)
       }
     }
-  }, [fence, showAccuracy, overlap, editable, drawing, crossed, onChange, fallbackCentre.lat, fallbackCentre.lng])
+  }, [mapReady, fence, showAccuracy, overlap, editable, drawing, crossed, onChange, fallbackCentre.lat, fallbackCentre.lng])
 
   /* ------------------------------------------------------ OSM footprint --- */
 
@@ -488,6 +496,8 @@ export function GeofenceEditor({
       }
       onChange({ type: "polygon", ring, buffer: fence.buffer })
       setDrawing(false)
+      // A stadium's outline is wider than the view it was fetched from.
+      mapRef.current?.fitBounds(ring, { padding: [24, 24] })
       setImportNote(`Imported a ${ring.length}-corner outline. Drag any corner to adjust.`)
     } catch {
       setImportNote("Couldn't reach OpenStreetMap. Trace it by hand, or try again.")
@@ -575,7 +585,7 @@ export function GeofenceEditor({
         </div>
 
         {overlay && !drawing && !crossed ? (
-          <div className="absolute left-2.5 top-2.5 z-[800] w-[min(58%,22rem)]">{overlay}</div>
+          <div className="absolute left-12 top-2.5 z-[800] w-[min(58%,22rem)]">{overlay}</div>
         ) : null}
 
         {editable && drawing ? (

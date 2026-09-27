@@ -63,8 +63,34 @@ describe("the map's supporting parts", () => {
     expect(editor).toMatch(/^import "leaflet\/dist\/leaflet\.css"$/m)
   })
 
+  it("draws a saved area once the map exists, not only when the area next changes (SCRUM-345)", () => {
+    // The map is created after `import("leaflet")` resolves; the draw effect
+    // had already run and returned. The venue page never re-rendered after
+    // that, so its saved area was never drawn.
+    const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
+    expect(editor).toMatch(/mapRef\.current = map\s*\n\s*setMapReady\(true\)/)
+    const draw = editor.slice(editor.indexOf("/* --------------------------------------------------------------- draw --- */"))
+    expect(draw.slice(0, draw.indexOf("/* ------------------------------------------------------ OSM footprint --- */"))).toMatch(/\}, \[mapReady, fence,/)
+  })
+
+  it("frames an imported outline, and keeps the search clear of the zoom control", () => {
+    const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
+    const imp = editor.slice(editor.indexOf("const importFootprint"), editor.indexOf("/* --------------------------------------------------------------- view --- */"))
+    expect(imp).toMatch(/mapRef\.current\?\.fitBounds\(ring/)
+    // Leaflet's zoom control is 10px in and 34px wide; the search starts past it.
+    expect(editor).toMatch(/className="absolute left-12 top-2\.5 z-\[800\]/)
+  })
+
+  it("LocationPicker loads the stylesheet from the package, not unpkg (CSP style-src)", () => {
+    const picker = readFileSync(join(__dirname, "../components/location-picker.tsx"), "utf8")
+    expect(picker).toMatch(/^import "leaflet\/dist\/leaflet\.css"$/m)
+    expect(picker).not.toMatch(/unpkg\.com\/leaflet@[^"]*\/leaflet\.css/)
+  })
+
   it("a fence replaced from outside ends tracing, so a venue's outline does not take clicks as corners", () => {
     const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
-    expect(editor).toMatch(/if \(fence\.type !== prevType\) \{\s*setPrevType\(fence\.type\)\s*if \(fence\.type !== "polygon"\) setDrawing\(false\)/)
+    // …and drops a note about the outline it replaced ("Couldn't reach
+    // OpenStreetMap" sat under "Outline cleared" on staging).
+    expect(editor).toMatch(/if \(fence\.type !== prevType\) \{\s*setPrevType\(fence\.type\)\s*if \(fence\.type !== "polygon"\) \{\s*setDrawing\(false\)\s*setImportNote\(null\)/)
   })
 })
