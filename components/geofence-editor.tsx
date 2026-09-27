@@ -7,17 +7,6 @@ import type { Map as LeafletMap, LayerGroup, TileLayer } from "leaflet"
 // Its own, not LocationPicker's runtime <link>: pages without that picker got
 // stacked, unclipped tiles and a circle drawn off the map (SCRUM-344).
 import "leaflet/dist/leaflet.css"
-import {
-  IconBuildingCommunity,
-  IconCircleDashed,
-  IconPolygon,
-  IconRefresh,
-} from "@tabler/icons-react"
-
-import { Button } from "@/components/ui/button"
-import { Slider } from "@/components/ui/slider"
-import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import {
   DEFAULT_ACCURACY_POLICY,
@@ -91,11 +80,11 @@ export interface GeofenceEditorProps {
   /** Directly under the map: the event form's address, written by the pin. */
   caption?: ReactNode
   /**
-   * Replaces the built-in toolbar and panel. The event form draws its own
-   * buffer choice and "Adjust area" from these tools (SCRUM-353); the venue
-   * pages keep the built-in ones until SCRUM-354.
+   * The controls under the map: the buffer and "Adjust area", drawn by the
+   * caller from these tools — the event form (SCRUM-353) and the venue pages
+   * (SCRUM-354). The editor's own toolbar and panel went with SCRUM-354.
    */
-  controls?: (tools: AreaTools) => ReactNode
+  controls: (tools: AreaTools) => ReactNode
   /** The legend's first two lines, when the caller can say whose they are. */
   legend?: { extent: string; buffer: string }
 }
@@ -141,7 +130,6 @@ export function GeofenceEditor({
   const leafletRef = useRef<typeof import("leaflet") | null>(null)
 
   const [layer, setLayer] = useState<"map" | "sat">("map")
-  const [showAccuracy, setShowAccuracy] = useState(true)
   const [drawing, setDrawing] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importNote, setImportNote] = useState<string | null>(null)
@@ -316,16 +304,14 @@ export function GeofenceEditor({
 
     if (fence.type === "circle") {
       const centre: [number, number] = [fence.lat, fence.lng]
-      if (showAccuracy) {
-        L.circle(centre, {
-          radius: fence.radius + fence.buffer + ACCURACY_CAP,
-          color: COLOURS.accuracy,
-          weight: 1.5,
-          dashArray: "2 7",
-          fill: false,
-          opacity: 0.55,
-        }).addTo(group)
-      }
+      L.circle(centre, {
+        radius: fence.radius + fence.buffer + ACCURACY_CAP,
+        color: COLOURS.accuracy,
+        weight: 1.5,
+        dashArray: "2 7",
+        fill: false,
+        opacity: 0.55,
+      }).addTo(group)
       L.circle(centre, {
         radius: fence.radius + fence.buffer,
         color: COLOURS.buffer,
@@ -376,15 +362,13 @@ export function GeofenceEditor({
         const lat = fence.ring[0][0]
         const zoom = mapRef.current?.getZoom() ?? 18
         const px = (m: number) => Math.max(1, (2 * m) / metresPerPixel(lat, zoom))
-        if (showAccuracy) {
-          L.polygon(fence.ring, {
-            fill: false,
-            color: COLOURS.accuracy,
-            opacity: 0.16,
-            weight: px(fence.buffer + ACCURACY_CAP),
-            lineJoin: "round",
-          }).addTo(group)
-        }
+        L.polygon(fence.ring, {
+          fill: false,
+          color: COLOURS.accuracy,
+          opacity: 0.16,
+          weight: px(fence.buffer + ACCURACY_CAP),
+          lineJoin: "round",
+        }).addTo(group)
         L.polygon(fence.ring, {
           fill: false,
           color: COLOURS.buffer,
@@ -469,7 +453,7 @@ export function GeofenceEditor({
         map.setView(centre, wide ? 16 : 18)
       }
     }
-  }, [mapReady, fence, showAccuracy, overlap, editable, drawing, crossed, onChange, fallbackCentre.lat, fallbackCentre.lng])
+  }, [mapReady, fence, overlap, editable, drawing, crossed, onChange, fallbackCentre.lat, fallbackCentre.lng])
 
   /* ------------------------------------------------------ OSM footprint --- */
 
@@ -548,31 +532,6 @@ export function GeofenceEditor({
 
   return (
     <div className="flex flex-col gap-3">
-      {editable && !controls ? (
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Tabs value={mode} onValueChange={switchMode}>
-            <TabsList>
-              <TabsTrigger value="circle">
-                <IconCircleDashed className="size-4" /> Circle
-              </TabsTrigger>
-              <TabsTrigger value="polygon">
-                <IconPolygon className="size-4" /> Trace outline
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <span className="text-[0.71875rem] text-faint-foreground">
-            {mode === "circle"
-              ? "Fast — right for most venues."
-              : "For stadiums, campuses, rooftops — anywhere a circle lies."}
-          </span>
-          <div className="flex-1" />
-          <Button size="sm" variant="outline" onClick={importFootprint} disabled={importing}>
-            <IconBuildingCommunity className="size-4" />
-            {importing ? "Looking…" : "Use building outline"}
-          </Button>
-        </div>
-      ) : null}
-
       <div className="relative overflow-hidden rounded-xl border border-border-strong">
         {/*
           OpenStreetMap's own unloaded-tile colour, deliberately not a brand
@@ -620,13 +579,11 @@ export function GeofenceEditor({
         <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[800] flex flex-col gap-1.5 rounded-lg border border-border-strong bg-background/90 px-3 py-2 text-[0.71875rem] backdrop-blur">
           <Legend token="--chart-1" dash="solid" label={legend?.extent ?? "Extent — the venue itself"} />
           <Legend token="--chart-2" dash="dashed" label={legend?.buffer ?? `Buffer — your tolerance (${fence.buffer} m)`} />
-          {showAccuracy ? (
-            <Legend
-              token="--muted-foreground"
-              dash="dotted"
-              label={`GPS allowance — automatic, up to ${ACCURACY_CAP} m`}
-            />
-          ) : null}
+          <Legend
+            token="--muted-foreground"
+            dash="dotted"
+            label={`GPS allowance — automatic, up to ${ACCURACY_CAP} m`}
+          />
           {overlap ? (
             <Legend token="--chart-3" dash="dashed" label={`${overlap.name} (concurrent)`} />
           ) : null}
@@ -639,66 +596,7 @@ export function GeofenceEditor({
         <p className="text-[0.75rem] text-muted-foreground">{importNote}</p>
       ) : null}
 
-      {controls ? <ControlsSlot render={controls} tools={tools} /> : editable ? (
-        <div className="grid gap-4 @2xl/main:grid-cols-2 @2xl/main:gap-7">
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center gap-2 text-[0.8125rem]">
-              <span className="font-bold">{describe(fence)}</span>
-              {fence.type === "polygon" && fence.ring.length > 0 ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setDrawing(true)
-                    onChange({ type: "polygon", ring: [], buffer: fence.buffer })
-                  }}
-                >
-                  <IconRefresh className="size-3.5" /> Start over
-                </Button>
-              ) : null}
-            </div>
-            <p className="text-[0.75rem] text-faint-foreground">
-              {fence.type === "circle"
-                ? "Drag the centre dot to move it, the white handle to resize. Draw the venue as it actually is — not bigger to be safe."
-                : "Drag a corner to adjust, right-click one to remove it."}
-            </p>
-
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[0.78125rem] font-medium text-muted-foreground">
-                Buffer — <b className="text-foreground">{fence.buffer} m</b> beyond the extent
-              </span>
-              <Slider
-                min={0}
-                max={GEOFENCE_LIMITS.MAX_BUFFER}
-                step={5}
-                value={[fence.buffer]}
-                onValueChange={([v]) => onChange({ ...fence, buffer: v })}
-                aria-label="Buffer in metres"
-                className="max-w-80"
-              />
-              <span className="text-[0.71875rem] text-faint-foreground">
-                The queue, the pavement, the car park — deliberate tolerance, your call.
-              </span>
-            </label>
-          </div>
-
-          <div className="flex flex-col gap-2 border-border text-[0.78125rem] text-muted-foreground @2xl/main:border-l @2xl/main:pl-6">
-            <span className="text-[0.8125rem] font-bold text-foreground">
-              GPS noise is handled for you
-            </span>
-            <p>
-              At check-in each phone reports how accurate its own fix is — typically 5–65 m
-              indoors. That reading, capped at {ACCURACY_CAP} m, is added on top of your buffer{" "}
-              <b>automatically, per attendee</b>. So someone up to ~{fence.buffer + ACCURACY_CAP} m
-              out may get in on a bad-GPS day, and that is correct behaviour rather than a bug.
-            </p>
-            <label className="flex items-center gap-2">
-              <Switch checked={showAccuracy} onCheckedChange={setShowAccuracy} />
-              <span>Show the allowance on the map</span>
-            </label>
-          </div>
-        </div>
-      ) : null}
+      <ControlsSlot render={controls} tools={tools} />
     </div>
   )
 }
@@ -827,12 +725,4 @@ function spanOf(ring: [number, number][]): number {
   if (ring.length < 2) return 0
   const c = centroid(ring, ring[0])
   return ring.reduce((m, p) => Math.max(m, metresBetween(c, p)), 0) * 2
-}
-
-function describe(fence: Geofence): string {
-  if (fence.type === "circle") return `circle · ${Math.round(fence.radius)} m radius`
-  if (fence.ring.length < 3) {
-    return `${fence.ring.length} point${fence.ring.length === 1 ? "" : "s"}`
-  }
-  return `traced outline · ${fence.ring.length} corners · ~${Math.round(spanOf(fence.ring))} m across`
 }

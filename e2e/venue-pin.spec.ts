@@ -148,9 +148,11 @@ test.describe("the venue page's check-in area map", () => {
     expect(href).toMatch(/^\/dashboard\/venues\/[^/?]+$/)
 
     await page.goto(href!)
+    // Since SCRUM-354 the venue page's area takes drags only while "Adjust
+    // area" is open, like the event form's; its buffer is the default every
+    // event here starts with, on a named slider.
+    await expect(page.getByRole("slider", { name: "Buffer, metres beyond the area" })).toBeVisible({ timeout: 30_000 })
+    await page.getByRole("button", { name: "Adjust area" }).click()
     await expectOnTheMap(page)
-    // The venue page keeps the editor's own controls; its slider is named on
-    // the thumb, the element with role="slider".
-    await expect(page.getByRole("slider", { name: "Buffer in metres" })).toBeVisible()
   })
 })

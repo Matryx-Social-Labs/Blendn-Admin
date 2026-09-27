@@ -127,6 +127,20 @@ export function venueTypeLabel(type: venue_type | null | undefined): string {
  * Deliberately conservative: the buffer and the per-attendee GPS allowance both
  * add on top, so these are the *building*, not the check-in area.
  */
+/**
+ * A circle still at its type's default size was never adjusted, so it follows
+ * the type: a café's 20 m is wrong once the place is a stadium (React review,
+ * SCRUM-354). A drawn outline, or a circle someone sized, stays as it is.
+ */
+export function followType<F extends { type: string; radius?: number }>(
+  fence: F | null,
+  from: venue_type | null | undefined,
+  to: venue_type | null | undefined
+): F | null {
+  if (!fence || fence.type !== "circle" || fence.radius !== defaultExtentMetres(from)) return fence
+  return { ...fence, radius: defaultExtentMetres(to) }
+}
+
 export function defaultExtentMetres(type: venue_type | null | undefined): number {
   switch (type) {
     case "stadium":
