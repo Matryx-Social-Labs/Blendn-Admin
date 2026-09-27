@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState, useTransition } from "react"
+import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -15,7 +15,7 @@ import {
 
 import { GeofenceEditor } from "@/components/geofence-editor"
 import { VenueTypePicker } from "@/components/venue-type-picker"
-import { cityFrom } from "@/lib/address"
+import { cityFrom, fillFromSearch, type AddressFields } from "@/lib/address"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,6 +52,8 @@ interface Draft {
   lng: number | null
   capacity: string
   geofence: Geofence | null
+  /** What the last search wrote into address and city (SCRUM-341). */
+  lastFill: AddressFields
 }
 
 export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
@@ -67,6 +69,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
     lng: null,
     capacity: "",
     geofence: null,
+    lastFill: { address: "", city: "" },
   })
 
   const [nearby, setNearby] = useState<NearbyVenue[]>([])
@@ -76,6 +79,9 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
   const [ackFor, setAckFor] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
+  // Only the newest search may write: two quick searches can resolve out of
+  // order, and the older one would put its pin and address back.
+  const searchSeq = useRef(0)
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }))
@@ -129,6 +135,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
   async function search() {
     const q = query.trim()
     if (!q) return
+    const seq = ++searchSeq.current
     setSearching(true)
     try {
       const res = await fetch(
@@ -140,27 +147,30 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
         display_name: string
         address?: Record<string, string>
       }[]
+      if (seq !== searchSeq.current) return
       if (!hits.length) {
         toast.error("Nothing found — drop the pin by hand instead.")
         return
       }
       const hit = hits[0]
+      // Was `city || town || state_district`, which skipped village and
+      // municipality entirely — so a venue in a village was filed under its
+      // district here and under the village name from the event form. Same
+      // pin, two cities, and neither screen looked wrong on its own.
+      const found = { address: hit.display_name, city: cityFrom(hit.address) || "" }
       setDraft((d) => ({
         ...d,
         lat: Number(hit.lat),
         lng: Number(hit.lon),
-        address: d.address || hit.display_name,
-        // Was `city || town || state_district`, which skipped village and
-        // municipality entirely — so a venue in a village was filed under its
-        // district here and under the village name from the event form. Same
-        // pin, two cities, and neither screen looked wrong on its own.
-        city: d.city || cityFrom(hit.address) || "",
+        // The pin moves, so the address it filled moves with it; only what the
+        // person typed stays.
+        ...fillFromSearch(d, found),
         geofence: null,
       }))
     } catch {
-      toast.error("Search is unavailable. Drop the pin by hand.")
+      if (seq === searchSeq.current) toast.error("Search is unavailable. Drop the pin by hand.")
     } finally {
-      setSearching(false)
+      if (seq === searchSeq.current) setSearching(false)
     }
   }
 

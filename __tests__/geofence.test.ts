@@ -7,6 +7,8 @@ import {
   legacyGeofence,
   boundingCircle,
   fenceCentre,
+  followPin,
+  samePlace,
   eventCentre,
   fencesOverlap,
   validateGeofence,
@@ -486,3 +488,93 @@ describe("self-crossing rings are refused", () => {
     })
   })
 })
+
+/*
+ * What the check-in area does when the event's pin moves by address search or
+ * a venue pick (the one-map "Where" section). With two maps, the pin moved and
+ * the area stayed wherever it had been drawn — the maps disagreed, and the
+ * event saved a pin in one place and a fence in another.
+ */
+describe("followPin", () => {
+  const cubbon = { lat: 12.97634, lng: 77.59286 }
+  const palace = { lat: 12.9986, lng: 77.59201 } // ~2.5 km north
+
+  it("leaves no area alone — the editor draws its default circle on the pin", () => {
+    expect(followPin(null, cubbon)).toEqual({ fence: null, movedKm: null })
+  })
+
+  it("moves a circle onto the new pin, keeping its size and buffer", () => {
+    const circle = { type: "circle" as const, lat: cubbon.lat, lng: cubbon.lng, radius: 45, buffer: 15 }
+    expect(followPin(circle, palace)).toEqual({ fence: { ...circle, lat: palace.lat, lng: palace.lng }, movedKm: null })
+  })
+
+  it("keeps an outline the new pin is still on — a nudge, not a new place", () => {
+    const d = 0.0003
+    const ring: [number, number][] = [
+      [cubbon.lat - d, cubbon.lng - d],
+      [cubbon.lat - d, cubbon.lng + d],
+      [cubbon.lat + d, cubbon.lng + d],
+      [cubbon.lat + d, cubbon.lng - d],
+    ]
+    const outline = { type: "polygon" as const, ring, buffer: 20 }
+    const nudged = { lat: cubbon.lat + 0.0002, lng: cubbon.lng }
+    expect(followPin(outline, nudged)).toEqual({ fence: outline, movedKm: null })
+  })
+
+  it("replaces an outline left behind with a circle on the pin, and says how far it moved", () => {
+    const d = 0.0003
+    const ring: [number, number][] = [
+      [cubbon.lat - d, cubbon.lng - d],
+      [cubbon.lat - d, cubbon.lng + d],
+      [cubbon.lat + d, cubbon.lng + d],
+      [cubbon.lat + d, cubbon.lng - d],
+    ]
+    const { fence, movedKm } = followPin({ type: "polygon", ring, buffer: 25 }, palace)
+    expect(fence).toEqual({ type: "circle", lat: palace.lat, lng: palace.lng, radius: 30, buffer: 25 })
+    expect(movedKm).toBeGreaterThan(2.3)
+    expect(movedKm).toBeLessThan(2.7)
+  })
+
+  it("does not mutate the fence it was given", () => {
+    const circle = { type: "circle" as const, lat: cubbon.lat, lng: cubbon.lng, radius: 30, buffer: 20 }
+    const before = { ...circle }
+    followPin(circle, palace)
+    expect(circle).toEqual(before)
+  })
+})
+
+describe("samePlace — whether the form's address still describes the area", () => {
+  const pin = { lat: 12.9772163, lng: 77.5991943 } // a Chinnaswamy search hit on Queen's Road
+  const square = (lat: number, lng: number, d: number) => ({
+    type: "polygon" as const,
+    buffer: 20,
+    ring: [
+      [lat - d, lng - d],
+      [lat - d, lng + d],
+      [lat + d, lng + d],
+      [lat + d, lng - d],
+    ] as [number, number][],
+  })
+
+  it("has no address to keep before there was a pin", () => {
+    expect(samePlace(null, { type: "circle", lat: pin.lat, lng: pin.lng, radius: 30, buffer: 20 })).toBe(false)
+  })
+
+  it("keeps it for a circle nudged a few metres, not for one dragged elsewhere", () => {
+    const circle = (dLat: number) => ({ type: "circle" as const, lat: pin.lat + dLat, lng: pin.lng, radius: 30, buffer: 20 })
+    expect(samePlace(pin, circle(0.00004))).toBe(true) // ~4 m
+    expect(samePlace(pin, circle(0.00045))).toBe(false) // ~50 m
+  })
+
+  it("keeps it for the stadium's own outline, whose centre is 183 m from the search point (staging, SCRUM-343)", () => {
+    // ~265 m square on the stadium; the pin is ~49 m south of its edge. Judged
+    // by how far the centre moved (183 m > 150) it read as a new place, and the
+    // address "Chinnaswamy Stadium, …" was replaced by a road.
+    expect(samePlace(pin, square(12.97886, 77.5995, 0.0012))).toBe(true)
+  })
+
+  it("does not keep it for an outline traced a kilometre away", () => {
+    expect(samePlace(pin, square(pin.lat + 0.009, pin.lng, 0.0003))).toBe(false)
+  })
+})
+

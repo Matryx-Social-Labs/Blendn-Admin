@@ -279,6 +279,53 @@ export function fenceCentre(fence: Geofence): LatLng | null {
   return Number.isFinite(centre.lat) && Number.isFinite(centre.lng) ? centre : null
 }
 
+/** An outline this close to a moved pin is still the venue's shape; beyond it, a new place. */
+export const OUTLINE_KEEP_WITHIN_M = 150
+
+/**
+ * What the check-in area becomes when the pin moves by an address search or a
+ * venue pick — the event form's one map, where pin and area are never apart.
+ *
+ * A circle moves onto the pin with its size and buffer. An outline the pin is
+ * still on (or within `OUTLINE_KEEP_WITHIN_M` of) is kept: that is a nudge. An
+ * outline left behind is replaced by a default circle on the pin, and
+ * `movedKm` says how far, so the form can tell the organiser why their
+ * outline went. With two maps the pin moved and the area did not, and the
+ * event saved a pin in one place and a fence in another.
+ */
+export function followPin(
+  fence: Geofence | null,
+  pin: LatLng
+): { fence: Geofence | null; movedKm: number | null } {
+  if (!fence) return { fence: null, movedKm: null }
+  if (fence.type === "circle") return { fence: { ...fence, lat: pin.lat, lng: pin.lng }, movedKm: null }
+  if (distanceToGeofence(pin, fence) <= OUTLINE_KEEP_WITHIN_M) return { fence, movedKm: null }
+  const from = fenceCentre(fence)
+  return {
+    fence: { type: "circle", lat: pin.lat, lng: pin.lng, radius: 30, buffer: fence.buffer },
+    movedKm: from ? Math.round(haversineDistanceMeters(from.lat, from.lng, pin.lat, pin.lng) / 100) / 10 : null,
+  }
+}
+
+/** A circle's centre moved less than this is the same place: a nudge, not a move. */
+export const CIRCLE_NUDGE_M = 10
+
+/**
+ * Whether the address the form already has still describes this area — the
+ * event form's one map rewrites it from the area's centre only when not.
+ *
+ * The same rule `followPin` uses for an outline: within `OUTLINE_KEEP_WITHIN_M`
+ * of the previous pin is the same place. Not how far the centre moved — a
+ * stadium's centre sits well inside it, and the search hit for "Chinnaswamy
+ * Stadium" was 183 m from the centre of its own outline, so importing that
+ * outline replaced the stadium's address with a road (staging, SCRUM-343).
+ */
+export function samePlace(before: LatLng | null, fence: Geofence): boolean {
+  if (!before) return false
+  if (fence.type === "polygon") return distanceToGeofence(before, fence) <= OUTLINE_KEEP_WITHIN_M
+  return haversineDistanceMeters(before.lat, before.lng, fence.lat, fence.lng) < CIRCLE_NUDGE_M
+}
+
 /**
  * Where an *event* is: the fence when it has one, the pin otherwise.
  *

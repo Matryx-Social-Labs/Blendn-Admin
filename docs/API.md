@@ -232,6 +232,38 @@ A page may hold fewer events than `totalCount` suggests if the platform has
 since deleted one. That is deliberate — a deletion does not change how many
 events you went to.
 
+### GET /me/rsvps
+
+The events you said you are going to — what the app's **Going** tab lists above
+your saved events. Until this route, RSVPs were only readable one event at a
+time, so the tab showed hearts and never the events you had said yes to.
+
+```
+GET /api/mobile/me/rsvps?page=1&limit=20
+```
+
+```json
+{ "success": true, "data": {
+  "events": [
+    { "id": "…", "slug": "…", "title": "Rooftop Sessions",
+      "coverImageUrl": null, "coverImage": null,
+      "startTime": "…", "endTime": "…", "timezone": "Asia/Kolkata",
+      "status": "published", "venueName": "…", "address": "…", "city": "Bengaluru",
+      "latitude": 12.97, "longitude": 77.59,
+      "rsvpStatus": "waitlisted", "rsvpAt": "2026-09-20T10:12:00.000Z" }
+  ],
+  "pagination": { "page": 1, "limit": 20, "totalCount": 3, "totalPages": 1, "hasMore": false }
+} }
+```
+
+- **`/me` only**, like attendance: where somebody is going is the same
+  correlation, in the future tense.
+- **`going` and `waitlisted`**, with `rsvpStatus` saying which, so a waitlisted
+  place is never shown as a confirmed one. Not `maybe` or `not_going`.
+- **Upcoming only, soonest first.** An event is listed until its `endTime`.
+  Cancelled events stay, with `status: "cancelled"`; drafts and deleted events
+  do not appear.
+
 ## Events
 
 | Method | Endpoint | Description |

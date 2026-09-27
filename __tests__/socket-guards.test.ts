@@ -1,6 +1,8 @@
 const mockDb = {
   chat_group_members: { findUnique: jest.fn() },
   private_conversations: { findUnique: jest.fn() },
+  // Typing leaves out the typist's block counterparties (SCRUM-338).
+  blocked_users: { findMany: jest.fn().mockResolvedValue([]) },
   profiles: { findUnique: jest.fn() },
   // `emitPrivateRead` persists before it relays: the receipt used to be a live
   // broadcast that reverted to a single tick on reload.
@@ -28,13 +30,16 @@ const EMAIL_LOCAL_PART = "zaphod.beeblebrox"
 
 function makeSocket() {
   const roomEmit = jest.fn()
+  const except = jest.fn()
+  const broadcast = { emit: roomEmit, except }
+  except.mockReturnValue(broadcast)
   const socket = {
     data: { userId: USER, email: `${EMAIL_LOCAL_PART}@example.com` },
     join: jest.fn(),
     emit: jest.fn(),
-    to: jest.fn(() => ({ emit: roomEmit })),
+    to: jest.fn(() => broadcast),
   }
-  return { socket: socket as unknown as AuthenticatedSocket, raw: socket, roomEmit }
+  return { socket: socket as unknown as AuthenticatedSocket, raw: socket, roomEmit, except }
 }
 
 beforeEach(() => {
@@ -111,6 +116,32 @@ describe("emitChatTyping", () => {
       userName: "Cosmic Panda",
       isTyping: true,
     })
+  })
+
+  it("leaves out everyone the typist blocked or was blocked by (SCRUM-338)", async () => {
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ anonymous_name: "Hidden Dune", status: "active" })
+    mockDb.blocked_users.findMany.mockResolvedValueOnce([
+      { blocker_id: USER, blocked_id: "they_were_blocked" },
+      { blocker_id: "they_blocked_me", blocked_id: USER },
+    ])
+    const { socket, except, roomEmit } = makeSocket()
+
+    await emitChatTyping(socket, CHAT_ID, true)
+
+    expect(except).toHaveBeenCalledWith(["user:they_were_blocked", "user:they_blocked_me"])
+    expect(roomEmit).toHaveBeenCalledTimes(1)
+  })
+
+  it("drops the indicator rather than throwing when the block lookup fails", async () => {
+    // Inside the same try as the membership read: a failed lookup must neither
+    // escape the listener (it would take the process down) nor fall back to
+    // broadcasting to everyone, blocked people included.
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ anonymous_name: "Hidden Dune", status: "active" })
+    mockDb.blocked_users.findMany.mockRejectedValueOnce(new Error("connection terminated"))
+    const { socket, roomEmit } = makeSocket()
+
+    await expect(emitChatTyping(socket, CHAT_ID, true)).resolves.toBeUndefined()
+    expect(roomEmit).not.toHaveBeenCalled()
   })
 
   it("passes isTyping:false through for stopTyping", async () => {

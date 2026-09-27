@@ -155,3 +155,64 @@ registry.registerPath({
     ...standardErrors,
   },
 })
+
+/*
+ * GET /api/mobile/me/rsvps
+ *
+ * `/me` for the same reason as attendance, in the future tense: where somebody
+ * is going, and when, is the correlation the pseudonym design exists to keep
+ * from being assembled.
+ */
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/rsvps",
+  tags: ["Mobile Profiles"],
+  summary: "The events the authenticated user is going to or waitlisted for",
+  description:
+    "RSVPs with status `going` or `waitlisted` for events that have not ended, soonest first. " +
+    "Cancelled events are included with their status so the cancellation is seen; drafts and " +
+    "deleted events are not. Event fields use the favourites route's names, plus `rsvpStatus` " +
+    "and `rsvpAt` (when the RSVP was made).",
+  security: bearerAuth,
+  request: {
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional(),
+      limit: z.coerce.number().int().min(1).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Upcoming RSVPs",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              events: z.array(
+                z.object({
+                  id: z.string().uuid(),
+                  slug: z.string(),
+                  title: z.string(),
+                  coverImageUrl: z.string().nullable(),
+                  coverImage: z.record(z.string(), z.unknown()).nullable(),
+                  startTime: z.string().datetime(),
+                  endTime: z.string().datetime(),
+                  timezone: z.string(),
+                  status: z.enum(["published", "cancelled", "completed"]),
+                  venueName: z.string().nullable(),
+                  address: z.string().nullable(),
+                  city: z.string().nullable(),
+                  latitude: z.number().nullable(),
+                  longitude: z.number().nullable(),
+                  rsvpStatus: z.enum(["going", "waitlisted"]),
+                  rsvpAt: z.string().datetime(),
+                })
+              ),
+              pagination: PaginationMetaSchema,
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})

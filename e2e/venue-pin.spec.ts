@@ -1,10 +1,12 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
 
 /**
  * Picking a venue moves the pin — K1.1, the two maps that disagreed.
  *
- * The Location section renders **two** Leaflet maps: `LocationPicker` (the pin)
- * and `GeofenceEditor` (the fence). Picking a venue writes `latitude`,
+ * Since SCRUM-343 the Location section renders **one** Leaflet map: the
+ * check-in area editor, with the address search on it, whose centre is the
+ * pin. It used to render two — `LocationPicker` (the pin) and `GeofenceEditor`
+ * (the fence) — and the history below is why this test exists. Picking a venue writes `latitude`,
  * `longitude` and a geofence onto the form, and the fence and the read-only
  * coordinates both moved — because both are watched. The pin did not, for two
  * independent reasons, either of which alone was enough:
@@ -33,6 +35,34 @@ test.use({ storageState: "e2e/.auth/admin.json" })
 const AWAY_FROM_DEFAULT = { name: "Chinnaswamy", lat: 12.9788, lng: 77.5996 }
 const PICKER_DEFAULT = { lat: 12.9716, lng: 77.5946 }
 
+/**
+ * The area's first handle is inside the map's box — on the map, not merely in
+ * the DOM. Without Leaflet's stylesheet (SCRUM-344) the container did not clip
+ * and the tiles stacked, so every marker still counted as "visible", about
+ * 3,000 px below the map's top edge.
+ *
+ * The seeded Chinnaswamy fence is a polygon, so this handle is its first
+ * corner rather than a centre pin; the stylesheet moves every marker alike.
+ * Retried, because a venue's fence can zoom the map 18 → 16 and Leaflet
+ * animates that.
+ */
+async function expectOnTheMap(page: Page) {
+  const map = page.locator(".leaflet-container")
+  await expect(map).toHaveCount(1)
+  const handle = map.locator(".leaflet-marker-icon").first()
+  await expect(handle).toBeAttached({ timeout: 15_000 })
+  await expect(async () => {
+    const mapBox = await map.boundingBox()
+    const box = await handle.boundingBox()
+    expect(mapBox).not.toBeNull()
+    expect(box).not.toBeNull()
+    expect(box!.x).toBeGreaterThanOrEqual(mapBox!.x)
+    expect(box!.y).toBeGreaterThanOrEqual(mapBox!.y)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(mapBox!.x + mapBox!.width)
+    expect(box!.y + box!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height)
+  }).toPass({ timeout: 10_000 })
+}
+
 test.describe("the venue picker and the pin agree", () => {
   test("a new event starts with no pin, then takes the venue's", async ({ page }) => {
     await page.goto("/dashboard/events/new")
@@ -41,13 +71,17 @@ test.describe("the venue picker and the pin agree", () => {
     await expect(picker).toBeVisible({ timeout: 30_000 })
 
     /*
-     * The control, and it is what makes the assertion below mean something: a
-     * new event has no coordinates, so there is no marker yet. If one were
-     * already present, "a marker exists after picking" would be true of the
-     * broken build too.
+     * The control, and it is what makes the assertions below mean something: a
+     * new event has no coordinates. If it already had the venue's, "the pin is
+     * at the venue after picking" would be true of the broken build too.
+     *
+     * Read from the form, not from markers. The map draws its placeholder
+     * circle (draggable, unsaved until moved) as soon as Leaflet loads — since
+     * SCRUM-345; before that, only once something else re-rendered the form,
+     * and a "no marker yet" count here passed on that race.
      */
     const marker = picker.locator(".leaflet-marker-icon")
-    await expect(marker).toHaveCount(0)
+    await expect(page.locator("[data-lat]").first()).toHaveAttribute("data-lat", "")
 
     /*
      * Wait for the field to settle before typing.
@@ -68,24 +102,11 @@ test.describe("the venue picker and the pin agree", () => {
     await expect(suggestion.first()).toBeVisible({ timeout: 15_000 })
     await suggestion.first().click()
 
-    // The pin appears where the venue is.
-    await expect(marker).toHaveCount(1, { timeout: 15_000 })
+    // One map, and the area's markers (its centre is the pin) appear on it.
+    await expect(page.locator(".leaflet-container")).toHaveCount(1)
+    await expect(marker.first()).toBeVisible({ timeout: 15_000 })
 
-    /*
-     * And the map is actually centred there, not merely carrying a marker
-     * somewhere off-screen. Read from Leaflet rather than from a CSS transform,
-     * which is a pixel offset and tells you nothing about where on earth it is.
-     */
-    const centre = await page.evaluate(() => {
-      const el = document.querySelector(".leaflet-container") as
-        | (HTMLElement & { _leaflet_map?: { getCenter(): { lat: number; lng: number } } })
-        | null
-      // Leaflet does not expose the map off the element in every version, so
-      // fall back to the marker's own position, which is the thing under test.
-      const icon = document.querySelector(".leaflet-marker-icon") as HTMLElement | null
-      return { hasMap: Boolean(el?._leaflet_map), hasMarker: Boolean(icon) }
-    })
-    expect(centre.hasMarker).toBe(true)
+    await expectOnTheMap(page)
 
     // The form's own coordinates are the same fact. The redesign cut the
     // human-readable lat/lng line (the pin and the address say it), so the
@@ -99,5 +120,24 @@ test.describe("the venue picker and the pin agree", () => {
     // And it is not the fallback centre — the failure this test exists to catch
     // would leave the pin sitting exactly there.
     expect(AWAY_FROM_DEFAULT.lat).not.toBeCloseTo(PICKER_DEFAULT.lat, 4)
+  })
+})
+
+/*
+ * The venue pages render the same editor and never had a LocationPicker to
+ * borrow the stylesheet from, so they were broken on a direct load before the
+ * event form was (SCRUM-344). Loaded by URL, not by clicking through: a
+ * client-side navigation could carry a stylesheet over from the page before.
+ */
+test.describe("the venue page's check-in area map", () => {
+  test("is on the map on a direct load", async ({ page }) => {
+    await page.goto(`/dashboard/venues?q=${AWAY_FROM_DEFAULT.name}`)
+    const link = page.getByRole("link", { name: new RegExp(AWAY_FROM_DEFAULT.name, "i") }).first()
+    await expect(link).toBeVisible({ timeout: 30_000 })
+    const href = await link.getAttribute("href")
+    expect(href).toMatch(/^\/dashboard\/venues\/[^/?]+$/)
+
+    await page.goto(href!)
+    await expectOnTheMap(page)
   })
 })

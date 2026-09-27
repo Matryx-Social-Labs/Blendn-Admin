@@ -33,6 +33,30 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "dm-delivered-once.test.ts": {
+      "guards": "SCRUM-337: with a real socket.io server installed as the app's io, one DM reaches each socket exactly once — the recipient with the chat open (conversation + user rooms), the recipient on the chat list (user room only), and the sender with the chat open",
+      "mutation": "M1: in lib/socket-server.ts emitPrivateMessage, the single `io.to(conversation).to(user:recipient).emit(...)` split back into two emits, one per room.",
+      "observed": "M1: 1 of 1 failing — the open-chat socket received [\"m1\", \"m1\"] (one extra).",
+      "date": "2026-09-27"
+    },
+    "event-where-one-map.test.ts": {
+      "guards": "The event form's Where is one map (2026-09-27): no LocationPicker, one GeofenceEditor carrying the AddressSearch overlay and the address caption, search and venue picks moving the area through followPin, the data-lat/data-lng hook e2e reads, no 'purple ring' copy. followPin's behaviour (circle follows, nearby outline kept, far outline → circle + movedKm, no mutation) is pinned in geofence.test.ts",
+      "mutation": "M1: lib/geofence.ts followPin returns a circle unchanged instead of moving it onto the pin. M2: location-section.tsx moveTo reduced to `onLocationChange(location)` (the area no longer follows a search).",
+      "observed": "M1: geofence.test.ts 1 of 67 failing ('moves a circle onto the new pin'). M2: event-where-one-map.test.ts 1 of 5 failing ('moves the area with the pin'). React review fixes (8 cases): M3 onFenceChange back to the circle-only guard, M4 pick() without clearTimeout/setSearching(false), M5 the editor's type-change reset without setDrawing(false) — each 1 of 8 failing. SCRUM-344: M6 geofence-editor.tsx without `import \"leaflet/dist/leaflet.css\"` — event-where-one-map.test.ts 1 of 9 failing; the e2e twin (venue-pin.spec.ts, marker inside the map's box) measured failing on the staging build d496da2: marker at y 3779 in a 420 px map. SCRUM-345 and the SCRUM-343 drive (12 cases): M7 no setMapReady(true) after the map is created, M8 no fitBounds on an imported outline, M9 the search back at left-2.5 under the zoom control, M10 the type-change reset without setImportNote(null), M11 location-picker.tsx without the package stylesheet import — each 1 of 12 failing. The e2e twin of M7, venue-pin.spec.ts 'the venue page’s check-in area map', failed in CI on the unfixed editor (run 36329829066: toBeAttached timed out, both attempts). samePlace (lib/geofence.ts, the staging drive of SCRUM-343): M12 an outline judged by how far its centre moved (the old rule) — geofence.test.ts 1 of 71 failing (the Chinnaswamy outline whose centre is 183 m from the search hit); M13 onFenceChange not consulting samePlace — event-where-one-map.test.ts 1 of 12 failing.",
+      "date": "2026-09-27"
+    },
+    "address.test.ts": {
+      "guards": "SCRUM-341: fillFromSearch replaces what the previous search filled into address and city and keeps only what the person typed, carrying lastFill forward in one pure step; the venue wizard's search() spreads it and drops a response a newer search superseded",
+      "mutation": "M1: fillFromSearch `typed` reduced to `current[key] !== \"\"` (keep anything non-empty). M2: the wizard's `...fillFromSearch(d, found)` replaced by `address: d.address || found.address, city: d.city || found.city`. M3: `lastFill: found` → `lastFill: current.lastFill` (never advances). M4: `if (seq !== searchSeq.current) return` removed.",
+      "observed": "M1 and M3: 3 of 25 failing each — 'two searches in a row … the bug', 'keeps an address typed between searches', 'keeps a city typed between searches'. M2: 1 of 25 (the wizard wiring pin). M4: 1 of 25 (the superseded-search pin). 'refills a field the person cleared' and 'keeps an address typed before any search' guard other regressions and kill none of these four.",
+      "date": "2026-09-27"
+    },
+    "live-room-honours-blocks.itest.ts": {
+      "guards": "SCRUM-338: with a real socket.io server installed as the app's io and check-ins through the real route, while A has B blocked: B's event:room:checkin reaches C's roster and not A's, and neither A nor B receives the other's chat:typing while C receives both; once the block is lifted A hears B type and hears the next arrival. socket-guards.test.ts pins the except() list as both directions of blocked_users and the fail-safe when the lookup rejects",
+      "mutation": "M1: in lib/socket-server.ts emitChatTyping, `.except(hidden.map(...))` → `.except([])`. M2: in emitEventCheckIn, `.except(excludeUserIds.map(...))` → `.except([])`.",
+      "observed": "M1: itest 1 of 3 failing (typing), socket-guards 1 of 22. M2: itest 1 of 3 failing (roster: A received B's arrival).",
+      "date": "2026-09-27"
+    },
     "announce-needs-edit.itest.ts": {
       "guards": "SCRUM-335: a venue owner on an event another org runs at their venue cannot post a poll through createPoll (default and explicit kind announcement: Forbidden, no chat_messages or chat_polls row) or announce through POST /api/mobile/events/:id/announce (403, nothing written); the organiser still posts a poll",
       "mutation": "In lib/rbac.ts canBroadcast, return `eventPermissions(actor, event).canOperate` for announcement instead of `.canEdit`.",

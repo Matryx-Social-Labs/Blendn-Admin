@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, Marker, Circle, LeafletMouseEvent } from "leaflet"
+// From the package, not a runtime <link> to unpkg: the CSP's style-src is
+// 'self' (report-only today), and GeofenceEditor loads the same file this way.
+import "leaflet/dist/leaflet.css"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -137,15 +140,6 @@ export function LocationPicker({
 
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return
-
-    // Load Leaflet CSS from CDN
-    if (!document.querySelector('link[data-leaflet]')) {
-      const link = document.createElement("link")
-      link.rel = "stylesheet"
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      link.dataset.leaflet = "true"
-      document.head.appendChild(link)
-    }
 
     /*
      * From the ref, not the closure: a venue picked while Leaflet was still

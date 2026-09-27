@@ -5,6 +5,7 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
+import { blockCounterparties } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
@@ -394,12 +395,19 @@ export async function emitChatTyping(
 
     if (!membership || membership.status !== "active") return
 
-    socket.to(`chat:${chatGroupId}`).emit("chat:typing", {
-      chatGroupId,
-      userId: socket.data.userId,
-      userName: membership.anonymous_name || "Someone",
-      isTyping,
-    })
+    // A block hides the typist from whoever they blocked or were blocked by —
+    // the same people `emitChatMessage` leaves out. Typing went to the whole
+    // room, so a blocker watched the person they blocked type (SCRUM-338).
+    const hidden = await blockCounterparties(socket.data.userId)
+    socket
+      .to(`chat:${chatGroupId}`)
+      .except(hidden.map((id) => `user:${id}`))
+      .emit("chat:typing", {
+        chatGroupId,
+        userId: socket.data.userId,
+        userName: membership.anonymous_name || "Someone",
+        isTyping,
+      })
   } catch (error) {
     // Same fail-safe as guardJoin: chat_group_id is `@db.Uuid`, and an
     // escaping rejection from this listener would take down the process.
@@ -851,7 +859,9 @@ export function emitEventCheckIn(
   eventId: string,
   userId: string,
   userName: string,
-  userImage?: string
+  userImage?: string,
+  /** The arriver's block counterparties: kept off the roster, as off the push (SCRUM-338). */
+  excludeUserIds: readonly string[] = []
 ): void {
   const io = currentIo()
   if (!io) return
@@ -877,13 +887,15 @@ export function emitEventCheckIn(
     checkInTime,
   })
 
-  io.to(`event:room:${eventId}`).emit("event:room:checkin", {
-    eventId,
-    userId,
-    userName,
-    userImage,
-    checkInTime,
-  })
+  io.to(`event:room:${eventId}`)
+    .except(excludeUserIds.map((id) => `user:${id}`))
+    .emit("event:room:checkin", {
+      eventId,
+      userId,
+      userName,
+      userImage,
+      checkInTime,
+    })
 }
 
 /**
@@ -1110,14 +1122,14 @@ export function emitPrivateMessage(
   const io = currentIo()
   if (!io) return
 
-  // Emit to conversation room (for active viewers)
-  io.to(`conversation:${conversationId}`).emit("private:message", {
-    conversationId,
-    message,
-  })
-
-  // Also emit to recipient's personal room (for notification if not in conversation)
-  io.to(`user:${recipientId}`).emit("private:message", {
+  /*
+   * One emit to both rooms: the conversation (whoever has the chat open) and
+   * the recipient's own room (the chat list, when it is not open). socket.io
+   * unions the rooms and delivers once per socket. It was two emits, and a
+   * recipient with the chat open is in both rooms, so every message arrived
+   * twice and the chat list counted it twice (SCRUM-337).
+   */
+  io.to(`conversation:${conversationId}`).to(`user:${recipientId}`).emit("private:message", {
     conversationId,
     message,
   })
