@@ -290,5 +290,6 @@ it works across machines:
 - **Sign-in limit** is per IP, so it's per machine — each developer has their own
   5 per 15 minutes, shared by their own sessions.
 - **Fixes**: `/tq-fix` comments `FIXING <tag>` first; promotion to staging is
-  fast-forward only, so a push rejected because someone promoted first means
-  fetch and look, never force.
+  a `dev` → `staging` pull request merged with a merge commit — the ruleset
+  refuses anything else. One already open means someone is promoting: wait for
+  it, never force.

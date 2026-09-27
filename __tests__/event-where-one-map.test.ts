@@ -77,9 +77,9 @@ describe("the event form's Where section", () => {
 
   it("moves the area with the pin — for a search and for a venue with no area of its own", () => {
     const moveTo = src.slice(src.indexOf("function moveTo("), src.indexOf("function onFenceChange("))
-    expect(moveTo).toMatch(/followPin\(/)
+    expect(moveTo).toMatch(/areaAfterPick\(/)
     const inherit = src.slice(src.indexOf("function inherit("), src.indexOf("function pickPlace("))
-    expect(inherit).toMatch(/followPin\(/)
+    expect(inherit).toMatch(/areaAfterPick\(/)
   })
 
   it("keeps check_in_radius covering the area — outlines too, grown and shrunk with them (SCRUM-350)", () => {
@@ -87,6 +87,30 @@ describe("the event form's Where section", () => {
     const setFence = src.slice(src.indexOf("function setFence("), src.indexOf("function moveTo("))
     expect(setFence).toMatch(/phoneCheckInRadius\(\{ geofence: fence \}\)/)
     expect(setFence).not.toMatch(/fence\?\.type === "circle"/)
+  })
+
+  it("a ring still being drawn moves neither the pin nor the address (React review, SCRUM-353b)", () => {
+    const onFence = src.slice(src.indexOf("function onFenceChange("), src.indexOf("function inherit("))
+    expect(onFence).toMatch(/if \(fence\.type === "polygon" && fence\.ring\.length < 3\) return\s*\n\s*const centre = fenceCentre\(fence\)/)
+  })
+
+  it("closing Adjust on an unfinished outline puts the area and its citation back (React review, SCRUM-353b)", () => {
+    const adjust = src.slice(src.indexOf("function adjust("), src.indexOf("function adjust(") + 400)
+    expect(adjust).toMatch(/if \(open\) beforeAdjust\.current = \{ fence: geofence, source: areaSource \}/)
+    expect(adjust).toMatch(/ring\.length < 3\) \{\s*setFence\(beforeAdjust\.current\.fence\)\s*setAreaSource\(beforeAdjust\.current\.source\)/)
+    const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
+    expect(editor).toMatch(/if \(!editable && drawing\) setDrawing\(false\)/)
+  })
+
+  it("the buffer choice waits for a linked venue to load, and the slider never ends below the venue's buffer (React review)", () => {
+    expect(src).toMatch(/fence=\{venuePending \? null : geofence\}/)
+    const controls = readFileSync(join(__dirname, "../components/event-form/area-controls.tsx"), "utf8")
+    expect(controls).toMatch(/Math\.max\(SLIDER_MAX_M, base, fence\?\.buffer \?\? 0\)/)
+  })
+
+  it("says an outline was cleared only when it was drawn by hand or saved, not when one picked place replaces another", () => {
+    expect(src.match(/setMovedKm\(lostDrawing\(areaSource\) \? moved : null\)/g)).toHaveLength(2)
+    expect(src).toMatch(/const lostDrawing = \(source: AreaSource \| null\) => source === "drawn" \|\| source === null/)
   })
 
   it("keeps the pin readable for e2e/venue-pin.spec.ts", () => {

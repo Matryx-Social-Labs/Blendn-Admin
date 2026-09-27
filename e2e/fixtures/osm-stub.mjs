@@ -6,13 +6,16 @@
  * 2026-09-27) and against their usage policies at volume. CI starts this and
  * points GEOCODE_UPSTREAM / FOOTPRINT_UPSTREAM at it.
  *
- * `osm/search-chinnaswamy.json` is one real Nominatim answer, recorded with
- * the product's User-Agent (data © OpenStreetMap contributors, ODbL).
+ * `osm/search-chinnaswamy.json` (a stadium OSM holds as an area) and
+ * `osm/search-toit.json` (a pub, only a point) are real Nominatim answers,
+ * recorded with the product's User-Agent (data © OpenStreetMap contributors,
+ * ODbL). Overpass answers "no building", so the pub keeps its circle.
  */
 import { createServer } from "node:http"
 import { readFileSync } from "node:fs"
 
 const chinnaswamy = readFileSync(new URL("./osm/search-chinnaswamy.json", import.meta.url))
+const toit = readFileSync(new URL("./osm/search-toit.json", import.meta.url))
 const port = Number(process.env.OSM_STUB_PORT ?? 4599)
 
 const send = (res, status, body) => {
@@ -24,7 +27,7 @@ createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://stub")
   if (url.pathname === "/search") {
     const q = (url.searchParams.get("q") ?? "").toLowerCase()
-    return send(res, 200, q.includes("chinnaswamy") ? chinnaswamy : "[]")
+    return send(res, 200, q.includes("chinnaswamy") ? chinnaswamy : q.includes("toit") ? toit : "[]")
   }
   if (url.pathname === "/reverse") {
     return send(res, 200, JSON.stringify({

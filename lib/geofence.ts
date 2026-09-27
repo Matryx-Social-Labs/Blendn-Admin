@@ -282,6 +282,9 @@ export function fenceCentre(fence: Geofence): LatLng | null {
 /** An outline this close to a moved pin is still the venue's shape; beyond it, a new place. */
 export const OUTLINE_KEEP_WITHIN_M = 150
 
+/** The circle an area starts as when there is no outline: a room, not a block. */
+export const DEFAULT_CIRCLE_M = 30
+
 /**
  * What the check-in area becomes when the pin moves by an address search or a
  * venue pick — the event form's one map, where pin and area are never apart.
@@ -302,9 +305,29 @@ export function followPin(
   if (distanceToGeofence(pin, fence) <= OUTLINE_KEEP_WITHIN_M) return { fence, movedKm: null }
   const from = fenceCentre(fence)
   return {
-    fence: { type: "circle", lat: pin.lat, lng: pin.lng, radius: 30, buffer: fence.buffer },
+    fence: { type: "circle", lat: pin.lat, lng: pin.lng, radius: DEFAULT_CIRCLE_M, buffer: fence.buffer },
     movedKm: from ? Math.round(haversineDistanceMeters(from.lat, from.lng, pin.lat, pin.lng) / 100) / 10 : null,
   }
+}
+
+/**
+ * The area after the event form picks a place or venue that brought no
+ * outline of its own (SCRUM-353b).
+ *
+ * An outline `followPin` kept is the same place re-picked, and keeps its
+ * buffer — a custom one included. Anything else is a new place and starts at
+ * the default buffer; a new event with no area yet gets a circle on the pin.
+ * Without that circle it saved no area at all, and check-in fell back to the
+ * bare radius.
+ */
+export function areaAfterPick(
+  current: Geofence | null,
+  pin: LatLng
+): { fence: Geofence; movedKm: number | null } {
+  const { fence, movedKm } = followPin(current, pin)
+  if (fence && fence === current) return { fence, movedKm }
+  const shape = fence ?? { type: "circle", lat: pin.lat, lng: pin.lng, radius: DEFAULT_CIRCLE_M, buffer: 0 }
+  return { fence: { ...shape, buffer: DEFAULT_BUFFER_M }, movedKm }
 }
 
 /** A circle's centre moved less than this is the same place: a nudge, not a move. */
