@@ -32,6 +32,8 @@ export interface LocationData {
   state: string | null
   country: string | null
   postal_code: string | null
+  /** The place's own outline, when the geocoder has one — a stadium, a palace (SCRUM-351). */
+  outline?: [number, number][] | null
 }
 
 interface NominatimResult {
