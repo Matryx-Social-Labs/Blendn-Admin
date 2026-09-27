@@ -5,6 +5,7 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
+import { blockCounterparties } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
@@ -394,12 +395,19 @@ export async function emitChatTyping(
 
     if (!membership || membership.status !== "active") return
 
-    socket.to(`chat:${chatGroupId}`).emit("chat:typing", {
-      chatGroupId,
-      userId: socket.data.userId,
-      userName: membership.anonymous_name || "Someone",
-      isTyping,
-    })
+    // A block hides the typist from whoever they blocked or were blocked by —
+    // the same people `emitChatMessage` leaves out. Typing went to the whole
+    // room, so a blocker watched the person they blocked type (SCRUM-338).
+    const hidden = await blockCounterparties(socket.data.userId)
+    socket
+      .to(`chat:${chatGroupId}`)
+      .except(hidden.map((id) => `user:${id}`))
+      .emit("chat:typing", {
+        chatGroupId,
+        userId: socket.data.userId,
+        userName: membership.anonymous_name || "Someone",
+        isTyping,
+      })
   } catch (error) {
     // Same fail-safe as guardJoin: chat_group_id is `@db.Uuid`, and an
     // escaping rejection from this listener would take down the process.
