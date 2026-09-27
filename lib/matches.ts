@@ -62,6 +62,45 @@ export interface MatchCard {
 }
 
 /**
+ * Child → parent, for the whole interest taxonomy. Two levels, ~80 rows.
+ *
+ * Exported so every "do these two share an interest" question in the Room —
+ * the ranked deck here and the count on `room-preview` — expands the same way.
+ * Two answers to that question would put "3 people here share your taste" over
+ * a deck that shows none of them sharing anything.
+ */
+export async function interestParents(): Promise<Map<string, string>> {
+  const parentOf = new Map<string, string>()
+  for (const row of await db.categories.findMany({
+    where: { parent_id: { not: null } },
+    select: { id: true, parent_id: true },
+  })) {
+    parentOf.set(row.id, row.parent_id!)
+  }
+  return parentOf
+}
+
+/**
+ * A held set, plus the parents those holdings imply. Deduplicated.
+ *
+ * Storage is leaf-only, so without this someone into "IPL screening" and
+ * someone into "Running" intersect on nothing — the shared "Sports" is not in
+ * either raw row. See the call site in `matchesForEvent` for the rarity half.
+ */
+export function expandInterests(
+  ids: readonly string[],
+  parentOf: ReadonlyMap<string, string>
+): string[] {
+  const held = new Set<string>()
+  for (const id of ids) {
+    held.add(id)
+    const parent = parentOf.get(id)
+    if (parent) held.add(parent)
+  }
+  return [...held]
+}
+
+/**
  * The room, ranked for one person in it.
  *
  * Returns `null` when the viewer has never checked in to this event — the match
@@ -196,13 +235,7 @@ export async function matchesForEvent(
    * the scoring rule stays pure, so `collapseToMostSpecific` is testable with a
    * literal map instead of a fixture.
    */
-  const parentOf = new Map<string, string>()
-  for (const row of await db.categories.findMany({
-    where: { parent_id: { not: null } },
-    select: { id: true, parent_id: true },
-  })) {
-    parentOf.set(row.id, row.parent_id!)
-  }
+  const parentOf = await interestParents()
 
   /**
    * A held set, plus the parents those holdings imply. Deduplicated.
@@ -213,15 +246,7 @@ export async function matchesForEvent(
    * would intersect on nothing — the shared "Sports" that this whole stage
    * exists to find is not in either raw row.
    */
-  const expand = (ids: readonly string[]): string[] => {
-    const held = new Set<string>()
-    for (const id of ids) {
-      held.add(id)
-      const parent = parentOf.get(id)
-      if (parent) held.add(parent)
-    }
-    return [...held]
-  }
+  const expand = (ids: readonly string[]): string[] => expandInterests(ids, parentOf)
 
   /*
    * Rarity counts each person once per category.

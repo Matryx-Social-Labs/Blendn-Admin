@@ -16,6 +16,7 @@ import { logger } from "@/lib/logger"
 import { likeAtEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { announceRoomMatch } from "@/lib/room-match"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -109,6 +110,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const outcome = await likeAtEvent(eventId, authUser.userId, likedId)
+
+    /*
+     * `room:match` to both of them, each naming the other as they see them.
+     * Awaited so it is sent before the response rather than racing it, but it
+     * cannot fail the like: `announceRoomMatch` never rejects.
+     */
+    if (outcome.mutual && outcome.conversationId) {
+      await announceRoomMatch(eventId, outcome.conversationId)
+    }
+
     return successResponse(outcome)
   } catch (error) {
     logger.error("Like error", {
