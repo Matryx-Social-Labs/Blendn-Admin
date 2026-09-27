@@ -39,6 +39,12 @@
       "observed": "M1: 1 of 1 failing — the open-chat socket received [\"m1\", \"m1\"] (one extra).",
       "date": "2026-09-27"
     },
+    "event-where-one-map.test.ts": {
+      "guards": "The event form's Where is one map (2026-09-27): no LocationPicker, one GeofenceEditor carrying the AddressSearch overlay and the address caption, search and venue picks moving the area through followPin, the data-lat/data-lng hook e2e reads, no 'purple ring' copy. followPin's behaviour (circle follows, nearby outline kept, far outline → circle + movedKm, no mutation) is pinned in geofence.test.ts",
+      "mutation": "M1: lib/geofence.ts followPin returns a circle unchanged instead of moving it onto the pin. M2: location-section.tsx moveTo reduced to `onLocationChange(location)` (the area no longer follows a search).",
+      "observed": "M1: geofence.test.ts 1 of 67 failing ('moves a circle onto the new pin'). M2: event-where-one-map.test.ts 1 of 5 failing ('moves the area with the pin'). React review fixes (8 cases): M3 onFenceChange back to the circle-only guard, M4 pick() without clearTimeout/setSearching(false), M5 the editor's type-change reset without setDrawing(false) — each 1 of 8 failing.",
+      "date": "2026-09-27"
+    },
     "address.test.ts": {
       "guards": "SCRUM-341: fillFromSearch replaces what the previous search filled into address and city and keeps only what the person typed, carrying lastFill forward in one pure step; the venue wizard's search() spreads it and drops a response a newer search superseded",
       "mutation": "M1: fillFromSearch `typed` reduced to `current[key] !== \"\"` (keep anything non-empty). M2: the wizard's `...fillFromSearch(d, found)` replaced by `address: d.address || found.address, city: d.city || found.city`. M3: `lastFill: found` → `lastFill: current.lastFill` (never advances). M4: `if (seq !== searchSeq.current) return` removed.",

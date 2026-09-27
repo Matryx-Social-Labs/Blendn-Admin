@@ -296,6 +296,34 @@ export function fenceCentre(fence: Geofence): LatLng | null {
  * validated here rather than trusted, so a hand-edited row cannot inject a
  * `NaN` coordinate into the distance sort.
  */
+/** An outline this close to a moved pin is still the venue's shape; beyond it, a new place. */
+export const OUTLINE_KEEP_WITHIN_M = 150
+
+/**
+ * What the check-in area becomes when the pin moves by an address search or a
+ * venue pick — the event form's one map, where pin and area are never apart.
+ *
+ * A circle moves onto the pin with its size and buffer. An outline the pin is
+ * still on (or within `OUTLINE_KEEP_WITHIN_M` of) is kept: that is a nudge. An
+ * outline left behind is replaced by a default circle on the pin, and
+ * `movedKm` says how far, so the form can tell the organiser why their
+ * outline went. With two maps the pin moved and the area did not, and the
+ * event saved a pin in one place and a fence in another.
+ */
+export function followPin(
+  fence: Geofence | null,
+  pin: LatLng
+): { fence: Geofence | null; movedKm: number | null } {
+  if (!fence) return { fence: null, movedKm: null }
+  if (fence.type === "circle") return { fence: { ...fence, lat: pin.lat, lng: pin.lng }, movedKm: null }
+  if (distanceToGeofence(pin, fence) <= OUTLINE_KEEP_WITHIN_M) return { fence, movedKm: null }
+  const from = fenceCentre(fence)
+  return {
+    fence: { type: "circle", lat: pin.lat, lng: pin.lng, radius: 30, buffer: fence.buffer },
+    movedKm: from ? Math.round(haversineDistanceMeters(from.lat, from.lng, pin.lat, pin.lng) / 100) / 10 : null,
+  }
+}
+
 export function eventCentre(
   geofence: unknown,
   latitude?: number | null,

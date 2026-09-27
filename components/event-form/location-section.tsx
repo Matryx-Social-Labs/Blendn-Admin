@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useId, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 import { IconAlertTriangle } from "@tabler/icons-react"
 import {
@@ -12,14 +12,16 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
-import { fenceCentre, type Geofence } from "@/lib/geofence"
-import { LocationPicker, type LocationData } from "@/components/location-picker"
+import { fenceCentre, followPin, OUTLINE_KEEP_WITHIN_M, type Geofence } from "@/lib/geofence"
+import type { LocationData } from "@/components/location-picker"
+import { AddressSearch } from "@/components/event-form/address-search"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
 import { VenuePicker } from "@/components/event-form/venue-picker"
 import { venueById, type VenueOption } from "@/lib/venue-actions"
 import { validateGeofence } from "@/lib/geofence"
-import { DEFAULT_CHECK_IN_RADIUS_M } from "@/lib/constants"
+import { extractAddress } from "@/lib/address"
+import { haversineDistanceMeters } from "@/lib/geo"
 
 export function LocationSection({
   form,
@@ -28,7 +30,6 @@ export function LocationSection({
   form: UseFormReturn<EventFormValues>
   onLocationChange: (data: LocationData) => void
 }) {
-  const checkInRadius = form.watch("check_in_radius") ?? DEFAULT_CHECK_IN_RADIUS_M
   /*
    * `watch`, not `getValues` — robustness, and NOT the bug.
    *
@@ -50,7 +51,75 @@ export function LocationSection({
   const initialLat = form.watch("latitude")
   const initialLng = form.watch("longitude")
 
-  const mapLabelId = useId()
+  /** How far the pin moved when it left an outline behind; null when nothing was cleared. */
+  const [movedKm, setMovedKm] = useState<number | null>(null)
+  const reverseSeq = useRef(0)
+
+  /** Keeps the legacy radius column in step: mobile builds in the wild still read check_in_radius. */
+  function setFence(fence: Geofence | null) {
+    form.setValue("geofence", fence, { shouldDirty: true })
+    if (fence?.type === "circle") form.setValue("check_in_radius", Math.round(fence.radius + fence.buffer))
+  }
+
+  /**
+   * The pin moved by a search or a venue pick. The address comes with it, and
+   * so does the area: a circle follows, an outline left behind becomes a
+   * circle on the pin — and the caption says how far, so the organiser knows
+   * why their outline went.
+   */
+  function moveTo(location: LocationData) {
+    onLocationChange(location)
+    const { fence, movedKm: moved } = followPin(
+      (form.getValues("geofence") as Geofence | null) ?? null,
+      { lat: location.lat, lng: location.lng }
+    )
+    setFence(fence)
+    setMovedKm(moved)
+  }
+
+  /**
+   * The area was drawn or dragged on the map. The pin is its centre — the
+   * columns the attendee app sorts "Nearby" by and puts its marker on — and a
+   * dragged circle brings the address with it, the way dragging the old pin did.
+   */
+  function onFenceChange(fence: Geofence) {
+    const before = { lat: form.getValues("latitude"), lng: form.getValues("longitude") }
+    setFence(fence)
+    if (fence.type === "polygon") setMovedKm(null)
+    // `fenceCentre` is null for a ring still being drawn: leave the pin alone
+    // until the shape exists.
+    const centre = fenceCentre(fence)
+    if (!centre) return
+    form.setValue("latitude", centre.lat)
+    form.setValue("longitude", centre.lng)
+    const moved =
+      before.lat == null || before.lng == null
+        ? Infinity
+        : haversineDistanceMeters(before.lat, before.lng, centre.lat, centre.lng)
+    // A dragged circle is a moved place. An outline within the distance
+    // `followPin` treats as the same place keeps the address that was typed.
+    if (moved < (fence.type === "circle" ? 10 : OUTLINE_KEEP_WITHIN_M)) return
+    const mine = ++reverseSeq.current
+    fetch(`/api/geocode?lat=${centre.lat}&lon=${centre.lng}`, { headers: { "Accept-Language": "en" } })
+      .then((res) => res.json())
+      .then((hit) => {
+        if (mine !== reverseSeq.current) return
+        const resolved = extractAddress(centre.lat, centre.lng, hit)
+        onLocationChange({
+          lat: centre.lat,
+          lng: centre.lng,
+          address: resolved.address,
+          city: resolved.city,
+          state: resolved.state,
+          country: resolved.country,
+          postal_code: resolved.postalCode,
+        })
+      })
+      .catch(() => {
+        // The pin moved; a failed lookup only leaves the old words, which the
+        // organiser can edit. Not worth an error over.
+      })
+  }
   const [venue, setVenue] = useState<VenueOption | null>(null)
   const venueId = form.watch("venue_id")
 
@@ -111,9 +180,18 @@ export function LocationSection({
     // The check-in area is a property of the place, and was being redrawn per
     // event. Validated rather than trusted — it came from the database, but so
     // did the 100km radius.
-    if (picked.geofence) {
-      const parsed = validateGeofence(picked.geofence)
-      if (parsed.ok) form.setValue("geofence", parsed.fence)
+    const own = picked.geofence ? validateGeofence(picked.geofence) : null
+    if (own?.ok) {
+      setFence(own.fence)
+      setMovedKm(null)
+    } else if (picked.lat !== null && picked.lng !== null) {
+      // A venue with no area of its own: the one the form has follows the pin.
+      const { fence, movedKm: moved } = followPin(
+        (form.getValues("geofence") as Geofence | null) ?? null,
+        { lat: picked.lat, lng: picked.lng }
+      )
+      setFence(fence)
+      setMovedKm(moved)
     }
   }
 
@@ -130,7 +208,7 @@ export function LocationSection({
     venue?.capacity != null && capacity != null && capacity > venue.capacity
 
   return (
-    <FormSection step="03" title="Where" hint="check-in counts inside the purple ring" id="step-where">
+    <FormSection step="03" title="Where" hint="check-in counts inside the ring" id="step-where">
       <FormField
         control={form.control}
         name="venue_name"
@@ -163,109 +241,53 @@ export function LocationSection({
       ) : null}
 
       {/*
-        Not a `FormLabel`: outside a `FormField` that renders `htmlFor` pointing
-        at an id nothing has, so the label named nothing. A heading the region
-        is labelled by is what a map with no input actually wants.
+        One map (the owner's call, 2026-09-27). There were two: a location map
+        with its own pin and its own circle, and this check-in area map. They
+        disagreed — moving the pin only moved the area while none had been
+        drawn — so an event could save a pin in one place and a fence in
+        another. Now the address is typed on this map, the pin is the area's
+        centre, and the address under the map is written by the pin.
+
+        The wrapper still carries the pin as data attributes:
+        `e2e/venue-pin.spec.ts` proves a venue pick moves the pin by reading
+        them here.
       */}
-      <section aria-labelledby={mapLabelId}>
-        <p id={mapLabelId} className="text-sm leading-none font-medium">
-          Map Location
-        </p>
-        {/* The redesign cut the lat/lng text readout — the pin and the address
-            say it. The coordinates still need to be readable by something
-            that is not a person: `e2e/venue-pin.spec.ts` proves the picker
-            and the pin agree by reading them here. */}
-        <div className="mt-2" data-lat={initialLat ?? ""} data-lng={initialLng ?? ""}>
-          <LocationPicker
-            initialLat={initialLat}
-            initialLng={initialLng}
-            checkInRadius={checkInRadius}
-            onLocationChange={onLocationChange}
-          />
-        </div>
-      </section>
-
-      <FormField
-        control={form.control}
-        name="address"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Address</FormLabel>
-            <FormControl>
-              <Input placeholder="Filled from the map; edit if the street is wrong" {...field} />
-            </FormControl>
-            <DerivedLine form={form} />
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-
-
-      {/*
-        The geofence, replacing a lone radius slider.
-
-        One number could not serve both a 20m cafe and a 200m stadium, because
-        it was doing three jobs at once — the venue's size, the organiser's
-        tolerance, and slack for bad GPS. The editor shows those as three rings,
-        and the third one is the point: once an organiser can see that GPS noise
-        is handled for them, they stop drawing the shape "bigger to be safe".
-
-        That is not hypothetical. A real football match on production carries a
-        100km radius, which is someone working around exactly this.
-
-        check_in_radius is still written for older mobile clients that read it;
-        `geofence` is what the check-in route prefers.
-      */}
-      <FormField
-        control={form.control}
-        name="geofence"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Where check-in counts</FormLabel>
-            <FormControl>
-              <GeofenceEditor
-                value={(field.value as Geofence | null) ?? null}
-                onChange={(fence) => {
-                  field.onChange(fence)
-                  // Keep the legacy column roughly in step: mobile builds in
-                  // the wild still read check_in_radius.
-                  if (fence.type === "circle") {
-                    form.setValue("check_in_radius", Math.round(fence.radius + fence.buffer))
-                  }
-                  /*
-                    Drag the pin to the shape the organiser actually drew.
-
-                    Nothing did this before, so an organiser could drop the pin
-                    on their office, trace a stadium five kilometres away, and
-                    save both. The fence was right — check-in worked — while
-                    `latitude`/`longitude` still pointed at the office. Those
-                    columns are what the attendee app sorts "Nearby" by and what
-                    the map marker uses, so the event showed up at the wrong
-                    distance from everyone, and nothing about the form looked
-                    wrong.
-
-                    `fenceCentre` returns null for a ring that is still being
-                    drawn; leaving the pin alone until the shape exists is the
-                    right behaviour, not a missed case.
-                  */
-                  const centre = fenceCentre(fence)
-                  if (centre) {
-                    form.setValue("latitude", centre.lat)
-                    form.setValue("longitude", centre.lng)
-                  }
-                }}
-                fallbackCentre={
-                  form.watch("latitude") && form.watch("longitude")
-                    ? { lat: form.watch("latitude")!, lng: form.watch("longitude")! }
-                    : undefined
-                }
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
+      <div className="flex flex-col gap-2" data-lat={initialLat ?? ""} data-lng={initialLng ?? ""}>
+        <p className="sr-only">Location and check-in area</p>
+        <GeofenceEditor
+          value={(form.watch("geofence") as Geofence | null) ?? null}
+          onChange={onFenceChange}
+          fallbackCentre={
+            initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : undefined
+          }
+          overlay={<AddressSearch onPick={moveTo} />}
+          caption={
+            <FormField
+              control={form.control}
+              name="address"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="sr-only">Address</FormLabel>
+                  <FormControl>
+                    <Input placeholder="The address — written by the pin; edit if the street is wrong" {...field} />
+                  </FormControl>
+                  <DerivedLine form={form} />
+                  {movedKm != null ? (
+                    <p role="status" className="flex items-baseline gap-2 text-[0.8125rem]">
+                      <span className="size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" aria-hidden />
+                      <span>
+                        Outline cleared — the pin moved {movedKm} km.{" "}
+                        <span className="text-muted-foreground">Trace it again or use the building outline.</span>
+                      </span>
+                    </p>
+                  ) : null}
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          }
+        />
+      </div>
     </FormSection>
   )
 }
@@ -286,7 +308,7 @@ function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
     <p className="text-[0.8125rem] text-muted-foreground">
       {parts.length ? (
         <>
-          <span className="text-foreground">{parts.join(" · ")}</span> — from the map
+          <span className="text-foreground">{parts.join(" · ")}</span> — from the pin
         </>
       ) : (
         "City, region and postal code come from the pin."

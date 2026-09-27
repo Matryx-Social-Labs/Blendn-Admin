@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { themeColour } from "@/lib/theme-colour"
 import type { Map as LeafletMap, LayerGroup, TileLayer } from "leaflet"
@@ -82,6 +82,14 @@ export interface GeofenceEditorProps {
   overlap?: { name: string; organiser: string; fence: Geofence } | null
   editable?: boolean
   height?: number
+  /**
+   * Sits on the map, top-left — the event form puts its address search here,
+   * so the one map is where the location is typed, the pin lands and the area
+   * is drawn. Hidden while an outline is being traced (its hint sits there).
+   */
+  overlay?: ReactNode
+  /** Directly under the map: the event form's address, written by the pin. */
+  caption?: ReactNode
 }
 
 export function GeofenceEditor({
@@ -91,6 +99,8 @@ export function GeofenceEditor({
   overlap = null,
   editable = true,
   height = 420,
+  overlay,
+  caption,
 }: GeofenceEditorProps) {
   const fallbackCentre = givenCentre ?? { lat: 12.9716, lng: 77.5946 }
   // As numbers, so a hook can depend on the pin without re-running every render:
@@ -148,6 +158,18 @@ export function GeofenceEditor({
   useEffect(() => {
     stateRef.current = { fence, editable, drawing, onChange }
   }, [fence, editable, drawing, onChange])
+
+  /*
+   * A fence replaced from outside — a far search turns an outline into a
+   * circle — ends any tracing. Left set, the next polygon to arrive (a venue's
+   * outline) would take clicks as new corners. Adjusted during render, on the
+   * type's change only, so switching to "Trace outline" is never undone.
+   */
+  const [prevType, setPrevType] = useState(fence.type)
+  if (fence.type !== prevType) {
+    setPrevType(fence.type)
+    if (fence.type !== "polygon") setDrawing(false)
+  }
 
   const crossed = fence.type === "polygon" && ringSelfIntersects(fence.ring)
 
@@ -549,6 +571,10 @@ export function GeofenceEditor({
           ))}
         </div>
 
+        {overlay && !drawing && !crossed ? (
+          <div className="absolute left-2.5 top-2.5 z-[800] w-[min(58%,22rem)]">{overlay}</div>
+        ) : null}
+
         {editable && drawing ? (
           <div className="pointer-events-none absolute left-1/2 top-2.5 z-[800] -translate-x-1/2 whitespace-nowrap rounded-lg border border-border-strong bg-background/90 px-3 py-1.5 text-[0.71875rem] backdrop-blur">
             {fence.type === "polygon" && fence.ring.length === 0
@@ -580,6 +606,8 @@ export function GeofenceEditor({
           ) : null}
         </div>
       </div>
+
+      {caption}
 
       {importNote ? (
         <p className="text-[0.75rem] text-muted-foreground">{importNote}</p>
