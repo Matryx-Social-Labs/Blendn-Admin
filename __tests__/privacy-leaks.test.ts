@@ -68,9 +68,11 @@ describe("B3 — the socket roster is for people in the room", () => {
     expect(open![0]).not.toContain("userName")
     expect(open![0]).not.toContain("userImage")
 
-    const roster = /io\.to\(`event:room:\$\{eventId\}`\)\.emit\("event:room:checkin", \{[^}]*\}/.exec(src)
+    // The `.except(...)` keeps the arriver's block counterparties off it (SCRUM-338).
+    const roster = /io\.to\(`event:room:\$\{eventId\}`\)\s*\.except\([^\n]*\)\s*\.emit\("event:room:checkin", \{[^}]*\}/.exec(src)
     expect(roster).not.toBeNull()
     expect(roster![0]).toContain("userName")
+    expect(roster![0]).toContain(".except(excludeUserIds.map(")
   })
 
   it("gates the roster room on a check-in", () => {
