@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "announce-needs-edit.itest.ts": {
+      "guards": "SCRUM-335: a venue owner on an event another org runs at their venue cannot post a poll through createPoll (default and explicit kind announcement: Forbidden, no chat_messages or chat_polls row) or announce through POST /api/mobile/events/:id/announce (403, nothing written); the organiser still posts a poll",
+      "mutation": "In lib/rbac.ts canBroadcast, return `eventPermissions(actor, event).canOperate` for announcement instead of `.canEdit`.",
+      "observed": "3 of 4 failing (the fourth, a venue owner hosting their own event, passes under it by design): createPoll resolved for the venue owner instead of rejecting Forbidden; the mobile route returned 200, not 403; the organiser's test then counted 2 polls in the room, not 1. broadcast-permissions.test.ts: 1 failing (venue owner announcement expected false, got true).",
+      "date": "2026-09-27"
+    },
     "participation-needs-onboarding.itest.ts": {
       "guards": "SCRUM-331: a profile that is neither onboarded nor of a known adult age cannot RSVP, save, read the board, check in, start a conversation, send a message request or send a DM (403 FINISH_ONBOARDING, nothing written) but can still view the event; an onboarded no-age account, an adult mid-onboarding and an onboarded pre-ruling under-18 can take part; an under-18 who never finished onboarding cannot",
       "mutation": "M1 attendeeEventAccess's participate gate disabled; M2 the check-in gate disabled; M3 participationRefusal returns null; M4 mayParticipate = onboarded only; M5 mayParticipate = isAdult only; M6 the gate applied to `view` too; M7 the interest route asks `view` instead of `participate`; M8 mayParticipate lets a missing profile through (all 2026-09-27).",

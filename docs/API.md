@@ -1072,16 +1072,23 @@ and only the second is worth blocking.
 
 | kind | who | media |
 |---|---|---|
-| `announcement` | anyone with `canOperate` — the organising org, **or the venue owner** | no |
-| `sponsored` | `canOperate` **and** an organisation with `may_sponsor` | **yes** |
+| `announcement` | `canEdit` — the organising org, or an `app_admin`. **Not** the venue owner | no |
+| `sponsored` | one organisation holding `may_sponsor` **and** an approved placement at this event, or an `app_admin` | **yes** |
 | `system` | `app_admin` only — it speaks as Blend'n | no |
 
 **This route used to compare two user ids.** `event.organizer_id !== caller.id`,
-which is exactly the mistake `lib/rbac.ts` exists to end, and it failed in three
-directions at once: an `app_admin` could not announce, a venue owner could not
-announce for an event in their own building, and a colleague at the organising
-org was refused for not being the row's creator. `organizer_id` still records who
-*created* an event — a different question, still useful for audit.
+which is exactly the mistake `lib/rbac.ts` exists to end: an `app_admin` could
+not announce, and a colleague at the organising org was refused for not being the
+row's creator. `organizer_id` still records who *created* an event — a different
+question, still useful for audit.
+
+**A venue owner operates an event in their building and does not announce into
+it** (R37). Every announcement is signed with the organising org's name, so one
+from the venue would speak for somebody else. The dashboard composer and
+`/api/events/:id/announcements` always required `canEdit`; this table said
+`canOperate` until SCRUM-335, which let a venue owner post polls through
+`createPoll`. A venue owner who hosts their own event is its organiser and
+announces as one.
 
 **Why `sponsored` needs its own flag.** It is a claim that somebody *paid*. If
 everyone who can announce can also mark a message sponsored, the label stops
@@ -1137,7 +1144,7 @@ still read. A vote additionally needs an `active` or `muted` membership and an
 open room (`409`). Before SCRUM-298 the read loaded the poll by id alone.
 
 Who may post one is the same table as above: an `announcement` poll needs
-`canOperate`, a `sponsored` poll needs the same grant a sponsored message needs.
+`canEdit`, a `sponsored` poll needs the same grant a sponsored message needs.
 A poll from a brand carries that brand's name into the room and takes the same
 attention, so it does not get a weaker gate because the payload is a question.
 

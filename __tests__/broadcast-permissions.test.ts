@@ -35,19 +35,27 @@ const event: PermissionEvent = {
   venue: { owner_org_id: VENUE_ORG },
 }
 
-describe("announcement — anyone who operates the event", () => {
+describe("announcement — whoever runs the event", () => {
   it("lets the organising org broadcast", () => {
     expect(canBroadcast(host, event, "announcement")).toBe(true)
   })
 
-  it("lets the venue owner broadcast for an event in their building", () => {
+  it("refuses the venue owner on an event another org runs in their building", () => {
     /*
-     * The row the old owner check got wrong and could never have got right:
-     * `canOperate` is true for a venue owner while `canEdit` is false. What
-     * happens in your building is yours to speak to, even though the event is
-     * not yours to change.
+     * This row said `true` until SCRUM-335: `canOperate` is true for a venue
+     * owner, and announcing was once part of it. R37 took it away — the
+     * composer is `canEdit` only, the announcements route refuses — but this
+     * rule did not follow, so `createPoll` let a venue owner post into the room
+     * under the organising org's name.
      */
-    expect(canBroadcast(venueOwner, event, "announcement")).toBe(true)
+    expect(canBroadcast(venueOwner, event, "announcement")).toBe(false)
+  })
+
+  it("lets a venue owner announce for an event their own org runs", () => {
+    // Hosting it yourself makes you the organiser (SCRUM-320). Guards against
+    // over-correcting into "venue owners never announce"; the organising-org
+    // branch grants both flags, so it does not tell canEdit from canOperate.
+    expect(canBroadcast(venueOwner, { ...event, organizer_org_id: VENUE_ORG }, "announcement")).toBe(true)
   })
 
   it("lets an app_admin broadcast anywhere", () => {
