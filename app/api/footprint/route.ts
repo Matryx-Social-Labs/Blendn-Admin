@@ -44,10 +44,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "lat and lon are required" }, { status: 400 })
   }
 
-  // The building the pin is in, and any within reach of a pin on the pavement.
+  // The stadium or building the pin is in, and any building within reach of a
+  // pin on the pavement.
   const query =
     `[out:json][timeout:8];is_in(${lat},${lng})->.a;` +
-    `(way(pivot.a)[building];way(around:${OUTLINE_BUILDING_WITHIN_M},${lat},${lng})[building];);out geom;`
+    `(way(pivot.a)[building];way(pivot.a)[leisure=stadium];` +
+    `way(around:${OUTLINE_BUILDING_WITHIN_M},${lat},${lng})[building];);out geom;`
 
   for (const upstream of UPSTREAMS) {
     try {

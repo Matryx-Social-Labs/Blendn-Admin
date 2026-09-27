@@ -84,6 +84,13 @@ describe("pickBuilding — the building a pinned place sits in (Overpass `out ge
     expect(ring).toHaveLength(4)
   })
 
+  it("takes the stadium the pin is inside over a stand inside it — the old browser lookup's rule, kept", () => {
+    const stadium = { ...way(8, 0.0012, lat, lng), tags: { leisure: "stadium", name: "Chinnaswamy" } }
+    const stand = way(9, 0.0002, lat, lng)
+    const ring = pickBuilding([stand, stadium], { lat, lng })
+    expect(pointInPolygon({ lat: lat + 0.001, lng }, ring!)).toBe(true) // only the stadium reaches this far
+  })
+
   it(`else the nearest building within ${OUTLINE_BUILDING_WITHIN_M} m — a pin dropped on the pavement`, () => {
     const near = way(3, 0.0001, lat + 0.0002, lng) // edge ~11 m north of the pin
     const far = way(4, 0.0001, lat + 0.0008, lng)

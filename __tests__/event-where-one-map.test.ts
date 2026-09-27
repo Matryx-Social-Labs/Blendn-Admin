@@ -56,6 +56,27 @@ describe("the event form's Where section", () => {
 })
 
 describe("the map's supporting parts", () => {
+  it("a search that brings the place's own outline draws it, the pin at its centre (SCRUM-351)", () => {
+    // Nominatim returns a stadium's or a palace's outline with the hit; a bar is a pin.
+    const search = readFileSync(join(__dirname, "../components/event-form/address-search.tsx"), "utf8")
+    const pick = search.slice(search.indexOf("function pick("), search.indexOf("const showList"))
+    expect(pick).toMatch(/outline: outlineFromGeoJson\(hit\.geojson\)/)
+    const moveTo = src.slice(src.indexOf("function moveTo("), src.indexOf("function onFenceChange("))
+    expect(moveTo).toMatch(/if \(location\.outline\)/)
+    expect(moveTo).toMatch(/type: "polygon", ring: location\.outline/)
+    expect(moveTo).toMatch(/fenceCentre\(/)
+  })
+
+  it("the building outline comes from /api/footprint, never Overpass from the browser (SCRUM-351)", () => {
+    // Direct, with no User-Agent, was against OSM's usage policy; and "Couldn't
+    // reach OpenStreetMap" was said for a busy server and for no building alike.
+    const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
+    const imp = editor.slice(editor.indexOf("const importFootprint"), editor.indexOf("/* --------------------------------------------------------------- view --- */"))
+    expect(imp).toMatch(/fetch\(`\/api\/footprint\?lat=/)
+    expect(imp).not.toMatch(/overpass-api\.de/)
+    expect(imp).toMatch(/busy/i)
+  })
+
   it("a pick cancels a pending search, so 'Searching…' cannot stick", () => {
     const search = readFileSync(join(__dirname, "../components/event-form/address-search.tsx"), "utf8")
     const pick = search.slice(search.indexOf("function pick("), search.indexOf("const showList"))

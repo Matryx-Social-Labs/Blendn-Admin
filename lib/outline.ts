@@ -88,23 +88,28 @@ export function outlineFromGeoJson(geojson: unknown): Ring | null {
 /**
  * The building a pinned place sits in, from Overpass `out geom` elements.
  *
- * The smallest building containing the pin (a unit, not the mall around it),
- * else the nearest within OUTLINE_BUILDING_WITHIN_M, else null.
+ * A stadium the pin is inside — its outline, not a stand within it, which is
+ * what the browser lookup this replaced chose too. Else the smallest building
+ * containing the pin (a unit, not the mall around it), else the nearest within
+ * OUTLINE_BUILDING_WITHIN_M, else null.
  */
 export function pickBuilding(elements: unknown, pin: LatLng): Ring | null {
   if (!Array.isArray(elements)) return null
-  const rings = elements.flatMap((e) => {
-    const geometry = (e as { type?: unknown; geometry?: unknown })?.geometry
-    if ((e as { type?: unknown })?.type !== "way" || !Array.isArray(geometry)) return []
+  const shapes = elements.flatMap((e) => {
+    const { type, geometry, tags } = (e ?? {}) as { type?: unknown; geometry?: unknown; tags?: Record<string, unknown> }
+    if (type !== "way" || !Array.isArray(geometry)) return []
     const ring = usable(toRing(geometry.map((g: { lat?: unknown; lon?: unknown }) => [g?.lon, g?.lat])))
-    return ring ? [ring] : []
+    return ring ? [{ ring, stadium: tags?.leisure === "stadium" }] : []
   })
 
-  const containing = rings.filter((ring) => pointInPolygon(pin, ring)).sort((a, b) => size(a) - size(b))
-  if (containing.length) return containing[0]
+  const containing = shapes
+    .filter(({ ring }) => pointInPolygon(pin, ring))
+    .sort((a, b) => Number(b.stadium) - Number(a.stadium) || size(a.ring) - size(b.ring))
+  if (containing.length) return containing[0].ring
 
-  const near = rings
-    .map((ring) => ({ ring, metres: distanceToGeofence(pin, { type: "polygon", ring, buffer: 0 }) }))
+  const near = shapes
+    .filter(({ stadium }) => !stadium)
+    .map(({ ring }) => ({ ring, metres: distanceToGeofence(pin, { type: "polygon", ring, buffer: 0 }) }))
     .filter(({ metres }) => metres <= OUTLINE_BUILDING_WITHIN_M)
     .sort((a, b) => a.metres - b.metres)
   return near[0]?.ring ?? null

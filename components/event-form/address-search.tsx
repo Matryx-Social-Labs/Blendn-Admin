@@ -3,6 +3,7 @@
 import { useId, useRef, useState } from "react"
 import { IconMapPin, IconSearch } from "@tabler/icons-react"
 import { extractAddress } from "@/lib/address"
+import { outlineFromGeoJson } from "@/lib/outline"
 import type { LocationData } from "@/components/location-picker"
 import { cn } from "@/lib/utils"
 
@@ -12,6 +13,8 @@ interface GeocodeHit {
   lon: string
   display_name: string
   address?: Record<string, string>
+  /** Polygon for a place OSM holds as an area; a Point for a pin (`/api/geocode`). */
+  geojson?: unknown
 }
 
 /**
@@ -81,6 +84,7 @@ export function AddressSearch({ onPick }: { onPick: (location: LocationData) => 
       state: resolved.state,
       country: resolved.country,
       postal_code: resolved.postalCode,
+      outline: outlineFromGeoJson(hit.geojson),
     })
   }
 
