@@ -46,7 +46,8 @@ export function AreaControls({
   tools: AreaTools
 }) {
   const id = useId()
-  const max = Math.max(SLIDER_MAX_M, fence?.buffer ?? 0)
+  // Never below the venue's own buffer, however far down it was dragged.
+  const max = Math.max(SLIDER_MAX_M, base, fence?.buffer ?? 0)
   const shape = fence?.type === "circle" ? "circle" : "outline"
 
   return (

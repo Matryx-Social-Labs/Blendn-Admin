@@ -110,7 +110,9 @@ test.describe("the venue picker and the pin agree", () => {
     await expect(page.locator(".leaflet-container")).toHaveCount(1)
     await expect(page.locator('[data-area-source="venue"]')).toBeVisible({ timeout: 15_000 })
     await expect(marker).toHaveCount(0)
-    await expect(page.getByRole("button", { name: /^Venue's · \d+ m$/ })).toHaveAttribute("aria-pressed", "true")
+    // The seeded venue's own buffer is 25 m (scripts/seed-qa.ts), not the default 20.
+    await expect(page.getByRole("button", { name: "Venue's · 25 m" })).toHaveAttribute("aria-pressed", "true")
+    await expect(page.locator('[data-area-source="venue"]')).toContainText("+25 m, the venue's buffer")
     await page.getByRole("button", { name: "Adjust for this event" }).click()
     await expect(marker.first()).toBeVisible({ timeout: 15_000 })
 
@@ -147,5 +149,8 @@ test.describe("the venue page's check-in area map", () => {
 
     await page.goto(href!)
     await expectOnTheMap(page)
+    // The venue page keeps the editor's own controls; its slider is named on
+    // the thumb, the element with role="slider".
+    await expect(page.getByRole("slider", { name: "Buffer in metres" })).toBeVisible()
   })
 })

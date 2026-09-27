@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
 import { AreaControls } from "@/components/event-form/area-controls"
-import { DEFAULT_BUFFER_M, fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, sameShape, type Geofence } from "@/lib/geofence"
+import { areaAfterPick, DEFAULT_BUFFER_M, fenceCentre, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, sameShape, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
@@ -102,18 +102,27 @@ export function LocationSection({
       return
     }
     onLocationChange(location)
-    const { fence, movedKm: moved } = followPin(
+    const { fence, movedKm: moved } = areaAfterPick(
       (form.getValues("geofence") as Geofence | null) ?? null,
       { lat: location.lat, lng: location.lng }
     )
-    // A new event has no area to follow the pin: without this it saved none,
-    // and check-in fell back to the bare radius.
-    setFence({ ...(fence ?? circleOn(location)), buffer: DEFAULT_BUFFER_M })
+    setFence(fence)
     setMovedKm(moved)
   }
 
   function setBuffer(buffer: number) {
     if (geofence) setFence({ ...geofence, buffer })
+  }
+
+  /** The area when Adjust opened: closing Adjust on an outline of fewer than three corners puts it back. */
+  const beforeAdjust = useRef<{ fence: Geofence | null; source: AreaSource | null }>({ fence: null, source: null })
+  function adjust(open: boolean) {
+    if (open) beforeAdjust.current = { fence: geofence, source: areaSource }
+    else if (geofence?.type === "polygon" && geofence.ring.length < 3) {
+      setFence(beforeAdjust.current.fence)
+      setAreaSource(beforeAdjust.current.source)
+    }
+    setAdjusting(open)
   }
 
   /**
@@ -133,8 +142,10 @@ export function LocationSection({
     const before = lat == null || lng == null ? null : { lat, lng }
     setFence(fence)
     if (fence.type === "polygon") setMovedKm(null)
-    // `fenceCentre` is null for a ring still being drawn: leave the pin alone
-    // until the shape exists.
+    // A ring still being drawn is not a place yet: its first click or two
+    // would move the pin — and rewrite the address — to wherever they landed.
+    // `fenceCentre` answers for one point, so the ring's length decides.
+    if (fence.type === "polygon" && fence.ring.length < 3) return
     const centre = fenceCentre(fence)
     if (!centre) return
     form.setValue("latitude", centre.lat)
@@ -163,6 +174,8 @@ export function LocationSection({
   }
   const [venue, setVenue] = useState<VenueOption | null>(null)
   const venueId = form.watch("venue_id")
+  /** A linked venue that could not be loaded: its buffer is unknown, so the default stands in. */
+  const [unloadedVenueId, setUnloadedVenueId] = useState<string | null>(null)
 
   // Editing an existing linked event: the id is on the form, the venue is not.
   useEffect(() => {
@@ -170,11 +183,14 @@ export function LocationSection({
     let cancelled = false
     venueById(venueId)
       .then((v) => {
-        if (!cancelled && v) setVenue(v)
+        if (cancelled) return
+        if (v) setVenue(v)
+        else setUnloadedVenueId(venueId)
       })
       .catch(() => {
         // A failed lookup leaves the free-text name showing, which is still
         // correct — the link is on the form either way.
+        if (!cancelled) setUnloadedVenueId(venueId)
       })
     return () => {
       cancelled = true
@@ -233,11 +249,11 @@ export function LocationSection({
       setAreaSource("venue")
     } else if (picked.lat !== null && picked.lng !== null) {
       // A venue with no area of its own: the one the form has follows the pin.
-      const { fence, movedKm: moved } = followPin(
+      const { fence, movedKm: moved } = areaAfterPick(
         (form.getValues("geofence") as Geofence | null) ?? null,
         { lat: picked.lat, lng: picked.lng }
       )
-      setFence({ ...(fence ?? circleOn({ lat: picked.lat, lng: picked.lng })), buffer: DEFAULT_BUFFER_M })
+      setFence(fence)
       setMovedKm(moved)
     }
   }
@@ -285,6 +301,9 @@ export function LocationSection({
     // this place, and clearing it all would punish them for unlinking.
   }
 
+  // Until the linked venue loads, its buffer is unknown: the choice would read
+  // "Custom" against the default and offer the default as the base.
+  const venuePending = !!venueId && venue?.id !== venueId && unloadedVenueId !== venueId
   const venueArea = venue?.geofence ? validateGeofence(venue.geofence) : null
   /** The buffer a pick starts from: the venue's own, else the default (owner's ruling 3). */
   const venueBuffer = venueArea?.ok ? venueArea.fence.buffer : null
@@ -364,7 +383,7 @@ export function LocationSection({
           legend={legend}
           controls={(tools) => (
             <AreaControls
-              fence={geofence}
+              fence={venuePending ? null : geofence}
               base={baseBuffer}
               baseIsVenue={venueBuffer != null}
               custom={custom}
@@ -375,7 +394,7 @@ export function LocationSection({
               onCustom={() => setCustomChosen(true)}
               onBuffer={setBuffer}
               adjusting={adjusting}
-              onAdjusting={setAdjusting}
+              onAdjusting={adjust}
               adjustLabel={venue ? "Adjust for this event" : "Adjust area"}
               tools={tools}
             />
@@ -391,8 +410,9 @@ export function LocationSection({
                 <FormItem>
                   <AreaSourceLine source={areaSource} fence={geofence} whose={whose} />
                   <FormLabel className="sr-only">Address</FormLabel>
+                  {/* Controlled from the first render: a new event has no address until a pick writes one. */}
                   <FormControl>
-                    <Input placeholder="The address — written by the pin; edit if the street is wrong" {...field} />
+                    <Input placeholder="The address — written by the pin; edit if the street is wrong" {...field} value={field.value ?? ""} />
                   </FormControl>
                   <DerivedLine form={form} />
                   {movedKm != null ? (
@@ -443,14 +463,6 @@ function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
 type AreaSource = "venue" | "osm-area" | "building" | "circle" | "drawn"
 type BufferWhose = "venue" | "default" | "custom"
 
-/** A place with no outline and no area yet: a circle on its pin, the size the editor starts with. */
-const circleOn = (pin: { lat: number; lng: number }): Geofence => ({
-  type: "circle",
-  lat: pin.lat,
-  lng: pin.lng,
-  radius: 30,
-  buffer: DEFAULT_BUFFER_M,
-})
 
 /**
  * The area cites its source — the section's memorable detail (SCRUM-353 design

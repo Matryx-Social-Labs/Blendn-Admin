@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
 
 /**
  * The area arrives set; the organiser chooses whose buffer, and adjusts the
@@ -60,7 +60,74 @@ test("a pub with no outline gets a circle at the default buffer; Custom moves th
   await expect(page.getByRole("button", { name: "Find the building again" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Use a circle instead" })).toHaveCount(0)
 
+  // Drawing by hand, one click in, then closing Adjust: one corner is not a
+  // place. The pin stays where it was, and the circle comes back, cited.
+  const pin = page.locator("[data-lat]").first()
+  const lat = await pin.getAttribute("data-lat")
+  await page.getByRole("button", { name: "Draw it yourself" }).click()
+  await expect(cite).toHaveCount(0)
+  const box = (await map.boundingBox())!
+  // Away from the zoom control, the layer toggle and the legend.
+  await map.click({ position: { x: box.width * 0.75, y: box.height * 0.4 } })
+  await expect(handles).toHaveCount(1)
+  await expect(pin).toHaveAttribute("data-lat", lat!)
+
   // Closing it locks the shape again.
   await page.getByRole("button", { name: "Adjust area" }).click()
+  await expect(cite).toBeVisible()
+  await expect(legend("Circle — 30 m")).toBeVisible()
   await expect(handles).toHaveCount(0)
+})
+
+/** Search, pick the option, and wait for the area it brings. */
+async function pickPlace(page: Page, query: string, option: RegExp) {
+  await page.getByRole("combobox", { name: "Venue or address" }).fill(query)
+  const hit = page.getByRole("option", { name: option }).first()
+  await expect(hit).toBeVisible({ timeout: 15_000 })
+  await hit.click()
+}
+
+test("a place picked after a venue starts at the default buffer, not the venue's", async ({ page }) => {
+  await page.goto("/dashboard/events/new")
+  await expect(page.locator(".leaflet-container")).toBeVisible({ timeout: 30_000 })
+
+  // The listed venue brings its 25 m (the seed's).
+  await pickPlace(page, "Chinnaswamy", /^M\. Chinnaswamy Stadium/)
+  await expect(page.locator('[data-area-source="venue"]')).toContainText("+25 m, the venue's buffer")
+
+  // Changed their mind: unlink, and pick a pub instead.
+  await page.getByRole("button", { name: "Unlink the venue" }).click()
+  await pickPlace(page, "Toit Indiranagar", /^Toit, 298/)
+  const cite = page.locator('[data-area-source="circle"]')
+  await expect(cite).toBeVisible({ timeout: 15_000 })
+  await expect(cite).toContainText("+20 m, the default buffer")
+  await expect(page.getByRole("button", { name: "Default · 20 m" })).toHaveAttribute("aria-pressed", "true")
+})
+
+test("a custom buffer is saved, and the edit page reads it back as Custom", async ({ page }) => {
+  await page.goto("/dashboard/events/new")
+  await expect(page.locator(".leaflet-container")).toBeVisible({ timeout: 30_000 })
+  await pickPlace(page, "Toit Indiranagar", /^Toit, 298/)
+  await expect(page.locator('[data-area-source="circle"]')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByRole("button", { name: "Custom" }).click()
+  const slider = page.getByRole("slider", { name: "Buffer, metres beyond the area" })
+  await slider.focus()
+  await page.keyboard.press("ArrowRight")
+  await expect(slider).toHaveAttribute("aria-valuenow", "25")
+
+  await page.getByLabel("Title").fill("e2e custom buffer (SCRUM-353b)")
+  await page.getByLabel("Description").fill("Saved by e2e/where-buffer-adjust.spec.ts.")
+  await page.getByLabel("Starts").fill("2030-10-10T19:00")
+  await page.getByLabel("Ends").fill("2030-10-10T22:00")
+  await page.getByRole("button", { name: "Save draft" }).click()
+  await expect(page).toHaveURL(/\/dashboard\/events\/[0-9a-f-]{36}$/, { timeout: 30_000 })
+
+  // The form loads what the row holds: 25 m, which is not the default — Custom.
+  await page.goto(`${new URL(page.url()).pathname}/edit`)
+  const saved = page.locator('[data-area-source="saved"]')
+  await expect(saved).toBeVisible({ timeout: 30_000 })
+  await expect(saved).toContainText("+25 m, custom for this event")
+  await expect(page.getByRole("button", { name: "Custom" })).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("slider", { name: "Buffer, metres beyond the area" })).toHaveAttribute("aria-valuenow", "25")
 })

@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import {
   DEFAULT_ACCURACY_POLICY,
   DEFAULT_BUFFER_M,
+  DEFAULT_CIRCLE_M,
   GEOFENCE_LIMITS,
   fenceCentre,
   ringSelfIntersects,
@@ -163,7 +164,7 @@ export function GeofenceEditor({
         type: "circle",
         lat: fallbackCentre.lat,
         lng: fallbackCentre.lng,
-        radius: 30,
+        radius: DEFAULT_CIRCLE_M,
         buffer: DEFAULT_BUFFER_M,
       },
     [value, fallbackCentre.lat, fallbackCentre.lng]
@@ -196,6 +197,10 @@ export function GeofenceEditor({
       setImportNote(null)
     }
   }
+
+  // Editing switched off mid-trace (the event form's Adjust closed): stop
+  // tracing, so reopening it shows a shape rather than a hidden trace mode.
+  if (!editable && drawing) setDrawing(false)
 
   const crossed = fence.type === "polygon" && ringSelfIntersects(fence.ring)
 
@@ -533,7 +538,7 @@ export function GeofenceEditor({
         type: "circle",
         lat: centre[0],
         lng: centre[1],
-        radius: 30,
+        radius: DEFAULT_CIRCLE_M,
         buffer: fence.buffer,
       })
     }

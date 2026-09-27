@@ -31,6 +31,7 @@ test("a stadium's search draws its own outline, with the pin at its centre", asy
   await expect(map.locator(".leaflet-marker-icon")).toHaveCount(0)
   await page.getByRole("button", { name: "Adjust area" }).click()
   await expect.poll(() => map.locator(".leaflet-marker-icon").count(), { timeout: 15_000 }).toBeGreaterThan(10)
+  await expect(page.getByRole("button", { name: "Use a circle instead" })).toBeVisible()
 
   // The pin is the outline's centre, not the geocoder's point.
   const pin = page.locator("[data-lat]").first()
