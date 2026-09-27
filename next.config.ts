@@ -1,4 +1,4 @@
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 import { sentryCspReportUri } from "./lib/csp-report";
 
@@ -112,7 +112,14 @@ const nextConfig: NextConfig = {
    * counters" and every rate limit was per-process and reset on deploy. The
    * one log line said so, on staging, for as long as Redis has been configured.
    */
-  serverExternalPackages: ["redis", "@redis/client"],
+  /*
+   * `expo-server-sdk` for the same reason, found on the v7 upgrade. Its
+   * `undici` bundles to a dev-server chunk that throws on load ("'super'
+   * keyword unexpected here"), so every route importing lib/push-notifications
+   * answered 500 under `npm run dev` — announcements first. The production
+   * build happened to survive it; Node resolving it is the same in both.
+   */
+  serverExternalPackages: ["redis", "@redis/client", "expo-server-sdk"],
 
   // Experimental features
   experimental: {

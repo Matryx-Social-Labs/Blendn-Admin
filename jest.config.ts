@@ -29,7 +29,12 @@ const config: Config = {
   },
   transform: {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: "tsconfig.json" }],
+    // expo-server-sdk is ESM-only from v6. Jest's CommonJS runtime cannot
+    // require() it, so ts-jest compiles just that package (allowJs is on in
+    // tsconfig.json) and the real client stays under test rather than a stub.
+    "/node_modules/expo-server-sdk/.+\\.js$": ["ts-jest", { tsconfig: "tsconfig.json" }],
   },
+  transformIgnorePatterns: ["/node_modules/(?!expo-server-sdk/)"],
 }
 
 export default config

@@ -26,7 +26,12 @@ const config: Config = {
      */
     "^jose$": "<rootDir>/__tests__/integration/jose-stub.ts",
   },
-  transform: { "^.+\\.tsx?$": ["ts-jest", { tsconfig: "tsconfig.json" }] },
+  transform: {
+    "^.+\\.tsx?$": ["ts-jest", { tsconfig: "tsconfig.json" }],
+    // expo-server-sdk is ESM-only from v6; see jest.config.ts.
+    "/node_modules/expo-server-sdk/.+\\.js$": ["ts-jest", { tsconfig: "tsconfig.json" }],
+  },
+  transformIgnorePatterns: ["/node_modules/(?!expo-server-sdk/)"],
   // Real DB work is slower than mocked unit tests, and they share one database,
   // so run serially to keep truncation between suites deterministic.
   maxWorkers: 1,

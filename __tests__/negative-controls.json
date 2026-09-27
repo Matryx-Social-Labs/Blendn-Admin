@@ -63,6 +63,12 @@
       "observed": "3 of 4 failing (the fourth, a venue owner hosting their own event, passes under it by design): createPoll resolved for the venue owner instead of rejecting Forbidden; the mobile route returned 200, not 403; the organiser's test then counted 2 polls in the room, not 1. broadcast-permissions.test.ts: 1 failing (venue owner announcement expected false, got true).",
       "date": "2026-09-27"
     },
+    "sentry-scrub.test.ts": {
+      "guards": "Sentry 11 dataCollection: every Sentry.init site (instrumentation-client.ts, sentry.server.config.ts, sentry.edge.config.ts) passes SENTRY_DATA_COLLECTION and none uses the removed sendDefaultPii; the baseline keeps userInfo, cookies, http bodies, database query data, queues, genAI and GraphQL collection off (v10's sendDefaultPii:false behaviour)",
+      "mutation": "M1 `dataCollection: SENTRY_DATA_COLLECTION` deleted from sentry.edge.config.ts; M2 `cookies: true` in SENTRY_DATA_COLLECTION (both 2026-09-27).",
+      "observed": "M1: 1 failing (\"is what sentry.edge.config.ts passes to Sentry.init\"). M2: 1 failing (the v10 baseline test). Both reverted from copies; 16/16 after.",
+      "date": "2026-09-27"
+    },
     "participation-needs-onboarding.itest.ts": {
       "guards": "SCRUM-331: a profile that is neither onboarded nor of a known adult age cannot RSVP, save, read the board, check in, start a conversation, send a message request or send a DM (403 FINISH_ONBOARDING, nothing written) but can still view the event; an onboarded no-age account, an adult mid-onboarding and an onboarded pre-ruling under-18 can take part; an under-18 who never finished onboarding cannot",
       "mutation": "M1 attendeeEventAccess's participate gate disabled; M2 the check-in gate disabled; M3 participationRefusal returns null; M4 mayParticipate = onboarded only; M5 mayParticipate = isAdult only; M6 the gate applied to `view` too; M7 the interest route asks `view` instead of `participate`; M8 mayParticipate lets a missing profile through (all 2026-09-27).",

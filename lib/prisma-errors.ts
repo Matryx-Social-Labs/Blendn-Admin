@@ -3,12 +3,14 @@
  *
  * ## Why this is not `error.message.includes(name)`
  *
- * That is the obvious way to write it, and in this stack it never matches.
- * Prisma's own message names the violated **fields**:
+ * That is the obvious way to write it, and up to Prisma 7.9 it never matched.
+ * Prisma's own message named the violated **fields**:
  *
  *     "Unique constraint failed on the fields: (`event_id`)"
  *
- * The constraint *name* is only in the driver adapter's nested cause:
+ * Prisma 7.10 names the constraint in the message as well, but that is one
+ * minor version's wording, and the name has always been in the driver
+ * adapter's nested cause:
  *
  *     meta.driverAdapterError.cause.originalMessage
  *       = 'duplicate key value violates unique constraint

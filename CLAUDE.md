@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Next.js 15 (App Router) web admin dashboard + REST API backend for **Blendn**, an event networking app. Serves two distinct clients from one codebase:
+Next.js 16 (App Router) web admin dashboard + REST API backend for **Blendn**, an event networking app. Serves two distinct clients from one codebase:
 
 - **Dashboard** (`app/dashboard/*`) — NextAuth session-authenticated UI for `app_admin`, `organizer`, and `venue_owner` roles.
 - **Mobile API** (`app/api/mobile/*`) — JWT-authenticated REST API consumed by the Expo React Native app (separate repo, `blendn/`).

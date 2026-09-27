@@ -1,4 +1,4 @@
-import type { ErrorEvent, EventHint } from "@sentry/nextjs"
+import type { BrowserOptions, ErrorEvent, EventHint } from "@sentry/nextjs"
 
 /**
  * Shared Sentry `beforeSend` and `ignoreErrors` for all three runtimes.
@@ -73,6 +73,29 @@ export const IGNORED_ERRORS = [
   "ResizeObserver loop completed with undelivered notifications",
   "ResizeObserver loop limit exceeded",
 ]
+
+/**
+ * What Sentry may collect, for all three runtimes.
+ *
+ * Sentry 11 replaced `sendDefaultPii: false` with this option, and unset it
+ * is permissive: cookies (the session token), whole request and response
+ * bodies (a sign-in's password), user IPs and database query data. That lands
+ * on transactions and spans, which `beforeSend` never sees, so this is the
+ * v10 behaviour restated field by field — from Sentry's own migration guide.
+ */
+const DENY_NETWORK_IDENTITY = { deny: ["forwarded", "-ip", "remote-", "via", "-user"] }
+
+export const SENTRY_DATA_COLLECTION = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: { request: DENY_NETWORK_IDENTITY, response: DENY_NETWORK_IDENTITY },
+  httpBodies: [],
+  urlQueryParams: DENY_NETWORK_IDENTITY,
+  genAI: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  queues: false,
+  graphQL: { document: false, variables: false },
+} satisfies NonNullable<BrowserOptions["dataCollection"]>
 
 export function beforeSend(event: ErrorEvent, _hint: EventHint): ErrorEvent | null {
   // Identify the account without shipping who they are.

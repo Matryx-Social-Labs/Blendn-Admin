@@ -1,5 +1,7 @@
 import type { ErrorEvent, EventHint } from "@sentry/nextjs"
-import { beforeSend, scrubString, IGNORED_ERRORS } from "@/lib/sentry-scrub"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { beforeSend, scrubString, IGNORED_ERRORS, SENTRY_DATA_COLLECTION } from "@/lib/sentry-scrub"
 
 const send = (event: Partial<ErrorEvent>) =>
   beforeSend(event as ErrorEvent, {} as EventHint)!
@@ -95,4 +97,31 @@ describe("IGNORED_ERRORS", () => {
       expect(IGNORED_ERRORS).toContain(needle)
     }
   })
+})
+
+/*
+ * Sentry 11 replaced `sendDefaultPii` with `dataCollection`, and left unset it
+ * now collects cookies, whole request/response bodies, user IPs and database
+ * query data — on transactions and spans, which `beforeSend` never sees. The
+ * v10 behaviour this project relied on has to be stated, in every runtime.
+ */
+describe("SENTRY_DATA_COLLECTION", () => {
+  it("keeps the restrictive v10 baseline: no user info, cookies, bodies or query data", () => {
+    expect(SENTRY_DATA_COLLECTION.userInfo).toBe(false)
+    expect(SENTRY_DATA_COLLECTION.cookies).toBe(false)
+    expect(SENTRY_DATA_COLLECTION.httpBodies).toEqual([])
+    expect(SENTRY_DATA_COLLECTION.databaseQueryData).toBe(false)
+    expect(SENTRY_DATA_COLLECTION.queues).toBe(false)
+    expect(SENTRY_DATA_COLLECTION.genAI).toEqual({ inputs: false, outputs: false })
+    expect(SENTRY_DATA_COLLECTION.graphQL).toEqual({ document: false, variables: false })
+  })
+
+  it.each(["instrumentation-client.ts", "sentry.server.config.ts", "sentry.edge.config.ts"])(
+    "is what %s passes to Sentry.init",
+    (file) => {
+      const source = readFileSync(join(process.cwd(), file), "utf8")
+      expect(source).toMatch(/dataCollection:\s*SENTRY_DATA_COLLECTION/)
+      expect(source).not.toMatch(/sendDefaultPii/)
+    }
+  )
 })
