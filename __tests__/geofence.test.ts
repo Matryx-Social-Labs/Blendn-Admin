@@ -11,6 +11,7 @@ import {
   followPin,
   samePlace,
   phoneCheckInRadius,
+  sameShape,
   eventCentre,
   fencesOverlap,
   validateGeofence,
@@ -641,6 +642,21 @@ describe("phoneCheckInRadius — the circle the app judges with must cover the w
 
   it("keeps the stored radius when there is nowhere to measure from", () => {
     expect(phoneCheckInRadius({ geofence: null, latitude: null, longitude: null, check_in_radius: 45 })).toBe(45)
+  })
+})
+
+describe("sameShape — a buffer change is not a new area (SCRUM-353 review)", () => {
+  const circle = { type: "circle" as const, lat: 12.97, lng: 77.59, radius: 30, buffer: 20 }
+  const ring: [number, number][] = [[12.97, 77.59], [12.971, 77.59], [12.971, 77.591]]
+  it("ignores the buffer", () => {
+    expect(sameShape(circle, { ...circle, buffer: 35 })).toBe(true)
+    expect(sameShape({ type: "polygon", ring, buffer: 20 }, { type: "polygon", ring: ring.map((p) => [...p] as [number, number]), buffer: 5 })).toBe(true)
+  })
+  it("sees a moved centre, a new radius, a moved corner, another kind", () => {
+    expect(sameShape(circle, { ...circle, lat: 12.98 })).toBe(false)
+    expect(sameShape(circle, { ...circle, radius: 31 })).toBe(false)
+    expect(sameShape({ type: "polygon", ring, buffer: 20 }, { type: "polygon", ring: [ring[0], ring[1], [12.972, 77.591]], buffer: 20 })).toBe(false)
+    expect(sameShape(circle, { type: "polygon", ring, buffer: 20 })).toBe(false)
   })
 })
 

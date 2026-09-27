@@ -106,6 +106,14 @@ export function WhereSearch({
     }, 350)
   }
 
+  /** Leaving the input: a search in flight must not reopen the list later. */
+  function cancel() {
+    clearTimeout(timer.current)
+    ++seq.current
+    setSearching(false)
+    setOpen(false)
+  }
+
   function pick(option: Option) {
     clearTimeout(timer.current)
     ++seq.current
@@ -173,7 +181,7 @@ export function WhereSearch({
           autoComplete="off"
           onChange={(e) => search(e.target.value)}
           onFocus={() => options.length > 0 && setOpen(true)}
-          onBlur={() => setOpen(false)}
+          onBlur={cancel}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown" && options.length) {
               e.preventDefault()
@@ -195,60 +203,71 @@ export function WhereSearch({
       </div>
 
       {showList ? (
-        <ul
+        <div
           id={listId}
           role="listbox"
           className="absolute z-[900] mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border-strong bg-popover p-1 shadow-lg"
         >
-          {options.map((option, i) => (
-            <li key={option.kind === "venue" ? `v-${option.venue.id}` : `p-${option.hit.place_id}`} role="presentation">
-              {i === 0 && venueCount > 0 ? <Group>Listed venues</Group> : null}
-              {i === venueCount ? <Group>Add a new place</Group> : null}
-              <div
-                id={`${listId}-${i}`}
-                role="option"
-                aria-selected={i === active}
-                // Pick before the input's blur can close the list.
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  pick(option)
-                }}
-                onMouseEnter={() => setActive(i)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem]",
-                  i === active && "bg-accent"
-                )}
-              >
-                {option.kind === "venue" ? (
-                  <>
-                    <IconMapPin className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">{option.venue.name}</span>
-                    {hasOutline(option.venue.geofence) ? <Badge variant="outline">outline</Badge> : null}
-                    <span className="shrink-0 text-[0.75rem] text-muted-foreground">
-                      {[option.venue.venueTypeLabel, option.venue.city].filter(Boolean).join(" · ")}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <IconPlus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">{option.hit.display_name}</span>
-                    <span className="shrink-0 text-[0.75rem] text-muted-foreground">
-                      {outlineFromGeoJson(option.hit.geojson) ? "OSM · area" : "OSM · pin"}
-                    </span>
-                  </>
-                )}
+          {/* Real groups, so a screen reader hears where the listed venues end. */}
+          {[
+            { key: "venues", label: "Listed venues", from: 0, to: venueCount },
+            { key: "places", label: "Add a new place", from: venueCount, to: options.length },
+          ]
+            .filter((g) => g.to > g.from)
+            .map((g) => (
+              <div key={g.key} role="group" aria-labelledby={`${listId}-${g.key}`}>
+                <Group id={`${listId}-${g.key}`}>{g.label}</Group>
+                {options.slice(g.from, g.to).map((option, k) => {
+                  const i = g.from + k
+                  return (
+                    <div
+                      key={option.kind === "venue" ? `v-${option.venue.id}` : `p-${option.hit.place_id}`}
+                      id={`${listId}-${i}`}
+                      role="option"
+                      aria-selected={i === active}
+                      // Pick before the input's blur can close the list.
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        pick(option)
+                      }}
+                      onMouseEnter={() => setActive(i)}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem]",
+                        i === active && "bg-accent"
+                      )}
+                    >
+                      {option.kind === "venue" ? (
+                        <>
+                          <IconMapPin className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{option.venue.name}</span>
+                          {hasOutline(option.venue.geofence) ? <Badge variant="outline">outline</Badge> : null}
+                          <span className="shrink-0 text-[0.75rem] text-muted-foreground">
+                            {[option.venue.venueTypeLabel, option.venue.city].filter(Boolean).join(" · ")}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <IconPlus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{option.hit.display_name}</span>
+                          <span className="shrink-0 text-[0.75rem] text-muted-foreground">
+                            {outlineFromGeoJson(option.hit.geojson) ? "OSM · area" : "OSM · pin"}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
-            </li>
-          ))}
-        </ul>
+            ))}
+        </div>
       ) : null}
     </div>
   )
 }
 
-function Group({ children }: { children: string }) {
+function Group({ id, children }: { id: string; children: string }) {
   return (
-    <p className="px-2 pb-1 pt-2 text-[0.6875rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+    <p id={id} className="px-2 pb-1 pt-2 text-[0.6875rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
       {children}
     </p>
   )

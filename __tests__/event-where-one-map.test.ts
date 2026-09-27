@@ -42,6 +42,32 @@ describe("the event form's Where section", () => {
     expect(inherit).toMatch(/\+\+footprintSeq\.current/)
   })
 
+  it("the citation stays true: a buffer nudge keeps the source; the editor's own import is a building (React review)", () => {
+    const onFence = src.slice(src.indexOf("function onFenceChange("), src.indexOf("function inherit("))
+    expect(onFence).toMatch(/how === "import"[\s\S]*?setAreaSource\("building"\)/)
+    expect(onFence).toMatch(/!sameShape\(prev, fence\)[\s\S]*?setAreaSource\("drawn"\)/)
+    const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
+    const imp = editor.slice(editor.indexOf("const importFootprint"), editor.indexOf("/* --------------------------------------------------------------- view --- */"))
+    expect(imp).toMatch(/onChange\(\{ type: "polygon", ring, buffer: fence\.buffer \}, "import"\)/)
+  })
+
+  it("a lookup still in flight when the section goes away writes nothing (React review)", () => {
+    expect(src).toMatch(/useEffect\(\s*\(\) => \(\) => \{\s*footprintSeq\.current\+\+/)
+  })
+
+  it("leaving the input cancels a search in flight, so it cannot reopen the list (React review)", () => {
+    const search = readFileSync(join(__dirname, "../components/event-form/where-search.tsx"), "utf8")
+    const blur = search.slice(search.indexOf("function cancel("), search.indexOf("function pick("))
+    expect(blur).toMatch(/clearTimeout\(timer\.current\)/)
+    expect(blur).toMatch(/\+\+seq\.current/)
+    expect(search).toMatch(/onBlur=\{cancel\}/)
+  })
+
+  it("the two groups are real listbox groups, heard by a screen reader (React review)", () => {
+    const search = readFileSync(join(__dirname, "../components/event-form/where-search.tsx"), "utf8")
+    expect(search).toMatch(/role="group"[\s\S]*?aria-labelledby=/)
+  })
+
   it("the area cites its source under the map — the section's memorable detail", () => {
     expect(src).toMatch(/<AreaSourceLine\s+source=\{areaSource\}/)
     for (const said of ["Area from the venue", "Outline from OpenStreetMap", "Building outline found nearby", "No outline in OpenStreetMap"]) {

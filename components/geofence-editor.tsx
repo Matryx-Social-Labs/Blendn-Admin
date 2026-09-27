@@ -79,7 +79,8 @@ function colours() {
 
 export interface GeofenceEditorProps {
   value: Geofence | null
-  onChange: (fence: Geofence) => void
+  /** `how` is "import" for the building outline this editor fetched itself. */
+  onChange: (fence: Geofence, how?: "import") => void
   /** Where to centre when there is nothing drawn yet. */
   fallbackCentre?: { lat: number; lng: number }
   /** A concurrent event's fence, drawn dashed purple as an overlap warning. */
@@ -477,7 +478,7 @@ export function GeofenceEditor({
         setImportNote("No building outline here in OpenStreetMap — trace it by hand.")
         return
       }
-      onChange({ type: "polygon", ring, buffer: fence.buffer })
+      onChange({ type: "polygon", ring, buffer: fence.buffer }, "import")
       setDrawing(false)
       // A stadium's outline is wider than the view it was fetched from.
       mapRef.current?.fitBounds(ring, { padding: [24, 24] })

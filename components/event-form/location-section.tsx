@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
-import { DEFAULT_BUFFER_M, fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, type Geofence } from "@/lib/geofence"
+import { DEFAULT_BUFFER_M, fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, sameShape, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
@@ -56,6 +56,11 @@ export function LocationSection({
   const [areaSource, setAreaSource] = useState<AreaSource | null>(null)
   /** Only the newest building lookup may draw; a later pick or a drawing wins. */
   const footprintSeq = useRef(0)
+  // And none after the section has gone: a late answer is ignored.
+  useEffect(() => () => {
+    footprintSeq.current++
+  }, [])
+  const geofence = (form.watch("geofence") as Geofence | null) ?? null
 
   /**
    * The app judges the area as a circle of `check_in_radius` around the pin, so
@@ -105,9 +110,13 @@ export function LocationSection({
    * columns the attendee app sorts "Nearby" by and puts its marker on — and a
    * dragged circle brings the address with it, the way dragging the old pin did.
    */
-  function onFenceChange(fence: Geofence) {
+  function onFenceChange(fence: Geofence, how?: "import") {
     ++footprintSeq.current
-    setAreaSource("drawn")
+    // The citation stays true: the editor's own import is a building, a new
+    // shape is drawn, and a buffer nudge keeps whatever it cited before.
+    const prev = form.getValues("geofence") as Geofence | null
+    if (how === "import") setAreaSource("building")
+    else if (!prev || !sameShape(prev, fence)) setAreaSource("drawn")
     const lat = form.getValues("latitude")
     const lng = form.getValues("longitude")
     const before = lat == null || lng == null ? null : { lat, lng }
@@ -312,7 +321,7 @@ export function LocationSection({
       <div className="flex flex-col gap-2" data-lat={initialLat ?? ""} data-lng={initialLng ?? ""}>
         <p className="sr-only">Location and check-in area</p>
         <GeofenceEditor
-          value={(form.watch("geofence") as Geofence | null) ?? null}
+          value={geofence}
           onChange={onFenceChange}
           fallbackCentre={
             initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : undefined
@@ -323,10 +332,7 @@ export function LocationSection({
               name="address"
               render={({ field }) => (
                 <FormItem>
-                  <AreaSourceLine
-                    source={areaSource}
-                    fence={(form.watch("geofence") as Geofence | null) ?? null}
-                  />
+                  <AreaSourceLine source={areaSource} fence={geofence} />
                   <FormLabel className="sr-only">Address</FormLabel>
                   <FormControl>
                     <Input placeholder="The address — written by the pin; edit if the street is wrong" {...field} />
