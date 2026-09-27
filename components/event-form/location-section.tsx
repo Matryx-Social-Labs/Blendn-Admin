@@ -107,7 +107,7 @@ export function LocationSection({
       { lat: location.lat, lng: location.lng }
     )
     setFence(fence)
-    setMovedKm(moved)
+    setMovedKm(lostDrawing(areaSource) ? moved : null)
   }
 
   function setBuffer(buffer: number) {
@@ -254,7 +254,7 @@ export function LocationSection({
         { lat: picked.lat, lng: picked.lng }
       )
       setFence(fence)
-      setMovedKm(moved)
+      setMovedKm(lostDrawing(areaSource) ? moved : null)
     }
   }
 
@@ -462,6 +462,14 @@ function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
 
 type AreaSource = "venue" | "osm-area" | "building" | "circle" | "drawn"
 type BufferWhose = "venue" | "default" | "custom"
+
+/**
+ * Whether an outline a pick leaves behind was somebody's work — drawn by hand,
+ * or the event's saved area. Only then does "Outline cleared" say so: moving
+ * from one picked place to another is the choice itself, and the new area is
+ * cited under the map.
+ */
+const lostDrawing = (source: AreaSource | null) => source === "drawn" || source === null
 
 
 /**

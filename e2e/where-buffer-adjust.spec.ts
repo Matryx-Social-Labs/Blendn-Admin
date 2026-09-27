@@ -102,6 +102,8 @@ test("a place picked after a venue starts at the default buffer, not the venue's
   await expect(cite).toBeVisible({ timeout: 15_000 })
   await expect(cite).toContainText("+20 m, the default buffer")
   await expect(page.getByRole("button", { name: "Default · 20 m" })).toHaveAttribute("aria-pressed", "true")
+  // Nothing the organiser drew was lost, so nothing says an outline was cleared.
+  await expect(page.getByText(/Outline cleared/)).toHaveCount(0)
 })
 
 test("a custom buffer is saved, and the edit page reads it back as Custom", async ({ page }) => {

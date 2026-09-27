@@ -108,6 +108,11 @@ describe("the event form's Where section", () => {
     expect(controls).toMatch(/Math\.max\(SLIDER_MAX_M, base, fence\?\.buffer \?\? 0\)/)
   })
 
+  it("says an outline was cleared only when it was drawn by hand or saved, not when one picked place replaces another", () => {
+    expect(src.match(/setMovedKm\(lostDrawing\(areaSource\) \? moved : null\)/g)).toHaveLength(2)
+    expect(src).toMatch(/const lostDrawing = \(source: AreaSource \| null\) => source === "drawn" \|\| source === null/)
+  })
+
   it("keeps the pin readable for e2e/venue-pin.spec.ts", () => {
     expect(src).toMatch(/data-lat=\{initialLat \?\? ""\} data-lng=\{initialLng \?\? ""\}/)
   })
