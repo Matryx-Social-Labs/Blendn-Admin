@@ -1,4 +1,5 @@
 import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
+import { friendIdsOf } from "@/lib/friends"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { notifyMatch } from "@/lib/push-notifications"
@@ -121,7 +122,7 @@ export async function matchesForEvent(
   })
   if (!viewerCheckIn) return null
 
-  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, closedPairs, likes] =
+  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, closedPairs, friends, likes] =
     await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
@@ -191,6 +192,9 @@ export async function matchesForEvent(
     // Leaving is permanent: an unmatched pair never appears to each other
     // again. Same `hidden` set as blocks below -- one exclusion, two reasons.
     closedPairKeys(viewerId),
+    // Friends are not matches (a decision recorded in the app's HANDOFF.md):
+    // the grid is for meeting people, and your friends are people you know.
+    friendIdsOf(viewerId),
     db.event_likes.findMany({
       where: { event_id: eventId, liker_id: viewerId },
       select: { liked_id: true },
@@ -202,6 +206,7 @@ export async function matchesForEvent(
   const hidden = new Set([
     ...blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id)),
     ...closedPairs,
+    ...friends,
   ])
   const liked = new Set(likes.map((l) => l.liked_id))
 

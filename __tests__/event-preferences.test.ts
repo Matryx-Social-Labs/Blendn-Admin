@@ -38,6 +38,9 @@ jest.mock("@/lib/conversations", () => ({
   closedPairKeys: jest.fn().mockResolvedValue(new Set<string>()),
   ConversationClosedError: class ConversationClosedError extends Error {},
 }))
+// Friends are left out of the pool. None here: these fixtures are about
+// multi-day check-ins, not about who knows whom.
+jest.mock("@/lib/friends", () => ({ friendIdsOf: jest.fn().mockResolvedValue([]) }))
 
 import { matchesForEvent } from "@/lib/matches"
 

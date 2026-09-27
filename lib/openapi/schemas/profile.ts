@@ -154,6 +154,8 @@ export const UpdateProfileRequestSchema = z
     show_online: z.boolean().optional(),
     read_receipts: z.boolean().optional(),
     share_location: z.boolean().optional(),
+    // Off by default: friends are pseudonyms in a room unless this is on.
+    friends_see_me_in_rooms: z.boolean().optional(),
   })
   .openapi("UpdateProfileRequest")
 
@@ -215,6 +217,7 @@ export const ProfileResponseSchema = z
       show_online: z.boolean(),
       read_receipts: z.boolean(),
       share_location: z.boolean(),
+      friends_see_me_in_rooms: z.boolean(),
     }).nullable(),
     interests: z.array(InterestSchema),
   })
