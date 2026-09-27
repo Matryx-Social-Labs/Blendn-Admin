@@ -279,23 +279,6 @@ export function fenceCentre(fence: Geofence): LatLng | null {
   return Number.isFinite(centre.lat) && Number.isFinite(centre.lng) ? centre : null
 }
 
-/**
- * Where an *event* is: the fence when it has one, the pin otherwise.
- *
- * These are two different claims and the product had been treating them as one.
- * `events.latitude/longitude` is a pin an organiser dropped once; the geofence
- * is the shape they then drew and the thing check-in actually defends. Nothing
- * keeps them in step — drawing a polygon never wrote back to the pin — so an
- * organiser could pin their office and trace a stadium five kilometres away.
- *
- * The fence wins because it is the authored answer to "where does this happen",
- * and because it is the one the door already enforces. The pin is the fallback
- * for the events that predate fences entirely.
- *
- * `geofence` is `unknown` because it arrives from a `Json` column; it is
- * validated here rather than trusted, so a hand-edited row cannot inject a
- * `NaN` coordinate into the distance sort.
- */
 /** An outline this close to a moved pin is still the venue's shape; beyond it, a new place. */
 export const OUTLINE_KEEP_WITHIN_M = 150
 
@@ -324,6 +307,42 @@ export function followPin(
   }
 }
 
+/** A circle's centre moved less than this is the same place: a nudge, not a move. */
+export const CIRCLE_NUDGE_M = 10
+
+/**
+ * Whether the address the form already has still describes this area — the
+ * event form's one map rewrites it from the area's centre only when not.
+ *
+ * The same rule `followPin` uses for an outline: within `OUTLINE_KEEP_WITHIN_M`
+ * of the previous pin is the same place. Not how far the centre moved — a
+ * stadium's centre sits well inside it, and the search hit for "Chinnaswamy
+ * Stadium" was 183 m from the centre of its own outline, so importing that
+ * outline replaced the stadium's address with a road (staging, SCRUM-343).
+ */
+export function samePlace(before: LatLng | null, fence: Geofence): boolean {
+  if (!before) return false
+  if (fence.type === "polygon") return distanceToGeofence(before, fence) <= OUTLINE_KEEP_WITHIN_M
+  return haversineDistanceMeters(before.lat, before.lng, fence.lat, fence.lng) < CIRCLE_NUDGE_M
+}
+
+/**
+ * Where an *event* is: the fence when it has one, the pin otherwise.
+ *
+ * These are two different claims and the product had been treating them as one.
+ * `events.latitude/longitude` is a pin an organiser dropped once; the geofence
+ * is the shape they then drew and the thing check-in actually defends. Nothing
+ * keeps them in step — drawing a polygon never wrote back to the pin — so an
+ * organiser could pin their office and trace a stadium five kilometres away.
+ *
+ * The fence wins because it is the authored answer to "where does this happen",
+ * and because it is the one the door already enforces. The pin is the fallback
+ * for the events that predate fences entirely.
+ *
+ * `geofence` is `unknown` because it arrives from a `Json` column; it is
+ * validated here rather than trusted, so a hand-edited row cannot inject a
+ * `NaN` coordinate into the distance sort.
+ */
 export function eventCentre(
   geofence: unknown,
   latitude?: number | null,
