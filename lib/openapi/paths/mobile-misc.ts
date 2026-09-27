@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, standardErrors } from "@/lib/openapi/schemas/common"
+import { PaginationMetaSchema, PARTICIPATION_GATE, standardErrors } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -239,6 +239,7 @@ registry.registerPath({
   tags: ["Mobile Message Requests"],
   summary: "Send message request",
   description:
+    PARTICIPATION_GATE +
     "Both of you must have attended the same event. 409 if a request is pending or accepted in either direction, or if you already sent one that was declined — a rejection is not an invitation to try again. The person who declined may ask you. The response names the recipient by id only: their name and photo are what accepting discloses, not asking.",
   security: bearerAuth,
   request: {

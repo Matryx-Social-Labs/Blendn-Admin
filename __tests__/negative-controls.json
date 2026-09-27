@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "participation-needs-onboarding.itest.ts": {
+      "guards": "SCRUM-331: a profile that is neither onboarded nor of a known adult age cannot RSVP, save, read the board, check in, start a conversation, send a message request or send a DM (403 FINISH_ONBOARDING, nothing written) but can still view the event; an onboarded no-age account, an adult mid-onboarding and an onboarded pre-ruling under-18 can take part; an under-18 who never finished onboarding cannot",
+      "mutation": "M1 attendeeEventAccess's participate gate disabled; M2 the check-in gate disabled; M3 participationRefusal returns null; M4 mayParticipate = onboarded only; M5 mayParticipate = isAdult only; M6 the gate applied to `view` too (all 2026-09-27).",
+      "observed": "M1: 4 failing (RSVP, save, board, the under-18 still onboarding). M2: 1 (check-in). M3: 1 (the DM test — conversations, requests and DM send are asserted in sequence). M4: 1 (adult mid-onboarding refused). M5: 2 (onboarded no-age and onboarded under-18 refused). M6: 1 (viewing the event refused).",
+      "date": "2026-09-27"
+    },
     "adults-only.itest.ts": {
       "guards": "Blend'n is 18+ (SCRUM-330): an email sign-up with no age or under 18 is 400 with the sentence and writes no account, 18 is admitted; a new profile age or birth date under 18 is 400 and stores nothing; onboarded false -> true needs an effective age of 18+ (a Google/Apple account with no age is held, 403); an onboarded under-18 from before the ruling can still edit their profile",
       "mutation": "M1 signupSchema.age .optional() again; M6 its .min back to 13; M2 parseDateOfBirth floor back to 13; M3 updateProfileSchema.age .min(13); M4 the onboarding guard disabled (`false &&`); M5 the guard without `!existing?.onboarded`; M7 isAdult with `>` for `>=` (all 2026-09-27).",
