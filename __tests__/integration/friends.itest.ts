@@ -35,6 +35,7 @@ const friend = require("@/app/api/mobile/friends/[userId]/route") as typeof impo
 const friendDm = require("@/app/api/mobile/friends/[userId]/conversation/route") as typeof import("@/app/api/mobile/friends/[userId]/conversation/route")
 const block = require("@/app/api/mobile/users/[userId]/block/route") as typeof import("@/app/api/mobile/users/[userId]/block/route")
 const profile = require("@/app/api/mobile/profiles/[userId]/route") as typeof import("@/app/api/mobile/profiles/[userId]/route")
+const account = require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 // `Promise<never>` is assignable to every route's own params type, so one
@@ -54,6 +55,14 @@ async function person(label: string, name: string): Promise<Person> {
   users.push(id)
   await onboard(id)
   await db.profiles.update({ where: { id }, data: { name, photos: [`https://img.invalid/${label}.jpg`] } })
+  return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
+}
+
+async function personWithId(id: string, name: string): Promise<Person> {
+  await db.user.create({ data: { id, email: `${id}@itest.invalid`, name } })
+  users.push(id)
+  await onboard(id)
+  await db.profiles.update({ where: { id }, data: { name } })
   return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
 }
 
@@ -89,6 +98,37 @@ const answer = (as: Person, requestId: string, action: "accept" | "dismiss") =>
 const listFriends = (as: Person) => call(friends.GET as Handler, "/api/mobile/friends", as)
 const friendProfile = (as: Person, userId: string) =>
   call(friend.GET as Handler, `/api/mobile/friends/${userId}`, as, { params: { userId } })
+const withdraw = (as: Person, requestId: string) =>
+  call(requestById.DELETE as Handler, `/api/mobile/friends/requests/${requestId}`, as, {
+    method: "DELETE",
+    params: { requestId },
+  })
+const openDm = (as: Person, userId: string) =>
+  call(friendDm.POST as Handler, `/api/mobile/friends/${userId}/conversation`, as, {
+    method: "POST",
+    params: { userId },
+  })
+
+async function room() {
+  const host = await makeUser("fr-host", "organizer")
+  users.push(host)
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+  await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" } })
+  return eventId
+}
+
+async function attend(p: Person, eventId: string) {
+  await db.event_check_ins.create({
+    data: {
+      user_id: p.id,
+      event_id: eventId,
+      occurrence_id: await occurrenceOf(eventId),
+      check_in_time: new Date(),
+      status: "checked_in",
+    },
+  })
+}
 
 /** Pushes are fire-and-forget; the notifications row lands a moment after the response. */
 async function notificationsOf(userId: string, kind: "friend_request" | "friend_accepted", settleMs = 0) {
@@ -399,5 +439,126 @@ describe("a block", () => {
         })
       ).status
     ).toBe(404)
+  })
+})
+
+describe("the edges the first reviews found", () => {
+  it("pairs ids the way Postgres orders them, punctuation and all", async () => {
+    // `fr-own` and `fr-owner` sort one way in JS and the other under en_US
+    // collation; the CHECK compares with COLLATE "C" so both agree.
+    //
+    // Fixed ids, not testId(): with a random suffix the two orders only
+    // disagree some of the time. `…own_z…` vs `…owner_a…` always does — JS puts
+    // '_' before 'e', en_US skips the '_' and compares 'z' with 'e'.
+    const suffix = Math.random().toString(36).slice(2, 8)
+    const [a, b] = [await personWithId(`itest_fr-own_z${suffix}`, "Ana"), await personWithId(`itest_fr-owner_a${suffix}`, "Ben")]
+    await befriend(a, b)
+    expect((await listFriends(a)).body.data.count).toBe(1)
+  })
+
+  it("shows you your own link as yours", async () => {
+    const ana = await person("fr-self-open", "Ana")
+    expect((await open(await linkOf(ana), ana)).body.data.state).toBe("self")
+  })
+
+  it("withdraw-and-ask cannot push the same person twice, or undo a Not now", async () => {
+    const [ana, ben] = [await person("fr-wd-a", "Ana"), await person("fr-wd-b", "Ben")]
+    const token = await linkOf(ana)
+    await ask(ben, { token })
+    const [req] = (await listRequests(ana)).body.data.incoming
+    await answer(ana, req.id, "dismiss")
+
+    expect((await withdraw(ben, req.id)).status).toBe(200)
+    expect((await listRequests(ben)).body.data.outgoing).toEqual([])
+    expect((await open(token, ben)).body.data.state).toBe("none")
+
+    expect((await ask(ben, { token })).body.data).toEqual({ state: "requested" })
+    expect((await listRequests(ana)).body.data.incoming).toEqual([])
+    expect(await notificationsOf(ana.id, "friend_request", 300)).toHaveLength(1)
+  })
+
+  it("two people asking each other at the same instant become friends, once", async () => {
+    const [ana, ben] = [await person("fr-race-a", "Ana"), await person("fr-race-b", "Ben")]
+    const [ta, tb] = [await linkOf(ana), await linkOf(ben)]
+    await Promise.all([ask(ben, { token: ta }), ask(ana, { token: tb })])
+    const [user1_id, user2_id] = conversationPair(ana.id, ben.id)
+    expect(await db.friendships.count({ where: { user1_id, user2_id } })).toBe(1)
+    expect(await db.friend_requests.count({ where: { OR: [{ sender_id: ana.id }, { sender_id: ben.id }] } })).toBe(0)
+  })
+
+  it("a block racing an accept never leaves a friendship behind", async () => {
+    const [ana, ben] = [await person("fr-blr-a", "Ana"), await person("fr-blr-b", "Ben")]
+    await ask(ben, { token: await linkOf(ana) })
+    const [req] = (await listRequests(ana)).body.data.incoming
+    await Promise.all([
+      answer(ana, req.id, "accept"),
+      call(block.POST as Handler, `/api/mobile/users/${ben.id}/block`, ana, { method: "POST", params: { userId: ben.id } }),
+    ])
+    const [user1_id, user2_id] = conversationPair(ana.id, ben.id)
+    expect(await db.friendships.count({ where: { user1_id, user2_id } })).toBe(0)
+    expect((await listFriends(ana)).body.data.count).toBe(0)
+  })
+
+  it("a closed friend DM is refused with 409, not reopened", async () => {
+    const [ana, ben] = [await person("fr-409-a", "Ana"), await person("fr-409-b", "Ben")]
+    await befriend(ana, ben)
+    const dm = await openDm(ana, ben.id)
+    await db.private_conversations.update({
+      where: { id: dm.body.data.conversationId },
+      data: { closed_at: new Date(), closed_by: ana.id, closed_reason: "unmatch" },
+    })
+    expect((await openDm(ana, ben.id)).status).toBe(409)
+  })
+
+  it("unfriending removes that one friend and nobody else", async () => {
+    const [ana, ben, cam] = [await person("fr-uf-a", "Ana"), await person("fr-uf-b", "Ben"), await person("fr-uf-c", "Cam")]
+    await befriend(ana, ben)
+    await befriend(ana, cam)
+    await call(friend.DELETE as Handler, `/api/mobile/friends/${ben.id}`, ana, { method: "DELETE", params: { userId: ben.id } })
+    const list = (await listFriends(ana)).body.data
+    expect(list.friends.map((f: { userId: string }) => f.userId)).toEqual([cam.id])
+  })
+
+  it("a deleted account drops out of both request lists", async () => {
+    const [ana, ben] = [await person("fr-del-a", "Ana"), await person("fr-del-b", "Ben")]
+    await ask(ben, { token: await linkOf(ana) })
+    await db.user.update({ where: { id: ben.id }, data: { deletedAt: new Date() } })
+    expect((await listRequests(ana)).body.data.incoming).toEqual([])
+  })
+
+  it("accepts a user id for someone who was public in a room you were in", async () => {
+    const [ana, ben] = [await person("fr-rev-a", "Ana"), await person("fr-rev-b", "Ben")]
+    const eventId = await room()
+    await attend(ana, eventId)
+    await attend(ben, eventId)
+    await db.event_match_preferences.create({ data: { event_id: eventId, user_id: ben.id, revealed: true } })
+    expect((await ask(ana, { userId: ben.id })).body.data).toEqual({ state: "requested" })
+  })
+
+  it("keeps someone who has not finished onboarding out of links and accepting", async () => {
+    const [ana, nia] = [await person("fr-gate-a", "Ana"), await person("fr-gate-n", "Nia")]
+    const token = await linkOf(ana)
+    await ask(ana, { token: await linkOf(nia) })
+    await db.profiles.update({ where: { id: nia.id }, data: { onboarded: false, age: null } })
+    expect((await open(token, nia)).status).toBe(403)
+    const [req] = (await listRequests(nia)).body.data.incoming
+    expect((await answer(nia, req.id, "accept")).status).toBe(403)
+  })
+
+  it("deleting an account removes its friendships, requests and link — in the real database", async () => {
+    const [ana, ben, cam] = [await person("fr-acct-a", "Ana"), await person("fr-acct-b", "Ben"), await person("fr-acct-c", "Cam")]
+    await befriend(ana, ben)
+    await ask(cam, { token: await linkOf(ana) })
+    const res = await account.DELETE(
+      new NextRequest("http://localhost/api/mobile/account", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${ana.token}` },
+      })
+    )
+    expect(res.status).toBe(200)
+    expect(await db.friendships.count({ where: { OR: [{ user1_id: ana.id }, { user2_id: ana.id }] } })).toBe(0)
+    expect(await db.friend_requests.count({ where: { OR: [{ sender_id: ana.id }, { recipient_id: ana.id }] } })).toBe(0)
+    expect(await db.friend_invites.findUnique({ where: { user_id: ana.id } })).toBeNull()
+    expect((await listFriends(ben)).body.data.count).toBe(0)
   })
 })

@@ -2969,7 +2969,7 @@ model friendships {
 }
 
 /// A request waiting for its recipient. Accepting deletes it and writes the
-/// friendship, so every row here is pending.
+/// friendship, so every row here is pending, withdrawn or dismissed.
 ///
 /// **"Not now" is never delivered.** It sets `dismissed_at`, which hides the
 /// request from the recipient's list and nowhere else: the sender keeps seeing
@@ -2981,6 +2981,10 @@ model friend_requests {
   sender_id    String
   recipient_id String
   dismissed_at DateTime? @db.Timestamptz(6)
+  /// The sender took it back. Kept, not deleted, so that asking again cannot
+  /// re-notify or undo a "Not now": withdraw-and-ask was a way to push the
+  /// same person over and over.
+  withdrawn_at DateTime? @db.Timestamptz(6)
   created_at   DateTime  @default(now()) @db.Timestamptz(6)
 
   sender    User @relation("FriendRequestSender", fields: [sender_id], references: [id], onDelete: Cascade)
@@ -2988,7 +2992,8 @@ model friend_requests {
 
   /// One request per direction: asking twice is asking once.
   @@unique([sender_id, recipient_id])
-  @@index([recipient_id])
+  /// "Waiting for me": recipient, the two live-row filters, newest first.
+  @@index([recipient_id, dismissed_at, withdrawn_at, created_at])
 }
 
 /// Each person's invite link — one at a time, replaced on reset.

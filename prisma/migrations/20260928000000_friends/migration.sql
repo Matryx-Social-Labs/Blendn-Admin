@@ -28,6 +28,7 @@ CREATE TABLE "friend_requests" (
     "sender_id" TEXT NOT NULL,
     "recipient_id" TEXT NOT NULL,
     "dismissed_at" TIMESTAMPTZ(6),
+    "withdrawn_at" TIMESTAMPTZ(6),
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "friend_requests_pkey" PRIMARY KEY ("id")
@@ -44,7 +45,7 @@ CREATE TABLE "friend_invites" (
 CREATE UNIQUE INDEX "friendships_user1_id_user2_id_key" ON "friendships"("user1_id", "user2_id");
 CREATE INDEX "friendships_user2_id_idx" ON "friendships"("user2_id");
 CREATE UNIQUE INDEX "friend_requests_sender_id_recipient_id_key" ON "friend_requests"("sender_id", "recipient_id");
-CREATE INDEX "friend_requests_recipient_id_idx" ON "friend_requests"("recipient_id");
+CREATE INDEX "friend_requests_recipient_id_dismissed_at_withdrawn_at_created_at_idx" ON "friend_requests"("recipient_id", "dismissed_at", "withdrawn_at", "created_at");
 CREATE UNIQUE INDEX "friend_invites_token_key" ON "friend_invites"("token");
 
 ALTER TABLE "friendships" ADD CONSTRAINT "friendships_user1_id_fkey" FOREIGN KEY ("user1_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -55,5 +56,11 @@ ALTER TABLE "friend_invites" ADD CONSTRAINT "friend_invites_user_id_fkey" FOREIG
 
 -- Pairs are stored in canonical order (see conversationPair) and a person
 -- cannot befriend or ask themselves; the database says so too.
-ALTER TABLE "friendships" ADD CONSTRAINT "friendships_canonical_pair" CHECK ("user1_id" < "user2_id");
+--
+-- COLLATE "C": conversationPair sorts with JS, which compares code units, and
+-- the database's default collation (en_US.utf8 here and on Railway) does not —
+-- it de-weights punctuation, so 'x_fr-own_…' and 'x_fr-owner_…' sort one way in
+-- JS and the other in Postgres, and the insert would fail this CHECK. Byte
+-- order is the one both agree on.
+ALTER TABLE "friendships" ADD CONSTRAINT "friendships_canonical_pair" CHECK (("user1_id" COLLATE "C") < ("user2_id" COLLATE "C"));
 ALTER TABLE "friend_requests" ADD CONSTRAINT "friend_requests_not_self" CHECK ("sender_id" <> "recipient_id");

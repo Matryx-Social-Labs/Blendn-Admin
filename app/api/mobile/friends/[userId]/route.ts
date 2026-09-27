@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { ageFrom } from "@/lib/age"
-import { conversationPair } from "@/lib/conversations"
+import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { normalizeLocationToCity } from "@/lib/location"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -36,11 +36,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { userId } = await params
 
     const [user1_id, user2_id] = conversationPair(me, userId)
-    const friendship = await db.friendships.findUnique({
-      where: { user1_id_user2_id: { user1_id, user2_id } },
-      select: { created_at: true },
-    })
-    if (me === userId || !friendship) return notFoundResponse("Not found")
+    const [friendship, blocked] = await Promise.all([
+      db.friendships.findUnique({
+        where: { user1_id_user2_id: { user1_id, user2_id } },
+        select: { created_at: true },
+      }),
+      blockedEitherWay(me, userId),
+    ])
+    // Blocked is checked too, as on the list: see `GET /friends`.
+    if (me === userId || !friendship || blocked) return notFoundResponse("Not found")
 
     const [user, conversation] = await Promise.all([
       db.user.findUnique({

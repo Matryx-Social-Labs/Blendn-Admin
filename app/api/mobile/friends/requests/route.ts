@@ -32,12 +32,12 @@ export async function GET(request: NextRequest) {
 
     const [incoming, outgoing] = await Promise.all([
       db.friend_requests.findMany({
-        where: { recipient_id: me, dismissed_at: null, sender: { deletedAt: null } },
+        where: { recipient_id: me, dismissed_at: null, withdrawn_at: null, sender: { deletedAt: null } },
         select: { id: true, created_at: true, sender: { select: personSelect } },
         orderBy: { created_at: "desc" },
       }),
       db.friend_requests.findMany({
-        where: { sender_id: me, recipient: { deletedAt: null } },
+        where: { sender_id: me, withdrawn_at: null, recipient: { deletedAt: null } },
         select: { id: true, created_at: true, recipient: { select: personSelect } },
         orderBy: { created_at: "desc" },
       }),
@@ -88,20 +88,25 @@ export async function POST(request: NextRequest) {
 
     const notFound = () => notFoundResponse("Not found")
     let recipientId: string
+    let connectable: boolean
     if ("token" in parsed.data) {
       const invite = await db.friend_invites.findUnique({
         where: { token: parsed.data.token },
         select: { user_id: true },
       })
+      // Same work either way — see the invite route — so timing cannot tell a
+      // reset link from a refusal.
+      connectable = await mayConnect(me, invite?.user_id ?? me)
       if (!invite) return notFound()
       recipientId = invite.user_id
     } else {
       recipientId = parsed.data.userId
       if (recipientId !== me && !(await maySeeIdentity(me, recipientId))) return notFound()
+      connectable = await mayConnect(me, recipientId)
     }
 
     if (recipientId === me) return errorResponse("You can't add yourself")
-    if (!(await mayConnect(me, recipientId))) return notFound()
+    if (!connectable) return notFound()
 
     return successResponse({ state: await requestFriend(me, recipientId) })
   } catch (error) {
