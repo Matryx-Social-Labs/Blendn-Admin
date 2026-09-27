@@ -145,13 +145,12 @@ export type BroadcastKind = "announcement" | "sponsored" | "system"
 /**
  * Who may put a non-user message into an event's room.
  *
- * Separate from `eventPermissions` rather than folded into `canOperate`,
- * because the three kinds do not share one answer and `canOperate` is
- * deliberately one flag:
+ * Separate from `eventPermissions` because the three kinds do not share one
+ * answer:
  *
  *     | kind         | who                                                  |
- *     | announcement | anyone with canOperate — the host, or the venue      |
- *     | sponsored    | canOperate AND an org allowed to sell placement      |
+ *     | announcement | canEdit — whoever runs the event, not the venue      |
+ *     | sponsored    | one org holding the flag AND a placement here        |
  *     | system       | app_admin only — it speaks as Blend'n                |
  *
  * ## Why `sponsored` needs its own gate
@@ -240,8 +239,15 @@ export function canBroadcast(
     return true
   }
 
-  // announcement: whoever operates the event. No placement involved.
-  return eventPermissions(actor, event).canOperate
+  /*
+   * announcement: whoever runs the event — `canEdit`, not `canOperate`. A venue
+   * owner operates what happens in their building but does not speak for an
+   * event they do not run (R37), and `broadcastAuthorName` signs every
+   * announcement with the organising org's name. This said `canOperate` after
+   * R37 took the composer away, so `createPoll` still let a venue owner post
+   * under the organiser's name (SCRUM-335).
+   */
+  return eventPermissions(actor, event).canEdit
 }
 
 /**
