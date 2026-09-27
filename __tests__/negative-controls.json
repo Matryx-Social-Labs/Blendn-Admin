@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "adults-only.itest.ts": {
+      "guards": "Blend'n is 18+ (SCRUM-330): an email sign-up with no age or under 18 is 400 with the sentence and writes no account, 18 is admitted; a new profile age or birth date under 18 is 400 and stores nothing; onboarded false -> true needs an effective age of 18+ (a Google/Apple account with no age is held, 403); an onboarded under-18 from before the ruling can still edit their profile",
+      "mutation": "M1 signupSchema.age .optional() again; M6 its .min back to 13; M2 parseDateOfBirth floor back to 13; M3 updateProfileSchema.age .min(13); M4 the onboarding guard disabled (`false &&`); M5 the guard without `!existing?.onboarded` (all 2026-09-27).",
+      "observed": "One failing each: M1 no age admitted (201); M6 the 17-year-old admitted; M2 the 17-year-old birth date stored; M3 age 17 stored; M4 the no-age account onboarded (200); M5 the onboarded 16-year-old refused a bio edit (403).",
+      "date": "2026-09-27"
+    },
     "email-is-one-identity.itest.ts": {
       "guards": "one address is one account whatever its case (SCRUM-328): a mixed-case mobile signup is stored lowercase and signs in typed any way; a case-variant signup is 409; forgot-password as typed at signup issues a token; dashboard authorize, Google and Apple find the lowercase account from a mixed-case address; createRoleUser stores lowercase and refuses a case-variant; the migration refuses (and changes nothing) while two accounts share an address once case is ignored, then trims and lowercases every address",
       "mutation": "M1 signupSchema without .trim().toLowerCase(); M2 signinSchema without it; M3 lib/auth.ts authorize looks up credentials.email as typed; M4 Google lookup uses googlePayload.email as given; M5 Apple uses applePayload.email as given; M6 the migration without its DO-block guard; M8 createRoleUser without the lowercase; M9 the migration folds with lower() and no btrim() (all 2026-09-25). Not covered: the LOCK TABLE, which guards a race with the old deployment that a single-process test cannot stage.",
