@@ -169,6 +169,7 @@ registry.registerPath({
   tags,
   summary: "Open an invite link",
   description:
+    PARTICIPATION_GATE +
     SAME_404 +
     "Shows the link owner's name and photo — handing the link out is their consent — and where you stand with them.",
   security: bearerAuth,
@@ -265,7 +266,7 @@ registry.registerPath({
   path: "/api/mobile/friends/requests/{requestId}",
   tags,
   summary: "Withdraw a request",
-  description: "Sender only.",
+  description: "Sender only. Kept as withdrawn, so asking again later neither re-notifies nor undoes a \"Not now\".",
   security: bearerAuth,
   request: { params: z.object({ requestId: z.string().uuid() }) },
   responses: {

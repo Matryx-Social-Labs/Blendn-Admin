@@ -894,7 +894,7 @@ request status.
 | GET | `/friends/requests` | `{ incoming, outgoing }` |
 | POST | `/friends/requests` | Ask: `{ token }` or `{ userId }` → `{ state: "requested" \| "friends" }` |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
-| DELETE | `/friends/requests/:id` | Withdraw — sender only |
+| DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
 
 **Nobody can be looked up.** There is no search. A request reaches someone only
 through their invite link (`https://www.blendn.app/f/<token>`, 128 random bits,
@@ -903,6 +903,12 @@ resettable) or, by `userId`, someone you can already see under
 refusal a stranger could reach answers with the **same 404**: an unknown,
 malformed or reset token, a deleted account, a block either way, a pair who
 left each other, an id you have no relationship with.
+
+Opening a link, asking and accepting all need a finished profile (the
+participation gate, SCRUM-331). Ask, accept and block take a lock on the pair,
+so two people asking each other at once become friends once, and an accept
+racing a block never leaves a blocked person on the list. Refusals cost the
+same work as a link that never existed, so timing tells a caller nothing either.
 
 **"Not now" is never delivered.** `dismiss` hides the request from the
 recipient; the sender keeps seeing it in `outgoing`. Asking again neither
