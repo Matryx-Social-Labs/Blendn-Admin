@@ -18,8 +18,10 @@ test("a stadium's search draws its own outline, with the pin at its centre", asy
   const map = page.locator(".leaflet-container")
   await expect(map).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole("combobox", { name: "Find the address" }).fill("M Chinnaswamy Stadium")
-  const hit = page.getByRole("option", { name: /Chinnaswamy Stadium/ }).first()
+  await page.getByRole("combobox", { name: "Venue or address" }).fill("M Chinnaswamy Stadium")
+  // The place to ADD (the geocoder's hit, "…, Link Road, …") — the seeded
+  // world also lists "M. Chinnaswamy Stadium" as a venue in the same list.
+  const hit = page.getByRole("option", { name: /Chinnaswamy Stadium, Link Road/ }).first()
   await expect(hit).toBeVisible({ timeout: 15_000 })
   await hit.click()
 

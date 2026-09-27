@@ -14,10 +14,9 @@ import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
 import { DEFAULT_BUFFER_M, fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
-import { AddressSearch } from "@/components/event-form/address-search"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
-import { VenuePicker } from "@/components/event-form/venue-picker"
+import { WhereSearch, type PickedPlace } from "@/components/event-form/where-search"
 import { venueById, type VenueOption } from "@/lib/venue-actions"
 import { validateGeofence } from "@/lib/geofence"
 import { extractAddress } from "@/lib/address"
@@ -53,6 +52,10 @@ export function LocationSection({
   /** How far the pin moved when it left an outline behind; null when nothing was cleared. */
   const [movedKm, setMovedKm] = useState<number | null>(null)
   const reverseSeq = useRef(0)
+  /** Where the area came from — the caption under the map cites it (SCRUM-353). */
+  const [areaSource, setAreaSource] = useState<AreaSource | null>(null)
+  /** Only the newest building lookup may draw; a later pick or a drawing wins. */
+  const footprintSeq = useRef(0)
 
   /**
    * The app judges the area as a circle of `check_in_radius` around the pin, so
@@ -85,6 +88,7 @@ export function LocationSection({
       onLocationChange({ ...location, lat: centre.lat, lng: centre.lng })
       setFence(fence)
       setMovedKm(null)
+      setAreaSource("osm-area")
       return
     }
     onLocationChange(location)
@@ -102,6 +106,8 @@ export function LocationSection({
    * dragged circle brings the address with it, the way dragging the old pin did.
    */
   function onFenceChange(fence: Geofence) {
+    ++footprintSeq.current
+    setAreaSource("drawn")
     const lat = form.getValues("latitude")
     const lng = form.getValues("longitude")
     const before = lat == null || lng == null ? null : { lat, lng }
@@ -163,6 +169,7 @@ export function LocationSection({
    * own footprint.
    */
   function inherit(picked: VenueOption) {
+    ++footprintSeq.current
     setVenue(picked)
     form.setValue("venue_id", picked.id)
     // auto_linked, not confirmed — the organiser picked the venue, but nobody
@@ -199,6 +206,7 @@ export function LocationSection({
     if (own?.ok) {
       setFence(own.fence)
       setMovedKm(null)
+      setAreaSource("venue")
     } else if (picked.lat !== null && picked.lng !== null) {
       // A venue with no area of its own: the one the form has follows the pin.
       const { fence, movedKm: moved } = followPin(
@@ -208,6 +216,39 @@ export function LocationSection({
       setFence(fence)
       setMovedKm(moved)
     }
+  }
+
+  /**
+   * A new place from the geocoder: it becomes the event's venue name and
+   * location. A place OSM holds as an area brought its outline (`moveTo`); a
+   * pin — a bar, a club — asks for the building it sits in (SCRUM-351), and
+   * keeps the circle, saying so, when OSM has none.
+   */
+  function pickPlace({ name, location }: PickedPlace) {
+    if (venue) unlink()
+    form.setValue("venue_name", name, { shouldDirty: true })
+    moveTo(location)
+    if (location.outline) return
+    setAreaSource("circle")
+    const mine = ++footprintSeq.current
+    fetch(`/api/footprint?lat=${location.lat}&lon=${location.lng}`)
+      .then((res) => (res.ok ? (res.json() as Promise<{ ring: [number, number][] | null }>) : { ring: null }))
+      .then(({ ring }) => {
+        if (mine !== footprintSeq.current || !ring) return
+        const current = form.getValues("geofence") as Geofence | null
+        const fence: Geofence = { type: "polygon", ring, buffer: current?.buffer ?? DEFAULT_BUFFER_M }
+        const centre = fenceCentre(fence)
+        if (centre) {
+          form.setValue("latitude", centre.lat)
+          form.setValue("longitude", centre.lng)
+        }
+        setFence(fence)
+        setMovedKm(null)
+        setAreaSource("building")
+      })
+      .catch(() => {
+        // The circle stays, and the caption already says there was no outline.
+      })
   }
 
   function unlink() {
@@ -229,13 +270,14 @@ export function LocationSection({
         name="venue_name"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Venue</FormLabel>
+            <FormLabel>Venue or address</FormLabel>
             <FormControl>
-              <VenuePicker
+              <WhereSearch
                 value={field.value ?? ""}
                 selected={venue}
                 onTextChange={field.onChange}
-                onSelect={inherit}
+                onPickVenue={inherit}
+                onPickPlace={pickPlace}
                 onClear={unlink}
               />
             </FormControl>
@@ -275,13 +317,16 @@ export function LocationSection({
           fallbackCentre={
             initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : undefined
           }
-          overlay={<AddressSearch onPick={moveTo} />}
           caption={
             <FormField
               control={form.control}
               name="address"
               render={({ field }) => (
                 <FormItem>
+                  <AreaSourceLine
+                    source={areaSource}
+                    fence={(form.watch("geofence") as Geofence | null) ?? null}
+                  />
                   <FormLabel className="sr-only">Address</FormLabel>
                   <FormControl>
                     <Input placeholder="The address — written by the pin; edit if the street is wrong" {...field} />
@@ -331,3 +376,37 @@ function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
     </p>
   )
 }
+
+type AreaSource = "venue" | "osm-area" | "building" | "circle" | "drawn"
+
+/**
+ * The area cites its source — the section's memorable detail (SCRUM-353 design
+ * chain). One line under the map, like a citation: where the outline came
+ * from, its size, and the buffer. A circle that stands in for a missing
+ * outline says so, in the warning tone, and asks for the building.
+ */
+function AreaSourceLine({ source, fence }: { source: AreaSource | null; fence: Geofence | null }) {
+  if (!fence) return null
+  const shape =
+    fence.type === "polygon" ? `${fence.ring.length} corners` : `a ${Math.round(fence.radius)} m circle`
+  const buffer = `+${fence.buffer} m${fence.buffer === DEFAULT_BUFFER_M ? ", the default buffer" : " buffer"}`
+  const said: Record<AreaSource | "saved", string> = {
+    venue: "Area from the venue",
+    "osm-area": "Outline from OpenStreetMap",
+    building: "Building outline found nearby",
+    circle: "No outline in OpenStreetMap",
+    drawn: "Drawn on the map",
+    saved: "The event's saved area",
+  }
+  const warn = source === "circle"
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]" data-area-source={source ?? "saved"}>
+      <span className={warn ? "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" : "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-primary"} aria-hidden />
+      <span className={warn ? "font-medium text-warning" : "font-medium"}>{said[source ?? "saved"]}</span>
+      <span className="text-muted-foreground">
+        · {warn ? `${shape} at the address — trace the building if you can` : shape} · {buffer}
+      </span>
+    </p>
+  )
+}
+

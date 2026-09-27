@@ -19,15 +19,40 @@ describe("the event form's Where section", () => {
     expect(src.match(/<GeofenceEditor/g)).toHaveLength(1)
   })
 
-  it("puts the address search on that map and the address under it", () => {
-    expect(src).toMatch(/overlay=\{<AddressSearch onPick=\{moveTo\} \/>\}/)
+  it("asks where once — listed venues first, then places — and writes the address under the map (SCRUM-353)", () => {
+    // There were two inputs for one question: a venue box and an address
+    // search on the map. One now; listed venues bring their area, places add one.
+    expect(src).toMatch(/<WhereSearch[\s\S]*?onPickVenue=\{inherit\}[\s\S]*?onPickPlace=\{pickPlace\}/)
+    expect(src).not.toMatch(/AddressSearch|VenuePicker|overlay=/)
     expect(src).toMatch(/caption=\{\s*<FormField[\s\S]*?name="address"/)
+  })
+
+  it("a place that is only a pin looks for its building, and keeps the circle — saying so — when OSM has none", () => {
+    const pickPlace = src.slice(src.indexOf("function pickPlace("), src.indexOf("function unlink("))
+    expect(pickPlace).toMatch(/setAreaSource\("circle"\)[\s\S]*?fetch\(`\/api\/footprint\?lat=/)
+    expect(pickPlace).toMatch(/setAreaSource\("building"\)/)
+  })
+
+  it("a late building lookup never overwrites a drawing or a later pick", () => {
+    const pickPlace = src.slice(src.indexOf("function pickPlace("), src.indexOf("function unlink("))
+    expect(pickPlace).toMatch(/if \(mine !== footprintSeq\.current \|\| !ring\) return/)
+    const onFence = src.slice(src.indexOf("function onFenceChange("), src.indexOf("function inherit("))
+    expect(onFence).toMatch(/\+\+footprintSeq\.current/)
+    const inherit = src.slice(src.indexOf("function inherit("), src.indexOf("function pickPlace("))
+    expect(inherit).toMatch(/\+\+footprintSeq\.current/)
+  })
+
+  it("the area cites its source under the map — the section's memorable detail", () => {
+    expect(src).toMatch(/<AreaSourceLine\s+source=\{areaSource\}/)
+    for (const said of ["Area from the venue", "Outline from OpenStreetMap", "Building outline found nearby", "No outline in OpenStreetMap"]) {
+      expect(src).toContain(said)
+    }
   })
 
   it("moves the area with the pin — for a search and for a venue with no area of its own", () => {
     const moveTo = src.slice(src.indexOf("function moveTo("), src.indexOf("function onFenceChange("))
     expect(moveTo).toMatch(/followPin\(/)
-    const inherit = src.slice(src.indexOf("function inherit("), src.indexOf("function unlink("))
+    const inherit = src.slice(src.indexOf("function inherit("), src.indexOf("function pickPlace("))
     expect(inherit).toMatch(/followPin\(/)
   })
 
@@ -58,8 +83,8 @@ describe("the event form's Where section", () => {
 describe("the map's supporting parts", () => {
   it("a search that brings the place's own outline draws it, the pin at its centre (SCRUM-351)", () => {
     // Nominatim returns a stadium's or a palace's outline with the hit; a bar is a pin.
-    const search = readFileSync(join(__dirname, "../components/event-form/address-search.tsx"), "utf8")
-    const pick = search.slice(search.indexOf("function pick("), search.indexOf("const showList"))
+    const search = readFileSync(join(__dirname, "../components/event-form/where-search.tsx"), "utf8")
+    const pick = search.slice(search.indexOf("function pick("), search.indexOf("if (selected)"))
     expect(pick).toMatch(/outline: outlineFromGeoJson\(hit\.geojson\)/)
     const moveTo = src.slice(src.indexOf("function moveTo("), src.indexOf("function onFenceChange("))
     expect(moveTo).toMatch(/if \(location\.outline\)/)
@@ -78,8 +103,8 @@ describe("the map's supporting parts", () => {
   })
 
   it("a pick cancels a pending search, so 'Searching…' cannot stick", () => {
-    const search = readFileSync(join(__dirname, "../components/event-form/address-search.tsx"), "utf8")
-    const pick = search.slice(search.indexOf("function pick("), search.indexOf("const showList"))
+    const search = readFileSync(join(__dirname, "../components/event-form/where-search.tsx"), "utf8")
+    const pick = search.slice(search.indexOf("function pick("), search.indexOf("if (selected)"))
     expect(pick).toMatch(/clearTimeout\(timer\.current\)/)
     expect(pick).toMatch(/setSearching\(false\)/)
   })
@@ -103,12 +128,13 @@ describe("the map's supporting parts", () => {
     expect(draw.slice(0, draw.indexOf("/* ------------------------------------------------------ OSM footprint --- */"))).toMatch(/\}, \[mapReady, fence,/)
   })
 
-  it("frames an imported outline, and keeps the search clear of the zoom control", () => {
+  it("frames an imported outline, and puts nothing over the zoom control", () => {
     const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
     const imp = editor.slice(editor.indexOf("const importFootprint"), editor.indexOf("/* --------------------------------------------------------------- view --- */"))
     expect(imp).toMatch(/mapRef\.current\?\.fitBounds\(ring/)
-    // Leaflet's zoom control is 10px in and 34px wide; the search starts past it.
-    expect(editor).toMatch(/className="absolute left-12 top-2\.5 z-\[800\]/)
+    // The search sat top-left on the map, first under the zoom control, then
+    // beside it; it lives above the map now (SCRUM-353) and the slot is gone.
+    expect(editor).not.toMatch(/overlay/)
   })
 
   it("LocationPicker loads the stylesheet from the package, not unpkg (CSP style-src)", () => {
