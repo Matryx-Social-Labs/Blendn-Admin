@@ -95,15 +95,13 @@ export async function POST(request: NextRequest) {
            * Captured here because there is nowhere else it can be. Google and
            * Apple create profiles with no age (`lib/mobile-auth.ts`), the
            * eight onboarding screens that used to ask are being deleted, and
-           * the roster displays it. Undefined until the app sends it, which is
-           * why the field is optional for now.
+           * the roster displays it. Required, and 18 or over, since SCRUM-330.
            *
-           * **Spread, never shorthand.** `age` is optional in `signupSchema`,
-           * so `age,` passes an explicit `undefined` whenever the caller omits
-           * it — and `strictUndefinedChecks` makes that a runtime error, not a
-           * no-op. Every sign-up that did not send an age 500'd: the app's own
-           * form (the field is optional), and Google and Apple, which never
-           * send one. The third instance of this class to reach staging.
+           * **Spread, never shorthand**, even now it is required: while `age`
+           * was optional, `age,` passed an explicit `undefined` and
+           * `strictUndefinedChecks` made every sign-up without one a 500 — the
+           * third instance of that class to reach staging. The ratchet
+           * (`prisma-shorthand-ratchet.test.ts`) keeps it spread.
            */
           ...(age !== undefined && { age }),
           onboarded: false,

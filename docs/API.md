@@ -46,11 +46,13 @@ Password reset is **not** under `/api/mobile`. See [Password reset](#password-re
 ```
 Returns **201**: `{ accessToken, refreshToken, user: { id, email, name, profile } }`
 
-`name` is **required**. `age` is accepted and currently optional, and becomes
-required once the mobile app ships the field — it is stored on the profile
-because there is nowhere else to collect it: Google and Apple create profiles
-without an age, and the onboarding screens that used to ask are being removed.
-The floor here is 13; **dating intent separately requires 18+**. Prefer
+`name` and `age` are **required**, and `age` must be **18 or over**: Blend'n is
+18+ (SCRUM-330). A missing age or one under 18 is **400** with
+`errors: [{ field: "age", message: "…Blend'n is for people 18 and over." }]`,
+and no account is written. Google and Apple create profiles without an age;
+those accounts cannot finish onboarding until a date of birth of 18+ is on file
+(see `PUT /profiles/:userId`). Accounts made before the ruling keep whatever age
+they have. Prefer
 `dateOfBirth` on `PUT /profiles/:userId` over this `age` — see *The age is
 derived, never remembered* below for why the number alone is not enough.
 
@@ -1290,17 +1292,23 @@ Three rules follow from that:
   cleared on account deletion along with the rest of the profile.
 
 Malformed input is **400, not a silent no-op**: a date that does not parse, is
-in the future, or implies an age outside 13–120 is refused, because storing
+in the future, or implies an age outside 18–120 is refused, because storing
 nothing while telling the user their profile saved is the worse failure.
 
-Three consequences worth knowing about:
+Four consequences worth knowing about:
 
 - **Age and intent may be sent together.** The gate reads the age *after* the
   request, so the onboarding screens can save both in one call. Works with
   `dateOfBirth` in place of `age`, with the same precedence as everywhere else.
-- **Lowering your age strips the tag.** Otherwise "set 25, tick dating, set 15"
-  is two individually legal requests that leave a 15-year-old in the pool. A
-  corrected `dateOfBirth` strips it the same way.
+- **A new age or `dateOfBirth` under 18 is refused (400)** since SCRUM-330, so
+  "set 25, tick dating, set 15" never lands. Clearing the age (`age: null`, no
+  birth date on file) makes it unknown, and unknown strips the tag.
+- **Finishing onboarding needs an adult on file.** `onboarded: true` on a profile
+  that is not yet onboarded is **403** "Blend'n is for people 18 and over. Add
+  your date of birth to finish." unless the age after the request is 18+ — send
+  `dateOfBirth` in the same call or before it. Google and Apple accounts start
+  with no age, so this is where they are held. A profile already onboarded
+  (including one under 18 from before the ruling) is not re-checked.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.

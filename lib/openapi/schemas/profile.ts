@@ -23,14 +23,15 @@ export const UpdateProfileRequestSchema = z
   .object({
     name: z.string().min(1).max(100).optional(),
     phone: z.string().max(20).optional().nullable(),
-    age: z.number().int().min(13).max(120).optional().nullable(),
+    // A new age is 18+ (SCRUM-330); an age stored before the ruling is left alone.
+    age: z.number().int().min(18).max(120).optional().nullable(),
 
     // Write-only, and it supersedes `age` above wherever both exist. A stored
     // age is a snapshot that starts decaying the day it is taken; a birth date
     // is not. No response carries this back — not even to its owner — because
     // it is materially more identifying than the number derived from it.
     // Rejected outright if it does not parse, is in the future, or implies an
-    // age outside 13–120.
+    // age outside 18–120.
     dateOfBirth: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)

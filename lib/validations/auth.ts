@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { MIN_PASSWORD_LENGTH } from "@/lib/password"
+import { ACCOUNT_MIN_AGE, ADULTS_ONLY } from "@/lib/age"
 
 export const signupSchema = z.object({
   // Lowercased: one address is one account whatever its case (SCRUM-328).
@@ -27,17 +28,22 @@ export const signupSchema = z.object({
    */
   name: z.string().min(1, "Name is required").max(100, "Name is too long"),
   /*
-   * Accepted, deliberately NOT required yet.
+   * Required, 18 or over: Blend'n is 18+ (SCRUM-330).
    *
-   * The shipped app does not send it. Making it required the moment this
-   * deploys would 400 every new password signup in production, because the
-   * server reaches staging before an app build does. It becomes required in
-   * the PR after the app ships the field — accept first, require second.
+   * The app has sent it since the field shipped, but labelled it optional, so
+   * a build that is already installed can still post a sign-up without one.
+   * That person gets this sentence as the form's error — the app shows the
+   * first field message it is given — and types their age. A 400 that says
+   * what to do, rather than an account nobody has checked the age of.
    *
-   * The floor is 13 here and the dating gate is 18 elsewhere: a 16-year-old
-   * may use the app, and may not be in the dating pool.
+   * Coerced, so a blank or missing age arrives as NaN and takes the
+   * invalid-type message; `min` catches everyone under the floor.
    */
-  age: z.coerce.number().int().min(13, "You must be at least 13").max(120).optional(),
+  age: z.coerce
+    .number({ error: `Enter your age. ${ADULTS_ONLY}` })
+    .int()
+    .min(ACCOUNT_MIN_AGE, ADULTS_ONLY)
+    .max(120),
   deviceInfo: z
     .object({
       platform: z.string().optional(),

@@ -79,11 +79,24 @@ it("still stores it for an adult", async () => {
   expect(row.show_orientation).toBe(true)
 })
 
-it("takes the stored orientation with it when the age drops below 18", async () => {
+it("refuses a birth date that would make an adult 17, and leaves the orientation as it was", async () => {
   const { id, token } = await person("nou-drop", twentyFive())
   expect((await put(id, token, { orientations: ["gay"], show_orientation: true })).status).toBe(200)
-  // The corrected date of birth is accepted; the orientation does not survive it.
-  expect((await put(id, token, { dateOfBirth: seventeen() })).status).toBe(200)
+  // A new birth date under 18 is refused since SCRUM-330; nothing on the row moves.
+  expect((await put(id, token, { dateOfBirth: seventeen() })).status).toBe(400)
+  const row = await db.profiles.findUniqueOrThrow({ where: { id } })
+  expect(row.orientations).toEqual(["gay"])
+  expect(row.show_orientation).toBe(true)
+})
+
+it("takes the stored orientation with it when the age is cleared to unknown", async () => {
+  const id = await makeUser("nou-clear")
+  users.push(id)
+  await db.profiles.create({ data: { id, name: "nou-clear", age: 25 } })
+  const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
+  const token = signAccessToken(id, email)
+  expect((await put(id, token, { orientations: ["gay"], show_orientation: true })).status).toBe(200)
+  expect((await put(id, token, { age: null })).status).toBe(200)
   const row = await db.profiles.findUniqueOrThrow({ where: { id } })
   expect(row.orientations).toEqual([])
   expect(row.interested_in).toEqual([])

@@ -70,7 +70,7 @@ describe("signup and sign-in", () => {
   const typed = mixedCase("eio-signup")
 
   it("stores a signup in lowercase", async () => {
-    const res = await signupRoute.POST(post("/api/mobile/auth/signup", { email: typed, password: PASSWORD, name: "Case" }))
+    const res = await signupRoute.POST(post("/api/mobile/auth/signup", { email: typed, password: PASSWORD, name: "Case", age: 30 }))
     expect(res.status).toBe(201)
     const row = await db.user.findUniqueOrThrow({ where: { email: typed.toLowerCase() }, select: { id: true } })
     users.push(row.id)
@@ -85,7 +85,7 @@ describe("signup and sign-in", () => {
 
   it("refuses a second account for the same inbox in another case", async () => {
     const res = await signupRoute.POST(
-      post("/api/mobile/auth/signup", { email: typed.toUpperCase(), password: PASSWORD, name: "Case" })
+      post("/api/mobile/auth/signup", { email: typed.toUpperCase(), password: PASSWORD, name: "Case", age: 30 })
     )
     expect(res.status).toBe(409)
   })

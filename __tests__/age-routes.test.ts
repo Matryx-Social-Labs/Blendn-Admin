@@ -125,21 +125,29 @@ describe("PUT /profiles/:userId — dating intent", () => {
     expect(res.status).toBe(200)
   })
 
-  it("strips dating when the age is lowered past the line", async () => {
+  it("refuses an age lowered under 18, so the two-request bypass never lands", async () => {
     /*
-     * The two-request bypass: set 25, tick dating, then set 15. Both requests
-     * are individually legal and the result is a 15-year-old in the dating
-     * pool. Stripped rather than refused — the correction is more likely to be
-     * the truth, and refusing it is the wrong incentive.
+     * The two-request bypass: set 25, tick dating, then set 15. It used to be
+     * stripped; since SCRUM-330 a new age under 18 is refused outright.
      */
     mockDb.profiles.findUnique.mockResolvedValue({ age: 25, intent_default: ["dating", "friendship"] })
     const res = await putProfile(profileReq({ age: 15 }), {
       params: Promise.resolve({ userId: USER }),
     })
+    expect(res.status).toBe(400)
+    expect(mockDb.profiles.upsert).not.toHaveBeenCalled()
+  })
+
+  it("strips dating when the age is cleared to unknown", async () => {
+    // Unknown may not date; clearing the age is the one way left to lose it.
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 25, intent_default: ["dating", "friendship"] })
+    const res = await putProfile(profileReq({ age: null }), {
+      params: Promise.resolve({ userId: USER }),
+    })
     expect(res.status).toBe(200)
     expect(mockDb.profiles.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({ age: 15, intent_default: ["friendship"] }),
+        update: expect.objectContaining({ age: null, intent_default: ["friendship"] }),
       })
     )
   })
@@ -462,12 +470,14 @@ describe("PUT /profiles/:userId — the age is derived, not remembered", () => {
   })
 
   it("refuses the same request when the date makes them 17", async () => {
+    // Refused at the schema now (SCRUM-330): a new birth date under 18 is not stored at all.
     mockDb.profiles.findUnique.mockResolvedValue({ age: null, date_of_birth: null, intent_default: [] })
     const res = await putProfile(
       profileReq({ dateOfBirth: dobForAge(17), intent_default: ["dating"] }),
       { params: Promise.resolve({ userId: USER }) }
     )
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
+    expect(mockDb.profiles.upsert).not.toHaveBeenCalled()
   })
 
   it("writes the date and refreshes the number beside it", async () => {
@@ -481,8 +491,8 @@ describe("PUT /profiles/:userId — the age is derived, not remembered", () => {
     expect(update.age).toBe(28)
   })
 
-  it("strips dating when a corrected birth date puts them under 18", async () => {
-    // The two-request bypass again, this time walked through the new field.
+  it("refuses a corrected birth date that puts them under 18", async () => {
+    // The two-request bypass again, walked through the new field: refused since SCRUM-330.
     mockDb.profiles.findUnique.mockResolvedValue({
       age: 25,
       date_of_birth: null,
@@ -491,12 +501,8 @@ describe("PUT /profiles/:userId — the age is derived, not remembered", () => {
     const res = await putProfile(profileReq({ dateOfBirth: dobForAge(16) }), {
       params: Promise.resolve({ userId: USER }),
     })
-    expect(res.status).toBe(200)
-    expect(mockDb.profiles.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: expect.objectContaining({ intent_default: ["networking"] }),
-      })
-    )
+    expect(res.status).toBe(400)
+    expect(mockDb.profiles.upsert).not.toHaveBeenCalled()
   })
 
   it("rejects a malformed date instead of quietly storing nothing", async () => {

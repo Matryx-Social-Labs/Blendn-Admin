@@ -218,11 +218,16 @@ describe("parseDateOfBirth", () => {
     expect(parseDateOfBirth(null, NOW)).toBeNull()
   })
 
-  it("holds the platform floor at 13", () => {
-    // Below it the account cannot exist, so storing the date would create a row
-    // the rest of the product refuses to serve.
-    expect(parseDateOfBirth("2015-06-15", NOW)).toBeNull()
-    expect(parseDateOfBirth("2013-06-15", NOW)).not.toBeNull()
+  it("holds the account floor at 18", () => {
+    // Blend'n is 18+ (SCRUM-330): a birth date under it is a person the
+    // product no longer admits.
+    const eighteenToday = `${NOW.getUTCFullYear() - 18}-${String(NOW.getUTCMonth() + 1).padStart(2, "0")}-${String(NOW.getUTCDate()).padStart(2, "0")}`
+    const eighteenTomorrow = new Date(Date.UTC(NOW.getUTCFullYear() - 18, NOW.getUTCMonth(), NOW.getUTCDate() + 1))
+      .toISOString()
+      .slice(0, 10)
+    expect(parseDateOfBirth(eighteenToday, NOW)).not.toBeNull()
+    expect(parseDateOfBirth(eighteenTomorrow, NOW)).toBeNull()
+    expect(parseDateOfBirth("2013-06-15", NOW)).toBeNull()
   })
 
   it("rejects the future and the implausible", () => {
