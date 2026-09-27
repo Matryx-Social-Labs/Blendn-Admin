@@ -23,45 +23,35 @@ const CIRCLE = { type: "circle", lat: 12.97, lng: 77.59, radius: 50, buffer: 0 }
 
 describe("C1/C2 — one fence resolver", () => {
   it("prefers the event's own fence", () => {
-    const fence = resolveFence({
-      geofence: CIRCLE,
-      venue: { geofence: { ...CIRCLE, radius: 500 } },
-      latitude: 1,
-      longitude: 1,
-      check_in_radius: 30,
-    })
+    const fence = resolveFence({ geofence: CIRCLE, latitude: 1, longitude: 1, check_in_radius: 30 })
     expect(fence).toMatchObject({ radius: 50 })
   })
 
-  it("falls back to the venue's, which schema.prisma has always promised", () => {
+  it("does not read the venue's area — an event copies it when saved (SCRUM-352 security review)", () => {
     /*
-     * The schema says events inherit the venue's geofence. Nothing on the
-     * server honoured it at the door — the "inheritance" was a prefill in the
-     * event form, and the one server-side fallback was unreachable.
+     * It fell back to the venue's area live, which schema.prisma promised.
+     * With organisers editing the unclaimed venues they add, the organisation
+     * that added a fence-less venue could give it a first fence after another
+     * organisation's event was linked, and move that event's check-in area.
+     * Owner's ruling 3: events copy the venue's area on save (venueFenceToCopy).
      */
-    const fence = resolveFence({
+    const row = {
       geofence: null,
       venue: { geofence: { ...CIRCLE, radius: 500 } },
-      latitude: 1,
-      longitude: 1,
-      check_in_radius: 30,
-    })
-    expect(fence).toMatchObject({ radius: 500 })
-  })
-
-  it("falls back to coordinates and a radius, for events older than the column", () => {
-    const fence = resolveFence({
-      geofence: null,
-      venue: null,
       latitude: 12.97,
       longitude: 77.59,
       check_in_radius: 30,
-    })
+    }
+    expect(resolveFence(row)).toMatchObject({ type: "circle", radius: 30 })
+  })
+
+  it("falls back to coordinates and a radius, for events older than the column", () => {
+    const fence = resolveFence({ geofence: null, latitude: 12.97, longitude: 77.59, check_in_radius: 30 })
     expect(fence).not.toBeNull()
   })
 
   it("returns null only when there is genuinely nothing to judge against", () => {
-    expect(resolveFence({ geofence: null, venue: null, latitude: null, longitude: null })).toBeNull()
+    expect(resolveFence({ geofence: null, latitude: null, longitude: null })).toBeNull()
   })
 
   it("is the only resolver on all three paths", () => {
@@ -85,17 +75,15 @@ describe("C1/C2 — one fence resolver", () => {
     }
   })
 
-  it("does not let two select fragments claim the venue relation", () => {
+  it("keeps the venue's owner at the door, and nothing else of the venue", () => {
     /*
-     * `fenceSelect` and `eventPermissionSelect` both want `venue`, and object
-     * spread means the second silently wins. The check-in route needs
-     * `owner_org_id` to tell staff from guests AND `geofence` to fall back on,
-     * so it merges them by hand — spreading `fenceSelect` there would have
-     * turned every staff check-in into a guest one.
+     * The check-in route needs `owner_org_id` to tell staff from guests. It
+     * used to merge the venue's `geofence` in too, for the live fallback the
+     * resolver no longer has (SCRUM-352 security review).
      */
     const src = code("app/api/mobile/events/[eventId]/checkin/route.ts")
-    expect(src).toMatch(/venue: \{ select: \{ owner_org_id: true, \.\.\.fenceVenueSelect \} \}/)
-    expect(src).not.toMatch(/\.\.\.fenceSelect/)
+    expect(src).toMatch(/venue: \{ select: \{ owner_org_id: true \} \}/)
+    expect(src).not.toMatch(/fenceVenueSelect/)
   })
 })
 

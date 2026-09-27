@@ -6,7 +6,7 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters, getBoundingBox } from "@/lib/geo"
-import { DEFAULT_BUFFER_M, fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
+import { DEFAULT_BUFFER_M, distanceToGeofence, fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
 import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
 
 /**
@@ -33,7 +33,7 @@ function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }
   }
 }
 import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
-import type { venue_type } from "@prisma/client"
+import { Prisma, type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
 
@@ -68,11 +68,31 @@ import { activeMembership } from "@/lib/org-membership"
 
 /** Two records for one building is how "The Loft" and "the loft" both exist. */
 const DUPLICATE_RADIUS_M = 100
+/**
+ * How far to look for a venue whose outline could hold the new pin. A pin
+ * inside a stadium can be 130 m from the stadium's own pin — past the 100 m
+ * rule — so outlines are searched wider and judged by the shape itself.
+ * ponytail: a fixed 2 km box; widen it if a venue's outline ever spans more.
+ */
+const OUTLINE_SEARCH_M = 2000
 
 async function requireUser() {
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Unauthorized")
   return session.user
+}
+
+/** A row of the duplicate check's lookup — `venuesNear`'s raw query. */
+interface NearbyRow {
+  id: string
+  name: string
+  address: string | null
+  city: string | null
+  latitude: number | null
+  longitude: number | null
+  owner_org_id: string | null
+  geofence: unknown
+  owner_name: string | null
 }
 
 export interface NearbyVenue {
@@ -96,28 +116,32 @@ export async function venuesNear(lat: number, lng: number): Promise<NearbyVenue[
   const user = await requireUser()
   const isAdmin = user.role === "app_admin"
 
-  // Bounding box first so the database does the coarse filter on an index,
-  // then exact haversine in memory. The box is generous; the filter below is
-  // the real one.
-  const box = getBoundingBox(lat, lng, DUPLICATE_RADIUS_M / 1000)
-  const candidates = await db.venues.findMany({
-    where: {
-      deleted_at: null,
-      latitude: { gte: box.minLat, lte: box.maxLat },
-      longitude: { gte: box.minLon, lte: box.maxLon },
-    },
-    select: {
-      id: true,
-      name: true,
-      address: true,
-      city: true,
-      latitude: true,
-      longitude: true,
-      owner_org_id: true,
-      owner_org: { select: { display_name: true } },
-    },
-    take: 50,
-  })
+  // Bounding boxes first so the lat/lng index does the coarse filter, then
+  // exact distances in memory. Nearest first *before* the LIMIT: a busy
+  // district would otherwise hand back whichever rows the scan met first and
+  // drop the real neighbour (#database-review, SCRUM-352). Two lookups, so the
+  // wide one for outlines never crowds a 100 m neighbour out of the tight one.
+  const cosLat = Math.cos((lat * Math.PI) / 180)
+  const nearest = (metres: number, outlinesOnly: boolean, limit: number) => {
+    const box = getBoundingBox(lat, lng, metres / 1000)
+    return db.$queryRaw<NearbyRow[]>`
+      SELECT v.id, v.name, v.address, v.city, v.latitude, v.longitude, v.owner_org_id, v.geofence,
+             o.display_name AS owner_name
+        FROM venues v
+        LEFT JOIN organisations o ON o.id = v.owner_org_id
+       WHERE v.deleted_at IS NULL
+         AND v.latitude BETWEEN ${box.minLat} AND ${box.maxLat}
+         AND v.longitude BETWEEN ${box.minLon} AND ${box.maxLon}
+         ${outlinesOnly ? Prisma.sql`AND v.geofence->>'type' = 'polygon'` : Prisma.empty}
+       ORDER BY power(v.latitude - ${lat}, 2) + power((v.longitude - ${lng}) * ${cosLat}, 2)
+       LIMIT ${limit}`
+  }
+  // A pin inside a stadium can be 130 m from the stadium's own pin (SCRUM-352).
+  const [near, outlined] = await Promise.all([
+    nearest(DUPLICATE_RADIUS_M, false, 50),
+    nearest(OUTLINE_SEARCH_M, true, 200),
+  ])
+  const candidates = [...near, ...outlined.filter((o) => !near.some((n) => n.id === o.id))]
 
   return candidates
     .flatMap((v) => {
@@ -125,7 +149,10 @@ export async function venuesNear(lat: number, lng: number): Promise<NearbyVenue[
       const distanceMetres = Math.round(
         haversineDistanceMeters(lat, lng, v.latitude, v.longitude)
       )
-      if (distanceMetres > DUPLICATE_RADIUS_M) return []
+      // Near its pin, or inside its outline (SCRUM-352).
+      const fence = validateGeofence(v.geofence)
+      const insideIt = fence.ok && fence.fence.type === "polygon" && distanceToGeofence({ lat, lng }, fence.fence) === 0
+      if (distanceMetres > DUPLICATE_RADIUS_M && !insideIt) return []
       return [
         {
           id: v.id,
@@ -135,7 +162,7 @@ export async function venuesNear(lat: number, lng: number): Promise<NearbyVenue[
           distanceMetres,
           claimed: v.owner_org_id !== null,
           // A host learning which company owns which venue is a customer list.
-          ownerName: isAdmin ? (v.owner_org?.display_name ?? null) : null,
+          ownerName: isAdmin ? v.owner_name : null,
         },
       ]
     })
@@ -162,12 +189,15 @@ export interface CreateVenueInput {
  * owned by their organisation** — they are describing their own place, and
  * making them create-then-claim it would be ceremony with no safety value.
  *
- * An organiser cannot create venues: a venue grants operational control over
- * other people's events, and an organiser has no claim to that.
+ * An organiser adds an **unclaimed** venue (SCRUM-352): the place they are
+ * holding an event at, saved once so nobody draws its outline again. Unclaimed
+ * grants nobody control over anybody's events — that only comes with a claim,
+ * which a person reviews — so this is safe. `created_by_org_id` records their
+ * organisation, which may edit the venue until someone claims it.
  */
 export async function createVenue(input: CreateVenueInput): Promise<{ id: string }> {
   const user = await requireUser()
-  if (user.role !== "app_admin" && user.role !== "venue_owner") {
+  if (user.role !== "app_admin" && user.role !== "venue_owner" && user.role !== "organizer") {
     throw new Refusal("Forbidden")
   }
 
@@ -208,11 +238,13 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   }
 
   // The same "my org" as event creation: oldest live membership (SCRUM-148).
-  const orgId = user.role === "venue_owner" ? await homeOrgIdFor(user) : null
+  const orgId = user.role === "app_admin" ? null : await homeOrgIdFor(user)
 
-  if (user.role === "venue_owner" && !orgId) {
+  if (user.role !== "app_admin" && !orgId) {
     throw new Refusal("Your account is not attached to an organisation yet.")
   }
+  // A venue owner describes their own place; an organiser adds one unclaimed.
+  const ownerOrgId = user.role === "venue_owner" ? orgId : null
 
   const venue = await db.venues.create({
     data: {
@@ -224,9 +256,10 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
       longitude: input.lng,
       capacity: input.capacity && input.capacity > 0 ? Math.round(input.capacity) : null,
       geofence: geofence as object,
-      owner_org_id: orgId,
-      claimed_at: orgId ? new Date() : null,
+      owner_org_id: ownerOrgId,
+      claimed_at: ownerOrgId ? new Date() : null,
       created_by: user.id,
+      created_by_org_id: orgId,
     },
     select: { id: true },
   })
@@ -236,7 +269,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
     action: "venue.created",
     resource: "venue",
     resourceId: venue.id,
-    details: { name, venueType: input.venueType, claimed: !!orgId },
+    details: { name, venueType: input.venueType, claimed: !!ownerOrgId, createdByOrgId: orgId },
   })
 
   revalidatePath("/dashboard/venues")
@@ -283,20 +316,24 @@ async function venueForWrite(
 ): Promise<{ id: string; name: string; owner_org_id: string | null }> {
   const venue = await db.venues.findUnique({
     where: { id, deleted_at: null },
-    select: { id: true, name: true, owner_org_id: true },
+    select: { id: true, name: true, owner_org_id: true, created_by_org_id: true },
   })
   if (!venue) throw new Refusal("Venue not found")
 
   if (user.role !== "app_admin") {
-    const member = venue.owner_org_id
+    // The owner's organisation once claimed; until then, the organisation
+    // that added it (owner's ruling 2, SCRUM-352). Never both: a claim hands
+    // the venue over.
+    const orgId = venue.owner_org_id ?? venue.created_by_org_id
+    const member = orgId
       ? await db.organisation_members.findFirst({
-          where: { user_id: user.id, org_id: venue.owner_org_id, ...activeMembership },
+          where: { user_id: user.id, org_id: orgId, ...activeMembership },
           select: { id: true },
         })
       : null
     if (!member) throw new Refusal("Forbidden")
   }
-  return venue
+  return { id: venue.id, name: venue.name, owner_org_id: venue.owner_org_id }
 }
 
 /** Edit a venue. Owners edit their own; admins edit any. */

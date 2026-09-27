@@ -9,7 +9,7 @@ import { openSession } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { notifyEventCheckIn } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { evaluateCheckIn, resolveFence, fenceVenueSelect } from "@/lib/geofence"
+import { evaluateCheckIn, resolveFence } from "@/lib/geofence"
 import {
   ErrorCode,
   successResponse,
@@ -81,20 +81,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       /*
-       * The venue relation is needed twice, for two unrelated reasons, and they
-       * have to be merged by hand.
-       *
        * `owner_org_id` tells staff from guests -- a check-in is staff work if
-       * the person's org runs the event or owns the venue. `geofence` is what
-       * `resolveFence` falls back to when the event has none, which the door has
-       * never consulted even though the sweeper has and `schema.prisma`
-       * promises events inherit it.
-       *
-       * Spreading `fenceSelect` here instead would silently replace the venue
-       * select and take `owner_org_id` away, and every staff check-in would
-       * quietly become a guest one.
+       * the person's org runs the event or owns the venue. The venue's
+       * `geofence` is not read at the door any more: an event copies it when
+       * saved (owner's ruling 3, `resolveFence`), so nothing can move it live.
        */
-      include: { venue: { select: { owner_org_id: true, ...fenceVenueSelect } } },
+      include: { venue: { select: { owner_org_id: true } } },
     })
 
     if (!event) {

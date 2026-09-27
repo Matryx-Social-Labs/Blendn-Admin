@@ -1,5 +1,6 @@
 import { db } from "@/lib/db"
 import type { venue_link_status } from "@prisma/client"
+import { validateGeofence, type Geofence } from "@/lib/geofence"
 
 /**
  * Resolving an event's link to a listed venue.
@@ -45,4 +46,25 @@ export async function resolveVenueLink(
   }
 
   return { venue_id: venue.id, venue_link_status: "auto_linked" }
+}
+
+/**
+ * The area an event linked to this venue saves, when it brings none of its own.
+ *
+ * Owner's ruling 3 (2026-09-27): an event **copies** its venue's area. Only the
+ * dashboard form did, and `resolveFence` falls back to the venue's area *live*
+ * for an event without one — so once an organisation may edit the unclaimed
+ * venue it added (SCRUM-352), it could move another organisation's check-in
+ * area at "its" venue (security review). The copy is the server's now, on every
+ * save that links a venue. Validated, because it came from the database, and so
+ * did the 100 km radius.
+ */
+export async function venueFenceToCopy(venueId: string | null | undefined): Promise<Geofence | null> {
+  if (!venueId) return null
+  const venue = await db.venues.findUnique({
+    where: { id: venueId, deleted_at: null },
+    select: { geofence: true },
+  })
+  const parsed = validateGeofence(venue?.geofence)
+  return parsed.ok ? parsed.fence : null
 }

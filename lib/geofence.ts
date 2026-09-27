@@ -532,38 +532,22 @@ function isValidLatLng(lat: number, lng: number): boolean {
 /**
  * The columns `resolveFence` needs. Spread it; do not hand-pick.
  *
- * It claims the `venue` relation, and `eventPermissionSelect` claims it too.
- * Object spread means whichever fragment is written second silently wins, which
- * is CLAUDE.md's "a select missing `venue` reads as no venue" arriving as a
- * collision rather than an omission. A caller that needs both must merge the
- * venue selects **by hand** and spread only `fenceSelectNoVenue` — there is no
- * way to make that automatic, so the two names exist to make forgetting loud.
+ * No `venue`: the venue's area is never read at check-in (see `resolveFence`),
+ * so this fragment no longer collides with `eventPermissionSelect`'s claim on
+ * the relation.
  */
 export const fenceSelect = {
   geofence: true,
   latitude: true,
   longitude: true,
   check_in_radius: true,
-  venue: { select: { geofence: true } },
 } as const
-
-/** `fenceSelect` without the relation, for callers who select `venue` themselves. */
-export const fenceSelectNoVenue = {
-  geofence: true,
-  latitude: true,
-  longitude: true,
-  check_in_radius: true,
-} as const
-
-/** What `resolveFence` needs off the venue, for merging into a caller's select. */
-export const fenceVenueSelect = { geofence: true } as const
 
 export interface FenceSource {
   geofence?: unknown
   latitude?: number | null
   longitude?: number | null
   check_in_radius?: number | null
-  venue?: { geofence?: unknown } | null
 }
 
 /**
@@ -590,11 +574,17 @@ export interface FenceSource {
  *
  * ## The order, and why
  *
- * The event's own fence wins: an organiser who drew one meant it. The venue's
- * is next, because `schema.prisma` promises events inherit it and until now
- * nothing on the server honoured that — the "inheritance" was a prefill in the
- * event form. `legacyGeofence` is last: coordinates plus a radius is the
- * weakest of the three and the only one nobody chose deliberately.
+ * The event's own fence wins: an organiser who drew one meant it.
+ * `legacyGeofence` is next: coordinates plus a radius, the only one nobody
+ * chose deliberately.
+ *
+ * **The venue's area is not read here.** It was, as a live fallback — until
+ * organisers could edit the unclaimed venues they add (SCRUM-352). Then the
+ * organisation that added a venue could move another organisation's check-in
+ * area at it, by giving a fence-less venue its first fence after the event was
+ * linked (security review). Owner's ruling 3: an event **copies** its venue's
+ * area when saved (`venueFenceToCopy`); the migration copied it onto the
+ * events already linked. So there is nothing live left to read.
  *
  * Returns null only when there is genuinely nothing to judge against. Callers
  * must decide what that means for them — the door lets people in, and the
@@ -604,9 +594,6 @@ export interface FenceSource {
 export function resolveFence(event: FenceSource): Geofence | null {
   const own = validateGeofence(event.geofence)
   if (own.ok) return own.fence
-
-  const venue = validateGeofence(event.venue?.geofence)
-  if (venue.ok) return venue.fence
 
   return legacyGeofence(
     event.latitude ?? null,

@@ -14,7 +14,7 @@ import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mobileEventPatchSchema } from "@/lib/validations/event"
 import { canPublish } from "@/lib/geofence-input"
-import { fenceVenueSelect, phoneCheckInRadius } from "@/lib/geofence"
+import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { getOccupancy } from "@/lib/occupancy"
@@ -91,9 +91,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         // What `eventHost` reads. Named rather than spread from
         // `eventHostSelect`, which claims `organizer` with a narrower shape.
         organizer_org: { select: { display_name: true } },
-        // For `phoneCheckInRadius`: an event with no area of its own is judged
-        // by its venue's (`resolveFence`), and so is its radius.
-        venue: { select: fenceVenueSelect },
         details: true,
         categories: {
           include: {

@@ -618,9 +618,10 @@ describe("phoneCheckInRadius — the circle the app judges with must cover the w
     expect(phoneCheckInRadius({ geofence: circle, latitude: pin.lat, longitude: pin.lng, check_in_radius: 50 })).toBe(50)
   })
 
-  it("uses the venue's area when the event has none of its own", () => {
-    const r = phoneCheckInRadius({ geofence: null, venue: { geofence: stadium }, latitude: pin.lat, longitude: pin.lng, check_in_radius: 30 })
-    expect(r).toBeGreaterThanOrEqual(cornerMetres + 20)
+  it("never reads a venue's area — an event copies it when saved (SCRUM-352 security review)", () => {
+    // A row loaded with its venue: the venue's outline is there, and ignored.
+    const row = { geofence: null, venue: { geofence: stadium }, latitude: pin.lat, longitude: pin.lng, check_in_radius: 30 }
+    expect(phoneCheckInRadius(row)).toBe(30)
   })
 
   it("keeps the stored radius for an event with only a pin and a radius", () => {
@@ -632,9 +633,9 @@ describe("phoneCheckInRadius — the circle the app judges with must cover the w
     expect(phoneCheckInRadius({ geofence: onZero, latitude: 0, longitude: 0, check_in_radius: 5 })).toBe(50)
   })
 
-  it("falls back past a venue fence that is not a fence", () => {
+  it("falls back past an event area that is not an area", () => {
     expect(
-      phoneCheckInRadius({ geofence: null, venue: { geofence: { type: "polygon", ring: "junk" } }, latitude: pin.lat, longitude: pin.lng, check_in_radius: 70 })
+      phoneCheckInRadius({ geofence: { type: "polygon", ring: "junk" }, latitude: pin.lat, longitude: pin.lng, check_in_radius: 70 })
     ).toBe(70)
   })
 

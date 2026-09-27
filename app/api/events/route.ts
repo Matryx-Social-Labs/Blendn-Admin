@@ -11,7 +11,8 @@ import { owningOrgFor } from "@/lib/event-ownership"
 import { canCreateEvents } from "@/lib/rbac"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
-import { resolveVenueLink } from "@/lib/venue-link"
+import { resolveVenueLink, venueFenceToCopy } from "@/lib/venue-link"
+import { phoneCheckInRadius } from "@/lib/geofence"
 import { syncOccurrences } from "@/lib/occurrences"
 import { auditLog } from "@/lib/audit-log"
 import { getOccupancies } from "@/lib/occupancy"
@@ -198,6 +199,9 @@ export async function POST(req: Request) {
 
     // Derived, never taken from the body — see lib/venue-link.ts.
     const venueLink = await resolveVenueLink(venue_id)
+    // An event linked to a venue keeps a copy of its area, never a live
+    // reference another organisation could move (owner's ruling 3).
+    const copiedFence = location.values.geofence ? null : await venueFenceToCopy(venueLink.venue_id)
 
     /*
      * Resolved before the write, so a creator with no organisation is told at
@@ -284,10 +288,19 @@ export async function POST(req: Request) {
         // organiser could put their own event on it. Ignored unless app_admin.
         ...(is_featured != null && session.user.role === "app_admin" && { is_featured }),
         ...(is_recurring != null && { is_recurring }),
-        ...(location.values.check_in_radius != null && {
-          check_in_radius: location.values.check_in_radius,
-        }),
-        ...(location.values.geofence != null && { geofence: location.values.geofence }),
+        ...(copiedFence
+          ? {
+              geofence: copiedFence,
+              check_in_radius:
+                phoneCheckInRadius({ geofence: copiedFence, latitude, longitude }) ??
+                location.values.check_in_radius,
+            }
+          : {
+              ...(location.values.check_in_radius != null && {
+                check_in_radius: location.values.check_in_radius,
+              }),
+              ...(location.values.geofence != null && { geofence: location.values.geofence }),
+            }),
         /*
          * `organizer_id` records who created the row; `organizer_org_id` is who
          * can act on it. Only the second is an authorization input, and until

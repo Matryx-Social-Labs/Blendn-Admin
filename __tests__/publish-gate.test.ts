@@ -30,7 +30,10 @@ jest.mock("@/lib/org-membership", () => ({
   actorFor: jest.fn(async (u: { id: string; role: string }) => ({ ...u, orgIds: [] })),
 }))
 
-jest.mock("@/lib/venue-link", () => ({ resolveVenueLink: jest.fn().mockResolvedValue({}) }))
+jest.mock("@/lib/venue-link", () => ({
+  resolveVenueLink: jest.fn().mockResolvedValue({}),
+  venueFenceToCopy: jest.fn().mockResolvedValue(null),
+}))
 jest.mock("@/lib/occurrences", () => ({ syncOccurrences: jest.fn().mockResolvedValue(undefined) }))
 // The event routes audit create, publish and cancel now (SCRUM-89); the db mock has no audit table.
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
