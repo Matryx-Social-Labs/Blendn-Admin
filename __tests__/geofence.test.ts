@@ -627,6 +627,17 @@ describe("phoneCheckInRadius — the circle the app judges with must cover the w
     expect(phoneCheckInRadius({ geofence: null, latitude: pin.lat, longitude: pin.lng, check_in_radius: 100 })).toBe(100)
   })
 
+  it("treats latitude 0 and longitude 0 as a place, not as missing", () => {
+    const onZero = { type: "circle" as const, lat: 0, lng: 0, radius: 30, buffer: 20 }
+    expect(phoneCheckInRadius({ geofence: onZero, latitude: 0, longitude: 0, check_in_radius: 5 })).toBe(50)
+  })
+
+  it("falls back past a venue fence that is not a fence", () => {
+    expect(
+      phoneCheckInRadius({ geofence: null, venue: { geofence: { type: "polygon", ring: "junk" } }, latitude: pin.lat, longitude: pin.lng, check_in_radius: 70 })
+    ).toBe(70)
+  })
+
   it("keeps the stored radius when there is nowhere to measure from", () => {
     expect(phoneCheckInRadius({ geofence: null, latitude: null, longitude: null, check_in_radius: 45 })).toBe(45)
   })

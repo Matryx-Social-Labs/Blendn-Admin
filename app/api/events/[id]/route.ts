@@ -4,6 +4,7 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
+import { phoneCheckInRadius } from "@/lib/geofence"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
@@ -316,8 +317,21 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         // organiser could put their own event on it. Ignored unless app_admin.
         ...(is_featured != null && session.user.role === "app_admin" && { is_featured }),
         ...(is_recurring != null && { is_recurring }),
+        /*
+         * From the pin this row keeps, not the area's centre (#458 review).
+         * `validateLocationInput` runs before the row is read, so an edit that
+         * sends the area without coordinates was measured from the area's own
+         * centre while the old, off-centre pin stayed — and the stored radius
+         * fell short of the far side (207 m where 287 m was needed).
+         */
         ...(location.values.check_in_radius != null && {
-          check_in_radius: location.values.check_in_radius,
+          check_in_radius: location.values.geofence
+            ? (phoneCheckInRadius({
+                geofence: location.values.geofence,
+                latitude: latitude ?? event.latitude,
+                longitude: longitude ?? event.longitude,
+              }) ?? location.values.check_in_radius)
+            : location.values.check_in_radius,
         }),
         /*
          * `in`, and nothing else — an explicit null has to reach the column.

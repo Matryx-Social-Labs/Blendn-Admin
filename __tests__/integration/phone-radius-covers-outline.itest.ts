@@ -1,3 +1,6 @@
+let session: { user: { id: string; role: string } } | null = null
+jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+
 import { NextRequest } from "next/server"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { haversineDistanceMeters } from "@/lib/geo"
@@ -6,6 +9,9 @@ import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventRoute = require("@/app/api/mobile/events/[eventId]/route") as
   typeof import("@/app/api/mobile/events/[eventId]/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const dashboardEventRoute = require("@/app/api/events/[id]/route") as
+  typeof import("@/app/api/events/[id]/route")
 
 /*
  * SCRUM-350. The app judges the area as `checkInRadius` metres around the pin
@@ -97,3 +103,37 @@ describe("the mobile event detail's checkInRadius covers the check-in area", () 
     expect(await checkInRadius(eventId, token)).toBe(100)
   })
 })
+
+describe("the stored check_in_radius follows the saved area on an edit", () => {
+  it("measures from the event's stored pin when the edit sends only the outline (pr-test-analyzer, #458)", async () => {
+    // An older event whose pin is ~100 m north of the outline's centre. The
+    // PATCH carries the outline and no coordinates, so the route keeps that
+    // pin — and the radius has to cover the outline from there.
+    const admin = await makeUser("phone-radius-admin", "app_admin")
+    users.push(admin)
+    session = { user: { id: admin, role: "app_admin" } }
+    const off = { lat: pin.lat + 0.0009, lng: pin.lng }
+    const eventId = await hostedEvent({ latitude: off.lat, longitude: off.lng, check_in_radius: 60 })
+
+    const res = await dashboardEventRoute.PATCH(
+      new NextRequest(`http://localhost/api/events/${eventId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ geofence: stadium }),
+      }),
+      { params: Promise.resolve({ id: eventId }) }
+    )
+    expect(res.status).toBe(200)
+
+    const row = await db.events.findUniqueOrThrow({
+      where: { id: eventId },
+      select: { check_in_radius: true, latitude: true },
+    })
+    expect(row.latitude).toBeCloseTo(off.lat, 6)
+    const fromStoredPin =
+      Math.max(...stadium.ring.map(([lat, lng]) => haversineDistanceMeters(off.lat, off.lng, lat, lng))) +
+      stadium.buffer
+    expect(row.check_in_radius).toBeGreaterThanOrEqual(fromStoredPin)
+  })
+})
+
