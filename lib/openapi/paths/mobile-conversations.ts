@@ -58,6 +58,24 @@ registry.registerPath({
   },
 })
 
+// POST /api/mobile/conversations/read
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/conversations/read",
+  tags: ["Mobile Conversations"],
+  summary: "Mark all conversations read",
+  description:
+    "The inbox's \"Mark all read\". Marks exactly what `GET /conversations` counts as unread: the other person's visible messages, in the caller's live conversations.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "Marked",
+      content: { "application/json": { schema: wrap(z.object({ marked: z.number().int() })) } },
+    },
+    ...standardErrors,
+  },
+})
+
 // GET /api/mobile/conversations/{conversationId}
 registry.registerPath({
   method: "get",
