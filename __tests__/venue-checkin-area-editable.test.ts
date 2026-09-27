@@ -66,6 +66,12 @@ it("keeps the \"different place\" answer while the same neighbours are near (Rea
   expect(create).not.toMatch(/pinKey/)
 })
 
+it("a failed or limited look-up never counts as \"no duplicates\" — the server's check still runs (SCRUM-360 review)", () => {
+  const create = readFileSync(join(__dirname, "..", "components", "venue-create-form.tsx"), "utf8")
+  expect(create).toMatch(/acknowledgedDuplicates: acknowledged,/)
+  expect(create).not.toMatch(/acknowledged \|\| nearby\.length === 0/)
+})
+
 it("a type change resizes a stand-in circle, on both venue pages (React review, SCRUM-354)", () => {
   const create = readFileSync(join(__dirname, "..", "components", "venue-create-form.tsx"), "utf8")
   expect(create).toMatch(/geofence: followType\(d\.geofence, d\.venueType, t\)/)

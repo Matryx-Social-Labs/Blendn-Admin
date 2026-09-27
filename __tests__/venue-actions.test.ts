@@ -489,6 +489,8 @@ describe("rate limits on the venue actions (SCRUM-360)", () => {
       createVenue({ name: "Toit", venueType: "pub_bar", lat: LAT, lng: LNG, acknowledgedDuplicates: true })
     ).rejects.toThrow(/too many venues/i)
     expect(mockDb.venues.create).not.toHaveBeenCalled()
+    // The tier matters: a create is "heavy" (10 a minute), not an ordinary write.
+    expect(mockOverLimit).toHaveBeenCalledWith("heavy", "venue-create", expect.any(String))
   })
 
   it("refuses a look-up over the limit, before any query", async () => {
@@ -496,6 +498,7 @@ describe("rate limits on the venue actions (SCRUM-360)", () => {
     mockOverLimit.mockImplementation(async (_policy: string, scope: string) => scope === "venues-near")
     await expect(venuesNear(LAT, LNG)).rejects.toThrow(/too many look-ups/i)
     expect(mockDb.$queryRaw).not.toHaveBeenCalled()
+    expect(mockOverLimit).toHaveBeenCalledWith("write", "venues-near", expect.any(String))
   })
 
   it("a create's own duplicate check is not a look-up: it spends only the create allowance", async () => {

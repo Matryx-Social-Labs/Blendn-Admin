@@ -366,7 +366,13 @@ function refuseUnknownVenueType(type: venue_type | null | undefined): void {
   if (type != null && !VENUE_TYPES.includes(type)) throw new Refusal("That is not a venue type this list knows.")
 }
 
-/** Edit a venue. Owners edit their own; admins edit any. */
+/**
+ * Edit a venue. Owners edit their own; admins edit any.
+ *
+ * Not rate limited, deliberately (SCRUM-360): an edit reaches only venues the
+ * caller's organisation may write, so it cannot flood the directory or map it
+ * the way a create or a look-up can.
+ */
 export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
   const user = await requireUser()
   await venueForWrite(id, user)
