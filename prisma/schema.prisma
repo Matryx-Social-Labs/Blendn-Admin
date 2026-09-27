@@ -1370,6 +1370,11 @@ model venues {
   claimed_at   DateTime?    @db.Timestamptz(6)
   status       venue_status @default(active)
   created_by   String?
+  /// The organisation whose member added this venue (SCRUM-352). While the
+  /// venue is unclaimed, that organisation and admins may edit it; once
+  /// claimed, the owner decides. Null for venues added before this, and for
+  /// admin-added ones — those stay admin-only while unclaimed.
+  created_by_org_id String? @db.Uuid
   created_at   DateTime     @default(now()) @db.Timestamptz(6)
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at   DateTime?    @db.Timestamptz(6)
@@ -1378,11 +1383,13 @@ model venues {
   // a real place and every event that happened in it.
   claims    venue_claims[]
   owner     User?          @relation("VenueOwner", fields: [owner_id], references: [id], onDelete: SetNull)
-  owner_org organisations? @relation(fields: [owner_org_id], references: [id], onDelete: SetNull)
-  events    events[]
+  owner_org      organisations? @relation("VenueOwnerOrg", fields: [owner_org_id], references: [id], onDelete: SetNull)
+  created_by_org organisations? @relation("VenueCreatedByOrg", fields: [created_by_org_id], references: [id], onDelete: SetNull)
+  events         events[]
 
   @@index([owner_id])
   @@index([owner_org_id])
+  @@index([created_by_org_id])
   @@index([city])
   @@index([status])
   /// The Hotspots feed bounding-boxes on these. `events` has had the matching
@@ -1433,7 +1440,8 @@ model organisations {
 
   members        organisation_members[]
   events         events[]
-  venues         venues[]
+  venues         venues[]       @relation("VenueOwnerOrg")
+  venues_created venues[]       @relation("VenueCreatedByOrg")
   domains        organisation_domains[]
   invites        organisation_invites[]
   join_requests  organisation_join_requests[]

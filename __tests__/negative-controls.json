@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "organisers-add-venues.itest.ts": {
+      "guards": "Organisers add unclaimed venues (SCRUM-352, owner's ruling 2): created with owner_org_id null and created_by_org_id = their organisation; that organisation and admins edit it while unclaimed, nobody else; once claimed, the owner org decides. The duplicate check refuses a pin inside a listed venue's outline, not only one within 100 m of its pin. venue-actions.test.ts pins that an organiser never owns what they add.",
+      "mutation": "M18: venueForWrite checks owner_org_id only (ignores created_by_org_id). M19: createVenue sets owner_org_id to the organiser's org. M20: venuesNear without the outline lookup.",
+      "observed": "M18: organisers-add-venues.itest.ts 1 of 6 failing (the creating organisation refused its own edit). M19: venue-actions.test.ts 1 of 34 failing. M20: organisers-add-venues.itest.ts 1 of 6 failing (a pin 130 m inside the stadium outline accepted as a new place).",
+      "date": "2026-09-27"
+    },
     "phone-radius-covers-outline.itest.ts": {
       "guards": "The app judges the check-in area as a circle of checkInRadius around the pin (PresenceMonitor, the check-in button). It must hold the whole area and its buffer — outline or circle, the event's own or its venue's — so the app is never stricter than the door (SCRUM-350). phoneCheckInRadius (lib/geofence.ts) is pinned in geofence.test.ts; validateLocationInput stores the same value on save (geofence-input.test.ts); the event form keeps it in step for outlines too (event-where-one-map.test.ts).",
       "mutation": "M14: location-section.tsx setFence back to circles only. M15: validateLocationInput no longer derives check_in_radius from a saved fence. M16: the mobile detail sends the stored check_in_radius column.",

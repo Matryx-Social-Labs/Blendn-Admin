@@ -109,8 +109,20 @@ describe("venuesNear — the duplicate check", () => {
 })
 
 describe("createVenue", () => {
-  it("refuses an organiser — a venue grants control over other people's events", async () => {
+  it("adds an organiser's venue unclaimed — a venue grants control over other people's events, and they get none (SCRUM-352)", async () => {
+    // Organisers were refused outright, so a place they held an event at was
+    // redrawn for every event. They may add it now, but never own it: an
+    // owner only arrives through a claim a person reviews.
     signIn("organizer")
+    await createVenue({ name: "Toit", venueType: "brewery", lat: LAT, lng: LNG, acknowledgedDuplicates: true })
+    const data = mockDb.venues.create.mock.calls[0][0].data
+    expect(data.owner_org_id).toBeNull()
+    expect(data.claimed_at).toBeNull()
+    expect(data.created_by_org_id).toBe(MY_ORG)
+  })
+
+  it("refuses an attendee — the app's people do not add venues", async () => {
+    signIn("attendee")
     await expect(
       createVenue({ name: "Toit", venueType: "brewery", lat: LAT, lng: LNG })
     ).rejects.toThrow(/forbidden/i)
