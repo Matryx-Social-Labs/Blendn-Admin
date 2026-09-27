@@ -70,8 +70,10 @@ describe("the event form's Where section", () => {
 
   it("the area cites its source under the map — the section's memorable detail", () => {
     expect(src).toMatch(/<AreaSourceLine\s+source=\{areaSource\}/)
+    // Shared with the venue pages since SCRUM-354.
+    const line = readFileSync(join(__dirname, "../components/area-source-line.tsx"), "utf8")
     for (const said of ["Area from the venue", "Outline from OpenStreetMap", "Building outline found nearby", "No outline in OpenStreetMap"]) {
-      expect(src).toContain(said)
+      expect(line).toContain(said)
     }
   })
 

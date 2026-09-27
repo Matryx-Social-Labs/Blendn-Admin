@@ -458,6 +458,12 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
 export async function retireVenue(id: string, reason?: string): Promise<void> {
   const user = await requireUser()
   const venue = await venueForWrite(id, user)
+  // The organisation that added an unclaimed venue corrects it; it does not
+  // take it out of every other organiser's list (SCRUM-361). An owner or an
+  // admin retires.
+  if (user.role !== "app_admin" && !venue.owner_org_id) {
+    throw new Refusal("Only an admin retires a venue nobody has claimed.")
+  }
 
   /*
    * Refused while an event is still to come there.

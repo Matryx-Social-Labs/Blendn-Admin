@@ -18,6 +18,7 @@ import type { LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
 import { WhereSearch, type PickedPlace } from "@/components/event-form/where-search"
+import { AreaSourceLine, type AreaSource, type BufferWhose } from "@/components/area-source-line"
 import { venueById, venuesNear, type NearbyVenue, type VenueOption } from "@/lib/venue-actions"
 import { validateGeofence } from "@/lib/geofence"
 import { extractAddress } from "@/lib/address"
@@ -524,9 +525,6 @@ function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
   )
 }
 
-type AreaSource = "venue" | "venue-pin" | "osm-area" | "building" | "circle" | "drawn"
-type BufferWhose = "venue" | "default" | "custom"
-
 /**
  * Whether an outline a pick leaves behind was somebody's work — drawn by hand,
  * or the event's saved area. Only then does "Outline cleared" say so: moving
@@ -534,37 +532,3 @@ type BufferWhose = "venue" | "default" | "custom"
  * cited under the map.
  */
 const lostDrawing = (source: AreaSource | null) => source === "drawn" || source === null
-
-
-/**
- * The area cites its source — the section's memorable detail (SCRUM-353 design
- * chain). One line under the map, like a citation: where the outline came
- * from, its size, and the buffer. A circle that stands in for a missing
- * outline says so, in the warning tone, and asks for the building.
- */
-function AreaSourceLine({ source, fence, whose }: { source: AreaSource | null; fence: Geofence | null; whose: BufferWhose }) {
-  if (!fence) return null
-  const shape =
-    fence.type === "polygon" ? `${fence.ring.length} corners` : `a ${Math.round(fence.radius)} m circle`
-  const buffer = `+${fence.buffer} m, ${{ venue: "the venue's buffer", default: "the default buffer", custom: "custom for this event" }[whose]}`
-  const said: Record<AreaSource | "saved", string> = {
-    venue: "Area from the venue",
-    "venue-pin": "The venue has no outline yet",
-    "osm-area": "Outline from OpenStreetMap",
-    building: "Building outline found nearby",
-    circle: "No outline in OpenStreetMap",
-    drawn: "Drawn on the map",
-    saved: "The event's saved area",
-  }
-  const warn = source === "circle" || source === "venue-pin"
-  return (
-    <p className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]" data-area-source={source ?? "saved"}>
-      <span className={warn ? "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" : "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-primary"} aria-hidden />
-      <span className={warn ? "font-medium text-warning" : "font-medium"}>{said[source ?? "saved"]}</span>
-      <span className="text-muted-foreground">
-        · {warn ? `${shape} at the address — adjust the area to draw the building` : shape} · {buffer}
-      </span>
-    </p>
-  )
-}
-

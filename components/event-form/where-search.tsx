@@ -61,6 +61,9 @@ export function WhereSearch({
   onPickVenue,
   onPickPlace,
   onClear,
+  listed = true,
+  label = "Venue or address",
+  placeholder = "Venue or address — pick a listed venue, or add a place",
 }: {
   value: string
   selected: VenueOption | null
@@ -68,6 +71,13 @@ export function WhereSearch({
   onPickVenue: (venue: VenueOption) => void
   onPickPlace: (place: PickedPlace) => void
   onClear: () => void
+  /**
+   * Offer listed venues too. The venue pages search places only: a listed
+   * venue there is a duplicate to claim, which `venuesNear` says (SCRUM-354).
+   */
+  listed?: boolean
+  label?: string
+  placeholder?: string
 }) {
   const listId = useId()
   const [venues, setVenues] = useState<VenueOption[]>([])
@@ -98,14 +108,14 @@ export function WhereSearch({
       setSearching(true)
       // Either half failing leaves the other: a geocoder outage must not hide
       // the listed venues, nor the reverse.
-      const [listed, found] = await Promise.allSettled([
-        searchVenues(q),
+      const [listedHits, found] = await Promise.allSettled([
+        listed ? searchVenues(q) : Promise.resolve([]),
         fetch(`/api/geocode?q=${encodeURIComponent(q)}`, { headers: { "Accept-Language": "en" } }).then((r) =>
           r.ok ? (r.json() as Promise<GeocodeHit[]>) : []
         ),
       ])
       if (mine !== seq.current) return
-      setVenues(listed.status === "fulfilled" ? listed.value : [])
+      setVenues(listedHits.status === "fulfilled" ? listedHits.value : [])
       setPlaces(found.status === "fulfilled" && Array.isArray(found.value) ? found.value : [])
       setActive(0)
       setOpen(true)
@@ -179,13 +189,13 @@ export function WhereSearch({
         <IconSearch className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         <input
           role="combobox"
-          aria-label="Venue or address"
+          aria-label={label}
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={showList ? `${listId}-${active}` : undefined}
           value={value}
-          placeholder="Venue or address — pick a listed venue, or add a place"
+          placeholder={placeholder}
           className="min-w-0 flex-1 bg-transparent text-[0.84375rem] outline-none placeholder:text-muted-foreground"
           autoComplete="off"
           onChange={(e) => search(e.target.value)}

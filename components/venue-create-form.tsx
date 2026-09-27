@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useCallback, useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -10,19 +10,19 @@ import {
   IconCheck,
   IconLoader2,
   IconMapPin,
-  IconSearch,
 } from "@tabler/icons-react"
 
-import { GeofenceEditor } from "@/components/geofence-editor"
+import { VenueArea } from "@/components/venue-area"
+import type { PickedPlace } from "@/components/event-form/where-search"
 import { VenueTypePicker } from "@/components/venue-type-picker"
-import { cityFrom, fillFromSearch, type AddressFields } from "@/lib/address"
+import { fillFromSearch, type AddressFields } from "@/lib/address"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { createVenue, venuesNear, type NearbyVenue } from "@/lib/venue-actions"
-import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
+import { followType, venueTypeLabel } from "@/lib/venue-types"
 import type { Geofence } from "@/lib/geofence"
 import type { venue_type } from "@prisma/client"
 import { refusalMessage } from "@/lib/refusal"
@@ -74,14 +74,10 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
 
   const [nearby, setNearby] = useState<NearbyVenue[]>([])
   const [checking, setChecking] = useState(false)
-  // Keyed on the pin, not a boolean: moving the pin invalidates the
-  // acknowledgement without a reset that could race the next lookup.
+  // Keyed on the neighbours it answered, not a boolean and not the pin: a new
+  // neighbour asks again, while nudging a corner — which moves the centre a
+  // metre — does not undo the answer (React review, SCRUM-354).
   const [ackFor, setAckFor] = useState<string | null>(null)
-  const [query, setQuery] = useState("")
-  const [searching, setSearching] = useState(false)
-  // Only the newest search may write: two quick searches can resolve out of
-  // order, and the older one would put its pin and address back.
-  const searchSeq = useRef(0)
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }))
@@ -117,65 +113,23 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
     }
   }, [draft.lat, draft.lng])
 
-  // The pin seeds a circle sized for the type, so most venues never draw
-  // anything. Derived rather than stored — an effect that writes it back would
-  // fight the editor's own null handling.
-  const fence: Geofence | null =
-    draft.geofence ??
-    (draft.lat !== null && draft.lng !== null
-      ? {
-          type: "circle",
-          lat: draft.lat,
-          lng: draft.lng,
-          radius: defaultExtentMetres(draft.venueType),
-          buffer: 20,
-        }
-      : null)
+  // The pin only ever arrives with its area (`onArea`): a place picked brings
+  // an outline, or a circle sized for the type.
+  const fence: Geofence | null = draft.geofence
 
-  async function search() {
-    const q = query.trim()
-    if (!q) return
-    const seq = ++searchSeq.current
-    setSearching(true)
-    try {
-      const res = await fetch(
-        `/api/geocode?q=${encodeURIComponent(q)}`
-      )
-      const hits = (await res.json()) as {
-        lat: string
-        lon: string
-        display_name: string
-        address?: Record<string, string>
-      }[]
-      if (seq !== searchSeq.current) return
-      if (!hits.length) {
-        toast.error("Nothing found — drop the pin by hand instead.")
-        return
-      }
-      const hit = hits[0]
-      // Was `city || town || state_district`, which skipped village and
-      // municipality entirely — so a venue in a village was filed under its
-      // district here and under the village name from the event form. Same
-      // pin, two cities, and neither screen looked wrong on its own.
-      const found = { address: hit.display_name, city: cityFrom(hit.address) || "" }
-      setDraft((d) => ({
-        ...d,
-        lat: Number(hit.lat),
-        lng: Number(hit.lon),
-        // The pin moves, so the address it filled moves with it; only what the
-        // person typed stays.
-        ...fillFromSearch(d, found),
-        geofence: null,
-      }))
-    } catch {
-      if (seq === searchSeq.current) toast.error("Search is unavailable. Drop the pin by hand.")
-    } finally {
-      if (seq === searchSeq.current) setSearching(false)
-    }
+  /**
+   * A picked place brings its words; the pin comes with its area (`onArea`),
+   * so it is the area's centre. Only the newest search can pick — WhereSearch
+   * drops an answer a newer query superseded (SCRUM-341).
+   */
+  function placePicked({ location }: PickedPlace) {
+    const found = { address: location.address, city: location.city ?? "" }
+    // The address a search filled moves with the pin; what the person typed stays.
+    setDraft((d) => ({ ...d, ...fillFromSearch(d, found) }))
   }
 
-  const pinKey = draft.lat !== null && draft.lng !== null ? `${draft.lat},${draft.lng}` : null
-  const acknowledged = ackFor !== null && ackFor === pinKey
+  const nearbyKey = nearby.map((v) => v.id).sort().join(",")
+  const acknowledged = ackFor !== null && ackFor === nearbyKey
   const blockingDuplicate = nearby.length > 0 && !acknowledged
   const stageValid: Record<Stage, boolean> = {
     Basics: draft.name.trim().length >= 2 && draft.venueType !== null,
@@ -269,7 +223,9 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
               <Label>What kind of venue is it?</Label>
               <VenueTypePicker
                 value={draft.venueType}
-                onChange={(t) => set("venueType", t)}
+                onChange={(t) =>
+                  setDraft((d) => ({ ...d, venueType: t, geofence: followType(d.geofence, d.venueType, t) }))
+                }
               />
             </div>
           </div>
@@ -277,52 +233,41 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
 
         {stage === "Location" ? (
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="venue-search">Find the building</Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint-foreground" />
+            <VenueArea
+              fence={fence}
+              venueType={draft.venueType}
+              editable
+              fallbackCentre={draft.lat !== null && draft.lng !== null ? { lat: draft.lat, lng: draft.lng } : undefined}
+              onPlace={placePicked}
+              onArea={(next, pin) => setDraft((d) => ({ ...d, geofence: next, ...(pin ?? {}) }))}
+              caption={
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="venue-address" className="sr-only">
+                    Address
+                  </Label>
                   <Input
-                    id="venue-search"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        void search()
-                      }
-                    }}
-                    placeholder="Toit, Indiranagar"
-                    className="pl-8"
+                    id="venue-address"
+                    value={draft.address}
+                    onChange={(e) => set("address", e.target.value)}
+                    placeholder="The address — written by the place; edit if the street is wrong"
                   />
+                  <p className="text-[0.8125rem] text-muted-foreground">
+                    {draft.city ? (
+                      <>
+                        <span className="text-foreground">{draft.city}</span> — from the place
+                      </>
+                    ) : (
+                      "The city comes from the place."
+                    )}
+                  </p>
                 </div>
-                <Button type="button" variant="outline" onClick={() => void search()} disabled={searching}>
-                  {searching ? <IconLoader2 className="size-4 animate-spin" /> : "Search"}
-                </Button>
-              </div>
-            </div>
-
-            <GeofenceEditor
-              value={fence}
-              onChange={(fence) => {
-                set("geofence", fence)
-                // The pin follows a circle's centre, so the venue coordinates
-                // and the fence cannot drift apart.
-                if (fence.type === "circle") {
-                  setDraft((d) => ({ ...d, lat: fence.lat, lng: fence.lng }))
-                }
-              }}
-              fallbackCentre={
-                draft.lat !== null && draft.lng !== null
-                  ? { lat: draft.lat, lng: draft.lng }
-                  : undefined
               }
             />
 
             {draft.lat === null ? (
               <p className="flex items-center gap-2 text-[0.78125rem] text-muted-foreground">
                 <IconMapPin className="size-4" />
-                Search above, or click the map to place the venue.
+                Search for the place above, or open Adjust area and drag the circle onto it.
               </p>
             ) : null}
 
@@ -373,7 +318,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
                   <input
                     type="checkbox"
                     checked={acknowledged}
-                    onChange={(e) => setAckFor(e.target.checked ? pinKey : null)}
+                    onChange={(e) => setAckFor(e.target.checked ? nearbyKey : null)}
                     className="mt-0.5 size-4 accent-[var(--color-primary)]"
                   />
                   <span>

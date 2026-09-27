@@ -2,6 +2,7 @@ import {
   VENUE_TYPE_GROUPS,
   venueTypeLabel,
   defaultExtentMetres,
+  followType,
   venueTypeFromOsm,
 } from "@/lib/venue-types"
 
@@ -135,5 +136,21 @@ describe("venueTypeFromOsm — suggest rather than ask", () => {
       const result = venueTypeFromOsm(tags)
       if (result !== null) expect(known.has(result)).toBe(true)
     }
+  })
+})
+
+describe("followType — a stand-in circle follows the venue type (React review, SCRUM-354)", () => {
+  const circle = (radius: number) => ({ type: "circle", lat: 12.97, lng: 77.64, radius, buffer: 20 })
+
+  it("resizes a circle still at the old type's default", () => {
+    expect(followType(circle(defaultExtentMetres("cafe")), "cafe", "stadium")).toMatchObject({ radius: defaultExtentMetres("stadium") })
+  })
+
+  it("leaves a circle someone sized, and an outline, as they are", () => {
+    const sized = circle(defaultExtentMetres("cafe") + 7)
+    expect(followType(sized, "cafe", "stadium")).toBe(sized)
+    const outline = { type: "polygon", ring: [[12.97, 77.64], [12.971, 77.64], [12.97, 77.641]], buffer: 20 }
+    expect(followType(outline, "cafe", "stadium")).toBe(outline)
+    expect(followType(null, "cafe", "stadium")).toBeNull()
   })
 })

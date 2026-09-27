@@ -13,6 +13,7 @@ import { turnUpPct } from "@/lib/counting"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
 import { activeMembership } from "@/lib/org-membership"
+import { venueTypeLabel } from "@/lib/venue-types"
 
 export const dynamic = "force-dynamic"
 
@@ -26,8 +27,11 @@ export const dynamic = "force-dynamic"
  * plus who owns it.
  *
  * Access is ownership-shaped, not role-shaped: whoever's organisation owns the
- * venue, plus platform admins. An unclaimed venue is admin-only, because there
- * is nobody whose venue it is.
+ * venue, plus platform admins. An unclaimed venue is also open to the
+ * organisation that added it (owner's ruling 2, SCRUM-352) — but only its
+ * record: the events held there belong to their organisers, and the history is
+ * nobody's until a claim (ruling 1), so that view stops at the record
+ * (SCRUM-361).
  */
 export default async function VenueDetailPage({
   params,
@@ -66,20 +70,65 @@ export default async function VenueDetailPage({
       longitude: true,
       venue_type: true,
       geofence: true,
+      created_by_org_id: true,
       owner_org: { select: { id: true, display_name: true } },
     },
   })
   if (!venue) notFound()
 
   const isAdmin = session.user.role === "app_admin"
-  if (!isAdmin) {
-    const membership = venue.owner_org
-      ? await db.organisation_members.findFirst({
-          where: { user_id: session.user.id, org_id: venue.owner_org.id, ...activeMembership },
-          select: { id: true },
-        })
-      : null
-    if (!membership) redirect("/dashboard/venues")
+  const memberOf = (orgId: string) =>
+    db.organisation_members.findFirst({
+      where: { user_id: session.user.id, org_id: orgId, ...activeMembership },
+      select: { id: true },
+    })
+  const record = {
+    id: venue.id,
+    name: venue.name,
+    venueType: venue.venue_type,
+    address: venue.address,
+    city: venue.city,
+    capacity: venue.capacity,
+    lat: venue.latitude,
+    lng: venue.longitude,
+    geofence: venue.geofence,
+    retired: venue.deleted_at !== null,
+    ownerOrg: venue.owner_org?.display_name ?? null,
+  }
+
+  if (!isAdmin && !(venue.owner_org && (await memberOf(venue.owner_org.id)))) {
+    // Not the owner: the organisation that added it may correct the place
+    // while nobody has claimed it, and sees nothing else (SCRUM-361).
+    const creator =
+      !venue.owner_org && !venue.deleted_at && venue.created_by_org_id
+        ? await memberOf(venue.created_by_org_id)
+        : null
+    if (!creator) redirect("/dashboard/venues")
+    return (
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
+            <span className="text-[0.8125rem] text-muted-foreground">
+              {[venueTypeLabel(venue.venue_type), venue.city, "unclaimed — added by your organisation"]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </div>
+          <p className="text-[0.8125rem] text-muted-foreground">
+            You can correct this place until someone claims it. The events held here stay with the
+            organisers who hold them.
+          </p>
+        </div>
+        <VenueManage
+          key={venue.updated_at.toISOString()}
+          orgs={{ rows: [], total: 0 }}
+          venue={record}
+          isAdmin={false}
+          canRetire={false}
+        />
+      </div>
+    )
   }
 
   const building = await getBuildingOccupancy(id)
@@ -242,19 +291,7 @@ export default async function VenueDetailPage({
         // seeded once at mount showing the pre-save value.
         key={venue.updated_at.toISOString()}
         orgs={ownerOptions}
-        venue={{
-          id: venue.id,
-          name: venue.name,
-          venueType: venue.venue_type,
-          address: venue.address,
-          city: venue.city,
-          capacity: venue.capacity,
-          lat: venue.latitude,
-          lng: venue.longitude,
-          geofence: venue.geofence,
-          retired: venue.deleted_at !== null,
-          ownerOrg: venue.owner_org?.display_name ?? null,
-        }}
+        venue={record}
         isAdmin={isAdmin}
       />
     </div>
