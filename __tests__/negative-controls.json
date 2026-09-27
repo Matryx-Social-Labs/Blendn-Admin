@@ -34,9 +34,9 @@
   ],
   "verified": {
     "address.test.ts": {
-      "guards": "SCRUM-341: fillFromSearch replaces the address and city the previous search filled in and keeps only what the person typed (first fill, replace, typed address kept, typed city kept, cleared field refilled); the venue wizard's search() goes through it and has no `d.address ||` / `d.city ||` keep-anything fill",
-      "mutation": "M1: in lib/address.ts fillFromSearch, `typed` reduced to `current[key] !== \"\"` (keep anything non-empty). M2: in components/venue-create-form.tsx search(), `...fillFromSearch(d, previous, found)` replaced by `address: d.address || found.address, city: d.city || found.city`.",
-      "observed": "M1: 3 of 24 failing (replace ×2 via the bug case, typed-city case). M2: 1 of 24 failing (the wizard wiring pin).",
+      "guards": "SCRUM-341: fillFromSearch replaces what the previous search filled into address and city and keeps only what the person typed, carrying lastFill forward in one pure step; the venue wizard's search() spreads it and drops a response a newer search superseded",
+      "mutation": "M1: fillFromSearch `typed` reduced to `current[key] !== \"\"` (keep anything non-empty). M2: the wizard's `...fillFromSearch(d, found)` replaced by `address: d.address || found.address, city: d.city || found.city`. M3: `lastFill: found` → `lastFill: current.lastFill` (never advances). M4: `if (seq !== searchSeq.current) return` removed.",
+      "observed": "M1 and M3: 3 of 25 failing each — 'two searches in a row … the bug', 'keeps an address typed between searches', 'keeps a city typed between searches'. M2: 1 of 25 (the wizard wiring pin). M4: 1 of 25 (the superseded-search pin). 'refills a field the person cleared' and 'keeps an address typed before any search' guard other regressions and kill none of these four.",
       "date": "2026-09-27"
     },
     "live-room-honours-blocks.itest.ts": {
