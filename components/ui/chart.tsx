@@ -257,7 +257,7 @@ function ChartLegendContent({
   verticalAlign = "bottom",
   nameKey,
 }: React.ComponentProps<"div"> & {
-    // Recharts 3 injects these into the content element; LegendProps no longer carries them.
+    // Recharts 3 injects `payload` into the content element; LegendProps no longer carries it.
     payload?: RechartsPrimitive.LegendPayload[]
     verticalAlign?: RechartsPrimitive.LegendProps["verticalAlign"]
   } & {
