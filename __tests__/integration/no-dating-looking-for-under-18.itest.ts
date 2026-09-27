@@ -67,11 +67,13 @@ it("still records it for an adult", async () => {
   expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual(["dating", "open"])
 })
 
-it("takes 'dating' out of looking-for when the age drops below 18, and keeps the rest", async () => {
+it("refuses a birth date that would make an adult 17, and keeps what they chose", async () => {
+  // A new birth date under 18 is refused outright since SCRUM-330, so the
+  // "set 25, tick dating, set 17" route to a minor in the pool is closed at the door.
   const { id, token } = await person("ndl-drop", yearsAgo(25))
   expect((await put(id, token, { looking_for: ["Dating", "travel"] })).status).toBe(200)
-  expect((await put(id, token, { dateOfBirth: yearsAgo(17) })).status).toBe(200)
-  expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual(["travel"])
+  expect((await put(id, token, { dateOfBirth: yearsAgo(17) })).status).toBe(400)
+  expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual(["Dating", "travel"])
 })
 
 // No date of birth: the age is the stored number, or unknown (OAuth accounts).
@@ -83,10 +85,13 @@ async function personByAge(label: string, age: number | null) {
   return { id, token: signAccessToken(id, email) }
 }
 
-it("strips it when the stored age number is lowered below 18", async () => {
+it("refuses an age number under 18, and strips dating when the age is cleared to unknown", async () => {
   const { id, token } = await personByAge("ndl-agenum", 25)
   expect((await put(id, token, { looking_for: ["dating", "networking"] })).status).toBe(200)
-  expect((await put(id, token, { age: 15 })).status).toBe(200)
+  expect((await put(id, token, { age: 15 })).status).toBe(400)
+  expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual(["dating", "networking"])
+  // Unknown may not date: the one way left to lose the age, and it takes the tag with it.
+  expect((await put(id, token, { age: null })).status).toBe(200)
   expect((await db.profiles.findUniqueOrThrow({ where: { id } })).looking_for).toEqual(["networking"])
 })
 

@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { parseDateOfBirth } from "@/lib/age"
+import { ACCOUNT_MIN_AGE, ADULTS_ONLY, parseDateOfBirth } from "@/lib/age"
 import { isOrientation, orientationsAreCoherent } from "@/lib/dating"
 import { isExpertise, MAX_EXPERTISE } from "@/lib/expertise"
 import { isWorkField } from "@/lib/work-fields"
@@ -38,7 +38,8 @@ export const GENDERS = ["woman", "man", "non_binary", "prefer_not_to_say"] as co
 export const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   phone: z.string().max(20).optional().nullable(),
-  age: z.number().int().min(13).max(120).optional().nullable(),
+  // A new age is an adult's (SCRUM-330). A stored one under 18 is left alone.
+  age: z.number().int().min(ACCOUNT_MIN_AGE, ADULTS_ONLY).max(120).optional().nullable(),
 
   /*
    * Birth date as `YYYY-MM-DD`. Write-only — no route returns it.
@@ -53,7 +54,7 @@ export const updateProfileSchema = z.object({
    *
    * Refused rather than coerced when it does not parse. `parseDateOfBirth`
    * returns `null` for a malformed string, a future date and anything implying
-   * an age outside 13–120 — and returning `null` from here would be
+   * an age outside 18–120 — and returning `null` from here would be
    * indistinguishable from "not sent", so a typo would silently store nothing
    * and the person would be told their profile saved.
    *
@@ -63,7 +64,7 @@ export const updateProfileSchema = z.object({
   dateOfBirth: z
     .string()
     .refine((value) => parseDateOfBirth(value) !== null, {
-      message: "Enter a real date of birth in YYYY-MM-DD form. You must be at least 13.",
+      message: `Enter a real date of birth in YYYY-MM-DD form. ${ADULTS_ONLY}`,
     })
     .optional(),
   location: z.string().max(200).optional().nullable(),

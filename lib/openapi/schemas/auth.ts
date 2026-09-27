@@ -21,9 +21,9 @@ export const SignupRequestSchema = z
     email: z.string().email(),
     password: z.string().min(MIN_PASSWORD_LENGTH).max(100),
     name: z.string().min(1).max(100),
-    // Optional for one release only. The shipped app does not send it yet, and
-    // requiring it before an app build ships would 400 every new signup.
-    age: z.number().int().min(13).max(120).optional(),
+    // Required, 18 or over: Blend'n is 18+ (SCRUM-330). Missing or under 18 is
+    // 400 with the sentence "Blend'n is for people 18 and over." on `errors[].field = "age"`.
+    age: z.number().int().min(18).max(120),
     deviceInfo: DeviceInfoSchema.optional(),
   })
   .openapi("SignupRequest")

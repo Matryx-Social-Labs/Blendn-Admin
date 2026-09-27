@@ -3,7 +3,16 @@ import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
 import { checkProfilePhoto, moderateProfilePhoto } from "@/lib/photos"
 import { recordPhotoCheck } from "@/lib/photo-checks"
-import { ageFrom, datingAgeRefusal, mayDate, orientationAgeRefusal, parseDateOfBirth, stripDating } from "@/lib/age"
+import {
+  ADULTS_ONLY,
+  ageFrom,
+  datingAgeRefusal,
+  isAdult,
+  mayDate,
+  orientationAgeRefusal,
+  parseDateOfBirth,
+  stripDating,
+} from "@/lib/age"
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
@@ -287,11 +296,19 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * own -- that is the whole case `pruneExpertise` exists for.
      */
     const touchesExpertise = work_field !== undefined || expertise !== undefined
+    // Finishing onboarding is gated on age (SCRUM-330), and needs to know whether it already happened.
+    const finishesOnboarding = onboarded === true
     const existing =
-      touchesAgeGate || touchesDating || touchesOrientationGate || touchesExpertise || photos !== undefined
+      touchesAgeGate ||
+      touchesDating ||
+      touchesOrientationGate ||
+      touchesExpertise ||
+      finishesOnboarding ||
+      photos !== undefined
         ? await db.profiles.findUnique({
             where: { id: userId },
             select: {
+              onboarded: true,
               age: true,
               date_of_birth: true,
               intent_default: true,
@@ -351,6 +368,19 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (orientationRefusal) return forbiddenResponse(orientationRefusal)
 
     /*
+     * Finishing onboarding needs an adult on file (SCRUM-330).
+     *
+     * Google and Apple create accounts with no age. The app holds them at "The
+     * basics" until a birth date of 18+ is given; this is the same rule for any
+     * client. Only the step from not-onboarded to onboarded is checked, so an
+     * account onboarded before the ruling — a 16-year-old included — is left
+     * alone, as the owner ruled.
+     */
+    if (finishesOnboarding && !existing?.onboarded && !isAdult(effectiveAge)) {
+      return forbiddenResponse(`${ADULTS_ONLY} Add your date of birth to finish.`)
+    }
+
+    /*
      * Lowering your age has to take the tag with it.
      *
      * Otherwise the gate is a one-time check at the moment of writing intent,
@@ -358,6 +388,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * that are individually legal and leave a 15-year-old in the dating pool.
      * Stripped rather than refused: the age they are giving us is more likely
      * to be the true one, and refusing the correction is the wrong incentive.
+     *
+     * Since SCRUM-330 a new age or birth date under 18 is refused by the schema
+     * before it gets here. What still arrives is an age cleared to `null` with
+     * no birth date on file: unknown, which may not date either.
      */
     const demotedIntents =
       (age !== undefined || dateOfBirth !== undefined) &&

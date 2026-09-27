@@ -6,16 +6,21 @@
  * reading `profiles.age` directly — see its comment for why a stored age is a
  * fact with an expiry date on it.
  *
- * Two separate rules that both happen to be about age:
+ * Three rules that all happen to be about age:
  *
- *  1. **Dating intent requires 18.** `profiles.age` accepts 13, and until now
- *     nothing anywhere connected the two — a 14-year-old could tick "open to
- *     dating" and be ranked into the same pool as adults, on a card that says
- *     "Both open to dating". The floor stays 13 for the product; it is the
- *     dating tag that is gated, not the account.
+ *  0. **An account is an adult.** `ACCOUNT_MIN_AGE`, below. Blend'n is 18+ —
+ *     the store listings say so, and the owner ruled it on 2026-09-27
+ *     (SCRUM-330). The floor used to be 13. Accounts made before the ruling
+ *     are left alone, which is why rule 1 still exists.
  *
- *  2. **An event can require a minimum age.** A club night is 18+ or 21+
- *     whatever anyone ticked, and the organiser is the one who knows.
+ *  1. **Dating intent requires 18.** It gated the dating tag, not the account,
+ *     while the floor was 13 — a 14-year-old could tick "open to dating" and be
+ *     ranked into the same pool as adults. No new account can be under 18 now,
+ *     but the ones already on file can, and so can an OAuth account whose age
+ *     is still unknown.
+ *
+ *  2. **An event can require a minimum age.** A club night is 21+ whatever
+ *     anyone ticked, and the organiser is the one who knows.
  *
  * Both **fail closed on an unknown age**, which is the whole reason these are
  * functions rather than inline comparisons. `age` is nullable and OAuth
@@ -26,6 +31,21 @@
  */
 
 export const DATING_MIN_AGE = 18
+
+/**
+ * The youngest anyone may be to hold a new account (SCRUM-330). Every check —
+ * sign-up's age, a profile's age, a birth date, finishing onboarding — reads
+ * this one number, and so does the sentence below.
+ */
+export const ACCOUNT_MIN_AGE = 18
+
+/** What a person under `ACCOUNT_MIN_AGE`, or with no age yet, is told. */
+export const ADULTS_ONLY = `Blend'n is for people ${ACCOUNT_MIN_AGE} and over.`
+
+/** Whether this age may hold a new account. Unknown is a no. */
+export function isAdult(age: number | null | undefined): boolean {
+  return typeof age === "number" && age >= ACCOUNT_MIN_AGE
+}
 
 /** Every intent that is gated on age. `dating` is currently the only one. */
 const AGE_GATED_INTENTS = ["dating"] as const
@@ -215,9 +235,8 @@ function wholeYearsBetween(from: Date, to: Date): number {
  * Parse a `YYYY-MM-DD` from a client into a date safe to store.
  *
  * `null` for anything malformed, in the future, or implying an age outside
- * 13–120. The floor matches the platform minimum — an account below it cannot
- * exist, so storing the date would create a row the rest of the product refuses
- * to serve.
+ * `ACCOUNT_MIN_AGE`–120. The floor is the account floor: a birth date under it
+ * is a person the product no longer admits (SCRUM-330).
  *
  * Built with `Date.UTC` rather than `new Date("YYYY-MM-DD")` so the stored day
  * is the day that was typed, wherever the server runs.
@@ -246,5 +265,5 @@ export function parseDateOfBirth(input: unknown, now: Date = new Date()): Date |
   }
 
   const years = wholeYearsBetween(date, now)
-  return years < 13 || years > 120 ? null : date
+  return years < ACCOUNT_MIN_AGE || years > 120 ? null : date
 }

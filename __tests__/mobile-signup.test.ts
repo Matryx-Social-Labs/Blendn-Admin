@@ -42,10 +42,12 @@ import { POST } from "@/app/api/mobile/auth/signup/route"
 
 const VALID = "correct horse battery staple"
 
-function req(body: unknown) {
+// An adult unless the test says otherwise: age is required, 18+ (SCRUM-330).
+// `age: undefined` in a body drops the key, which is how "no age" is sent.
+function req(body: Record<string, unknown>) {
   return new NextRequest("https://api.blendn.app/api/mobile/auth/signup", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ age: 30, ...body }),
     headers: { "content-type": "application/json" },
   })
 }
@@ -100,23 +102,29 @@ describe("POST /api/mobile/auth/signup — name and age", () => {
     expect(mockDb.user.create).not.toHaveBeenCalled()
   })
 
-  it("still accepts a signup with no age", async () => {
+  it("refuses a signup with no age, and says what to do", async () => {
     /*
-     * The guarantee that keeps this deployable.
-     *
-     * The shipped app does not send `age` yet, and the server reaches staging
-     * before an app build does. If this ever starts failing, every new password
-     * signup in production is 400ing — make `age` required only in the release
-     * after the app ships the field.
+     * Blend'n is 18+ (SCRUM-330). An installed build that leaves the old
+     * "Age (optional)" field blank gets this sentence as its form error — the
+     * app shows the first field message — rather than an unchecked account.
      */
-    const res = await POST(req({ email: "a@b.com", password: VALID, name: "A" }))
-    expect(res.status).toBe(201)
+    const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age: undefined }))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.errors).toContainEqual({ field: "age", message: "Enter your age. Blend'n is for people 18 and over." })
+    expect(mockDb.user.create).not.toHaveBeenCalled()
   })
 
-  it("rejects an age below the floor", async () => {
-    const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age: 11 }))
+  it.each([11, 17])("refuses %i — the floor is 18", async (age) => {
+    const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age }))
     expect(res.status).toBe(400)
+    expect((await res.json()).errors).toContainEqual({ field: "age", message: "Blend'n is for people 18 and over." })
     expect(mockDb.user.create).not.toHaveBeenCalled()
+  })
+
+  it("admits exactly 18", async () => {
+    const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age: 18 }))
+    expect(res.status).toBe(201)
   })
 
   it("stores the age on the profile when sent", async () => {
