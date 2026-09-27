@@ -124,6 +124,37 @@ describe("finishing onboarding", () => {
     expect((await db.profiles.findUniqueOrThrow({ where: { id } })).age).toBeNull()
   })
 
+  it("holds a stored 17 and lets a stored 18 finish — the line is 18 exactly", async () => {
+    const seventeen = await person("ao-stored17", { age: 17, onboarded: false })
+    expect((await put(seventeen.id, seventeen.token, { onboarded: true })).status).toBe(403)
+    const eighteen = await person("ao-stored18", { age: 18, onboarded: false })
+    expect((await put(eighteen.id, eighteen.token, { onboarded: true })).status).toBe(200)
+    expect((await db.profiles.findUniqueOrThrow({ where: { id: eighteen.id } })).onboarded).toBe(true)
+  })
+
+  it("accepts age 18 on its own", async () => {
+    const { id, token } = await person("ao-age18", { onboarded: false })
+    expect((await put(id, token, { age: 18 })).status).toBe(200)
+    expect((await db.profiles.findUniqueOrThrow({ where: { id } })).age).toBe(18)
+  })
+
+  it("reads a birth date saved earlier when onboarding finishes on its own", async () => {
+    const { id, token } = await person("ao-dob-first", { onboarded: false })
+    expect((await put(id, token, { dateOfBirth: bornYearsAgo(30) })).status).toBe(200)
+    expect((await put(id, token, { onboarded: true })).status).toBe(200)
+    expect((await db.profiles.findUniqueOrThrow({ where: { id } })).onboarded).toBe(true)
+  })
+
+  it("holds an account whose profile row does not exist yet", async () => {
+    const id = await makeUser("ao-norow")
+    users.push(id)
+    const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
+    const res = await put(id, signAccessToken(id, email), { onboarded: true })
+
+    expect(res.status).toBe(403)
+    expect(await db.profiles.findUnique({ where: { id } })).toBeNull()
+  })
+
   it("lets an adult finish", async () => {
     const { id, token } = await person("ao-dob25", { onboarded: false })
     const res = await put(id, token, { dateOfBirth: bornYearsAgo(25), onboarded: true })

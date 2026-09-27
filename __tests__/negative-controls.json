@@ -35,8 +35,8 @@
   "verified": {
     "adults-only.itest.ts": {
       "guards": "Blend'n is 18+ (SCRUM-330): an email sign-up with no age or under 18 is 400 with the sentence and writes no account, 18 is admitted; a new profile age or birth date under 18 is 400 and stores nothing; onboarded false -> true needs an effective age of 18+ (a Google/Apple account with no age is held, 403); an onboarded under-18 from before the ruling can still edit their profile",
-      "mutation": "M1 signupSchema.age .optional() again; M6 its .min back to 13; M2 parseDateOfBirth floor back to 13; M3 updateProfileSchema.age .min(13); M4 the onboarding guard disabled (`false &&`); M5 the guard without `!existing?.onboarded` (all 2026-09-27).",
-      "observed": "One failing each: M1 no age admitted (201); M6 the 17-year-old admitted; M2 the 17-year-old birth date stored; M3 age 17 stored; M4 the no-age account onboarded (200); M5 the onboarded 16-year-old refused a bio edit (403).",
+      "mutation": "M1 signupSchema.age .optional() again; M6 its .min back to 13; M2 parseDateOfBirth floor back to 13; M3 updateProfileSchema.age .min(13); M4 the onboarding guard disabled (`false &&`); M5 the guard without `!existing?.onboarded`; M7 isAdult with `>` for `>=` (all 2026-09-27).",
+      "observed": "One failing each: M1 no age admitted (201); M6 the 17-year-old admitted; M2 the 17-year-old birth date stored; M3 age 17 stored; M4 the no-age account onboarded (200); M5 the onboarded 16-year-old refused a bio edit (403); M7 a stored 18 held at onboarding (403).",
       "date": "2026-09-27"
     },
     "email-is-one-identity.itest.ts": {

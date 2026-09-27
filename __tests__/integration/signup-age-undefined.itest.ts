@@ -3,12 +3,16 @@ import { db, closeDb, testId } from "./helpers"
 /**
  * Creating an account without an age, against a real Postgres.
  *
- * `POST /api/mobile/auth/signup` built its profile with a bare `age,`. `age` is
- * `.optional()` in `signupSchema`, so a caller that omits it produces an
+ * `POST /api/mobile/auth/signup` built its profile with a bare `age,`. `age` was
+ * `.optional()` in `signupSchema` then, so a caller that omitted it produced an
  * explicit `undefined` — and under `strictUndefinedChecks` that is a runtime
  * error rather than "leave the column alone". **Every sign-up that did not send
- * an age returned 500**: the app's own form (the Age field is optional), and
+ * an age returned 500**: the app's own form (the Age field was optional), and
  * Google and Apple, which never send one.
+ *
+ * Email sign-up requires an age of 18+ since SCRUM-330 (`adults-only.itest.ts`).
+ * Google and Apple still create profiles with no age, which is the case this
+ * file keeps pinning at the Prisma layer.
  *
  * Callers that *did* send an age worked, which is why an API-level sweep passed
  * while sign-up was down. It was found by driving the real form on a simulator,
