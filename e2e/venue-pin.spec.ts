@@ -71,13 +71,17 @@ test.describe("the venue picker and the pin agree", () => {
     await expect(picker).toBeVisible({ timeout: 30_000 })
 
     /*
-     * The control, and it is what makes the assertion below mean something: a
-     * new event has no coordinates, so there is no marker yet. If one were
-     * already present, "a marker exists after picking" would be true of the
-     * broken build too.
+     * The control, and it is what makes the assertions below mean something: a
+     * new event has no coordinates. If it already had the venue's, "the pin is
+     * at the venue after picking" would be true of the broken build too.
+     *
+     * Read from the form, not from markers. The map draws its placeholder
+     * circle (draggable, unsaved until moved) as soon as Leaflet loads — since
+     * SCRUM-345; before that, only once something else re-rendered the form,
+     * and a "no marker yet" count here passed on that race.
      */
     const marker = picker.locator(".leaflet-marker-icon")
-    await expect(marker).toHaveCount(0)
+    await expect(page.locator("[data-lat]").first()).toHaveAttribute("data-lat", "")
 
     /*
      * Wait for the field to settle before typing.
