@@ -632,3 +632,17 @@ export function phoneCheckInRadius(event: FenceSource): number | null {
       : Math.max(...fence.ring.map(([lat, lng]) => haversineDistanceMeters(pin.lat, pin.lng, lat, lng)))
   return Math.ceil(reach + fence.buffer)
 }
+
+/**
+ * The same area, whatever its buffer — a buffer nudge is not a new outline,
+ * so the event form's caption keeps saying where the area came from.
+ */
+export function sameShape(a: Geofence, b: Geofence): boolean {
+  if (a.type === "circle" && b.type === "circle") {
+    return a.lat === b.lat && a.lng === b.lng && a.radius === b.radius
+  }
+  if (a.type === "polygon" && b.type === "polygon") {
+    return a.ring.length === b.ring.length && a.ring.every(([lat, lng], i) => lat === b.ring[i][0] && lng === b.ring[i][1])
+  }
+  return false
+}

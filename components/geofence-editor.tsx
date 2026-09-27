@@ -79,19 +79,14 @@ function colours() {
 
 export interface GeofenceEditorProps {
   value: Geofence | null
-  onChange: (fence: Geofence) => void
+  /** `how` is "import" for the building outline this editor fetched itself. */
+  onChange: (fence: Geofence, how?: "import") => void
   /** Where to centre when there is nothing drawn yet. */
   fallbackCentre?: { lat: number; lng: number }
   /** A concurrent event's fence, drawn dashed purple as an overlap warning. */
   overlap?: { name: string; organiser: string; fence: Geofence } | null
   editable?: boolean
   height?: number
-  /**
-   * Sits on the map, top-left — the event form puts its address search here,
-   * so the one map is where the location is typed, the pin lands and the area
-   * is drawn. Hidden while an outline is being traced (its hint sits there).
-   */
-  overlay?: ReactNode
   /** Directly under the map: the event form's address, written by the pin. */
   caption?: ReactNode
 }
@@ -103,7 +98,6 @@ export function GeofenceEditor({
   overlap = null,
   editable = true,
   height = 420,
-  overlay,
   caption,
 }: GeofenceEditorProps) {
   const fallbackCentre = givenCentre ?? { lat: 12.9716, lng: 77.5946 }
@@ -484,7 +478,7 @@ export function GeofenceEditor({
         setImportNote("No building outline here in OpenStreetMap — trace it by hand.")
         return
       }
-      onChange({ type: "polygon", ring, buffer: fence.buffer })
+      onChange({ type: "polygon", ring, buffer: fence.buffer }, "import")
       setDrawing(false)
       // A stadium's outline is wider than the view it was fetched from.
       mapRef.current?.fitBounds(ring, { padding: [24, 24] })
@@ -573,10 +567,6 @@ export function GeofenceEditor({
             </button>
           ))}
         </div>
-
-        {overlay && !drawing && !crossed ? (
-          <div className="absolute left-12 top-2.5 z-[800] w-[min(58%,22rem)]">{overlay}</div>
-        ) : null}
 
         {editable && drawing ? (
           <div className="pointer-events-none absolute left-1/2 top-2.5 z-[800] -translate-x-1/2 whitespace-nowrap rounded-lg border border-border-strong bg-background/90 px-3 py-1.5 text-[0.71875rem] backdrop-blur">
