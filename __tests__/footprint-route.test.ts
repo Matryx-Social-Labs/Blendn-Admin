@@ -98,3 +98,17 @@ describe("GET /api/footprint — the building a pinned place sits in", () => {
     expect(((await res.json()) as { ring: unknown }).ring).toBeNull()
   })
 })
+
+describe("the footprint upstream is configuration (SCRUM-357)", () => {
+  afterEach(() => { delete process.env.FOOTPRINT_UPSTREAM })
+
+  it("uses FOOTPRINT_UPSTREAM alone when it is set — never the public mirror", async () => {
+    process.env.FOOTPRINT_UPSTREAM = "http://127.0.0.1:4599/api/interpreter"
+    fetchMock.mockResolvedValueOnce(gatewayTimeout())
+    const res = await call(`lat=${lat}&lon=${lng}`)
+    expect(res.status).toBe(502)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^http:\/\/127\.0\.0\.1:4599\/api\/interpreter\?data=/)
+  })
+})
+

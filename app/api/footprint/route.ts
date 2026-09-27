@@ -51,7 +51,10 @@ export async function GET(req: NextRequest) {
     `(way(pivot.a)[building];way(pivot.a)[leisure=stadium];` +
     `way(around:${OUTLINE_BUILDING_WITHIN_M},${lat},${lng})[building];);out geom;`
 
-  for (const upstream of UPSTREAMS) {
+  // Configuration, so CI's e2e can point it at recorded answers — and then
+  // only there, never on to the public mirror (SCRUM-357).
+  const configured = process.env.FOOTPRINT_UPSTREAM?.trim()
+  for (const upstream of configured ? [configured] : UPSTREAMS) {
     try {
       const res = await fetch(`${upstream}?data=${encodeURIComponent(query)}`, {
         headers: { "User-Agent": OSM_USER_AGENT, Accept: "application/json" },

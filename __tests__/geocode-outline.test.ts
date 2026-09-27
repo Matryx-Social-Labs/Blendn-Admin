@@ -34,3 +34,21 @@ describe("the geocoder asks for a place's own outline", () => {
     expect(String(fetchMock.mock.calls[0][0])).not.toMatch(/polygon_geojson/)
   })
 })
+
+describe("the geocoder's upstream is configuration (SCRUM-357)", () => {
+  // CI's e2e points it at a local stub of recorded OSM answers, so no test
+  // run calls Nominatim — flaky, and against its usage policy at volume.
+  afterEach(() => { delete process.env.GEOCODE_UPSTREAM })
+
+  it("uses GEOCODE_UPSTREAM when it is set", async () => {
+    process.env.GEOCODE_UPSTREAM = "http://127.0.0.1:4599"
+    await GET(new NextRequest("http://localhost/api/geocode?q=Chinnaswamy"))
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^http:\/\/127\.0\.0\.1:4599\/search\?/)
+  })
+
+  it("is Nominatim when it is not", async () => {
+    await GET(new NextRequest("http://localhost/api/geocode?q=Chinnaswamy"))
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^https:\/\/nominatim\.openstreetmap\.org\/search\?/)
+  })
+})
+

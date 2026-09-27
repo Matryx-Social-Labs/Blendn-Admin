@@ -332,6 +332,10 @@ jobs:
     env:
       # Fixed, so the seeded world is reproducible and the suite can sign in.
       SEED_PASSWORD: Blendn-CI-2026!
+      # Recorded OpenStreetMap answers instead of Nominatim and Overpass
+      # (SCRUM-357) — see the "Start the OSM stub" step and e2e/fixtures/.
+      GEOCODE_UPSTREAM: http://127.0.0.1:4599
+      FOOTPRINT_UPSTREAM: http://127.0.0.1:4599/api/interpreter
 
     steps:
       - uses: actions/checkout@v7
@@ -398,6 +402,17 @@ jobs:
           echo "--- memory ---"; free -m
           echo "--- cpus: $(nproc) ---"
           echo "--- disk ---"; df -h / /dev/shm | sed -n '1,4p'
+
+      - name: Start the OSM stub
+        # The address search and the building lookup call OpenStreetMap; an e2e
+        # run must not (flaky, and against their usage policies at volume).
+        run: |
+          node e2e/fixtures/osm-stub.mjs > /tmp/osm-stub.log 2>&1 &
+          for i in $(seq 1 20); do
+            curl -sf "http://127.0.0.1:4599/search?q=ping" > /dev/null && exit 0
+            sleep 0.5
+          done
+          echo "OSM stub did not start"; cat /tmp/osm-stub.log; exit 1
 
       - name: Start the production server
         run: |

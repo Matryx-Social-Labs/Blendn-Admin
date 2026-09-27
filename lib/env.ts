@@ -73,6 +73,10 @@ const envSchema = z.object({
    * so dropping a pin abroad resolves fine while searching for it does not.
    */
   GEOCODE_COUNTRY_CODES: z.string().default("in"),
+  /** Nominatim's base URL for /api/geocode. Unset in production; CI's e2e points it at a stub (SCRUM-357). */
+  GEOCODE_UPSTREAM: z.string().url().optional(),
+  /** Overpass interpreter URL for /api/footprint. Unset in production (main + mirror); CI's e2e stubs it. */
+  FOOTPRINT_UPSTREAM: z.string().url().optional(),
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
 

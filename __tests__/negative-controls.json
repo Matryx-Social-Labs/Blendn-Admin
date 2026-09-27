@@ -35,8 +35,8 @@
   "verified": {
     "outline.test.ts": {
       "guards": "SCRUM-351: a venue's outline from free OSM sources. outlineFromGeoJson turns a geocoder hit's polygon into our ring ([lng,lat] to [lat,lng], closing point dropped, largest part of a MultiPolygon, thinned to MAX_RING, no self-intersection, null for a pin). pickBuilding: a stadium containing the pin, else the smallest building containing it, else the nearest within 25 m. footprint-route.test.ts pins /api/footprint (auth, cacheable GET with the product's User-Agent, mirror after a 5xx, 502 lookup_unavailable vs ring: null); geocode-outline.test.ts pins polygon_geojson on searches only; event-where-one-map.test.ts pins the wiring (a search's outline drawn with the pin at its centre; the building button through /api/footprint, never overpass-api.de from the browser).",
-      "mutation": "M26: address-search pick without outline. M27: pickBuilding preferring the smallest containing shape over a stadium.",
-      "observed": "M26: event-where-one-map.test.ts 1 of 15 failing. M27: outline.test.ts 1 of 10 failing (a stand inside the stadium returned instead of the stadium).",
+      "mutation": "M26: address-search pick without outline. M27: pickBuilding preferring the smallest containing shape over a stadium. M28 (SCRUM-357): /api/geocode ignoring GEOCODE_UPSTREAM.",
+      "observed": "M26: event-where-one-map.test.ts 1 of 15 failing. M27: outline.test.ts 1 of 10 failing (a stand inside the stadium returned instead of the stadium). M28: geocode-outline.test.ts 1 of 4 failing \u2014 CI's e2e would have called the real Nominatim.",
       "date": "2026-09-27"
     },
     "organisers-add-venues.itest.ts": {
