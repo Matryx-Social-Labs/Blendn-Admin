@@ -83,8 +83,13 @@ export interface AddressFields {
   city: string
 }
 
+/** A form's address and city, plus what its last search wrote into them. */
+export interface SearchFill extends AddressFields {
+  lastFill: AddressFields
+}
+
 /**
- * The address and city a new search should leave in a form (SCRUM-341).
+ * What a new address search leaves in a form (SCRUM-341).
  *
  * A search moves the pin, so it replaces what the *previous* search wrote and
  * keeps only what the person typed. The venue wizard kept any non-empty value,
@@ -92,18 +97,16 @@ export interface AddressFields {
  * search moved the pin and left the first address behind, and venues were
  * saved kilometres from the place their pin marks.
  *
- * `previous` is what the last search filled in. A field that still equals it,
- * or is empty, was not typed.
+ * A field is typed when it is non-empty and differs from `lastFill`. The
+ * result carries `lastFill: found`, so the bookkeeping is read and written in
+ * one pure step — a state updater, not a ref beside it.
  */
-export function fillFromSearch(
-  current: AddressFields,
-  previous: AddressFields,
-  found: AddressFields
-): AddressFields {
-  const typed = (key: keyof AddressFields) => current[key] !== "" && current[key] !== previous[key]
+export function fillFromSearch(current: SearchFill, found: AddressFields): SearchFill {
+  const typed = (key: keyof AddressFields) => current[key] !== "" && current[key] !== current.lastFill[key]
   return {
     address: typed("address") ? current.address : found.address,
     city: typed("city") ? current.city : found.city,
+    lastFill: found,
   }
 }
 

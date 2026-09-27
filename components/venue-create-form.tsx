@@ -52,6 +52,8 @@ interface Draft {
   lng: number | null
   capacity: string
   geofence: Geofence | null
+  /** What the last search wrote into address and city (SCRUM-341). */
+  lastFill: AddressFields
 }
 
 export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
@@ -67,6 +69,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
     lng: null,
     capacity: "",
     geofence: null,
+    lastFill: { address: "", city: "" },
   })
 
   const [nearby, setNearby] = useState<NearbyVenue[]>([])
@@ -76,9 +79,9 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
   const [ackFor, setAckFor] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
-  // What the last search wrote into address and city, so the next one can tell
-  // its own fill from what the person typed (SCRUM-341).
-  const lastFill = useRef<AddressFields>({ address: "", city: "" })
+  // Only the newest search may write: two quick searches can resolve out of
+  // order, and the older one would put its pin and address back.
+  const searchSeq = useRef(0)
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }))
@@ -132,6 +135,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
   async function search() {
     const q = query.trim()
     if (!q) return
+    const seq = ++searchSeq.current
     setSearching(true)
     try {
       const res = await fetch(
@@ -143,6 +147,7 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
         display_name: string
         address?: Record<string, string>
       }[]
+      if (seq !== searchSeq.current) return
       if (!hits.length) {
         toast.error("Nothing found — drop the pin by hand instead.")
         return
@@ -153,21 +158,19 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
       // district here and under the village name from the event form. Same
       // pin, two cities, and neither screen looked wrong on its own.
       const found = { address: hit.display_name, city: cityFrom(hit.address) || "" }
-      const previous = lastFill.current
-      lastFill.current = found
       setDraft((d) => ({
         ...d,
         lat: Number(hit.lat),
         lng: Number(hit.lon),
         // The pin moves, so the address it filled moves with it; only what the
         // person typed stays.
-        ...fillFromSearch(d, previous, found),
+        ...fillFromSearch(d, found),
         geofence: null,
       }))
     } catch {
-      toast.error("Search is unavailable. Drop the pin by hand.")
+      if (seq === searchSeq.current) toast.error("Search is unavailable. Drop the pin by hand.")
     } finally {
-      setSearching(false)
+      if (seq === searchSeq.current) setSearching(false)
     }
   }
 

@@ -167,40 +167,53 @@ describe("groupCities", () => {
  */
 describe("fillFromSearch", () => {
   const empty = { address: "", city: "" }
+  const start = { ...empty, lastFill: empty }
   const churchStreet = { address: "Church Street, Ashok Nagar, Bengaluru", city: "Bengaluru" }
   const cubbonPark = { address: "Cubbon Park, Sampangi Rama Nagara, Bengaluru", city: "Bengaluru" }
   const lisbon = { address: "Praça do Comércio, Lisboa", city: "Lisboa" }
 
-  it("fills both on the first search", () => {
-    expect(fillFromSearch(empty, empty, churchStreet)).toEqual(churchStreet)
+  it("two searches in a row: the second replaces what the first filled in — the bug", () => {
+    const afterFirst = fillFromSearch(start, churchStreet)
+    expect(afterFirst).toEqual({ ...churchStreet, lastFill: churchStreet })
+    expect(fillFromSearch(afterFirst, cubbonPark)).toEqual({ ...cubbonPark, lastFill: cubbonPark })
+    expect(fillFromSearch(afterFirst, lisbon)).toMatchObject(lisbon)
   })
 
-  it("replaces what the previous search filled in — the bug", () => {
-    expect(fillFromSearch(churchStreet, churchStreet, cubbonPark)).toEqual(cubbonPark)
-    expect(fillFromSearch(churchStreet, churchStreet, lisbon)).toEqual(lisbon)
+  it("keeps an address typed between searches, and still moves the city on", () => {
+    const typed = { ...fillFromSearch(start, churchStreet), address: "Unit 4, Brewery Lane" }
+    expect(fillFromSearch(typed, lisbon)).toEqual({ address: "Unit 4, Brewery Lane", city: "Lisboa", lastFill: lisbon })
   })
 
-  it("keeps an address the person typed, and still moves the city on", () => {
-    const typed = { address: "Unit 4, Brewery Lane", city: "Bengaluru" }
-    expect(fillFromSearch(typed, churchStreet, lisbon)).toEqual({ address: "Unit 4, Brewery Lane", city: "Lisboa" })
-  })
-
-  it("keeps a city the person typed", () => {
-    const typed = { address: churchStreet.address, city: "Bangalore" }
-    expect(fillFromSearch(typed, churchStreet, cubbonPark)).toEqual({ address: cubbonPark.address, city: "Bangalore" })
+  it("keeps a city typed between searches", () => {
+    const typed = { ...fillFromSearch(start, churchStreet), city: "Bangalore" }
+    expect(fillFromSearch(typed, cubbonPark)).toMatchObject({ address: cubbonPark.address, city: "Bangalore" })
   })
 
   it("refills a field the person cleared", () => {
-    expect(fillFromSearch({ address: "", city: "" }, churchStreet, cubbonPark)).toEqual(cubbonPark)
+    const cleared = { ...fillFromSearch(start, churchStreet), address: "", city: "" }
+    expect(fillFromSearch(cleared, cubbonPark)).toMatchObject(cubbonPark)
+  })
+
+  it("keeps an address typed before any search", () => {
+    const typedFirst = { address: "Unit 4, Brewery Lane", city: "", lastFill: empty }
+    expect(fillFromSearch(typedFirst, churchStreet)).toMatchObject({ address: "Unit 4, Brewery Lane", city: "Bengaluru" })
   })
 })
 
-describe("the venue wizard goes through fillFromSearch", () => {
+describe("the venue wizard goes through fillFromSearch, and only its newest search writes", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const src = require("fs").readFileSync(require("path").join(__dirname, "../components/venue-create-form.tsx"), "utf8") as string
+
   it("does not keep a stale address or city on a new search", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const src = require("fs").readFileSync(require("path").join(__dirname, "../components/venue-create-form.tsx"), "utf8") as string
-    expect(src).toContain("...fillFromSearch(d, previous, found)")
+    expect(src).toContain("...fillFromSearch(d, found)")
     expect(src).not.toMatch(/address: d\.address \|\|/)
     expect(src).not.toMatch(/city: d\.city \|\|/)
+  })
+
+  it("drops a search that a newer one superseded", () => {
+    // Two quick searches can resolve out of order; the older must not put its
+    // pin and address back (review finding on SCRUM-341).
+    expect(src).toMatch(/const seq = \+\+searchSeq\.current/)
+    expect(src).toMatch(/if \(seq !== searchSeq\.current\) return/)
   })
 })
