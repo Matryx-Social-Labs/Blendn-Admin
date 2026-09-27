@@ -194,3 +194,13 @@ describe("fillFromSearch", () => {
     expect(fillFromSearch({ address: "", city: "" }, churchStreet, cubbonPark)).toEqual(cubbonPark)
   })
 })
+
+describe("the venue wizard goes through fillFromSearch", () => {
+  it("does not keep a stale address or city on a new search", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../components/venue-create-form.tsx"), "utf8") as string
+    expect(src).toContain("...fillFromSearch(d, previous, found)")
+    expect(src).not.toMatch(/address: d\.address \|\|/)
+    expect(src).not.toMatch(/city: d\.city \|\|/)
+  })
+})

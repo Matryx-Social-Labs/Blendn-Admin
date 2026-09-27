@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "address.test.ts": {
+      "guards": "SCRUM-341: fillFromSearch replaces the address and city the previous search filled in and keeps only what the person typed (first fill, replace, typed address kept, typed city kept, cleared field refilled); the venue wizard's search() goes through it and has no `d.address ||` / `d.city ||` keep-anything fill",
+      "mutation": "M1: in lib/address.ts fillFromSearch, `typed` reduced to `current[key] !== \"\"` (keep anything non-empty). M2: in components/venue-create-form.tsx search(), `...fillFromSearch(d, previous, found)` replaced by `address: d.address || found.address, city: d.city || found.city`.",
+      "observed": "M1: 3 of 24 failing (replace ×2 via the bug case, typed-city case). M2: 1 of 24 failing (the wizard wiring pin).",
+      "date": "2026-09-27"
+    },
     "live-room-honours-blocks.itest.ts": {
       "guards": "SCRUM-338: with a real socket.io server installed as the app's io and check-ins through the real route, while A has B blocked: B's event:room:checkin reaches C's roster and not A's, and neither A nor B receives the other's chat:typing while C receives both; once the block is lifted A hears B type and hears the next arrival. socket-guards.test.ts pins the except() list as both directions of blocked_users and the fail-safe when the lookup rejects",
       "mutation": "M1: in lib/socket-server.ts emitChatTyping, `.except(hidden.map(...))` → `.except([])`. M2: in emitEventCheckIn, `.except(excludeUserIds.map(...))` → `.except([])`.",
