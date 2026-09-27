@@ -1,4 +1,5 @@
 const mockDb = {
+  $queryRaw: jest.fn(),
   venues: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -40,7 +41,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockDb.organisation_members.findFirst.mockResolvedValue({ org_id: MY_ORG })
   mockDb.venues.create.mockResolvedValue({ id: "venue_new" })
-  mockDb.venues.findMany.mockResolvedValue([])
+  mockDb.$queryRaw.mockResolvedValue([])
   mockDb.venues.findUnique.mockResolvedValue({
     id: "venue_1",
     name: "Toit",
@@ -64,26 +65,26 @@ describe("venuesNear — the duplicate check", () => {
   beforeEach(() => signIn("venue_owner"))
 
   it("keeps venues inside 100 m and drops the ones beyond", async () => {
-    mockDb.venues.findMany.mockResolvedValue([
-      { id: "a", name: "Close", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_org: null },
+    mockDb.$queryRaw.mockResolvedValue([
+      { id: "a", name: "Close", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_name: null },
       // ~0.005° of latitude is roughly 550 m — comfortably outside.
-      { id: "b", name: "Far", address: null, city: null, latitude: LAT + 0.005, longitude: LNG, owner_org_id: null, owner_org: null },
+      { id: "b", name: "Far", address: null, city: null, latitude: LAT + 0.005, longitude: LNG, owner_org_id: null, owner_name: null },
     ])
     const hits = await venuesNear(LAT, LNG)
     expect(hits.map((h) => h.id)).toEqual(["a"])
   })
 
   it("skips rows with no coordinates instead of treating them as at 0,0", async () => {
-    mockDb.venues.findMany.mockResolvedValue([
-      { id: "a", name: "No pin", address: null, city: null, latitude: null, longitude: null, owner_org_id: null, owner_org: null },
+    mockDb.$queryRaw.mockResolvedValue([
+      { id: "a", name: "No pin", address: null, city: null, latitude: null, longitude: null, owner_org_id: null, owner_name: null },
     ])
     expect(await venuesNear(LAT, LNG)).toEqual([])
   })
 
   it("hides the owning organisation from non-admins", async () => {
     // A host learning which company owns which venue is a customer list.
-    mockDb.venues.findMany.mockResolvedValue([
-      { id: "a", name: "Owned", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: "org_x", owner_org: { display_name: "Secret Ltd" } },
+    mockDb.$queryRaw.mockResolvedValue([
+      { id: "a", name: "Owned", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: "org_x", owner_name: "Secret Ltd" },
     ])
     const [hit] = await venuesNear(LAT, LNG)
     expect(hit.claimed).toBe(true)
@@ -92,17 +93,17 @@ describe("venuesNear — the duplicate check", () => {
 
   it("shows it to an admin, who needs it to resolve disputes", async () => {
     signIn("app_admin")
-    mockDb.venues.findMany.mockResolvedValue([
-      { id: "a", name: "Owned", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: "org_x", owner_org: { display_name: "Secret Ltd" } },
+    mockDb.$queryRaw.mockResolvedValue([
+      { id: "a", name: "Owned", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: "org_x", owner_name: "Secret Ltd" },
     ])
     const [hit] = await venuesNear(LAT, LNG)
     expect(hit.ownerName).toBe("Secret Ltd")
   })
 
   it("sorts nearest first", async () => {
-    mockDb.venues.findMany.mockResolvedValue([
-      { id: "far", name: "Far", address: null, city: null, latitude: LAT + 0.0006, longitude: LNG, owner_org_id: null, owner_org: null },
-      { id: "near", name: "Near", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_org: null },
+    mockDb.$queryRaw.mockResolvedValue([
+      { id: "far", name: "Far", address: null, city: null, latitude: LAT + 0.0006, longitude: LNG, owner_org_id: null, owner_name: null },
+      { id: "near", name: "Near", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_name: null },
     ])
     expect((await venuesNear(LAT, LNG)).map((h) => h.id)).toEqual(["near", "far"])
   })
@@ -131,8 +132,8 @@ describe("createVenue", () => {
 
   it("blocks a duplicate the caller has not acknowledged, and names the neighbour", async () => {
     signIn("venue_owner")
-    mockDb.venues.findMany.mockResolvedValue([
-      { id: "a", name: "Toit", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_org: null },
+    mockDb.$queryRaw.mockResolvedValue([
+      { id: "a", name: "Toit", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_name: null },
     ])
     await expect(
       createVenue({ name: "Toit Brewpub", venueType: "brewery", lat: LAT, lng: LNG })
@@ -141,8 +142,8 @@ describe("createVenue", () => {
 
   it("lets it through once acknowledged — same address, different hall is real", async () => {
     signIn("venue_owner")
-    mockDb.venues.findMany.mockResolvedValue([
-      { id: "a", name: "Toit", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_org: null },
+    mockDb.$queryRaw.mockResolvedValue([
+      { id: "a", name: "Toit", address: null, city: null, latitude: LAT, longitude: LNG, owner_org_id: null, owner_name: null },
     ])
     await expect(
       createVenue({
@@ -217,7 +218,7 @@ describe("createVenue", () => {
     const near = { type: "polygon" as const, buffer: 20, ring: [
       [LAT + 0.0005, LNG], [LAT + 0.0005, LNG + 0.0005], [LAT, LNG + 0.0005], [LAT, LNG],
     ] as [number, number][] }
-    mockDb.venues.findMany.mockResolvedValue([])
+    mockDb.$queryRaw.mockResolvedValue([])
     await createVenue({ name: "Toit", venueType: "brewery", lat: LAT, lng: LNG, geofence: near })
     expect(mockDb.venues.create).toHaveBeenCalled()
   })

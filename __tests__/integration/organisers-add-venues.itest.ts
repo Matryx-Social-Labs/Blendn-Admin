@@ -147,3 +147,34 @@ describe("the duplicate check knows an outline, not only a pin", () => {
     ).rejects.toThrow(/already listed/i)
   })
 })
+
+describe("the duplicate check still finds the neighbour when the district is busy (database review)", () => {
+  it("orders by distance before its LIMIT — 205 outline venues nearer the box's edge do not hide the one the pin is in", async () => {
+    const host = await member("oav-busy", "organizer")
+    host.as()
+    const c = { lat: base.lat + 0.06, lng: base.lng + 0.04 }
+    // 205 small outlines scattered 1–1.8 km away, inserted first, so an
+    // unordered scan meets them before the venue that matters.
+    const crowd = Array.from({ length: 205 }, (_, i) => {
+      const a = (2 * Math.PI * i) / 205
+      const r = 0.009 + (i % 7) * 0.001
+      const p = { lat: c.lat + r * Math.sin(a), lng: c.lng + r * Math.cos(a) }
+      return {
+        name: testId(`crowd-${i}`),
+        latitude: p.lat,
+        longitude: p.lng,
+        geofence: { type: "polygon", buffer: 20, ring: [[p.lat, p.lng], [p.lat + 0.0001, p.lng], [p.lat, p.lng + 0.0001]] },
+      }
+    })
+    await db.venues.createMany({ data: crowd })
+    const crowdIds = (await db.venues.findMany({ where: { name: { in: crowd.map((v) => v.name) } }, select: { id: true } })).map((v) => v.id)
+    venues.push(...crowdIds)
+    await added(c)
+
+    const inside = { lat: c.lat + 0.00115, lng: c.lng }
+    await expect(
+      createVenue({ name: testId("Busy Stadium"), venueType: "stadium", lat: inside.lat, lng: inside.lng })
+    ).rejects.toThrow(/already listed/i)
+  })
+})
+

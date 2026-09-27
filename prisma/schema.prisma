@@ -1362,8 +1362,9 @@ model venues {
   /// venues an admin adds in a hurry, should not be blocked on classifying.
   venue_type   venue_type?
   /// Extent + buffer for check-in, in the shape lib/geofence.ts understands.
-  /// Events at this venue inherit it and may override per event — a rooftop
-  /// event at a three-floor venue is a real case.
+  /// Events at this venue COPY it when saved (owner's ruling 3, 2026-09-27 —
+  /// `venueFenceToCopy`), so editing a venue never moves an event's area, and
+  /// may override it per event — a rooftop at a three-floor venue is a real case.
   geofence     Json?
   owner_id     String?
   owner_org_id String?      @db.Uuid

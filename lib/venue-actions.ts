@@ -33,7 +33,7 @@ function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }
   }
 }
 import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
-import type { venue_type } from "@prisma/client"
+import { Prisma, type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
 
@@ -82,6 +82,19 @@ async function requireUser() {
   return session.user
 }
 
+/** A row of the duplicate check's lookup — `venuesNear`'s raw query. */
+interface NearbyRow {
+  id: string
+  name: string
+  address: string | null
+  city: string | null
+  latitude: number | null
+  longitude: number | null
+  owner_org_id: string | null
+  geofence: unknown
+  owner_name: string | null
+}
+
 export interface NearbyVenue {
   id: string
   name: string
@@ -103,36 +116,30 @@ export async function venuesNear(lat: number, lng: number): Promise<NearbyVenue[
   const user = await requireUser()
   const isAdmin = user.role === "app_admin"
 
-  // Bounding boxes first so the database does the coarse filter on an index,
-  // then exact distances in memory. Two lookups, so the wide one for outlines
-  // can never crowd a 100 m neighbour out of the tight one's results.
-  const select = {
-    id: true,
-    name: true,
-    address: true,
-    city: true,
-    latitude: true,
-    longitude: true,
-    owner_org_id: true,
-    geofence: true,
-    owner_org: { select: { display_name: true } },
-  } as const
-  const within = (metres: number) => {
+  // Bounding boxes first so the lat/lng index does the coarse filter, then
+  // exact distances in memory. Nearest first *before* the LIMIT: a busy
+  // district would otherwise hand back whichever rows the scan met first and
+  // drop the real neighbour (#database-review, SCRUM-352). Two lookups, so the
+  // wide one for outlines never crowds a 100 m neighbour out of the tight one.
+  const cosLat = Math.cos((lat * Math.PI) / 180)
+  const nearest = (metres: number, outlinesOnly: boolean, limit: number) => {
     const box = getBoundingBox(lat, lng, metres / 1000)
-    return {
-      deleted_at: null,
-      latitude: { gte: box.minLat, lte: box.maxLat },
-      longitude: { gte: box.minLon, lte: box.maxLon },
-    }
+    return db.$queryRaw<NearbyRow[]>`
+      SELECT v.id, v.name, v.address, v.city, v.latitude, v.longitude, v.owner_org_id, v.geofence,
+             o.display_name AS owner_name
+        FROM venues v
+        LEFT JOIN organisations o ON o.id = v.owner_org_id
+       WHERE v.deleted_at IS NULL
+         AND v.latitude BETWEEN ${box.minLat} AND ${box.maxLat}
+         AND v.longitude BETWEEN ${box.minLon} AND ${box.maxLon}
+         ${outlinesOnly ? Prisma.sql`AND v.geofence->>'type' = 'polygon'` : Prisma.empty}
+       ORDER BY power(v.latitude - ${lat}, 2) + power((v.longitude - ${lng}) * ${cosLat}, 2)
+       LIMIT ${limit}`
   }
+  // A pin inside a stadium can be 130 m from the stadium's own pin (SCRUM-352).
   const [near, outlined] = await Promise.all([
-    db.venues.findMany({ where: within(DUPLICATE_RADIUS_M), select, take: 50 }),
-    // A pin inside a stadium can be 130 m from the stadium's own pin (SCRUM-352).
-    db.venues.findMany({
-      where: { ...within(OUTLINE_SEARCH_M), geofence: { path: ["type"], equals: "polygon" } },
-      select,
-      take: 200,
-    }),
+    nearest(DUPLICATE_RADIUS_M, false, 50),
+    nearest(OUTLINE_SEARCH_M, true, 200),
   ])
   const candidates = [...near, ...outlined.filter((o) => !near.some((n) => n.id === o.id))]
 
@@ -155,7 +162,7 @@ export async function venuesNear(lat: number, lng: number): Promise<NearbyVenue[
           distanceMetres,
           claimed: v.owner_org_id !== null,
           // A host learning which company owns which venue is a customer list.
-          ownerName: isAdmin ? (v.owner_org?.display_name ?? null) : null,
+          ownerName: isAdmin ? v.owner_name : null,
         },
       ]
     })
