@@ -8,7 +8,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { matchesForEvent } from "@/lib/matches"
 import { getOccupancy } from "@/lib/occupancy"
 
-import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 
 /*
  * Two things the door does for a person, driven through the real routes.
@@ -79,7 +79,8 @@ async function liveEvent() {
 async function attendee(label: string, profile?: { show_online?: boolean; intent_default?: ("friendship" | "networking")[] }) {
   const id = await makeUser(testId(label))
   users.push(id)
-  if (profile) await db.profiles.create({ data: { id, name: label, ...profile } })
+  if (profile) await db.profiles.create({ data: { id, name: label, onboarded: true, ...profile } })
+  else await onboard(id)
   const user = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
   return { id, token: signAccessToken(id, user.email) }
 }

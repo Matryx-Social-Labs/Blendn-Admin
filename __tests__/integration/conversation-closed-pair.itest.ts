@@ -13,7 +13,7 @@ import { NextRequest } from "next/server"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 import { signAccessToken } from "@/lib/mobile-auth"
 import { openConversation } from "@/lib/conversations"
-import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const conversations = require("@/app/api/mobile/conversations/route") as typeof import("@/app/api/mobile/conversations/route")
 
@@ -41,6 +41,7 @@ async function closedPair(label: string) {
   const a = await makeUser(testId(`${label}-a`))
   const b = await makeUser(testId(`${label}-b`))
   users.push(a, b)
+  await onboard(a, b)
   await db.message_requests.create({
     data: { sender_id: a, recipient_id: b, status: "accepted", responded_at: new Date() },
   })
@@ -73,6 +74,7 @@ it("still opens a live pair", async () => {
   const a = await makeUser(testId("ccp-live-a"))
   const b = await makeUser(testId("ccp-live-b"))
   users.push(a, b)
+  await onboard(a, b)
   await db.message_requests.create({
     data: { sender_id: a, recipient_id: b, status: "accepted", responded_at: new Date() },
   })

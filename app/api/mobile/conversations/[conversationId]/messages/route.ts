@@ -4,6 +4,7 @@ import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { media_type } from "@prisma/client"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -165,6 +166,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+
+    // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
+    const unfinished = await participationRefusal(authUser.userId)
+    if (unfinished) return forbiddenResponse(unfinished)
 
     const body = await request.json()
     const parsed = sendMessageSchema.safeParse(body)

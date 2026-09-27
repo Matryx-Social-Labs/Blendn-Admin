@@ -6,6 +6,7 @@ import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymo
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -15,6 +16,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
   conflictResponse,
+  forbiddenResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
 
@@ -188,6 +190,10 @@ export async function POST(request: NextRequest) {
 
     const limited = await rateLimit(request, userLimit("heavy", "conversation-create", authUser.userId))
     if (limited) return limited
+
+    // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
+    const unfinished = await participationRefusal(authUser.userId)
+    if (unfinished) return forbiddenResponse(unfinished)
 
     const body = await request.json()
     const parsed = createConversationSchema.safeParse(body)

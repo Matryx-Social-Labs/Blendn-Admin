@@ -140,7 +140,7 @@ async function viewer(label: string, dateOfBirth?: Date) {
   const user = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
   // `profiles.id` IS the user id — there is no separate `user_id` column.
   await db.profiles.create({
-    data: { id, ...(dateOfBirth ? { date_of_birth: dateOfBirth } : {}) },
+    data: { id, onboarded: true, ...(dateOfBirth ? { date_of_birth: dateOfBirth } : {}) },
   })
   return { id, token: signAccessToken(id, user.email) }
 }

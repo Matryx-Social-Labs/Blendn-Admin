@@ -13,7 +13,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 import { signAccessToken } from "@/lib/mobile-auth"
 import { getOccupancy } from "@/lib/occupancy"
 
-import { db, closeDb, makeUser, testId } from "./helpers"
+import { db, closeDb, makeUser, onboard, testId } from "./helpers"
 
 /**
  * The check-in route, driven end to end.
@@ -96,6 +96,7 @@ async function liveEvent(opts: { capacity?: number | null; orgId?: string } = {}
 async function attendee(label: string) {
   const id = await makeUser(testId(label))
   users.push(id)
+  await onboard(id)
   const user = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
   return { id, token: signAccessToken(id, user.email) }
 }

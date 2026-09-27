@@ -12,7 +12,7 @@ import { NextRequest } from "next/server"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
-import { db, closeDb, makeUser, testId } from "./helpers"
+import { db, closeDb, makeUser, onboard, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const route = require("@/app/api/mobile/conversations/[conversationId]/messages/route") as
@@ -33,6 +33,7 @@ afterAll(async () => {
 async function person(label: string) {
   const id = await makeUser(testId(label))
   users.push(id)
+  await onboard(id)
   const user = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
   return { id, token: signAccessToken(id, user.email) }
 }

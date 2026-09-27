@@ -73,6 +73,19 @@ export async function makeUser(label: string, role: "attendee" | "organizer" | "
   return id
 }
 
+/**
+ * A person who finished onboarding, as every real app user taking part has.
+ * Since SCRUM-331 the participation routes refuse a profile that is neither
+ * onboarded nor of a known adult age, and a user with no profile at all — a
+ * shape sign-up and OAuth never produce. Upserted, so a fixture that already
+ * wrote a profile keeps its fields.
+ */
+export async function onboard(...userIds: string[]) {
+  for (const id of userIds) {
+    await db.profiles.upsert({ where: { id }, create: { id, name: "Test", onboarded: true }, update: { onboarded: true } })
+  }
+}
+
 export async function makeEvent(
   organizerId: string,
   overrides: Partial<{ visibility: "public" | "private" | "unlisted"; deleted_at: Date | null }> = {}

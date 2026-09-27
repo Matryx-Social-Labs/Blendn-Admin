@@ -68,7 +68,7 @@ async function person(
 ) {
   const id = await makeUser(label, role)
   users.push(id)
-  await db.profiles.create({ data: { id, name: `Test ${label}`, date_of_birth: dateOfBirth } })
+  await db.profiles.create({ data: { id, name: `Test ${label}`, date_of_birth: dateOfBirth, onboarded: true } })
   const user = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
   return { id, token: signAccessToken(id, user.email) }
 }
