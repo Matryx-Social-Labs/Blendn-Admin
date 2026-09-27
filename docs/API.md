@@ -880,6 +880,57 @@ request status.
 
 ---
 
+## Friends
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/friends` | My friends, newest first, and `count` |
+| GET | `/friends/:userId` | A friend's profile (404 for anyone else) |
+| DELETE | `/friends/:userId` | Unfriend — silent, leaves any DM alone |
+| POST | `/friends/:userId/conversation` | Open (or find) a DM with a friend → `{ conversationId }` |
+| GET | `/friends/invite` | My invite link `{ token, url }`, made on first ask |
+| POST | `/friends/invite` | Reset it — the old link stops working |
+| GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
+| GET | `/friends/requests` | `{ incoming, outgoing }` |
+| POST | `/friends/requests` | Ask: `{ token }` or `{ userId }` → `{ state: "requested" \| "friends" }` |
+| POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
+| DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
+
+**Nobody can be looked up.** There is no search. A request reaches someone only
+through their invite link (`https://www.blendn.app/f/<token>`, 128 random bits,
+resettable) or, by `userId`, someone you can already see under
+`maySeeIdentity` — a match, a conversation, someone public in your room. Every
+refusal a stranger could reach answers with the **same 404**: an unknown,
+malformed or reset token, a deleted account, a block either way, a pair who
+left each other, an id you have no relationship with.
+
+Opening a link, asking and accepting all need a finished profile (the
+participation gate, SCRUM-331). Ask, accept and block take a lock on the pair,
+so two people asking each other at once become friends once, and an accept
+racing a block never leaves a blocked person on the list. Refusals cost the
+same work as a link that never existed, so timing tells a caller nothing either.
+
+**"Not now" is never delivered.** `dismiss` hides the request from the
+recipient; the sender keeps seeing it in `outgoing`. Asking again neither
+notifies again nor un-dismisses. Two people who ask each other are friends at
+once.
+
+**Friends are still pseudonyms in a room.** Friendship shows real names on the
+friend surfaces above, because both people said yes. It is *not* a branch of
+`maySeeIdentity`, which every room surface asks — unless the person turned on
+`friends_see_me_in_rooms` (see Settings). A DM opened from `/friends/:userId/conversation`
+is marked `origin_friendship`, so it does not open that gate either. Friends are
+left out of each other's match pool.
+
+**A block** deletes the friendship and any request between the pair; unblocking
+does not restore it. **Deleting your account** removes your friendships,
+requests and link.
+
+Pushes: `friend_request` (`requestId`) and `friend_accepted`. Neither names
+anybody — both render on a lock screen.
+
+---
+
 ## Matching inputs on the profile
 
 `PUT /profiles/:userId` also accepts what ranking reads.
@@ -1459,7 +1510,7 @@ one `event_update` notification saying so.
 ## Settings
 
 `PUT /profiles/:userId` accepts four preference booleans, all defaulting to
-**true**:
+**true**, and `friends_see_me_in_rooms`, defaulting to **false**:
 
 | Field | Governs |
 |---|---|
@@ -1467,6 +1518,7 @@ one `event_update` notification saying so.
 | `show_online` | Whether others see you as active |
 | `read_receipts` | Whether DM reads are reported back |
 | `share_location` | Whether other attendees see your distance |
+| `friends_see_me_in_rooms` | Whether friends see who you are in a room. Off: a friend is a pseudonym there like anyone else |
 
 These had been shown in the app and stored nowhere — there were no columns, so
 hydration fell back to `true` and every switch read ON whatever the user chose.

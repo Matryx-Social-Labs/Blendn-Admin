@@ -239,6 +239,8 @@ export const updateProfileSchema = z.object({
   show_online: z.boolean().optional(),
   read_receipts: z.boolean().optional(),
   share_location: z.boolean().optional(),
+  /** Off unless they turn it on: friends are pseudonyms in a room by default. */
+  friends_see_me_in_rooms: z.boolean().optional(),
 })
 
 export const addInterestsSchema = z.object({

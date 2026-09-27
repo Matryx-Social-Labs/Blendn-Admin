@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { closeConversation, conversationPair } from "@/lib/conversations"
+import { lockPair, severFriendship } from "@/lib/friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -45,7 +46,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
-     * All three writes, or none.
+     * All of it, or none — the block, the cancelled requests, the severed
+     * friendship and the closed conversation.
      *
      * These were four sequential awaits, and the partial states were all bad:
      * a block recorded with the conversation left open is a "block" that
@@ -60,6 +62,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const [user1_id, user2_id] = conversationPair(authUser.userId, targetId)
 
     const closedConversationId = await db.$transaction(async (tx) => {
+      // The pair's friend lock first, so an accept in flight either finishes
+      // before this block (and is severed below) or sees it (see lib/friends.ts).
+      await lockPair(tx, authUser.userId, targetId)
+
       await tx.blocked_users.upsert({
         where: {
           blocker_id_blocked_id: {
@@ -93,6 +99,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         },
         data: { status: "blocked" },
       })
+
+      /*
+       * And the friendship, with any friend request either way. A block that
+       * left it standing would keep the blocked person on the blocker's
+       * friends list, one tap from a DM. Not restored by unblocking: being
+       * friends again is a new yes from both people.
+       */
+      await severFriendship(authUser.userId, targetId, tx)
 
       /*
        * Close the conversation, if there is one.
