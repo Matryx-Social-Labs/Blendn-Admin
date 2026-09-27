@@ -105,8 +105,13 @@ test.describe("the venue picker and the pin agree", () => {
     await expect(suggestion.first()).toBeVisible({ timeout: 15_000 })
     await suggestion.first().click()
 
-    // One map, and the area's markers (its centre is the pin) appear on it.
+    // One map. The venue's outline arrives locked — no handles — with the
+    // venue's own buffer chosen (SCRUM-353b); "Adjust for this event" opens it.
     await expect(page.locator(".leaflet-container")).toHaveCount(1)
+    await expect(page.locator('[data-area-source="venue"]')).toBeVisible({ timeout: 15_000 })
+    await expect(marker).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^Venue's · \d+ m$/ })).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("button", { name: "Adjust for this event" }).click()
     await expect(marker.first()).toBeVisible({ timeout: 15_000 })
 
     await expectOnTheMap(page)

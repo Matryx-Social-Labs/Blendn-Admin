@@ -25,7 +25,11 @@ test("a stadium's search draws its own outline, with the pin at its centre", asy
   await expect(hit).toBeVisible({ timeout: 15_000 })
   await hit.click()
 
-  // An outline's corners are handles on the map; a circle has two.
+  // The outline is set, not offered for editing: no handles until "Adjust
+  // area" (SCRUM-353b) — then every corner is one; a circle has two.
+  await expect(page.locator('[data-area-source="osm-area"]')).toBeVisible({ timeout: 15_000 })
+  await expect(map.locator(".leaflet-marker-icon")).toHaveCount(0)
+  await page.getByRole("button", { name: "Adjust area" }).click()
   await expect.poll(() => map.locator(".leaflet-marker-icon").count(), { timeout: 15_000 }).toBeGreaterThan(10)
 
   // The pin is the outline's centre, not the geocoder's point.

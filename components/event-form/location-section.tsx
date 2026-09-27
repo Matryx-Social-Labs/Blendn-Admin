@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
+import { AreaControls } from "@/components/event-form/area-controls"
 import { DEFAULT_BUFFER_M, fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, sameShape, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
@@ -61,6 +62,10 @@ export function LocationSection({
     footprintSeq.current++
   }, [])
   const geofence = (form.watch("geofence") as Geofence | null) ?? null
+  /** "Adjust area" is open — only then does the shape take drags (SCRUM-353: adjust only if wrong). */
+  const [adjusting, setAdjusting] = useState(false)
+  /** The organiser chose Custom. A buffer other than the base reads as custom too. */
+  const [customChosen, setCustomChosen] = useState(false)
 
   /**
    * The app judges the area as a circle of `check_in_radius` around the pin, so
@@ -84,11 +89,11 @@ export function LocationSection({
    */
   function moveTo(location: LocationData) {
     // A place OSM holds as an area comes with its outline (SCRUM-351): that is
-    // the check-in area, with the buffer it already had, and the pin is its
-    // centre. The address the search wrote stays.
+    // the check-in area, at the default buffer — a new place starts from the
+    // base, not from the last place's choice — and the pin is its centre. The
+    // address the search wrote stays.
     if (location.outline) {
-      const current = form.getValues("geofence") as Geofence | null
-      const fence: Geofence = { type: "polygon", ring: location.outline, buffer: current?.buffer ?? DEFAULT_BUFFER_M }
+      const fence: Geofence = { type: "polygon", ring: location.outline, buffer: DEFAULT_BUFFER_M }
       const centre = fenceCentre(fence) ?? { lat: location.lat, lng: location.lng }
       onLocationChange({ ...location, lat: centre.lat, lng: centre.lng })
       setFence(fence)
@@ -101,8 +106,14 @@ export function LocationSection({
       (form.getValues("geofence") as Geofence | null) ?? null,
       { lat: location.lat, lng: location.lng }
     )
-    setFence(fence)
+    // A new event has no area to follow the pin: without this it saved none,
+    // and check-in fell back to the bare radius.
+    setFence({ ...(fence ?? circleOn(location)), buffer: DEFAULT_BUFFER_M })
     setMovedKm(moved)
+  }
+
+  function setBuffer(buffer: number) {
+    if (geofence) setFence({ ...geofence, buffer })
   }
 
   /**
@@ -179,6 +190,10 @@ export function LocationSection({
    */
   function inherit(picked: VenueOption) {
     ++footprintSeq.current
+    // A pick starts from the venue's own area and buffer, shape locked until
+    // "Adjust for this event".
+    setAdjusting(false)
+    setCustomChosen(false)
     setVenue(picked)
     form.setValue("venue_id", picked.id)
     // auto_linked, not confirmed — the organiser picked the venue, but nobody
@@ -222,7 +237,7 @@ export function LocationSection({
         (form.getValues("geofence") as Geofence | null) ?? null,
         { lat: picked.lat, lng: picked.lng }
       )
-      setFence(fence)
+      setFence({ ...(fence ?? circleOn({ lat: picked.lat, lng: picked.lng })), buffer: DEFAULT_BUFFER_M })
       setMovedKm(moved)
     }
   }
@@ -234,6 +249,8 @@ export function LocationSection({
    * keeps the circle, saying so, when OSM has none.
    */
   function pickPlace({ name, location }: PickedPlace) {
+    setAdjusting(false)
+    setCustomChosen(false)
     if (venue) unlink()
     form.setValue("venue_name", name, { shouldDirty: true })
     moveTo(location)
@@ -267,6 +284,26 @@ export function LocationSection({
     // The name, location and geofence stay — the organiser typed an event at
     // this place, and clearing it all would punish them for unlinking.
   }
+
+  const venueArea = venue?.geofence ? validateGeofence(venue.geofence) : null
+  /** The buffer a pick starts from: the venue's own, else the default (owner's ruling 3). */
+  const venueBuffer = venueArea?.ok ? venueArea.fence.buffer : null
+  const baseBuffer = venueBuffer ?? DEFAULT_BUFFER_M
+  const custom = customChosen || (geofence != null && geofence.buffer !== baseBuffer)
+  const whose: BufferWhose = custom ? "custom" : venueBuffer != null ? "venue" : "default"
+  const legend = geofence
+    ? {
+        extent:
+          geofence.type === "circle"
+            ? `Circle — ${Math.round(geofence.radius)} m`
+            : adjusting
+              ? "Outline — drag a corner"
+              : areaSource === "venue"
+                ? "The venue's outline"
+                : "The outline",
+        buffer: `Buffer — ${geofence.buffer} m, ${{ venue: "the venue's", default: "the default", custom: "custom" }[whose]}`,
+      }
+    : undefined
 
   const capacity = form.watch("max_capacity")
   const overVenueCapacity =
@@ -323,6 +360,26 @@ export function LocationSection({
         <GeofenceEditor
           value={geofence}
           onChange={onFenceChange}
+          editable={adjusting}
+          legend={legend}
+          controls={(tools) => (
+            <AreaControls
+              fence={geofence}
+              base={baseBuffer}
+              baseIsVenue={venueBuffer != null}
+              custom={custom}
+              onBase={() => {
+                setCustomChosen(false)
+                setBuffer(baseBuffer)
+              }}
+              onCustom={() => setCustomChosen(true)}
+              onBuffer={setBuffer}
+              adjusting={adjusting}
+              onAdjusting={setAdjusting}
+              adjustLabel={venue ? "Adjust for this event" : "Adjust area"}
+              tools={tools}
+            />
+          )}
           fallbackCentre={
             initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : undefined
           }
@@ -332,7 +389,7 @@ export function LocationSection({
               name="address"
               render={({ field }) => (
                 <FormItem>
-                  <AreaSourceLine source={areaSource} fence={geofence} />
+                  <AreaSourceLine source={areaSource} fence={geofence} whose={whose} />
                   <FormLabel className="sr-only">Address</FormLabel>
                   <FormControl>
                     <Input placeholder="The address — written by the pin; edit if the street is wrong" {...field} />
@@ -343,7 +400,7 @@ export function LocationSection({
                       <span className="size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" aria-hidden />
                       <span>
                         Outline cleared — the pin moved {movedKm} km.{" "}
-                        <span className="text-muted-foreground">Trace it again or use the building outline.</span>
+                        <span className="text-muted-foreground">Adjust the area to draw it or find the building again.</span>
                       </span>
                     </p>
                   ) : null}
@@ -384,6 +441,16 @@ function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
 }
 
 type AreaSource = "venue" | "osm-area" | "building" | "circle" | "drawn"
+type BufferWhose = "venue" | "default" | "custom"
+
+/** A place with no outline and no area yet: a circle on its pin, the size the editor starts with. */
+const circleOn = (pin: { lat: number; lng: number }): Geofence => ({
+  type: "circle",
+  lat: pin.lat,
+  lng: pin.lng,
+  radius: 30,
+  buffer: DEFAULT_BUFFER_M,
+})
 
 /**
  * The area cites its source — the section's memorable detail (SCRUM-353 design
@@ -391,11 +458,11 @@ type AreaSource = "venue" | "osm-area" | "building" | "circle" | "drawn"
  * from, its size, and the buffer. A circle that stands in for a missing
  * outline says so, in the warning tone, and asks for the building.
  */
-function AreaSourceLine({ source, fence }: { source: AreaSource | null; fence: Geofence | null }) {
+function AreaSourceLine({ source, fence, whose }: { source: AreaSource | null; fence: Geofence | null; whose: BufferWhose }) {
   if (!fence) return null
   const shape =
     fence.type === "polygon" ? `${fence.ring.length} corners` : `a ${Math.round(fence.radius)} m circle`
-  const buffer = `+${fence.buffer} m${fence.buffer === DEFAULT_BUFFER_M ? ", the default buffer" : " buffer"}`
+  const buffer = `+${fence.buffer} m, ${{ venue: "the venue's buffer", default: "the default buffer", custom: "custom for this event" }[whose]}`
   const said: Record<AreaSource | "saved", string> = {
     venue: "Area from the venue",
     "osm-area": "Outline from OpenStreetMap",
@@ -410,7 +477,7 @@ function AreaSourceLine({ source, fence }: { source: AreaSource | null; fence: G
       <span className={warn ? "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" : "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-primary"} aria-hidden />
       <span className={warn ? "font-medium text-warning" : "font-medium"}>{said[source ?? "saved"]}</span>
       <span className="text-muted-foreground">
-        · {warn ? `${shape} at the address — trace the building if you can` : shape} · {buffer}
+        · {warn ? `${shape} at the address — adjust the area to draw the building` : shape} · {buffer}
       </span>
     </p>
   )
