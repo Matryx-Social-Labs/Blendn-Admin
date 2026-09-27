@@ -38,7 +38,7 @@ async function listen(userId: string, rooms: string[]): Promise<string[]> {
   const socket = connect(`http://localhost:${port}`, { auth: { userId, rooms }, transports: ["websocket"] })
   clients.push(socket)
   const ids: string[] = []
-  socket.on("private:message", (p: { message: { id: string } }) => ids.push(p.message.id))
+  socket.on("private:message", (p: { conversationId: string; message: { id: string } }) => ids.push(`${p.conversationId}/${p.message.id}`))
   await new Promise<void>((resolve) => socket.on("connect", () => resolve()))
   return ids
 }
@@ -72,7 +72,7 @@ it("reaches each socket once: the open chat, the chat list, and the sender's own
   })
   await new Promise((r) => setTimeout(r, 200))
 
-  expect(chatOpen).toEqual(["m1"])
-  expect(onList).toEqual(["m1"])
-  expect(senderChat).toEqual(["m1"])
+  expect(chatOpen).toEqual([`${CONVO}/m1`])
+  expect(onList).toEqual([`${CONVO}/m1`])
+  expect(senderChat).toEqual([`${CONVO}/m1`])
 })
