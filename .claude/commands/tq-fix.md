@@ -52,8 +52,10 @@ negative controls), `docs/agents/routines/landing-and-staging.md`.
   the fix, the tests and mutation results. Ticket → **In Review**.
 - CI green → `gh pr merge <n> --squash --subject "<PR title> (#<n>)"` (without
   `--subject` a multi-commit PR squashes under its first commit's message).
-- Promote: `git fetch && git push origin origin/dev:staging` (fast-forward
-  only; if it's rejected, someone promoted first — fetch and check, never force).
+- Promote: `gh pr create --base staging --head dev`, then `gh pr merge <n> --merge`.
+  Staging's ruleset takes only a pull request whose head is `dev`, merged with a
+  merge commit — a push, a squash, or a side branch is refused (#464). Someone
+  else's promotion already open? Wait for theirs; never force.
 - Wait for the Railway staging deploy to succeed.
 
 ## 6 · Prove it where it was found
