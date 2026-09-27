@@ -1,6 +1,6 @@
 // Relative imports — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
-import { ageFrom, minAgeRefusal } from "./age"
+import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal } from "./age"
 import { ErrorCode, errorResponse, notFoundResponse } from "./api-response"
 import { db } from "./db"
 import { canJoinEvent } from "./socket-auth"
@@ -46,7 +46,13 @@ export const hostNotSuspended = {
 export type EventAccessDenial =
   | { kind: "not_found" }
   | { kind: "age"; message: string }
+  | { kind: "unfinished"; message: string }
 
+/*
+ * `participate` also asks `mayParticipate` (SCRUM-331): finished onboarding, or
+ * an adult age on file. It is asked before the event's own age rule because it
+ * is about the person, not the event, and it holds everywhere.
+ */
 export async function attendeeEventAccess(
   userId: string,
   eventId: string,
@@ -60,12 +66,16 @@ export async function attendeeEventAccess(
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
     return { kind: "not_found" }
   }
-  if (event.min_age == null) return null
+  if (event.min_age == null && intent === "view") return null
 
   const profile = await db.profiles.findUnique({
     where: { id: userId },
-    select: { age: true, date_of_birth: true },
+    select: { age: true, date_of_birth: true, onboarded: true },
   })
+  if (intent === "participate" && !mayParticipate(profile)) {
+    return { kind: "unfinished", message: FINISH_ONBOARDING }
+  }
+  if (event.min_age == null) return null
   // Derived, never the stored column — see `ageFrom` in lib/age.ts.
   const age = ageFrom(profile)
   if (age == null && intent === "view") return null
@@ -73,9 +83,21 @@ export async function attendeeEventAccess(
   return message ? { kind: "age", message } : null
 }
 
+/**
+ * The same rule for the surfaces that are not about one event — starting a
+ * conversation, a message request, a DM (SCRUM-331). The sentence, or `null`.
+ */
+export async function participationRefusal(userId: string): Promise<string | null> {
+  const profile = await db.profiles.findUnique({
+    where: { id: userId },
+    select: { age: true, date_of_birth: true, onboarded: true },
+  })
+  return mayParticipate(profile) ? null : FINISH_ONBOARDING
+}
+
 /** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
-  return denial.kind === "age"
-    ? errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED)
-    : notFoundResponse("Event not found")
+  if (denial.kind === "age") return errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED)
+  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN)
+  return notFoundResponse("Event not found")
 }

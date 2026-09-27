@@ -3,6 +3,7 @@ import {
   ageFrom,
   datingAgeRefusal,
   mayDate,
+  mayParticipate,
   minAgeRefusal,
   parseDateOfBirth,
   stripDating,
@@ -251,5 +252,35 @@ describe("free-text dating is caught however it is written (SCRUM-294, security 
 
   it("does not mistake a word that merely contains it", () => {
     expect(datingAgeRefusal(["updating my photos", "candidates"], 17)).toBeNull()
+  })
+})
+
+describe("mayParticipate (SCRUM-331)", () => {
+  const years = (n: number) => {
+    const d = new Date()
+    d.setUTCFullYear(d.getUTCFullYear() - n)
+    return d
+  }
+
+  it("lets an onboarded profile take part whatever its age says — including none", () => {
+    expect(mayParticipate({ onboarded: true, age: null, date_of_birth: null })).toBe(true)
+    expect(mayParticipate({ onboarded: true, age: 16, date_of_birth: null })).toBe(true)
+  })
+
+  it("lets a profile still in onboarding take part only with an adult age on file", () => {
+    expect(mayParticipate({ onboarded: false, age: 18, date_of_birth: null })).toBe(true)
+    expect(mayParticipate({ onboarded: false, age: 17, date_of_birth: null })).toBe(false)
+    expect(mayParticipate({ onboarded: false, age: null, date_of_birth: null })).toBe(false)
+  })
+
+  it("reads the age from the birth date first, as every age rule does", () => {
+    // A stored 30 that the birth date contradicts is not an adult.
+    expect(mayParticipate({ onboarded: false, age: 30, date_of_birth: years(16) })).toBe(false)
+    expect(mayParticipate({ onboarded: false, age: null, date_of_birth: years(25) })).toBe(true)
+  })
+
+  it("says no when there is no profile at all", () => {
+    expect(mayParticipate(null)).toBe(false)
+    expect(mayParticipate(undefined)).toBe(false)
   })
 })

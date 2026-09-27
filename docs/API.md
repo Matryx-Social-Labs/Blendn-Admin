@@ -1295,7 +1295,7 @@ Malformed input is **400, not a silent no-op**: a date that does not parse, is
 in the future, or implies an age outside 18–120 is refused, because storing
 nothing while telling the user their profile saved is the worse failure.
 
-Four consequences worth knowing about:
+Five consequences worth knowing about:
 
 - **Age and intent may be sent together.** The gate reads the age *after* the
   request, so the onboarding screens can save both in one call. Works with
@@ -1309,6 +1309,13 @@ Four consequences worth knowing about:
   `dateOfBirth` in the same call or before it. Google and Apple accounts start
   with no age, so this is where they are held. A profile already onboarded
   (including one under 18 from before the ruling) is not re-checked.
+- **Taking part needs the same.** RSVP, favourite, the board, check-in,
+  starting a conversation, a message request and a DM send answer **403**
+  `FORBIDDEN` "Finish setting up your profile first. Blend'n is for people 18
+  and over." to a profile that is neither onboarded nor of a known adult age
+  (SCRUM-331), so the hold above is not only the app's. Viewing events is not
+  gated; neither are replies to a message request (decline and block are
+  safety actions). An onboarded profile with no age keeps taking part.
 - **Check-in filters rather than refuses.** A profile written before this rule
   can still carry `dating`; copying it onto a check-in row drops it silently,
   because nobody should be kept out of a room over a stale profile field.

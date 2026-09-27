@@ -3,7 +3,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { ageFrom, minAgeRefusal, stripDating } from "@/lib/age"
+import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { openSession } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
@@ -136,6 +136,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const profile = await db.profiles.findUnique({
       where: { id: authUser.userId },
       select: {
+        onboarded: true,
         age: true,
         date_of_birth: true,
         intent_default: true,
@@ -147,6 +148,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // taken off the row: a stored age was true on signup day, and someone who
     // signed up at 17 would otherwise be refused an 18+ event a year later.
     const profileAge = ageFrom(profile)
+
+    // Not onboarded and no adult age on file: held here as at every door (SCRUM-331).
+    if (!mayParticipate(profile)) return errorResponse(FINISH_ONBOARDING, 403, ErrorCode.FORBIDDEN)
 
     const ageRefusal = minAgeRefusal(profileAge, event.min_age)
     if (ageRefusal) {

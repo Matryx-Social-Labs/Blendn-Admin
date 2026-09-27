@@ -81,6 +81,14 @@ registry.register("CursorPaginationMeta", CursorPaginationMetaSchema)
 registry.register("DeviceInfo", DeviceInfoSchema)
 
 // Reusable error responses for path definitions
+/**
+ * The participation gate (SCRUM-331), for every endpoint that asks it:
+ * RSVP, favourite, board, check-in, and starting or sending a DM.
+ */
+export const PARTICIPATION_GATE =
+  "403 `FORBIDDEN` \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
+  "profile has neither finished onboarding nor an adult age on file (SCRUM-331). "
+
 export const standardErrors = {
   400: {
     description: "Validation error",

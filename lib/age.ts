@@ -47,6 +47,26 @@ export function isAdult(age: number | null | undefined): boolean {
   return typeof age === "number" && age >= ACCOUNT_MIN_AGE
 }
 
+/** What someone who may not take part yet is told (SCRUM-331). */
+export const FINISH_ONBOARDING = `Finish setting up your profile first. ${ADULTS_ONLY}`
+
+/**
+ * May this profile take part — RSVP, check in, use the board, DM? (SCRUM-331)
+ *
+ * Finished onboarding, or an adult age on file. Google and Apple accounts
+ * arrive with no age and the app holds them at "The basics"; without this the
+ * hold was a client convention and the raw API let them straight in. Gated on
+ * onboarding OR age, not age alone: onboarded accounts from before age was
+ * asked have none and keep working, and an onboarded under-18 from before the
+ * 18+ ruling is left alone. No profile at all cannot happen (sign-up and OAuth
+ * both create one), so it is a no.
+ */
+export function mayParticipate(
+  profile: (AgeSource & { onboarded: boolean }) | null | undefined
+): boolean {
+  return !!profile && (profile.onboarded || isAdult(ageFrom(profile)))
+}
+
 /** Every intent that is gated on age. `dating` is currently the only one. */
 const AGE_GATED_INTENTS = ["dating"] as const
 

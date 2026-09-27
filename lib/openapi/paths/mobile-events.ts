@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, standardErrors } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, PARTICIPATION_GATE, standardErrors } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -44,6 +44,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "The pre-event board",
   description:
+    PARTICIPATION_GATE +
     "Going alone, and looking for somebody to go with. Readable by anyone who " +
     "RSVP'd or favourited — somebody deciding whether to go is exactly who it is " +
     "for. Authors are pseudonyms, the same handle the room uses; the request " +
@@ -86,6 +87,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Post to the board",
   description:
+    PARTICIPATION_GATE +
     "Requires RSVP 'going' (not merely committed — offering a seat in a car you " +
     "may not be driving to is worse than not offering), a complete profile, and " +
     "room under both request caps. Closes when the doors open: after that the " +
@@ -324,7 +326,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/checkin",
   tags: ["Mobile Events"],
   summary: "Check in to event",
-  description: "GPS-verified check-in. Must be within event's check-in radius. Max GPS accuracy: 150m.",
+  description: PARTICIPATION_GATE + "GPS-verified check-in. Must be within event's check-in radius. Max GPS accuracy: 150m.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -409,6 +411,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "RSVP to event",
   description:
+    PARTICIPATION_GATE +
     "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age; 404 for a draft " +
     "or a private event you are not on the list for (lib/event-access.ts).",
   security: bearerAuth,
@@ -471,6 +474,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Favorite event",
   description:
+    PARTICIPATION_GATE +
     "Same answers as RSVP: 403 `AGE_RESTRICTED` on an age-restricted event for an under-age or " +
     "unknown age; 404 for a draft or a private event you are not on the list for.",
   security: bearerAuth,
