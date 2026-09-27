@@ -533,12 +533,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
     const displayName = updatedMembership?.anonymous_name || "Someone"
 
+    /*
+     * Whoever is in a block relationship with the arriver hears nothing of the
+     * arrival: not the push below, and not the live roster event, which reached
+     * them while the push and the REST roster did not (SCRUM-338).
+     */
+    const blockedIds = await blockCounterparties(authUser.userId)
+
     // Emit real-time check-in event (anonymous)
     emitEventCheckIn(
       eventId,
       authUser.userId,
       displayName,
-      undefined
+      undefined,
+      blockedIds
     )
 
     /*
@@ -549,17 +557,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * unwelcome notification the product could send, and the reason "block" has
      * to mean more than "cannot DM me".
      */
-    blockCounterparties(authUser.userId)
-      .then((blockedIds) =>
-        db.event_check_ins.findMany({
-          where: {
-            event_id: eventId,
-            status: "checked_in",
-            user_id: { not: authUser.userId, ...(blockedIds.length ? { notIn: blockedIds } : {}) },
-          },
-          select: { user_id: true },
-        })
-      )
+    db.event_check_ins
+      .findMany({
+        where: {
+          event_id: eventId,
+          status: "checked_in",
+          user_id: { not: authUser.userId, ...(blockedIds.length ? { notIn: blockedIds } : {}) },
+        },
+        select: { user_id: true },
+      })
       .then((checkIns) => {
         const userIds = checkIns.map((c) => c.user_id)
         if (userIds.length > 0) {
