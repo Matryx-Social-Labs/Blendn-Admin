@@ -74,7 +74,9 @@ client performs after a reconnect.
 
 `chat:startTyping`/`chat:stopTyping` are silently dropped for members who are
 `muted` or `banned`, so a member banned mid-session stops broadcasting typing
-state without being disconnected.
+state without being disconnected. They also never reach anyone the typist has
+blocked or been blocked by. That is the same exclusion `chat:message` applies
+(SCRUM-338).
 
 ## Server → Client Events
 
