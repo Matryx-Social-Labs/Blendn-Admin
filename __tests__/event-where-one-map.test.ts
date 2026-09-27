@@ -54,6 +54,15 @@ describe("the map's supporting parts", () => {
     expect(pick).toMatch(/setSearching\(false\)/)
   })
 
+  it("the map brings its own stylesheet (SCRUM-344)", () => {
+    // It borrowed LocationPicker's runtime <link>; with that picker gone from
+    // the event form, and never on the venue pages, tiles stacked unstyled and
+    // the circle drew 3,000 px below the map. e2e/venue-pin.spec.ts checks the
+    // marker is inside the map's box.
+    const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
+    expect(editor).toMatch(/^import "leaflet\/dist\/leaflet\.css"$/m)
+  })
+
   it("a fence replaced from outside ends tracing, so a venue's outline does not take clicks as corners", () => {
     const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
     expect(editor).toMatch(/if \(fence\.type !== prevType\) \{\s*setPrevType\(fence\.type\)\s*if \(fence\.type !== "polygon"\) setDrawing\(false\)/)
