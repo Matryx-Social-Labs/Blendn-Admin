@@ -42,21 +42,26 @@ async function newEventAtToit(page: Page) {
   await expect(page.locator('[data-area-source="circle"]')).toBeVisible({ timeout: 15_000 })
 }
 
-async function saveDraft(page: Page, title: string): Promise<string> {
+async function saveDraft(page: Page, title: string, { twice = false } = {}): Promise<string> {
   await page.getByLabel("Title").fill(title)
   await page.getByLabel("Description").fill("Saved by e2e/where-new-place-listed.spec.ts.")
   await page.getByLabel("Starts").fill("2030-11-10T19:00")
   await page.getByLabel("Ends").fill("2030-11-10T22:00")
-  await page.getByRole("button", { name: "Save draft" }).click()
+  const save = page.getByRole("button", { name: "Save draft" })
+  if (twice) await save.dblclick()
+  else await save.click()
   await expect(page).toHaveURL(/\/dashboard\/events\/[0-9a-f-]{36}$/, { timeout: 30_000 })
   return new URL(page.url()).pathname.split("/").pop()!
 }
 
 test("a picked place is listed when its event saves; the next event there uses it", async ({ page }) => {
-  // First event: nothing listed there yet, so the place will be.
+  const since = new Date()
+  // First event: nothing listed there yet, so the place will be. Saved with a
+  // double click — one venue and one event, not two (React review).
   await newEventAtToit(page)
   await expect(page.getByText("Saved as a venue when you save the event")).toBeVisible()
-  const first = await saveDraft(page, "e2e new place listed (SCRUM-353c)")
+  const first = await saveDraft(page, "e2e new place listed (SCRUM-353c)", { twice: true })
+  expect(await db.events.count({ where: { title: "e2e new place listed (SCRUM-353c)", created_at: { gte: since } } })).toBe(1)
 
   const linked = await db.events.findUniqueOrThrow({ where: { id: first }, select: { venue_id: true, venue_link_status: true } })
   expect(linked.venue_link_status).toBe("auto_linked")
@@ -87,4 +92,22 @@ test("a picked place is listed when its event saves; the next event there uses i
   const reused = await db.events.findUniqueOrThrow({ where: { id: second }, select: { venue_id: true } })
   expect(reused.venue_id).toBe(linked.venue_id)
   expect(await db.venues.count({ where: { name: "Toit", deleted_at: null, latitude: { gte: TOIT.lat - 0.001, lte: TOIT.lat + 0.001 } } })).toBe(1)
+})
+
+test("a listed venue with no outline of its own says so when used", async ({ page }) => {
+  // Most venues listed before SCRUM-352 have no area: "Use it" must not keep
+  // citing the place it replaced (React review).
+  const near = { name: "Toit", latitude: { gte: TOIT.lat - 0.001, lte: TOIT.lat + 0.001 } }
+  await db.events.updateMany({ where: { venue: near }, data: { venue_id: null, venue_link_status: null } })
+  await db.venues.deleteMany({ where: near })
+  await db.venues.create({ data: { name: "Toit", latitude: TOIT.lat, longitude: TOIT.lng, venue_type: "pub_bar" } })
+
+  await newEventAtToit(page)
+  const already = page.locator("[data-listed-nearby]")
+  await expect(already).toContainText("Toit is already listed")
+  await already.getByRole("button", { name: "Use it" }).click()
+  const cite = page.locator('[data-area-source="venue-pin"]')
+  await expect(cite).toBeVisible({ timeout: 15_000 })
+  await expect(cite).toContainText("The venue has no outline yet")
+  await expect(page.locator('[data-area-source="circle"]')).toHaveCount(0)
 })

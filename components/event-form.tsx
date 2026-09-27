@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useFieldArray, useForm, useWatch } from "react-hook-form"
 import { format } from "date-fns"
@@ -227,12 +227,17 @@ export function EventForm({
     void form.handleSubmit(submit)()
   }
   const [listingVenue, setListingVenue] = useState(false)
+  // The rail disables on the state above one render late; this refuses a
+  // second click in between, which would list the place twice (React review).
+  const submitting = useRef(false)
   /*
    * A place picked from the map is listed before the event saves, so the event
    * links to it (SCRUM-353c). Its id goes back into the form: a retry after a
    * refused event save links that venue rather than adding it twice.
    */
   const submit = async (data: EventFormValues) => {
+    if (submitting.current) return
+    submitting.current = true
     setListingVenue(true)
     try {
       const venueId = await saveAsVenue(data)
@@ -243,6 +248,7 @@ export function EventForm({
       }
       await onSubmit(venueId ? { ...data, venue_id: venueId, venue_link_status: "auto_linked", new_venue: null } : data)
     } finally {
+      submitting.current = false
       setListingVenue(false)
     }
   }

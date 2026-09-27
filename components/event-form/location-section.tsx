@@ -57,9 +57,12 @@ export function LocationSection({
   const [areaSource, setAreaSource] = useState<AreaSource | null>(null)
   /** Only the newest building lookup may draw; a later pick or a drawing wins. */
   const footprintSeq = useRef(0)
+  /** Only the newest "is it listed?" answer, or "Use it" lookup, may apply. */
+  const nearbySeq = useRef(0)
   // And none after the section has gone: a late answer is ignored.
   useEffect(() => () => {
     footprintSeq.current++
+    nearbySeq.current++
   }, [])
   const geofence = (form.watch("geofence") as Geofence | null) ?? null
   /** "Adjust area" is open — only then does the shape take drags (SCRUM-353: adjust only if wrong). */
@@ -176,7 +179,6 @@ export function LocationSection({
   const venueId = form.watch("venue_id")
   /** A listed venue where a new place was picked: "use it", before a second one is added (SCRUM-353c). */
   const [listedNearby, setListedNearby] = useState<NearbyVenue | null>(null)
-  const nearbySeq = useRef(0)
   const newVenue = form.watch("new_venue")
   /** A linked venue that could not be loaded: its buffer is unknown, so the default stands in. */
   const [unloadedVenueId, setUnloadedVenueId] = useState<string | null>(null)
@@ -262,6 +264,7 @@ export function LocationSection({
       )
       setFence(fence)
       setMovedKm(lostDrawing(areaSource) ? moved : null)
+      setAreaSource("venue-pin")
     }
   }
 
@@ -314,9 +317,17 @@ export function LocationSection({
 
   /** "Use it": the listed venue, with its own area and buffer. */
   function takeListed(listed: NearbyVenue) {
+    // A pick made while this is in flight wins (React review).
+    const asked = ++nearbySeq.current
     venueById(listed.id)
-      .then((v) => (v ? inherit(v) : setListedNearby(null)))
-      .catch(() => setListedNearby(null))
+      .then((v) => {
+        if (asked !== nearbySeq.current) return
+        if (v) inherit(v)
+        else setListedNearby(null)
+      })
+      .catch(() => {
+        if (asked === nearbySeq.current) setListedNearby(null)
+      })
   }
 
   /** Not the same place after all: listed as its own venue on save. */
@@ -464,7 +475,7 @@ export function LocationSection({
                       </span>
                     </p>
                   ) : newVenue && !venueId ? (
-                    <p className="text-[0.8125rem] text-muted-foreground">
+                    <p role="status" className="text-[0.8125rem] text-muted-foreground">
                       Saved as a venue when you save the event — the next organiser picks it instead of drawing it.
                     </p>
                   ) : null}
@@ -513,7 +524,7 @@ function DerivedLine({ form }: { form: UseFormReturn<EventFormValues> }) {
   )
 }
 
-type AreaSource = "venue" | "osm-area" | "building" | "circle" | "drawn"
+type AreaSource = "venue" | "venue-pin" | "osm-area" | "building" | "circle" | "drawn"
 type BufferWhose = "venue" | "default" | "custom"
 
 /**
@@ -538,13 +549,14 @@ function AreaSourceLine({ source, fence, whose }: { source: AreaSource | null; f
   const buffer = `+${fence.buffer} m, ${{ venue: "the venue's buffer", default: "the default buffer", custom: "custom for this event" }[whose]}`
   const said: Record<AreaSource | "saved", string> = {
     venue: "Area from the venue",
+    "venue-pin": "The venue has no outline yet",
     "osm-area": "Outline from OpenStreetMap",
     building: "Building outline found nearby",
     circle: "No outline in OpenStreetMap",
     drawn: "Drawn on the map",
     saved: "The event's saved area",
   }
-  const warn = source === "circle"
+  const warn = source === "circle" || source === "venue-pin"
   return (
     <p className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]" data-area-source={source ?? "saved"}>
       <span className={warn ? "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" : "size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-primary"} aria-hidden />
