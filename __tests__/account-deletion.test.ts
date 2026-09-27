@@ -29,6 +29,9 @@ const mockDb = {
   push_tokens: { deleteMany: jest.fn() },
   photo_checks: { deleteMany: jest.fn() },
   city_demand: { deleteMany: jest.fn() },
+  friendships: { deleteMany: jest.fn() },
+  friend_requests: { deleteMany: jest.fn() },
+  friend_invites: { deleteMany: jest.fn() },
   product_events: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
@@ -123,6 +126,14 @@ describe("deleting an account scrubs the matching inputs", () => {
     // well; asserted here so the deletion path stays a readable list of
     // everything it removes rather than a set of constraints to go and check.
     expect(mockDb.city_demand.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // Off every friends list, every request gone, and the link stops opening.
+    expect(mockDb.friendships.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ user1_id: USER }, { user2_id: USER }] },
+    })
+    expect(mockDb.friend_requests.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ sender_id: USER }, { recipient_id: USER }] },
+    })
+    expect(mockDb.friend_invites.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
     /*
      * DELETED, not scrubbed. A scrubbed row cannot be counted as a distinct
      * person, so nulling `user_id` would keep a record of when somebody was
@@ -219,6 +230,7 @@ describe("no field on the profile survives deletion unnoticed", () => {
     show_online: "a setting, not an attribute of the person",
     read_receipts: "a setting, not an attribute of the person",
     share_location: "a setting, not an attribute of the person",
+    friends_see_me_in_rooms: "a setting, not an attribute of the person — and the friendships it governs are deleted",
   }
 
   function profileFields(): string[] {

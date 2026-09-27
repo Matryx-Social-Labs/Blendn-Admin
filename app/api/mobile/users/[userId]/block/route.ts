@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { closeConversation, conversationPair } from "@/lib/conversations"
+import { severFriendship } from "@/lib/friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -93,6 +94,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         },
         data: { status: "blocked" },
       })
+
+      /*
+       * And the friendship, with any friend request either way. A block that
+       * left it standing would keep the blocked person on the blocker's
+       * friends list, one tap from a DM. Not restored by unblocking: being
+       * friends again is a new yes from both people.
+       */
+      await severFriendship(authUser.userId, targetId, tx)
 
       /*
        * Close the conversation, if there is one.

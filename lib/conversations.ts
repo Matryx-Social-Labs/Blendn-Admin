@@ -61,6 +61,12 @@ export async function openConversation(
      * opener on two people who agreed to share a car.
      */
     boardRequestId?: string
+    /**
+     * Opened between friends from the friends list. Recorded so the DM does
+     * not count as "in a conversation" for room identity — see
+     * `private_conversations.origin_friendship`.
+     */
+    friendship?: boolean
   }
 ) {
   const [user1_id, user2_id] = conversationPair(a, b)
@@ -91,6 +97,7 @@ export async function openConversation(
       user2_id,
       origin_event_id: ctx?.eventId ?? null,
       origin_board_request_id: ctx?.boardRequestId ?? null,
+      origin_friendship: ctx?.friendship ?? false,
       user1_pseudonym: ctx?.pseudonyms?.[user1_id] ?? null,
       user2_pseudonym: ctx?.pseudonyms?.[user2_id] ?? null,
       // Someone already public in the room has nothing left to reveal to a

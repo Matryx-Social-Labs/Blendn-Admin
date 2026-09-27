@@ -240,7 +240,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos,
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
-      push_enabled, show_online, read_receipts, share_location,
+      push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
     } = parsed.data
     const normalizedLocation = await normalizeLocationToCity(location)
 
@@ -575,6 +575,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(show_online !== undefined && { show_online }),
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),
+        ...(friends_see_me_in_rooms !== undefined && { friends_see_me_in_rooms }),
       },
       update: {
         ...(name !== undefined && { name }),
@@ -629,6 +630,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(show_online !== undefined && { show_online }),
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),
+        ...(friends_see_me_in_rooms !== undefined && { friends_see_me_in_rooms }),
         updated_at: new Date(),
       },
     })

@@ -42,6 +42,9 @@ import { db } from "@/lib/db"
  * - **They chose to be public in a room you were in.** `event_check_ins.revealed`
  *   is someone opting out of the pseudonym for that event, so it would be
  *   strange to keep hiding them from the people who were there.
+ * - **You are friends and they let friends recognise them in rooms**
+ *   (`profiles.friends_see_me_in_rooms`, default off). Friendship alone is not
+ *   a branch, and neither is a DM opened between friends — see `lib/friends.ts`.
  *
  * Co-presence alone is deliberately *not* enough. Sharing a room is what lets
  * you send a request; it is not consent to be identified.
@@ -54,9 +57,9 @@ import { db } from "@/lib/db"
  *
  * ## Why the plural one is the real one
  *
- * `maySeeIdentity` runs five queries. Every surface that resolves identity is a
+ * `maySeeIdentity` runs six queries. Every surface that resolves identity is a
  * **list** — the roster, the participants list, the match deck, the blocked
- * list — so a singular gate invites `list.map(maySeeIdentity)`, which is five
+ * list — so a singular gate invites `list.map(maySeeIdentity)`, which is six
  * queries per person and looks completely correct in review. That is exactly
  * what `GET /users/blocked` was doing.
  *
@@ -65,7 +68,7 @@ import { db } from "@/lib/db"
  * module exists to fix, and it would arrive here first: the singular is the one
  * everybody reaches for, so it is the one that would drift.
  *
- * Five queries regardless of how many people are asked about. The mutual-like
+ * Six queries regardless of how many people are asked about. The mutual-like
  * check costs two, because "we liked each other at the same event" cannot be
  * expressed as one Prisma query over a *set* of targets — the inner filter
  * would have to reference the outer row's `liked_id`. Both directions are
@@ -83,7 +86,7 @@ export async function maySeeIdentityFor(
   if (targetIds.includes(viewerId)) visible.add(viewerId)
   if (others.length === 0) return visible
 
-  const [sent, received, conversations, revealed, blocks] = await Promise.all([
+  const [sent, received, conversations, revealed, blocks, friendsOptedIn] = await Promise.all([
     db.event_likes.findMany({
       where: { liker_id: viewerId, liked_id: { in: others } },
       select: { event_id: true, liked_id: true },
@@ -105,7 +108,7 @@ export async function maySeeIdentityFor(
           { user2_id: viewerId, user1_id: { in: others } },
         ],
       },
-      select: { user1_id: true, user2_id: true, closed_at: true },
+      select: { user1_id: true, user2_id: true, closed_at: true, origin_friendship: true },
     }),
 
     /*
@@ -139,6 +142,25 @@ export async function maySeeIdentityFor(
       },
       select: { blocker_id: true, blocked_id: true },
     }),
+
+    /*
+     * Friends who chose to be recognisable to their friends in a room.
+     *
+     * Only those: being friends is not, by itself, a way to see who somebody
+     * is here. Every caller of this function is a room surface or answers for
+     * one, and somebody at a singles night may not want the people they know
+     * to learn which card is theirs. `friends_see_me_in_rooms` is theirs to
+     * turn on, and it defaults off.
+     */
+    db.friendships.findMany({
+      where: {
+        OR: [
+          { user1_id: viewerId, user2_id: { in: others }, user2: { profile: { friends_see_me_in_rooms: true } } },
+          { user2_id: viewerId, user1_id: { in: others }, user1: { profile: { friends_see_me_in_rooms: true } } },
+        ],
+      },
+      select: { user1_id: true, user2_id: true },
+    }),
   ])
 
   const sentAt = new Set(sent.map((r) => `${r.event_id}:${r.liked_id}`))
@@ -152,8 +174,19 @@ export async function maySeeIdentityFor(
   const closed = new Set<string>()
   for (const c of conversations) {
     const other = c.user1_id === viewerId ? c.user2_id : c.user1_id
-    ;(c.closed_at === null ? open : closed).add(other)
+    if (c.closed_at !== null) closed.add(other)
+    /*
+     * A DM two friends opened from the friends list is not "in a
+     * conversation" for this purpose. If it were, the first message between
+     * friends would make them recognisable to each other in every room after
+     * — undoing `friends_see_me_in_rooms` for anyone who ever said hello.
+     * Closed still counts as closed above: leaving beats everything.
+     */
+    else if (!c.origin_friendship) open.add(other)
   }
+  const friendVisible = new Set(
+    friendsOptedIn.map((f) => (f.user1_id === viewerId ? f.user2_id : f.user1_id))
+  )
 
   const revealedTo = new Set(revealed.map((r) => r.user_id))
   const blocked = new Set(
@@ -174,7 +207,7 @@ export async function maySeeIdentityFor(
    */
   for (const id of others) {
     if (blocked.has(id) || closed.has(id)) continue
-    if (mutual.has(id) || open.has(id) || revealedTo.has(id)) visible.add(id)
+    if (mutual.has(id) || open.has(id) || revealedTo.has(id) || friendVisible.has(id)) visible.add(id)
   }
   return visible
 }
@@ -183,7 +216,7 @@ export async function maySeeIdentity(viewerId: string, targetId: string): Promis
   /*
    * A wrapper, deliberately. The rule lives in `maySeeIdentityFor` and this
    * asks it about one person, so the two can never answer differently — which
-   * they would, eventually, if both held a copy of five branches whose ordering
+   * they would, eventually, if both held a copy of six branches whose ordering
    * and overrides are the whole point.
    */
   return (await maySeeIdentityFor(viewerId, [targetId])).has(targetId)

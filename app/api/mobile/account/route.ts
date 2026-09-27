@@ -158,6 +158,17 @@ export async function DELETE(request: NextRequest) {
       // everything it removes rather than relying on a constraint to be read.
       db.city_demand.deleteMany({ where: { user_id: authUser.userId } }),
       /*
+       * Friends, requests either way, and the invite link. Nothing cascades
+       * (the `User` row is kept), and a deleted account left on somebody's
+       * friends list — or a link that still opened to its husk — would be a
+       * person who asked to be erased and was not.
+       */
+      db.friendships.deleteMany({ where: { OR: [{ user1_id: authUser.userId }, { user2_id: authUser.userId }] } }),
+      db.friend_requests.deleteMany({
+        where: { OR: [{ sender_id: authUser.userId }, { recipient_id: authUser.userId }] },
+      }),
+      db.friend_invites.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
        * DELETED, not scrubbed, and the consequence is stated because it is
        * visible: every historical "active this week" figure drops by the days
        * this person contributed.
