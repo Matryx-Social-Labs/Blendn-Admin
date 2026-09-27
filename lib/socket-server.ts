@@ -9,6 +9,7 @@ import { blockCounterparties } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
+import { hereCountFor } from "./attendee-counts"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -65,6 +66,12 @@ export interface ServerToClientEvents {
     eventId: string
     userId: string
     checkInTime: string
+    /**
+     * Distinct people inside right now (`hereCountFor`) — goes down on a
+     * checkout. Not `checkInCount`, which is "ever attended".
+     * Absent only when the count query failed; keep the last one you had.
+     */
+    hereCount?: number
   }) => void
   /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. */
   "event:room:checkin": (data: {
@@ -73,11 +80,31 @@ export interface ServerToClientEvents {
     userName: string
     userImage?: string
     checkInTime: string
+    /** As on `event:checkin`. */
+    hereCount?: number
   }) => void
   "event:checkout": (data: {
     eventId: string
     userId: string
     checkOutTime: string
+    /** As on `event:checkin`. */
+    hereCount?: number
+  }) => void
+  /**
+   * A mutual like, to each side's `user:{id}` room. `name` is the other person
+   * as this recipient sees them — pseudonym unless they revealed. No photo.
+   */
+  "room:match": (data: {
+    eventId: string
+    otherUserId: string
+    conversationId: string
+    name: string
+  }) => void
+  /** Somebody in the room waved. Ephemeral; nothing is stored. */
+  "room:wave": (data: {
+    eventId: string
+    fromUserId: string
+    fromName: string
   }) => void
   "event:interestUpdate": (data: {
     eventId: string
@@ -853,6 +880,40 @@ export function initSocketServer(httpServer: HttpServer): Server {
 }
 
 /**
+ * Look up the Room's headline number, then send.
+ *
+ * Inside the emitter rather than at each call site because there are three
+ * callers of the checkout half alone — the manual route, check-in's "you
+ * cannot be in two rooms" branch, and the presence sweeper, all through
+ * `performCheckout` — and `lib/checkout.ts` already explains how three copies
+ * of one idea drift. Here, no caller can forget it.
+ *
+ * Never throws and never rejects. An emitter is called after the write has
+ * committed; a failed count must not become a 500 on a check-in that
+ * happened, nor an unhandled rejection that takes the process down. If the
+ * count fails the event still goes out, WITHOUT `hereCount` — the fact that
+ * somebody arrived or left matters more than the number, and a client that
+ * keeps its last number is right, where one handed a made-up 0 is not.
+ */
+function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void): void {
+  hereCountFor(eventId)
+    .catch((error: unknown) => {
+      logger.warn("hereCount lookup failed; emitting without it", {
+        eventId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return undefined
+    })
+    .then(send)
+    .catch((error: unknown) => {
+      logger.error("Room emit failed", {
+        eventId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+}
+
+/**
  * Emit an event check-in update to all users in the event room
  */
 export function emitEventCheckIn(
@@ -868,34 +929,41 @@ export function emitEventCheckIn(
 
   const checkInTime = new Date().toISOString()
 
-  /*
-   * Two rooms, because two audiences want different things.
-   *
-   * `event:{id}` is joinable by anyone who opened the event, and it used to
-   * carry this whole payload — so `{ real userId, pseudonym }` went to every
-   * stranger watching. It gets the fact that a check-in happened, which is all
-   * the live counter ever needed, and `userId` so a client can recognise its
-   * own check-in.
-   *
-   * The name goes only to `event:room:{id}`, which requires a check-in — the
-   * same gate `GET /events/:id/checkins` applies when it answers "Check in to
-   * see who else is here".
-   */
-  io.to(`event:${eventId}`).emit("event:checkin", {
-    eventId,
-    userId,
-    checkInTime,
-  })
-
-  io.to(`event:room:${eventId}`)
-    .except(excludeUserIds.map((id) => `user:${id}`))
-    .emit("event:room:checkin", {
+  sendWithHereCount(eventId, (hereCount) => {
+    /*
+     * Two rooms, because two audiences want different things.
+     *
+     * `event:{id}` is joinable by anyone who opened the event, and it used to
+     * carry this whole payload — so `{ real userId, pseudonym }` went to every
+     * stranger watching. It gets the fact that a check-in happened, which is all
+     * the live counter ever needed, and `userId` so a client can recognise its
+     * own check-in.
+     *
+     * The name goes only to `event:room:{id}`, which requires a check-in — the
+     * same gate `GET /events/:id/checkins` applies when it answers "Check in to
+     * see who else is here".
+     *
+     * `hereCount` goes to both: a bare headcount of the room names nobody, and
+     * `room-preview` serves the same number to anyone who can open the event.
+     */
+    io.to(`event:${eventId}`).emit("event:checkin", {
       eventId,
       userId,
-      userName,
-      userImage,
       checkInTime,
+      hereCount,
     })
+
+    io.to(`event:room:${eventId}`)
+      .except(excludeUserIds.map((id) => `user:${id}`))
+      .emit("event:room:checkin", {
+        eventId,
+        userId,
+        userName,
+        userImage,
+        checkInTime,
+        hereCount,
+      })
+  })
 }
 
 /**
@@ -905,11 +973,64 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
   const io = currentIo()
   if (!io) return
 
-  io.to(`event:${eventId}`).emit("event:checkout", {
-    eventId,
-    userId,
-    checkOutTime: new Date().toISOString(),
+  const checkOutTime = new Date().toISOString()
+  sendWithHereCount(eventId, (hereCount) => {
+    io.to(`event:${eventId}`).emit("event:checkout", {
+      eventId,
+      userId,
+      checkOutTime,
+      hereCount,
+    })
   })
+}
+
+/**
+ * A mutual like, told to both people while they are still in the room.
+ *
+ * `POST /matches/likes` answers the person who tapped; the earlier liker gets a
+ * push, which says nothing (a lock screen is not an authenticated surface —
+ * see `notifyMatch`). This is the in-app half: whoever has the Room open sees
+ * the match land without polling.
+ *
+ * Each side is sent the OTHER person as that person appears to them, resolved
+ * by the caller through `displayNameInConversation` — a pseudonym unless they
+ * revealed. Never a photo: nothing on this payload is something the recipient
+ * has not already earned in the conversation it points at.
+ *
+ * `user:{id}` rooms, so it crosses instances through the Redis adapter.
+ */
+export function emitRoomMatch(match: {
+  eventId: string
+  conversationId: string
+  /** Each participant, with the name the OTHER one sees them by. */
+  a: { userId: string; name: string }
+  b: { userId: string; name: string }
+}): void {
+  const io = currentIo()
+  if (!io) return
+  const { eventId, conversationId, a, b } = match
+  io.to(`user:${a.userId}`).emit("room:match", { eventId, otherUserId: b.userId, conversationId, name: b.name })
+  io.to(`user:${b.userId}`).emit("room:match", { eventId, otherUserId: a.userId, conversationId, name: a.name })
+}
+
+/**
+ * A wave: "I see you" across the room, with nothing stored.
+ *
+ * Ephemeral on purpose. It is not a message and not a like — it opens nothing
+ * and leaves no row, so there is nothing to moderate, retain or delete. The
+ * route has already checked both are in the room, no block either way, and the
+ * pair's ten-minute window; this only delivers.
+ *
+ * `fromName` is resolved by the route with the roster's rule: the sender's real
+ * name only if they revealed in this room, otherwise their pseudonym.
+ */
+export function emitRoomWave(
+  toUserId: string,
+  wave: { eventId: string; fromUserId: string; fromName: string }
+): void {
+  const io = currentIo()
+  if (!io) return
+  io.to(`user:${toUserId}`).emit("room:wave", wave)
 }
 
 /**

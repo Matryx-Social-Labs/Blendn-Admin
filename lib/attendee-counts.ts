@@ -59,6 +59,39 @@ export async function distinctAttendeeCounts(
 }
 
 /**
+ * The Room's headline number: how many people are inside RIGHT NOW.
+ *
+ * Deliberately NOT `distinctAttendeeCounts`. That is "attended" — it keeps
+ * `checked_out` so an event's headline stops falling as the night goes on, and
+ * `GET /events/:id` still serves it as `checkInCount`. The Room is the other
+ * question: who is here now, so a checkout has to make this go down.
+ *
+ * `checked_in` only, distinct people (a multi-day run can hold more than one
+ * live row per person), attendees only (staff are working, as everywhere
+ * else), and no suspended account — suspension bans the chat membership but
+ * leaves the check-in row, and a person who cannot enter the room should not
+ * be counted in it. "Show online status" off is still counted: the roster's
+ * rule is "in the room, counted, not listed" (SCRUM-141), and a count names
+ * nobody.
+ *
+ * Read by the socket emitters (`hereCount`) and `room-preview`, and nothing
+ * else.
+ */
+export async function hereCountFor(eventId: string): Promise<number> {
+  const rows = await db.event_check_ins.findMany({
+    where: {
+      event_id: eventId,
+      status: "checked_in",
+      kind: "attendee",
+      user: { suspended_at: null },
+    },
+    distinct: ["user_id"],
+    select: { user_id: true },
+  })
+  return rows.length
+}
+
+/**
  * How many distinct *events* this person has attended.
  *
  * `_count.event_check_ins` on a user counts attendance-days, so somebody whose

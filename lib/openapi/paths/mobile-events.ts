@@ -25,6 +25,9 @@ import {
   AttendeeListResponseSchema,
   LikeRequestSchema,
   LikeResponseSchema,
+  RoomPreviewResponseSchema,
+  WaveRequestSchema,
+  WaveResponseSchema,
   MatchListResponseSchema,
   PeerRatingRequestSchema,
   RatablePeersResponseSchema,
@@ -571,6 +574,42 @@ registry.registerPath({
   },
   responses: {
     200: { description: "Like recorded", content: { "application/json": { schema: wrap(LikeResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+// GET /api/mobile/events/{eventId}/room-preview
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/room-preview",
+  tags: ["Mobile Events"],
+  summary: "The room from the door: how many are here, how many share your taste",
+  description:
+    "Anyone who can open the event (404 otherwise). `hereCount` is distinct people checked in right now (the socket's `hereCount`, not `checkInCount`). `tasteMatchCount` counts those inside now and visible to you who share at least one interest; `null` when `hereCount` < 3, because a small count identifies people.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string().uuid() }) },
+  responses: {
+    200: { description: "Preview", content: { "application/json": { schema: wrap(RoomPreviewResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+// POST /api/mobile/events/{eventId}/waves
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/waves",
+  tags: ["Mobile Events"],
+  summary: "Wave at someone in the room",
+  description:
+    "Ephemeral: emits `room:wave` to the recipient and stores nothing. Both people must be checked in now.\n\n" +
+    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, or a block either way; deliberately indistinguishable), `WAVE_TOO_SOON` (429, one per pair per 10 minutes, with `retryAfter`)",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    body: { content: { "application/json": { schema: WaveRequestSchema } } },
+  },
+  responses: {
+    200: { description: "Delivered to whoever has the app open", content: { "application/json": { schema: wrap(WaveResponseSchema) } } },
     ...standardErrors,
   },
 })

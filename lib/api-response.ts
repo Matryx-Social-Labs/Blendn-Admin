@@ -38,6 +38,14 @@ export const ErrorCode = {
   CHAT_CLOSED: "CHAT_CLOSED",
   NOT_CHECKED_IN: "NOT_CHECKED_IN",
   SPAM_BLOCKED: "SPAM_BLOCKED",
+  /**
+   * The person you waved at is not in the room — or is, and one of you has
+   * blocked the other. One code for both on purpose: a distinct answer for the
+   * block would be a way to find out who blocked you.
+   */
+  RECIPIENT_NOT_HERE: "RECIPIENT_NOT_HERE",
+  /** You waved at this person less than ten minutes ago. */
+  WAVE_TOO_SOON: "WAVE_TOO_SOON",
 } as const
 
 /**

@@ -426,6 +426,23 @@ export const LikeResponseSchema = z
   .object({ mutual: z.boolean(), conversationId: z.string().optional() })
   .openapi("LikeResponse")
 
+export const RoomPreviewResponseSchema = z
+  .object({
+    /** Distinct people checked in right now — the socket's `hereCount`. */
+    hereCount: z.number().int(),
+    /** Inside now and sharing ≥1 interest with you; null when hereCount < 3. */
+    tasteMatchCount: z.number().int().nullable(),
+  })
+  .openapi("RoomPreviewResponse")
+
+export const WaveRequestSchema = z
+  .object({ toUserId: z.string() })
+  .openapi("WaveRequest")
+
+export const WaveResponseSchema = z
+  .object({ sent: z.literal(true) })
+  .openapi("WaveResponse")
+
 export const MatchPreferencesSchema = z
   .object({
     intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).optional(),
@@ -503,6 +520,9 @@ const schemas = {
   MatchListResponse: MatchListResponseSchema,
   LikeRequest: LikeRequestSchema,
   LikeResponse: LikeResponseSchema,
+  RoomPreviewResponse: RoomPreviewResponseSchema,
+  WaveRequest: WaveRequestSchema,
+  WaveResponse: WaveResponseSchema,
   MatchPreferences: MatchPreferencesSchema,
   InterestedUsersResponse: InterestedUsersResponseSchema,
 }
