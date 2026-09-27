@@ -220,12 +220,12 @@ export const EventDetailSchema = z
     currentCapacity: z.number(),
     /**
      * Metres around latitude/longitude that hold the whole check-in area and its
-     * buffer — derived from the event's (else its venue's) geofence, not stored
+     * buffer — derived from the event's geofence (a copy of its venue's, taken on save), not stored
      * (SCRUM-350). The door judges the real area; this circle only contains it.
      */
     checkInRadius: z.number().openapi({
       description:
-        "Radius in metres around latitude/longitude that contains the whole check-in area (outline or circle) plus its buffer. Derived from the event's geofence, else its venue's. The server judges check-in against the real area; this circle only contains it.",
+        "Radius in metres around latitude/longitude that contains the whole check-in area (outline or circle) plus its buffer. Derived from the event's geofence, which is a copy of its venue's taken when the event was saved. The server judges check-in against the real area; this circle only contains it.",
     }),
     isFeatured: z.boolean(),
     isRecurring: z.boolean(),

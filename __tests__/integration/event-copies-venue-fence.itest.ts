@@ -4,6 +4,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { NextRequest } from "next/server"
+import { resolveFence } from "@/lib/geofence"
 import { createVenue, updateVenue } from "@/lib/venue-actions"
 import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 
@@ -168,3 +169,41 @@ describe("an event copies its venue's area — another organisation cannot move 
     expect((await fenceOf(id)).geofence).toMatchObject({ type: "circle", radius: 15 })
   })
 })
+
+describe("the door never reads a venue's area live (security re-check)", () => {
+  it("A gives its fence-less venue a first area after B linked an event — B's door does not move", async () => {
+    const a = await organiser("ecv-live-a")
+    const b = await organiser("ecv-live-b")
+    const aOrg = await db.organisation_members.findFirstOrThrow({ where: { user_id: a.id }, select: { org_id: true } })
+    // A venue row with no area, as older rows are — createVenue always gives one now.
+    const venue = await db.venues.create({
+      data: { name: testId("Fenceless"), latitude: c.lat, longitude: c.lng, created_by_org_id: aOrg.org_id },
+      select: { id: true },
+    })
+    venues.push(venue.id)
+
+    b.as()
+    const res = await createRoute.POST(
+      new NextRequest("http://localhost/api/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body({ venue_id: venue.id, check_in_radius: 40 })),
+      })
+    )
+    const { id } = (await res.json()) as { id: string }
+    events.push(id)
+    expect((await fenceOf(id)).geofence).toBeNull()
+
+    a.as()
+    await updateVenue(venue.id, { geofence: moved })
+
+    const row = await db.events.findUniqueOrThrow({
+      where: { id },
+      select: { geofence: true, latitude: true, longitude: true, check_in_radius: true, venue: { select: { geofence: true } } },
+    })
+    // The venue now has A's outline; B's event is still judged by its own pin and radius.
+    expect(row.venue?.geofence).toMatchObject({ type: "polygon" })
+    expect(resolveFence(row)).toMatchObject({ type: "circle", lat: c.lat, lng: c.lng })
+  })
+})
+

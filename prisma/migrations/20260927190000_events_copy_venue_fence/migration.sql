@@ -13,4 +13,5 @@ UPDATE "events" AS e
    AND (e."geofence" IS NULL OR e."geofence" = 'null'::jsonb)
    AND v."geofence" IS NOT NULL
    AND v."geofence" <> 'null'::jsonb
+   AND v."deleted_at" IS NULL
    AND e."deleted_at" IS NULL;
