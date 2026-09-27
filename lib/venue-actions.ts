@@ -32,7 +32,7 @@ function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }
     )
   }
 }
-import { defaultExtentMetres, venueTypeLabel } from "@/lib/venue-types"
+import { defaultExtentMetres, VENUE_TYPES, venueTypeLabel } from "@/lib/venue-types"
 import { Prisma, type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
@@ -208,6 +208,7 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
 
   const name = input.name.trim()
   if (name.length < 2) throw new Refusal("Give the venue a name.")
+  refuseUnknownVenueType(input.venueType)
   if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
     throw new Refusal("Place the venue on the map first.")
   }
@@ -342,10 +343,19 @@ async function venueForWrite(
   return { id: venue.id, name: venue.name, owner_org_id: venue.owner_org_id }
 }
 
+/**
+ * A server action's caller is any client, typed or not: a venue type outside
+ * the vocabulary is refused here rather than handed to Prisma to throw on.
+ */
+function refuseUnknownVenueType(type: venue_type | null | undefined): void {
+  if (type != null && !VENUE_TYPES.includes(type)) throw new Refusal("That is not a venue type this list knows.")
+}
+
 /** Edit a venue. Owners edit their own; admins edit any. */
 export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
   const user = await requireUser()
   await venueForWrite(id, user)
+  refuseUnknownVenueType(input.venueType)
 
   /*
    * Both or neither, checked before anything is written. Half a coordinate pair

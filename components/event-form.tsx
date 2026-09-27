@@ -82,6 +82,11 @@ export function EventForm({
       accessibility_info: [],
       start_time: "",
       end_time: "",
+      // Strings from the first render: undefined made these inputs switch from
+      // uncontrolled to controlled, and an empty one refused with "Invalid
+      // input: expected string, received undefined" instead of its own sentence.
+      title: "",
+      description: "",
       full_description: "",
       ...defaultValues,
     }),

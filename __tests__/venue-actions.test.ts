@@ -343,6 +343,24 @@ describe("restoring a venue", () => {
   })
 })
 
+describe("a venue type outside the vocabulary (security review, SCRUM-353c)", () => {
+  // A server action's caller is any client: the event form sends OSM's guess,
+  // and nothing stops a hand-made call from sending anything else.
+  it("is refused on create, before anything is written", async () => {
+    signIn("organizer")
+    await expect(
+      createVenue({ name: "Toit", venueType: "dungeon" as never, lat: LAT, lng: LNG, acknowledgedDuplicates: true })
+    ).rejects.toThrow(/not a venue type/i)
+    expect(mockDb.venues.create).not.toHaveBeenCalled()
+  })
+
+  it("is refused on edit", async () => {
+    signIn("app_admin")
+    await expect(updateVenue("venue_1", { venueType: "dungeon" as never })).rejects.toThrow(/not a venue type/i)
+    expect(mockDb.venues.update).not.toHaveBeenCalled()
+  })
+})
+
 describe("correcting the pin", () => {
   it("refuses half a coordinate pair", async () => {
     /*
