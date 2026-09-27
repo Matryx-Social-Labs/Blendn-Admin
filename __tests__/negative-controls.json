@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "dm-delivered-once.test.ts": {
+      "guards": "SCRUM-337: with a real socket.io server installed as the app's io, one DM reaches each socket exactly once — the recipient with the chat open (conversation + user rooms), the recipient on the chat list (user room only), and the sender with the chat open",
+      "mutation": "M1: in lib/socket-server.ts emitPrivateMessage, the single `io.to(conversation).to(user:recipient).emit(...)` split back into two emits, one per room.",
+      "observed": "M1: 1 of 1 failing — the open-chat socket received [\"m1\", \"m1\"] (one extra).",
+      "date": "2026-09-27"
+    },
     "address.test.ts": {
       "guards": "SCRUM-341: fillFromSearch replaces what the previous search filled into address and city and keeps only what the person typed, carrying lastFill forward in one pure step; the venue wizard's search() spreads it and drops a response a newer search superseded",
       "mutation": "M1: fillFromSearch `typed` reduced to `current[key] !== \"\"` (keep anything non-empty). M2: the wizard's `...fillFromSearch(d, found)` replaced by `address: d.address || found.address, city: d.city || found.city`. M3: `lastFill: found` → `lastFill: current.lastFill` (never advances). M4: `if (seq !== searchSeq.current) return` removed.",

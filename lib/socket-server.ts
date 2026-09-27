@@ -1122,14 +1122,14 @@ export function emitPrivateMessage(
   const io = currentIo()
   if (!io) return
 
-  // Emit to conversation room (for active viewers)
-  io.to(`conversation:${conversationId}`).emit("private:message", {
-    conversationId,
-    message,
-  })
-
-  // Also emit to recipient's personal room (for notification if not in conversation)
-  io.to(`user:${recipientId}`).emit("private:message", {
+  /*
+   * One emit to both rooms: the conversation (whoever has the chat open) and
+   * the recipient's own room (the chat list, when it is not open). socket.io
+   * unions the rooms and delivers once per socket. It was two emits, and a
+   * recipient with the chat open is in both rooms, so every message arrived
+   * twice and the chat list counted it twice (SCRUM-337).
+   */
+  io.to(`conversation:${conversationId}`).to(`user:${recipientId}`).emit("private:message", {
     conversationId,
     message,
   })
