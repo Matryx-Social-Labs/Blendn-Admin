@@ -88,17 +88,20 @@ test.describe("the venue picker and the pin agree", () => {
      *
      * Filling as soon as the map appeared hit a strict-mode violation: two
      * inputs with this placeholder existed at that moment, and one a few
-     * seconds later. `LocationSection` renders `VenuePicker` exactly once, so
+     * seconds later. `LocationSection` renders `WhereSearch` exactly once, so
      * the second is a hydration artefact rather than a duplicate in the tree —
      * transient, and gone by the time anything can interact with it. Asserting
      * the settled count says so, and fails if it ever becomes a real duplicate.
      */
-    const venueInput = page.getByPlaceholder("Venue name — pick a listed one, or just type it")
+    // One input for listed venues and places since SCRUM-353.
+    const venueInput = page.getByRole("combobox", { name: "Venue or address" })
     await expect(venueInput.first()).toBeVisible({ timeout: 30_000 })
     await expect(venueInput).toHaveCount(1, { timeout: 30_000 })
     await venueInput.fill(AWAY_FROM_DEFAULT.name)
 
-    const suggestion = page.getByRole("button", { name: new RegExp(AWAY_FROM_DEFAULT.name, "i") })
+    // The LISTED venue ("M. Chinnaswamy Stadium", with the dot) — not the
+    // geocoder's place of the same name, which the list also offers to add.
+    const suggestion = page.getByRole("option", { name: /^M\. Chinnaswamy Stadium/ })
     await expect(suggestion.first()).toBeVisible({ timeout: 15_000 })
     await suggestion.first().click()
 
