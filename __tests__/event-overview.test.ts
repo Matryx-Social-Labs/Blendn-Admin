@@ -31,6 +31,8 @@ const baseEvent = {
   venue_id: null,
   max_capacity: null as number | null,
   check_in_radius: 60,
+  geofence: null as unknown,
+  venue: null as { geofence: unknown } | null,
   cover_image_url: null,
   _count: { categories: 1, favorites: 3 },
 }
@@ -62,6 +64,28 @@ describe("getEventOverview — upcoming", () => {
     expect(o?.tiles.map((t) => t.label)).toEqual(["Capacity", "Checked in", "Room opens", "Check-in fence"])
     expect(o?.tiles[0].value).toBeNull()
     expect(o?.tiles[3].value).toBe("60 m")
+  })
+
+  it("the fence tile shows the radius that covers an outline, not the 60 m the row stored (SCRUM-350)", async () => {
+    // ~265 m square outline on the pin, +20 m buffer: the phone gets ~207 m.
+    const d = 0.0012
+    const outline = {
+      type: "polygon",
+      buffer: 20,
+      ring: [
+        [12.9 - d, 77.5 - d],
+        [12.9 - d, 77.5 + d],
+        [12.9 + d, 77.5 + d],
+        [12.9 + d, 77.5 - d],
+      ],
+    }
+    arrange({ event: { geofence: outline } })
+    const fromOwn = (await getEventOverview("e1"))?.tiles[3].value
+    expect(Number(fromOwn?.replace(" m", ""))).toBeGreaterThanOrEqual(206)
+
+    arrange({ event: { venue: { geofence: outline } } })
+    const fromVenue = (await getEventOverview("e1"))?.tiles[3].value
+    expect(fromVenue).toBe(fromOwn)
   })
 
   it("says fill when a capacity is set", async () => {

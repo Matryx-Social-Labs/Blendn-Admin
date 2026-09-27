@@ -21,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import {
   DEFAULT_ACCURACY_POLICY,
+  DEFAULT_BUFFER_M,
   GEOFENCE_LIMITS,
   fenceCentre,
   ringSelfIntersects,
@@ -148,7 +149,7 @@ export function GeofenceEditor({
         lat: fallbackCentre.lat,
         lng: fallbackCentre.lng,
         radius: 30,
-        buffer: 20,
+        buffer: DEFAULT_BUFFER_M,
       },
     [value, fallbackCentre.lat, fallbackCentre.lng]
   )

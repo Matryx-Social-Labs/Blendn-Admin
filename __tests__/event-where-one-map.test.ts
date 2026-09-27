@@ -31,6 +31,13 @@ describe("the event form's Where section", () => {
     expect(inherit).toMatch(/followPin\(/)
   })
 
+  it("keeps check_in_radius covering the area — outlines too, grown and shrunk with them (SCRUM-350)", () => {
+    // It was written for circles only, so the ~260 m stadium outline kept 100.
+    const setFence = src.slice(src.indexOf("function setFence("), src.indexOf("function moveTo("))
+    expect(setFence).toMatch(/phoneCheckInRadius\(\{ geofence: fence \}\)/)
+    expect(setFence).not.toMatch(/fence\?\.type === "circle"/)
+  })
+
   it("keeps the pin readable for e2e/venue-pin.spec.ts", () => {
     expect(src).toMatch(/data-lat=\{initialLat \?\? ""\} data-lng=\{initialLng \?\? ""\}/)
   })

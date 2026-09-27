@@ -148,7 +148,7 @@ export async function POST(req: Request) {
     // Bounded server-side. This route previously passed check_in_radius from
     // the request body straight into Prisma, so the only limit in the product
     // was a slider in a form — which is a suggestion, not a limit.
-    const location = validateLocationInput({ check_in_radius, geofence })
+    const location = validateLocationInput({ check_in_radius, geofence, latitude, longitude })
     if (!location.ok) {
       return NextResponse.json({ error: location.error }, { status: 400 })
     }

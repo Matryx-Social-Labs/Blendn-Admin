@@ -9,6 +9,7 @@ import { curatedDescription, curatedFence } from "@/lib/curation"
 import { sourceDomain } from "@/lib/curation-sources"
 import { db } from "@/lib/db"
 import { uniqueEventSlug } from "@/lib/event-slug"
+import { phoneCheckInRadius } from "@/lib/geofence"
 import { canPublish } from "@/lib/geofence-input"
 import { logger } from "@/lib/logger"
 import { syncOccurrences } from "@/lib/occurrences"
@@ -115,7 +116,9 @@ export async function curateEvent(
         latitude: v.latitude,
         longitude: v.longitude,
         geofence,
-        check_in_radius: geofence.radius,
+        // Covers the circle and its buffer (SCRUM-350) — the bare radius left
+        // the app's circle a buffer short of the door's.
+        check_in_radius: phoneCheckInRadius({ geofence, latitude: v.latitude, longitude: v.longitude }) ?? geofence.radius,
         /*
          * The curation marks. `curated_at` is what makes this claimable and is
          * the only thing separating it from a legacy row with no owner —

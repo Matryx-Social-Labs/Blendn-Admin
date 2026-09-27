@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { fenceVenueSelect, phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
 import { eventStateFor, publishBlockers, type EventState, type PublishBlocker } from "@/lib/event-phase"
@@ -44,6 +45,9 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
       venue_id: true,
       max_capacity: true,
       check_in_radius: true,
+      // The area the radius below is derived from — the event's own, else its venue's.
+      geofence: true,
+      venue: { select: fenceVenueSelect },
       cover_image_url: true,
       _count: { select: { categories: true, favorites: true } },
     },
@@ -168,8 +172,11 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
             },
             {
               label: "Check-in fence",
-              value: `${event.check_in_radius} m`,
-              hint: "around the pin",
+              // What the app is sent (SCRUM-350): the circle around the pin
+              // that holds the whole area and its buffer. The stored column of
+              // an older outline event can still say 60 or 100.
+              value: `${phoneCheckInRadius(event) ?? event.check_in_radius} m`,
+              hint: "around the pin, covering the whole area and its buffer",
             },
           ]
         : state === "live"

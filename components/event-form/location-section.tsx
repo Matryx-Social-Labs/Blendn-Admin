@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
-import { fenceCentre, followPin, samePlace, type Geofence } from "@/lib/geofence"
+import { fenceCentre, followPin, GEOFENCE_LIMITS, phoneCheckInRadius, samePlace, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
 import { AddressSearch } from "@/components/event-form/address-search"
 import { FormSection } from "@/components/event-form/form-section"
@@ -54,10 +54,18 @@ export function LocationSection({
   const [movedKm, setMovedKm] = useState<number | null>(null)
   const reverseSeq = useRef(0)
 
-  /** Keeps the legacy radius column in step: mobile builds in the wild still read check_in_radius. */
+  /**
+   * The app judges the area as a circle of `check_in_radius` around the pin, so
+   * it follows the area — outline or circle, grown and shrunk with it, buffer
+   * included — never a number of its own (SCRUM-350). Measured from the area's
+   * centre, which is where this section puts the pin. The server derives it
+   * again on save; this copy is what the readiness checks read. Capped at the
+   * schema's limit so a campus-sized outline cannot silently block the save.
+   */
   function setFence(fence: Geofence | null) {
     form.setValue("geofence", fence, { shouldDirty: true })
-    if (fence?.type === "circle") form.setValue("check_in_radius", Math.round(fence.radius + fence.buffer))
+    const covering = fence ? phoneCheckInRadius({ geofence: fence }) : null
+    if (covering != null) form.setValue("check_in_radius", Math.min(covering, GEOFENCE_LIMITS.MAX_RADIUS))
   }
 
   /**

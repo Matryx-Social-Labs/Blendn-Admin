@@ -412,6 +412,14 @@ export function fencesOverlap(a: Geofence, b: Geofence): boolean {
 /* Validation                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Metres beyond the drawn area that still count as inside, until someone
+ * changes it: the pavement, the queue, a GPS fix a little off. 15–25 m is the
+ * owner's range (2026-09-27); each attendee's own GPS allowance is added on
+ * top at the door, automatically (`evaluateCheckIn`).
+ */
+export const DEFAULT_BUFFER_M = 20
+
 export const GEOFENCE_LIMITS = {
   /** Beyond this an event stops being "here" in any useful sense. */
   MAX_RADIUS: 2000,
@@ -605,4 +613,35 @@ export function resolveFence(event: FenceSource): Geofence | null {
     event.longitude ?? null,
     event.check_in_radius ?? null
   )
+}
+
+/**
+ * The radius the app should judge this event's area by: the smallest circle
+ * around the event's pin that holds the whole area and its buffer.
+ *
+ * The app has only ever known a circle — `checkInRadius` metres around the
+ * pin, for its check-in button and for PresenceMonitor's "have they left?".
+ * `check_in_radius` was written for circles alone, so an outline kept whatever
+ * the form last had: the Chinnaswamy outline, ~260 m across, stored 60 and 100
+ * (staging, SCRUM-350), and a phone inside the stadium read as outside.
+ *
+ * Covering the area means the app can only be more lenient than the door,
+ * which judges the real shape — the direction PresenceMonitor is built to err.
+ * ponytail: a circle around a long, thin venue is far looser than the venue;
+ * sending the polygon itself is SCRUM-358.
+ */
+export function phoneCheckInRadius(event: FenceSource): number | null {
+  const stored = event.check_in_radius ?? null
+  const fence = resolveFence(event)
+  if (!fence) return stored
+  const pin =
+    event.latitude != null && event.longitude != null
+      ? { lat: event.latitude, lng: event.longitude }
+      : fenceCentre(fence)
+  if (!pin) return stored
+  const reach =
+    fence.type === "circle"
+      ? haversineDistanceMeters(pin.lat, pin.lng, fence.lat, fence.lng) + fence.radius
+      : Math.max(...fence.ring.map(([lat, lng]) => haversineDistanceMeters(pin.lat, pin.lng, lat, lng)))
+  return Math.ceil(reach + fence.buffer)
 }

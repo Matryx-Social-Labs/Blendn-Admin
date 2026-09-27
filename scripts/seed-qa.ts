@@ -1,6 +1,7 @@
 import { PrismaClient, type user_role, type connection_intent } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
+import { phoneCheckInRadius } from "../lib/geofence"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
@@ -613,7 +614,14 @@ async function main() {
          * absent key is how you say that on a create.
          */
         ...(venue?.geofence != null && { geofence: venue.geofence }),
-        check_in_radius: 60,
+        // Covers the venue's area and buffer (SCRUM-350). A flat 60 left the
+        // app judging the ~200 m Chinnaswamy outline by a 60 m circle.
+        check_in_radius:
+          phoneCheckInRadius({
+            geofence: venue?.geofence ?? null,
+            latitude: venue?.latitude ?? city.lat,
+            longitude: venue?.longitude ?? city.lng,
+          }) ?? 60,
         venue_id: venue?.id ?? null,
         venue_name: venue?.name ?? `${city.name} public space`,
         organizer_id: users.organiser,

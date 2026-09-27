@@ -1,4 +1,4 @@
-import { GEOFENCE_LIMITS, validateGeofence, type Geofence, type GeofenceError } from "./geofence"
+import { GEOFENCE_LIMITS, phoneCheckInRadius, validateGeofence, type Geofence, type GeofenceError } from "./geofence"
 
 /**
  * Server-side bounds for what an event may claim as its check-in area.
@@ -56,6 +56,16 @@ export function validateLocationInput(input: LocationInput): LocationResult {
         return { ok: false, error: GEOFENCE_MESSAGES[result.error], values }
       }
       values.geofence = result.fence
+      // Derived, never taken from the form: it has to cover the saved area,
+      // or the app judges an outline by a circle smaller than the venue
+      // (SCRUM-350). Past MAX_RADIUS is allowed — the area was bounded above.
+      values.check_in_radius =
+        phoneCheckInRadius({
+          geofence: result.fence,
+          // The pin the app's circle is measured from; absent, the area's centre.
+          latitude: typeof input.latitude === "number" ? input.latitude : null,
+          longitude: typeof input.longitude === "number" ? input.longitude : null,
+        }) ?? values.check_in_radius
     }
   }
 
