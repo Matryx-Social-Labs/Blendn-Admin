@@ -101,7 +101,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
 
 
   // --- Half-wired flows ------------------------------------------------------
-  ["expertiseFor", "nothing serves the expertise options for a chosen work field"],
 
   // --- Presence sessions: the folds, shipped ahead of their readers ---------
   //
