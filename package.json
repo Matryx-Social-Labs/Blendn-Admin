@@ -84,7 +84,6 @@
     "pg": "^8.23.0",
     "radix-ui": "^1.6.0",
     "react": "^19.3.0",
-    "react-day-picker": "^9.13.0",
     "react-dom": "^19.3.0",
     "react-hook-form": "^7.89.0",
     "recharts": "^3.10.1",
