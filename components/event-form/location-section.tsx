@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
-import { fenceCentre, followPin, OUTLINE_KEEP_WITHIN_M, type Geofence } from "@/lib/geofence"
+import { fenceCentre, followPin, samePlace, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
 import { AddressSearch } from "@/components/event-form/address-search"
 import { FormSection } from "@/components/event-form/form-section"
@@ -21,7 +21,6 @@ import { VenuePicker } from "@/components/event-form/venue-picker"
 import { venueById, type VenueOption } from "@/lib/venue-actions"
 import { validateGeofence } from "@/lib/geofence"
 import { extractAddress } from "@/lib/address"
-import { haversineDistanceMeters } from "@/lib/geo"
 
 export function LocationSection({
   form,
@@ -83,7 +82,9 @@ export function LocationSection({
    * dragged circle brings the address with it, the way dragging the old pin did.
    */
   function onFenceChange(fence: Geofence) {
-    const before = { lat: form.getValues("latitude"), lng: form.getValues("longitude") }
+    const lat = form.getValues("latitude")
+    const lng = form.getValues("longitude")
+    const before = lat == null || lng == null ? null : { lat, lng }
     setFence(fence)
     if (fence.type === "polygon") setMovedKm(null)
     // `fenceCentre` is null for a ring still being drawn: leave the pin alone
@@ -92,13 +93,7 @@ export function LocationSection({
     if (!centre) return
     form.setValue("latitude", centre.lat)
     form.setValue("longitude", centre.lng)
-    const moved =
-      before.lat == null || before.lng == null
-        ? Infinity
-        : haversineDistanceMeters(before.lat, before.lng, centre.lat, centre.lng)
-    // A dragged circle is a moved place. An outline within the distance
-    // `followPin` treats as the same place keeps the address that was typed.
-    if (moved < (fence.type === "circle" ? 10 : OUTLINE_KEEP_WITHIN_M)) return
+    if (samePlace(before, fence)) return
     const mine = ++reverseSeq.current
     fetch(`/api/geocode?lat=${centre.lat}&lon=${centre.lng}`, { headers: { "Accept-Language": "en" } })
       .then((res) => res.json())

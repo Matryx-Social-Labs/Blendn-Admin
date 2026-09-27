@@ -8,6 +8,7 @@ import {
   boundingCircle,
   fenceCentre,
   followPin,
+  samePlace,
   eventCentre,
   fencesOverlap,
   validateGeofence,
@@ -541,3 +542,39 @@ describe("followPin", () => {
     expect(circle).toEqual(before)
   })
 })
+
+describe("samePlace — whether the form's address still describes the area", () => {
+  const pin = { lat: 12.9772163, lng: 77.5991943 } // a Chinnaswamy search hit on Queen's Road
+  const square = (lat: number, lng: number, d: number) => ({
+    type: "polygon" as const,
+    buffer: 20,
+    ring: [
+      [lat - d, lng - d],
+      [lat - d, lng + d],
+      [lat + d, lng + d],
+      [lat + d, lng - d],
+    ] as [number, number][],
+  })
+
+  it("has no address to keep before there was a pin", () => {
+    expect(samePlace(null, { type: "circle", lat: pin.lat, lng: pin.lng, radius: 30, buffer: 20 })).toBe(false)
+  })
+
+  it("keeps it for a circle nudged a few metres, not for one dragged elsewhere", () => {
+    const circle = (dLat: number) => ({ type: "circle" as const, lat: pin.lat + dLat, lng: pin.lng, radius: 30, buffer: 20 })
+    expect(samePlace(pin, circle(0.00004))).toBe(true) // ~4 m
+    expect(samePlace(pin, circle(0.00045))).toBe(false) // ~50 m
+  })
+
+  it("keeps it for the stadium's own outline, whose centre is 183 m from the search point (staging, SCRUM-343)", () => {
+    // ~265 m square on the stadium; the pin is ~49 m south of its edge. Judged
+    // by how far the centre moved (183 m > 150) it read as a new place, and the
+    // address "Chinnaswamy Stadium, …" was replaced by a road.
+    expect(samePlace(pin, square(12.97886, 77.5995, 0.0012))).toBe(true)
+  })
+
+  it("does not keep it for an outline traced a kilometre away", () => {
+    expect(samePlace(pin, square(pin.lat + 0.009, pin.lng, 0.0003))).toBe(false)
+  })
+})
+

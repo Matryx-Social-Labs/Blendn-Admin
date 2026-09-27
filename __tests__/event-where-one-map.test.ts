@@ -39,9 +39,11 @@ describe("the event form's Where section", () => {
     expect(src).not.toMatch(/purple/i)
   })
 
-  it("rewrites the address for an outline moved to another place, not only a dragged circle", () => {
+  it("rewrites the address only when the area is another place — samePlace, for circles and outlines alike", () => {
+    // samePlace's rule is pinned in geofence.test.ts, including the stadium
+    // whose own outline read as a new place when judged by its centre.
     const onFence = src.slice(src.indexOf("function onFenceChange("), src.indexOf("function inherit("))
-    expect(onFence).toMatch(/moved < \(fence\.type === "circle" \? 10 : OUTLINE_KEEP_WITHIN_M\)/)
+    expect(onFence).toMatch(/if \(samePlace\(before, fence\)\) return\s*\n\s*const mine = \+\+reverseSeq\.current/)
     expect(onFence).not.toMatch(/fence\.type !== "circle"/)
   })
 })
