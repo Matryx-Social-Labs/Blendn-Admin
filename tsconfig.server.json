@@ -2,7 +2,15 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "CommonJS",
+    // TypeScript 6 deprecates node10 resolution ("Node"). The replacement,
+    // Node16, types this CommonJS build honestly — and then refuses
+    // `import ... from "jose"` / "@auth/prisma-adapter", which are ESM-only.
+    // They load today only because Node 22 can require() ESM. Moving off
+    // node10 means either an ESM server build or dynamic imports in
+    // lib/auth.ts and lib/mobile-auth.ts: a change to how the server loads,
+    // not a config edit. Silenced for 6.x; it must be done before TS 7.
     "moduleResolution": "Node",
+    "ignoreDeprecations": "6.0",
     "esModuleInterop": true,
     "noEmit": false,
     "outDir": "./dist",
