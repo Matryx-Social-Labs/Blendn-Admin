@@ -3,8 +3,10 @@ import { test, expect } from "@playwright/test"
 /**
  * Picking a venue moves the pin — K1.1, the two maps that disagreed.
  *
- * The Location section renders **two** Leaflet maps: `LocationPicker` (the pin)
- * and `GeofenceEditor` (the fence). Picking a venue writes `latitude`,
+ * Since SCRUM-343 the Location section renders **one** Leaflet map: the
+ * check-in area editor, with the address search on it, whose centre is the
+ * pin. It used to render two — `LocationPicker` (the pin) and `GeofenceEditor`
+ * (the fence) — and the history below is why this test exists. Picking a venue writes `latitude`,
  * `longitude` and a geofence onto the form, and the fence and the read-only
  * coordinates both moved — because both are watched. The pin did not, for two
  * independent reasons, either of which alone was enough:
@@ -68,8 +70,9 @@ test.describe("the venue picker and the pin agree", () => {
     await expect(suggestion.first()).toBeVisible({ timeout: 15_000 })
     await suggestion.first().click()
 
-    // The pin appears where the venue is.
-    await expect(marker).toHaveCount(1, { timeout: 15_000 })
+    // One map, and the area's markers (its centre is the pin) appear on it.
+    await expect(page.locator(".leaflet-container")).toHaveCount(1)
+    await expect(marker.first()).toBeVisible({ timeout: 15_000 })
 
     /*
      * And the map is actually centred there, not merely carrying a marker
