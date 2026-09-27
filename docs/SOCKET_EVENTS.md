@@ -76,7 +76,9 @@ client performs after a reconnect.
 `muted` or `banned`, so a member banned mid-session stops broadcasting typing
 state without being disconnected. They also never reach anyone the typist has
 blocked or been blocked by. That is the same exclusion `chat:message` applies
-(SCRUM-338).
+(SCRUM-338). The same goes for `event:room:checkin`, the roster's live "just
+arrived" event, which the push for that arrival and `GET …/participants`
+already left out.
 
 ## Server → Client Events
 

@@ -33,10 +33,10 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
-    "typing-honours-blocks.itest.ts": {
-      "guards": "SCRUM-338: with a real socket.io server and three clients in one room, a blocker's socket never receives the blocked person's chat:typing and the blocked person never receives the blocker's, while the third member receives both; with the block removed everyone hears everyone. socket-guards.test.ts pins the except() list as both directions of blocked_users",
-      "mutation": "In lib/socket-server.ts emitChatTyping, replace `.except(hidden.map((id) => `user:${id}`))` with `.except([])`.",
-      "observed": "typing-honours-blocks.itest.ts: 1 of 2 failing (the blocker received B's chat:typing: expected length 0, received 1). socket-guards.test.ts: 1 of 21 failing (except called with [] rather than both counterparties).",
+    "live-room-honours-blocks.itest.ts": {
+      "guards": "SCRUM-338: with a real socket.io server installed as the app's io and check-ins through the real route, while A has B blocked: B's event:room:checkin reaches C's roster and not A's, and neither A nor B receives the other's chat:typing while C receives both; once the block is lifted A hears B type and hears the next arrival. socket-guards.test.ts pins the except() list as both directions of blocked_users and the fail-safe when the lookup rejects",
+      "mutation": "M1: in lib/socket-server.ts emitChatTyping, `.except(hidden.map(...))` → `.except([])`. M2: in emitEventCheckIn, `.except(excludeUserIds.map(...))` → `.except([])`.",
+      "observed": "M1: itest 1 of 3 failing (typing), socket-guards 1 of 22. M2: itest 1 of 3 failing (roster: A received B's arrival).",
       "date": "2026-09-27"
     },
     "announce-needs-edit.itest.ts": {
