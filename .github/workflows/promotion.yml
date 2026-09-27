@@ -1,0 +1,42 @@
+# staging and prod only take promotions: a pull request from dev, or into prod
+# from staging (which only ever holds dev's commits). The "promotion source" job
+# is a required check in the "staging and prod: promotion from dev only"
+# ruleset, alongside merge-commit-only merging.
+#
+# Merge commits, not squash: a squash gives staging a commit dev never sees, the
+# next promotion then needs a staging→dev back-merge, and on 2026-09-27 one of
+# those (#452) deleted `staging` on merge.
+#
+# No paths filter, unlike ci.yml: a required check that a docs-only promotion
+# skipped would block that promotion forever.
+name: promotion
+
+on:
+  pull_request:
+    branches: [staging, prod]
+
+permissions: {}
+
+jobs:
+  source:
+    name: promotion source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Head is dev (or staging, into prod), from this repository
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "::error::$BASE takes promotions from $REPO only, not from $HEAD_REPO."
+            exit 1
+          fi
+          case "$BASE:$HEAD" in
+            staging:dev | prod:dev | prod:staging)
+              echo "Promotion $HEAD → $BASE." ;;
+            *)
+              echo "::error::$BASE only takes promotions (staging ← dev, prod ← staging or dev). This pull request is $HEAD → $BASE: merge it into dev instead."
+              exit 1 ;;
+          esac
