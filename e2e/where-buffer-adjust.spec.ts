@@ -118,6 +118,11 @@ test("a custom buffer is saved, and the edit page reads it back as Custom", asyn
   await page.keyboard.press("ArrowRight")
   await expect(slider).toHaveAttribute("aria-valuenow", "25")
 
+  // An empty form refuses in its own words, not Zod's "expected string, received undefined".
+  await page.getByRole("button", { name: "Save draft" }).click()
+  await expect(page.getByText("Description must be at least 10 characters.")).toBeVisible()
+  await expect(page.getByText(/received undefined/)).toHaveCount(0)
+
   await page.getByLabel("Title").fill("e2e custom buffer (SCRUM-353b)")
   await page.getByLabel("Description").fill("Saved by e2e/where-buffer-adjust.spec.ts.")
   await page.getByLabel("Starts").fill("2030-10-10T19:00")
@@ -127,7 +132,9 @@ test("a custom buffer is saved, and the edit page reads it back as Custom", asyn
 
   // The form loads what the row holds: 25 m, which is not the default — Custom.
   await page.goto(`${new URL(page.url()).pathname}/edit`)
-  const saved = page.locator('[data-area-source="saved"]')
+  // `:visible`: a first dev-mode compile of the edit route can leave a hidden
+  // copy of the section behind (never on a production server).
+  const saved = page.locator('[data-area-source="saved"]:visible')
   await expect(saved).toBeVisible({ timeout: 30_000 })
   await expect(saved).toContainText("+25 m, custom for this event")
   await expect(page.getByRole("button", { name: "Custom" })).toHaveAttribute("aria-pressed", "true")
