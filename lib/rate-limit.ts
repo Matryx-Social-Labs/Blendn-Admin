@@ -206,3 +206,19 @@ export function userLimit(
     keyGenerator: () => `${scope}:${userId}`,
   }
 }
+
+/**
+ * The same per-user policy for a server action, which has no request to key
+ * on and no response to return: true when the caller is over, so the action
+ * refuses in a sentence of its own (SCRUM-360). Same bucket shape as
+ * `rateLimit` + `userLimit`, so a scope counts once whichever door it uses.
+ */
+export async function overUserLimit(
+  policy: UserRateLimitPolicy,
+  scope: string,
+  userId: string
+): Promise<boolean> {
+  const { windowMs, maxRequests } = USER_POLICIES[policy]
+  const { count } = await hit(`rl:${scope}:${userId}`, windowMs)
+  return count > maxRequests
+}
