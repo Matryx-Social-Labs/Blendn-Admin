@@ -153,7 +153,10 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
           lng: draft.lng!,
           capacity: draft.capacity ? Number(draft.capacity) : null,
           geofence: fence ?? undefined,
-          acknowledgedDuplicates: acknowledged || nearby.length === 0,
+          // Only what the person said. An empty `nearby` is also what a failed
+          // or rate-limited look-up leaves, and sending "acknowledged" for it
+          // switched the server's own duplicate check off (SCRUM-360 review).
+          acknowledgedDuplicates: acknowledged,
         })
         toast.success(
           canOwn ? `${draft.name} added to your venues.` : `${draft.name} created, unclaimed.`

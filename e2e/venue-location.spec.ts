@@ -81,6 +81,42 @@ test.describe("a venue owner adds a venue: the outline arrives with the place", 
   })
 })
 
+test.describe("a failed duplicate look-up does not switch the server's check off (SCRUM-360 review)", () => {
+  test.use({ storageState: "e2e/.auth/venue.json" })
+
+  test("the look-up fails, the form says nothing, and the create is still refused as a duplicate", async ({ page }) => {
+    // Server actions post to the page with a Next-Action header. Every one is
+    // dropped until Create — so `venuesNear` fails, as a limit or an outage would.
+    let dropActions = true
+    await page.route("**/dashboard/venues/new", async (route) => {
+      const req = route.request()
+      if (dropActions && req.method() === "POST" && req.headers()["next-action"]) return route.abort()
+      return route.continue()
+    })
+    const name = `e2e Duplicate ${Date.now()}`
+    await page.goto("/dashboard/venues/new")
+    await page.getByLabel("Venue name").fill(name)
+    await page.getByLabel("Search venue types").fill("stadium")
+    await page.getByRole("button", { name: "Stadium", exact: true }).click()
+    const next = (stage: string) => page.getByRole("button", { name: new RegExp(`^${stage}`) }).last()
+    await next("Location").click()
+    await page.getByRole("combobox", { name: "Place or address" }).fill("M Chinnaswamy Stadium")
+    await page.getByRole("option", { name: /Chinnaswamy Stadium, Link Road/ }).click()
+    await expect(page.locator('[data-area-source="osm-area"]')).toBeVisible({ timeout: 15_000 })
+    // The seeded M. Chinnaswamy Stadium is here, but the look-up failed: no box.
+    await page.waitForTimeout(1500)
+    await expect(page.getByText(/already listed here/)).toHaveCount(0)
+
+    await next("Capacity").click()
+    await next("Review").click()
+    dropActions = false
+    await page.getByRole("button", { name: "Create venue" }).click()
+    await expect(page.getByText(/is already listed \d+ m away/)).toBeVisible({ timeout: 15_000 })
+    await expect(page).toHaveURL(/\/dashboard\/venues\/new$/)
+    expect(await db.venues.count({ where: { name } })).toBe(0)
+  })
+})
+
 test.describe("a building found late keeps the buffer changed meanwhile", () => {
   test.use({ storageState: "e2e/.auth/venue.json" })
 
