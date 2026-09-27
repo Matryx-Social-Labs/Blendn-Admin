@@ -38,4 +38,24 @@ describe("the event form's Where section", () => {
   it("does not describe a purple ring that no longer exists", () => {
     expect(src).not.toMatch(/purple/i)
   })
+
+  it("rewrites the address for an outline moved to another place, not only a dragged circle", () => {
+    const onFence = src.slice(src.indexOf("function onFenceChange("), src.indexOf("function inherit("))
+    expect(onFence).toMatch(/moved < \(fence\.type === "circle" \? 10 : OUTLINE_KEEP_WITHIN_M\)/)
+    expect(onFence).not.toMatch(/fence\.type !== "circle"/)
+  })
+})
+
+describe("the map's supporting parts", () => {
+  it("a pick cancels a pending search, so 'Searching…' cannot stick", () => {
+    const search = readFileSync(join(__dirname, "../components/event-form/address-search.tsx"), "utf8")
+    const pick = search.slice(search.indexOf("function pick("), search.indexOf("const showList"))
+    expect(pick).toMatch(/clearTimeout\(timer\.current\)/)
+    expect(pick).toMatch(/setSearching\(false\)/)
+  })
+
+  it("a fence replaced from outside ends tracing, so a venue's outline does not take clicks as corners", () => {
+    const editor = readFileSync(join(__dirname, "../components/geofence-editor.tsx"), "utf8")
+    expect(editor).toMatch(/if \(fence\.type !== prevType\) \{\s*setPrevType\(fence\.type\)\s*if \(fence\.type !== "polygon"\) setDrawing\(false\)/)
+  })
 })

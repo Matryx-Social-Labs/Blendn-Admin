@@ -159,6 +159,18 @@ export function GeofenceEditor({
     stateRef.current = { fence, editable, drawing, onChange }
   }, [fence, editable, drawing, onChange])
 
+  /*
+   * A fence replaced from outside — a far search turns an outline into a
+   * circle — ends any tracing. Left set, the next polygon to arrive (a venue's
+   * outline) would take clicks as new corners. Adjusted during render, on the
+   * type's change only, so switching to "Trace outline" is never undone.
+   */
+  const [prevType, setPrevType] = useState(fence.type)
+  if (fence.type !== prevType) {
+    setPrevType(fence.type)
+    if (fence.type !== "polygon") setDrawing(false)
+  }
+
   const crossed = fence.type === "polygon" && ringSelfIntersects(fence.ring)
 
   /* ---------------------------------------------------------------- map --- */

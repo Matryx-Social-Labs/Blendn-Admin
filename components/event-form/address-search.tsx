@@ -67,7 +67,9 @@ export function AddressSearch({ onPick }: { onPick: (location: LocationData) => 
     const lng = Number(hit.lon)
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
     const resolved = extractAddress(lat, lng, hit)
+    clearTimeout(timer.current)
     ++seq.current
+    setSearching(false)
     setQuery(hit.display_name)
     setHits([])
     setOpen(false)

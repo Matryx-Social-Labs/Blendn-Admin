@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { GeofenceEditor } from "@/components/geofence-editor"
-import { fenceCentre, followPin, type Geofence } from "@/lib/geofence"
+import { fenceCentre, followPin, OUTLINE_KEEP_WITHIN_M, type Geofence } from "@/lib/geofence"
 import type { LocationData } from "@/components/location-picker"
 import { AddressSearch } from "@/components/event-form/address-search"
 import { FormSection } from "@/components/event-form/form-section"
@@ -96,7 +96,9 @@ export function LocationSection({
       before.lat == null || before.lng == null
         ? Infinity
         : haversineDistanceMeters(before.lat, before.lng, centre.lat, centre.lng)
-    if (fence.type !== "circle" || moved < 10) return
+    // A dragged circle is a moved place. An outline within the distance
+    // `followPin` treats as the same place keeps the address that was typed.
+    if (moved < (fence.type === "circle" ? 10 : OUTLINE_KEEP_WITHIN_M)) return
     const mine = ++reverseSeq.current
     fetch(`/api/geocode?lat=${centre.lat}&lon=${centre.lng}`, { headers: { "Accept-Language": "en" } })
       .then((res) => res.json())
