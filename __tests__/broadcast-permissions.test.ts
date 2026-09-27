@@ -30,9 +30,11 @@ const venueOwner: PermissionActor = {
 const stranger: PermissionActor = { id: "u-x", role: "organizer", orgIds: ["org-other"] }
 const attendee: PermissionActor = { id: "u-a", role: "attendee", orgIds: [] }
 
+// Claimed long before the event, so the venue owner operates it (SCRUM-355).
 const event: PermissionEvent = {
   organizer_org_id: ORG,
-  venue: { owner_org_id: VENUE_ORG },
+  start_time: new Date("2026-10-01T18:00:00Z"),
+  venue: { owner_org_id: VENUE_ORG, claimed_at: new Date("2026-01-01T00:00:00Z") },
 }
 
 describe("announcement — whoever runs the event", () => {
@@ -185,7 +187,7 @@ describe("media rides on sponsored alone", () => {
 })
 
 describe("an event with no venue", () => {
-  const noVenue: PermissionEvent = { organizer_org_id: ORG, venue: null }
+  const noVenue: PermissionEvent = { organizer_org_id: ORG, start_time: new Date("2026-10-01T18:00:00Z"), venue: null }
 
   it("still lets the organising org broadcast", () => {
     expect(canBroadcast(host, noVenue, "announcement")).toBe(true)

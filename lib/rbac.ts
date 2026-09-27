@@ -54,7 +54,12 @@ export interface PermissionActor {
  */
 export interface PermissionEvent {
   organizer_org_id: string | null
-  venue: { owner_org_id: string | null } | null
+  /**
+   * Required, like `venue.claimed_at`, so a caller that forgot to select them
+   * does not typecheck — rather than silently granting a venue owner the past.
+   */
+  start_time: Date
+  venue: { owner_org_id: string | null; claimed_at: Date | null } | null
 }
 
 export interface EventPermissions {
@@ -111,10 +116,19 @@ export function eventPermissions(
     return { canEdit: true, canOperate: true }
   }
 
+  /*
+   * A claim opens what happens at the venue from then on — never its past
+   * (owner's ruling 1, SCRUM-355). Operating an event is its chat, moderation
+   * and attendee list, and nobody at an earlier event agreed to the venue's
+   * new owner seeing them. That history is for aggregate insights (SCRUM-356).
+   * No claim date on an owned venue is bad data: closed, not open.
+   */
   const ownsVenue =
     actor.role === "venue_owner" &&
     event.venue?.owner_org_id != null &&
-    orgs.has(event.venue.owner_org_id)
+    orgs.has(event.venue.owner_org_id) &&
+    event.venue.claimed_at != null &&
+    event.start_time >= event.venue.claimed_at
 
   return ownsVenue ? { canEdit: false, canOperate: true } : DENIED
 }
@@ -126,7 +140,8 @@ export function eventPermissions(
  */
 export const eventPermissionSelect = {
   organizer_org_id: true,
-  venue: { select: { owner_org_id: true } },
+  start_time: true,
+  venue: { select: { owner_org_id: true, claimed_at: true } },
 } as const
 
 /* -------------------------------------------------------------------------- */

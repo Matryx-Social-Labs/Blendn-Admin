@@ -30,7 +30,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       select: {
         id: true,
         organizer_org_id: true,
-        venue: { select: { owner_org_id: true } },
+        start_time: true,
+        venue: { select: { owner_org_id: true, claimed_at: true } },
         chat_group: { select: { id: true } },
       },
     })

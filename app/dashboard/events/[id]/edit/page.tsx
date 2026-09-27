@@ -53,7 +53,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
         },
         // eventPermissions needs the venue owner: an event at a claimed venue
         // grants that owner operational access even though they cannot edit it.
-        venue: { select: { owner_org_id: true } },
+        venue: { select: { owner_org_id: true, claimed_at: true } },
       },
     }),
     // With the parent — see the same query in `../new/page.tsx`. The picker

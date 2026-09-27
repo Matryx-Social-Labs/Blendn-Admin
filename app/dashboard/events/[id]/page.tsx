@@ -76,7 +76,7 @@ export default async function EventDetailPage({
       city: true,
       organizer_id: true,
       organizer_org_id: true,
-      venue: { select: { name: true, owner_org_id: true } },
+      venue: { select: { name: true, owner_org_id: true, claimed_at: true } },
     },
   })
   if (!event) notFound()
