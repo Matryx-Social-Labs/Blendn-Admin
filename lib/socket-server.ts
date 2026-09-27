@@ -859,7 +859,9 @@ export function emitEventCheckIn(
   eventId: string,
   userId: string,
   userName: string,
-  userImage?: string
+  userImage?: string,
+  /** The arriver's block counterparties: kept off the roster, as off the push (SCRUM-338). */
+  excludeUserIds: readonly string[] = []
 ): void {
   const io = currentIo()
   if (!io) return
@@ -885,13 +887,15 @@ export function emitEventCheckIn(
     checkInTime,
   })
 
-  io.to(`event:room:${eventId}`).emit("event:room:checkin", {
-    eventId,
-    userId,
-    userName,
-    userImage,
-    checkInTime,
-  })
+  io.to(`event:room:${eventId}`)
+    .except(excludeUserIds.map((id) => `user:${id}`))
+    .emit("event:room:checkin", {
+      eventId,
+      userId,
+      userName,
+      userImage,
+      checkInTime,
+    })
 }
 
 /**

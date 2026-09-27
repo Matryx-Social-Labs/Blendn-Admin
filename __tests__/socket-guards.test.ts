@@ -132,6 +132,18 @@ describe("emitChatTyping", () => {
     expect(roomEmit).toHaveBeenCalledTimes(1)
   })
 
+  it("drops the indicator rather than throwing when the block lookup fails", async () => {
+    // Inside the same try as the membership read: a failed lookup must neither
+    // escape the listener (it would take the process down) nor fall back to
+    // broadcasting to everyone, blocked people included.
+    mockDb.chat_group_members.findUnique.mockResolvedValue({ anonymous_name: "Hidden Dune", status: "active" })
+    mockDb.blocked_users.findMany.mockRejectedValueOnce(new Error("connection terminated"))
+    const { socket, roomEmit } = makeSocket()
+
+    await expect(emitChatTyping(socket, CHAT_ID, true)).resolves.toBeUndefined()
+    expect(roomEmit).not.toHaveBeenCalled()
+  })
+
   it("passes isTyping:false through for stopTyping", async () => {
     mockDb.chat_group_members.findUnique.mockResolvedValue({
       anonymous_name: "Neon Phoenix",
