@@ -101,8 +101,9 @@ configs read it and set `enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN`, so
 Sentry initialises disabled and reports nothing, anywhere.
 
 The wiring is complete and good — `@sentry/nextjs` is a dependency, `beforeSend`
-and `IGNORED_ERRORS` come from `lib/sentry-scrub.ts`, and `sendDefaultPii` is
-false. Nothing is missing except the DSN.
+and `IGNORED_ERRORS` come from `lib/sentry-scrub.ts`, and so does
+`SENTRY_DATA_COLLECTION`, the restrictive baseline that replaced
+`sendDefaultPii: false` in Sentry 11. Nothing is missing except the DSN.
 
 This subsumes the earlier note that sourcemap upload no-ops without
 `SENTRY_AUTH_TOKEN`: that is true, and it is a symptom. The larger fact is that
