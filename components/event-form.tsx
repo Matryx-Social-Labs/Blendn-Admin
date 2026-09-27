@@ -13,6 +13,7 @@ import {
   type CategoryOption,
 } from "@/components/event-form/basic-info-section"
 import { LocationSection } from "@/components/event-form/location-section"
+import { saveAsVenue } from "@/components/event-form/save-as-venue"
 import { ScheduleSection } from "@/components/event-form/schedule-section"
 import { AmenitiesSection, type AmenityOption } from "@/components/event-form/amenities-section"
 import { CapacitySettingsSection } from "@/components/event-form/capacity-settings-section"
@@ -218,7 +219,27 @@ export function EventForm({
    */
   const submitAs = (status: EventFormValues["status"]) => {
     form.setValue("status", status, { shouldDirty: true })
-    void form.handleSubmit(onSubmit)()
+    void form.handleSubmit(submit)()
+  }
+  const [listingVenue, setListingVenue] = useState(false)
+  /*
+   * A place picked from the map is listed before the event saves, so the event
+   * links to it (SCRUM-353c). Its id goes back into the form: a retry after a
+   * refused event save links that venue rather than adding it twice.
+   */
+  const submit = async (data: EventFormValues) => {
+    setListingVenue(true)
+    try {
+      const venueId = await saveAsVenue(data)
+      if (venueId) {
+        form.setValue("venue_id", venueId)
+        form.setValue("venue_link_status", "auto_linked")
+        form.setValue("new_venue", null)
+      }
+      await onSubmit(venueId ? { ...data, venue_id: venueId, venue_link_status: "auto_linked", new_venue: null } : data)
+    } finally {
+      setListingVenue(false)
+    }
   }
   const cancelEvent = () => {
     if (
@@ -232,7 +253,7 @@ export function EventForm({
   const railProps = {
     readiness,
     isEditing,
-    isSubmitting,
+    isSubmitting: isSubmitting || listingVenue,
     status: (storedStatus ?? "draft") as EventFormValues["status"],
     onSaveDraft: () => submitAs("draft"),
     onPublish: () => submitAs("published"),

@@ -18,7 +18,7 @@ import type { LocationData } from "@/components/location-picker"
 import { FormSection } from "@/components/event-form/form-section"
 import type { EventFormValues } from "@/components/event-form/schema"
 import { WhereSearch, type PickedPlace } from "@/components/event-form/where-search"
-import { venueById, type VenueOption } from "@/lib/venue-actions"
+import { venueById, venuesNear, type NearbyVenue, type VenueOption } from "@/lib/venue-actions"
 import { validateGeofence } from "@/lib/geofence"
 import { extractAddress } from "@/lib/address"
 
@@ -174,6 +174,10 @@ export function LocationSection({
   }
   const [venue, setVenue] = useState<VenueOption | null>(null)
   const venueId = form.watch("venue_id")
+  /** A listed venue where a new place was picked: "use it", before a second one is added (SCRUM-353c). */
+  const [listedNearby, setListedNearby] = useState<NearbyVenue | null>(null)
+  const nearbySeq = useRef(0)
+  const newVenue = form.watch("new_venue")
   /** A linked venue that could not be loaded: its buffer is unknown, so the default stands in. */
   const [unloadedVenueId, setUnloadedVenueId] = useState<string | null>(null)
 
@@ -206,6 +210,9 @@ export function LocationSection({
    */
   function inherit(picked: VenueOption) {
     ++footprintSeq.current
+    ++nearbySeq.current
+    setListedNearby(null)
+    form.setValue("new_venue", null)
     // A pick starts from the venue's own area and buffer, shape locked until
     // "Adjust for this event".
     setAdjusting(false)
@@ -264,11 +271,23 @@ export function LocationSection({
    * pin — a bar, a club — asks for the building it sits in (SCRUM-351), and
    * keeps the circle, saying so, when OSM has none.
    */
-  function pickPlace({ name, location }: PickedPlace) {
+  function pickPlace({ name, location, venueType }: PickedPlace) {
     setAdjusting(false)
     setCustomChosen(false)
     if (venue) unlink()
     form.setValue("venue_name", name, { shouldDirty: true })
+    // Listed when the event saves (SCRUM-353c) — unless it already is. Asked
+    // now, not on save: "use it" is cheaper before anything is adjusted.
+    form.setValue("new_venue", { venue_type: venueType, acknowledged_duplicates: false })
+    setListedNearby(null)
+    const asked = ++nearbySeq.current
+    venuesNear(location.lat, location.lng)
+      .then((hits) => {
+        if (asked === nearbySeq.current) setListedNearby(hits[0] ?? null)
+      })
+      .catch(() => {
+        // The save asks again, and says so if it refuses.
+      })
     moveTo(location)
     if (location.outline) return
     setAreaSource("circle")
@@ -291,6 +310,20 @@ export function LocationSection({
       .catch(() => {
         // The circle stays, and the caption already says there was no outline.
       })
+  }
+
+  /** "Use it": the listed venue, with its own area and buffer. */
+  function takeListed(listed: NearbyVenue) {
+    venueById(listed.id)
+      .then((v) => (v ? inherit(v) : setListedNearby(null)))
+      .catch(() => setListedNearby(null))
+  }
+
+  /** Not the same place after all: listed as its own venue on save. */
+  function keepSeparate() {
+    const current = form.getValues("new_venue")
+    if (current) form.setValue("new_venue", { ...current, acknowledged_duplicates: true })
+    setListedNearby(null)
   }
 
   function unlink() {
@@ -415,6 +448,26 @@ export function LocationSection({
                     <Input placeholder="The address — written by the pin; edit if the street is wrong" {...field} value={field.value ?? ""} />
                   </FormControl>
                   <DerivedLine form={form} />
+                  {listedNearby ? (
+                    <p role="status" className="flex items-baseline gap-2 text-[0.8125rem]" data-listed-nearby>
+                      <span className="size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" aria-hidden />
+                      <span>
+                        {listedNearby.name} is already listed {listedNearby.distanceMetres} m away.{" "}
+                        <button type="button" className="underline underline-offset-[3px]" onClick={() => takeListed(listedNearby)}>
+                          Use it
+                        </button>{" "}
+                        or{" "}
+                        <button type="button" className="underline underline-offset-[3px]" onClick={keepSeparate}>
+                          keep this as a different place
+                        </button>
+                        .
+                      </span>
+                    </p>
+                  ) : newVenue && !venueId ? (
+                    <p className="text-[0.8125rem] text-muted-foreground">
+                      Saved as a venue when you save the event — the next organiser picks it instead of drawing it.
+                    </p>
+                  ) : null}
                   {movedKm != null ? (
                     <p role="status" className="flex items-baseline gap-2 text-[0.8125rem]">
                       <span className="size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-warning" aria-hidden />

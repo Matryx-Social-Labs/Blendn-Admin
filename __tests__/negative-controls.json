@@ -1118,6 +1118,12 @@
       "mutation": "Delete the `if (response.status === 401) { ... return }` block in handleSubmit (or neuter it with `&& false`).",
       "observed": "1 failing: `if (response.status === 401) {` not found.",
       "date": "2026-09-18"
+    },
+    "save-as-venue.test.ts": {
+      "guards": "A place picked from the event form's map is listed as an unclaimed venue before its event saves, with the event's area, and the event links it; a refusal is said and the event saves anyway (SCRUM-353c). With organisers-add-venues.itest.ts (asUnclaimed) and e2e/where-new-place-listed.spec.ts (list, then reuse).",
+      "mutation": "M40: lib/venue-actions.ts createVenue ignoring `asUnclaimed` (a venue owner saving an event's place owns it). M41: components/event-form.tsx submit not calling saveAsVenue. M42: location-section.tsx pickPlace not asking venuesNear (no \u201calready listed \u2014 use it\u201d).",
+      "observed": "M40: organisers-add-venues.itest.ts 1 of 9 failing (owner_org_id was the owner\u2019s org). M41: where-new-place-listed.spec.ts failing \u2014 venue_link_status null on the first saved event. M42: where-new-place-listed.spec.ts failing \u2014 no \u201cToit is already listed\u201d on the second pick. (Local server on blendn_test with the OSM stub; Turbopack panicked once under rapid edits, M42 re-run on a fresh server.)",
+      "date": "2026-09-27"
     }
   },
   "grandfathered": [

@@ -213,6 +213,8 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
         external_link: data.external_link || undefined,
         // The rail's buttons set this: Save draft → draft, Publish → published.
         status: data.status,
+        // The form's own bookkeeping (a place to list as a venue), not the event's.
+        new_venue: undefined,
       }
 
       const response = await fetch(

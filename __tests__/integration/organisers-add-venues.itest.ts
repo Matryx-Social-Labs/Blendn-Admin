@@ -103,6 +103,25 @@ describe("an organiser adds a venue", () => {
   })
 })
 
+describe("the place of an event is listed unclaimed, whoever saves it (SCRUM-353c)", () => {
+  it("a venue owner saving an event's place does not become its owner — the creating organisation may edit it", async () => {
+    const owner = await member("oav-evt-owner", "venue_owner")
+    owner.as()
+    const id = await added({ lat: base.lat + 0.05, lng: base.lng }, { asUnclaimed: true })
+    const r = await db.venues.findUniqueOrThrow({ where: { id }, select: { owner_org_id: true, created_by_org_id: true, claimed_at: true } })
+    expect(r).toEqual({ owner_org_id: null, created_by_org_id: owner.orgId, claimed_at: null })
+  })
+
+  it("without the flag a venue owner still describes their own place, owned and claimed", async () => {
+    const owner = await member("oav-own-place", "venue_owner")
+    owner.as()
+    const id = await added({ lat: base.lat + 0.055, lng: base.lng })
+    const r = await db.venues.findUniqueOrThrow({ where: { id }, select: { owner_org_id: true, claimed_at: true } })
+    expect(r.owner_org_id).toBe(owner.orgId)
+    expect(r.claimed_at).not.toBeNull()
+  })
+})
+
 describe("who may edit an unclaimed venue (owner's ruling 2)", () => {
   it("its creating organisation may; another organiser's may not, and nothing is written", async () => {
     const host = await member("oav-edit-host", "organizer")

@@ -180,6 +180,11 @@ export interface CreateVenueInput {
   geofence?: unknown
   /** Set after the caller has seen `venuesNear` and chosen to add anyway. */
   acknowledgedDuplicates?: boolean
+  /**
+   * Unclaimed whoever adds it: the event form saves the place an event is at
+   * (SCRUM-353c), which is not a venue owner describing their own place.
+   */
+  asUnclaimed?: boolean
 }
 
 /**
@@ -243,8 +248,9 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
   if (user.role !== "app_admin" && !orgId) {
     throw new Refusal("Your account is not attached to an organisation yet.")
   }
-  // A venue owner describes their own place; an organiser adds one unclaimed.
-  const ownerOrgId = user.role === "venue_owner" ? orgId : null
+  // A venue owner describes their own place; an organiser adds one unclaimed,
+  // and so does anyone saving the place of an event.
+  const ownerOrgId = user.role === "venue_owner" && !input.asUnclaimed ? orgId : null
 
   const venue = await db.venues.create({
     data: {
