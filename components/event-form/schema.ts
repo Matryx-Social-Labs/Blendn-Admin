@@ -22,6 +22,12 @@ export const eventFormSchema = z.object({
   // is the common case — most events are at places not on the platform.
   venue_id: z.string().nullable().optional(),
   venue_link_status: z.enum(["auto_linked", "confirmed", "disputed"]).nullable().optional(),
+  // A place picked from the map, to be saved as an unclaimed venue when the
+  // event saves (SCRUM-353c). Never sent to the events API.
+  new_venue: z
+    .object({ venue_type: z.string().nullable(), acknowledged_duplicates: z.boolean() })
+    .nullable()
+    .optional(),
   address: z.string().optional(),
   // Nullable because the map fills these in and can fail to: a pin in open
   // country resolves no city, and that has to reach the server as `null` to

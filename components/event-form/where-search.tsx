@@ -10,6 +10,8 @@ import { extractAddress } from "@/lib/address"
 import { outlineFromGeoJson } from "@/lib/outline"
 import { cn } from "@/lib/utils"
 import { searchVenues, type VenueOption } from "@/lib/venue-actions"
+import { venueTypeFromOsm } from "@/lib/venue-types"
+import type { venue_type } from "@prisma/client"
 
 interface GeocodeHit {
   place_id: number
@@ -20,6 +22,9 @@ interface GeocodeHit {
   address?: Record<string, string>
   /** Polygon for a place OSM holds as an area; a Point for a pin. */
   geojson?: unknown
+  /** OSM's tag: `amenity` + `pub`, `leisure` + `stadium`. */
+  class?: string
+  type?: string
 }
 
 /** A place picked from the geocoder, not yet a listed venue. */
@@ -27,6 +32,8 @@ export interface PickedPlace {
   /** What the organiser will call it: OSM's name, else the first part of the address. */
   name: string
   location: LocationData
+  /** The venue type OSM's tag implies, when the place is saved as a venue. */
+  venueType: venue_type | null
 }
 
 type Option = { kind: "venue"; venue: VenueOption } | { kind: "place"; hit: GeocodeHit }
@@ -140,6 +147,8 @@ export function WhereSearch({
         postal_code: resolved.postalCode,
         outline: outlineFromGeoJson(hit.geojson),
       },
+      // A hit's class and type are one OSM tag: amenity=pub, leisure=stadium.
+      venueType: hit.class && hit.type ? venueTypeFromOsm({ [hit.class]: hit.type }) : null,
     })
   }
 

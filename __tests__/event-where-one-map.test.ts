@@ -113,6 +113,19 @@ describe("the event form's Where section", () => {
     expect(src).toMatch(/const lostDrawing = \(source: AreaSource \| null\) => source === "drawn" \|\| source === null/)
   })
 
+  it("\"Use it\" applies only if nothing was picked meanwhile, and no lookup lands after the section goes (React review, SCRUM-353c)", () => {
+    const take = src.slice(src.indexOf("function takeListed("), src.indexOf("function keepSeparate("))
+    expect(take).toMatch(/const asked = \+\+nearbySeq\.current/)
+    expect(take).toMatch(/if \(asked !== nearbySeq\.current\) return\s*\n\s*if \(v\) inherit\(v\)/)
+    expect(src).toMatch(/useEffect\(\(\) => \(\) => \{\s*footprintSeq\.current\+\+\s*nearbySeq\.current\+\+/)
+  })
+
+  it("a second click cannot list the place twice (React review, SCRUM-353c)", () => {
+    const form = readFileSync(join(__dirname, "../components/event-form.tsx"), "utf8")
+    expect(form).toMatch(/const submit = async \(data: EventFormValues\) => \{\s*if \(submitting\.current\) return\s*submitting\.current = true/)
+    expect(form).toMatch(/finally \{\s*submitting\.current = false/)
+  })
+
   it("keeps the pin readable for e2e/venue-pin.spec.ts", () => {
     expect(src).toMatch(/data-lat=\{initialLat \?\? ""\} data-lng=\{initialLng \?\? ""\}/)
   })
