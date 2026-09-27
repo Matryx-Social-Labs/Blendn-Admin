@@ -78,7 +78,6 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
     where: { id: eventId, deleted_at: null },
     select: {
       id: true,
-      start_time: true,
       end_time: true,
       status: true,
       deleted_at: true,

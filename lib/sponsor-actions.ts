@@ -806,7 +806,7 @@ export async function getEventSponsors(eventId: string): Promise<EventSponsorRow
 
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { start_time: true, end_time: true, ...eventPermissionSelect },
+    select: { end_time: true, ...eventPermissionSelect },
   })
   if (!event) throw new Refusal("Event not found")
 

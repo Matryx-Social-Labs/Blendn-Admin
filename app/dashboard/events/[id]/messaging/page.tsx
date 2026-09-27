@@ -31,7 +31,7 @@ export default async function EventMessagingPage({ params }: Props) {
       status: true,
       venue_name: true,
       organizer_org_id: true,
-      venue: { select: { owner_org_id: true } },
+      venue: { select: { owner_org_id: true, claimed_at: true } },
     },
   })
 

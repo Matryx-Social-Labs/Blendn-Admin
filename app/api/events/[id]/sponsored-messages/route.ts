@@ -18,7 +18,7 @@ export async function GET(_: Request, { params }: RouteContext) {
     const { id: eventId } = await params
     const session = await getAuth()
     if (!session?.user) return errorResponse("Unauthorized", 401)
-    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } } })
+    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
     if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {
       return errorResponse("Forbidden", 403)
@@ -60,7 +60,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     const { id: eventId } = await params
 
-    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } } })
+    const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
     if (!event) return errorResponse("Not found", 404)
 
     /*

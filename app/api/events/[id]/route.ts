@@ -65,7 +65,7 @@ export async function GET(_: Request, { params }: RouteContext) {
         deleted_at: null,
       },
       include: {
-        venue: { select: { owner_org_id: true } },
+        venue: { select: { owner_org_id: true, claimed_at: true } },
       },
     })
 
@@ -164,7 +164,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       },
       // eventPermissions needs the venue owner: an event at a claimed venue
       // grants that owner operational access even though they cannot edit it.
-      include: { venue: { select: { owner_org_id: true } } },
+      include: { venue: { select: { owner_org_id: true, claimed_at: true } } },
     })
 
     if (!event) {
@@ -565,7 +565,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
       },
       // eventPermissions needs the venue owner: an event at a claimed venue
       // grants that owner operational access even though they cannot edit it.
-      include: { venue: { select: { owner_org_id: true } } },
+      include: { venue: { select: { owner_org_id: true, claimed_at: true } } },
     })
 
     if (!event) {

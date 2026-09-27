@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       where: { id: eventId, deleted_at: null },
       select: {
         id: true,
-        organizer_org_id: true, venue: { select: { owner_org_id: true } },
+        organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } },
         chat_group: { select: { id: true } },
       },
     })

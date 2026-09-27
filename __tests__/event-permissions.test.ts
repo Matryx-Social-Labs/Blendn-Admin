@@ -36,9 +36,17 @@ const actor = (
   orgIds: string[] = []
 ): PermissionActor => ({ id, role, orgIds })
 
-const event = (organizerOrgId: string, venueOwnerOrgId?: string | null): PermissionEvent => ({
+const DAY = 86_400_000
+/** Claimed a year ago; the event is next week — a claim older than the event. */
+const CLAIMED = new Date(Date.now() - 365 * DAY)
+const event = (
+  organizerOrgId: string,
+  venueOwnerOrgId?: string | null,
+  { startsAt = new Date(Date.now() + 7 * DAY), claimedAt = CLAIMED }: { startsAt?: Date; claimedAt?: Date | null } = {}
+): PermissionEvent => ({
   organizer_org_id: organizerOrgId,
-  venue: venueOwnerOrgId === undefined ? null : { owner_org_id: venueOwnerOrgId },
+  start_time: startsAt,
+  venue: venueOwnerOrgId === undefined ? null : { owner_org_id: venueOwnerOrgId, claimed_at: claimedAt },
 })
 
 describe("eventPermissions — the matrix", () => {
@@ -202,3 +210,41 @@ describe("the actor must carry its memberships — the bug the compiler now bloc
     )
   })
 })
+
+describe("eventPermissions — a claim does not open the venue's past (SCRUM-355, owner's ruling 1)", () => {
+  /*
+   * An approved claim made the owner an operator — chat, moderation, the
+   * attendee list — of every event ever linked to the venue. With organisers
+   * adding unclaimed venues (SCRUM-352), that history can be long and none of
+   * it was agreed to. The owner's ruling: the past is for aggregate, paid
+   * insights later (SCRUM-356), never operational access.
+   */
+  const owner = () => actor(CARA, "venue_owner", [ORG_VENUE])
+  const claimedAt = new Date(Date.now() - 30 * DAY)
+
+  it("denies the owner an event that started before the claim", () => {
+    const before = event(ORG_HOST, ORG_VENUE, { startsAt: new Date(claimedAt.getTime() - DAY), claimedAt })
+    expect(eventPermissions(owner(), before)).toEqual({ canEdit: false, canOperate: false })
+  })
+
+  it("lets the owner operate an event that starts after the claim", () => {
+    const after = event(ORG_HOST, ORG_VENUE, { startsAt: new Date(claimedAt.getTime() + DAY), claimedAt })
+    expect(eventPermissions(owner(), after)).toEqual({ canEdit: false, canOperate: true })
+  })
+
+  it("fails closed on an owned venue with no claim date — every writer sets one", () => {
+    const unknown = event(ORG_HOST, ORG_VENUE, { claimedAt: null })
+    expect(eventPermissions(owner(), unknown).canOperate).toBe(false)
+  })
+
+  it("leaves the organising organisation's access alone, before or after", () => {
+    const before = event(ORG_HOST, ORG_VENUE, { startsAt: new Date(claimedAt.getTime() - DAY), claimedAt })
+    expect(eventPermissions(actor(ALICE, "organizer", [ORG_HOST]), before)).toEqual({ canEdit: true, canOperate: true })
+  })
+
+  it("leaves an owner that also runs the event with both buckets", () => {
+    const own = event(ORG_VENUE, ORG_VENUE, { startsAt: new Date(claimedAt.getTime() - DAY), claimedAt })
+    expect(eventPermissions(owner(), own)).toEqual({ canEdit: true, canOperate: true })
+  })
+})
+

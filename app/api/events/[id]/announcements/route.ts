@@ -24,7 +24,7 @@ export async function GET(_: Request, { params }: RouteContext) {
 
     const { id: eventId } = await params
 
-    const eventForGet = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, venue: { select: { owner_org_id: true } } } })
+    const eventForGet = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
     if (!eventForGet) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), eventForGet).canEdit) {
       return errorResponse("Forbidden", 403)
