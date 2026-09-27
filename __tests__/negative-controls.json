@@ -36,7 +36,7 @@
     "announce-needs-edit.itest.ts": {
       "guards": "SCRUM-335: a venue owner on an event another org runs at their venue cannot post a poll through createPoll (default and explicit kind announcement: Forbidden, no chat_messages or chat_polls row) or announce through POST /api/mobile/events/:id/announce (403, nothing written); the organiser still posts a poll",
       "mutation": "In lib/rbac.ts canBroadcast, return `eventPermissions(actor, event).canOperate` for announcement instead of `.canEdit`.",
-      "observed": "3 of 3 failing: createPoll resolved for the venue owner instead of rejecting Forbidden; the mobile route returned 200, not 403; the organiser's test then counted 2 polls in the room, not 1. broadcast-permissions.test.ts: 1 failing (venue owner announcement expected false, got true).",
+      "observed": "3 of 4 failing (the fourth, a venue owner hosting their own event, passes under it by design): createPoll resolved for the venue owner instead of rejecting Forbidden; the mobile route returned 200, not 403; the organiser's test then counted 2 polls in the room, not 1. broadcast-permissions.test.ts: 1 failing (venue owner announcement expected false, got true).",
       "date": "2026-09-27"
     },
     "participation-needs-onboarding.itest.ts": {

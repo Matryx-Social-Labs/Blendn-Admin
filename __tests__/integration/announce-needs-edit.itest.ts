@@ -33,6 +33,8 @@ let eventId = ""
 let groupId = ""
 let host = ""
 let venueOwner = ""
+let venueOrg = ""
+let venueId = ""
 
 afterAll(async () => {
   await db.chat_groups.deleteMany({ where: { event_id: { in: events } } })
@@ -56,9 +58,11 @@ beforeAll(async () => {
   users.push(host, venueOwner)
   await db.user.update({ where: { id: venueOwner }, data: { role: "venue_owner" } })
   const hostOrg = await orgOf(host)
+  venueOrg = await orgOf(venueOwner)
   const venue = await db.venues.create({
-    data: { name: testId("ane-venue"), city: "Bangalore", owner_org_id: await orgOf(venueOwner), claimed_at: new Date() },
+    data: { name: testId("ane-venue"), city: "Bangalore", owner_org_id: venueOrg, claimed_at: new Date() },
   })
+  venueId = venue.id
   venues.push(venue.id)
   eventId = await makeEvent(host)
   events.push(eventId)
@@ -99,6 +103,18 @@ describe("the venue owner", () => {
     expect(res.status).toBe(403)
     expect(await inRoom()).toBe(0)
   })
+})
+
+it("a venue owner hosting their own event is its organiser, and posts a poll", async () => {
+  // The fix must not become "venue owners never announce" (SCRUM-320).
+  const own = await makeEvent(venueOwner)
+  events.push(own)
+  await db.events.update({ where: { id: own }, data: { organizer_org_id: venueOrg, venue_id: venueId, venue_link_status: "auto_linked" } })
+  const room = (await db.chat_groups.create({ data: { event_id: own, name: "room", status: "active" }, select: { id: true } })).id
+  mockGetAuth.mockResolvedValue({ user: { id: venueOwner, role: "venue_owner" } })
+  const { pollId } = await createPoll(own, { question: "Terrace or inside?", options: ["Terrace", "Inside"] })
+  const poll = await db.chat_polls.findUniqueOrThrow({ where: { id: pollId }, select: { message: { select: { chat_group_id: true } } } })
+  expect(poll.message.chat_group_id).toBe(room)
 })
 
 it("the organiser still posts a poll", async () => {

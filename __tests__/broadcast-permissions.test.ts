@@ -52,7 +52,9 @@ describe("announcement — whoever runs the event", () => {
   })
 
   it("lets a venue owner announce for an event their own org runs", () => {
-    // Hosting it yourself makes you the organiser (SCRUM-320).
+    // Hosting it yourself makes you the organiser (SCRUM-320). Guards against
+    // over-correcting into "venue owners never announce"; the organising-org
+    // branch grants both flags, so it does not tell canEdit from canOperate.
     expect(canBroadcast(venueOwner, { ...event, organizer_org_id: VENUE_ORG }, "announcement")).toBe(true)
   })
 
