@@ -34,7 +34,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
-import { occurrencesForSpan } from "../lib/occurrences"
+import { syncOccurrences } from "../lib/occurrences"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -222,12 +222,10 @@ async function main() {
     }
     const event = await db.events.upsert({ where: { slug: p.slug }, create: { slug: p.slug, ...data }, update: data })
 
-    // Dates move on every run, so rebuild the occurrences rather than patching them.
-    await db.event_occurrences.deleteMany({ where: { event_id: event.id } })
-    const days = occurrencesForSpan(event.start_time, event.end_time, event.timezone)
-    await db.event_occurrences.createMany({
-      data: days.map((d) => ({ event_id: event.id, occurs_on: d.occursOn, start_time: d.startTime, end_time: d.endTime })),
-    })
+    // Dates move on every run. Through the one mechanism every event write
+    // uses (__tests__/events-have-occurrences.test.ts): days that fall away are
+    // removed with their check-ins, a day that stays keeps its id.
+    await syncOccurrences(event.id, event.start_time, event.end_time, event.timezone)
     const occurrence = await db.event_occurrences.findFirstOrThrow({
       where: { event_id: event.id },
       orderBy: { start_time: "asc" },
