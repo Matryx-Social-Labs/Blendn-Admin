@@ -23,6 +23,7 @@ jest.mock("@/lib/rate-limit", () => ({ overUserLimit: (...a: unknown[]) => mockO
 
 import {
   venuesNear,
+  searchVenues,
   createVenue,
   assignVenueOwner,
   retireVenue,
@@ -507,5 +508,50 @@ describe("rate limits on the venue actions (SCRUM-360)", () => {
     const scopes = mockOverLimit.mock.calls.map((c) => c[1])
     expect(scopes).toEqual(["venue-create"])
     expect(mockDb.$queryRaw).toHaveBeenCalled()
+  })
+})
+
+describe("searchVenues — by word, not by phrase (SCRUM-362)", () => {
+  const row = (name: string, address: string | null = null, city: string | null = "Bengaluru") => ({
+    id: name, name, venue_type: null, address, city, latitude: 12.97, longitude: 77.64, capacity: null, geofence: null, owner_org_id: null,
+  })
+
+  it("finds Toit for \"Toit Indiranagar\", though no field holds the phrase", async () => {
+    signIn("organizer")
+    mockDb.venues.findMany.mockResolvedValue([row("Toit", "Toit, 298, 100 Feet Road, Old Binnamangala, Hoysala Nagara")])
+    const hits = await searchVenues("Toit Indiranagar")
+    expect(hits.map((h) => h.name)).toEqual(["Toit"])
+    // Each word is asked of the name; the phrase still of the address.
+    const where = mockDb.venues.findMany.mock.calls[0][0].where
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        { address: { contains: "Toit Indiranagar", mode: "insensitive" } },
+        { name: { contains: "toit", mode: "insensitive" } },
+        { name: { contains: "indiranagar", mode: "insensitive" } },
+      ])
+    )
+  })
+
+  it("ranks the venue matching the most words, in its name, first", async () => {
+    signIn("organizer")
+    mockDb.venues.findMany.mockResolvedValue([row("The Tree House"), row("The Humming Tree"), row("Humming Bird Cafe")])
+    const hits = await searchVenues("the humming tree")
+    expect(hits[0].name).toBe("The Humming Tree")
+    // "the" names nothing: it is not asked for.
+    const names = mockDb.venues.findMany.mock.calls[0][0].where.OR.filter((c: { name?: unknown }) => c.name)
+    expect(names).toEqual([
+      { name: { contains: "humming", mode: "insensitive" } },
+      { name: { contains: "tree", mode: "insensitive" } },
+    ])
+  })
+
+  it("keeps eight, after ranking fifty candidates", async () => {
+    signIn("organizer")
+    const many = Array.from({ length: 20 }, (_, i) => row(`Cafe ${String(i).padStart(2, "0")}`))
+    mockDb.venues.findMany.mockResolvedValue([...many, row("Cafe Koramangala Social", null, "Bengaluru")])
+    const hits = await searchVenues("cafe koramangala")
+    expect(hits).toHaveLength(8)
+    expect(hits[0].name).toBe("Cafe Koramangala Social")
+    expect(mockDb.venues.findMany.mock.calls[0][0].take).toBe(50)
   })
 })
