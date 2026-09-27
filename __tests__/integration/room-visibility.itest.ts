@@ -8,7 +8,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { matchesForEvent } from "@/lib/matches"
 import { getOccupancy } from "@/lib/occupancy"
 
-import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
 
 /*
  * Two things the door does for a person, driven through the real routes.
@@ -111,8 +111,15 @@ describe("show online status off", () => {
     const viewer = await attendee("rv_viewer", { show_online: true })
     const hidden = await attendee("rv_hidden", { show_online: false })
     const shown = await attendee("rv_shown", { show_online: true })
-    const bare = await attendee("rv_bare") // no profile row at all
-    for (const p of [viewer, hidden, shown, bare]) expect((await checkIn(eventId, p.token)).status).toBe(200)
+    // No profile row at all — made directly, since `attendee` gives everyone one.
+    const bareId = await makeUser(testId("rv_bare"))
+    users.push(bareId)
+    const bare = { id: bareId }
+    for (const p of [viewer, hidden, shown]) expect((await checkIn(eventId, p.token)).status).toBe(200)
+    // The door refuses a user with no profile (SCRUM-331: a shape sign-up and
+    // OAuth never make), so seat them directly. What this guards is the read
+    // side: a relation filter that read the missing row as "hidden" would drop them.
+    await putInRoom({ eventId, occurrenceId: await occurrenceOf(eventId), userId: bare.id })
 
     // Fire safety counts bodies; the room's number includes them.
     expect((await getOccupancy(eventId)).inside).toBe(4)

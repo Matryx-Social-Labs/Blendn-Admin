@@ -29,6 +29,8 @@ const conversations = require("@/app/api/mobile/conversations/route") as typeof 
 const dm = require("@/app/api/mobile/conversations/[conversationId]/messages/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/messages/route")
 const requests = require("@/app/api/mobile/message-requests/route") as typeof import("@/app/api/mobile/message-requests/route")
 const eventDetail = require("@/app/api/mobile/events/[eventId]/route") as typeof import("@/app/api/mobile/events/[eventId]/route")
+const interest = require("@/app/api/mobile/events/[eventId]/interest/route") as typeof import("@/app/api/mobile/events/[eventId]/interest/route")
+const boardRequests = require("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -105,6 +107,20 @@ describe("an account that skipped onboarding with no age on file", () => {
 
   it("cannot read the board", async () => {
     await refused(await board.GET(req(`/api/mobile/events/${eventId}/board`, who.token, "GET"), eventParams(eventId)))
+  })
+
+  it("cannot mark interest, post on the board, or ask to join a post", async () => {
+    await refused(await interest.POST(req(`/api/mobile/events/${eventId}/interest`, who.token, "POST", {}), eventParams(eventId)))
+    await refused(
+      await board.POST(req(`/api/mobile/events/${eventId}/board`, who.token, "POST", { kind: "chat", body: "anyone here?" }), eventParams(eventId))
+    )
+    // The door is asked before the post is looked up, so any post id reaches it.
+    const postId = "00000000-0000-4000-8000-000000000331"
+    await refused(
+      await boardRequests.POST(req(`/api/mobile/events/${eventId}/board/${postId}/requests`, who.token, "POST", {}), {
+        params: Promise.resolve({ eventId, postId }),
+      })
+    )
   })
 
   it("cannot check in", async () => {
