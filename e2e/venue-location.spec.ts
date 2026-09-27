@@ -61,6 +61,7 @@ test.describe("a venue owner adds a venue: the outline arrives with the place", 
     await page.getByLabel(/This is a different place/).check()
     await next("Capacity").click()
     await next("Review").click()
+    await expect(page.getByText(/^Outline, \d+ corners, \+20 m for every event here$/)).toBeVisible()
     await page.getByRole("button", { name: "Create venue" }).click()
     await expect(page).toHaveURL(/\/dashboard\/venues\/[0-9a-f-]{36}$/, { timeout: 30_000 })
     const id = new URL(page.url()).pathname.split("/").pop()!

@@ -379,10 +379,13 @@ export function VenueCreateForm({ canOwn }: { canOwn: boolean }) {
             <Row
               label="Check-in area"
               value={
+                // Found or drawn, it is the outline; the buffer is what every
+                // event here starts with (SCRUM-354). "Traced" was wrong for
+                // an outline the search brought.
                 fence?.type === "polygon"
-                  ? `Traced outline, ${fence.ring.length} points, +${fence.buffer} m buffer`
+                  ? `Outline, ${fence.ring.length} corners, +${fence.buffer} m for every event here`
                   : fence
-                    ? `${fence.radius} m circle, +${fence.buffer} m buffer`
+                    ? `${fence.radius} m circle, +${fence.buffer} m for every event here`
                     : "—"
               }
             />
