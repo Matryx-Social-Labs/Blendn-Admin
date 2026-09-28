@@ -9,6 +9,7 @@ import {
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
@@ -52,6 +53,9 @@ export async function GET(request: NextRequest) {
     const rows = await db.notifications.findMany({
       where: {
         user_id: user.userId,
+        // Messages live in their inbox; see `NOT_IN_THE_BELL`. Rows written
+        // before that rule stay until retention takes them, unseen.
+        kind: { notIn: NOT_IN_THE_BELL },
         ...(unreadOnly ? { read_at: null } : {}),
       },
       orderBy: { created_at: "desc" },
@@ -80,7 +84,7 @@ export async function GET(request: NextRequest) {
      * `@@index([user_id, read_at])` exists for this count.
      */
     const unreadCount = await db.notifications.count({
-      where: { user_id: user.userId, read_at: null },
+      where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
     })
 
     return successResponse({

@@ -248,10 +248,11 @@ describe("a friend who holds your real id reads the room and finds nothing", () 
     expect(own.user.id).toBe(ana.id)
     expect(surfaces.chatList.body.data.groups[0].lastMessage.user.id).toBe(hBen)
 
-    // The lock-screen push Ana got for Ben's reply is stored and served back.
-    const pushes = await db.notifications.findMany({ where: { user_id: ana.id, kind: "group_message" } })
-    expect(pushes.length).toBeGreaterThan(0)
-    expect(JSON.stringify(pushes.map((p) => p.data))).not.toContain(ben.id)
+    // A room push used to be stored in the bell and served back, carrying the
+    // sender. Room messages write no bell row now (`NOT_IN_THE_BELL`), and the
+    // reply push itself — to Cam, not Ana — is checked for Ben's real id in
+    // `push-bursts.itest.ts`.
+    expect(await db.notifications.count({ where: { user_id: { in: [ana.id, cam.id] }, kind: "group_message" } })).toBe(0)
   })
 
   it("the quoted author keeps their own name in the reply's response, not the sender's", async () => {

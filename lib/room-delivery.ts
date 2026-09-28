@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { blockCounterparties } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
-import { notifyGroupMessage } from "@/lib/push-notifications"
+import { notifyRoomReply } from "@/lib/push-notifications"
 import { roomHandle } from "@/lib/room-handle"
 
 /**
@@ -25,7 +25,7 @@ import { roomHandle } from "@/lib/room-handle"
  *
  * ## Blocks are resolved once
  *
- * Both the socket emit and the push fan-out filter on the same set, and the
+ * Both the socket emit and the reply push filter on the same set, and the
  * REST history filters on it too — so the three surfaces cannot disagree about
  * who is in the room. Fetching it twice would be how they start to.
  *
@@ -97,26 +97,38 @@ export async function deliverToRoom(input: {
     })
   }
 
+  /*
+   * The push goes to one person or nobody: the author of the message this one
+   * replies to. Every other room message is for whoever has the room open —
+   * see `notifyRoomReply` for why the room stopped pushing to everyone.
+   */
+  if (!message.parent_id) return
+
   try {
-    const members = await db.chat_group_members.findMany({
-      where: {
-        chat_group_id: chatGroupId,
-        status: "active",
-        // A lock screen is the loudest surface in the product. Somebody who
-        // blocked this sender must not get a notification from them.
-        ...(senderBlocked.length ? { user_id: { notIn: senderBlocked } } : {}),
-      },
+    const parent = await db.chat_messages.findUnique({
+      where: { id: message.parent_id },
       select: { user_id: true },
     })
+    const recipientId = parent?.user_id
+    // A lock screen is the loudest surface in the product. Somebody in a block
+    // with this sender must not get a notification from them.
+    if (!recipientId || recipientId === senderId || senderBlocked.includes(recipientId)) return
 
-    await notifyGroupMessage(
-      members.map((m) => m.user_id),
-      senderAnonName,
-      input.groupName || "Group Chat",
-      input.preview,
+    // Still in the room: `left` and `banned` are gone, `muted` still reads.
+    const membership = await db.chat_group_members.findUnique({
+      where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: recipientId } },
+      select: { status: true },
+    })
+    if (membership?.status !== "active" && membership?.status !== "muted") return
+
+    await notifyRoomReply({
+      recipientId,
+      senderName: senderAnonName,
+      groupName: input.groupName || "Group Chat",
+      preview: input.preview,
       chatGroupId,
-      { id: senderId, handle: roomHandle(input.eventId, senderId) }
-    )
+      senderHandle: roomHandle(input.eventId, senderId),
+    })
   } catch (error) {
     logger.error("Room push notification failed", {
       chatGroupId,

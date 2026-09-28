@@ -1291,17 +1291,15 @@ async function main() {
    *
    * Bodies go through `storedBodyFor`, exactly as the push path does, so the
    * seeded world shows what the product actually stores rather than a
-   * hand-written approximation of it. A `group_message` therefore reads "New
-   * message in the room" here, and the pseudonymous check-in line keeps its
-   * pseudonym — which is the distinction the spec exists to police.
+   * hand-written approximation of it — and only kinds it stores. Messages and
+   * check-ins write no row (`NOT_IN_THE_BELL`), so none is seeded here; the
+   * announcement is the content-bearing kind left to be redacted.
    */
   const notificationSpecs = [
-    { kind: "group_message" as const, title: "New message",
-      body: "hey, is anyone near the bar?" },
-    { kind: "private_message" as const, title: "New message",
-      body: "loved chatting earlier — same time next week?" },
-    { kind: "event_checkin" as const, title: "Someone just arrived",
-      body: "Cosmic Panda just checked in!" },
+    { kind: "friend_request" as const, title: "New friend request",
+      body: "Someone wants to be friends. Open Blend'n to see who." },
+    { kind: "event_update" as const, title: "Friday at Toit",
+      body: "Event updated: start time" },
     { kind: "match" as const, title: "It's a match",
       body: "You and someone in the room both said yes." },
     { kind: "announcement" as const, title: "From the organiser",

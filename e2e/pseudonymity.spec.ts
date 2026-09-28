@@ -195,13 +195,10 @@ test.describe("a room never carries another attendee's real name", () => {
      * the single biggest obstacle to any privacy claim about DMs, encrypted or
      * not.
      *
-     * `storedBodyFor` now redacts the content-bearing kinds, so the push says
-     * what it needs to and the row says "New message in the room". This asserts
-     * the property that redaction exists to produce, rather than asserting that
-     * the function was called.
-     *
-     * `event_checkin` bodies legitimately name somebody - "Cosmic Panda just
-     * checked in" - because a pseudonym is what the room is for. Only real
+     * `storedBodyFor` redacts the content-bearing kinds, and messages write no
+     * row at all any more (`NOT_IN_THE_BELL`). This asserts the property that
+     * both exist to produce, rather than asserting that either was called.
+     * Pseudonyms are allowed - a pseudonym is what the room is for. Only real
      * names are forbidden.
      */
     const people = await db.user.findMany({

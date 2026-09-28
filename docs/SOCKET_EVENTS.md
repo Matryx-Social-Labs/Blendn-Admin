@@ -149,4 +149,4 @@ already know each other's ids.
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `private:message` | Same as above | Notification when not in conversation room |
-| Custom events via `emitToUser()` | Varies | Server-initiated user notifications |
+| `notification:new` | `{ kind }` | A row landed in the notifications bell; the app refreshes its badge. Never sent for messages, which write no row |
