@@ -225,6 +225,18 @@ an opaque, url-safe string. Field names and shapes did not change.
   and `POST /conversations` resolve a handle only for someone you may already
   see (`identityVisible`); otherwise they answer exactly as for a stranger. A
   forged or tampered handle is answered exactly as an unknown user id.
+- **A handle is answered in its own room's terms.** Whether you may see who a
+  handle is follows what that event's roster shows: they chose "show who I am"
+  in *that* event (and you checked in there), or they are a friend who turned
+  on `friends_see_me_in_rooms`. A reveal at another event, a mutual like or an
+  open conversation does not name them through this room's handle — a raw id
+  still answers as before. For somebody the room keeps anonymous,
+  `GET /users/:userId` returns only `{ id, name, age, location, isOwnProfile,
+  identityVisible: false }` with `name` their pseudonym in that room;
+  `GET /profiles/:userId` returns only `{ id, name, profile: { id, age,
+  onboarded, location } }`; and `GET /profiles/:userId/interests` returns an
+  empty list. The same rule decides the 409-or-201 answer of
+  `POST /message-requests` and whether `POST /friends/requests` is refused.
 - **Echoes stay handles.** `GET /users/:userId`, `GET /profiles/:userId` (`id`
   and `profile.id`) and `POST /message-requests` (`recipientId`, `recipient.id`)
   return the ref you sent — a handle in, the same handle out — except for your
@@ -1675,12 +1687,12 @@ be seen.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
+| GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
 | POST | `/users/:userId/block` | Block/unblock user |
 | GET | `/users/:userId/favorites` | Get your saved events — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
 | GET | `/profiles/:userId` | Get full profile |
 | PUT | `/profiles/:userId` | Update profile |
-| GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299) |
+| GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |
 | PUT | `/profiles/:userId/interests` | Update interests |
 
 ---

@@ -16,7 +16,8 @@ import {
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
-import { maySeeIdentity } from "@/lib/identity"
+import { identityForRef } from "@/lib/identity"
+import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
@@ -98,17 +99,38 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      *
      * `users/[userId]` next door already selects explicitly. This now matches.
      */
+
     /*
-     * Same gate as `users/[userId]`. This route serves a superset of that one,
+     * Same gate as `users/[userId]` — `identityForRef`, so a room handle is
+     * answered in its room's terms. This route serves a superset of that one,
      * so leaving it ungated would have made the other fix decorative.
      */
-    const identified = isSelf || (await maySeeIdentity(authUser.userId, userId))
-
     const p = user.profile
     // Derived, so the number is true today rather than on the day they signed
     // up. See `ageFrom` in lib/age.ts — this is a read of the derived value,
     // never of `date_of_birth`, which is stripped from both branches below.
     const profileAge = ageFrom(p)
+
+    const { room, identified } = await identityForRef(authUser.userId, ref)
+
+    /*
+     * A room card for somebody that room keeps anonymous — the same answer as
+     * `GET /users/:ref`, for the same reason (see there and `IdentityScope`):
+     * their pseudonym in that room, age and city, and nothing that is the
+     * same in every room. `work_field` and `expertise` go too: the Grid shows
+     * a work field only past a small-room floor this route cannot apply, and
+     * `blurPhoto` is one stored URL for every room they are in.
+     */
+    if (room && !identified) {
+      return successResponse({
+        id: ref,
+        name: await roomPseudonymOf(room, userId),
+        profile: p
+          ? { id: ref, age: profileAge, onboarded: p.onboarded, location: normalizedLocation }
+          : null,
+      })
+    }
+
     const publicProfileFields = p && {
       id: ref,
       age: profileAge,

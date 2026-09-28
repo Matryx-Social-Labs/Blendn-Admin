@@ -181,7 +181,11 @@ export const ProfileResponseSchema = z
     email: z.string().email(),
     name: z.string(),
     image: z.string().nullable(),
-    createdAt: z.string().datetime(),
+    createdAt: z
+      .string()
+      .datetime()
+      .optional()
+      .describe("Absent through a room handle for somebody that room keeps anonymous."),
     profile: z.object({
       id: z.string().uuid(),
       phone: z.string().nullable(),
@@ -219,7 +223,10 @@ export const ProfileResponseSchema = z
       share_location: z.boolean(),
       friends_see_me_in_rooms: z.boolean(),
     }).nullable(),
-    interests: z.array(InterestSchema),
+    interests: z
+      .array(InterestSchema)
+      .optional()
+      .describe("Absent through a room handle for somebody that room keeps anonymous."),
   })
   .openapi("ProfileResponse")
 
@@ -236,24 +243,36 @@ export const UserPublicProfileSchema = z
         "The `userId` path segment as sent — a room handle in, the same handle out — so the real id behind a handle is never echoed. Your own profile answers with your own id.",
     }),
     name: z.string(),
-    image: z.string().nullable(),
-    photos: z.array(z.string()),
+    image: z.string().nullable().optional(),
+    photos: z.array(z.string()).optional(),
     age: z.number().nullable(),
     location: z.string().nullable(),
-    bio: z.string().nullable(),
-    occupation: z.string().nullable(),
-    education: z.string().nullable(),
-    interests: z.array(InterestSchema),
-    memberSince: z.string().datetime(),
-    stats: z.object({
-      eventsAttended: z.number(),
-      eventsFavorited: z.number(),
-      eventsOrganized: z.number(),
-    }),
+    bio: z.string().nullable().optional(),
+    occupation: z.string().nullable().optional(),
+    education: z.string().nullable().optional(),
+    interests: z
+      .array(InterestSchema)
+      .optional()
+      .describe("Absent through a room handle for somebody that room keeps anonymous."),
+    memberSince: z
+      .string()
+      .datetime()
+      .optional()
+      .describe("Absent through a room handle for somebody that room keeps anonymous."),
+    stats: z
+      .object({
+        eventsAttended: z.number(),
+        eventsFavorited: z.number(),
+        eventsOrganized: z.number(),
+      })
+      .optional()
+      .describe("Absent through a room handle for somebody that room keeps anonymous."),
     isOwnProfile: z.boolean(),
     identityVisible: z
       .boolean()
-      .describe("Whether the caller may see who this is. When false, name is \"Attendee\" and image, photos, bio, occupation and education are absent."),
+      .describe(
+        "Whether the caller may see who this is. A room handle is answered in that room's terms: revealed there, or a friend with `friends_see_me_in_rooms` on. When false, image, photos, bio, occupation and education are absent; `name` is \"Attendee\" by raw id, or their pseudonym in that room by handle — which then also omits interests, memberSince and stats."
+      ),
     connection: z
       .object({
         conversationId: z
