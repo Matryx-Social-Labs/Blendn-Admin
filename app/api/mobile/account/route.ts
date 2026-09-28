@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
+import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix } from "@/lib/tigris"
 import { promoteFromWaitlist } from "@/lib/waitlist"
@@ -50,7 +51,14 @@ export async function DELETE(request: NextRequest) {
     })
     const openEventIds = [...new Set(openRsvps.map((r) => r.event_id))]
 
+    const deletedAt = new Date()
     await db.$transaction([
+      /*
+       * FIRST, before anything below scrubs it: the copy of what they
+       * registered with that the IT Rules 2021, r.3(1)(h), require for 180
+       * days. Inside the batch, so it commits or rolls back with the erasure.
+       */
+      recordDeletedAccount(authUser.userId, deletedAt),
       db.user.update({
         where: { id: authUser.userId },
         data: {
@@ -59,7 +67,7 @@ export async function DELETE(request: NextRequest) {
           emailVerified: null,
           password: null,
           image: null,
-          deletedAt: new Date(),
+          deletedAt,
         },
       }),
       db.profiles.update({
@@ -257,8 +265,14 @@ export async function DELETE(request: NextRequest) {
        * with it, and that is right rather than merely unavoidable: a request to
        * a post that no longer exists is not a request, it is a dangling
        * sentence.
+       *
+       * EXCEPT a post moderation took down. That row is the removed content
+       * and the only record of its removal, and the IT Rules 2021, r.3(1)(g),
+       * require both for 180 days — an author deleting their account must not
+       * be the way to destroy the evidence. It is already hidden, so nobody
+       * is left holding an offer they cannot take.
        */
-      db.board_posts.deleteMany({ where: { author_id: authUser.userId } }),
+      db.board_posts.deleteMany({ where: { author_id: authUser.userId, moderation_status: null } }),
 
       /*
        * Requests they SENT to other people's posts: the row survives — the

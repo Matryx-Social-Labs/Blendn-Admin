@@ -93,7 +93,7 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
   },
   board_posts: {
     how: "DELETED",
-    why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence.",
+    why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence. A post moderation hid is kept: it is removed content, which the IT Rules 2021 r.3(1)(g) require for 180 days.",
   },
   board_requests: {
     how: "SCRUBBED",
@@ -102,6 +102,10 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
   chat_messages: {
     how: "RETAINED",
     why: "The room's conversation is other people's history. A thread that loses half its turns is unreadable for everyone still in it, and the author is already pseudonymous there. Moderation and reports still reach it.",
+  },
+  deleted_account_records: {
+    how: "RETAINED",
+    why: "Written BY the deletion: what they registered with, which the IT Rules 2021 r.3(1)(h) require for 180 days after the account goes. No route reads it, and the retention sweeper purges each row on its date.",
   },
   audit_logs: {
     how: "RETAINED",
