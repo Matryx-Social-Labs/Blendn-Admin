@@ -502,6 +502,36 @@ registry.registerPath({
   },
 })
 
+// GET /api/mobile/events/{eventId}/rating
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/rating",
+  tags: ["Mobile Events"],
+  summary: "My rating of this event",
+  description:
+    "Your own rating only — there is no route that returns anyone else's. `rating` is null when you have not rated (including when you never attended; " +
+    "the POST is what refuses). `ratedAt` is when you last set it. 404 `NOT_FOUND` for an unknown or deleted event.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: "Your rating",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              rating: z.number().int().min(1).max(5).nullable(),
+              review: z.string().nullable(),
+              ratedAt: z.string().datetime().nullable(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // POST /api/mobile/events/{eventId}/rating
 registry.registerPath({
   method: "post",
