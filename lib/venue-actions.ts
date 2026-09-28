@@ -601,6 +601,12 @@ export interface VenueOption {
   claimed: boolean
 }
 
+/** Words that name no venue: "The Humming Tree" is found by "humming" and "tree". */
+const SEARCH_STOPWORDS = new Set(["the", "and", "of", "at", "in", "on", "by", "an", "&"])
+/** Read before ranking, so a name-sorted page of "Cafe …" rows cannot crowd the best match out. */
+const SEARCH_CANDIDATES = 50
+const SEARCH_RESULTS = 8
+
 /**
  * Venues an organiser can pick from when creating an event.
  *
@@ -618,12 +624,23 @@ export async function searchVenues(query: string): Promise<VenueOption[]> {
   const q = query.trim()
   if (q.length < 2) return []
 
-  const venues = await db.venues.findMany({
+  /*
+   * By word, not by phrase (SCRUM-362). "Toit Indiranagar" found nothing: the
+   * venue is named "Toit" and its address says "Hoysala Nagara", so neither
+   * held the whole phrase. A venue with any word in its name is a candidate;
+   * the ones matching the most words — in the name first — come back. The
+   * whole phrase in the address still counts, for "100 Feet Road".
+   */
+  const phrase = q.toLowerCase()
+  const words = [...new Set(phrase.split(/\s+/))].filter((w) => w.length >= 2 && !SEARCH_STOPWORDS.has(w)).slice(0, 6)
+  const terms = words.length ? words : [phrase]
+
+  const candidates = await db.venues.findMany({
     where: {
       deleted_at: null,
       OR: [
-        { name: { contains: q, mode: "insensitive" } },
         { address: { contains: q, mode: "insensitive" } },
+        ...terms.map((w) => ({ name: { contains: w, mode: "insensitive" as const } })),
       ],
     },
     select: {
@@ -639,8 +656,20 @@ export async function searchVenues(query: string): Promise<VenueOption[]> {
       owner_org_id: true,
     },
     orderBy: { name: "asc" },
-    take: 8,
+    take: SEARCH_CANDIDATES,
   })
+
+  const score = (v: { name: string; address: string | null; city: string | null }) => {
+    const name = v.name.toLowerCase()
+    const rest = `${v.address ?? ""} ${v.city ?? ""}`.toLowerCase()
+    const byWord = terms.reduce((sum, w) => sum + (name.includes(w) ? 2 : rest.includes(w) ? 1 : 0), 0)
+    return byWord + (name.includes(phrase) ? 3 : 0)
+  }
+  const venues = candidates
+    .map((v) => ({ v, s: score(v) }))
+    .sort((a, b) => b.s - a.s || a.v.name.localeCompare(b.v.name))
+    .slice(0, SEARCH_RESULTS)
+    .map(({ v }) => v)
 
   return venues.map((v) => ({
     id: v.id,
