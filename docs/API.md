@@ -812,6 +812,17 @@ does not offer Delist.
 | POST | `/conversations/:id/messages` | Send message |
 | DELETE | `/conversations/:id` | **Leave — closes it for both people, permanently** |
 
+#### Opening a thread, delivery, replies and retries (SCRUM-406, 408, 409, 410)
+
+- **`GET /conversations/:id/messages`** (first page, no `before`) returns `firstUnreadId` and `unreadCount`, answered **before** anything is marked. The app opens at that message with an "Unread messages" divider. The same call then marks the **whole** thread read and delivered, not only the page, so the inbox count clears. Older pages mark nothing.
+- **Delivered.** Each of your own messages carries `deliveredAt`: null until the recipient's app has it, which is any of:
+  - a socket ack (`private:delivered`);
+  - loading this thread;
+  - loading the inbox (`GET /conversations`).
+  The sender is told over the socket. Delivered is shown whatever the recipient's `read_receipts` setting; read stays gated.
+- **Replies.** `POST` takes `replyToId`, which must be a message in the same conversation, otherwise `400`. Every message carries `replyTo: { id, senderName, text, mediaType, unavailable }`. `senderName` resolves through the reveal rules (a pseudonym until revealed). A quote of a hidden message is `unavailable: true` with no text.
+- **Retries.** `POST` takes `clientId` (a uuid the app makes per message). A repeat with the same `clientId` returns the first write instead of writing a second; a `clientId` already used in another conversation gets `409`. Both room write paths accept `clientId` the same way.
+
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
 exists — otherwise `400`. A block in **either** direction makes both this and

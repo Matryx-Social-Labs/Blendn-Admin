@@ -64,6 +64,7 @@ client performs after a reconnect.
 | `private:startTyping` | `conversationId: string` | Typing in private conversation |
 | `private:stopTyping` | `conversationId: string` | Stop typing in private conversation |
 | `private:markRead` | `conversationId: string, messageIds: string[]` | Mark messages as read |
+| `private:delivered` | `conversationId: string, messageIds: string[]` | Ack messages this app received (sets `delivered_at`; only messages sent to you, not yet delivered) |
 | `ping` | — | Connection health check |
 
 > **Chat messages are not sent over the socket.** There is no inbound
@@ -144,6 +145,7 @@ already know each other's ids.
 | `private:message` | `conversation:{id}` & `user:{recipientId}` | `{ id, conversationId, senderId, senderName, senderImage, messageText, mediaUrl, mediaType, createdAt }` |
 | `private:typing` | `conversation:{id}` | `{ conversationId, userId, userName }` |
 | `private:read` | `conversation:{id}` | `{ conversationId, userId }` |
+| `private:delivered` | `conversation:{id}` | `{ conversationId, messageIds }`. The recipient's app has these messages (✓✓ delivered). Sent whatever the read-receipt setting |
 
 ### User Events (room: `user:{userId}`)
 

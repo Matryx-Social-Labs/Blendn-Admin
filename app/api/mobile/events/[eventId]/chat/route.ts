@@ -30,6 +30,7 @@ import {
   type RoomEntitlement,
 } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
+import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
@@ -485,7 +486,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { content, type, parentId, metadata } = parsed.data
+    const { content, type, parentId, metadata, clientId } = parsed.data
 
     // Get chat group for event (create on demand if user is checked in)
     let chatGroup = await db.chat_groups.findUnique({
@@ -700,6 +701,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           content,
           type,
           parent_id: parentId ?? null,
+          ...(clientId && { client_id: clientId }),
           ...(metadata != null && { metadata: metadata as Prisma.InputJsonValue }),
           moderation_status: "hidden",
           deleted_at: new Date(),
@@ -718,14 +720,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    // A retry of a send that already landed: answered with the first write.
+    if (clientId) {
+      const existing = await findRoomSend(authUser.userId, clientId)
+      if (existing) return answerRoomRetry(existing, chatGroup.id)
+    }
+
     // Create message
-    const message = await db.chat_messages.create({
+    let message
+    try {
+    message = await db.chat_messages.create({
       data: {
         chat_group_id: chatGroup.id,
         user_id: authUser.userId,
         content,
         type,
         parent_id: parentId ?? null,
+        ...(clientId && { client_id: clientId }),
         /*
          * Conditional spread. `metadata as … | undefined` wrote an explicit
          * undefined whenever the client omitted it — every plain message —
@@ -736,6 +747,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         ...(metadata != null && { metadata: metadata as Prisma.InputJsonValue }),
       },
     })
+    } catch (error) {
+      // Two sends with one clientId raced; the other wrote it first.
+      const raced =
+        clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(authUser.userId, clientId) : null
+      if (!raced) throw error
+      return answerRoomRetry(raced, chatGroup.id)
+    }
 
     /*
      * Did anybody actually look at this message?
