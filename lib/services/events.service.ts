@@ -4,6 +4,7 @@ import { resolveEventCity, geocodeBudget, type GeocodeBudget } from "@/lib/locat
 import { haversineDistance } from "@/lib/geo"
 import { eventHost } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
+import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 
 export const eventListSelect = {
   id: true,
@@ -13,6 +14,8 @@ export const eventListSelect = {
   cover_image_url: true,
   start_time: true,
   end_time: true,
+  // Per-day windows, so `session` below can say which day is on. See `eventSession`.
+  occurrences: sessionOccurrencesSelect,
   timezone: true,
   venue_name: true,
   address: true,
@@ -154,6 +157,13 @@ async function transformEvent(
     coverImageUrl: event.cover_image_url,
     startTime: event.start_time,
     endTime: event.end_time,
+    /*
+     * The window "live" is judged by: today's day of a multi-day run, the next
+     * one, or null when every day is cancelled. `startTime`/`endTime` stay the
+     * whole run. Computed per request, after the list cache, so it moves with
+     * the clock.
+     */
+    session: eventSession(event),
     timezone: event.timezone,
     venueName: event.venue_name,
     address: event.address,

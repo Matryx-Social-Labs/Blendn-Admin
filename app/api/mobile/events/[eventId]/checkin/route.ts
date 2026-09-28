@@ -1,4 +1,4 @@
-import { outOfRangeMessage } from "@/lib/checkin-messages"
+import { closedDoorMessage, outOfRangeMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockCounterparties } from "@/lib/conversations"
@@ -173,17 +173,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       const occurrenceId = slot.occurrence?.id ?? null
       if (slot.reason === "too_early") {
         recordRefusal({ eventId, userId: authUser.userId, reason: "too_early", occurrenceId })
-        return errorResponse("Event has not started yet", 400, ErrorCode.EVENT_NOT_STARTED)
-      }
-      if (slot.reason === "cancelled") {
+      } else if (slot.reason === "cancelled") {
         recordRefusal({ eventId, userId: authUser.userId, reason: "day_cancelled", occurrenceId })
-        return errorResponse("This day has been cancelled", 400, ErrorCode.EVENT_ENDED)
+      } else {
+        recordRefusal({ eventId, userId: authUser.userId, reason: "too_late", occurrenceId })
       }
-      recordRefusal({ eventId, userId: authUser.userId, reason: "too_late", occurrenceId })
-      // "none" means the event has no occurrences at all, which should be
-      // impossible — every event gets one. Treated as ended rather than 500:
-      // the attendee cannot act on the difference.
-      return errorResponse("Event has already ended", 400, ErrorCode.EVENT_ENDED)
+      /*
+       * Named for the day, not the event: from day 2 of a run "has not
+       * started yet" is false. `closedDoorMessage` says which day is next, or
+       * which was called off. "none" means the event has no occurrences at
+       * all, which should be impossible — every event gets one. Treated as
+       * ended rather than 500: the attendee cannot act on the difference.
+       */
+      const closed = closedDoorMessage(slot.reason, slot.occurrence, slot.slots, event.timezone, now)
+      return errorResponse(
+        closed.message,
+        400,
+        closed.ended ? ErrorCode.EVENT_ENDED : ErrorCode.EVENT_NOT_STARTED
+      )
     }
     const occurrence = slot.occurrence
 

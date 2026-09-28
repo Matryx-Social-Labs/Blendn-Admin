@@ -184,6 +184,21 @@ const UserStatusSchema = z.object({
   rsvpStatus: z.string().nullable(),
 })
 
+/**
+ * The window the app judges "live" and "ended" by — `lib/occurrences.ts`
+ * `eventSession`. `startTime`/`endTime` are the whole run.
+ */
+export const EventSessionSchema = z
+  .object({
+    startTime: z.string().datetime(),
+    endTime: z.string().datetime(),
+  })
+  .nullable()
+  .openapi("EventSession", {
+    description:
+      "The day of the event the app should talk about now: the one running, else the next one going ahead, else the last one that went ahead (so it reads as ended). Null when every day is cancelled. On a single-day event it equals startTime/endTime. Judge LIVE / Happening now / check-in by this, not by startTime/endTime, which span the whole run.",
+  })
+
 export const EventSummarySchema = z
   .object({
     id: z.string().uuid(),
@@ -209,6 +224,7 @@ export const EventDetailSchema = z
     coverImageUrl: z.string().nullable(),
     startTime: z.string().datetime(),
     endTime: z.string().datetime(),
+    session: EventSessionSchema,
     timezone: z.string(),
     status: z.string(),
     visibility: z.string(),

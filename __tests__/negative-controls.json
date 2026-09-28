@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "multi-day-session.test.ts": {
+      "guards": "A multi-day event's `session` (lib/occurrences.ts eventSession) is on every payload the app judges LIVE by -- the list serializer, GET /events/:eventId and GET /me/rsvps -- and the check-in route's clock refusals go through closedDoorMessage. The pure tests in the same file cover pickOccurrence, eventSession and the copy on the staging rows of blr-design-festival.",
+      "mutation": "`session: eventSession(event),` removed from app/api/mobile/me/rsvps/route.ts.",
+      "observed": "1 of 16 failing (the /me/rsvps case of 'every payload the app judges live by carries the session'). Restored; 16 of 16.",
+      "date": "2026-09-28"
+    },
     "rating-request.test.ts": {
       "guards": "The rate-who-you-met push (sendRatingRequests) is reachable from the reminder sweeper every server starts and from the cron route, claims rating_requested_at with a conditional update before sending so no pass or replica sends twice, and drops a connection when either side blocked the other.",
       "mutation": "M1: `await sendRatingRequests()` replaced with `0` in lib/reminder-sweeper.ts. M2: the claim's `rating_requested_at: null` dropped from the updateMany where. M3: the block check in rateRequestAudience short-circuited to false.",

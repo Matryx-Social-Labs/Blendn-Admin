@@ -18,6 +18,7 @@ import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { getOccupancy } from "@/lib/occupancy"
+import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import {
   successResponse,
   errorResponse,
@@ -92,6 +93,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         // `eventHostSelect`, which claims `organizer` with a narrower shape.
         organizer_org: { select: { display_name: true } },
         details: true,
+        // What `session` below is computed from. See `eventSession`.
+        occurrences: sessionOccurrencesSelect,
         categories: {
           include: {
             category: {
@@ -240,6 +243,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       coverImageUrl: event.cover_image_url,
       startTime: event.start_time,
       endTime: event.end_time,
+      // Today's day of a multi-day run, the next, or null when every day is
+      // cancelled — what the app judges "live" and "ended" by. Same field as
+      // the list.
+      session: eventSession(event),
       timezone: event.timezone,
       status: event.status,
       visibility: event.visibility,
