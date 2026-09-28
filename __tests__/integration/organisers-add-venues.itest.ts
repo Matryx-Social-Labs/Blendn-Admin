@@ -22,7 +22,7 @@ const venues: string[] = []
 const events: string[] = []
 
 afterAll(async () => {
-  // Events first: they point at the venues.
+  // The events this file makes; without this they outlived every run.
   await cleanup([], events)
   await db.venues.deleteMany({ where: { id: { in: venues } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
@@ -162,6 +162,9 @@ describe("who may edit an unclaimed venue (owner's ruling 2)", () => {
     events.push(eventId)
     await db.events.update({ where: { id: eventId }, data: { venue_id: id } })
 
+    await expect(retireVenue(id)).rejects.toThrow(/1 event is still booked here/)
+    // A draft is still booked there: only a cancellation lets the venue go.
+    await db.events.update({ where: { id: eventId }, data: { status: "draft" } })
     await expect(retireVenue(id)).rejects.toThrow(/1 event is still booked here/)
     await db.events.update({ where: { id: eventId }, data: { status: "cancelled" } })
     await retireVenue(id)

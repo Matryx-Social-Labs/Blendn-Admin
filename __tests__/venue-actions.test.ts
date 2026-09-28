@@ -300,6 +300,8 @@ describe("retiring a venue", () => {
     const where = mockDb.events.count.mock.calls[0][0].where
     expect(where.end_time).toEqual({ gte: expect.any(Date) })
     expect(where.deleted_at).toBeNull()
+    // A cancelled event is not booked (SCRUM-424); a draft still is.
+    expect(where.status).toEqual({ not: "cancelled" })
   })
 
   it("writes both columns, because one without the other is a contradiction", async () => {
