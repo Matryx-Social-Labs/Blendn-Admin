@@ -1,5 +1,8 @@
-import { logger } from "@/lib/logger"
-import { RATE_LIMIT_MAX_ENTRIES } from "@/lib/constants"
+// Relative, not `@/`: `lib/push-notifications.ts` throttles bursts with `hit`,
+// and it is reachable from `server.ts`, which `build:server` compiles with
+// plain tsc. `__tests__/server-import-boundary.test.ts` enforces it.
+import { logger } from "./logger"
+import { RATE_LIMIT_MAX_ENTRIES } from "./constants"
 
 /**
  * Where rate-limit counters live.

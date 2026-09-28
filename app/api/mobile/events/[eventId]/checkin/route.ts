@@ -7,7 +7,6 @@ import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal, stripDating 
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { openSession } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
-import { notifyEventCheckIn } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { evaluateCheckIn, resolveFence } from "@/lib/geofence"
 import {
@@ -527,8 +526,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     /*
      * Whoever is in a block relationship with the arriver hears nothing of the
-     * arrival: not the push below, and not the live roster event, which reached
-     * them while the push and the REST roster did not (SCRUM-338).
+     * arrival: not the live roster event, which reached them while the REST
+     * roster did not (SCRUM-338).
      */
     const blockedIds = await blockCounterparties(authUser.userId)
 
@@ -542,35 +541,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     )
 
     /*
-     * Send push notifications to other checked-in users (async, don't await).
-     *
-     * Minus anyone in a block relationship with the arriver. This told you that
-     * a person you had blocked had just walked into the room -- the single most
-     * unwelcome notification the product could send, and the reason "block" has
-     * to mean more than "cannot DM me".
+     * No push. Every arrival used to push "X just checked in!" to everybody
+     * already inside, so the first person through the door heard about the
+     * next two hundred. The live roster above is how the room sees arrivals.
      */
-    db.event_check_ins
-      .findMany({
-        where: {
-          event_id: eventId,
-          status: "checked_in",
-          user_id: { not: authUser.userId, ...(blockedIds.length ? { notIn: blockedIds } : {}) },
-        },
-        select: { user_id: true },
-      })
-      .then((checkIns) => {
-        const userIds = checkIns.map((c) => c.user_id)
-        if (userIds.length > 0) {
-          return notifyEventCheckIn(
-            userIds,
-            displayName,
-            event.title,
-            eventId,
-            authUser.userId
-          )
-        }
-      })
-      .catch((err) => logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) }))
 
     return successResponse({
       checkIn: {

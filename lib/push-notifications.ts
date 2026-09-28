@@ -6,6 +6,7 @@ import { logger } from "./logger"
 
 import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk"
 import { db } from "./db"
+import { hit } from "./rate-limit-store"
 
 // Create a new Expo SDK client
 const expo = new Expo()
@@ -28,7 +29,6 @@ interface SendNotificationOptions {
   data?: NotificationData
   badge?: number
   sound?: "default" | null
-  channelId?: string
 }
 
 interface SendBulkNotificationOptions {
@@ -38,7 +38,106 @@ interface SendBulkNotificationOptions {
   data?: NotificationData
   badge?: number
   sound?: "default" | null
-  channelId?: string
+}
+
+/**
+ * Where a notification lands on the phone, decided by what it is rather than
+ * by each caller.
+ *
+ * ## Channels
+ *
+ * Android files every notification under a channel the app created, and people
+ * silence a channel in system settings. The app created one, `default`, at the
+ * highest importance — and this file sent DMs, friend requests and matches on
+ * `messages`, which did not exist, so Android put them in "Miscellaneous" at
+ * normal importance while room chatter rode `default` as a heads-up. The
+ * things that were about you were quieter than the things that were not.
+ *
+ * Three, because there are three things a person might want to silence
+ * separately: people (`messages`), the room (`rooms`), and events (`events`).
+ * The app creates exactly these; `default` is only for a payload with no type.
+ *
+ * ## Replaced in place, or stacked
+ *
+ * `threadId` stacks a conversation's notifications together on iOS.
+ * `collapseId` (iOS, and in-transit on Android) and `tag` (already on screen,
+ * Android) *replace* the previous one — so a conversation is one notification
+ * that updates, not a column of them. An event's changes collapse too, because
+ * only its latest state is true. Announcements stack but never replace: "doors
+ * moved to the side entrance" must survive "raffle at nine".
+ */
+export function deliveryFor(
+  data?: NotificationData
+): Pick<ExpoPushMessage, "channelId" | "threadId" | "collapseId" | "tag"> {
+  if (!data) return { channelId: "default" }
+  switch (data.type) {
+    case "private_message":
+      return replaced("messages", data.conversationId && `dm:${data.conversationId}`)
+    case "group_message":
+      return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
+    case "event_update":
+      return replaced("events", data.eventId && `event:${data.eventId}`)
+    case "announcement":
+    case "waitlist_promoted":
+      return data.eventId
+        ? { channelId: "events", threadId: `event:${data.eventId}` }
+        : { channelId: "events" }
+    default:
+      return { channelId: "messages" }
+  }
+}
+
+function replaced(
+  channelId: string,
+  key: string | undefined
+): Pick<ExpoPushMessage, "channelId" | "threadId" | "collapseId" | "tag"> {
+  return key ? { channelId, threadId: key, collapseId: key, tag: key } : { channelId }
+}
+
+/**
+ * Kinds the bell does not show.
+ *
+ * Messages have an inbox — the Banter list and the Room badge both count what
+ * is unread — so a bell row per message was the same fact a second time, and
+ * it buried what only the bell carries: a friend request, a cancelled event.
+ * Every messaging product draws this line (Instagram's activity feed, LinkedIn's
+ * notifications and Discord's inbox all leave DMs out).
+ *
+ * `event_checkin` is here for the rows written before its push was removed.
+ * Nothing writes any of these any more; the feed filters on the list so the
+ * rows already in the table disappear today rather than when retention reaches
+ * them.
+ */
+export const NOT_IN_THE_BELL: NotificationData["type"][] = [
+  "private_message",
+  "group_message",
+  "event_checkin",
+]
+
+/**
+ * How long a burst stays quiet.
+ *
+ * A DM rings when the conversation goes from read to unread. While it stays
+ * unread, it rings again at most once per window, with the count — so twenty
+ * messages in a minute is one alert, and a conversation you have not opened
+ * for ten minutes still reminds you it is there.
+ */
+export const DM_PUSH_WINDOW_MS = 5 * 60 * 1000
+
+/** At most one "somebody replied to you" per room in this long. */
+export const ROOM_REPLY_PUSH_WINDOW_MS = 3 * 60 * 1000
+
+/**
+ * True the first time a key is seen in its window.
+ *
+ * ponytail: the counters live in `rate-limit-store` — Redis when `REDIS_URL` is
+ * set, this process otherwise. Without Redis a deploy or a second replica
+ * forgets the window, and the cost of forgetting is one extra alert. Move this
+ * to a table if that ever matters.
+ */
+async function firstInWindow(key: string, windowMs: number): Promise<boolean> {
+  const { count } = await hit(key, windowMs)
+  return count === 1
 }
 
 /**
@@ -86,8 +185,8 @@ async function getBulkUserPushTokens(userIds: string[]): Promise<Map<string, str
     where: {
       user_id: { in: userIds },
       // Same opt-out rule as the single-user path. This one matters more:
-      // group-message fan-out is the loudest sender in the product, so a
-      // preference that works everywhere except here would look broken.
+      // an announcement to a full room is the loudest sender in the product,
+      // so a preference that works everywhere except here would look broken.
       ...NOT_OPTED_OUT,
     },
     select: { user_id: true, token: true },
@@ -125,14 +224,14 @@ async function getBulkUserPushTokens(userIds: string[]): Promise<Map<string, str
  *
  * ## Never throws
  *
- * Callers are eleven `notify*` helpers, and every one of them is
+ * Callers are the `notify*` helpers, and every one of them is
  * fire-and-forget: the send is not allowed to fail the request that triggered
  * it. A failed insert is logged and swallowed for the same reason — nobody
  * should lose a check-in because the notifications table was busy.
  *
  * The `kind` cast is safe by construction and guarded by a test:
  * `NotificationData["type"]` and the `notification_kind` enum are the same
- * eleven strings, and `__tests__/notifications.test.ts` fails if they diverge.
+ * strings, and `__tests__/notifications.test.ts` fails if they diverge.
  */
 /**
  * Kinds whose push body is a copy of something a person wrote.
@@ -176,6 +275,23 @@ export function storedBodyFor(kind: string, body: string): string {
   }
 }
 
+type BellSocket = { to(rooms: string[]): { emit(event: "notification:new", payload: { kind: string }): void } }
+
+/**
+ * A bell row landed: tell the app, if it is open, so the badge moves now rather
+ * than when the Pulse next comes into focus. The kind and nothing else — the
+ * app reads the row through `GET /notifications`, like any other.
+ *
+ * The `globalThis` instance every emitter in `lib/socket-server.ts` reads
+ * (see the note at its top), rather than an import that would pull socket.io
+ * into every sender for one emit. No server attached means nobody to tell.
+ */
+function announceToBell(userIds: string[], kind: string): void {
+  const io = (globalThis as { __blendnSocketIo?: BellSocket | null }).__blendnSocketIo
+  if (!io || userIds.length === 0) return
+  io.to(userIds.map((id) => `user:${id}`)).emit("notification:new", { kind })
+}
+
 async function recordNotification(
   userId: string,
   title: string,
@@ -193,6 +309,7 @@ async function recordNotification(
     logger.debug("Notification not recorded: no type on payload", { userId })
     return
   }
+  if (NOT_IN_THE_BELL.includes(data.type)) return
 
   try {
     await db.notifications.create({
@@ -204,6 +321,7 @@ async function recordNotification(
         data: data as object,
       },
     })
+    announceToBell([userId], data.type)
   } catch (error) {
     logger.warn("Failed to record notification", { userId, error: String(error) })
   }
@@ -243,10 +361,8 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
         body,
         data: data as Record<string, unknown>,
         badge,
-        // Android-specific
-        channelId: options.channelId || "default",
-        // iOS-specific
         priority: "high",
+        ...deliveryFor(data),
       })
     }
 
@@ -296,7 +412,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
 export async function sendBulkPushNotifications(
   options: SendBulkNotificationOptions
 ): Promise<{ sent: number; failed: number }> {
-  const { userIds, title, body, data, badge, sound = "default", channelId = "default" } = options
+  const { userIds, title, body, data, badge, sound = "default" } = options
 
   /*
    * Every recipient gets a row, not just the ones with a device.
@@ -312,7 +428,7 @@ export async function sendBulkPushNotifications(
    * same reason the single sender's is — a failed insert must not fail the
    * announcement.
    */
-  if (data?.type && userIds.length > 0) {
+  if (data?.type && !NOT_IN_THE_BELL.includes(data.type) && userIds.length > 0) {
     await db.notifications
       .createMany({
         data: userIds.map((userId) => ({
@@ -323,6 +439,7 @@ export async function sendBulkPushNotifications(
           data: data as object,
         })),
       })
+      .then(() => announceToBell(userIds, data.type))
       .catch((error) => {
         logger.warn("Failed to record bulk notifications", {
           count: userIds.length,
@@ -345,7 +462,7 @@ export async function sendBulkPushNotifications(
           data: { ...data, userId } as Record<string, unknown>,
           badge,
           priority: "high",
-          channelId,
+          ...deliveryFor(data),
         })
       }
     }
@@ -441,7 +558,6 @@ export async function notifyMatch(
     title: "You have a new match",
     body: "Someone you liked has liked you back.",
     data: { type: "match", conversationId },
-    channelId: "messages",
   })
 }
 
@@ -455,7 +571,6 @@ export async function notifyRevealRequest(
     title: "A match wants to know you",
     body: "Someone you matched with wants to see who you are.",
     data: { type: "reveal_request", conversationId },
-    channelId: "messages",
   })
 }
 
@@ -469,7 +584,6 @@ export async function notifyReveal(
     title: "A match revealed",
     body: "Someone you matched with showed you who they are.",
     data: { type: "reveal", conversationId },
-    channelId: "messages",
   })
 }
 
@@ -497,7 +611,6 @@ export async function notifyBoardRequest(
     title: "Someone answered your post",
     body: "Open the board to see who is asking.",
     data: { type: "board_request", eventId, requestId },
-    channelId: "messages",
   })
 }
 
@@ -511,92 +624,87 @@ export async function notifyBoardRequestAccepted(
     title: "Your ask was accepted",
     body: "You can message them now.",
     data: { type: "board_request_accepted", conversationId },
-    channelId: "messages",
   })
 }
 
-/**
- * Send notification for a new private message
- */
-export async function notifyPrivateMessage(
-  recipientId: string,
-  senderName: string,
-  messagePreview: string,
-  conversationId: string
-): Promise<boolean> {
-  return sendPushNotification({
-    userId: recipientId,
-    title: senderName,
-    body: messagePreview.length > 100 ? messagePreview.substring(0, 97) + "..." : messagePreview,
-    data: {
-      type: "private_message",
-      conversationId,
-    },
-    channelId: "messages",
-  })
+function clip(text: string, max: number): string {
+  return text.length > max ? text.substring(0, max - 3) + "..." : text
 }
 
 /**
- * Send notification for a new group chat message.
+ * A DM, once per burst.
  *
- * `sender.handle` is what the payload carries as `senderId`: the sender's
- * handle in this event's room (SCRUM-371). Every recipient is somebody else —
- * the sender is filtered out below — and the payload is stored in
- * `notifications.data` and served back by `GET /notifications`, so a real id
- * here was the room's pseudonym-to-person map arriving by push instead.
+ * `unread` is how many of the sender's messages in this conversation the
+ * recipient has not read, **this one included** — the caller counts it with
+ * `VISIBLE_DM`, because a hidden message is never marked read and would
+ * otherwise keep every conversation it is in permanently "unread".
+ *
+ * One unread means the conversation just went from read to unread, and that
+ * always rings: reading resets it, with no hook to forget. More than one is a
+ * burst, and it rings only when the window has passed, saying how many. Every
+ * push carries the conversation's `collapseId`, so the lock screen shows one
+ * notification for it, updated, rather than a column.
+ *
+ * The body is still the message on the first alert. Whether a lock screen
+ * should carry what somebody wrote is a product decision this does not make.
+ *
+ * ponytail: two sends committing within the same few milliseconds can each
+ * count one unread and both ring; they share a `collapseId`, so the phone shows
+ * one. A short dedupe key on the first alert closes it if it is ever seen.
  */
-export async function notifyGroupMessage(
-  recipientIds: string[],
-  senderName: string,
-  groupName: string,
-  messagePreview: string,
-  chatGroupId: string,
-  sender: { id: string; handle: string }
-): Promise<{ sent: number; failed: number }> {
-  // Exclude the sender from notifications
-  const filteredRecipients = recipientIds.filter((id) => id !== sender.id)
+export async function notifyPrivateMessage(dm: {
+  recipientId: string
+  senderName: string
+  preview: string
+  conversationId: string
+  unread: number
+}): Promise<boolean> {
+  const fresh = await firstInWindow(`push:dm:${dm.conversationId}:${dm.recipientId}`, DM_PUSH_WINDOW_MS)
+  if (dm.unread > 1 && !fresh) return false
 
-  if (filteredRecipients.length === 0) {
-    return { sent: 0, failed: 0 }
-  }
-
-  return sendBulkPushNotifications({
-    userIds: filteredRecipients,
-    title: groupName,
-    body: `${senderName}: ${messagePreview.length > 80 ? messagePreview.substring(0, 77) + "..." : messagePreview}`,
-    data: {
-      type: "group_message",
-      chatGroupId,
-      senderId: sender.handle,
-    },
+  return sendPushNotification({
+    userId: dm.recipientId,
+    title: dm.senderName,
+    body: dm.unread > 1 ? `${dm.unread} new messages` : clip(dm.preview, 100),
+    data: { type: "private_message", conversationId: dm.conversationId },
   })
 }
 
 /**
- * Send notification when someone checks in to an event
+ * Somebody replied to you in a room. The only room message that pushes.
+ *
+ * A room is a few hundred strangers, and it pushed every message to all of
+ * them — members who had gone home included, because membership is attendance
+ * and lasts the whole window. Large group products default to "replies and
+ * mentions only" for exactly this reason (Discord's large servers, Slack's
+ * channels). A reply is the one message that is about you.
+ *
+ * At most one per room per window: a thread that turns into a conversation
+ * would otherwise be a DM burst with none of the DM's throttle.
+ *
+ * `senderHandle` is what the payload carries as `senderId`: the sender's handle
+ * in this event's room (SCRUM-371). A real id here was the room's
+ * pseudonym-to-person map arriving by push.
  */
-export async function notifyEventCheckIn(
-  recipientIds: string[],
-  userName: string,
-  eventName: string,
-  eventId: string,
-  checkInUserId: string
-): Promise<{ sent: number; failed: number }> {
-  // Exclude the user who checked in
-  const filteredRecipients = recipientIds.filter((id) => id !== checkInUserId)
+export async function notifyRoomReply(reply: {
+  recipientId: string
+  senderName: string
+  groupName: string
+  preview: string
+  chatGroupId: string
+  senderHandle: string
+}): Promise<boolean> {
+  const fresh = await firstInWindow(
+    `push:room-reply:${reply.chatGroupId}:${reply.recipientId}`,
+    ROOM_REPLY_PUSH_WINDOW_MS
+  )
+  if (!fresh) return false
 
-  if (filteredRecipients.length === 0) {
-    return { sent: 0, failed: 0 }
-  }
-
-  return sendBulkPushNotifications({
-    userIds: filteredRecipients,
-    title: eventName,
-    body: `${userName} just checked in!`,
-    data: {
-      type: "event_checkin",
-      eventId,
-    },
+  return sendPushNotification({
+    userId: reply.recipientId,
+    title: reply.groupName,
+    body: `${reply.senderName} replied: ${clip(reply.preview, 80)}`,
+    data: { type: "group_message", chatGroupId: reply.chatGroupId, senderId: reply.senderHandle },
   })
 }
 
@@ -630,7 +738,6 @@ export async function notifyAnnouncement(
     title: `📢 ${eventTitle}`,
     body: preview,
     data: { type: "announcement", chatGroupId, eventId },
-    channelId: "announcements",
   })
 }
 
