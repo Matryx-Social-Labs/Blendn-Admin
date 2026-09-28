@@ -394,7 +394,9 @@ export async function POST(
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
-      const message = await db.chat_messages.create({
+      let message
+      try {
+        message = await db.chat_messages.create({
         data: {
           chat_group_id: chatGroupId,
           user_id: user.userId,
@@ -407,6 +409,12 @@ export async function POST(
           deleted_at: new Date(),
         },
       })
+      } catch (error) {
+        // A concurrent retry with the same clientId wrote it first.
+        const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
+        if (!raced) throw error
+        return answerRoomRetry(raced, chatGroupId)
+      }
       // Flag for review and, for abuse rather than a phone number, count
       // toward an auto-mute (fire-and-forget)
       void flagForReview(message.id, chatGroupId, user.userId, preSave.result)

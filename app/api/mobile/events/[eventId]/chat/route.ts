@@ -691,10 +691,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
+    // A retry of a send that already landed: answered with the first write —
+    // before moderation, so a retried flagged message replays its hidden
+    // answer instead of colliding with its own first write.
+    if (clientId) {
+      const existing = await findRoomSend(authUser.userId, clientId)
+      if (existing) return answerRoomRetry(existing, chatGroup.id)
+    }
+
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users
-      const message = await db.chat_messages.create({
+      let message
+      try {
+        message = await db.chat_messages.create({
         data: {
           chat_group_id: chatGroup.id,
           user_id: authUser.userId,
@@ -707,6 +717,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           deleted_at: new Date(),
         },
       })
+      } catch (error) {
+        // A concurrent retry with the same clientId wrote it first.
+        const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(authUser.userId, clientId) : null
+        if (!raced) throw error
+        return answerRoomRetry(raced, chatGroup.id)
+      }
       void flagForReview(message.id, chatGroup.id, authUser.userId, preSave.result)
       if (preSave.autoMute) void checkAndAutoMute(authUser.userId, chatGroup.id)
       return successResponse({
@@ -718,12 +734,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           createdAt: message.created_at,
         },
       })
-    }
-
-    // A retry of a send that already landed: answered with the first write.
-    if (clientId) {
-      const existing = await findRoomSend(authUser.userId, clientId)
-      if (existing) return answerRoomRetry(existing, chatGroup.id)
     }
 
     // Create message

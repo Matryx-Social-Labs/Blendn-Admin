@@ -31,6 +31,8 @@ export async function openThread(
   ])
 
   if (unreadCount > 0) {
+    // ponytail: one UPDATE for the whole backlog — fine at thousands of rows;
+    // batch it if a thread's unread ever reaches the tens of thousands.
     await db.private_messages.updateMany({ where: { ...incoming, is_read: false }, data: { is_read: true } })
   }
   if (undelivered.length > 0) {

@@ -1388,6 +1388,8 @@ model private_messages {
   @@index([sender_id])
   @@index([created_at])
   @@index([reply_to_id])
+  /// "Still undelivered in this conversation" — the inbox marks these delivered.
+  @@index([conversation_id, delivered_at])
   @@unique([sender_id, client_id])
 }
 
