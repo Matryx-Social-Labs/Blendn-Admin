@@ -116,13 +116,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("You can rate an event you checked in to", 403, ErrorCode.FORBIDDEN)
     }
     /*
-     * Over means the last day that went ahead has ended — the same window the
-     * app reads (`session`). A run whose last day was cancelled is over when
-     * the day before it ends; waiting for the cancelled day's end would offer
-     * "Rate" on the phone and refuse it here.
+     * Over when the run has ended, or earlier when the last day that went
+     * ahead has ended — the window the app reads (`session`). A run whose last
+     * day was cancelled is over when the day before it ends; waiting for the
+     * cancelled day's end would offer "Rate" on the phone and refuse it here.
+     *
+     * Only ever *earlier* than the run's end, never later. The occurrences
+     * are a second copy of the schedule; if one lags the event row (a write
+     * that moved the times without `syncOccurrences`), it must not hold a
+     * rating shut past the event's own end — that was the rule before, and
+     * `event-rating.itest.ts` pins it.
      */
+    const now = Date.now()
     const session = eventSession(event)
-    const over = session === null || session.endTime.getTime() <= Date.now()
+    const over =
+      event.end_time.getTime() <= now || session === null || session.endTime.getTime() <= now
     if (!over) {
       return errorResponse("You can rate this event once it has ended", 403, ErrorCode.FORBIDDEN)
     }
