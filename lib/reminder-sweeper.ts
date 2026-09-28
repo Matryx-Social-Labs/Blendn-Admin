@@ -3,7 +3,7 @@
 // alias verbatim into the require() and fails at boot.
 import { logger } from "./logger"
 import { cleanupExpiredTokens } from "./mobile-auth"
-import { sendEventReminders } from "./services/event-notifications.service"
+import { sendEventReminders, sendRatingRequests } from "./services/event-notifications.service"
 
 /**
  * The reminder people were promised, and the tokens nobody pruned.
@@ -38,6 +38,14 @@ async function pass(): Promise<void> {
    */
   const notified = await sendEventReminders(60)
   if (notified > 0) logger.info("Event reminders sent", { notified })
+
+  /*
+   * The other end of the night: "rate who you met", once per event, soon after
+   * it ends. Same claim-before-send idempotency as the reminder, same cadence,
+   * so it rides this loop rather than adding a seventh timer.
+   */
+  const asked = await sendRatingRequests()
+  if (asked > 0) logger.info("Rating requests sent", { asked })
 
   const pruned = await cleanupExpiredTokens()
   if (pruned > 0) logger.info("Expired refresh tokens pruned", { pruned })

@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "rating-request.test.ts": {
+      "guards": "The rate-who-you-met push (sendRatingRequests) is reachable from the reminder sweeper every server starts and from the cron route, claims rating_requested_at with a conditional update before sending so no pass or replica sends twice, and drops a connection when either side blocked the other.",
+      "mutation": "M1: `await sendRatingRequests()` replaced with `0` in lib/reminder-sweeper.ts. M2: the claim's `rating_requested_at: null` dropped from the updateMany where. M3: the block check in rateRequestAudience short-circuited to false.",
+      "observed": "M1: rating-request.test.ts 1 of 12 failing (reachability). M2: 1 of 12 failing (the claim). M3: 2 of 12 failing (audience split, per-user body).",
+      "date": "2026-09-28"
+    },
     "deleted-account-records-boundary.test.ts": {
       "guards": "IT Rules 2021 r.3(1)(h): deleted_account_records (registration details kept 180 days after account deletion) is named by no file under app/, components/ or lib/ except its one writer, lib/deleted-account-records.ts, so no route or dashboard page can read it. With account-deletion.test.ts (the copy is the first statement of the deletion batch, 180 days from the same deletedAt) and deleted-account-records.itest.ts (one row with the right values, none on a failed deletion, purge takes only rows past purge_after; a board post moderation hid survives its author's deletion, r.3(1)(g)).",
       "mutation": "M1: `// deleted_account_records` appended to app/api/mobile/account/route.ts. M2: recordDeletedAccount dropped from the deletion $transaction. M3: purge predicate `lt` -> `lte`. M4: board_posts.deleteMany without `moderation_status: null`.",

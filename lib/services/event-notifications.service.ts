@@ -10,7 +10,7 @@
 // point of that test.
 import { logger } from "../logger"
 import { db } from "../db"
-import { notifyEventUpdate } from "../push-notifications"
+import { notifyEventUpdate, sendBulkPushNotifications } from "../push-notifications"
 import type { rsvp_status } from "@prisma/client"
 
 /**
@@ -203,4 +203,149 @@ export async function notifyEventCancelled(
   } catch (error) {
     logger.error("Failed to send cancellation notification", { eventId, error: String(error) })
   }
+}
+
+/**
+ * How far back an ended event is still worth asking about.
+ *
+ * The sweep runs every five minutes, so a live server asks within five minutes
+ * of the end. The window exists for the day this ships — every past event has
+ * `rating_requested_at` null, and without a bound the first pass would ask
+ * about every night the platform has ever held — and for a server that was down
+ * at the end: six hours late is "last night", a week late is spam.
+ */
+export const RATING_REQUEST_LOOKBACK_MS = 6 * 60 * 60 * 1000
+
+/** At most this many events per pass; the next pass picks up the rest. */
+const RATING_REQUEST_BATCH = 50
+
+export const RATING_REQUEST_COPY = {
+  /** Somebody you connected with is waiting to be rated. */
+  peers: "The night's over. Rate the people you met — only you see what you say.",
+  /** You attended, and the event is what there is to rate. */
+  event: "How was it? Tap to rate the night.",
+} as const
+
+/**
+ * "The event ended — rate who you met." Once per event, to the people who were
+ * there.
+ *
+ * ## Once, across passes and replicas
+ *
+ * The same claim as the reminder: a conditional update on
+ * `rating_requested_at` before the send, so exactly one caller sees
+ * `count === 1`. Claimed first because a lost push is one person not asked,
+ * while a double claim is the whole room asked twice.
+ *
+ * ## Who
+ *
+ * Everyone with a check-in row for the event — attendance, the rule the rating
+ * routes use, not presence: by the end most people have been checked out, and
+ * they are exactly who this is for. Deleted and suspended accounts are left out.
+ * Somebody who already rated the event and has nobody left to rate is not asked
+ * about something they have done.
+ *
+ * ## What it says
+ *
+ * Two bodies, chosen per person. If you have somebody to rate — a mutual like
+ * at this event, the same rule as `ratablePeers` — it says so; otherwise it
+ * asks about the night. A block either way removes that person from the count,
+ * so nobody is prompted by someone they blocked. No names on either: a lock
+ * screen is not an authenticated surface (see `notifyMatch`).
+ *
+ * `profiles.push_enabled` is honoured by the bulk sender itself; everyone still
+ * gets the bell row, as with every other kind.
+ *
+ * Never throws: it runs on a timer in the server process.
+ */
+export async function sendRatingRequests(now: Date = new Date()): Promise<number> {
+  try {
+    const events = await db.events.findMany({
+      where: {
+        // `completed` too: an organiser may close the night before the clock does.
+        status: { in: ["published", "completed"] },
+        deleted_at: null,
+        rating_requested_at: null,
+        end_time: { lte: now, gt: new Date(now.getTime() - RATING_REQUEST_LOOKBACK_MS) },
+      },
+      select: { id: true, title: true },
+      orderBy: { end_time: "asc" },
+      take: RATING_REQUEST_BATCH,
+    })
+
+    let totalNotified = 0
+    for (const event of events) {
+      const { count: claimed } = await db.events.updateMany({
+        where: { id: event.id, rating_requested_at: null },
+        data: { rating_requested_at: now },
+      })
+      if (claimed === 0) continue
+      totalNotified += await requestRatingsFor(event)
+    }
+
+    if (events.length > 0) logger.info("Rating requests sent", { eventsCount: events.length, totalNotified })
+    return totalNotified
+  } catch (error) {
+    logger.error("Failed to send rating requests", { error: String(error) })
+    return 0
+  }
+}
+
+/** Who gets which body. Exported for the test; the sweep is the only caller. */
+export async function rateRequestAudience(
+  eventId: string
+): Promise<{ withPeers: string[]; eventOnly: string[] }> {
+  const checkIns = await db.event_check_ins.findMany({
+    where: { event_id: eventId, user: { deletedAt: null, suspended_at: null } },
+    select: { user_id: true },
+    distinct: ["user_id"],
+  })
+  const attendees = checkIns.map((c) => c.user_id)
+  if (attendees.length === 0) return { withPeers: [], eventOnly: [] }
+
+  const [likes, blocks, rated] = await Promise.all([
+    db.event_likes.findMany({
+      where: { event_id: eventId, liker_id: { in: attendees } },
+      select: { liker_id: true, liked_id: true },
+    }),
+    db.blocked_users.findMany({
+      where: { OR: [{ blocker_id: { in: attendees } }, { blocked_id: { in: attendees } }] },
+      select: { blocker_id: true, blocked_id: true },
+    }),
+    db.event_ratings.findMany({
+      where: { event_id: eventId, user_id: { in: attendees } },
+      select: { user_id: true },
+    }),
+  ])
+
+  const pair = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
+  const blocked = new Set(blocks.map((b) => pair(b.blocker_id, b.blocked_id)))
+  const liked = new Set(likes.map((l) => `${l.liker_id}>${l.liked_id}`))
+  const hasPeer = new Set<string>()
+  for (const l of likes) {
+    if (!liked.has(`${l.liked_id}>${l.liker_id}`)) continue
+    if (blocked.has(pair(l.liker_id, l.liked_id))) continue
+    hasPeer.add(l.liker_id)
+  }
+  const ratedEvent = new Set(rated.map((r) => r.user_id))
+
+  return {
+    withPeers: attendees.filter((id) => hasPeer.has(id)),
+    eventOnly: attendees.filter((id) => !hasPeer.has(id) && !ratedEvent.has(id)),
+  }
+}
+
+async function requestRatingsFor(event: { id: string; title: string }): Promise<number> {
+  const { withPeers, eventOnly } = await rateRequestAudience(event.id)
+  // The mobile app routes this exact type to /rate/[eventId].
+  const data = { type: "rating_request" as const, eventId: event.id }
+
+  for (const [userIds, body] of [
+    [withPeers, RATING_REQUEST_COPY.peers],
+    [eventOnly, RATING_REQUEST_COPY.event],
+  ] as const) {
+    if (userIds.length === 0) continue
+    await sendBulkPushNotifications({ userIds: [...userIds], title: event.title, body, data })
+  }
+  return withPeers.length + eventOnly.length
 }
