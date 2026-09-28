@@ -4,7 +4,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { createVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
-import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 /*
  * SCRUM-352 (epic SCRUM-349). An organiser could not add a venue — createVenue
@@ -19,8 +19,11 @@ import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 const users: string[] = []
 const orgs: string[] = []
 const venues: string[] = []
+const events: string[] = []
 
 afterAll(async () => {
+  // Events first: they point at the venues.
+  await cleanup([], events)
   await db.venues.deleteMany({ where: { id: { in: venues } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
@@ -146,6 +149,21 @@ describe("who may edit an unclaimed venue (owner's ruling 2)", () => {
     await expect(retireVenue(id)).rejects.toThrow(/only an admin/i)
     expect((await db.venues.findUniqueOrThrow({ where: { id }, select: { deleted_at: true } })).deleted_at).toBeNull()
     admin.as()
+    await retireVenue(id)
+    expect((await db.venues.findUniqueOrThrow({ where: { id }, select: { deleted_at: true } })).deleted_at).not.toBeNull()
+  })
+
+  it("a cancelled event no longer keeps its venue from retiring (SCRUM-424)", async () => {
+    // "Move or cancel it first" — and cancelling it has to be enough.
+    const admin = await member("oav-retire-cancelled", "app_admin", false)
+    admin.as()
+    const id = await added({ lat: base.lat + 0.05, lng: base.lng })
+    const eventId = await makeEvent(admin.id) // published, ends in an hour
+    events.push(eventId)
+    await db.events.update({ where: { id: eventId }, data: { venue_id: id } })
+
+    await expect(retireVenue(id)).rejects.toThrow(/1 event is still booked here/)
+    await db.events.update({ where: { id: eventId }, data: { status: "cancelled" } })
     await retireVenue(id)
     expect((await db.venues.findUniqueOrThrow({ where: { id }, select: { deleted_at: true } })).deleted_at).not.toBeNull()
   })
