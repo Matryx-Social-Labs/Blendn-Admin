@@ -191,6 +191,12 @@ export interface ServerToClientEvents {
     messageIds: string[]
     readBy: string
   }) => void
+  /**
+   * These messages reached the recipient's app (SCRUM-408): ✓✓ delivered. Sent
+   * whatever the recipient's read-receipt setting, as WhatsApp and Signal do;
+   * reading stays behind `private:read`.
+   */
+  "private:delivered": (data: { conversationId: string; messageIds: string[] }) => void
 
   // Moderation events
   "chat:messageDeleted": (data: { chatGroupId: string; messageId: string; moderation?: boolean; userId?: string }) => void
@@ -234,6 +240,8 @@ export interface ClientToServerEvents {
   "private:startTyping": (conversationId: string) => void
   "private:stopTyping": (conversationId: string) => void
   "private:markRead": (conversationId: string, messageIds: string[]) => void
+  /** The app received these messages (a socket delivery or a push it handled). */
+  "private:delivered": (conversationId: string, messageIds: string[]) => void
 
   // Ping for connection health
   ping: () => void
@@ -609,6 +617,56 @@ export async function emitPrivateRead(
 }
 
 /**
+ * The recipient's app says it has these messages: mark them delivered and tell
+ * whoever has the conversation open (SCRUM-408).
+ *
+ * Only messages sent **to** the acking user, in a conversation they are in, and
+ * not yet delivered — so a sender cannot tick their own messages, and an ack
+ * repeated on reconnect changes nothing and says nothing.
+ */
+export async function emitPrivateDelivered(
+  socket: Pick<AuthenticatedSocket, "data" | "to">,
+  conversationId: string,
+  messageIds: string[]
+): Promise<void> {
+  try {
+    if (!Array.isArray(messageIds)) return
+    const ids = messageIds.filter((id) => typeof id === "string").slice(0, READ_RECEIPT_BATCH)
+    if (ids.length === 0) return
+    if (!(await canJoinConversation(socket.data.userId, conversationId))) return
+    const fresh = await db.private_messages.findMany({
+      where: {
+        id: { in: ids },
+        conversation_id: conversationId,
+        sender_id: { not: socket.data.userId },
+        delivered_at: null,
+      },
+      select: { id: true },
+    })
+    if (fresh.length === 0) return
+    const delivered = fresh.map((m) => m.id)
+    await db.private_messages.updateMany({
+      where: { id: { in: delivered }, delivered_at: null },
+      data: { delivered_at: new Date() },
+    })
+    socket.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds: delivered })
+  } catch (error) {
+    logger.warn("Private delivery ack failed", {
+      conversationId,
+      userId: socket.data.userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/** Delivery a route recorded (a thread or the inbox loaded): tell the conversation. */
+export function emitDelivered(conversationId: string, messageIds: string[]): void {
+  const io = currentIo()
+  if (!io || messageIds.length === 0) return
+  io.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds })
+}
+
+/**
  * Initialize Socket.io server
  */
 export function initSocketServer(httpServer: HttpServer): Server {
@@ -866,6 +924,10 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     authSocket.on("private:stopTyping", (conversationId) =>
       void emitPrivateTyping(authSocket, conversationId, false)
+    )
+
+    authSocket.on("private:delivered", (conversationId, messageIds) =>
+      void emitPrivateDelivered(authSocket, conversationId, messageIds)
     )
 
     authSocket.on("private:markRead", (conversationId, messageIds) =>

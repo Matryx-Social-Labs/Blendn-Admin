@@ -2,7 +2,8 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { media_type } from "@prisma/client"
+import { media_type, type Prisma } from "@prisma/client"
+import { openThread, quoteOf, replyToSelect } from "@/lib/dm-thread"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
@@ -23,6 +24,12 @@ import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
 
+const sentInclude = {
+  sender: { select: { id: true, name: true, image: true } },
+  reply_to: replyToSelect,
+} as const
+type SentMessage = Prisma.private_messagesGetPayload<{ include: typeof sentInclude }>
+
 interface RouteParams {
   params: Promise<{ conversationId: string }>
 }
@@ -31,6 +38,10 @@ const sendMessageSchema = z.object({
   text: z.string().min(1).max(5000).optional(),
   mediaUrl: z.string().url().optional(),
   mediaType: z.enum(["image", "video"]).optional(),
+  /** The message this one replies to; must be in the same conversation. */
+  replyToId: z.string().uuid().optional(),
+  /** The app's own id for this send: a retry with it returns the first write. */
+  clientId: z.string().uuid().optional(),
 }).refine(
   (data) => data.text || data.mediaUrl,
   { message: "Message must have text or media" }
@@ -107,20 +118,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             image: true,
           },
         },
+        reply_to: replyToSelect,
       },
     })
 
     // Mark unread messages as read
-    const unreadMessageIds = messages
-      .filter((m) => !m.is_read && m.sender_id !== authUser.userId)
-      .map((m) => m.id)
-
-    if (unreadMessageIds.length > 0) {
-      await db.private_messages.updateMany({
-        where: { id: { in: unreadMessageIds } },
-        data: { is_read: true },
-      })
-    }
+    /*
+     * The first page opens the thread: where the unread start, answered before
+     * anything is marked, then the whole thread read and delivered
+     * (`openThread`). Older pages mark nothing — the first page already did.
+     */
+    const opened = before ? null : await openThread(conversationId, authUser.userId)
 
     const otherParty = conversation.user1_id === authUser.userId ? conversation.user2 : conversation.user1
 
@@ -143,11 +151,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         isRead: msg.is_read,
         otherPartyAllowsReceipts: otherParty.profile?.read_receipts,
       }),
+      // Your own messages only: ✓✓ once their app has it (SCRUM-408).
+      deliveredAt: msg.sender_id === authUser.userId ? msg.delivered_at : undefined,
+      replyTo: quoteOf(conversation, msg.reply_to),
       createdAt: msg.created_at,
     }))
 
     return successResponse({
       messages: formattedMessages,
+      ...(opened && { firstUnreadId: opened.firstUnreadId, unreadCount: opened.unreadCount }),
       hasMore: messages.length === limit,
       nextCursor: messages.length > 0 ? messages[messages.length - 1].created_at.toISOString() : null,
     })
@@ -178,7 +190,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { text, mediaUrl, mediaType } = parsed.data
+    const { text, mediaUrl, mediaType, replyToId, clientId } = parsed.data
 
     // Verify conversation exists and user has access
     const conversation = await db.private_conversations.findUnique({
@@ -208,6 +220,57 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Group chat sends and check-ins are rate limited; DM sends were not, so a
     // single account could flood a conversation and its push notifications.
+    /** One shape for a new message and for a retry that finds its first write. */
+    const sentData = (m: SentMessage) => ({
+      id: m.id,
+      conversationId: m.conversation_id,
+      senderId: m.sender_id,
+      sender: {
+        ...m.sender,
+        name: displayNameInConversation(conversation, m.sender.id, m.sender.name),
+        image: mayShowRealName(conversation, m.sender.id) ? m.sender.image : null,
+      },
+      text: m.message_text,
+      mediaUrl: m.media_url,
+      mediaType: m.media_type,
+      isRead: m.is_read,
+      deliveredAt: m.delivered_at,
+      replyTo: quoteOf(conversation, m.reply_to),
+      clientId: m.client_id,
+      createdAt: m.created_at,
+    })
+    const answer = (m: SentMessage) =>
+      m.moderation_status === "hidden"
+        ? successResponse({ ...sentData(m), text: null, moderation_hidden: true })
+        : successResponse(sentData(m))
+
+    /*
+     * A retry of a send that already landed (SCRUM-410): the request reached
+     * us, the response did not reach the phone, and "Tap to retry" sent it
+     * again. Answered with the first write — before the rate limit, which a
+     * retry should not spend, and before the checks, which it already passed.
+     */
+    if (clientId) {
+      const existing = await db.private_messages.findUnique({
+        where: { sender_id_client_id: { sender_id: authUser.userId, client_id: clientId } },
+        include: sentInclude,
+      })
+      if (existing) {
+        if (existing.conversation_id !== conversationId) {
+          return errorResponse("That message id belongs to another conversation", 409)
+        }
+        return answer(existing)
+      }
+    }
+
+    if (replyToId) {
+      const quoted = await db.private_messages.findFirst({
+        where: { id: replyToId, conversation_id: conversationId },
+        select: { id: true },
+      })
+      if (!quoted) return errorResponse("You can only reply to a message in this conversation", 400)
+    }
+
     const limited = await rateLimit(request, createUserRateLimit("private-message", authUser.userId))
     if (limited) return limited
 
@@ -251,7 +314,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const hidden = screen.verdict === "hide"
 
     // Create the message
-    const message = await db.private_messages.create({
+    let message: SentMessage
+    try {
+      message = await db.private_messages.create({
       data: {
         conversation_id: conversationId,
         sender_id: authUser.userId,
@@ -266,17 +331,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         ...(mediaUrl != null && { media_url: mediaUrl }),
         ...(mediaType != null && { media_type: mediaType as media_type }),
         moderation_status: screen.status,
+        ...(replyToId && { reply_to_id: replyToId }),
+        ...(clientId && { client_id: clientId }),
       },
-      include: {
-        sender: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-          },
-        },
-      },
+      include: sentInclude,
     })
+    } catch (error) {
+      // Two sends with one clientId raced, and the other wrote it first. The
+      // driver adapter nests the constraint, so the code is all we can read.
+      const raced =
+        clientId && (error as { code?: string }).code === "P2002"
+          ? await db.private_messages.findUnique({
+              where: { sender_id_client_id: { sender_id: authUser.userId, client_id: clientId } },
+              include: sentInclude,
+            })
+          : null
+      if (!raced) throw error
+      return answer(raced)
+    }
 
     /*
      * A hidden message does not touch the conversation's clock.
@@ -293,21 +365,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Emit via Socket.io
-    const messageData = {
-      id: message.id,
-      conversationId: message.conversation_id,
-      senderId: message.sender_id,
-      sender: {
-        ...message.sender,
-        name: displayNameInConversation(conversation, message.sender.id, message.sender.name),
-        image: mayShowRealName(conversation, message.sender.id) ? message.sender.image : null,
-      },
-      text: message.message_text,
-      mediaUrl: message.media_url,
-      mediaType: message.media_type,
-      isRead: message.is_read,
-      createdAt: message.created_at,
-    }
+    const messageData = sentData(message)
 
     /*
      * Neither delivered nor announced.

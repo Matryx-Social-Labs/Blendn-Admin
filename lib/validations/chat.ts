@@ -4,6 +4,8 @@ export const sendMessageSchema = z.object({
   content: z.string().min(1, "Message cannot be empty").max(2000, "Message is too long"),
   type: z.enum(["text", "image", "video"]).default("text"),
   parentId: z.string().uuid().optional(), // For replies
+  /** The app's own id for this send: a retry with it returns the first write (SCRUM-410). */
+  clientId: z.string().uuid().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
