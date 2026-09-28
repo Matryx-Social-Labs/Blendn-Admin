@@ -1156,9 +1156,9 @@
       "date": "2026-09-28"
     },
     "../e2e/where-map-stacking.spec.ts": {
-      "guards": "SCRUM-420: nothing on the map paints over the venue suggestions or the sticky header. Leaflet's panes (400-700) and controls (up to 1000) stay inside components/geofence-editor.tsx's wrapper, which is `isolate`. Checked by hit-testing a grid over each surface, inset past its border-radius, and requiring more than 100 points actually sampled.",
-      "mutation": "M1: `isolate` removed from the geofence editor's wrapper. M0 (a vacuous first draft): the list was hit-tested where it opened, below the fold of a 720px viewport.",
-      "observed": "M1: 2 of 2 failing. List: leaflet-control-zoom, leaflet-control-zoom-in. Header: the zoom controls and the Map/Satellite toggle. M0: the list test passed on the unfixed code because elementFromPoint returned null for every point, which is why it now scrolls the list into view and asserts sampled > 100.",
+      "guards": "SCRUM-420: nothing on the map paints over the venue suggestions or the sticky header, and the open suggestions scroll under the header. Leaflet's panes (400-700) and controls (up to 1000) stay inside components/geofence-editor.tsx's wrapper, which is `isolate`; the list (where-search.tsx) is z-10, over the map and under the z-20 chrome. Checked by hit-testing a grid over each surface, inset past its border-radius, with the zoom buttons asserted inside the sampled band on both axes and more than 100 points actually sampled.",
+      "mutation": "M1: `isolate` removed from the geofence editor's wrapper. M2: the list back at z-[900] (with `isolate` kept). M0 (a vacuous first draft): the list was hit-tested where it opened, below the fold of a 720px viewport.",
+      "observed": "M1: 2 of 2 failing. List: leaflet-control-zoom, leaflet-control-zoom-in. Header: the zoom controls and the Map/Satellite toggle. M2: 1 of 2 failing (the header test: the list's rows over the header). M0: the list test passed on the unfixed code because elementFromPoint returned null for every point, which is why the list is now scrolled into view and sampled > 100 is asserted.",
       "date": "2026-09-29"
     }
   },
