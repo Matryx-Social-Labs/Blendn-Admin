@@ -24,6 +24,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 process.env.NEXTAUTH_SECRET ??= "itest-room-handles-secret-of-32-characters"
 process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 
+import { randomUUID } from "crypto"
 import { createServer } from "http"
 import type { AddressInfo } from "net"
 import { Server } from "socket.io"
@@ -52,6 +53,7 @@ const respondRoute = require("@/app/api/mobile/message-requests/[requestId]/resp
 const friendRoute = require("@/app/api/mobile/friends/[userId]/route") as typeof import("@/app/api/mobile/friends/[userId]/route")
 const friendDmRoute = require("@/app/api/mobile/friends/[userId]/conversation/route") as typeof import("@/app/api/mobile/friends/[userId]/conversation/route")
 const conversationsRoute = require("@/app/api/mobile/conversations/route") as typeof import("@/app/api/mobile/conversations/route")
+const interestsRoute = require("@/app/api/mobile/profiles/[userId]/interests/route") as typeof import("@/app/api/mobile/profiles/[userId]/interests/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 type Handler = (req: NextRequest, ctx: { params: Promise<never> }) => Promise<Response>
@@ -64,6 +66,7 @@ const LAT = 12.9716
 const LNG = 77.5946
 const users: string[] = []
 const events: string[] = []
+const categorySlugs: string[] = []
 
 async function person(label: string): Promise<Person> {
   const id = await makeUser(testId(label))
@@ -156,6 +159,7 @@ const shapeOf = (v: unknown): unknown =>
       : typeof v
 
 afterAll(async () => {
+  await db.categories.deleteMany({ where: { slug: { in: categorySlugs } } })
   await db.message_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
   await db.friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.presence_sessions.deleteMany({ where: { event_id: { in: events } } })
@@ -321,8 +325,61 @@ describe("a friend who holds your real id reads the room and finds nothing", () 
         method: "POST",
         body: { recipientId: ref, message: "hi" },
       }),
+      await call(blockRoute.POST, `/api/mobile/users/${ref}/block`, ana, { method: "POST", params: { userId: ref } }),
+      await call(blockRoute.DELETE, `/api/mobile/users/${ref}/block`, ana, { method: "DELETE", params: { userId: ref } }),
+      await call(profileRoute.GET, `/api/mobile/profiles/${ref}`, ana, { params: { userId: ref } }),
+      await call(interestsRoute.GET, `/api/mobile/profiles/${ref}/interests`, ana, { params: { userId: ref } }),
     ]
     expect(await answers(forged)).toEqual(await answers(nobody))
+    // Nothing reached Ben by the forged handle.
+    expect(await db.blocked_users.count({ where: { blocker_id: ana.id, blocked_id: ben.id } })).toBe(0)
+  })
+
+  it("interests read through the roster's handle are Ben's", async () => {
+    const slug = testId("rh-cat")
+    categorySlugs.push(slug)
+    const category = await db.categories.create({ data: { name: "Board games", slug } })
+    await db.user_interests.create({ data: { user_id: ben.id, category_id: category.id } })
+    const read = (ref: string) =>
+      call(interestsRoute.GET, `/api/mobile/profiles/${ref}/interests`, ana, { params: { userId: ref } })
+    const [byHandle, byRawId] = [await read(hBen), await read(ben.id)]
+    expect(byHandle.status).toBe(200)
+    expect(byHandle.body.data.interests.map((i: { slug: string }) => i.slug)).toEqual([slug])
+    expect(byHandle).toEqual(byRawId)
+  })
+
+  it("likes and waves take only this room's handles: a raw id or another room's handle is nobody", async () => {
+    /*
+     * Cam is checked in and visible, so a raw-id like or wave used to answer
+     * "yes, that account is in this room right now". Now it is answered as an
+     * id nobody has, and so is Cam's handle from another event.
+     */
+    const act = async (ref: string) => [
+      await call(likesRoute.POST, `/api/mobile/events/${eventId}/matches/likes`, ana, {
+        method: "POST",
+        body: { userId: ref },
+        params: { eventId },
+      }),
+      await call(wavesRoute.POST, `/api/mobile/events/${eventId}/waves`, ana, {
+        method: "POST",
+        body: { toUserId: ref },
+        params: { eventId },
+      }),
+    ]
+    const unknown = await act(testId("nobody"))
+    expect(unknown.map((r) => r.status)).toEqual([404, 403])
+    expect(await act(cam.id)).toEqual(unknown)
+    expect(await act(roomHandle(randomUUID(), cam.id))).toEqual(unknown)
+    expect(await db.event_likes.count({ where: { liker_id: ana.id, liked_id: cam.id } })).toBe(0)
+
+    // The too-soon finder is closed: the refused raw-id wave started no
+    // window, so the first wave by the roster's handle goes through.
+    const byHandle = await call(wavesRoute.POST, `/api/mobile/events/${eventId}/waves`, ana, {
+      method: "POST",
+      body: { toUserId: await rosterRef(eventId, ana, cam) },
+      params: { eventId },
+    })
+    expect(byHandle.status).toBe(200)
   })
 
   it("everything the room lets Ana do to Ben works with the roster's handle, and lands on Ben", async () => {
@@ -340,10 +397,10 @@ describe("a friend who holds your real id reads the room and finds nothing", () 
       params: { eventId },
     })
     expect(wave.status).toBe(200)
-    // The pair's window is keyed on real ids: the raw id is the same person.
+    // One wave per pair per ten minutes still holds by handle.
     const again = await call(wavesRoute.POST, `/api/mobile/events/${eventId}/waves`, ana, {
       method: "POST",
-      body: { toUserId: ben.id },
+      body: { toUserId: hBen },
       params: { eventId },
     })
     expect(again.status).toBe(429)
@@ -493,6 +550,20 @@ describe("a response that differs for a friend is the id by another route", () =
         status: 409,
         body: expect.objectContaining({ error: "You already have a conversation with this user" }),
       })
+    })
+
+    it("his handle opens the friend DM through either route", async () => {
+      const viaFriends = await call(friendDmRoute.POST, `/api/mobile/friends/${hBen}/conversation`, ana, {
+        method: "POST",
+        params: { userId: hBen },
+      })
+      expect(viaFriends).toEqual({ status: 200, body: expect.objectContaining({ data: { conversationId: dmId } }) })
+      const viaConversations = await call(conversationsRoute.POST, "/api/mobile/conversations", ana, {
+        method: "POST",
+        body: { otherUserId: hBen },
+      })
+      expect(viaConversations.status).toBe(200)
+      expect(viaConversations.body.data.id).toBe(dmId)
     })
 
     it("his handle opens the friend routes, and he leaves Ana's deck", async () => {

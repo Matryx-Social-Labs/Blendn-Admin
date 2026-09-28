@@ -949,24 +949,28 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
 }
 
 /**
- * `emitAsSeenBy` for a chat room, which knows its group and not its event.
+ * `emitAsSeenBy` for a chat room, which knows its group and not always its event.
  *
- * The handle is per event (`chat_groups.event_id`, one room per event), so it
- * is looked up here rather than asked of every caller — five places emit into
- * a room, and a handle minted from the wrong id would be a different person.
- * Never rejects, like the rest of this file's emitters: the write it reports
- * has already committed.
+ * The handle is per event (`chat_groups.event_id`, one room per event). A
+ * caller that already holds the event passes it — room delivery, the announce
+ * routes, polls and the organiser moderation routes all do — and the rest are
+ * looked up here rather than asked for, since a handle minted from the wrong
+ * id would be a different person. Never rejects, like the rest of this file's
+ * emitters: the write it reports has already committed.
  */
 async function toChatRoom<E extends keyof ServerToClientEvents>(
   chatGroupId: string,
   audience: Parameters<typeof emitAsSeenBy<E>>[0],
   event: E,
-  build: (idFor: (userId: string) => string) => Payload<E>
+  build: (idFor: (userId: string) => string) => Payload<E>,
+  knownEventId?: string
 ): Promise<void> {
   try {
-    const group = await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { event_id: true } })
-    if (!group) return
-    await emitAsSeenBy(audience, group.event_id, event, build)
+    const eventId =
+      knownEventId ??
+      (await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { event_id: true } }))?.event_id
+    if (!eventId) return
+    await emitAsSeenBy(audience, eventId, event, build)
   } catch (error) {
     logger.error("Room emit failed", {
       chatGroupId,
@@ -1234,7 +1238,9 @@ export function emitChatMessage(
     createdAt: string
     parentId?: string
   },
-  excludeUserIds: readonly string[] = []
+  excludeUserIds: readonly string[] = [],
+  /** The room's event, when the caller has it — saves `toChatRoom` a lookup. */
+  eventId?: string
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1243,7 +1249,8 @@ export function emitChatMessage(
     chatGroupId,
     io.in(`chat:${chatGroupId}`).except(excludeUserIds.map((id) => `user:${id}`)),
     "chat:message",
-    (idFor) => ({ chatGroupId, message: { ...message, userId: idFor(message.userId) } })
+    (idFor) => ({ chatGroupId, message: { ...message, userId: idFor(message.userId) } }),
+    eventId
   )
 }
 
@@ -1295,30 +1302,26 @@ export function emitChatMessageDeleted(chatGroupId: string, messageId: string): 
  * Includes userId and moderation flag so the client can show a
  * "message removed" placeholder to the sender instead of just deleting it.
  */
-export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string): void {
+export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string, eventId?: string): void {
   const io = currentIo()
   if (!io) return
   // The author still sees their own id and draws the placeholder; the rest of
   // the room gets the handle their copy of the message carried.
-  void toChatRoom(chatGroupId, io.in(`chat:${chatGroupId}`), "chat:messageDeleted", (idFor) => ({
+  void toChatRoom(
     chatGroupId,
-    messageId,
-    moderation: true,
-    userId: idFor(userId),
-  }))
+    io.in(`chat:${chatGroupId}`),
+    "chat:messageDeleted",
+    (idFor) => ({ chatGroupId, messageId, moderation: true, userId: idFor(userId) }),
+    eventId
+  )
 }
 
 /**
  * Emit a member ban/unban to the chat room
  */
-export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean): void {
+export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean, eventId?: string): void {
   const io = currentIo()
   if (!io) return
-  const notice = toChatRoom(chatGroupId, io.in(`chat:${chatGroupId}`), "chat:memberBanned", (idFor) => ({
-    chatGroupId,
-    userId: idFor(userId),
-    banned,
-  }))
   /*
    * And out of the room, on every instance — after the notice, so their own
    * client hears it. `canJoinChat` refuses a banned *rejoin*; a socket already
@@ -1332,21 +1335,36 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
    * before their own copy (with their own real id, so the app knows it is
    * them) was sent. `toChatRoom` never rejects, so the eviction always runs.
    */
-  if (banned) void notice.then(() => io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`))
+  void toChatRoom(
+    chatGroupId,
+    io.in(`chat:${chatGroupId}`),
+    "chat:memberBanned",
+    (idFor) => ({ chatGroupId, userId: idFor(userId), banned }),
+    eventId
+  ).then(() => {
+    if (banned) io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
+  })
 }
 
 /**
  * Emit a member mute/unmute to the chat room
  */
-export function emitChatMemberMuted(chatGroupId: string, userId: string, muted: boolean, reason?: string): void {
+export function emitChatMemberMuted(
+  chatGroupId: string,
+  userId: string,
+  muted: boolean,
+  reason?: string,
+  eventId?: string
+): void {
   const io = currentIo()
   if (!io) return
-  void toChatRoom(chatGroupId, io.in(`chat:${chatGroupId}`), "chat:memberMuted", (idFor) => ({
+  void toChatRoom(
     chatGroupId,
-    userId: idFor(userId),
-    muted,
-    reason,
-  }))
+    io.in(`chat:${chatGroupId}`),
+    "chat:memberMuted",
+    (idFor) => ({ chatGroupId, userId: idFor(userId), muted, reason }),
+    eventId
+  )
 }
 
 /**

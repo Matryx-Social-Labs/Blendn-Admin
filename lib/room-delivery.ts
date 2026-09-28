@@ -87,7 +87,8 @@ export async function deliverToRoom(input: {
         createdAt: message.created_at.toISOString(),
         parentId: message.parent_id || undefined,
       },
-      senderBlocked
+      senderBlocked,
+      input.eventId
     )
   } catch (error) {
     logger.error("Room socket emit failed", {

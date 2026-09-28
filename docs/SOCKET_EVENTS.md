@@ -96,7 +96,8 @@ person's **room handle** for the event: `rh_` + an opaque string
   and your own typing still arrive under your real id.
 - Every REST endpoint that takes a user id accepts a handle (see `docs/API.md`,
   "Room handles"), so a handle from a socket event can be used to like, wave,
-  block, report or open a message request.
+  block, report or open a message request. Likes and waves take **only** that
+  event's handles — not a raw id, not another event's handle.
 
 Because the payload now differs per reader, room events are sent **per socket**
 (`fetchSockets()` on the room, then one emit each) rather than as one broadcast.

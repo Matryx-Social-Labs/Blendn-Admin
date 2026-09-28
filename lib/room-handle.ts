@@ -134,6 +134,27 @@ export function userIdFromRef(ref: string): string {
 }
 
 /**
+ * Who a room-only action — a like, a wave — may name: somebody this event's
+ * room showed the caller, by the handle it showed, or the caller by their own
+ * id (the roster lists you as yourself, and "you cannot wave at yourself" is
+ * the honest answer to that). Null for anything else — a raw id, another
+ * event's handle, a forged one — which the route answers as an unknown person.
+ *
+ * Stricter than `userIdFromRef` because these two answer from the room's live
+ * state. A raw id there asked "is this account checked in here right now", and
+ * the wave window, keyed on the real pair, turned one raw-id wave into a
+ * finder: wave at your friend's real id, then at each handle on the roster,
+ * and the one refused as too soon was them. Every legitimate caller holds a
+ * handle for these, because the roster and the deck are all that name anyone.
+ */
+export function roomMemberFromRef(eventId: string, ref: string, viewerId: string): string | null {
+  if (ref === viewerId) return viewerId
+  const resolved = resolveUserRef(ref)
+  if (!resolved?.eventId || resolved.eventId !== eventId.toLowerCase()) return null
+  return resolved.userId
+}
+
+/**
  * One person's id as `viewerId` should see it in `eventId`'s room: their own
  * stays real, everyone else's is the handle.
  */

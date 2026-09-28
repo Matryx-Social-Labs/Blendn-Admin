@@ -206,14 +206,21 @@ an opaque, url-safe string. Field names and shapes did not change.
   on every surface and socket event, so a card, a message and a match can be
   matched up. The same person at another event has an unrelated handle — there
   is no cross-event identity, for ids as for pseudonyms.
-- **Every endpoint that takes a user id accepts a handle**, anywhere a raw id
-  was accepted: `POST /events/:id/matches/likes` (`userId`),
-  `POST /events/:id/waves` (`toUserId`), `GET /users/:userId`,
+- **Every endpoint that takes a user id accepts a handle**: `GET /users/:userId`,
   `POST|DELETE /users/:userId/block`, `POST /users/:userId/report`,
   `GET /profiles/:userId`, `GET /profiles/:userId/interests`,
   `POST /message-requests` (`recipientId`), `POST /conversations`
   (`otherUserId`), `POST /friends/requests` (`userId`), `GET|DELETE
-  /friends/:userId` and `POST /friends/:userId/conversation`. Raw ids still work.
+  /friends/:userId` and `POST /friends/:userId/conversation`. Raw ids still work
+  on these.
+- **Likes and waves take only this event's handles.** `POST /events/:id/matches/likes`
+  (`userId`) and `POST /events/:id/waves` (`toUserId`) name somebody only by the
+  handle that event's roster or deck gave you — or you by your own id, which is
+  refused as "not yourself". A raw id, another event's handle and a forged
+  handle are all answered exactly as an unknown person (likes `404 User not
+  found`, waves `403 RECIPIENT_NOT_HERE`): these two answer from who is in the
+  room right now, so a raw id asked "is this account here", and the per-pair
+  wave window turned one raw-id wave into a way to find which handle it was.
 - **A handle is not a lookup key for what the room hides.** The friends routes
   and `POST /conversations` resolve a handle only for someone you may already
   see (`identityVisible`); otherwise they answer exactly as for a stranger. A
@@ -429,7 +436,8 @@ with you, and rank lower rather than disappearing.
 liked you** — a mutual like is the only thing that reveals it, and there is no
 endpoint that leaks it early.
 
-`POST .../likes` takes `{ "userId": "..." }` and returns
+`POST .../likes` takes `{ "userId": "<this event's room handle>" }` — the card's
+own `userId` — and returns
 `{ "mutual": false }` or `{ "mutual": true, "conversationId": "..." }`. A mutual
 like opens the conversation directly: a message request exists to establish that
 both people agreed to talk, and two likes are exactly that.

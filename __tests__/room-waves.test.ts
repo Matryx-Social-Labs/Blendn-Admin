@@ -45,14 +45,17 @@ const EVENT = "22222222-2222-2222-2222-222222222222"
 const ME = "me"
 const THEM = "them"
 
-const wave = (toUserId: string = THEM) =>
+/** Somebody as this room's roster names them: their handle here (SCRUM-371). */
+const inRoom = (userId: string, eventId: string = EVENT) => roomHandle(eventId, userId)
+
+const wave = (toUserId: string = inRoom(THEM), eventId: string = EVENT) =>
   POST(
-    new NextRequest(`https://api.blendn.app/api/mobile/events/${EVENT}/waves`, {
+    new NextRequest(`https://api.blendn.app/api/mobile/events/${eventId}/waves`, {
       method: "POST",
       body: JSON.stringify({ toUserId }),
       headers: { "content-type": "application/json" },
     }),
-    { params: Promise.resolve({ eventId: EVENT }) }
+    { params: Promise.resolve({ eventId }) }
   )
 
 /** Who is inside now, by user id. */
@@ -156,7 +159,7 @@ it("allows one wave per pair per ten minutes: 429 WAVE_TOO_SOON", async () => {
 it("keeps the window per pair: waving at someone else is fine", async () => {
   inside(ME, THEM, "other")
   expect((await wave()).status).toBe(200)
-  expect((await wave("other")).status).toBe(200)
+  expect((await wave(inRoom("other"))).status).toBe(200)
 })
 
 it("does not start the clock on a wave that was refused", async () => {
@@ -166,29 +169,56 @@ it("does not start the clock on a wave that was refused", async () => {
 })
 
 describe("room handles (SCRUM-371)", () => {
-  it("takes the roster's handle and waves at the person behind it", async () => {
-    expect((await wave(roomHandle(EVENT, THEM))).status).toBe(200)
+  const OTHER_EVENT = "33333333-3333-4333-8333-333333333333"
+  const nobody = async () => {
+    const res = await wave(inRoom("nobody-here"))
+    return { status: res.status, body: await res.json() }
+  }
+  const answer = async (ref: string) => {
+    const res = await wave(ref)
+    return { status: res.status, body: await res.json() }
+  }
+
+  it("takes this room's handle and waves at the person behind it", async () => {
+    expect((await wave(inRoom(THEM))).status).toBe(200)
     expect(mockEmitWave).toHaveBeenCalledWith(THEM, expect.objectContaining({ fromUserId: ME }))
   })
 
-  it("keys the ten-minute window on the real pair: a handle and the raw id are one person", async () => {
-    // Moving rooms — a new handle for the same person — is not a new window.
-    const OTHER_EVENT = "33333333-3333-4333-8333-333333333333"
-    expect((await wave(roomHandle(OTHER_EVENT, THEM))).status).toBe(200)
-    expect((await wave(roomHandle(EVENT, THEM))).status).toBe(429)
-    expect((await wave(THEM)).status).toBe(429)
-  })
-
-  it("answers a forged handle exactly as it answers somebody who is not here", async () => {
-    const handle = roomHandle(EVENT, THEM)
-    const forged = `${handle.slice(0, -1)}${handle.endsWith("A") ? "B" : "A"}`
-    const [a, b] = [await wave(forged), await wave("nobody")]
-    expect(a.status).toBe(b.status)
-    expect(await a.json()).toEqual(await b.json())
+  it.each([
+    ["a raw real id of somebody checked in and visible", () => THEM],
+    ["their handle from another event", () => inRoom(THEM, OTHER_EVENT)],
+    [
+      "a forged handle",
+      () => {
+        const h = inRoom(THEM)
+        return `${h.slice(0, -1)}${h.endsWith("A") ? "B" : "A"}`
+      },
+    ],
+  ])("answers %s exactly as somebody who is not here", async (_label, ref) => {
+    // `THEM` is inside and visible: only the ref differs from the 200 above.
+    expect(await answer(ref())).toEqual(await nobody())
     expect(mockEmitWave).not.toHaveBeenCalled()
   })
 
-  it("refuses your own handle as it refuses your own id", async () => {
-    expect((await wave(roomHandle(EVENT, ME))).status).toBe(400)
+  it("closes the too-soon finder: a raw-id wave is refused and starts no window", async () => {
+    /*
+     * The attack: wave at a friend's real id, then at each roster handle —
+     * the one answered 429 is the friend. The raw-id wave is now nobody, so
+     * it cannot start the pair's clock, and the handle's first wave goes.
+     */
+    expect((await wave(THEM)).status).toBe(403)
+    expect((await wave(inRoom(THEM))).status).toBe(200)
+  })
+
+  it("keys the ten-minute window on the real pair, so a new room is not a new window", async () => {
+    // The residual, recorded in SECURITY_BACKLOG: linking two rooms' handles
+    // this way needs both people to move rooms within ten minutes.
+    expect((await wave(inRoom(THEM), EVENT)).status).toBe(200)
+    expect((await wave(inRoom(THEM, OTHER_EVENT), OTHER_EVENT)).status).toBe(429)
+  })
+
+  it("refuses your own id, and your own handle, as waving at yourself", async () => {
+    expect((await wave(ME)).status).toBe(400)
+    expect((await wave(inRoom(ME))).status).toBe(400)
   })
 })

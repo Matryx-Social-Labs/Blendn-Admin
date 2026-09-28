@@ -30,7 +30,9 @@ import { Server } from "socket.io"
 import { io as connect, type Socket as ClientSocket } from "socket.io-client"
 import {
   emitChatMemberBanned,
+  emitChatMemberMuted,
   emitChatMessage,
+  emitChatMessageHidden,
   emitEventCheckIn,
   emitEventCheckOut,
   emitEventInterestUpdate,
@@ -234,6 +236,64 @@ describe("every recipient gets their own copy (SCRUM-371)", () => {
     expect(blocker["chat:message"]).toBeUndefined()
     // The handle is minted from the room's event, not from the chat group id.
     expect(mockChatGroup).toHaveBeenCalledWith({ where: { id: CHAT }, select: { event_id: true } })
+  })
+
+  it("event:checkout: the leaver's own socket reads their real id, a watcher a handle", async () => {
+    const leaver = await listen("pr-leaver", [`event:${EVENT}`])
+    const watcher = await listen("pr-co-watcher", [`event:${EVENT}`])
+
+    emitEventCheckOut(EVENT, "pr-leaver")
+    await settle()
+
+    expect(leaver["event:checkout"]).toEqual([expect.objectContaining({ userId: "pr-leaver" })])
+    expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ userId: handle("pr-leaver") })])
+  })
+
+  it("chat:messageDeleted (moderation): the author reads their own id and draws the placeholder; the room a handle", async () => {
+    const author = await listen("pr-hidden-author", [`chat:${CHAT}`])
+    const witness = await listen("pr-hidden-witness", [`chat:${CHAT}`])
+
+    emitChatMessageHidden(CHAT, "m-hidden", "pr-hidden-author")
+    await settle()
+
+    expect(author["chat:messageDeleted"]).toEqual([
+      { chatGroupId: CHAT, messageId: "m-hidden", moderation: true, userId: "pr-hidden-author" },
+    ])
+    expect(witness["chat:messageDeleted"]).toEqual([
+      { chatGroupId: CHAT, messageId: "m-hidden", moderation: true, userId: handle("pr-hidden-author") },
+    ])
+  })
+
+  it("chat:memberMuted: the muted member reads their own id; the room a handle", async () => {
+    const muted = await listen("pr-muted", [`chat:${CHAT}`])
+    const witness = await listen("pr-mute-witness", [`chat:${CHAT}`])
+
+    emitChatMemberMuted(CHAT, "pr-muted", true, "Muted by admin")
+    await settle()
+
+    expect(muted["chat:memberMuted"]).toEqual([
+      { chatGroupId: CHAT, userId: "pr-muted", muted: true, reason: "Muted by admin" },
+    ])
+    expect(witness["chat:memberMuted"]).toEqual([
+      { chatGroupId: CHAT, userId: handle("pr-muted"), muted: true, reason: "Muted by admin" },
+    ])
+  })
+
+  it("an emitter told the event mints handles from it without looking the room up", async () => {
+    const witness = await listen("pr-known-witness", [`chat:${CHAT}`])
+
+    emitChatMessage(
+      CHAT,
+      { id: "m2", content: "hi", type: "text", userId: "pr-known-sender", userName: "Quiet Otter", createdAt: "2026-09-28T00:00:00Z" },
+      [],
+      EVENT
+    )
+    await settle()
+
+    expect(witness["chat:message"]).toEqual([
+      expect.objectContaining({ message: expect.objectContaining({ userId: handle("pr-known-sender") }) }),
+    ])
+    expect(mockChatGroup).not.toHaveBeenCalled()
   })
 
   it("chat:memberBanned reaches the banned person under their own id, then takes them out of the room", async () => {

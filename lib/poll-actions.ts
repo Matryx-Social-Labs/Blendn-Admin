@@ -170,7 +170,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       userId: session.user.id,
       userName: roomSenderName({ type: "poll", metadata: { kind } }, undefined, event),
       createdAt: created.createdAt.toISOString(),
-    })
+    }, [], eventId)
   } catch (error) {
     logger.error("Poll emit failed", {
       pollId: created.pollId,

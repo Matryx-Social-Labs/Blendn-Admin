@@ -1,6 +1,6 @@
 process.env.NEXTAUTH_SECRET = "room-handle-test-secret-at-least-32-chars"
 
-import { isRoomHandle, resolveUserRef, roomHandle, userIdFromRef } from "@/lib/room-handle"
+import { isRoomHandle, resolveUserRef, roomHandle, roomMemberFromRef, userIdFromRef } from "@/lib/room-handle"
 
 /*
  * The per-event handle that stands in for another person's user id on every
@@ -96,5 +96,25 @@ describe("roomHandle / resolveUserRef", () => {
     } finally {
       process.env.NEXTAUTH_SECRET = saved
     }
+  })
+})
+
+describe("roomMemberFromRef — who a like or a wave may name", () => {
+  const VIEWER = "cmg1viewer0000ab12cd34ef5"
+
+  it("is the person behind this room's handle, whatever case the route's uuid is in", () => {
+    expect(roomMemberFromRef(EVENT, roomHandle(EVENT, USER), VIEWER)).toBe(USER)
+    expect(roomMemberFromRef(EVENT.toUpperCase(), roomHandle(EVENT, USER), VIEWER)).toBe(USER)
+  })
+
+  it("is the caller for their own id, so the route can say 'not yourself'", () => {
+    expect(roomMemberFromRef(EVENT, VIEWER, VIEWER)).toBe(VIEWER)
+    expect(roomMemberFromRef(EVENT, roomHandle(EVENT, VIEWER), VIEWER)).toBe(VIEWER)
+  })
+
+  it("is nobody for a raw id, another room's handle, or a forged one", () => {
+    expect(roomMemberFromRef(EVENT, USER, VIEWER)).toBeNull()
+    expect(roomMemberFromRef(EVENT, roomHandle(OTHER_EVENT, USER), VIEWER)).toBeNull()
+    expect(roomMemberFromRef(EVENT, "rh_forged", VIEWER)).toBeNull()
   })
 })

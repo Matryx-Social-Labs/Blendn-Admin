@@ -213,7 +213,7 @@ event and user, reversible without a lookup, unlinkable across events), and
 your own id stays real so the app keeps working unchanged. Socket room events
 are emitted per recipient. Every id-accepting endpoint takes a handle.
 
-Closing the id exposed four ways to learn the same thing by asking, each fixed:
+Closing the id exposed five ways to learn the same thing by asking, each fixed:
 
 - `POST /message-requests` answered 409 "you already have a conversation" for a
   friend DM, so a request to each card picked out the friend. To a caller who
@@ -226,22 +226,42 @@ Closing the id exposed four ways to learn the same thing by asking, each fixed:
 - The match deck dropped every friend while the roster listed them, so
   roster-minus-deck was the friend. Only friends you can recognise leave it now.
 - A forged handle is answered byte-for-byte as an unknown id.
+- Likes and waves took raw ids. A raw-id like or wave said whether that account
+  was checked in here right now, and the wave's ten-minute window, keyed on the
+  real pair, made it a finder: wave at a friend's real id, then at each roster
+  handle, and the one answered 429 was the friend — about a minute at the write
+  limit. Both now name somebody only by this event's handle (or you by your own
+  id, refused as "not yourself"); a raw id, another event's handle or a forged
+  one is answered exactly as an unknown person and starts no window. Every
+  client call already sends the roster's or deck's id, so nothing legitimate
+  used a raw id here.
 
 `__tests__/integration/room-handles.itest.ts` drives all of it through the real
 routes and searches every serialised response for the friend's id.
 
 **Left open, deliberately:**
 
-- **Quasi-identifiers.** `GET /users/:handle` still returns `memberSince`, the
-  attendance stats, age, city and interests, and `GET /profiles/:handle` its
-  `createdAt` — the same values `GET /users/:realId` returns to anyone. A
-  determined friend can compare them. The roster already shows age and city, so
-  closing this means deciding what a pseudonymous card may say at all, which is
-  a product question, not an id one.
-- **The wave window is keyed on the real pair** (by design: a new room is not a
-  new window). A caller who holds a raw id can wave at it and then find the one
-  handle that answers 429. Refusing raw ids on room endpoints once clients send
-  only handles would close it.
+- **Quasi-identifiers link a person across rooms — open, product decision for
+  the owner.** This defeats per-event unlinkability, not just one profile's
+  privacy. The roster puts age and city on every row, and `GET /users/:realId`
+  returns age, city, interests, `memberSince` and attendance stats to any
+  signed-in caller. A friend who holds your real id reads your (age, city)
+  once, then picks the matching row out of the roster at every event you
+  attend; strangers do the same with the (age, city) they saw on you at one
+  event. In a room of a few dozen that pair is often unique, and the
+  interests, `memberSince` and stats on `GET /users/:handle` and `createdAt` on
+  `GET /profiles/:handle` confirm it exactly. The handle removes the id; it
+  cannot remove attributes the room chooses to show. Closing this means
+  deciding what a pseudonymous row and card may say, and what an id lookup
+  returns to someone who cannot see who it is — the owner's call, deliberately
+  not changed here.
+- **The wave window is still keyed on the real pair across rooms** (by design: a
+  new room is not a new window). The raw-id finder above is closed, but the same
+  window links one person's handles in two rooms: wave at a handle in room A,
+  then, within ten minutes, at each handle in room B — the 429 is the same
+  person. Check-in allows one room at a time, so this needs the caller and the
+  target both to move from A to B inside those ten minutes, and the caller to
+  have waved at them in A.
 - **Closed pairs** stay on the roster and off the deck, so roster-minus-deck
   still marks someone you unmatched.
 - Stored `notifications.data.senderId` from before this change still holds real

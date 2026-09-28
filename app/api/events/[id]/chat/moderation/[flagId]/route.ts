@@ -157,7 +157,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // The room is told, as the auto-hide path already does; without this the
     // message stayed on every open phone until the next reload.
     if (action === "reject") {
-      emitChatMessageHidden(event.chat_group.id, flag.message_id, flag.user_id)
+      emitChatMessageHidden(event.chat_group.id, flag.message_id, flag.user_id, eventId)
     }
 
     // Same action names as the admin twin, so one audit query finds both.
