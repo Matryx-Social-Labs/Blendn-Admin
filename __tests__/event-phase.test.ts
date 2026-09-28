@@ -1,4 +1,4 @@
-import { eventStateFor, livePhaseFor, publishBlockers } from "@/lib/event-phase"
+import { eventClock, eventStateFor, livePhaseFor, publishBlockers } from "@/lib/event-phase"
 
 /**
  * The four states the Overview is designed around.
@@ -120,5 +120,31 @@ describe("publishBlockers", () => {
   it("counts only blocking items towards being unpublishable", () => {
     const found = publishBlockers({ ...ready, cover_image_url: null })
     expect(found.some((b) => b.blocking)).toBe(false)
+  })
+})
+
+describe("an event's times are told in its own timezone (SCRUM-421)", () => {
+  // Jest runs in UTC, as Railway does. A 04:30 IST start is 23:00Z the day before.
+  const start = new Date("2026-09-28T23:00:00Z")
+  const end = new Date("2026-09-29T01:00:00Z")
+  const ist = eventClock("Asia/Kolkata")
+
+  it("formats in the event's zone, not the server's", () => {
+    expect(ist.time(start)).toBe("04:30")
+    expect(ist.time(end)).toBe("06:30")
+    expect(ist.day(start)).toMatch(/^29 Sep/)
+    expect(ist.dateTime(start)).toMatch(/^29 Sept? 2026, 04:30$/)
+  })
+
+  it("counts days to the doors by the event's calendar, not by 24-hour blocks", () => {
+    // Three minutes before the doors is today, not "in 1 day".
+    expect(ist.daysUntil(start, new Date("2026-09-28T22:57:00Z"))).toBe(0)
+    // 23:30 IST on the 28th: the doors are tomorrow, five hours away.
+    expect(ist.daysUntil(start, new Date("2026-09-28T18:00:00Z"))).toBe(1)
+    expect(ist.daysUntil(start, new Date("2026-09-25T12:00:00Z"))).toBe(4)
+  })
+
+  it("falls back to UTC for a zone the runtime does not know, rather than throwing", () => {
+    expect(eventClock("Not/AZone").time(start)).toBe("23:00")
   })
 })

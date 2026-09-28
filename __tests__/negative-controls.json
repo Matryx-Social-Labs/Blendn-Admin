@@ -1160,6 +1160,12 @@
       "mutation": "M1: `isolate` removed from the geofence editor's wrapper. M2: the list back at z-[900] (with `isolate` kept). M0 (a vacuous first draft): the list was hit-tested where it opened, below the fold of a 720px viewport.",
       "observed": "M1: 2 of 2 failing. List: leaflet-control-zoom, leaflet-control-zoom-in. Header: the zoom controls and the Map/Satellite toggle. M2: 1 of 2 failing (the header test: the list's rows over the header). M0: the list test passed on the unfixed code because elementFromPoint returned null for every point, which is why the list is now scrolled into view and sampled > 100 is asserted.",
       "date": "2026-09-29"
+    },
+    "event-page-timezone.test.ts": {
+      "guards": "SCRUM-421: the event page tells its times on the event's clock. The page selects events.timezone and formats through eventClock (no bare Intl.DateTimeFormat, which on Railway is UTC); the Live tab is handed the zone and formats nothing with toLocale*String (the viewer's zone). With event-phase.test.ts, which pins eventClock itself under jest's TZ=UTC: 04:30 IST shows as 04:30, and days to the doors count by the event's calendar.",
+      "mutation": "M62: the header back to a bare Intl.DateTimeFormat. M63: the Live tab's doors label back to toLocaleTimeString. M64: eventClock without timeZone. M65: daysUntil back to Math.ceil of 24-hour blocks.",
+      "observed": "M62: event-page-timezone.test.ts 1 of 2 failing (new Intl.DateTimeFormat on the page). M63: event-page-timezone.test.ts 1 of 2 failing (toLocaleTimeString in the Live tab). M64: event-phase.test.ts 2 of 16 failing (\"23:00\" for a 04:30 IST start; the unknown-zone fallback). M65: event-phase.test.ts 1 of 16 failing (three minutes before the doors counted as 1 day).",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

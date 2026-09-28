@@ -20,7 +20,7 @@ import { IssueLog } from "@/components/dashboard/issue-log"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { cn } from "@/lib/utils"
-import { livePhaseFor } from "@/lib/event-phase"
+import { eventClock, livePhaseFor } from "@/lib/event-phase"
 
 // Moved to lib/event-phase.ts so a server component can ask the question
 // without importing this whole client module. Re-exported because callers
@@ -67,11 +67,14 @@ export function LiveTab({
   eventId,
   startAt,
   endAt,
+  timezone,
   issues = [],
 }: {
   eventId: string
   startAt: string
   endAt: string
+  /** The event's own zone: its times are told in it, not the viewer's (SCRUM-421). */
+  timezone: string
   /**
    * What has already happened tonight, from `event_issues`.
    *
@@ -82,6 +85,7 @@ export function LiveTab({
   issues?: IssueRow[]
 }) {
   const phase = livePhaseFor(startAt, endAt)
+  const clock = eventClock(timezone)
   // Only hold a socket while there is something to watch. The server runs its
   // snapshot timer per event while anyone is subscribed, so connecting outside
   // the live window would keep it querying for a screen showing an empty state.
@@ -170,10 +174,7 @@ export function LiveTab({
           <OccupancyHero
             occupancy={snapshot}
             unreliable={occupancyMostlyInferred(snapshot)}
-            time={new Date(snapshot.at).toLocaleTimeString("en-GB", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            time={clock.time(new Date(snapshot.at))}
             description={`${formatNumber(snapshot.checkedInTotal)} checked in, ${formatNumber(snapshot.checkedOutTotal)} left${
               snapshot.staleInside > 0
                 ? `. ${formatNumber(snapshot.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
@@ -212,14 +213,8 @@ export function LiveTab({
           <ArrivalCurve
             data={arrival}
             capacity={snapshot.capacity}
-            doorsLabel={new Date(startAt).toLocaleTimeString("en-GB", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-            endLabel={new Date(endAt).toLocaleTimeString("en-GB", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            doorsLabel={clock.time(new Date(startAt))}
+            endLabel={clock.time(new Date(endAt))}
             empty={snapshot.checkedInTotal === 0}
           />
         </div>

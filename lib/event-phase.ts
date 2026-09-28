@@ -16,6 +16,39 @@ export function livePhaseFor(startAt: string, endAt: string, now = new Date()): 
 }
 
 /**
+ * An event's times, told on its own clock (SCRUM-421).
+ *
+ * A bare `Intl.DateTimeFormat` formats in the zone of whatever runs it: UTC on
+ * Railway, so an event at 04:30 IST read "23:00" the day before on its own
+ * page, and the viewer's zone in a client component. `events.timezone` is what
+ * the organiser typed the times in, so it is what they are shown in. An unknown
+ * zone falls back to UTC rather than taking the page down.
+ */
+export function eventClock(timezone: string) {
+  let zone = timezone
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: zone })
+  } catch {
+    zone = "UTC"
+  }
+  const format = (options: Intl.DateTimeFormatOptions, locale = "en-GB") =>
+    new Intl.DateTimeFormat(locale, { ...options, timeZone: zone })
+  const day = format({ day: "numeric", month: "short" })
+  const time = format({ timeStyle: "short" })
+  const dateTime = format({ dateStyle: "medium", timeStyle: "short" })
+  const calendarDay = format({}, "en-CA") // YYYY-MM-DD
+
+  return {
+    day: (d: Date) => day.format(d),
+    time: (d: Date) => time.format(d),
+    dateTime: (d: Date) => dateTime.format(d),
+    /** Whole calendar days from `now` to `d` on the event's clock: 0 is today. */
+    daysUntil: (d: Date, now: Date) =>
+      Math.round((Date.parse(calendarDay.format(d)) - Date.parse(calendarDay.format(now))) / 86_400_000),
+  }
+}
+
+/**
  * The four states the Overview is designed around.
  *
  * `LivePhase` answers "where are we in the schedule". This answers "what is the
