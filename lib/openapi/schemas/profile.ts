@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema } from "./common"
+import { PaginationMetaSchema, UserRefParamSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -231,7 +231,10 @@ export const InterestsResponseSchema = z
 
 export const UserPublicProfileSchema = z
   .object({
-    id: z.string(),
+    id: z.string().openapi({
+      description:
+        "The `userId` path segment as sent — a room handle in, the same handle out — so the real id behind a handle is never echoed. Your own profile answers with your own id.",
+    }),
     name: z.string(),
     image: z.string().nullable(),
     photos: z.array(z.string()),
@@ -248,6 +251,25 @@ export const UserPublicProfileSchema = z
       eventsOrganized: z.number(),
     }),
     isOwnProfile: z.boolean(),
+    identityVisible: z
+      .boolean()
+      .describe("Whether the caller may see who this is. When false, name is \"Attendee\" and image, photos, bio, occupation and education are absent."),
+    connection: z
+      .object({
+        conversationId: z
+          .string()
+          .uuid()
+          .nullable()
+          .describe("The caller's open conversation with this person, if any. A closed one reads as null."),
+        request: z
+          .enum(["sent", "received"])
+          .nullable()
+          .describe("A pending message request between you, from the caller's side."),
+      })
+      .optional()
+      .describe(
+        "Present only when `identityVisible` is true. Absent otherwise — a friend's card in a room, with their `friends_see_me_in_rooms` off, must not say a friend DM exists (SCRUM-371)."
+      ),
   })
   .openapi("UserPublicProfile")
 
@@ -262,7 +284,7 @@ export const UserFavoritesResponseSchema = z
 // Message request schemas
 export const MessageRequestCreateSchema = z
   .object({
-    recipientId: z.string().uuid(),
+    recipientId: UserRefParamSchema,
     message: z.string().max(500).optional(),
   })
   .openapi("MessageRequestCreate")
@@ -277,7 +299,10 @@ export const MessageRequestSchema = z
   .object({
     id: z.string().uuid(),
     senderId: z.string().optional(),
-    recipientId: z.string().optional(),
+    recipientId: z
+      .string()
+      .optional()
+      .describe("On a create: the `recipientId` as sent — a room handle stays a handle (SCRUM-371)."),
     sender: z.object({ id: z.string(), name: z.string(), avatar: z.string().nullable() }).optional(),
     /** The id only — the recipient's name and photo are the accept's to give, not the ask's (SCRUM-182). */
     recipient: z.object({ id: z.string() }).optional(),

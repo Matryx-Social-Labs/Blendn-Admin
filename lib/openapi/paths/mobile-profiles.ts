@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors, PaginationMetaSchema } from "@/lib/openapi/schemas/common"
+import { standardErrors, PaginationMetaSchema, UserRefParamSchema } from "@/lib/openapi/schemas/common"
 import {
   UpdateProfileRequestSchema,
   InterestCategoryIdsSchema,
@@ -17,8 +17,10 @@ registry.registerPath({
   path: "/api/mobile/profiles/{userId}",
   tags: ["Mobile Profiles"],
   summary: "Get user profile",
+  description:
+    "`userId` may be a room handle (SCRUM-371). `id` and `profile.id` echo it as sent — `profiles.id` is the user id, so both are echoed — except on your own profile.",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string().uuid() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     200: { description: "Profile", content: { "application/json": { schema: wrap(ProfileResponseSchema) } } },
     ...standardErrors,
@@ -56,9 +58,10 @@ registry.registerPath({
   path: "/api/mobile/profiles/{userId}/interests",
   tags: ["Mobile Profiles"],
   summary: "Get user interests",
-  description: "A block, either way, answers **404** — the same as the profile itself (SCRUM-299).",
+  description:
+    "A block, either way, answers **404** — the same as the profile itself (SCRUM-299). `userId` may be a room handle (SCRUM-371).",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string().uuid() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     ...standardErrors,
     200: { description: "Interests", content: { "application/json": { schema: wrap(InterestsResponseSchema) } } },

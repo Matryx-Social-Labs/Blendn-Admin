@@ -66,13 +66,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    if (!messageRequest) {
+    /*
+     * A request that is not yours to answer is, to you, not found.
+     *
+     * This said 403 "You can only respond to requests sent to you", which told
+     * a sender their id was real — and `POST /message-requests` now answers a
+     * request it will not deliver with an id that is not (SCRUM-371). Two
+     * answers would let a sender check which of their requests exist, and so
+     * which room handle was their friend.
+     */
+    if (!messageRequest || messageRequest.recipient_id !== authUser.userId) {
       return notFoundResponse("Message request not found")
-    }
-
-    // Verify the user is the recipient
-    if (messageRequest.recipient_id !== authUser.userId) {
-      return errorResponse("You can only respond to requests sent to you", 403)
     }
 
     // Verify the request is still pending

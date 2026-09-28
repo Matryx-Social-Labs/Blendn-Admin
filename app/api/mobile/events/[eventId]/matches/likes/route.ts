@@ -17,12 +17,14 @@ import { likeAtEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { announceRoomMatch } from "@/lib/room-match"
+import { userIdFromRef } from "@/lib/room-handle"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
 }
 
-// User ids are cuid, not uuid — do not tighten this to z.string().uuid().
+// User ids are cuid, not uuid — do not tighten this to z.string().uuid(). And
+// the deck sends room handles (`rh_…`, SCRUM-371), which are neither.
 const likeSchema = z.object({ userId: z.string().min(1) })
 
 /**
@@ -51,7 +53,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const parsed = likeSchema.safeParse(await request.json())
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { userId: likedId } = parsed.data
+    // The deck's handle, or a raw id from before handles; a forged handle
+    // matches nobody and is answered as an unknown id below.
+    const likedId = userIdFromRef(parsed.data.userId)
 
     if (likedId === authUser.userId) {
       return errorResponse("You cannot like yourself")

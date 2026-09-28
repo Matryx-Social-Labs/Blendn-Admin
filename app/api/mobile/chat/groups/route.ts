@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PAGINATION } from "@/lib/constants"
+import { idForViewer } from "@/lib/room-handle"
 import {
   successResponse,
   unauthorizedResponse,
@@ -270,7 +271,8 @@ export async function GET(request: NextRequest) {
                   : lastMessage.content.substring(0, 100),
               createdAt: lastMessage.created_at,
               user: {
-                id: lastMessage.user_id,
+                // The room's handle for anyone but you (SCRUM-371).
+                id: idForViewer(authUser.userId, membership.chat_group.event.id, lastMessage.user_id),
                 name: lastMessage.user_name,
               },
             }

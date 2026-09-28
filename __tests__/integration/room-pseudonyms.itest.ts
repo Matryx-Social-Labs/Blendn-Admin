@@ -14,6 +14,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 import { signAccessToken } from "@/lib/mobile-auth"
 
 import { claimAnonymousName } from "@/lib/anonymous-names"
+import { userIdFromRef } from "@/lib/room-handle"
 
 import { db, closeDb, makeUser, testId } from "./helpers"
 
@@ -150,7 +151,9 @@ describe("a room page carries every sender's pseudonym", () => {
     // name assertion below is checking an empty list.
     expect(returned).toHaveLength(people.length)
 
-    const nameFor = new Map(returned.map((m) => [m.user.id, m.user.name]))
+    // Keyed on the person behind the id: everyone but the viewer comes back as
+    // their handle in this room (SCRUM-371), which must resolve to them.
+    const nameFor = new Map(returned.map((m) => [userIdFromRef(m.user.id), m.user.name]))
     const wrong = people
       .filter((p) => nameFor.get(p.id) !== p.pseudonym)
       .map((p) => `${p.pseudonym} rendered as ${JSON.stringify(nameFor.get(p.id))}`)
@@ -260,7 +263,9 @@ describe("a room page carries every sender's pseudonym", () => {
 
     expect(returned.length).toBeGreaterThanOrEqual(people.length)
 
-    const nameFor = new Map(returned.map((m) => [m.user.id, m.user.name]))
+    // Keyed on the person behind the id: everyone but the viewer comes back as
+    // their handle in this room (SCRUM-371), which must resolve to them.
+    const nameFor = new Map(returned.map((m) => [userIdFromRef(m.user.id), m.user.name]))
     const wrong = people
       .filter((p) => nameFor.get(p.id) !== p.pseudonym)
       .map((p) => `${p.pseudonym} rendered as ${JSON.stringify(nameFor.get(p.id))}`)

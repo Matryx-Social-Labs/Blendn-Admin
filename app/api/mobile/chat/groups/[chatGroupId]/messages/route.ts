@@ -6,6 +6,7 @@ import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
+import { idForViewer } from "@/lib/room-handle"
 import { rateLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
@@ -184,11 +185,21 @@ export async function GET(
       : []
     const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
 
+    /*
+     * Every other person's id as their handle in this room, yours as yours
+     * (SCRUM-371). The row spread below carried `user_id` and `deleted_by`
+     * straight out of the table, beside `user.id` — so both are overridden,
+     * not just the one the client reads.
+     */
+    const idFor = (userId: string) => idForViewer(user.userId, chatGroup.event_id, userId)
+
     return successResponse({
       messages: messagesToReturn.map((m) => {
         const isHidden = m.moderation_status === "hidden"
         return {
           ...m,
+          user_id: idFor(m.user_id),
+          deleted_by: m.deleted_by && idFor(m.deleted_by),
           /*
            * Counts, not names. The spread above carries `reactions` straight
            * out of the row — `{ id, emoji, user_id }` per reaction — so this
@@ -202,7 +213,7 @@ export async function GET(
           content: isHidden ? null : m.content,
           moderation_hidden: isHidden,
           user: {
-            id: m.user.id,
+            id: idFor(m.user.id),
             name: roomSenderName(m, anonMap.get(m.user.id), chatGroup.event),
             image: null,
           },
@@ -210,7 +221,7 @@ export async function GET(
             ? {
                 ...m.parent_message,
                 user: {
-                  id: m.parent_message.user.id,
+                  id: idFor(m.parent_message.user.id),
                   name: roomSenderName(m.parent_message, anonMap.get(m.parent_message.user.id), chatGroup.event),
                 },
               }
@@ -281,7 +292,7 @@ export async function POST(
         // only `end_time` would leave this path silently un-floored --
         // `chatWindowState` treats a missing start as "no lower bound", which
         // is the right default for old callers and the wrong one here.
-        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
+        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } },
       },
     })
 
@@ -596,6 +607,7 @@ export async function POST(
      */
     await deliverToRoom({
       chatGroupId,
+      eventId: chatGroup.event_id,
       groupName: chatGroup.name,
       senderId: user.userId,
       senderAnonName,
@@ -603,7 +615,23 @@ export async function POST(
       preview: previewFor(type, content),
     })
 
-    // Return anonymized response
+    /*
+     * The quoted author by their own name in this room. This labelled them with
+     * the SENDER's pseudonym — reply to Cosmic Panda as Quiet Otter and the
+     * response said Quiet Otter had written the quote — which the history GET,
+     * reading the author's own row, then contradicted.
+     */
+    const quoted = message.parent_message
+    const quotedAuthor =
+      quoted && quoted.user.id !== user.userId
+        ? await db.chat_group_members.findUnique({
+            where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: quoted.user.id } },
+            select: { anonymous_name: true },
+          })
+        : membership
+
+    // Return anonymized response. The sender's own id stays real; the quoted
+    // author's is their handle in this room (SCRUM-371).
     return successResponse({
       ...message,
       user: {
@@ -611,12 +639,12 @@ export async function POST(
         name: senderAnonName,
         image: null,
       },
-      parent_message: message.parent_message
+      parent_message: quoted
         ? {
-            ...message.parent_message,
+            ...quoted,
             user: {
-              id: message.parent_message.user.id,
-              name: membership.anonymous_name || "Attendee",
+              id: idForViewer(user.userId, chatGroup.event_id, quoted.user.id),
+              name: roomSenderName(quoted, quotedAuthor?.anonymous_name || undefined, chatGroup.event),
             },
           }
         : null,

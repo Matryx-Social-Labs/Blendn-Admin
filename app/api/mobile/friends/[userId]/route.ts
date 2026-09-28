@@ -8,6 +8,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { UNNAMED } from "@/lib/conversation-identity"
 import { unfriend } from "@/lib/friends"
+import { userIdFromRefIfIdentified } from "@/lib/identity"
 import {
   successResponse,
   unauthorizedResponse,
@@ -33,7 +34,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
     const me = authUser.userId
-    const { userId } = await params
+    // A friend's id, or a room handle for a friend you can recognise there.
+    // Any other handle reads as a stranger's 404 — see the helper (SCRUM-371).
+    const userId = await userIdFromRefIfIdentified(me, (await params).userId)
 
     const [user1_id, user2_id] = conversationPair(me, userId)
     const [friendship, blocked] = await Promise.all([
@@ -112,7 +115,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "friend-remove", authUser.userId))
     if (limited) return limited
 
-    const { userId } = await params
+    const userId = await userIdFromRefIfIdentified(authUser.userId, (await params).userId)
     await unfriend(authUser.userId, userId)
     return successResponse({ removed: true })
   } catch (error) {

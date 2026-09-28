@@ -188,6 +188,43 @@ It still will not equal `/matches`, and should not: matches select on
 checked out stays matchable and stops being listed as present — "was here" versus
 "is here".
 
+### Room handles
+
+A room never sends another person's real user id (SCRUM-371). Wherever a room
+surface names somebody by id — the roster's `attendees[].userId`, the match
+deck's `matches[].userId`, `participants[].userId`, every message's `user.id`
+(and the group history's `user_id`, `deleted_by` and quoted
+`parent_message.user.id`), the chat list's `lastMessage.user.id`, the
+`group_message` push's `senderId`, and every `chat:*`, `event:*` and `room:*`
+socket event — it sends that person's **room handle** instead: `rh_` followed by
+an opaque, url-safe string. Field names and shapes did not change.
+
+- **Your own id is always your real id.** Align your own bubbles, find your own
+  check-in, drop your own typing and leave yourself off the roster exactly as
+  before, by comparing with your id.
+- **One handle per person per event.** Stable for the whole event and the same
+  on every surface and socket event, so a card, a message and a match can be
+  matched up. The same person at another event has an unrelated handle — there
+  is no cross-event identity, for ids as for pseudonyms.
+- **Every endpoint that takes a user id accepts a handle**, anywhere a raw id
+  was accepted: `POST /events/:id/matches/likes` (`userId`),
+  `POST /events/:id/waves` (`toUserId`), `GET /users/:userId`,
+  `POST|DELETE /users/:userId/block`, `POST /users/:userId/report`,
+  `GET /profiles/:userId`, `GET /profiles/:userId/interests`,
+  `POST /message-requests` (`recipientId`), `POST /conversations`
+  (`otherUserId`), `POST /friends/requests` (`userId`), `GET|DELETE
+  /friends/:userId` and `POST /friends/:userId/conversation`. Raw ids still work.
+- **A handle is not a lookup key for what the room hides.** The friends routes
+  and `POST /conversations` resolve a handle only for someone you may already
+  see (`identityVisible`); otherwise they answer exactly as for a stranger. A
+  forged or tampered handle is answered exactly as an unknown user id.
+- **Echoes stay handles.** `GET /users/:userId`, `GET /profiles/:userId` (`id`
+  and `profile.id`) and `POST /message-requests` (`recipientId`, `recipient.id`)
+  return the ref you sent — a handle in, the same handle out — except for your
+  own profile, which answers with your id.
+- Handles are keyed to the server secret: rotating `NEXTAUTH_SECRET` retires
+  every handle a client holds. Re-fetch the room rather than caching them.
+
 ---
 
 ### GET /me/attendance
@@ -602,6 +639,14 @@ conversation. And
 `@@unique([sender_id, recipient_id])` means **one request per pair for all
 time** — decline it and that person can never send another.
 
+**The last two refusals are said only to someone who can see who this is**
+(SCRUM-371). An existing request or conversation is a fact about the pair, and a
+room handle hides the pair: a friend DM would otherwise answer 409 and pick the
+friend out of a roster. To a caller for whom `identityVisible` is false they
+answer `201` with the created-request shape and a fresh id, write nothing and
+notify nobody. The 409s are unchanged for everyone else — the app can read the
+same facts from `GET /users/:userId`'s `connection`.
+
 ### GET /conversations
 Each conversation carries **`fromMatch`** — it opened from a mutual like rather
 than from an accepted message request.
@@ -876,7 +921,9 @@ someone the morning after is the ordinary case. An RSVP does not count; only an
 actual check-in puts you in the room.
 
 `respond` with `block` writes a real `blocked_users` row as well as setting the
-request status.
+request status. A request that is not yours to answer is `404` — the same as one
+that does not exist (it was `403`), so a sender cannot use `respond` to check
+which request ids are real.
 
 ---
 
@@ -919,8 +966,10 @@ once.
 friend surfaces above, because both people said yes. It is *not* a branch of
 `maySeeIdentity`, which every room surface asks — unless the person turned on
 `friends_see_me_in_rooms` (see Settings). A DM opened from `/friends/:userId/conversation`
-is marked `origin_friendship`, so it does not open that gate either. Friends are
-left out of each other's match pool.
+is marked `origin_friendship`, so it does not open that gate either. A friend
+you can recognise in a room is left out of your match pool; one who has not
+turned the switch on stays in it, as the stranger they chose to be — leaving
+them out while the roster lists them would say which handle is your friend.
 
 **A block** deletes the friendship and any request between the pair; unblocking
 does not restore it. **Deleting your account** removes your friendships,
@@ -1549,7 +1598,7 @@ be seen.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/users/:userId` | Get user profile |
+| GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
 | POST | `/users/:userId/block` | Block/unblock user |
 | GET | `/users/:userId/favorites` | Get your saved events — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
 | GET | `/profiles/:userId` | Get full profile |

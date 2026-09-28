@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { blockedEitherWay } from "@/lib/conversations"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -22,7 +23,9 @@ interface RouteParams {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { userId } = await params
+    // A room handle or a raw id (SCRUM-371). POST and DELETE stay self-only
+    // on the raw id: nobody edits someone else's interests through a handle.
+    const userId = userIdFromRef((await params).userId)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)

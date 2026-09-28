@@ -16,12 +16,14 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { hit } from "@/lib/rate-limit-store"
 import { emitRoomWave } from "@/lib/socket-server"
+import { userIdFromRef } from "@/lib/room-handle"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
 }
 
-// User ids are cuid, not uuid — do not tighten this to z.string().uuid().
+// User ids are cuid, not uuid — do not tighten this to z.string().uuid(). And
+// the roster sends room handles (`rh_…`, SCRUM-371), which are neither.
 const waveSchema = z.object({ toUserId: z.string().min(1) })
 
 /** One wave per sender → recipient, per this long. */
@@ -56,7 +58,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const parsed = waveSchema.safeParse(await request.json())
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { toUserId } = parsed.data
+    // Resolved here, so everything below — the pair window's key included —
+    // is on real ids: a new room is a new handle, not a new window.
+    const toUserId = userIdFromRef(parsed.data.toUserId)
     const fromUserId = authUser.userId
 
     if (toUserId === fromUserId) {

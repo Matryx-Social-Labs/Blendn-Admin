@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { ConversationClosedError, blockedEitherWay, openConversation } from "@/lib/conversations"
 import { participationRefusal } from "@/lib/event-access"
 import { areFriends } from "@/lib/friends"
+import { userIdFromRefIfIdentified } from "@/lib/identity"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -35,7 +36,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const unfinished = await participationRefusal(me)
     if (unfinished) return forbiddenResponse(unfinished)
 
-    const { userId } = await params
+    // As `GET /friends/:id`: a handle only for a friend you can recognise.
+    const userId = await userIdFromRefIfIdentified(me, (await params).userId)
     // A block severs the friendship, so the second check is belt and braces
     // for a request racing the block.
     if (!(await areFriends(me, userId)) || (await blockedEitherWay(me, userId))) {

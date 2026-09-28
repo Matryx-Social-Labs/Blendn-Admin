@@ -1,4 +1,5 @@
 process.env.MOBILE_JWT_SECRET = "test-secret-at-least-32-characters-long!!"
+process.env.NEXTAUTH_SECRET = "room-waves-test-secret-at-least-32-chars"
 
 /*
  * `POST /events/:id/waves` — "I see you", with nothing stored.
@@ -38,6 +39,7 @@ jest.mock("@/lib/socket-server", () => ({ emitRoomWave: (...a: unknown[]) => moc
 import { NextRequest } from "next/server"
 import { POST } from "@/app/api/mobile/events/[eventId]/waves/route"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
+import { roomHandle } from "@/lib/room-handle"
 
 const EVENT = "22222222-2222-2222-2222-222222222222"
 const ME = "me"
@@ -76,6 +78,8 @@ it("sends, and emits room:wave to the recipient with the sender's pseudonym", as
   const res = await wave()
   expect(res.status).toBe(200)
   expect(await res.json()).toEqual({ success: true, data: { sent: true } })
+  // Real ids to the emitter, which is where the sender becomes a handle for
+  // the recipient (see room-socket-payloads.test.ts) — so no caller can forget.
   expect(mockEmitWave).toHaveBeenCalledWith(THEM, { eventId: EVENT, fromUserId: ME, fromName: "Cosmic Panda" })
   // The real name is not even read for somebody who has not revealed.
   expect(mockDb.user.findUnique).not.toHaveBeenCalled()
@@ -159,4 +163,32 @@ it("does not start the clock on a wave that was refused", async () => {
   mockBlocked.mockResolvedValueOnce(true)
   expect((await wave()).status).toBe(403)
   expect((await wave()).status).toBe(200)
+})
+
+describe("room handles (SCRUM-371)", () => {
+  it("takes the roster's handle and waves at the person behind it", async () => {
+    expect((await wave(roomHandle(EVENT, THEM))).status).toBe(200)
+    expect(mockEmitWave).toHaveBeenCalledWith(THEM, expect.objectContaining({ fromUserId: ME }))
+  })
+
+  it("keys the ten-minute window on the real pair: a handle and the raw id are one person", async () => {
+    // Moving rooms — a new handle for the same person — is not a new window.
+    const OTHER_EVENT = "33333333-3333-4333-8333-333333333333"
+    expect((await wave(roomHandle(OTHER_EVENT, THEM))).status).toBe(200)
+    expect((await wave(roomHandle(EVENT, THEM))).status).toBe(429)
+    expect((await wave(THEM)).status).toBe(429)
+  })
+
+  it("answers a forged handle exactly as it answers somebody who is not here", async () => {
+    const handle = roomHandle(EVENT, THEM)
+    const forged = `${handle.slice(0, -1)}${handle.endsWith("A") ? "B" : "A"}`
+    const [a, b] = [await wave(forged), await wave("nobody")]
+    expect(a.status).toBe(b.status)
+    expect(await a.json()).toEqual(await b.json())
+    expect(mockEmitWave).not.toHaveBeenCalled()
+  })
+
+  it("refuses your own handle as it refuses your own id", async () => {
+    expect((await wave(roomHandle(EVENT, ME))).status).toBe(400)
+  })
 })
