@@ -7,6 +7,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { maySeeIdentity } from "@/lib/identity"
 import { matchesForEvent } from "@/lib/matches"
 import { conversationPair } from "@/lib/conversations"
+import { resolveUserRef } from "@/lib/room-handle"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard } from "./helpers"
 
@@ -392,7 +393,7 @@ describe("friends are still pseudonyms in a room", () => {
     expect(await maySeeIdentity(cam.id, ben.id)).toBe(false)
   })
 
-  it("friends are left out of each other's match pool", async () => {
+  it("friends leave each other's match pool only where they can recognise each other", async () => {
     const host = await makeUser("fr-host", "organizer")
     users.push(host)
     const eventId = await makeEvent(host)
@@ -405,11 +406,26 @@ describe("friends are still pseudonyms in a room", () => {
         data: { user_id: p.id, event_id: eventId, occurrence_id, check_in_time: new Date(), status: "checked_in" },
       })
     }
-    expect((await matchesForEvent(eventId, ana.id))!.map((m) => m.userId).sort()).toEqual([ben.id, cam.id].sort())
+    // The deck names people by their handle in this room (SCRUM-371).
+    const deck = async (viewer: Person) =>
+      (await matchesForEvent(eventId, viewer.id))!.map((m) => resolveUserRef(m.userId)!.userId).sort()
+    expect(await deck(ana)).toEqual([ben.id, cam.id].sort())
 
+    /*
+     * Friends, both switches off: each is a stranger to the other in this room,
+     * so each stays in the other's deck. Dropping Ben here while the roster
+     * lists him made "on the roster, not in the deck" the handle that is Ana's
+     * friend — the recognition his switch refuses, by subtraction.
+     */
     await befriend(ana, ben)
-    expect((await matchesForEvent(eventId, ana.id))!.map((m) => m.userId)).toEqual([cam.id])
-    expect((await matchesForEvent(eventId, ben.id))!.map((m) => m.userId)).toEqual([cam.id])
+    expect(await deck(ana)).toEqual([ben.id, cam.id].sort())
+    expect(await deck(ben)).toEqual([ana.id, cam.id].sort())
+
+    // Ben lets friends recognise him: now Ana knows he is here, and a friend
+    // she can see is not a match. Ana's switch is still off, so Ben keeps her.
+    await db.profiles.update({ where: { id: ben.id }, data: { friends_see_me_in_rooms: true } })
+    expect(await deck(ana)).toEqual([cam.id])
+    expect(await deck(ben)).toEqual([ana.id, cam.id].sort())
   })
 })
 

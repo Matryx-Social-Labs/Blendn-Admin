@@ -1,4 +1,5 @@
 process.env.MOBILE_JWT_SECRET = "test-secret-at-least-32-characters-long!!"
+process.env.NEXTAUTH_SECRET = "room-match-test-secret-at-least-32-chars"
 
 /*
  * `room:match` names each person as the OTHER one is entitled to see them.
@@ -36,6 +37,7 @@ jest.mock("@/lib/matches", () => ({ likeAtEvent: (...a: unknown[]) => mockLike(.
 import { NextRequest } from "next/server"
 import { announceRoomMatch } from "@/lib/room-match"
 import { POST as like } from "@/app/api/mobile/events/[eventId]/matches/likes/route"
+import { roomHandle } from "@/lib/room-handle"
 
 const EVENT = "22222222-2222-2222-2222-222222222222"
 const A = "user-a"
@@ -93,17 +95,42 @@ describe("announceRoomMatch", () => {
 })
 
 describe("POST /matches/likes", () => {
-  const req = () =>
+  // The deck names B by their handle in this room (SCRUM-371).
+  const req = (userId: string = roomHandle(EVENT, B)) =>
     new NextRequest(`https://api.blendn.app/api/mobile/events/${EVENT}/matches/likes`, {
       method: "POST",
-      body: JSON.stringify({ userId: B }),
+      body: JSON.stringify({ userId }),
       headers: { "content-type": "application/json" },
     })
 
   beforeEach(() => {
     mockAuth.mockResolvedValue({ userId: A, email: "a@b.com" })
-    mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "ci" })
+    // A and B are checked in; nobody else is.
+    mockDb.event_check_ins.findFirst.mockImplementation(async ({ where }: { where: { user_id: string } }) =>
+      [A, B].includes(where.user_id) ? { id: `ci-${where.user_id}` } : null
+    )
     mockDb.private_conversations.findUnique.mockResolvedValue(conversation({}))
+  })
+
+  const answer = async (ref: string) => {
+    const res = await like(req(ref), { params: Promise.resolve({ eventId: EVENT }) })
+    return { status: res.status, body: await res.json() }
+  }
+
+  it.each([
+    ["B's raw real id, although B is checked in", () => B],
+    ["B's handle from another event", () => roomHandle("33333333-3333-4333-8333-333333333333", B)],
+  ])("answers %s exactly as an unknown id", async (_label, ref) => {
+    // A raw-id like said whether that account was in this room right now.
+    mockLike.mockResolvedValue({ mutual: false })
+    expect(await answer(ref())).toEqual(await answer(roomHandle(EVENT, "nobody-here")))
+    expect(await answer(ref())).toEqual({ status: 404, body: expect.objectContaining({ error: "User not found" }) })
+    expect(mockLike).not.toHaveBeenCalled()
+  })
+
+  it("keeps the 400 for your own real id, which is how the roster names you", async () => {
+    const res = await like(req(A), { params: Promise.resolve({ eventId: EVENT }) })
+    expect(res.status).toBe(400)
   })
 
   it("emits room:match on a mutual like", async () => {
@@ -111,6 +138,20 @@ describe("POST /matches/likes", () => {
     const res = await like(req(), { params: Promise.resolve({ eventId: EVENT }) })
     expect(res.status).toBe(200)
     expect(mockEmitRoomMatch).toHaveBeenCalledTimes(1)
+  })
+
+  it("takes the deck's handle and likes the person behind it (SCRUM-371)", async () => {
+    // The deck sends `roomHandle(event, them)`; the like lands on the real id.
+    mockLike.mockResolvedValue({ mutual: false })
+    const res = await like(req(roomHandle(EVENT, B)), { params: Promise.resolve({ eventId: EVENT }) })
+    expect(res.status).toBe(200)
+    expect(mockLike).toHaveBeenCalledWith(EVENT, A, B)
+  })
+
+  it("refuses your own handle as it refuses your own id", async () => {
+    const res = await like(req(roomHandle(EVENT, A)), { params: Promise.resolve({ eventId: EVENT }) })
+    expect(res.status).toBe(400)
+    expect(mockLike).not.toHaveBeenCalled()
   })
 
   it("emits nothing on a one-sided like", async () => {

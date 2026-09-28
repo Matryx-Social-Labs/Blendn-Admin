@@ -184,12 +184,92 @@ Two things deliberately left as they are, with reasons:
 - **A per-event opaque handle instead of the real user id.** Now defence in
   depth rather than a fix: `maySeeIdentity` means the id no longer buys anything.
   Worth doing eventually so an id cannot be correlated across events at all, and
-  not worth churning the mobile contract for today.
+  not worth churning the mobile contract for today. *(Done 2026-09-28,
+  SCRUM-371 — friends made the id buy something again; see Closed.)*
 - **CSP is report-only.** Enforcing it blind would break Swagger UI and the
   chart library. It needs a report endpoint and a week of data before the
   `'unsafe-inline'` and `'unsafe-eval'` come out.
 
 ## Closed
+
+### 2026-09-28 — a friend could read which pseudonym was you (SCRUM-371)
+
+**HIGH · fixed on `feat/room-handles`**
+
+The id was "never the secret" (2026-08-08 below) only while nobody held yours.
+Friends changed that: the friends list and a friend DM carry your real user id,
+and every room surface — roster, match deck, participants, both chat histories,
+the chat list, the `group_message` push, and every `chat:*` / `event:*` /
+`room:*` socket event — sent the real id beside the pseudonym. A friend read
+which card was you straight off the wire, past `friends_see_me_in_rooms` (the
+switch that exists to refuse exactly that), and anyone who knew your id from
+anywhere could follow your pseudonyms across events. `event:checkin`,
+`event:checkout` and `event:interestUpdate` went to `event:{id}`, which anyone
+viewing a public event may join, so the harvest did not even need a check-in.
+
+Fixed: every room surface sends a per-event **room handle** for anyone but the
+viewer (`lib/room-handle.ts`: deterministic authenticated encryption of the
+event and user, reversible without a lookup, unlinkable across events), and
+your own id stays real so the app keeps working unchanged. Socket room events
+are emitted per recipient. Every id-accepting endpoint takes a handle.
+
+Closing the id exposed five ways to learn the same thing by asking, each fixed:
+
+- `POST /message-requests` answered 409 "you already have a conversation" for a
+  friend DM, so a request to each card picked out the friend. To a caller who
+  may not see who this is, every "already exists" now answers as a fresh 201,
+  writes nothing and notifies nobody; `respond` answers 404 for any request that
+  is not yours (it was 403), so the returned id cannot be checked.
+- `GET /friends/:id`, `POST /friends/:id/conversation` and `POST /conversations`
+  answered a friend's handle differently from a stranger's. They resolve a
+  handle only for someone you may already see.
+- The match deck dropped every friend while the roster listed them, so
+  roster-minus-deck was the friend. Only friends you can recognise leave it now.
+- A forged handle is answered byte-for-byte as an unknown id.
+- Likes and waves took raw ids. A raw-id like or wave said whether that account
+  was checked in here right now, and the wave's ten-minute window, keyed on the
+  real pair, made it a finder: wave at a friend's real id, then at each roster
+  handle, and the one answered 429 was the friend — about a minute at the write
+  limit. Both now name somebody only by this event's handle (or you by your own
+  id, refused as "not yourself"); a raw id, another event's handle or a forged
+  one is answered exactly as an unknown person and starts no window. Every
+  client call already sends the roster's or deck's id, so nothing legitimate
+  used a raw id here.
+
+`__tests__/integration/room-handles.itest.ts` drives all of it through the real
+routes and searches every serialised response for the friend's id.
+
+**Left open, deliberately:**
+
+- **Quasi-identifiers link a person across rooms — open, product decision for
+  the owner.** This defeats per-event unlinkability, not just one profile's
+  privacy. The roster puts age and city on every row, and `GET /users/:realId`
+  returns age, city, interests, `memberSince` and attendance stats to any
+  signed-in caller. A friend who holds your real id reads your (age, city)
+  once, then picks the matching row out of the roster at every event you
+  attend; strangers do the same with the (age, city) they saw on you at one
+  event. In a room of a few dozen that pair is often unique, and the
+  interests, `memberSince` and stats on `GET /users/:handle` and `createdAt` on
+  `GET /profiles/:handle` confirm it exactly. The handle removes the id; it
+  cannot remove attributes the room chooses to show. Closing this means
+  deciding what a pseudonymous row and card may say, and what an id lookup
+  returns to someone who cannot see who it is — the owner's call, deliberately
+  not changed here.
+- **The wave window is still keyed on the real pair across rooms** (by design: a
+  new room is not a new window). The raw-id finder above is closed, but the same
+  window links one person's handles in two rooms: wave at a handle in room A,
+  then, within ten minutes, at each handle in room B — the 429 is the same
+  person. Check-in allows one room at a time, so this needs the caller and the
+  target both to move from A to B inside those ten minutes, and the caller to
+  have waved at them in A.
+- **Closed pairs** stay on the roster and off the deck, so roster-minus-deck
+  still marks someone you unmatched.
+- Stored `notifications.data.senderId` from before this change still holds real
+  ids; new rows hold handles.
+- DM and conversation routes, `private:*` events, `users/blocked`, the friends
+  list and message-request GET/respond payloads keep real ids: identity is
+  already exchanged there, or the people are your own contacts. Dashboard and
+  organiser routes keep real ids for moderation and audit.
 
 ### 2026-08-10 — the group-chat report button now reports
 
@@ -495,6 +575,7 @@ one.
 |---|---|
 | Peer ratings never reach the person rated — no mobile route may even import the trust module | `__tests__/trust-not-exposed.test.ts` |
 | Rooms are pseudonymous; real names and photos only on mutual reveal | `__tests__/chat-identity.test.ts` |
+| No room surface or room socket event carries another attendee's real id — only your own | `__tests__/integration/room-handles.itest.ts`, `__tests__/room-socket-payloads.test.ts` |
 | Mobile JWT verification and refresh rotation | `__tests__/mobile-auth.test.ts` |
 | Socket connections authenticate and rooms are scoped | `__tests__/socket-auth.test.ts` |
 | Every `"use server"` file reads the session | `__tests__/server-action-authz.test.ts` — **weaker than it looks, see below** |

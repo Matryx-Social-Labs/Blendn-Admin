@@ -11,6 +11,7 @@
  * These tests use a three-day event throughout, because on a single-day event
  * every version of this code agrees and the bug is invisible.
  */
+process.env.NEXTAUTH_SECRET = "event-preferences-test-secret-32-characters"
 const mockDb = {
   // `matchesForEvent` runs the co-attendance count as one raw query for the
   // whole room rather than a query per candidate. Returns nothing here: these
@@ -43,6 +44,7 @@ jest.mock("@/lib/conversations", () => ({
 jest.mock("@/lib/friends", () => ({ friendIdsOf: jest.fn().mockResolvedValue([]) }))
 
 import { matchesForEvent } from "@/lib/matches"
+import { resolveUserRef } from "@/lib/room-handle"
 
 const EVENT = "11111111-1111-1111-1111-111111111111"
 const VIEWER = "viewer"
@@ -102,7 +104,8 @@ describe("a three-day event", () => {
 
     const matches = await matchesForEvent(EVENT, VIEWER)
     expect(matches).toHaveLength(1)
-    expect(matches![0].userId).toBe("regular")
+    // A card names its person by their handle in this room (SCRUM-371).
+    expect(resolveUserRef(matches![0].userId)).toEqual({ userId: "regular", eventId: EVENT })
   })
 
   it("takes presence from their most recent day, not an arbitrary one", async () => {

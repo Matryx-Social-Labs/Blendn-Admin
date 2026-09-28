@@ -566,7 +566,8 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Like someone from this event",
   description:
-    "A mutual like opens a conversation. The response never reveals whether the other person liked you first.",
+    "A mutual like opens a conversation. The response never reveals whether the other person liked you first.\n\n" +
+    "`userId` must be the handle this event's deck or roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as an unknown person — 404 `User not found` — because a raw-id like would say whether that account is in this room. Your own id is 400.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -602,6 +603,7 @@ registry.registerPath({
   summary: "Wave at someone in the room",
   description:
     "Ephemeral: emits `room:wave` to the recipient and stores nothing. Both people must be checked in now.\n\n" +
+    "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`) and starts no window: a raw id asked who is here, and the per-pair window then told which handle it was. Your own id is 400.\n\n" +
     "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, or a block either way; deliberately indistinguishable), `WAVE_TOO_SOON` (429, one per pair per 10 minutes, with `retryAfter`)",
   security: bearerAuth,
   request: {

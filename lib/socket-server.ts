@@ -1,6 +1,6 @@
 import { logger } from "./logger"
 import { Server as HttpServer } from "http"
-import { Server, Socket } from "socket.io"
+import { Server, Socket, type RemoteSocket } from "socket.io"
 import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
@@ -10,6 +10,7 @@ import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
+import { roomHandle } from "./room-handle"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -61,6 +62,10 @@ export interface ServerToClientEvents {
    * This is the room anyone who opened the event can join, so it drives the
    * live counter and nothing else. `userId` stays so a client can recognise
    * its own check-in; the pseudonym moved to `event:room:checkin`.
+   *
+   * Every `userId` on these payloads is the recipient's own real id or, for
+   * anybody else, that person's handle in this event (`lib/room-handle.ts`,
+   * SCRUM-371) — `emitAsSeenBy` sends each socket its own copy.
    */
   "event:checkin": (data: {
     eventId: string
@@ -93,6 +98,8 @@ export interface ServerToClientEvents {
   /**
    * A mutual like, to each side's `user:{id}` room. `name` is the other person
    * as this recipient sees them — pseudonym unless they revealed. No photo.
+   * `otherUserId` is their handle in this event: the same string the roster
+   * and the match deck show for them.
    */
   "room:match": (data: {
     eventId: string
@@ -100,7 +107,7 @@ export interface ServerToClientEvents {
     conversationId: string
     name: string
   }) => void
-  /** Somebody in the room waved. Ephemeral; nothing is stored. */
+  /** Somebody in the room waved. Ephemeral; nothing is stored. `fromUserId` is their handle here. */
   "room:wave": (data: {
     eventId: string
     fromUserId: string
@@ -417,7 +424,7 @@ export async function emitChatTyping(
           user_id: socket.data.userId,
         },
       },
-      select: { anonymous_name: true, status: true },
+      select: { anonymous_name: true, status: true, chat_group: { select: { event_id: true } } },
     })
 
     if (!membership || membership.status !== "active") return
@@ -426,15 +433,24 @@ export async function emitChatTyping(
     // the same people `emitChatMessage` leaves out. Typing went to the whole
     // room, so a blocker watched the person they blocked type (SCRUM-338).
     const hidden = await blockCounterparties(socket.data.userId)
-    socket
-      .to(`chat:${chatGroupId}`)
-      .except(hidden.map((id) => `user:${id}`))
-      .emit("chat:typing", {
+    /*
+     * Per recipient, and still not back to the typing socket: `socket.to()`
+     * left out the sender's own socket, so this does too. `socket.nsp` is the
+     * namespace that socket lives in, which is the right one whichever copy of
+     * this module is running.
+     */
+    await emitAsSeenBy(
+      socket.nsp.in(`chat:${chatGroupId}`).except(hidden.map((id) => `user:${id}`)),
+      membership.chat_group.event_id,
+      "chat:typing",
+      (idFor) => ({
         chatGroupId,
-        userId: socket.data.userId,
+        userId: idFor(socket.data.userId),
         userName: membership.anonymous_name || "Someone",
         isTyping,
-      })
+      }),
+      socket.id
+    )
   } catch (error) {
     // Same fail-safe as guardJoin: chat_group_id is `@db.Uuid`, and an
     // escaping rejection from this listener would take down the process.
@@ -879,6 +895,91 @@ export function initSocketServer(httpServer: HttpServer): Server {
   return io
 }
 
+type Payload<E extends keyof ServerToClientEvents> = Parameters<ServerToClientEvents[E]>[0]
+
+/**
+ * Send `event` to every socket in `audience`, each copy with the ids its
+ * recipient may see: their own real, anybody else's as this event's room
+ * handle (SCRUM-371, `lib/room-handle.ts`).
+ *
+ * The app compares these ids with its own to align its bubbles, spot its own
+ * check-in and drop its own typing, so the recipient's own id has to stay
+ * real; and everybody else's has to be a handle, or a friend who holds your
+ * real id reads which pseudonym is you straight off the wire. One payload no
+ * longer suits the whole room, and socket.io has no per-recipient broadcast —
+ * so this fetches the room and emits to each socket.
+ *
+ * `fetchSockets` goes through the adapter, so with Redis it reaches sockets on
+ * every instance, as `to()` did. Callers apply `except()` to the audience
+ * before it gets here, so the block filter is still the room-name filter it
+ * always was. A payload is built once per user and a handle once per person,
+ * however many sockets they hold.
+ *
+ * `skipSocketId` is `socket.to()`'s "not back to the sender" for typing.
+ *
+ * ponytail: one `fetchSockets` and one packet per socket per event, where a
+ * broadcast was one packet. Fine at one instance and rooms of hundreds; if a
+ * public event's counter room grows to thousands, every payload here names one
+ * person, so send the handled copy as one broadcast `except` that person's
+ * `user:` room and fetch only their own sockets for the real-id copy.
+ */
+async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
+  audience: { fetchSockets(): Promise<RemoteSocket<ServerToClientEvents, Partial<SocketData> | undefined>[]> },
+  eventId: string,
+  event: E,
+  build: (idFor: (userId: string) => string) => Payload<E>,
+  skipSocketId?: string
+): Promise<void> {
+  const sockets = await audience.fetchSockets()
+  const handles = new Map<string, string>()
+  const handleOf = (userId: string) => {
+    let handle = handles.get(userId)
+    if (!handle) handles.set(userId, (handle = roomHandle(eventId, userId)))
+    return handle
+  }
+  const copies = new Map<string, Payload<E>>()
+  for (const recipient of sockets) {
+    if (recipient.id === skipSocketId) continue
+    // No user on the socket means nobody is "own": every id goes out handled.
+    const viewer = recipient.data?.userId ?? ""
+    let copy = copies.get(viewer)
+    if (!copy) copies.set(viewer, (copy = build((userId) => (userId === viewer ? userId : handleOf(userId)))))
+    ;(recipient.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
+  }
+}
+
+/**
+ * `emitAsSeenBy` for a chat room, which knows its group and not always its event.
+ *
+ * The handle is per event (`chat_groups.event_id`, one room per event). A
+ * caller that already holds the event passes it — room delivery, the announce
+ * routes, polls and the organiser moderation routes all do — and the rest are
+ * looked up here rather than asked for, since a handle minted from the wrong
+ * id would be a different person. Never rejects, like the rest of this file's
+ * emitters: the write it reports has already committed.
+ */
+async function toChatRoom<E extends keyof ServerToClientEvents>(
+  chatGroupId: string,
+  audience: Parameters<typeof emitAsSeenBy<E>>[0],
+  event: E,
+  build: (idFor: (userId: string) => string) => Payload<E>,
+  knownEventId?: string
+): Promise<void> {
+  try {
+    const eventId =
+      knownEventId ??
+      (await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { event_id: true } }))?.event_id
+    if (!eventId) return
+    await emitAsSeenBy(audience, eventId, event, build)
+  } catch (error) {
+    logger.error("Room emit failed", {
+      chatGroupId,
+      event,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 /**
  * Look up the Room's headline number, then send.
  *
@@ -895,7 +996,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
  * somebody arrived or left matters more than the number, and a client that
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
-function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void): void {
+function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): void {
   hereCountFor(eventId)
     .catch((error: unknown) => {
       logger.warn("hereCount lookup failed; emitting without it", {
@@ -946,23 +1047,27 @@ export function emitEventCheckIn(
      * `hereCount` goes to both: a bare headcount of the room names nobody, and
      * `room-preview` serves the same number to anyone who can open the event.
      */
-    io.to(`event:${eventId}`).emit("event:checkin", {
-      eventId,
-      userId,
-      checkInTime,
-      hereCount,
-    })
-
-    io.to(`event:room:${eventId}`)
-      .except(excludeUserIds.map((id) => `user:${id}`))
-      .emit("event:room:checkin", {
+    return Promise.all([
+      emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkin", (idFor) => ({
         eventId,
-        userId,
-        userName,
-        userImage,
+        userId: idFor(userId),
         checkInTime,
         hereCount,
-      })
+      })),
+      emitAsSeenBy(
+        io.in(`event:room:${eventId}`).except(excludeUserIds.map((id) => `user:${id}`)),
+        eventId,
+        "event:room:checkin",
+        (idFor) => ({
+          eventId,
+          userId: idFor(userId),
+          userName,
+          userImage,
+          checkInTime,
+          hereCount,
+        })
+      ),
+    ]).then(() => undefined)
   })
 }
 
@@ -974,14 +1079,14 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
   if (!io) return
 
   const checkOutTime = new Date().toISOString()
-  sendWithHereCount(eventId, (hereCount) => {
-    io.to(`event:${eventId}`).emit("event:checkout", {
+  sendWithHereCount(eventId, (hereCount) =>
+    emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor) => ({
       eventId,
-      userId,
+      userId: idFor(userId),
       checkOutTime,
       hereCount,
-    })
-  })
+    }))
+  )
 }
 
 /**
@@ -1009,8 +1114,10 @@ export function emitRoomMatch(match: {
   const io = currentIo()
   if (!io) return
   const { eventId, conversationId, a, b } = match
-  io.to(`user:${a.userId}`).emit("room:match", { eventId, otherUserId: b.userId, conversationId, name: b.name })
-  io.to(`user:${b.userId}`).emit("room:match", { eventId, otherUserId: a.userId, conversationId, name: a.name })
+  // Each learns the other as the roster names them in this room: the handle,
+  // so the card they matched on and the match that arrives are one person.
+  io.to(`user:${a.userId}`).emit("room:match", { eventId, otherUserId: roomHandle(eventId, b.userId), conversationId, name: b.name })
+  io.to(`user:${b.userId}`).emit("room:match", { eventId, otherUserId: roomHandle(eventId, a.userId), conversationId, name: a.name })
 }
 
 /**
@@ -1030,7 +1137,8 @@ export function emitRoomWave(
 ): void {
   const io = currentIo()
   if (!io) return
-  io.to(`user:${toUserId}`).emit("room:wave", wave)
+  // The recipient is never the sender, so the sender is always a handle here.
+  io.to(`user:${toUserId}`).emit("room:wave", { ...wave, fromUserId: roomHandle(wave.eventId, wave.fromUserId) })
 }
 
 /**
@@ -1045,11 +1153,21 @@ export function emitEventInterestUpdate(
   const io = currentIo()
   if (!io) return
 
-  io.to(`event:${eventId}`).emit("event:interestUpdate", {
+  /*
+   * Per recipient: this is the counter room anyone who opened the event may
+   * join, and a real id here told any of them who was interested — and, with
+   * the id from anywhere else, which pseudonym it would be once inside.
+   */
+  emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:interestUpdate", (idFor) => ({
     eventId,
-    userId,
+    userId: idFor(userId),
     interested,
     interestCount,
+  })).catch((error: unknown) => {
+    logger.error("Room emit failed", {
+      eventId,
+      error: error instanceof Error ? error.message : String(error),
+    })
   })
 }
 
@@ -1120,20 +1238,20 @@ export function emitChatMessage(
     createdAt: string
     parentId?: string
   },
-  excludeUserIds: readonly string[] = []
+  excludeUserIds: readonly string[] = [],
+  /** The room's event, when the caller has it — saves `toChatRoom` a lookup. */
+  eventId?: string
 ): void {
   const io = currentIo()
   if (!io) return
 
-  const room = io.to(`chat:${chatGroupId}`)
-  const scoped = excludeUserIds.length
-    ? room.except(excludeUserIds.map((id) => `user:${id}`))
-    : room
-
-  scoped.emit("chat:message", {
+  void toChatRoom(
     chatGroupId,
-    message,
-  })
+    io.in(`chat:${chatGroupId}`).except(excludeUserIds.map((id) => `user:${id}`)),
+    "chat:message",
+    (idFor) => ({ chatGroupId, message: { ...message, userId: idFor(message.userId) } }),
+    eventId
+  )
 }
 
 /**
@@ -1184,24 +1302,26 @@ export function emitChatMessageDeleted(chatGroupId: string, messageId: string): 
  * Includes userId and moderation flag so the client can show a
  * "message removed" placeholder to the sender instead of just deleting it.
  */
-export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string): void {
+export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string, eventId?: string): void {
   const io = currentIo()
   if (!io) return
-  io.to(`chat:${chatGroupId}`).emit("chat:messageDeleted", {
+  // The author still sees their own id and draws the placeholder; the rest of
+  // the room gets the handle their copy of the message carried.
+  void toChatRoom(
     chatGroupId,
-    messageId,
-    moderation: true,
-    userId,
-  })
+    io.in(`chat:${chatGroupId}`),
+    "chat:messageDeleted",
+    (idFor) => ({ chatGroupId, messageId, moderation: true, userId: idFor(userId) }),
+    eventId
+  )
 }
 
 /**
  * Emit a member ban/unban to the chat room
  */
-export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean): void {
+export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean, eventId?: string): void {
   const io = currentIo()
   if (!io) return
-  io.to(`chat:${chatGroupId}`).emit("chat:memberBanned", { chatGroupId, userId, banned })
   /*
    * And out of the room, on every instance — after the notice, so their own
    * client hears it. `canJoinChat` refuses a banned *rejoin*; a socket already
@@ -1209,17 +1329,42 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
    * happened to disconnect, so a ban mid-evening stopped the posts and not the
    * reading (SCRUM-205). `evictUserSockets`, scoped to one room: the person
    * keeps the rest of the app.
+   *
+   * Chained on the notice, which is per recipient now and so asynchronous —
+   * leaving first would take the banned person's sockets out of the room
+   * before their own copy (with their own real id, so the app knows it is
+   * them) was sent. `toChatRoom` never rejects, so the eviction always runs.
    */
-  if (banned) io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
+  void toChatRoom(
+    chatGroupId,
+    io.in(`chat:${chatGroupId}`),
+    "chat:memberBanned",
+    (idFor) => ({ chatGroupId, userId: idFor(userId), banned }),
+    eventId
+  ).then(() => {
+    if (banned) io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
+  })
 }
 
 /**
  * Emit a member mute/unmute to the chat room
  */
-export function emitChatMemberMuted(chatGroupId: string, userId: string, muted: boolean, reason?: string): void {
+export function emitChatMemberMuted(
+  chatGroupId: string,
+  userId: string,
+  muted: boolean,
+  reason?: string,
+  eventId?: string
+): void {
   const io = currentIo()
   if (!io) return
-  io.to(`chat:${chatGroupId}`).emit("chat:memberMuted", { chatGroupId, userId, muted, reason })
+  void toChatRoom(
+    chatGroupId,
+    io.in(`chat:${chatGroupId}`),
+    "chat:memberMuted",
+    (idFor) => ({ chatGroupId, userId: idFor(userId), muted, reason }),
+    eventId
+  )
 }
 
 /**

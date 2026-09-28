@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { blockCounterparties } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyGroupMessage } from "@/lib/push-notifications"
+import { roomHandle } from "@/lib/room-handle"
 
 /**
  * Getting a message to the room. One implementation, because there were two
@@ -36,6 +37,8 @@ import { notifyGroupMessage } from "@/lib/push-notifications"
  */
 export async function deliverToRoom(input: {
   chatGroupId: string
+  /** The room's event: the push names the sender by their handle in it. */
+  eventId: string
   groupName: string | null
   senderId: string
   senderAnonName: string
@@ -84,7 +87,8 @@ export async function deliverToRoom(input: {
         createdAt: message.created_at.toISOString(),
         parentId: message.parent_id || undefined,
       },
-      senderBlocked
+      senderBlocked,
+      input.eventId
     )
   } catch (error) {
     logger.error("Room socket emit failed", {
@@ -111,7 +115,7 @@ export async function deliverToRoom(input: {
       input.groupName || "Group Chat",
       input.preview,
       chatGroupId,
-      senderId
+      { id: senderId, handle: roomHandle(input.eventId, senderId) }
     )
   } catch (error) {
     logger.error("Room push notification failed", {

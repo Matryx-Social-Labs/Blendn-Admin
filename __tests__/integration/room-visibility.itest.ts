@@ -6,6 +6,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { matchesForEvent } from "@/lib/matches"
+import { isRoomHandle, userIdFromRef } from "@/lib/room-handle"
 import { getOccupancy } from "@/lib/occupancy"
 
 import { cleanup, closeDb, db, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
@@ -102,7 +103,15 @@ const roster = async (eventId: string, token: string) => {
     params: Promise.resolve({ eventId }),
   })
   const json = await res.json()
-  return { ids: (json.data.attendees as { userId: string }[]).map((a) => a.userId).sort(), total: json.data.pagination.totalCount }
+  const refs = (json.data.attendees as { userId: string }[]).map((a) => a.userId)
+  return {
+    // The people behind the ids: everyone but the viewer is listed by their
+    // handle in this room (SCRUM-371), and must resolve back to them.
+    ids: refs.map(userIdFromRef).sort(),
+    /** The ids listed raw — only ever the viewer's own. */
+    raw: refs.filter((r) => !isRoomHandle(r)),
+    total: json.data.pagination.totalCount,
+  }
 }
 
 describe("show online status off", () => {
@@ -126,13 +135,17 @@ describe("show online status off", () => {
 
     const seen = await roster(eventId, viewer.token)
     expect(seen.ids).toEqual([viewer.id, shown.id, bare.id].sort())
+    expect(seen.raw).toEqual([viewer.id])
     expect(seen.total).toBe(3)
 
-    const grid = (await matchesForEvent(eventId, viewer.id))!.map((m) => m.userId).sort()
+    const grid = (await matchesForEvent(eventId, viewer.id))!.map((m) => userIdFromRef(m.userId)).sort()
     expect(grid).toEqual([shown.id, bare.id].sort())
 
     // Symmetric: the hidden person still sees the room they are in.
-    expect((await roster(eventId, hidden.token)).ids).toEqual([viewer.id, shown.id, bare.id].sort())
+    const theirs = await roster(eventId, hidden.token)
+    expect(theirs.ids).toEqual([viewer.id, shown.id, bare.id].sort())
+    // Not listed themselves, so no raw id at all on their copy.
+    expect(theirs.raw).toEqual([])
   })
 })
 

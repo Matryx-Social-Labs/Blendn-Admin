@@ -17,12 +17,14 @@ import { likeAtEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { announceRoomMatch } from "@/lib/room-match"
+import { roomMemberFromRef } from "@/lib/room-handle"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
 }
 
-// User ids are cuid, not uuid — do not tighten this to z.string().uuid().
+// User ids are cuid, not uuid — do not tighten this to z.string().uuid(). And
+// the deck sends room handles (`rh_…`, SCRUM-371), which are neither.
 const likeSchema = z.object({ userId: z.string().min(1) })
 
 /**
@@ -51,7 +53,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const parsed = likeSchema.safeParse(await request.json())
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { userId: likedId } = parsed.data
+    // Only the handle this room's deck showed you, or your own id (refused
+    // just below). Anything else — a raw id, another room's handle, a forged
+    // one — is nobody here and is answered as an unknown id: a raw-id like
+    // would say whether that account is in this room (`roomMemberFromRef`).
+    const likedId = roomMemberFromRef(eventId, parsed.data.userId, authUser.userId)
 
     if (likedId === authUser.userId) {
       return errorResponse("You cannot like yourself")
@@ -70,7 +76,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null } },
         select: { id: true },
       }),
-      db.event_check_ins.findFirst({
+      likedId && db.event_check_ins.findFirst({
         where: {
           event_id: eventId,
           user_id: likedId,
@@ -86,7 +92,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!mine) return forbiddenResponse("Check in before liking anyone here")
     // Not "they weren't here" — that would confirm who did and did not attend to
     // anyone probing user ids.
-    if (!theirs) return notFoundResponse("User not found")
+    if (!theirs || !likedId) return notFoundResponse("User not found")
 
     if (await blockedEitherWay(authUser.userId, likedId)) {
       return notFoundResponse("User not found")

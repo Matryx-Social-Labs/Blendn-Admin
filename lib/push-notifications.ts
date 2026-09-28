@@ -537,7 +537,13 @@ export async function notifyPrivateMessage(
 }
 
 /**
- * Send notification for a new group chat message
+ * Send notification for a new group chat message.
+ *
+ * `sender.handle` is what the payload carries as `senderId`: the sender's
+ * handle in this event's room (SCRUM-371). Every recipient is somebody else —
+ * the sender is filtered out below — and the payload is stored in
+ * `notifications.data` and served back by `GET /notifications`, so a real id
+ * here was the room's pseudonym-to-person map arriving by push instead.
  */
 export async function notifyGroupMessage(
   recipientIds: string[],
@@ -545,10 +551,10 @@ export async function notifyGroupMessage(
   groupName: string,
   messagePreview: string,
   chatGroupId: string,
-  senderId: string
+  sender: { id: string; handle: string }
 ): Promise<{ sent: number; failed: number }> {
   // Exclude the sender from notifications
-  const filteredRecipients = recipientIds.filter((id) => id !== senderId)
+  const filteredRecipients = recipientIds.filter((id) => id !== sender.id)
 
   if (filteredRecipients.length === 0) {
     return { sent: 0, failed: 0 }
@@ -561,7 +567,7 @@ export async function notifyGroupMessage(
     data: {
       type: "group_message",
       chatGroupId,
-      senderId,
+      senderId: sender.handle,
     },
   })
 }

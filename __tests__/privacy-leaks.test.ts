@@ -63,15 +63,19 @@ describe("B3 — the socket roster is for people in the room", () => {
      * exist to prevent. The REST twin already answers this with a 403.
      */
     const src = code("lib/socket-server.ts")
-    const open = /io\.to\(`event:\$\{eventId\}`\)\.emit\("event:checkin", \{[^}]*\}/.exec(src)
+    const open = /emitAsSeenBy\(io\.in\(`event:\$\{eventId\}`\), eventId, "event:checkin", \(idFor\) => \(\{[^}]*\}/.exec(src)
     expect(open).not.toBeNull()
     expect(open![0]).not.toContain("userName")
     expect(open![0]).not.toContain("userImage")
+    // And not even the id: each watcher reads a handle unless it is their own
+    // check-in (SCRUM-371) — a real id here was the same harvest by account.
+    expect(open![0]).toContain("userId: idFor(userId)")
 
     // The `.except(...)` keeps the arriver's block counterparties off it (SCRUM-338).
-    const roster = /io\.to\(`event:room:\$\{eventId\}`\)\s*\.except\([^\n]*\)\s*\.emit\("event:room:checkin", \{[^}]*\}/.exec(src)
+    const roster = /io\.in\(`event:room:\$\{eventId\}`\)\.except\([^\n]*\),\s*eventId,\s*"event:room:checkin",\s*\(idFor\) => \(\{[^}]*\}/.exec(src)
     expect(roster).not.toBeNull()
     expect(roster![0]).toContain("userName")
+    expect(roster![0]).toContain("userId: idFor(userId)")
     expect(roster![0]).toContain(".except(excludeUserIds.map(")
   })
 

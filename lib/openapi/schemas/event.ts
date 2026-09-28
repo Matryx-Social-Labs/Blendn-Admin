@@ -1,6 +1,12 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, DeviceInfoSchema } from "./common"
+import { PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema } from "./common"
+
+/** Likes and waves name somebody only by this event's handle (SCRUM-371). */
+const ThisRoomRefSchema = z.string().min(1).openapi({
+  description:
+    "The room handle (`rh_…`) this event's roster or deck gave for the person. A raw user id or another event's handle is answered as an unknown person.",
+})
 
 // Request schemas
 export const EventQuerySchema = z
@@ -384,7 +390,7 @@ export const MatchListResponseSchema = z
   .object({
     matches: z.array(
       z.object({
-        userId: z.string(),
+        userId: RoomUserRefSchema,
         /** Room pseudonym unless that person revealed themselves at this event. */
         displayName: z.string(),
         /** Null unless revealed — a photo identifies as surely as a name. */
@@ -419,7 +425,7 @@ export const MatchListResponseSchema = z
   .openapi("MatchListResponse")
 
 export const LikeRequestSchema = z
-  .object({ userId: z.string() })
+  .object({ userId: ThisRoomRefSchema })
   .openapi("LikeRequest")
 
 export const LikeResponseSchema = z
@@ -436,7 +442,7 @@ export const RoomPreviewResponseSchema = z
   .openapi("RoomPreviewResponse")
 
 export const WaveRequestSchema = z
-  .object({ toUserId: z.string() })
+  .object({ toUserId: ThisRoomRefSchema })
   .openapi("WaveRequest")
 
 export const WaveResponseSchema = z
@@ -461,7 +467,7 @@ export const AttendeeListResponseSchema = z
   .object({
     attendees: z.array(
       z.object({
-        userId: z.string(),
+        userId: RoomUserRefSchema,
         /**
          * The room pseudonym ("Cosmic Panda"), not the real name — the same one
          * this person carries in the event chat — unless they turned on "Show

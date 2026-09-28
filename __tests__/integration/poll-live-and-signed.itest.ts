@@ -76,7 +76,11 @@ it("emits a new poll to the room at once, signed by the organisation", async () 
   const { messageId } = await createPoll(eventId, { question: "Best brew method?", options: ["Pour-over", "Aeropress"] })
   expect(mockEmit).toHaveBeenCalledWith(
     groupId,
-    expect.objectContaining({ id: messageId, type: "poll", content: "Best brew method?", userName: ORG })
+    expect.objectContaining({ id: messageId, type: "poll", content: "Best brew method?", userName: ORG }),
+    // No exclusions, and the event it already holds, so the emitter mints
+    // room handles without looking the room up (SCRUM-371).
+    [],
+    eventId
   )
 })
 

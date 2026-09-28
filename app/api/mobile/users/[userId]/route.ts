@@ -2,8 +2,9 @@ import { logger } from "@/lib/logger"
 import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { blockedEitherWay } from "@/lib/conversations"
+import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
+import { userIdFromRef } from "@/lib/room-handle"
 import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
@@ -24,7 +25,13 @@ export async function GET(
       return unauthorizedResponse("Authentication required")
     }
 
-    const { userId } = await params
+    /*
+     * `ref` is a room handle or a raw id (SCRUM-371). Everything below acts on
+     * the real id; only the echo in `id` uses the ref, so a handle never comes
+     * back as the id it stands for.
+     */
+    const { userId: ref } = await params
+    const userId = userIdFromRef(ref)
 
     // Get the user's public profile
     const user = await db.user.findUnique({
@@ -99,12 +106,13 @@ export async function GET(
     /*
      * The room is pseudonymous, and this endpoint was how that came undone.
      *
-     * Every room surface returns the real user id -- the roster, the chat
+     * Every room surface returned the real user id -- the roster, the chat
      * participant list, message authors, reactions -- because the client needs
      * it to block, report and open a message request. Any of those ids could be
      * handed straight to this route, which returned the real name and photos to
      * anyone holding a valid token. Two requests turned a whole room's
-     * pseudonyms into named faces.
+     * pseudonyms into named faces. (They carry room handles now, SCRUM-371 —
+     * this gate is what stops a handle being worth more than the room says.)
      *
      * `maySeeIdentity` is the gate: matched, in a conversation, or they chose to
      * be public in a room you were in. Co-presence alone is deliberately not
@@ -112,9 +120,12 @@ export async function GET(
      * be identified.
      */
     const identified = await maySeeIdentity(authUser.userId, userId)
+    const isOwnProfile = authUser.userId === userId
 
     const publicProfile = {
-      id: user.id,
+      // The ref as given — a handle in, the same handle out — except for your
+      // own profile, whose real id is yours to have.
+      id: isOwnProfile ? user.id : ref,
       /*
        * Pseudonyms are per event and this route has no event context, so there
        * is no pseudonym to return -- the client already holds the room's one
@@ -147,13 +158,56 @@ export async function GET(
         eventsFavorited: user._count.event_favorites,
         eventsOrganized: user._count.organized_events,
       },
-      isOwnProfile: authUser.userId === userId,
+      isOwnProfile,
       identityVisible: identified,
+      /*
+       * What is already open between you, so a room card can say "Message" or
+       * "Request sent" instead of offering a request that would be refused.
+       *
+       * Only when you may already see who this is. Otherwise it would be the
+       * leak `identityVisible` withholds, by another field: a friend's card in
+       * a room, with their `friends_see_me_in_rooms` off, reading
+       * `conversationId: …` is the friend DM saying which pseudonym is them.
+       */
+      ...(identified && { connection: await connectionBetween(authUser.userId, userId) }),
     }
 
     return successResponse(publicProfile)
   } catch (error) {
     logger.error("Get public profile error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get user profile")
+  }
+}
+
+/**
+ * The viewer's open conversation with `otherId`, and any pending message
+ * request between them, from the viewer's side. A closed conversation is not
+ * one you can open, so it reads as none.
+ */
+async function connectionBetween(
+  viewerId: string,
+  otherId: string
+): Promise<{ conversationId: string | null; request: "sent" | "received" | null }> {
+  if (viewerId === otherId) return { conversationId: null, request: null }
+  const [user1_id, user2_id] = conversationPair(viewerId, otherId)
+  const [conversation, pending] = await Promise.all([
+    db.private_conversations.findUnique({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+      select: { id: true, closed_at: true },
+    }),
+    db.message_requests.findFirst({
+      where: {
+        status: "pending",
+        OR: [
+          { sender_id: viewerId, recipient_id: otherId },
+          { sender_id: otherId, recipient_id: viewerId },
+        ],
+      },
+      select: { sender_id: true },
+    }),
+  ])
+  return {
+    conversationId: conversation && !conversation.closed_at ? conversation.id : null,
+    request: pending ? (pending.sender_id === viewerId ? "sent" : "received") : null,
   }
 }

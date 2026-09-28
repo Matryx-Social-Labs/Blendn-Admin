@@ -23,6 +23,7 @@ import { Server } from "socket.io"
 import { io as connect, type Socket as ClientSocket } from "socket.io-client"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { emitChatTyping, type AuthenticatedSocket } from "@/lib/socket-server"
+import { roomHandle, userIdFromRef } from "@/lib/room-handle"
 import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const checkin = require("@/app/api/mobile/events/[eventId]/checkin/route") as typeof import("@/app/api/mobile/events/[eventId]/checkin/route")
@@ -79,6 +80,11 @@ const checkIn = async (token: string) => {
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 200))
+/*
+ * Who each payload names, resolved: everyone but the recipient arrives as their
+ * handle in this event (SCRUM-371), so the block assertions compare people.
+ */
+const who = (xs: { userId: string }[]) => xs.map((x) => userIdFromRef(x.userId))
 
 let A: { id: string; token: string }
 let B: { id: string; token: string }
@@ -144,17 +150,25 @@ describe("while A has B blocked", () => {
   })
 
   it("B's arrival reaches C's roster and not A's", () => {
-    expect(c.arrivals.map((x) => x.userId)).toContain(B.id)
-    expect(a.arrivals.map((x) => x.userId)).not.toContain(B.id)
+    expect(who(c.arrivals)).toContain(B.id)
+    expect(who(a.arrivals)).not.toContain(B.id)
+  })
+
+  it("C reads B's arrival under B's handle; B reads their own under their own id", () => {
+    expect(c.arrivals.map((x) => x.userId)).toContain(roomHandle(eventId, B.id))
+    expect(JSON.stringify(c.arrivals)).not.toContain(B.id)
+    expect(b.arrivals.map((x) => x.userId)).toContain(B.id)
   })
 
   it("neither sees the other type, whoever filed the block; C sees both", async () => {
     await emitChatTyping(serverSide.get(B.id)!, roomId, true)
     await emitChatTyping(serverSide.get(A.id)!, roomId, true)
     await settle()
-    expect(a.typing.map((x) => x.userId)).not.toContain(B.id)
-    expect(b.typing.map((x) => x.userId)).not.toContain(A.id)
-    expect(c.typing.map((x) => x.userId).sort()).toEqual([A.id, B.id].sort())
+    expect(who(a.typing)).not.toContain(B.id)
+    expect(who(b.typing)).not.toContain(A.id)
+    expect(who(c.typing).sort()).toEqual([A.id, B.id].sort())
+    // Per recipient: C hears both typists by handle, never by real id.
+    expect(c.typing.map((x) => x.userId).sort()).toEqual([roomHandle(eventId, A.id), roomHandle(eventId, B.id)].sort())
   })
 })
 
@@ -167,7 +181,7 @@ describe("once the block is lifted", () => {
     const D = await person("lrb-d")
     await checkIn(D.token)
     await settle()
-    expect(a.typing).toEqual([expect.objectContaining({ userId: B.id, isTyping: false })])
-    expect(a.arrivals.map((x) => x.userId)).toContain(D.id)
+    expect(a.typing).toEqual([expect.objectContaining({ userId: roomHandle(eventId, B.id), isTyping: false })])
+    expect(who(a.arrivals)).toContain(D.id)
   })
 })

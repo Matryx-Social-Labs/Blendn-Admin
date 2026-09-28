@@ -55,7 +55,8 @@ describe("PATCH /api/events/[id]/chat/moderation/[flagId]", () => {
     expect(messageWrite()).toMatchObject({ moderation_status: "hidden" })
     expect(messageWrite().deleted_at).toBeInstanceOf(Date)
     // And the phones that have the room open are told, as auto-hide does.
-    expect(emitChatMessageHidden).toHaveBeenCalledWith("g1", "m1", "u9")
+    // With the event it already verified, so the emitter mints handles without a lookup.
+    expect(emitChatMessageHidden).toHaveBeenCalledWith("g1", "m1", "u9", "e1")
   })
 
   it("reject keeps the original deleted_at on a message that was already hidden", async () => {

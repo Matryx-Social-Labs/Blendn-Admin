@@ -31,6 +31,7 @@ import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
+import { idForViewer } from "@/lib/room-handle"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 
@@ -415,7 +416,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           parentId: m.parent_id,
           replyCount: m._count.replies,
           user: {
-            id: m.user.id,
+            // Yours real, so the app can align your bubbles; anybody else's —
+            // an organiser's announcement included — as their handle in this
+            // room (SCRUM-371, `lib/room-handle.ts`).
+            id: idForViewer(authUser.userId, eventId, m.user.id),
             name: roomSenderName(m, anonMap.get(m.user.id), chatGroup.event),
             image: null,
           },
@@ -855,6 +859,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     await deliverToRoom({
       chatGroupId: chatGroup.id,
+      eventId,
       groupName: chatGroup.name,
       senderId: authUser.userId,
       senderAnonName: senderMembership?.anonymous_name || "Attendee",
