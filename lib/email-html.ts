@@ -1,19 +1,23 @@
 /**
- * HTML bodies for the five transactional emails.
+ * HTML bodies for the transactional emails.
  *
  * Table layout and inline CSS throughout, because Outlook's rendering engine is
- * Word and supports neither flexbox nor grid. The only `<style>` block is the
+ * Word and supports neither flexbox nor grid. The one `<style>` block holds the
  * dark-mode media query, which Outlook ignores harmlessly.
  *
- * Three constraints that shaped this more than taste did:
+ * Two shells. The email confirmation and the password reset follow the Claude
+ * Design templates (`designEmail`, below); the host emails still use `shell`.
+ *
+ * Constraints that shaped this more than taste did:
  *
  *   - **Images are blocked by default in many clients**, so every email has to
- *     make sense with them off. The wordmark is live text; the monogram beside
- *     it is decoration that can vanish without loss.
- *   - **Only the gradient monogram is hosted.** `public/brand/` has
- *     `lockup-white.png`, which is invisible on the light background these
- *     emails use, so the design's light/dark logo swap is not available. The
- *     gradient mark reads on both.
+ *     make sense with them off. In `shell` the wordmark is live text beside a
+ *     decorative monogram; in `designEmail` the lockup image carries
+ *     alt="Blend'n", which is what a client shows in its place.
+ *   - **The design's lockups live on the marketing site**, at
+ *     https://www.blendn.app/brand/lockup-{dark,white}.png (the landing repo's
+ *     `public/brand/`, rendered from the Illustrator master's vectors). They
+ *     exist only once that site is deployed with them.
  *   - **The footer address is not invented.** The design mocked up a registered
  *     office; shipping a made-up address in a compliance footer is worse than
  *     shipping none, so it comes from `EMAIL_FOOTER_ADDRESS` and the line is
@@ -113,6 +117,138 @@ ${address ? `  <p class="dm-muted" style="margin:0 0 4px;font-family:${FONT};fon
 </table></td></tr></table></body></html>`
 }
 
+/* -------------------------------------------------------------------------- */
+/* The design shell: confirm-email.html and reset-password.html                */
+/* -------------------------------------------------------------------------- */
+
+const DESIGN_FONT = "'Helvetica Neue',Helvetica,Arial,sans-serif"
+const DESIGN_MUTED = "#6B6461"
+/** The marketing site's copies of the lockups, 253x72, shown at 126x36 (their own ratio). */
+const BRAND_ASSETS = "https://www.blendn.app/brand"
+
+/* From the design, verbatim: dark mode for clients that honour the media query,
+   and the same again under [data-ogsc] for Outlook.com, which rewrites it. */
+const DESIGN_CSS = `
+:root{color-scheme:light dark;supported-color-schemes:light dark}
+body{margin:0;padding:0;-webkit-text-size-adjust:100%}
+table{border-collapse:collapse;mso-table-lspace:0;mso-table-rspace:0}
+img{border:0;line-height:100%;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
+a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important}
+.dk{display:none}
+@media (prefers-color-scheme:dark){
+ .bg{background-color:#0F0E0E!important}
+ .card{background-color:#272525!important}
+ .t{color:#FFFFFF!important}
+ .m{color:#B8B0AC!important}
+ .lnk{color:#B8B0AC!important}
+ .btn{background-color:#FF906D!important}
+ .btn a{color:#5B1600!important}
+ .rule{border-top-color:#3A3736!important}
+ .lt{display:none!important}
+ .dk{display:block!important}
+}
+[data-ogsc] .bg{background-color:#0F0E0E!important}
+[data-ogsc] .card{background-color:#272525!important}
+[data-ogsc] .t{color:#FFFFFF!important}
+[data-ogsc] .m,[data-ogsc] .lnk{color:#B8B0AC!important}
+[data-ogsc] .btn{background-color:#FF906D!important}
+[data-ogsc] .btn a{color:#5B1600!important}
+[data-ogsc] .lt{display:none!important}
+[data-ogsc] .dk{display:block!important}
+@media only screen and (max-width:620px){
+ .wrap{width:100%!important}
+ .pad{padding:32px 24px!important}
+ .h1{font-size:26px!important;line-height:32px!important}
+}`.trim()
+
+function designPara(html: string): string {
+  return `<p style="margin:0 0 16px;font-family:${DESIGN_FONT};font-size:16px;line-height:24px;color:${INK}" class="t">${html}</p>`
+}
+
+function designFooterLine(html: string, last = false): string {
+  return `<p style="margin:${last ? "0" : "0 0 8px"};font-family:${DESIGN_FONT};font-size:12px;line-height:18px;color:${DESIGN_MUTED}" class="m">${html}</p>`
+}
+
+/**
+ * The design's shell. Everything interpolated is escaped here, except
+ * `paragraphs` and `note`, which are HTML the caller built with esc().
+ *
+ * Two departures from the design, both kept from `shell`: the raw URL under the
+ * button (some clients strip the anchor), and `max-width:100%` on the body
+ * table, so it fits a phone whose client ignores the media query.
+ */
+function designEmail(opts: {
+  title: string
+  preheader: string
+  eyebrow: string
+  heading: string
+  paragraphs: string[]
+  button: { href: string; label: string }
+  note: string
+  /** What the email is about, for the footer: "account" or "host application". */
+  about: string
+}): string {
+  const address = process.env.EMAIL_FOOTER_ADDRESS?.trim()
+  const href = esc(opts.button.href)
+  return `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>${esc(opts.title)}</title>
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+<style>
+${DESIGN_CSS}
+</style>
+</head>
+<body class="bg" style="margin:0;padding:0;background-color:#FBF8F6" bgcolor="#FBF8F6">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${esc(opts.preheader)}${"&nbsp;&zwnj;".repeat(12)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg" style="background-color:#FBF8F6" bgcolor="#FBF8F6">
+<tr><td align="center" style="padding:32px 16px">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrap" style="width:600px;max-width:100%">
+<tr><td style="padding:0 0 24px 0">
+<a href="https://www.blendn.app" style="text-decoration:none"><img class="lt" src="${BRAND_ASSETS}/lockup-dark.png" width="126" height="36" alt="Blend'n" style="display:block;width:126px;height:36px"></a>
+<!--[if !mso]><!-- --><a href="https://www.blendn.app" class="dk" style="text-decoration:none;display:none;mso-hide:all"><img class="dk" src="${BRAND_ASSETS}/lockup-white.png" width="126" height="36" alt="Blend'n" style="display:none;width:126px;height:36px;mso-hide:all"></a><!--<![endif]-->
+</td></tr>
+<tr><td class="card" style="background-color:#FFFFFF;border-radius:14px" bgcolor="#FFFFFF">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td class="pad" style="padding:40px">
+<p style="margin:0 0 12px;font-family:${DESIGN_FONT};font-size:12px;line-height:16px;letter-spacing:0.06em;text-transform:uppercase;color:${DESIGN_MUTED}" class="m">${esc(opts.eyebrow)}</p>
+<h1 class="t h1" style="margin:0 0 20px;font-family:${DESIGN_FONT};font-size:28px;line-height:34px;font-weight:700;letter-spacing:-0.01em;color:${INK};mso-line-height-rule:exactly">${esc(opts.heading)}</h1>
+${opts.paragraphs.map(designPara).join("")}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 16px">
+<tr><td class="btn" bgcolor="#F97316" style="background-color:#F97316;border-radius:999px;mso-padding-alt:0">
+<a href="${href}" style="display:block;padding:14px 28px;font-family:${DESIGN_FONT};font-size:16px;line-height:20px;font-weight:700;color:${INK};text-decoration:none;border-radius:999px;mso-line-height-rule:exactly">${esc(opts.button.label)}</a>
+</td></tr>
+</table>
+<p style="margin:0 0 24px;font-family:${DESIGN_FONT};font-size:13px;line-height:20px;color:${DESIGN_MUTED};word-break:break-all" class="m">Button not working? Paste this into your browser:<br><a href="${href}" class="lnk" style="color:${DESIGN_MUTED};text-decoration:underline">${href}</a></p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="rule" style="border-top:1px solid #ECE6E2;padding:16px 0 0">
+<p style="margin:0;font-family:${DESIGN_FONT};font-size:13px;line-height:20px;color:${DESIGN_MUTED}" class="m">${opts.note}</p>
+</td></tr></table>
+</td></tr>
+</table>
+</td></tr>
+<tr><td style="padding:24px 8px 0">
+${[
+  ...(address ? [esc(address)] : []),
+  `This is a one-off email about your Blend'n ${esc(opts.about)}, so there is nothing to unsubscribe from.`,
+  `Blend'n is built by Matrix Social Labs, Bengaluru, India. Questions about your data: <a href="mailto:privacy@blendn.app" class="lnk" style="color:${DESIGN_MUTED};text-decoration:underline">privacy@blendn.app</a>`,
+]
+  .map((line, i, all) => designFooterLine(line, i === all.length - 1))
+  .join("\n")}
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`
+}
+
 function heading(text: string): string {
   return `<h1 class="dm-text" style="margin:0 0 14px;font-family:${FONT};font-size:21px;line-height:28px;font-weight:bold;color:${INK};">${esc(text)}</h1>`
 }
@@ -121,22 +257,26 @@ function heading(text: string): string {
 /* The five                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The design's confirm-email.html. Its copy was written for an attendee's
+ * account ("the last step before your first check-in"); this email goes to a
+ * host applicant, for whom no account exists yet, so the words say what the
+ * link actually does. The 24 hours is the token's lifetime in
+ * app/api/onboarding/apply.
+ */
 export function onboardingVerifyHtml(name: string, orgName: string, link: string): string {
-  return shell({
+  return designEmail({
     title: "Confirm your email — Blend'n",
-    preheader: "One click confirms your address and moves your host application forward.",
-    body: [
-      heading("Confirm your email"),
-      para(
-        `Hi ${esc(name)}, you applied to host on Blend&#39;n as <b>${esc(orgName)}</b>. Confirm this address and your application goes to our team for review &mdash; most are answered within two working days.`
-      ),
-      button(link, "Confirm email address"),
-      fallbackLink(link),
-      note("&#9202; This link expires in 24 hours. After that, re-apply to get a fresh one."),
-      note(
-        "Didn&#39;t apply to Blend&#39;n? Someone typed your address by mistake &mdash; ignore this email and nothing happens. No account has been created."
-      ),
-    ].join("\n"),
+    preheader: "One tap confirms your address and sends your host application for review.",
+    eyebrow: "Host application",
+    heading: "Confirm your email",
+    paragraphs: [
+      `Hi ${esc(name)}, you applied to host on Blend'n as <b>${esc(orgName)}</b>. Tap the button to confirm this is your address, and your application goes to our team for review. Most are answered within two working days.`,
+      "The link works for 24 hours. After that, apply again to get a fresh one.",
+    ],
+    button: { href: link, label: "Confirm email" },
+    note: "Didn't apply to host on Blend'n? You can ignore this email. Nothing happens until the link is used, and no account has been created.",
+    about: "host application",
   })
 }
 
@@ -280,21 +420,23 @@ export function domainVerifyHtml(domain: string, link: string): string {
   })
 }
 
+/**
+ * The design's reset-password.html. The design says 30 minutes; the link lives
+ * for one hour (RESET_TTL_MS in app/api/auth/forgot-password), and the mail
+ * says what the code does.
+ */
 export function passwordResetHtml(name: string, link: string): string {
-  return shell({
+  return designEmail({
     title: "Reset your Blend'n password",
-    preheader: "A link to set a new password. It expires in an hour.",
-    body: [
-      heading("Set a new password"),
-      para(`Hi ${esc(name)}, someone asked to reset the password on your Blend&#39;n account.`),
-      button(link, "Set a new password"),
-      fallbackLink(link),
-      // One hour, and the mail says so. A reset link is the one credential in
-      // the product that changes another credential.
-      note("&#9202; This link expires in one hour and can only be used once."),
-      note(
-        "Didn&#39;t ask for this? Ignore this email &mdash; your password has not changed. If it keeps happening, reply and tell us."
-      ),
-    ].join("\n"),
+    preheader: "Choose a new password. The link works for one hour.",
+    eyebrow: "Your account",
+    heading: "Reset your password",
+    paragraphs: [
+      `Hi ${esc(name)}, someone asked to reset the password for this account. If that was you, choose a new one below.`,
+      "The link works for one hour and only once.",
+    ],
+    button: { href: link, label: "Reset password" },
+    note: "Didn't ask for this? Ignore this email and your password stays the same. If it keeps happening, write to privacy@blendn.app.",
+    about: "account",
   })
 }

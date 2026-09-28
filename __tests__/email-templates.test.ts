@@ -4,11 +4,12 @@ import {
   approvedEmail,
   declinedEmail,
   domainVerifyEmail,
+  passwordResetEmail,
   applyUrl,
 } from "@/lib/email"
 
 /**
- * The five transactional templates.
+ * The transactional templates.
  *
  * Copy is the one thing here nobody notices regressing — a template is only
  * read by the person it was sent to, months after whoever wrote it moved on.
@@ -17,6 +18,19 @@ import {
 
 const templates = () => [
   onboardingVerifyEmail("Asha", "https://api.blendn.app/apply/verify?token=t"),
+  inviteEmail("Byg Brewski", "Asha", "https://api.blendn.app/invite?token=t"),
+  approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t"),
+  declinedEmail("Asha", "We couldn't confirm your venue licence."),
+  domainVerifyEmail("bygbrewski.com", "https://api.blendn.app/verify?token=t"),
+  passwordResetEmail("Asha", "https://api.blendn.app/reset-password?token=t"),
+]
+
+/** The two that follow the Claude Design templates; the rest use the older shell. */
+const designed = () => [
+  onboardingVerifyEmail("Asha", "https://api.blendn.app/apply/verify?token=t"),
+  passwordResetEmail("Asha", "https://api.blendn.app/reset-password?token=t"),
+]
+const shelled = () => [
   inviteEmail("Byg Brewski", "Asha", "https://api.blendn.app/invite?token=t"),
   approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t"),
   declinedEmail("Asha", "We couldn't confirm your venue licence."),
@@ -128,7 +142,7 @@ describe("the HTML survives the clients that break HTML", () => {
     for (const html of htmls()) {
       // One <style> block only, and it is the media query.
       expect(html.match(/<style>/g)?.length).toBe(1)
-      expect(html).toContain("prefers-color-scheme: dark")
+      expect(html).toMatch(/prefers-color-scheme:\s?dark/)
       expect(html).toContain('style="')
     }
   })
@@ -151,7 +165,7 @@ describe("the HTML is readable with images blocked", () => {
   it("renders the wordmark as live text, not only as an image", () => {
     // A large share of recipients have images off by default. A logo-only
     // header leaves them with an unbranded email.
-    for (const html of templates().map((t) => (t as { html: string }).html)) {
+    for (const html of shelled().map((t) => (t as { html: string }).html)) {
       expect(html).toContain("Blend&#39;n</span>")
     }
   })
@@ -159,8 +173,18 @@ describe("the HTML is readable with images blocked", () => {
   it("gives the decorative monogram an empty alt", () => {
     // It carries no information the text does not; alt text would be noise for
     // a screen reader.
-    for (const html of templates().map((t) => (t as { html: string }).html)) {
+    for (const html of shelled().map((t) => (t as { html: string }).html)) {
       expect(html).toContain('alt=""')
+    }
+  })
+
+  it("names the brand in the lockup's alt text where the logo is the wordmark", () => {
+    // The design's header is the lockup image alone; with images off, the alt
+    // text is what the client shows in its place.
+    for (const html of designed().map((t) => t.html)) {
+      const imgs = html.match(/<img [^>]*>/g) ?? []
+      expect(imgs.length).toBe(2) // light and dark lockups
+      for (const img of imgs) expect(img).toContain(`alt="Blend'n"`)
     }
   })
 })
@@ -285,5 +309,110 @@ describe("host-facing links can move; session-bound links cannot", () => {
     const t = approvedEmail("Asha", "Byg Brewski", "a@byg.in", null)
     expect(t.text).toContain("https://api.blendn.app/login")
     expect(t.text).not.toContain("organizers.blendn.app")
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* The design's account emails: confirm and reset                              */
+/* -------------------------------------------------------------------------- */
+
+describe("the confirm and reset emails, from the design", () => {
+  const confirmLink = "https://organizers.blendn.app/apply/verify?token=tok_123"
+  const resetLink = "https://api.blendn.app/reset-password?token=abc&next=%2Flogin"
+  const confirm = () => onboardingVerifyEmail("Asha", confirmLink, "Byg Brewski")
+  const reset = () => passwordResetEmail("Asha", resetLink)
+
+  it("keeps the subjects the code has always sent", () => {
+    expect(confirm().subject).toBe("Confirm your email — Blend'n host application")
+    expect(reset().subject).toBe("Reset your Blend'n password")
+  })
+
+  it("puts the confirm link in the button and prints it under it", () => {
+    const html = confirm().html
+    expect(html.match(new RegExp(`href="${confirmLink.replace(/[.?]/g, "\\$&")}"`, "g"))?.length).toBe(2)
+    expect(html).toContain(`>${confirmLink}</a>`)
+    expect(confirm().text).toContain(confirmLink)
+  })
+
+  it("puts the reset link in the button, escaped for HTML", () => {
+    // `&` in a query string is `&amp;` inside an attribute; a raw one is
+    // invalid HTML that some clients truncate at.
+    const html = reset().html
+    const escaped = resetLink.replace(/&/g, "&amp;")
+    expect(html.split(`href="${escaped}"`).length - 1).toBe(2)
+    expect(html).not.toContain(`href="${resetLink}"`)
+    expect(reset().text).toContain(resetLink)
+  })
+
+  it("states the expiry the code enforces, not the design's", () => {
+    // Onboarding tokens live 24 hours (app/api/onboarding/apply). Reset links
+    // live one hour (RESET_TTL_MS); the design said 30 minutes.
+    expect(confirm().html).toContain("The link works for 24 hours.")
+    expect(confirm().text).toMatch(/expires in 24 hours/)
+    expect(reset().html).toContain("The link works for one hour and only once.")
+    expect(reset().html).toContain("The link works for one hour.") // preheader
+    expect(reset().html).not.toMatch(/30 minutes/)
+    expect(reset().text).toMatch(/expires in one hour/)
+  })
+
+  it("carries the recipient's name, and the organisation they applied as", () => {
+    expect(confirm().html).toContain("Hi Asha,")
+    expect(confirm().html).toContain("<b>Byg Brewski</b>")
+    expect(reset().html).toContain("Hi Asha,")
+  })
+
+  it("names the brand and the company as the guidelines spell them", () => {
+    for (const { html } of [confirm(), reset()]) {
+      expect(html).toContain("Blend'n")
+      expect(html).not.toMatch(/\bBlendn\b/)
+      expect(html).toContain("Matrix Social Labs")
+      expect(html).not.toContain("Matryx") // the registered name is for legal lines only
+    }
+  })
+
+  it("leaves no placeholder unfilled", () => {
+    for (const { html } of [confirm(), reset()]) {
+      expect(html).not.toMatch(/REPLACE_TOKEN|\{\{|\}\}|\$\{|undefined|>null<|\.\.\/assets/)
+    }
+  })
+
+  it("loads its logos from absolute https URLs on www.blendn.app", () => {
+    for (const { html } of [confirm(), reset()]) {
+      const srcs = [...html.matchAll(/<img [^>]*src="([^"]+)"/g)].map((m) => m[1])
+      expect(srcs).toEqual([
+        "https://www.blendn.app/brand/lockup-dark.png",
+        "https://www.blendn.app/brand/lockup-white.png",
+      ])
+    }
+  })
+
+  it("puts ink text on the orange button, never white", () => {
+    // White on #F97316 is 2.8:1 and fails AA; ink is 7.6:1.
+    const html = reset().html
+    expect(html).toMatch(/<td class="btn" bgcolor="#F97316"/)
+    expect(html).toMatch(/<a href="[^"]+" style="[^"]*color:#0D0C0C[^"]*">Reset password<\/a>/)
+  })
+
+  it("uses no emoji", () => {
+    for (const { html } of [confirm(), reset()]) {
+      expect(html).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]|&#(9202|128274);/u)
+    }
+  })
+
+  it("escapes a name or organisation containing markup", () => {
+    // Both are typed by the applicant at /apply.
+    const html = onboardingVerifyEmail("<i>A</i>", "l", '<script>alert(1)</script>').html
+    expect(html).not.toContain("<script>")
+    expect(html).not.toContain("<i>A</i>")
+    expect(html).toContain("&lt;script&gt;")
+  })
+
+  it("prints the configured footer address, and none when unset", () => {
+    delete process.env.EMAIL_FOOTER_ADDRESS
+    expect(reset().html).toContain("nothing to unsubscribe from")
+    expect(reset().html).not.toContain("1 Test Road")
+    process.env.EMAIL_FOOTER_ADDRESS = "Blend'n, 1 Test Road, Bengaluru"
+    expect(reset().html).toContain("1 Test Road")
+    delete process.env.EMAIL_FOOTER_ADDRESS
   })
 })
