@@ -222,10 +222,12 @@ export function WhereSearch({
       </div>
 
       {showList ? (
+        // z-10 clears the map (its layers are isolated) and stays under the
+        // sticky header and the publish bar (z-20) when the page scrolls.
         <div
           id={listId}
           role="listbox"
-          className="absolute z-[900] mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border-strong bg-popover p-1 shadow-lg"
+          className="absolute z-10 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border-strong bg-popover p-1 shadow-lg"
         >
           {/* Real groups, so a screen reader hears where the listed venues end. */}
           {[
