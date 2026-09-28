@@ -1387,6 +1387,7 @@ model private_messages {
   @@index([conversation_id])
   @@index([sender_id])
   @@index([created_at])
+  @@index([reply_to_id])
   @@unique([sender_id, client_id])
 }
 
