@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema } from "./common"
+import { PaginationMetaSchema, RoomUserRefSchema, UserRefParamSchema } from "./common"
 
 // Request schemas
 export const SendMessageRequestSchema = z
@@ -22,7 +22,10 @@ export const SendDMRequestSchema = z
 
 export const CreateConversationRequestSchema = z
   .object({
-    otherUserId: z.string().uuid(),
+    otherUserId: UserRefParamSchema.openapi({
+      description:
+        "A user id, or a room handle for someone the caller may already see (`identityVisible`). Any other handle is answered as an unknown user (SCRUM-371).",
+    }),
   })
   .openapi("CreateConversationRequest")
 
@@ -32,6 +35,9 @@ const ChatUserSchema = z.object({
   name: z.string(),
   image: z.string().nullable(),
 })
+
+/** A message author in a room: yours real, anybody else's a room handle. */
+const RoomChatUserSchema = ChatUserSchema.extend({ id: RoomUserRefSchema })
 
 /**
  * A tally, not a roster.
@@ -63,7 +69,7 @@ export const ChatMessageSchema = z
     editedAt: z.string().datetime().nullable().optional(),
     parentId: z.string().uuid().nullable(),
     replyCount: z.number().optional(),
-    user: ChatUserSchema,
+    user: RoomChatUserSchema,
     reactions: z.array(ReactionSchema),
     isOwn: z.boolean().optional(),
   })
@@ -96,7 +102,7 @@ export const ChatGroupSchema = z
         id: z.string().uuid(),
         content: z.string(),
         createdAt: z.string().datetime(),
-        user: z.object({ id: z.string(), name: z.string() }),
+        user: z.object({ id: RoomUserRefSchema, name: z.string() }),
       })
       .nullable(),
     event: z.object({
@@ -145,7 +151,7 @@ export const GroupMessagesResponseSchema = z
 
 export const ParticipantSchema = z
   .object({
-    userId: z.string(),
+    userId: RoomUserRefSchema,
     name: z.string(),
     avatar: z.string().nullable(),
     role: z.string(),

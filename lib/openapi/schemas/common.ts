@@ -62,6 +62,25 @@ export const CursorPaginationMetaSchema = z
   })
   .openapi("CursorPaginationMeta")
 
+/**
+ * A person as a room names them (SCRUM-371, `lib/room-handle.ts`).
+ *
+ * The caller's own real id when it is them; anybody else's room handle for
+ * that event — `rh_` + an opaque url-safe string, the same for one person on
+ * every surface and socket event of one event, and unrelated at the next.
+ */
+export const RoomUserRefSchema = z.string().openapi({
+  description:
+    "The caller's own user id when it is the caller; otherwise that person's room handle for this event (`rh_…`, SCRUM-371) — stable for the event, different at every event. Never another person's real id. Accepted anywhere a user id is.",
+  example: "rh_q2V0bHlXb3JkcyBhcmUgb3BhcXVl",
+})
+
+/** A user id a client sends: a raw id, or a room handle from any room surface. */
+export const UserRefParamSchema = z.string().min(1).openapi({
+  description:
+    "A user id or a room handle (`rh_…`) taken from a room surface (SCRUM-371). A handle that does not verify is answered exactly as an unknown id.",
+})
+
 // Device info (reused across auth endpoints)
 export const DeviceInfoSchema = z
   .object({

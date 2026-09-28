@@ -9,6 +9,7 @@
  * body: a filtered roster and an unfiltered one look identical when the fixture
  * happens to have complete profiles.
  */
+process.env.NEXTAUTH_SECRET = "mobile-roster-test-secret-of-32-characters"
 const mockDb = {
   events: { findUnique: jest.fn() },
   event_check_ins: { findFirst: jest.fn(), count: jest.fn(), findMany: jest.fn() },
@@ -34,6 +35,7 @@ jest.mock("@/lib/location", () => ({
 
 import { NextRequest } from "next/server"
 import { GET } from "@/app/api/mobile/events/[eventId]/checkins/route"
+import { resolveUserRef } from "@/lib/room-handle"
 
 const EVENT = "11111111-1111-1111-1111-111111111111"
 const params = Promise.resolve({ eventId: EVENT })
@@ -118,7 +120,22 @@ describe("GET /events/:id/checkins — who counts as present", () => {
   it("returns someone with no name and no photos", async () => {
     const body = await (await GET(req(), { params })).json()
     expect(body.data.attendees).toHaveLength(1)
-    expect(body.data.attendees[0].userId).toBe("u2")
+    // Somebody else, so their handle in this room — resolving to them (SCRUM-371).
+    expect(resolveUserRef(body.data.attendees[0].userId)).toEqual({ userId: "u2", eventId: EVENT })
+  })
+
+  it("lists the viewer by their own id and everyone else by a handle, never a real id", async () => {
+    // The app leaves itself off its own roster by comparing ids, so yours stays
+    // real; a friend who holds someone's real id must not find it here.
+    mockDb.event_check_ins.findMany.mockResolvedValue([
+      bare,
+      { user: { id: "u1", profile: { age: 30, location: "Bengaluru" } }, check_in_time: bare.check_in_time },
+    ])
+    const body = await (await GET(req(), { params })).json()
+    const ids = body.data.attendees.map((a: { userId: string }) => a.userId)
+    expect(ids).toContain("u1")
+    expect(ids.filter((id: string) => id !== "u1").every((id: string) => id.startsWith("rh_"))).toBe(true)
+    expect(JSON.stringify(body)).not.toContain('"u2"')
   })
 
   it("lists only people still checked in, not everyone who ever was", async () => {

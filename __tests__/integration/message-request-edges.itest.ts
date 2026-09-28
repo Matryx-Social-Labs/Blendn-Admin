@@ -45,14 +45,29 @@ const ask = (token: string, recipientId: string) =>
     })
   )
 
+/*
+ * Whether a refusal is SAID depends on whether the asker may already see who
+ * this is (SCRUM-371). To someone the room keeps a stranger, "you already asked"
+ * or "they already asked you" is a fact about the pair that a room handle
+ * hides, so it reads as a fresh 201 and nothing is written — see the route.
+ * `b` revealing in the room is what lets `a` see who `b` is, and so hear the 409.
+ */
+const reveal = (eventId: string, userId: string, revealed: boolean) =>
+  db.event_match_preferences.upsert({
+    where: { event_id_user_id: { event_id: eventId, user_id: userId } },
+    create: { event_id: eventId, user_id: userId, revealed },
+    update: { revealed },
+  })
+
 describe("asking", () => {
   let a: { id: string; token: string }
   let b: { id: string; token: string }
+  let eventId: string
 
   beforeAll(async () => {
     const host = await makeUser(testId("mr-host"), "organizer")
     users.push(host)
-    const eventId = await makeEvent(host)
+    eventId = await makeEvent(host)
     events.push(eventId)
     ;[a, b] = await Promise.all([person("mr-a"), person("mr-b")])
     const occ = await occurrenceOf(eventId)
@@ -75,9 +90,18 @@ describe("asking", () => {
       data: { status: "declined" },
     })
 
+    // A stranger to b: the refusal is not said, and nothing is sent either.
     const again = await ask(a.token, b.id)
-    expect(again.status).toBe(409)
-    expect(await again.json()).toMatchObject({ error: "You have already sent a request to this user" })
+    expect(again.status).toBe(201)
+    expect(await db.message_requests.findMany({ where: { sender_id: a.id, recipient_id: b.id }, select: { status: true } }))
+      .toEqual([{ status: "declined" }])
+
+    // Once b is someone a can see, the refusal is said, as it always was.
+    await reveal(eventId, b.id, true)
+    const seen = await ask(a.token, b.id)
+    expect(seen.status).toBe(409)
+    expect(await seen.json()).toMatchObject({ error: "You have already sent a request to this user" })
+    await reveal(eventId, b.id, false)
 
     const reverse = await ask(b.token, a.id)
     expect(reverse.status).toBe(201)
@@ -85,13 +109,19 @@ describe("asking", () => {
   })
 
   it("a pending request still blocks the other direction (negative control)", async () => {
-    // b → a is pending from the previous test; a asking b again is refused with
-    // the "check your incoming requests" sentence, which is now true.
+    // b → a is pending from the previous test; a asking b writes nothing.
     await db.message_requests.deleteMany({ where: { sender_id: a.id, recipient_id: b.id } })
     const res = await ask(a.token, b.id)
-    expect(res.status).toBe(409)
-    expect(await res.json()).toMatchObject({
+    expect(res.status).toBe(201)
+    expect(await db.message_requests.count({ where: { sender_id: a.id, recipient_id: b.id } })).toBe(0)
+
+    // And to someone who can see b, it says why: the sentence is true.
+    await reveal(eventId, b.id, true)
+    const seen = await ask(a.token, b.id)
+    expect(seen.status).toBe(409)
+    expect(await seen.json()).toMatchObject({
       error: "This user has already sent you a request. Check your incoming requests.",
     })
+    await reveal(eventId, b.id, false)
   })
 })

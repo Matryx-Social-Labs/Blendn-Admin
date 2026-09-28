@@ -84,10 +84,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     })
 
     if (action === "ban" || action === "unban") {
-      emitChatMemberBanned(event.chat_group.id, targetUserId, action === "ban")
+      emitChatMemberBanned(event.chat_group.id, targetUserId, action === "ban", eventId)
     }
     if (action === "mute" || action === "unmute") {
-      emitChatMemberMuted(event.chat_group.id, targetUserId, action === "mute", "Muted by admin")
+      emitChatMemberMuted(event.chat_group.id, targetUserId, action === "mute", "Muted by admin", eventId)
     }
 
     // The trail the schema promises beside `banned_by` / `muted_by` — a

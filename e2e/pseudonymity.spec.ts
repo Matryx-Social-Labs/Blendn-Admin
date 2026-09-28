@@ -27,6 +27,14 @@ import { signAccessToken } from "../lib/mobile-auth"
  *
  * Without those, a green result here would mean nothing at all, and it would
  * mean nothing in the most reassuring possible way.
+ *
+ * ## And not their real id either (SCRUM-371)
+ *
+ * A name is not the only thing that identifies. A friend holds your real user
+ * id, and every one of these surfaces used to send it beside your pseudonym.
+ * They send a per-event room handle for everyone but the viewer now, so no
+ * peer's real id may appear either — while the viewer's own may, and must be
+ * the one `/users/:id` answers with.
  */
 
 const db = new PrismaClient({
@@ -149,6 +157,9 @@ test.describe("a room never carries another attendee's real name", () => {
           leaked.push(`${url} carried "${person.email}"`)
         }
       }
+      for (const person of others) {
+        if (body.includes(`"${person.id}"`)) leaked.push(`${url} carried the real id of ${person.id}`)
+      }
     }
 
     // Positive control, same context and the same serialisation stack: the
@@ -156,10 +167,14 @@ test.describe("a room never carries another attendee's real name", () => {
     // emitting names at all would read as a pass.
     const ownProfile = await ctx.get(`/api/mobile/users/${viewer.id}`)
     expect(ownProfile.status()).toBeLessThan(400)
+    const own = await ownProfile.text()
     expect(
-      (await ownProfile.text()).includes(viewer.name ?? " "),
+      own.includes(viewer.name ?? " "),
       "the viewer's own name must still be served - otherwise the absence above is not a gate"
     ).toBe(true)
+    // And the viewer's own id, by the same stack: the absence of everyone
+    // else's above is the handle, not a serialiser that dropped ids.
+    expect(own.includes(`"${viewer.id}"`), "the viewer's own id must still be served").toBe(true)
 
     await ctx.dispose()
 

@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -33,7 +34,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("safety", "report-user", authUser.userId))
     if (limited) return limited
 
-    const { userId: reportedId } = await params
+    // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.
+    const reportedId = userIdFromRef((await params).userId)
 
     if (reportedId === authUser.userId) {
       return errorResponse("Cannot report yourself", 400)

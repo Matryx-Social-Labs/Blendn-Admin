@@ -169,7 +169,7 @@ export async function POST(req: Request, { params }: RouteContext) {
       // organiser's real name, so the socket disagreed with the history.
       userName: senderName,
       createdAt: chatMsg.created_at.toISOString(),
-    })
+    }, [], eventId)
 
     // Fetch event title then send push notifications (fire and forget)
     db.events.findUnique({ where: { id: eventId }, select: { title: true } })

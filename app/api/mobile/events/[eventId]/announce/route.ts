@@ -261,7 +261,7 @@ export async function POST(
          * pretending to broadcast it is not.
          */
         createdAt: chatMsg.created_at.toISOString(),
-      })
+      }, [], eventId)
     }
 
     // The chat_messages id, so replies, reports and moderator deletes address

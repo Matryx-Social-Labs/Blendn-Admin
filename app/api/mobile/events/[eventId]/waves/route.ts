@@ -16,12 +16,14 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { hit } from "@/lib/rate-limit-store"
 import { emitRoomWave } from "@/lib/socket-server"
+import { roomMemberFromRef } from "@/lib/room-handle"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
 }
 
-// User ids are cuid, not uuid — do not tighten this to z.string().uuid().
+// User ids are cuid, not uuid — do not tighten this to z.string().uuid(). And
+// the roster sends room handles (`rh_…`, SCRUM-371), which are neither.
 const waveSchema = z.object({ toUserId: z.string().min(1) })
 
 /** One wave per sender → recipient, per this long. */
@@ -56,7 +58,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const parsed = waveSchema.safeParse(await request.json())
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { toUserId } = parsed.data
+    /*
+     * Only a handle this room showed you — or your own id, refused just below.
+     * A raw id, another room's handle or a forged one is nobody here, and is
+     * answered exactly as somebody not in the room (`roomMemberFromRef`).
+     * Resolved to the real id, so the pair window below is keyed on people:
+     * a new room is a new handle, not a new window.
+     */
+    const toUserId = roomMemberFromRef(eventId, parsed.data.toUserId, authUser.userId)
     const fromUserId = authUser.userId
 
     if (toUserId === fromUserId) {
@@ -68,7 +77,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         where: { event_id: eventId, user_id: fromUserId, status: "checked_in" },
         select: { id: true },
       }),
-      db.event_check_ins.findFirst({
+      toUserId && db.event_check_ins.findFirst({
         where: {
           event_id: eventId,
           user_id: toUserId,
@@ -100,7 +109,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     const notHere = () =>
       errorResponse("They're not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
-    if (!theirs) return notHere()
+    if (!theirs || !toUserId) return notHere()
     if (await blockedEitherWay(fromUserId, toUserId)) return notHere()
     if (await pairIsClosed(fromUserId, toUserId)) return notHere()
 

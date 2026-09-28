@@ -19,6 +19,7 @@ import { blockedEitherWay } from "@/lib/conversations"
 import { maySeeIdentity } from "@/lib/identity"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -38,7 +39,14 @@ interface RouteParams {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { userId } = await params
+    /*
+     * A room handle or a raw id (SCRUM-371). Resolved for every read below;
+     * echoed as given in `id` and `profile.id` — `profiles.id` IS the user id,
+     * so echoing only the top-level one would hand the real id back one level
+     * down. Your own profile answers with your own id.
+     */
+    const { userId: ref } = await params
+    const userId = userIdFromRef(ref)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
@@ -102,7 +110,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // never of `date_of_birth`, which is stripped from both branches below.
     const profileAge = ageFrom(p)
     const publicProfileFields = p && {
-      id: p.id,
+      id: ref,
       age: profileAge,
       interests: p.interests,
       onboarded: p.onboarded,
@@ -175,7 +183,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { date_of_birth: _dob, ...selfProfileFields } = { ...p, age: profileAge }
 
     return successResponse({
-      id: user.id,
+      id: isSelf ? user.id : ref,
       email: isSelf ? user.email : undefined,
       name: identified ? user.name : "Attendee",
       ...(identified ? { image: user.image } : {}),

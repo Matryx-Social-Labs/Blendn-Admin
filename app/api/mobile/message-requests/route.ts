@@ -1,7 +1,10 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
+import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
+import { maySeeIdentity } from "@/lib/identity"
+import { userIdFromRef } from "@/lib/room-handle"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal } from "@/lib/event-access"
@@ -60,7 +63,10 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { recipientId, message } = parsed.data
+    // A room handle or a raw id (SCRUM-371). `ref` is what the response
+    // echoes, so a handle never comes back as the real id behind it.
+    const { recipientId: ref, message } = parsed.data
+    const recipientId = userIdFromRef(ref)
 
     // Cannot send request to yourself
     if (recipientId === authUser.userId) {
@@ -145,17 +151,6 @@ export async function POST(request: NextRequest) {
      * So: a pending or accepted request in either direction still blocks; a
      * declined one blocks only its sender.
      */
-    if (existingRequest) {
-      if (existingRequest.sender_id === authUser.userId) {
-        return conflictResponse("You have already sent a request to this user")
-      }
-      if (existingRequest.status !== "declined") {
-        return conflictResponse(
-          "This user has already sent you a request. Check your incoming requests."
-        )
-      }
-    }
-
     // Check if a conversation already exists between these users
     const existingConversation = await db.private_conversations.findFirst({
       where: {
@@ -166,8 +161,55 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    if (existingConversation) {
-      return conflictResponse("You already have a conversation with this user")
+    const conflict = !existingRequest
+      ? null
+      : existingRequest.sender_id === authUser.userId
+        ? "You have already sent a request to this user"
+        : existingRequest.status !== "declined"
+          ? "This user has already sent you a request. Check your incoming requests."
+          : null
+    const refusal = conflict ?? (existingConversation ? "You already have a conversation with this user" : null)
+
+    if (refusal) {
+      /*
+       * Say so only to somebody who may already see who this is (SCRUM-371).
+       *
+       * Each of these 409s is a fact about the pair, and a room handle hides
+       * the pair. A friend DM is the sharp case: it deliberately does not make
+       * two friends recognisable in a room (`origin_friendship`), yet it
+       * answered 409 here — so a friend could send a request to every card on a
+       * roster and the one that refused was the friend. An earlier request does
+       * the same across events, pinning two handles on one person.
+       *
+       * So for anyone the room keeps a stranger, "something already exists"
+       * reads as a request just made: the same 201 and the same shape, with a
+       * fresh random id — not the existing request's id, which the sender may
+       * have from before and would recognise, and not one derived from the
+       * pair, which a second ask by raw id would reproduce. Nothing is written
+       * and nobody is notified: a second request to someone already asked, or
+       * one to a friend already in a DM, is not something to deliver.
+       *
+       * The trade-off: the id is not a row. The respond route answers "not
+       * found" for any request that is not yours to answer, so the sender
+       * cannot ask it which ids are real; the client is not told either way,
+       * which is the point. Someone who can see who this is still gets the
+       * 409 — they know the answer already, and `GET /users/:id` hands the app
+       * the same facts as `connection`.
+       */
+      if (await maySeeIdentity(authUser.userId, recipientId)) return conflictResponse(refusal)
+      return successResponse(
+        {
+          request: {
+            id: randomUUID(),
+            recipientId: ref,
+            recipient: { id: ref },
+            message,
+            status: "pending",
+            createdAt: new Date(),
+          },
+        },
+        201
+      )
     }
 
     // Fetch sender name for push notification (authUser doesn't carry name)
@@ -212,7 +254,8 @@ export async function POST(request: NextRequest) {
       {
         request: {
           id: messageRequest.id,
-          recipientId: messageRequest.recipient_id,
+          // The ref as given: a handle in, the same handle out (SCRUM-371).
+          recipientId: ref,
           /*
            * The id only. This carried the recipient's real name and photo back
            * to the sender at the moment of asking — before she had done
@@ -221,7 +264,7 @@ export async function POST(request: NextRequest) {
            * decliner is never named"). A stranger picked off a pseudonymous
            * grid should not learn who she is from the act of asking (SCRUM-182).
            */
-          recipient: { id: messageRequest.recipient.id },
+          recipient: { id: ref },
           message: messageRequest.message,
           status: messageRequest.status,
           createdAt: messageRequest.created_at,

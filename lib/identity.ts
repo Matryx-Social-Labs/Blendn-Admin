@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { resolveUserRef } from "@/lib/room-handle"
 
 /**
  * Who may see whose real name and face.
@@ -17,17 +18,20 @@ import { db } from "@/lib/db"
  * the chatroom -- the ones the sentiment classifier reads, and the ones
  * `lib/trust.ts` cites as the reason peer ratings are never surfaced.
  *
- * ## Why the id stays
+ * ## Why the id went too
  *
- * The obvious fix is a per-event opaque handle, and it is the wrong first move:
- * the id is what the client passes to block, report and open a message request,
- * so replacing it changes the mobile contract everywhere at once. The id was
- * never the secret. **The lookup was.**
+ * The first fix was this gate, and it said the id could stay: the client passes
+ * it to block, report and open a message request, and without the lookup it
+ * "bought nothing". A per-event handle was left as defence in depth for later.
  *
- * So the id keeps flowing and identity becomes relationship-gated. A per-event
- * handle is still worth doing later for defence in depth -- an id that never
- * leaves the server cannot be correlated across events -- but it is no longer
- * load-bearing.
+ * Friends made it load-bearing. A friend holds your real id, so the id beside a
+ * pseudonym told them which card was you — past `friends_see_me_in_rooms`, and
+ * without asking this gate anything. Every room surface now sends a per-event
+ * room handle for anyone but the viewer (`lib/room-handle.ts`, SCRUM-371), and
+ * every endpoint that took an id takes a handle. This gate is still the one
+ * that decides who sees a name; the handle only stops the id answering first.
+ * `userIdFromRefIfIdentified` below keeps a handle from being worth more than
+ * this gate allows on the routes whose answer turns on a friendship.
  *
  * ## The rule
  *
@@ -222,3 +226,28 @@ export async function maySeeIdentity(viewerId: string, targetId: string): Promis
   return (await maySeeIdentityFor(viewerId, [targetId])).has(targetId)
 }
 
+
+/**
+ * The account behind a ref, for a route whose answer turns on a relationship
+ * the room hides (SCRUM-371).
+ *
+ * A room handle names somebody as they appear in one room. Most routes can
+ * take it at face value — a block, a report, a like answer the same whoever it
+ * is. These cannot: `GET /friends/:id` answers 200 for a friend and 404 for
+ * anyone else, and `POST /conversations` returns an open friend DM's other
+ * side by name. Handed every handle on a roster, either one picks out which
+ * pseudonym is your friend — past the `friends_see_me_in_rooms` switch, whose
+ * whole point is that they cannot.
+ *
+ * So a handle resolves here only for a viewer the room would let see who it
+ * is. Otherwise it comes back unchanged, which no account id matches, and the
+ * route answers exactly as it does for an id nobody has. A raw id is not
+ * gated: whoever sends one already knows who it is, and learns nothing from a
+ * room they did not use.
+ */
+export async function userIdFromRefIfIdentified(viewerId: string, ref: string): Promise<string> {
+  const resolved = resolveUserRef(ref)
+  if (!resolved) return ref
+  if (resolved.eventId === null || resolved.userId === viewerId) return resolved.userId
+  return (await maySeeIdentity(viewerId, resolved.userId)) ? resolved.userId : ref
+}

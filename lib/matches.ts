@@ -12,6 +12,8 @@ import {
 import type { Gender } from "@/lib/dating"
 import { ageFrom } from "@/lib/age"
 import { workFieldLabel } from "@/lib/work-fields"
+import { roomHandle } from "@/lib/room-handle"
+import { maySeeIdentityFor } from "@/lib/identity"
 
 /**
  * Everything `rankMatches` needs, gathered from the database.
@@ -193,7 +195,8 @@ export async function matchesForEvent(
     // again. Same `hidden` set as blocks below -- one exclusion, two reasons.
     closedPairKeys(viewerId),
     // Friends are not matches (a decision recorded in the app's HANDOFF.md):
-    // the grid is for meeting people, and your friends are people you know.
+    // the grid is for meeting people, and your friends are people you know —
+    // when you can tell they are here. See `recognisedFriends` below.
     friendIdsOf(viewerId),
     db.event_likes.findMany({
       where: { event_id: eventId, liker_id: viewerId },
@@ -201,12 +204,25 @@ export async function matchesForEvent(
     }),
   ])
 
+  /*
+   * Only the friends you can recognise here leave the deck (SCRUM-371).
+   *
+   * A friend with `friends_see_me_in_rooms` off is a stranger in this room by
+   * their own choice, and the roster lists them under a handle like everyone
+   * else. Leaving them out of the deck made "on the roster, not in the deck"
+   * the one handle that is your friend — the recognition the switch exists to
+   * refuse, answered by subtraction. So they stay, as the stranger they chose
+   * to be; a friend you can already tell is here still leaves, since hiding a
+   * card you would recognise gives nothing away.
+   */
+  const recognisedFriends = friends.length ? await maySeeIdentityFor(viewerId, friends) : new Set<string>()
+
   // Blocks hide people in both directions. Someone you blocked should not
   // reappear as a suggestion, and neither should someone who blocked you.
   const hidden = new Set([
     ...blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id)),
     ...closedPairs,
-    ...friends,
+    ...recognisedFriends,
   ])
   const liked = new Set(likes.map((l) => l.liked_id))
 
@@ -460,7 +476,13 @@ export async function matchesForEvent(
   ).catch(() => {})
 
   return ranked.map((m) => ({
-    userId: m.userId,
+    /*
+     * Their handle in this room, never the real id (SCRUM-371). The viewer is
+     * never in their own deck, so every card is somebody else's. The same
+     * string as the roster's and `room:match`'s, and `POST /matches/likes`
+     * takes it back.
+     */
+    userId: roomHandle(eventId, m.userId),
     displayName: m.displayName,
     photo: m.photo,
     sharedInterests: m.sharedInterestIds.map((id) => nameOf.get(id) ?? id),

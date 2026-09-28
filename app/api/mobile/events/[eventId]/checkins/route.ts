@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { normalizeLocationToCity } from "@/lib/location"
+import { idForViewer } from "@/lib/room-handle"
 import {
   successResponse,
   unauthorizedResponse,
@@ -27,7 +28,11 @@ import { parsePagination, paginationMeta, paginationSkip } from "@/lib/paginatio
  * living on the mobile side the whole time.
  *
  * `userId` stays: a message request, a block and a report each need to name a
- * person, and the id alone discloses nothing.
+ * person. It is no longer the real id, though, because the id alone disclosed
+ * plenty — to a friend, who holds yours. Everybody but you is listed by their
+ * handle in this event (`lib/room-handle.ts`, SCRUM-371), which every one of
+ * those endpoints accepts; you are listed by your own id, which is how the app
+ * leaves you off your own roster.
  *
  * Age and city remain because they are what someone decides to say hello with,
  * and neither identifies. When the reveal flag lands, real name and photo become
@@ -75,10 +80,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * then handed the roster to anybody, so a timestamped guest list for any
      * event was one request away from any account, from anywhere.
      *
-     * That matters more than it looks because the roster carries the real
-     * `userId` next to the pseudonym, and `GET /users/:id` turns a `userId`
-     * into a real name and photos. See SECURITY_BACKLOG.md -- the id itself is
-     * the deeper problem and is still open.
+     * That mattered more than it looked while the roster carried the real
+     * `userId` next to the pseudonym. It carries room handles now (SCRUM-371),
+     * and the gate stays: a guest list is still a guest list.
      */
     const attended = await db.event_check_ins.findFirst({
       where: { event_id: eventId, user_id: authUser.userId },
@@ -184,9 +188,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         checkIns.map(async (c) => {
           const shown = revealed.has(c.user.id) && c.user.name
           return {
-            // Kept: a message request, a block and a report all need to name a
-            // person, and the id discloses nothing on its own.
-            userId: c.user.id,
+            // A message request, a block and a report all need to name a
+            // person; this names them only inside this room (SCRUM-371).
+            userId: idForViewer(authUser.userId, eventId, c.user.id),
             name: shown ? c.user.name : pseudonyms.get(c.user.id) ?? "Attendee",
             // Present only for somebody who revealed in this room; the header
             // explains why it is otherwise absent.

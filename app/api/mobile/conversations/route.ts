@@ -6,6 +6,7 @@ import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymo
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { userIdFromRefIfIdentified } from "@/lib/identity"
 import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -202,7 +203,14 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { otherUserId } = parsed.data
+    /*
+     * A room handle only for someone the room lets you see (SCRUM-371). Every
+     * conversation that makes this route succeed — a match, an accepted
+     * request — already makes them identified, except a friend DM; answering
+     * a handle with that DM's other side by name is how a roster would give
+     * away which pseudonym is your friend.
+     */
+    const otherUserId = await userIdFromRefIfIdentified(authUser.userId, parsed.data.otherUserId)
 
     // Can't create conversation with yourself
     if (otherUserId === authUser.userId) {

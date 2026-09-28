@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { roomReadDenial } from "@/lib/chat-window"
 import { bannedRefusal } from "@/lib/moderation/actions"
+import { idForViewer } from "@/lib/room-handle"
 import {
   successResponse,
   unauthorizedResponse,
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Check if chat group exists
     const chatGroup = await db.chat_groups.findUnique({
       where: { id: chatGroupId, deleted_at: null },
-      select: { id: true, event: { select: { status: true, deleted_at: true } } },
+      select: { id: true, event_id: true, event: { select: { status: true, deleted_at: true } } },
     })
 
     if (!chatGroup) {
@@ -110,7 +111,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return successResponse({
       participants: members.map((m) => ({
-        userId: m.user.id,
+        // Yours real; everyone else's as their handle in this room (SCRUM-371).
+        userId: idForViewer(authUser.userId, chatGroup.event_id, m.user.id),
         name: m.anonymous_name || "Anonymous",
         avatar: null,
         role: m.role,

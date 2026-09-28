@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PARTICIPATION_GATE, standardErrors } from "@/lib/openapi/schemas/common"
+import { PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
 
 /*
  * Friends. Two rules shape every route here (see lib/friends.ts):
@@ -72,9 +72,11 @@ registry.registerPath({
   description:
     "The identified profile, for a friend only; 404 for anyone else whether or not they exist. Separate from " +
     "`GET /users/{userId}`, which is what a room card opens — a friend there is still a pseudonym. " +
-    "`conversationId` is an open DM, if there is one.",
+    "`conversationId` is an open DM, if there is one. " +
+    "A room handle resolves here only for a friend you can already recognise in that room (`friends_see_me_in_rooms` on); " +
+    "any other handle is the same 404 as a stranger, so the route cannot say which card on a roster is a friend (SCRUM-371).",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     200: {
       description: "Friend",
@@ -107,9 +109,10 @@ registry.registerPath({
   path: "/api/mobile/friends/{userId}",
   tags,
   summary: "Unfriend",
-  description: "Silent — nobody is told — and any DM is left alone. Idempotent.",
+  description:
+    "Silent — nobody is told — and any DM is left alone. Idempotent. A room handle counts only for a friend you can recognise in that room, as on `GET`.",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     200: { description: "Removed", content: { "application/json": { schema: wrap(z.object({ removed: z.literal(true) })) } } },
     ...standardErrors,
@@ -125,9 +128,9 @@ registry.registerPath({
     PARTICIPATION_GATE +
     "No shared event needed. Returns the existing conversation if there is one; a new one is marked as opened " +
     "between friends, so it does not make either of you recognisable in rooms. 404 unless you are friends; 409 if " +
-    "the conversation was closed.",
+    "the conversation was closed. A room handle counts only for a friend you can recognise in that room, as on `GET /friends/{userId}`.",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     200: {
       description: "Conversation",
@@ -214,7 +217,7 @@ registry.registerPath({
     PARTICIPATION_GATE +
     SAME_404 +
     "Exactly one of `token` (somebody's invite link) or `userId` (only for someone you can already see: a match, " +
-    "a conversation, someone public in your room). Idempotent and cannot nag: asking again neither notifies again " +
+    "a conversation, someone public in your room; a room handle works too, SCRUM-371). Idempotent and cannot nag: asking again neither notifies again " +
     "nor un-dismisses. `friends` when they had already asked you. 400 for your own link.",
   security: bearerAuth,
   request: {

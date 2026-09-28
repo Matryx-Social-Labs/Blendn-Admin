@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, PARTICIPATION_GATE, standardErrors } from "@/lib/openapi/schemas/common"
+import { PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -175,8 +175,10 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}",
   tags: ["Mobile Users"],
   summary: "Get user public profile",
+  description:
+    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). `connection` is present only when `identityVisible` is true.",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string().uuid() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     200: { description: "User profile", content: { "application/json": { schema: wrap(UserPublicProfileSchema) } } },
     ...standardErrors,
@@ -211,7 +213,7 @@ registry.registerPath({
   tags: ["Mobile Users"],
   summary: "Block user",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string().uuid() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     200: { description: "Blocked", content: { "application/json": { schema: wrap(z.object({ blocked: z.literal(true) })) } } },
     ...standardErrors,
@@ -224,7 +226,7 @@ registry.registerPath({
   tags: ["Mobile Users"],
   summary: "Unblock user",
   security: bearerAuth,
-  request: { params: z.object({ userId: z.string().uuid() }) },
+  request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
     200: { description: "Unblocked", content: { "application/json": { schema: wrap(z.object({ blocked: z.literal(false) })) } } },
     ...standardErrors,
@@ -240,7 +242,7 @@ registry.registerPath({
   summary: "Send message request",
   description:
     PARTICIPATION_GATE +
-    "Both of you must have attended the same event. 409 if a request is pending or accepted in either direction, or if you already sent one that was declined — a rejection is not an invitation to try again. The person who declined may ask you. The response names the recipient by id only: their name and photo are what accepting discloses, not asking.",
+    "Both of you must have attended the same event. 409 if a request is pending or accepted in either direction, if you already sent one that was declined — a rejection is not an invitation to try again — or if you already have a conversation; the person who declined may ask you. **Those 409s are said only when `identityVisible` would be true for the recipient** (SCRUM-371): to anyone else they answer 201 with this same shape and a fresh id, write nothing and notify nobody, so a room handle cannot be probed for a friend DM or an earlier request. `recipientId` may be a room handle and is echoed as sent. The response names the recipient by that ref only: their name and photo are what accepting discloses, not asking.",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: MessageRequestCreateSchema } } },
@@ -275,6 +277,8 @@ registry.registerPath({
   path: "/api/mobile/message-requests/{requestId}/respond",
   tags: ["Mobile Message Requests"],
   summary: "Respond to message request",
+  description:
+    "Recipient only. A request that is not yours to answer is 404, the same as one that does not exist, so a sender cannot check which request ids are real (SCRUM-371).",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string().uuid() }),
@@ -613,7 +617,7 @@ registry.registerPath({
   summary: "Report a user",
   security: bearerAuth,
   request: {
-    params: z.object({ userId: z.string() }),
+    params: z.object({ userId: UserRefParamSchema }),
     body: {
       content: {
         "application/json": {

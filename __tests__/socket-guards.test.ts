@@ -1,3 +1,4 @@
+process.env.NEXTAUTH_SECRET = "socket-guards-test-secret-of-32-characters"
 const mockDb = {
   chat_group_members: { findUnique: jest.fn() },
   private_conversations: { findUnique: jest.fn() },
@@ -21,9 +22,16 @@ import {
   emitPrivateRead,
 } from "@/lib/socket-server"
 import type { AuthenticatedSocket } from "@/lib/socket-server"
+import { roomHandle } from "@/lib/room-handle"
 
 const USER = "user_self"
 const CHAT_ID = "11111111-1111-1111-1111-111111111111"
+const EVENT_ID = "22222222-2222-4222-8222-222222222222"
+const member = (anonymous_name: string | null, status: string) => ({
+  anonymous_name,
+  status,
+  chat_group: { event_id: EVENT_ID },
+})
 // Deliberately shares no substring with USER, so the leak assertion below
 // can only fail on a genuine email leak.
 const EMAIL_LOCAL_PART = "zaphod.beeblebrox"
@@ -33,13 +41,38 @@ function makeSocket() {
   const except = jest.fn()
   const broadcast = { emit: roomEmit, except }
   except.mockReturnValue(broadcast)
+  /*
+   * The chat room as `fetchSockets` returns it: somebody else, the typist's
+   * other device, and the typing socket itself. Typing is per recipient now
+   * (SCRUM-371), so `roomEmit` is what the other person's socket receives.
+   */
+  const ownOtherDeviceEmit = jest.fn()
+  const typingSocketEmit = jest.fn()
+  const chatRoom = {
+    except,
+    fetchSockets: jest.fn(async () => [
+      { id: "sock-peer", data: { userId: "user_peer" }, emit: roomEmit },
+      { id: "sock-self-2", data: { userId: USER }, emit: ownOtherDeviceEmit },
+      { id: "sock-self", data: { userId: USER }, emit: typingSocketEmit },
+    ]),
+  }
+  except.mockImplementation(() => ({ ...broadcast, ...chatRoom }))
   const socket = {
+    id: "sock-self",
     data: { userId: USER, email: `${EMAIL_LOCAL_PART}@example.com` },
     join: jest.fn(),
     emit: jest.fn(),
     to: jest.fn(() => broadcast),
+    nsp: { in: jest.fn(() => chatRoom) },
   }
-  return { socket: socket as unknown as AuthenticatedSocket, raw: socket, roomEmit, except }
+  return {
+    socket: socket as unknown as AuthenticatedSocket,
+    raw: socket,
+    roomEmit,
+    except,
+    ownOtherDeviceEmit,
+    typingSocketEmit,
+  }
 }
 
 beforeEach(() => {
@@ -101,25 +134,34 @@ describe("guardJoin", () => {
 
 describe("emitChatTyping", () => {
   it("broadcasts under the anonymous name for an active member", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({
-      anonymous_name: "Cosmic Panda",
-      status: "active",
-    })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "active"))
     const { socket, raw, roomEmit } = makeSocket()
 
     await emitChatTyping(socket, CHAT_ID, true)
 
-    expect(raw.to).toHaveBeenCalledWith(`chat:${CHAT_ID}`)
+    expect(raw.nsp.in).toHaveBeenCalledWith(`chat:${CHAT_ID}`)
+    // Everybody else reads the typist as this event's handle (SCRUM-371).
     expect(roomEmit).toHaveBeenCalledWith("chat:typing", {
       chatGroupId: CHAT_ID,
-      userId: USER,
+      userId: roomHandle(EVENT_ID, USER),
       userName: "Cosmic Panda",
       isTyping: true,
     })
   })
 
+  it("names the typist by their real id to their own other device, and not back to the typing socket", async () => {
+    // The app drops its own typing by comparing ids, so its own copy stays real.
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Cosmic Panda", "active"))
+    const { socket, ownOtherDeviceEmit, typingSocketEmit } = makeSocket()
+
+    await emitChatTyping(socket, CHAT_ID, true)
+
+    expect(ownOtherDeviceEmit).toHaveBeenCalledWith("chat:typing", expect.objectContaining({ userId: USER }))
+    expect(typingSocketEmit).not.toHaveBeenCalled()
+  })
+
   it("leaves out everyone the typist blocked or was blocked by (SCRUM-338)", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ anonymous_name: "Hidden Dune", status: "active" })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Hidden Dune", "active"))
     mockDb.blocked_users.findMany.mockResolvedValueOnce([
       { blocker_id: USER, blocked_id: "they_were_blocked" },
       { blocker_id: "they_blocked_me", blocked_id: USER },
@@ -136,7 +178,7 @@ describe("emitChatTyping", () => {
     // Inside the same try as the membership read: a failed lookup must neither
     // escape the listener (it would take the process down) nor fall back to
     // broadcasting to everyone, blocked people included.
-    mockDb.chat_group_members.findUnique.mockResolvedValue({ anonymous_name: "Hidden Dune", status: "active" })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Hidden Dune", "active"))
     mockDb.blocked_users.findMany.mockRejectedValueOnce(new Error("connection terminated"))
     const { socket, roomEmit } = makeSocket()
 
@@ -145,10 +187,7 @@ describe("emitChatTyping", () => {
   })
 
   it("passes isTyping:false through for stopTyping", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({
-      anonymous_name: "Neon Phoenix",
-      status: "active",
-    })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Neon Phoenix", "active"))
     const { socket, roomEmit } = makeSocket()
 
     await emitChatTyping(socket, CHAT_ID, false)
@@ -160,10 +199,7 @@ describe("emitChatTyping", () => {
   })
 
   it("never broadcasts the real identity — falls back to 'Someone'", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({
-      anonymous_name: null,
-      status: "active",
-    })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member(null, "active"))
     const { socket, roomEmit } = makeSocket()
 
     await emitChatTyping(socket, CHAT_ID, true)
@@ -187,10 +223,7 @@ describe("emitChatTyping", () => {
   })
 
   it("stays silent for a muted member", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({
-      anonymous_name: "Muted Otter",
-      status: "muted",
-    })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Muted Otter", "muted"))
     const { socket, roomEmit } = makeSocket()
 
     await emitChatTyping(socket, CHAT_ID, true)
@@ -199,10 +232,7 @@ describe("emitChatTyping", () => {
   })
 
   it("stays silent for a member banned after they joined the room", async () => {
-    mockDb.chat_group_members.findUnique.mockResolvedValue({
-      anonymous_name: "Banned Wolf",
-      status: "banned",
-    })
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Banned Wolf", "banned"))
     const { socket, roomEmit } = makeSocket()
 
     await emitChatTyping(socket, CHAT_ID, true)

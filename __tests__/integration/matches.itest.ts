@@ -1,5 +1,6 @@
 import { likeAtEvent, matchesForEvent } from "@/lib/matches"
 import { mayConverse } from "@/lib/conversations"
+import { resolveUserRef, roomHandle } from "@/lib/room-handle"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpers"
 
@@ -94,7 +95,10 @@ describe("who can see the list at all", () => {
     await attend(them, eventId)
 
     const matches = await matchesForEvent(eventId, me)
-    expect(matches!.map((m) => m.userId)).toEqual([them])
+    // Named by their handle in this room, never the real id (SCRUM-371) — and
+    // it is the same string the roster and `room:match` use for them.
+    expect(matches!.map((m) => m.userId)).toEqual([roomHandle(eventId, them)])
+    expect(resolveUserRef(matches![0].userId)).toEqual({ userId: them, eventId })
   })
 })
 
@@ -121,7 +125,7 @@ describe("who appears in it", () => {
     await attend(gone, eventId, { status: "checked_out" })
 
     const matches = await matchesForEvent(eventId, me)
-    expect(matches!.map((m) => m.userId)).toEqual([gone])
+    expect(matches!.map((m) => resolveUserRef(m.userId)?.userId)).toEqual([gone])
     expect(matches![0].insideNow).toBe(false)
   })
 
