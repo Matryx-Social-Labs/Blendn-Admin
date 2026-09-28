@@ -7,6 +7,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { normalizeLocationToCity } from "@/lib/location"
 import { idForViewer } from "@/lib/room-handle"
+import { revealedInRoom } from "@/lib/identity"
 import {
   successResponse,
   unauthorizedResponse,
@@ -174,14 +175,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * it still said "Cosmic Panda" (L2.5). Same rule, same two fields, only
      * for people who chose it, and only inside this event.
      */
-    const [pseudonyms, revealedRows] = await Promise.all([
+    const [pseudonyms, revealed] = await Promise.all([
       pseudonymsForEvent(eventId),
-      db.event_match_preferences.findMany({
-        where: { event_id: eventId, revealed: true, user_id: { in: checkIns.map((c) => c.user.id) } },
-        select: { user_id: true },
-      }),
+      // The one definition, shared with the profile a card opens
+      // (`identityForRef`), so the card and the profile cannot disagree.
+      revealedInRoom(eventId, checkIns.map((c) => c.user.id)),
     ])
-    const revealed = new Set(revealedRows.map((r) => r.user_id))
 
     return successResponse({
       attendees: await Promise.all(

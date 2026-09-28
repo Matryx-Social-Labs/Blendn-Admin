@@ -215,7 +215,11 @@ export async function matchesForEvent(
    * to be; a friend you can already tell is here still leaves, since hiding a
    * card you would recognise gives nothing away.
    */
-  const recognisedFriends = friends.length ? await maySeeIdentityFor(viewerId, friends) : new Set<string>()
+  // In this room's terms, like the roster and the card: a friend recognised
+  // only because of a reveal at some other event is still a stranger here.
+  const recognisedFriends = friends.length
+    ? await maySeeIdentityFor(viewerId, friends, { room: eventId })
+    : new Set<string>()
 
   // Blocks hide people in both directions. Someone you blocked should not
   // reappear as a suggestion, and neither should someone who blocked you.

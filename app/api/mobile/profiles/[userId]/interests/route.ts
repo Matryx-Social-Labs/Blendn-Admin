@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { blockedEitherWay } from "@/lib/conversations"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { identityForRef } from "@/lib/identity"
 import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -25,7 +26,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     // A room handle or a raw id (SCRUM-371). POST and DELETE stay self-only
     // on the raw id: nobody edits someone else's interests through a handle.
-    const userId = userIdFromRef((await params).userId)
+    const ref = (await params).userId
+    const userId = userIdFromRef(ref)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
@@ -40,6 +42,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (authUser.userId !== userId && (await blockedEitherWay(authUser.userId, userId))) {
       return notFoundResponse("User not found")
     }
+
+    /*
+     * Through a room handle, only for somebody that room shows by name. The
+     * room card shows interests you share, never the whole list, and the whole
+     * list is the same in every room: a viewer who has seen this person named
+     * elsewhere could match it to the pseudonym. So a room that keeps them
+     * anonymous gets an empty list here, as the profile routes withhold it.
+     * A raw id is unchanged.
+     */
+    const { room, identified } = await identityForRef(authUser.userId, ref)
+    if (room && !identified) return successResponse({ interests: [] })
 
     // Fetch user interests
     const interests = await db.user_interests.findMany({

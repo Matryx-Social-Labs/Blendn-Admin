@@ -36,7 +36,15 @@ jest.mock("@/lib/location", () => ({
 
 jest.mock("@/lib/conversations", () => ({ blockedEitherWay: jest.fn().mockResolvedValue(false) }))
 const maySeeIdentity = jest.fn().mockResolvedValue(false)
-jest.mock("@/lib/identity", () => ({ maySeeIdentity: (...a: unknown[]) => maySeeIdentity(...a) }))
+// Every ref here is a raw id, so `identityForRef` is the unscoped gate — which
+// is what this file varies. Room handles are covered in room-handles.itest.ts.
+jest.mock("@/lib/identity", () => ({
+  identityForRef: async (viewerId: string, ref: string) => ({
+    userId: ref,
+    room: null,
+    identified: ref === viewerId || (await maySeeIdentity(viewerId, ref)),
+  }),
+}))
 
 import { NextRequest } from "next/server"
 import { GET as getProfile, PUT as putProfile } from "@/app/api/mobile/profiles/[userId]/route"

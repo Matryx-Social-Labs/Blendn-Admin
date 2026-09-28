@@ -3,8 +3,8 @@ import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
-import { maySeeIdentity } from "@/lib/identity"
-import { userIdFromRef } from "@/lib/room-handle"
+import { roomPseudonymOf } from "@/lib/anonymous-names"
+import { identityForRef } from "@/lib/identity"
 import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
@@ -31,7 +31,13 @@ export async function GET(
      * back as the id it stands for.
      */
     const { userId: ref } = await params
-    const userId = userIdFromRef(ref)
+    /*
+     * Who the ref names, and whether the viewer may see who that is. A room
+     * handle is answered in its own room's terms — see `IdentityScope` for the
+     * staging case where a reveal at one event named somebody through the
+     * pseudonym they kept at another.
+     */
+    const { userId, room, identified } = await identityForRef(authUser.userId, ref)
 
     // Get the user's public profile
     const user = await db.user.findUnique({
@@ -114,13 +120,37 @@ export async function GET(
      * pseudonyms into named faces. (They carry room handles now, SCRUM-371 —
      * this gate is what stops a handle being worth more than the room says.)
      *
-     * `maySeeIdentity` is the gate: matched, in a conversation, or they chose to
-     * be public in a room you were in. Co-presence alone is deliberately not
+     * `identityForRef` is the gate: by raw id, matched, in a conversation, or
+     * they chose to be public in a room you were in; by a room handle, only
+     * what that room shows (handled above). Co-presence alone is deliberately not
      * enough -- sharing a room is what lets you send a request, not consent to
      * be identified.
      */
-    const identified = await maySeeIdentity(authUser.userId, userId)
     const isOwnProfile = authUser.userId === userId
+
+    /*
+     * A room card, for somebody that room keeps anonymous: exactly what the
+     * roster already shows beside their pseudonym, and nothing else.
+     *
+     * Their pseudonym in that room rather than "Attendee" — the card that
+     * opened this already shows it, so it discloses nothing, and a second
+     * name for one person in one room is how surfaces start to disagree.
+     * Age and city stay, as they do on the roster (owner decision, #485).
+     * Everything that is the same in every room goes: the interest list,
+     * the join date and the attendance counts are a fingerprint, and a
+     * viewer who has seen this person named elsewhere could match them to
+     * the pseudonym field by field.
+     */
+    if (room && !identified) {
+      return successResponse({
+        id: ref,
+        name: await roomPseudonymOf(room, userId),
+        age: ageFrom(user.profile),
+        location: await normalizeLocationToCity(user.profile?.location),
+        isOwnProfile: false,
+        identityVisible: false,
+      })
+    }
 
     const publicProfile = {
       // The ref as given — a handle in, the same handle out — except for your

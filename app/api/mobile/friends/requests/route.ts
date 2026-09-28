@@ -4,8 +4,7 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { participationRefusal } from "@/lib/event-access"
 import { INVITE_TOKEN, mayConnect, personCard, personSelect, requestFriend } from "@/lib/friends"
-import { maySeeIdentity } from "@/lib/identity"
-import { userIdFromRef } from "@/lib/room-handle"
+import { identityForRef } from "@/lib/identity"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -101,10 +100,12 @@ export async function POST(request: NextRequest) {
       if (!invite) return notFound()
       recipientId = invite.user_id
     } else {
-      // A room handle works here too (SCRUM-371); the identity gate on the
-      // next line already refuses anyone the room keeps a stranger.
-      recipientId = userIdFromRef(parsed.data.userId)
-      if (recipientId !== me && !(await maySeeIdentity(me, recipientId))) return notFound()
+      // A room handle works here too (SCRUM-371); the identity gate refuses
+      // anyone the room keeps a stranger — in that room's terms, so a reveal
+      // at another event does not make this room's pseudonym askable.
+      const target = await identityForRef(me, parsed.data.userId)
+      recipientId = target.userId
+      if (!target.identified) return notFound()
       connectable = await mayConnect(me, recipientId)
     }
 
