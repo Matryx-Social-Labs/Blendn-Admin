@@ -2901,6 +2901,46 @@ model audit_logs {
   @@index([created_at])
 }
 
+/// What a person registered with, kept for 180 days after they delete their
+/// account, and then destroyed.
+///
+/// India's IT (Intermediary Guidelines) Rules 2021, r.3(1)(h): an intermediary
+/// that collects information for registration keeps it for 180 days after the
+/// registration is cancelled or withdrawn. Account deletion scrubs the `User`
+/// and `profiles` rows at once, so this is the only copy. It is written in the
+/// deletion transaction, before the scrub, so a failed deletion leaves no copy
+/// and a successful one always has one (`lib/deleted-account-records.ts`).
+///
+/// After `purge_after` the DPDP Act 2023 says the data must go, and the
+/// retention sweeper (`lib/notification-retention.ts`) hard-deletes the row.
+///
+/// **No route or dashboard page reads this table.** A legal request is answered
+/// by an admin querying the database, and that query is logged in `audit_logs`
+/// — see `docs/RETENTION.md`. `__tests__/deleted-account-records-boundary.test.ts`
+/// fails the build if anything under `app/`, `components/` or `lib/` other than
+/// the one writer names it.
+///
+/// No foreign key, deliberately: nothing may cascade this away before its time,
+/// and `user_id` points at a row that has already been anonymised.
+model deleted_account_records {
+  id                 String    @id @default(uuid()) @db.Uuid
+  /// The anonymised `User` row's id.
+  user_id            String
+  name               String?
+  email              String
+  phone              String?
+  date_of_birth      DateTime? @db.Date
+  /// Copied verbatim from `User.createdAt`, so the same column type.
+  account_created_at DateTime
+  deleted_at         DateTime  @db.Timestamptz(6)
+  /// 'email', 'google' or 'apple'.
+  sign_up_method     String
+  /// deleted_at + 180 days. The purge deletes rows past it.
+  purge_after        DateTime  @db.Timestamptz(6)
+
+  @@index([purge_after])
+}
+
 // Blocked Users
 model blocked_users {
   id         String   @id @default(uuid()) @db.Uuid

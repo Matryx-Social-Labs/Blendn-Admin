@@ -17,7 +17,7 @@ process.env.MOBILE_JWT_SECRET = "test-secret-at-least-32-characters-long!!"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 const mockDb = {
-  user: { update: jest.fn() },
+  user: { update: jest.fn().mockReturnValue({ op: "user.update" }) },
   profiles: { update: jest.fn() },
   user_interests: { deleteMany: jest.fn() },
   // Two open RSVPs on future events, read before the transaction; both go.
@@ -46,7 +46,8 @@ const mockDb = {
   board_posts: { deleteMany: jest.fn() },
   board_requests: { updateMany: jest.fn() },
   private_conversations: { updateMany: jest.fn() },
-  $executeRaw: jest.fn(),
+  // Returns what it was given, so a test can find a statement in the batch.
+  $executeRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ sql: strings.join("?"), values })),
   $transaction: jest.fn().mockResolvedValue([]),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -199,6 +200,35 @@ describe("deleting an account scrubs the matching inputs", () => {
     // A half-scrubbed account is worse than an unscrubbed one: it looks done.
     await del()
     expect(mockDb.$transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it("copies what they registered with first, inside the same transaction, kept 180 days", async () => {
+    /*
+     * IT Rules 2021, r.3(1)(h). The copy is a statement IN the batch, not a
+     * write beside it: a failed deletion must leave no copy and a successful
+     * one must always have one. And it is first, because every statement after
+     * it scrubs something it reads.
+     */
+    await del()
+    const batch = mockDb.$transaction.mock.calls[0][0] as Array<{ sql?: string; values?: unknown[] }>
+    const at = batch.findIndex((op) => op?.sql?.includes("INSERT INTO deleted_account_records"))
+    expect(at).toBe(0)
+    expect(batch.indexOf(mockDb.user.update.mock.results[0].value)).toBeGreaterThan(at)
+
+    const [deletedAt, purgeAfter, userId] = batch[at].values as [Date, Date, string]
+    expect(userId).toBe(USER)
+    // The same instant the User row is stamped with, and 180 days on from it.
+    expect(deletedAt).toBe(mockDb.user.update.mock.calls[0][0].data.deletedAt)
+    expect(purgeAfter.getTime() - deletedAt.getTime()).toBe(180 * 24 * 60 * 60 * 1000)
+  })
+
+  it("keeps the board posts moderation took down", async () => {
+    // IT Rules 2021, r.3(1)(g): removed content is kept 180 days. `null`, not
+    // `not: "hidden"`, which in Prisma would also skip every unmoderated post.
+    await del()
+    expect(mockDb.board_posts.deleteMany).toHaveBeenCalledWith({
+      where: { author_id: USER, moderation_status: null },
+    })
   })
 
   it("refuses an unauthenticated caller", async () => {

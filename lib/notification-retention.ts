@@ -4,6 +4,7 @@
 // caught exactly this when the file was first added.
 import { logger } from "./logger"
 import { db } from "./db"
+import { purgeDeletedAccountRecords } from "./deleted-account-records"
 
 /**
  * Nothing pruned `notifications`, ever.
@@ -121,6 +122,18 @@ async function runSweep(): Promise<void> {
     }
   } catch (error) {
     logger.error("Product event prune failed", { error: String(error) })
+  }
+
+  /*
+   * Registration records of deleted accounts, past their 180 days (IT Rules
+   * 2021 r.3(1)(h), then DPDP erasure). A count and nothing else: the rows are
+   * personal data, and a log line is a copy nobody purges.
+   */
+  try {
+    const deleted = await purgeDeletedAccountRecords()
+    if (deleted > 0) logger.info("Purged deleted-account records", { deleted })
+  } catch (error) {
+    logger.error("Deleted-account record purge failed", { error: String(error) })
   }
 }
 

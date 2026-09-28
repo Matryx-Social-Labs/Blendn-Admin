@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "deleted-account-records-boundary.test.ts": {
+      "guards": "IT Rules 2021 r.3(1)(h): deleted_account_records (registration details kept 180 days after account deletion) is named by no file under app/, components/ or lib/ except its one writer, lib/deleted-account-records.ts, so no route or dashboard page can read it. With account-deletion.test.ts (the copy is the first statement of the deletion batch, 180 days from the same deletedAt) and deleted-account-records.itest.ts (one row with the right values, none on a failed deletion, purge takes only rows past purge_after; a board post moderation hid survives its author's deletion, r.3(1)(g)).",
+      "mutation": "M1: `// deleted_account_records` appended to app/api/mobile/account/route.ts. M2: recordDeletedAccount dropped from the deletion $transaction. M3: purge predicate `lt` -> `lte`. M4: board_posts.deleteMany without `moderation_status: null`.",
+      "observed": "M1: deleted-account-records-boundary.test.ts 1 of 2 failing (the route listed). M2: account-deletion.test.ts 1 of 21 failing; deleted-account-records.itest.ts 2 of 4 failing (no record written). M3: deleted-account-records.itest.ts 1 of 4 failing (the row due exactly now purged). M4: deleted-account-records.itest.ts 1 of 5 failing; account-deletion.test.ts 1 of 22 failing.",
+      "date": "2026-09-28"
+    },
     "claim-does-not-open-the-past.itest.ts": {
       "guards": "Owner's ruling 1 (SCRUM-355): an approved venue claim does not open the venue's past. eventPermissions gives a venue owner canOperate (chat, moderation, attendee list) only for events that start at or after venues.claimed_at; an owned venue with no claim date fails closed. PermissionEvent requires start_time and venue.claimed_at so a caller that did not select them does not typecheck. event-permissions.test.ts pins the matrix; this file proves the shared eventPermissionSelect carries both, from Postgres, and that the room's messages route refuses the owner for a pre-claim event.",
       "mutation": "M25: eventPermissions without the claimed_at cut-off (the venue owner operates every event at the venue).",
