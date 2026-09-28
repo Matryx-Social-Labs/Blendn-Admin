@@ -47,9 +47,10 @@ export function recordDeletedAccount(userId: string, deletedAt: Date) {
           (SELECT o.provider FROM user_oauth_accounts o
             WHERE o.user_id = u.id AND o.provider IN ('google', 'apple')
             ORDER BY o.created_at LIMIT 1),
+          -- No link time on NextAuth's Account; a cuid id starts with one.
           (SELECT a.provider FROM "Account" a
             WHERE a."userId" = u.id AND a.provider IN ('google', 'apple')
-            LIMIT 1),
+            ORDER BY a.id LIMIT 1),
           'email')
       END,
       ${purgeAfter}::timestamptz
