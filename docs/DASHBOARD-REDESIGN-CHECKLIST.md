@@ -74,7 +74,7 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/events/[id]` + tabs | ✅ 8d6f547 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/messaging` | ✅ d1096f7 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/feedback` | ✅ d1096f7 | ✅ 2026-09-11 | shared with admin |
-| `/dashboard/attendees` | ✅ 2026-09-11 (repeat chip cut; mockup skipped — one column) | ✅ E4; 2026-09-11 | pseudonymous roster |
+| `/dashboard/attendees` | ✅ 2026-09-11 (repeat chip cut; mockup skipped — one column); ✅ 2026-09-28 SCRUM-383 (mockup `attendees-labels-20260928`) | ✅ E4; 2026-09-11; 2026-09-28 as organiser + admin, local seed | the 2026-09-11 "pseudonymous roster" note was wrong: the Person column showed real names. Now the Attendee column is the export's label in mono, and the query selects no name (`lib/attendee-roster.ts`) |
 | `/dashboard/chatrooms` | ✅ 2026-09-11 (mockup `chatrooms-20260911`) | ✅ 2026-09-11 | a list with state + when it changes; scope via visibleEventsWhere |
 | `/dashboard/organisation` (my organisation) | ✅ 2026-09-11 (chrome cut; mockup skipped) | ✅ E4, #322 domain verification | title line, divided lists |
 | `/dashboard/reports`, `/dashboard/audit`, `/dashboard/settings` | — | ✅ | shared |

@@ -4,6 +4,7 @@ import { IconUsers } from "@tabler/icons-react"
 
 import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState } from "@/components/dashboard/primitives"
+import type { AttendeeRow } from "@/lib/attendee-roster"
 import { formatSince } from "@/lib/dashboard-format"
 
 /**
@@ -18,18 +19,19 @@ import { formatSince } from "@/lib/dashboard-format"
  * function. `AttendeeRow` is plain data, so it serialises fine.
  */
 
-export interface AttendeeRow {
-  id: string
-  name: string
-  attended: number
-  rsvps: number
-  noShows: number
-  lastAttendedAt: string | null
-  repeat: boolean
-}
-
 const columns: Column<AttendeeRow>[] = [
-  { key: "name", label: "Person", sortType: "string", primary: true },
+  /*
+   * The label, not a person's name (SCRUM-383 b), set as a code so it reads as
+   * one: the same string the Attendees export carries, so a row here and a row
+   * in the spreadsheet are the same person. Never wrapped at its hyphen.
+   */
+  {
+    key: "id",
+    label: "Attendee",
+    sortType: "string",
+    primary: true,
+    render: (r) => <span className="whitespace-nowrap font-mono text-[0.78125rem]">{r.id}</span>,
+  },
   {
     key: "attended",
     label: "Attended",
@@ -80,12 +82,12 @@ export function AttendeesTable({ rows }: { rows: AttendeeRow[] }) {
         <EmptyState
           icon={<IconUsers />}
           title="No attendees yet"
-          description="People who RSVP and check in to your events build this list — repeat attendance is the loyalty signal."
+          description="People who RSVP and check in to your events build this list, each by a label rather than their name. Repeat attendance is the loyalty signal."
         />
       }
       footer={
         <span>
-          attended = GPS check-in · committed RSVPs without a check-in count as no-shows
+          attended = GPS check-in · committed RSVPs without a check-in count as no-shows · the same label as the Attendees export
         </span>
       }
     />

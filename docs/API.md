@@ -1983,3 +1983,8 @@ Kept: the four settings booleans (how a dead account would behave, not who the
 person was), and `event_check_ins` — attendance is the organiser's history too,
 and it is the co-presence that keeps a conversation open for someone who
 actually met them. What they were *open to* is only theirs, and goes.
+
+Kept for 180 days, then purged (IT Rules 2021): a copy of what they registered
+with (name, email, phone, date of birth, sign-up method), written in the same
+transaction before the scrub. No route returns it. Their board posts that
+moderation hid are kept too. See `docs/RETENTION.md`.

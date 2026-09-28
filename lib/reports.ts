@@ -20,8 +20,9 @@ import { activeMembership } from "./org-membership"
  * every other host's attendee list.
  *
  * No PII beyond what the running role already sees on screen. The attendee
- * report is the sharp one: an organiser sees who came to *their* events, which
- * they already see in the dashboard, and never an email address.
+ * report is the sharp one: an organiser sees how often each person came to
+ * *their* events, by the same `attendeeLabel` the Attendees screen shows --
+ * never a name, email, phone or photo (SCRUM-383 b).
  */
 
 export type ReportKey =

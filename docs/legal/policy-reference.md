@@ -461,6 +461,7 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 | Data Type | Retention | Deletion Method |
 |-----------|-----------|-----------------|
 | **User account** | Until deletion requested | Soft delete (deleted_at timestamp) |
+| **Registration details of a deleted account** (name, email, phone, date of birth, sign-up method) | 180 days after deletion (IT Rules 2021 r.3(1)(h)) | Hard delete by the retention sweeper; see `docs/RETENTION.md` |
 | **Chat messages** | Indefinite | Soft delete; moderation-hidden messages retained for review |
 | **Private messages** | Until conversation deleted | Hard delete (cascade) |
 | **Event check-ins** (incl. GPS) | Indefinite | Retained for event analytics |
