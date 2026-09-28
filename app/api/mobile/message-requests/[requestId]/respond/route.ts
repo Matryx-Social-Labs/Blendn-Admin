@@ -205,7 +205,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           requestId,
           conversationId: conversationId ?? undefined,
         },
-        channelId: "messages",
       }).catch((err: unknown) =>
       // Push is best-effort and must not fail the request, but swallowing the
       // error entirely means a broken push pipeline is invisible.

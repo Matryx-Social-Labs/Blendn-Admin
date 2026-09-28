@@ -11,8 +11,8 @@ import { join } from "path"
  * over the socket, and on your lock screen. In a pseudonymous room you could
  * not even tell which "Cosmic Panda" they were.
  *
- * `notifyEventCheckIn` would additionally tell you that a person you had
- * blocked had just walked in.
+ * The check-in ping would additionally tell you that a person you had blocked
+ * had just walked in. That push is gone; the live roster still filters.
  *
  * These are source assertions rather than behavioural ones because the paths
  * they guard are a Prisma `where` clause, a socket fan-out and a push
@@ -70,7 +70,7 @@ describe("every group-chat surface consults blocked_users", () => {
       const src = read(route)
       expect(src).toMatch(/await deliverToRoom\(\{/)
       // And does not hand-roll its own fan-out beside it.
-      expect(src).not.toMatch(/notifyGroupMessage\(/)
+      expect(src).not.toMatch(/notifyRoomReply\(/)
     }
   })
 
@@ -81,10 +81,12 @@ describe("every group-chat surface consults blocked_users", () => {
     expect(src).toMatch(/except\(excludeUserIds\.map\(\(id\) => `user:\$\{id\}`\)\)/)
   })
 
-  it("the group push fan-out drops blocked recipients", () => {
-    // The loudest surface in the product.
+  it("the reply push never reaches someone in a block with the sender", () => {
+    // The room pushes one person now — the author of the message replied to —
+    // and a lock screen is still the loudest surface in the product.
+    // Behaviourally covered in `push-policy.test.ts`.
     const src = read("lib/room-delivery.ts")
-    expect(src).toMatch(/user_id: \{ notIn: senderBlocked \}/)
+    expect(src).toMatch(/senderBlocked\.includes\(recipientId\)\) return/)
   })
 
   it("skips delivery entirely if it cannot tell who blocked whom", () => {
@@ -98,7 +100,7 @@ describe("every group-chat surface consults blocked_users", () => {
     expect(src).toMatch(/Room delivery skipped: could not resolve blocks[\s\S]{0,120}return/)
   })
 
-  it("the check-in ping does not announce someone you blocked", () => {
+  it("the live check-in roster does not announce someone you blocked", () => {
     const src = read("app/api/mobile/events/[eventId]/checkin/route.ts")
     expect(src).toContain("blockCounterparties")
   })

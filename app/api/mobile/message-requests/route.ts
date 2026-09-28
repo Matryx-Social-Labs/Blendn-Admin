@@ -240,7 +240,6 @@ export async function POST(request: NextRequest) {
       // request text stays in the app rather than on the lock screen.
       body: `${senderName} wants to connect`,
       data: { type: "message_request", requestId: messageRequest.id },
-      channelId: "messages",
     }).catch((err: unknown) =>
       // Push is best-effort and must not fail the request, but swallowing the
       // error entirely means a broken push pipeline is invisible.

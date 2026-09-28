@@ -362,13 +362,14 @@ registry.registerPath({
  * the feed holds what was sent rather than what was delivered. The three ways a
  * push does not arrive — notifications off, no device registered, expired token
  * — are all reasons to look at the bell, not reasons for it to be empty.
+ *
+ * Messages are not here: DMs and room messages live in their own inbox, and the
+ * feed never returns `private_message`, `group_message` or `event_checkin`
+ * (`NOT_IN_THE_BELL` in `lib/push-notifications.ts`).
  */
 const NotificationSchema = z.object({
   id: z.string().uuid(),
   kind: z.enum([
-    "private_message",
-    "group_message",
-    "event_checkin",
     "event_update",
     "announcement",
     "message_request",
@@ -377,6 +378,10 @@ const NotificationSchema = z.object({
     "match",
     "reveal_request",
     "reveal",
+    "board_request",
+    "board_request_accepted",
+    "friend_request",
+    "friend_accepted",
   ]),
   title: z.string(),
   body: z.string(),

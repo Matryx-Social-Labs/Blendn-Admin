@@ -760,7 +760,7 @@ lands.
 
 | Check | What happens |
 |---|---|
-| **Spam** | Refused, `429 SPAM_BLOCKED`. A flood is the one failure the recipient feels immediately, because every message is a push — so it is stopped at the door and the sender is told. Counted per conversation, so messaging ten people is not throttled as flooding one |
+| **Spam** | Refused, `429 SPAM_BLOCKED`. A flood is the one failure the recipient feels immediately — so it is stopped at the door and the sender is told. Counted per conversation, so messaging ten people is not throttled as flooding one |
 | **Keyword** | Stored hidden, never delivered, and the sender is told (`moderation_hidden: true`). Not a silent drop — somebody who thinks a message arrived and gets no reply concludes they were ignored |
 | **Contact details** | Flagged and **delivered**. Refusing teaches the sender exactly where the boundary is, and the next attempt is spelled out with nothing behind it |
 
@@ -1930,6 +1930,28 @@ every recipient, not only the ones with a registered device.
 applies to push titles (`maySeeIdentity`), so a pseudonymous match is
 pseudonymous here too. This table must never be given a richer copy of the same
 event — that would route around a gate it took three PRs to close.
+
+**Messages are not in the bell.** DMs and room messages have their own inbox —
+the Banter list and the Room badge count what is unread — so the feed never
+returns `private_message`, `group_message` or `event_checkin`, and nothing writes
+them any more. Rows written before that are hidden, and retention removes them.
+
+#### What pushes, and when
+
+| What happened | Who gets a push | On the phone |
+|---|---|---|
+| A DM | The recipient, when the conversation goes from read to unread; while it stays unread, at most once every 5 minutes, as "N new messages" | One notification per conversation, replaced in place (`dm:{conversationId}`) |
+| A room message | **Nobody** | — |
+| A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes | `room:{chatGroupId}`, replaced in place |
+| A check-in | **Nobody** — the live roster carries arrivals | — |
+| An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going, maybe, waitlisted and saved | `event:{eventId}`, replaced in place: only the latest state is true |
+| An organiser announcement | Everyone in the room | Stacked with its event, never replaced |
+| Friend request / accepted, match, reveal, board, message request | The person it is about, immediately | One each |
+
+Every push carries an Android `channelId` the app creates — `messages`,
+`rooms` or `events` — so each can be silenced in system settings, and an iOS
+`threadId` that stacks a conversation's or an event's notifications. Chosen by
+`deliveryFor` from `data.type`, never by the caller.
 
 `POST /notifications/read` with no `ids` marks all of the caller's. The caller's
 `user_id` stays in the filter even when ids are named, so a uuid alone cannot

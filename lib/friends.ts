@@ -364,7 +364,6 @@ function notifyFriendRequest(recipientId: string, requestId: string): void {
     title: "New friend request",
     body: "Someone wants to be friends. Open Blend'n to see who.",
     data: { type: "friend_request", requestId },
-    channelId: "messages",
   }).catch((err: unknown) => logPushFailure("friend request", err))
 }
 
@@ -374,7 +373,6 @@ function notifyFriendAccepted(recipientId: string): void {
     title: "Friend request accepted",
     body: "You're friends now.",
     data: { type: "friend_accepted" },
-    channelId: "messages",
   }).catch((err: unknown) => logPushFailure("friend accepted", err))
 }
 

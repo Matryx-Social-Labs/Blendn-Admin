@@ -337,9 +337,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     )
     const messagePreview = text || (mediaType === "image" ? "📷 Photo" : "🎥 Video")
     if (!hidden) {
-      notifyPrivateMessage(recipientId, senderName, messagePreview, conversationId).catch((err) =>
-        logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) })
-      )
+      /*
+       * What the recipient has not read from this sender, this message
+       * included: one means the conversation just went unread and rings, more
+       * is a burst and is throttled (`notifyPrivateMessage`). Counted through
+       * `VISIBLE_DM`, because a hidden message is never marked read.
+       */
+      db.private_messages
+        .count({
+          where: { conversation_id: conversationId, sender_id: authUser.userId, is_read: false, ...VISIBLE_DM },
+        })
+        .then((unread) =>
+          notifyPrivateMessage({ recipientId, senderName, preview: messagePreview, conversationId, unread })
+        )
+        .catch((err) =>
+          logger.error("Push notification failed", { error: err instanceof Error ? err.message : String(err) })
+        )
     }
 
     /*

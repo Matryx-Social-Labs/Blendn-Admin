@@ -55,6 +55,12 @@ export type RoomType = "event" | "chat" | "user"
 
 // Socket events
 export interface ServerToClientEvents {
+  /**
+   * A row landed in your notifications bell. The kind only; the app reads the
+   * row through `GET /notifications`. Emitted by `lib/push-notifications.ts`
+   * to `user:{id}`.
+   */
+  "notification:new": (data: { kind: string }) => void
   // Event-related
   /**
    * A check-in happened. Deliberately carries no name.

@@ -10,6 +10,7 @@ import {
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
 /**
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
     })
 
     const unreadCount = await db.notifications.count({
-      where: { user_id: user.userId, read_at: null },
+      where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
     })
 
     return successResponse({ marked: count, unreadCount })
