@@ -532,7 +532,13 @@ export function GeofenceEditor({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative overflow-hidden rounded-xl border border-border-strong">
+      {/*
+        `isolate` keeps Leaflet's own z-indexes (panes 400–700, controls up to
+        1000) inside the map. Without it they competed with the whole page: the
+        zoom buttons covered the venue suggestions and scrolled over the sticky
+        header (SCRUM-420).
+      */}
+      <div className="relative isolate overflow-hidden rounded-xl border border-border-strong">
         {/*
           OpenStreetMap's own unloaded-tile colour, deliberately not a brand
           token: this is what the map looks like before tiles arrive, and
