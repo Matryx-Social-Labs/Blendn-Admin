@@ -113,7 +113,7 @@ export const dashboardNav: DashboardNavItem[] = [
   },
   {
     title: "Attendees",
-    description: "Who comes back, and who RSVPs but doesn't show.",
+    description: "Who comes back, who doesn't show. Labels only, never names.",
     url: "/dashboard/attendees",
     icon: IconUsers,
     allowedRoles: ["organizer"],

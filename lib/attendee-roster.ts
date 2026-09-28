@@ -1,0 +1,132 @@
+import type { user_role } from "@prisma/client"
+
+import { db } from "./db"
+import { attendeeLabel } from "./pseudonym"
+import { eventScopeFor, pseudonymScope } from "./reports"
+
+/**
+ * One attendee as a host sees them: a label and counts, never who they are.
+ *
+ * Owner ruling SCRUM-383 (b), 2026-09-28: organisers, venue owners and sponsors
+ * see attendees only as a pseudonymous label plus counts -- never a name,
+ * email, phone, photo or profile. Platform admins keep full account details,
+ * and they have them on `/dashboard/users`, not here.
+ *
+ * This roster used to be the "decision 7" exception: it showed the organiser
+ * the real name of everybody who checked in to or RSVP'd to their past events,
+ * falling back to the label only for somebody with no name set. The CSV export
+ * of the same list already used the label, so the screen was the way around
+ * the export. `__tests__/attendee-identity-boundary.test.ts` keeps a name from
+ * being selected here again.
+ */
+export interface AttendeeRow {
+  /**
+   * `attendeeLabel` -- the Attendees export's label, stable for one person
+   * across the organisation's events and different at every other
+   * organisation. Never the user id: that is the id the room hands out for
+   * moderation, and the two together would link a label to a room pseudonym.
+   */
+  id: string
+  attended: number
+  rsvps: number
+  noShows: number
+  lastAttendedAt: string | null
+  repeat: boolean
+}
+
+export interface AttendeeRoster {
+  rows: AttendeeRow[]
+  uniqueAttendees: number
+  repeatCount: number
+  /** Null until there is a past committed RSVP to measure against. */
+  noShowPct: number | null
+}
+
+/**
+ * The organisation's audience: who comes back, and who RSVPs but doesn't show.
+ *
+ * Scoped by organisation (`eventScopeFor`), not by who created the events --
+ * a colleague sees the same roster, and somebody who left sees none.
+ */
+export async function attendeeRoster(role: user_role, userId: string): Promise<AttendeeRoster> {
+  const scope = await eventScopeFor(role, userId)
+  const labelScope = await pseudonymScope(role, userId)
+
+  // Ids and times only. Nothing here may select a name, email, image or phone.
+  const [checkIns, rsvps] = await Promise.all([
+    db.event_check_ins.findMany({
+      where: {
+        status: { in: ["checked_in", "checked_out"] },
+        kind: "attendee",
+        event: scope,
+      },
+      select: { user_id: true, event_id: true, check_in_time: true },
+    }),
+    db.event_rsvps.findMany({
+      where: { status: { in: ["going", "maybe"] }, event: { ...scope, start_time: { lt: new Date() } } },
+      select: { user_id: true, event_id: true },
+    }),
+  ])
+
+  // Assembled in memory rather than SQL: this is bounded by one organiser's
+  // audience, and the "attended a given event" join it would otherwise need is
+  // a compound key Prisma cannot group by in one call.
+  /*
+   * Distinct **events**, not check-in rows.
+   *
+   * `event_check_ins` holds one row per person per day, so a three-day
+   * conference counted as three attendances by one person -- and `repeat` below
+   * is `attended > 1`, so one attendee at one multi-day event was a returning
+   * attendee on the screen whose entire purpose is telling an organiser whether
+   * they are building an audience.
+   */
+  const attendedByUser = new Map<string, { events: Set<string>; last: Date | null }>()
+  for (const row of checkIns) {
+    const existing = attendedByUser.get(row.user_id)
+    const last = row.check_in_time
+    const events = existing?.events ?? new Set<string>()
+    events.add(row.event_id)
+    attendedByUser.set(row.user_id, {
+      events,
+      last: !existing?.last || (last && last > existing.last) ? last : existing.last,
+    })
+  }
+
+  const rsvpByUser = new Map<string, number>()
+  for (const rsvp of rsvps) {
+    rsvpByUser.set(rsvp.user_id, (rsvpByUser.get(rsvp.user_id) ?? 0) + 1)
+  }
+
+  const userIds = new Set([...attendedByUser.keys(), ...rsvpByUser.keys()])
+  const rows: AttendeeRow[] = Array.from(userIds)
+    .map((userId) => {
+      const attended = attendedByUser.get(userId)
+      const rsvpCount = rsvpByUser.get(userId) ?? 0
+      const attendedCount = attended?.events.size ?? 0
+      return {
+        id: attendeeLabel(userId, labelScope),
+        attended: attendedCount,
+        rsvps: rsvpCount,
+        // Floored at zero: walk-ins attend without an RSVP, so attended can
+        // legitimately exceed RSVPs and a negative no-show count is nonsense.
+        noShows: Math.max(0, rsvpCount - attendedCount),
+        lastAttendedAt: attended?.last?.toISOString() ?? null,
+        repeat: attendedCount > 1,
+      }
+    })
+    .sort((a, b) => b.attended - a.attended || b.rsvps - a.rsvps)
+
+  const totalCommitted = rsvps.length
+  // People, not rows. See the fold above.
+  const totalAttended = Array.from(attendedByUser.values()).reduce((n, a) => n + a.events.size, 0)
+
+  return {
+    rows,
+    uniqueAttendees: attendedByUser.size,
+    repeatCount: rows.filter((r) => r.repeat).length,
+    noShowPct:
+      totalCommitted === 0
+        ? null
+        : Math.max(0, 100 - (Math.min(totalAttended, totalCommitted) / totalCommitted) * 100),
+  }
+}

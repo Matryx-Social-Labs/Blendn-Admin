@@ -11,12 +11,14 @@ yet; each item that is picked gets the design chain and a drive.
 **Identity is safe on every organiser/venue/sponsor surface.** Driven as Arjun
 (organiser), Fatima (venue owner) and Meera (sponsor): the room, the members
 list, the live tab, the feedback digest and the chatrooms index all show the
-**pseudonym** ("Cosmic Panda"), never a real name, email or user id. The one
-place a real name appears is `/dashboard/attendees` — by decision 7, organisers
-see *names* (never emails/ids) for their own audience — and the CSV export uses
-the same HMAC pseudonym as the screen, so the two agree. `DESIGN_BRIEF_VENUES_AND_CONTROL.md:134`
-("never show a host a real attendee name") governs the *room*; the attendee
-roster is the deliberate, decision-7 exception. Venue owner and sponsor get the
+**pseudonym** ("Cosmic Panda"), never a real name, email or user id. The
+attendee roster at `/dashboard/attendees` used to be the exception -- by
+"decision 7" it showed organisers real names -- and since SCRUM-383 (owner
+ruling b, 2026-09-28) it shows the same HMAC label as the CSV export, with the
+counts, and no name, email, phone or photo. `DESIGN_BRIEF_VENUES_AND_CONTROL.md:134`
+("never show a host a real attendee name") now holds on every host surface;
+`app_admin` keeps the person on `/dashboard/users` and in the room feed.
+Venue owner and sponsor get the
 room read-only and the pseudonyms; sponsor is bounced from an event they do not
 run.
 
