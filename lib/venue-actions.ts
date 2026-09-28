@@ -492,9 +492,13 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
    * Retiring a venue with a future event booked leaves that event pointing at a
    * place no screen will show, and the organiser finds out at the door. The
    * event has to move first, which is a decision with a person in it.
+   *
+   * A cancelled event is not booked: the refusal says "move or cancel it", and
+   * cancelling it has to be enough (SCRUM-424). `status` is NOT NULL, so `not`
+   * hides no row.
    */
   const upcoming = await db.events.count({
-    where: { venue_id: id, deleted_at: null, end_time: { gte: new Date() } },
+    where: { venue_id: id, deleted_at: null, end_time: { gte: new Date() }, status: { not: "cancelled" } },
   })
   if (upcoming > 0) {
     throw new Refusal(
