@@ -4,6 +4,7 @@ import { blockCounterparties } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
 import { roomHandle } from "@/lib/room-handle"
+import { isRoomMuted } from "@/lib/room-mute"
 
 /**
  * Getting a message to the room. One implementation, because there were two
@@ -117,9 +118,11 @@ export async function deliverToRoom(input: {
     // Still in the room: `left` and `banned` are gone, `muted` still reads.
     const membership = await db.chat_group_members.findUnique({
       where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: recipientId } },
-      select: { status: true },
+      select: { status: true, notification_preferences: true },
     })
     if (membership?.status !== "active" && membership?.status !== "muted") return
+    // And they have not silenced the room (`POST /chat/groups/:id/mute`).
+    if (isRoomMuted(membership.notification_preferences)) return
 
     await notifyRoomReply({
       recipientId,

@@ -319,6 +319,7 @@ GET /api/mobile/me/rsvps?page=1&limit=20
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
 | GET | `/events/:eventId/interested-users` | List interested users |
+| GET | `/events/:eventId/rating` | Your own rating → `{ rating: 1..5 \| null, review, ratedAt }`; null when you have not rated. Nobody else's is ever returned. 404 `NOT_FOUND` for an unknown or deleted event |
 | POST | `/events/:eventId/rating` | Rate an event — stars 1–5, optional review; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it |
 | POST | `/events/:eventId/rsvp` | RSVP — waitlists when full |
 | POST | `/events/:eventId/announce` | Send announcement |
@@ -722,10 +723,51 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
 If OpenAI times out (>1s), message is broadcast and moderation falls back to async (socket delete event).
 
-**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429)
+**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `SPAM_BLOCKED` (429)
 
 ### Event Chat: POST /events/:eventId/chat
 Same moderation pipeline and error codes apply.
+
+### Leaving, muting and reporting a room
+
+| Method | Endpoint | Result |
+|--------|----------|--------|
+| POST | `/chat/groups/:chatGroupId/leave` | `{ chatGroupId, left: true }` — idempotent |
+| DELETE | `/chat/groups/:chatGroupId/leave` | Rejoin → `{ chatGroupId, left: false }` — idempotent |
+| POST | `/chat/groups/:chatGroupId/mute` | Body `{ until?: ISO \| null }` → `{ chatGroupId, mute: { muted, until } }` |
+| DELETE | `/chat/groups/:chatGroupId/mute` | → `{ chatGroupId, mute: { muted: false, until: null } }` |
+| POST | `/chat/groups/:chatGroupId/report` | Body `{ reason, description? }` → 201 `{ reported: true }` |
+
+All five answer one `404 NOT_FOUND` for a malformed id, an unknown room, a draft
+or deleted event's room, or a room you have no membership in (report alone
+still accepts a room whose event was taken down).
+
+**Leaving** marks the membership `left` with `left_at` — kept, not deleted,
+because your pseudonym on past messages resolves through it. Until you come
+back the room is closed to you: `GET /events/:eventId/chat` answers
+`403 LEFT_ROOM` with `chatGroupId` in the body **instead of rejoining you**,
+history, roster and polls answer as for a non-member, a post or reaction is
+`403 LEFT_ROOM`, the socket join is refused, and no push from the room reaches
+you. Your live sockets leave `chat:{id}` and the room gets `chat:memberLeft`.
+Opening the room never rejoins you — the Room tab loads it for the event you
+are checked in to, so it would undo the leave the moment the tab was shown.
+**Two ways back:** checking in to the event again (the check-in clears
+`left_at`), or `DELETE …/leave` while the room is open. A person muted by the
+organiser when they left comes back muted. The sweeper's `left` (archived room)
+and account deletion's keep their old behaviour; only `left_at` marks a choice.
+
+**Muting** is yours and silent: it stops the room's pushes to you — a reply to
+you, an organiser's announcement and its bell row — and nothing else. Not the
+organiser's mute (`member_status = muted`), which stops a person posting.
+Stored in `chat_group_members.notification_preferences` as
+`{ muted, muted_until }`; a lapsed `until` reads as not muted. `until` must be
+in the future and at most a year away. The state is returned as `mute` by
+`GET /events/:eventId/chat` and on each `GET /chat/groups` item.
+
+**Reporting a room** is for what no single message shows. Members only, any
+status — somebody who left or was banned may need it most. Stored in
+`event_reports` with `chat_group_id`; the admin queue shows it as "Room" and
+does not offer Delist.
 
 ---
 
@@ -946,6 +988,7 @@ which request ids are real.
 | GET | `/friends/invite` | My invite link `{ token, url }`, made on first ask |
 | POST | `/friends/invite` | Reset it — the old link stops working |
 | GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
+| GET | `/friends/invite/:token/preview` | **No auth.** Signed-out invite screen → `{ name, photoUrl }` — first name only. Per-IP limit (20/min). Same 404 |
 | GET | `/friends/requests` | `{ incoming, outgoing }` |
 | POST | `/friends/requests` | Ask: `{ token }` or `{ userId }` → `{ state: "requested" \| "friends" }` |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
@@ -985,6 +1028,14 @@ requests and link.
 
 Pushes: `friend_request` (`requestId`) and `friend_accepted`. Neither names
 anybody — both render on a lock screen.
+
+**The signed-out preview** (`/friends/invite/:token/preview`) is the one
+friends route a stranger can reach. It says only the owner's **first name** and
+one photo — no full name, id or friend state, since the link may have been
+forwarded — and refuses with the same 404 for a malformed, unknown or reset
+token or a deleted or suspended owner. A caller who sends a bearer token also
+gets the block rule, so the public door never shows what the signed-in one
+hides.
 
 ---
 
@@ -1676,6 +1727,7 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | POST | `/users/:userId/report` | `user_reports` |
 | POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
 | POST | `/events/:eventId/report` | `event_reports` |
+| POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
 
 ### The pre-event board
 
@@ -1947,6 +1999,10 @@ them any more. Rows written before that are hidden, and retention removes them.
 | An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going, maybe, waitlisted and saved | `event:{eventId}`, replaced in place: only the latest state is true |
 | An organiser announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, board, message request | The person it is about, immediately | One each |
+| An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
+
+A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push
+nor announcements.
 
 Every push carries an Android `channelId` the app creates — `messages`,
 `rooms` or `events` — so each can be silenced in system settings, and an iOS

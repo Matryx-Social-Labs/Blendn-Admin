@@ -22,7 +22,7 @@ import {
   ErrorCode,
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
-import { chatClosedMessage, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
+import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
@@ -342,6 +342,9 @@ export async function POST(
       }
       if (denial.reason === "muted") {
         return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
+      }
+      if (denial.reason === "left") {
+        return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM)
       }
       return errorResponse(
         chatClosedMessage(denial.reason),

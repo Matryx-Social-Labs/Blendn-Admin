@@ -188,6 +188,29 @@ registry.registerPath({
 
 registry.registerPath({
   method: "get",
+  path: "/api/mobile/friends/invite/{token}/preview",
+  tags,
+  summary: "Preview an invite link, signed out",
+  description:
+    "**No authentication** — for the invite screen before sign-up. Rate-limited per IP (20 a minute). Returns only the owner's FIRST name and one photo: " +
+    "not the full name, not a user id, not a friend state — the link may have been forwarded. " +
+    "404 `NOT_FOUND` (the same one as `GET /friends/invite/{token}`) for a malformed, unknown or reset token, or a deleted or suspended owner. " +
+    "Send a bearer token if you have one and the block rule applies too: a block either way, or a pair who left each other, is the same 404.",
+  security: [],
+  request: { params: z.object({ token: z.string() }) },
+  responses: {
+    200: {
+      description: "Who sent the link",
+      content: {
+        "application/json": { schema: wrap(z.object({ name: z.string(), photoUrl: z.string().nullable() })) },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
   path: "/api/mobile/friends/requests",
   tags,
   summary: "Friend requests, both ways",

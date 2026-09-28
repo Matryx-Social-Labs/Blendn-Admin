@@ -46,6 +46,11 @@ export const ErrorCode = {
   RECIPIENT_NOT_HERE: "RECIPIENT_NOT_HERE",
   /** You waved at this person less than ten minutes ago. */
   WAVE_TOO_SOON: "WAVE_TOO_SOON",
+  /**
+   * You left this room yourself. Distinct from `FORBIDDEN` because the remedy
+   * is yours: check in again, or `DELETE /chat/groups/:id/leave` to rejoin.
+   */
+  LEFT_ROOM: "LEFT_ROOM",
 } as const
 
 /**
