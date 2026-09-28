@@ -75,10 +75,23 @@ export const ChatMessageSchema = z
   })
   .openapi("ChatMessage")
 
+/** Your own mute of a room's pushes (`POST /chat/groups/{id}/mute`). Not the organiser's mute. */
+export const RoomMuteSchema = z
+  .object({
+    muted: z.boolean(),
+    until: z
+      .string()
+      .datetime()
+      .nullable()
+      .describe("When the mute lapses. Null with `muted: true` means until you unmute; always null when not muted."),
+  })
+  .openapi("RoomMute")
+
 export const EventChatResponseSchema = z
   .object({
     chatGroupId: z.string().uuid(),
     chatGroupName: z.string(),
+    mute: RoomMuteSchema,
     messages: z.array(ChatMessageSchema),
     pagination: PaginationMetaSchema,
   })
@@ -91,6 +104,7 @@ export const ChatGroupSchema = z
     type: z.string(),
     memberCount: z.number(),
     unreadCount: z.number(),
+    mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable(),
     fromMatch: z
       .boolean()

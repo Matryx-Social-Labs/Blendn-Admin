@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PAGINATION } from "@/lib/constants"
 import { idForViewer } from "@/lib/room-handle"
+import { roomMuteState } from "@/lib/room-mute"
 import {
   successResponse,
   unauthorizedResponse,
@@ -248,6 +249,8 @@ export async function GET(request: NextRequest) {
         type: membership.chat_group.type,
         memberCount: membership.chat_group._count.members,
         unreadCount,
+        /** Whether you silenced this room's pushes, and until when (`lib/room-mute.ts`). */
+        mute: roomMuteState(membership.notification_preferences),
         lastMessageAt: membership.chat_group.last_message_at,
         lastMessage: lastMessage
           ? {

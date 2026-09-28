@@ -469,6 +469,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             data: {
               status: "active",
               last_allowed_at: null,
+              // Checking in again is the way back into a room you left
+              // yourself (`POST /chat/groups/:id/leave`).
+              left_at: null,
               anonymous_name,
               updated_at: now,
             },

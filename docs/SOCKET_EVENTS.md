@@ -113,6 +113,7 @@ already know each other's ids.
 | `chat:reaction` | `{ chatGroupId, messageId, tally: [{ emoji, count }] }` | Reactions changed on a message. **Counts only — never who reacted**, which the room must not disclose. The whole tally rather than a delta, so two reactions in the same tick cannot race and a dropped packet self-corrects. `mine` is per-viewer and absent by design: a client knows its own reaction from its own request. |
 | `chat:messageDeleted` | `{ chatGroupId, messageId, moderation?, userId? }` | Message deleted. When `moderation: true`, it was auto-hidden by moderation — `userId` identifies the sender (their real id to them, a handle to everyone else) so the sender's client can show a placeholder instead of removing. |
 | `chat:memberBanned` | `{ chatGroupId, userId, banned }` | Member ban status changed. The banned person receives it under their own id, then their sockets leave the room. |
+| `chat:memberLeft` | `{ chatGroupId, userId }` | Somebody left the room themselves (`POST /chat/groups/:id/leave`) — drop them from the roster. `userId` is their handle in this event; the leaver's own sockets get their real id, then leave the room. Not sent to anyone in a block with the leaver. |
 | `chat:memberMuted` | `{ chatGroupId, userId, muted, reason? }` | Member mute status changed. `muted: true` = auto-muted (3+ violations in 1hr) or admin-muted. `muted: false` = auto-unmute expired or admin-unmuted. |
 
 ### Event Events (room: `event:{eventId}`, joinable by anyone who can open the event)

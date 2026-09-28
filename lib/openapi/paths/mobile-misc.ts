@@ -382,6 +382,7 @@ const NotificationSchema = z.object({
     "board_request_accepted",
     "friend_request",
     "friend_accepted",
+    "rating_request",
   ]),
   title: z.string(),
   body: z.string(),

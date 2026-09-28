@@ -83,7 +83,9 @@ export function ReportsTable({
           {row.kind === "user"
             ? "Person"
             : row.kind === "event"
-              ? "Event"
+              ? row.room
+                ? "Room"
+                : "Event"
               : row.messageType === "private"
                 ? "DM"
                 : "Room message"}
@@ -201,7 +203,7 @@ export function ReportsTable({
               curated event `organizer_id` is the admin who curated it, so
               wiring suspension to an event report could suspend a colleague.
             */}
-            {row.kind === "event" && row.eventId ? (
+            {row.kind === "event" && row.eventId && !row.room ? (
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(row, "delist")}>
                 Delist
               </Button>

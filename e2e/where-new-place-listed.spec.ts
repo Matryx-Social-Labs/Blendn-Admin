@@ -78,6 +78,13 @@ test("a picked place is listed when its event saves; the next event there uses i
   })
   expect(venue.address).toMatch(/100 Feet Road/)
 
+  // Searched by its name and its district, the listed venue is offered: the
+  // listed search goes by word, not by phrase (SCRUM-362).
+  await page.goto("/dashboard/events/new")
+  await page.getByRole("combobox", { name: "Venue or address" }).fill("Toit Indiranagar")
+  await expect(page.getByText("Listed venues")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole("option", { name: /^Toit\s*outline|^Toit\s*Pub or bar/ })).toBeVisible()
+
   // Second event, same place picked again: it is listed now — use it, and
   // the event links the same venue rather than adding a second.
   await newEventAtToit(page)

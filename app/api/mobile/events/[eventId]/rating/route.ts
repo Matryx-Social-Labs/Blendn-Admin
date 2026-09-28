@@ -14,8 +14,50 @@ import {
 } from "@/lib/api-response"
 import { ratingSchema } from "@/lib/validations/event"
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 interface RouteParams {
   params: Promise<{ eventId: string }>
+}
+
+/**
+ * GET — your own rating of this event, so the rate screen opens on the stars
+ * you gave rather than on none (and a second visit edits instead of guessing).
+ *
+ * Yours only: there is no route that returns another person's rating. `null`
+ * when you have not rated — including when you never attended, because "you
+ * cannot rate this" is the POST's answer to give, not this one's.
+ */
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { eventId } = await params
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) return unauthorizedResponse("Invalid or expired token")
+
+    // A malformed id is not an event; asking Postgres would make it a 500.
+    if (!UUID.test(eventId)) return notFoundResponse("Event not found")
+
+    const event = await db.events.findUnique({
+      where: { id: eventId, deleted_at: null },
+      select: { id: true },
+    })
+    if (!event) return notFoundResponse("Event not found")
+
+    const mine = await db.event_ratings.findUnique({
+      where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
+      select: { rating: true, review: true, updated_at: true },
+    })
+
+    return successResponse({
+      rating: mine?.rating ?? null,
+      review: mine?.review ?? null,
+      // When it was last set: rating again edits the one row.
+      ratedAt: mine?.updated_at.toISOString() ?? null,
+    })
+  } catch (error) {
+    logger.error("Get my event rating error", { error: error instanceof Error ? error.message : String(error) })
+    return serverErrorResponse("Failed to load your rating")
+  }
 }
 
 export async function POST(request: NextRequest, { params }: RouteParams) {

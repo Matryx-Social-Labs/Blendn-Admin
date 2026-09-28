@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { sendEventReminders } from "@/lib/services/event-notifications.service"
+import { sendEventReminders, sendRatingRequests } from "@/lib/services/event-notifications.service"
 
 export async function GET(request: NextRequest) {
   // Verify cron secret to prevent unauthorized calls
@@ -11,10 +11,13 @@ export async function GET(request: NextRequest) {
   }
 
   const notified = await sendEventReminders(60) // 1 hour before
+  // The in-process sweeper does both; an external scheduler driving this route should too.
+  const ratingRequests = await sendRatingRequests()
 
   return NextResponse.json({
     success: true,
     notified,
+    ratingRequests,
     timestamp: new Date().toISOString(),
   })
 }

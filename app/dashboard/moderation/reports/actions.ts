@@ -49,6 +49,12 @@ export interface ReportRow {
   messageDeleted: boolean
   eventTitle: string | null
   eventId: string | null
+  /**
+   * Event reports only: true when it is about the event's room, not the event
+   * (`POST /chat/groups/:id/report`). Delisting is not offered on these — a
+   * hostile room is not a misleading listing.
+   */
+  room: boolean
   reviewedBy: string | null
 }
 
@@ -137,6 +143,7 @@ export async function getReportQueue(status: report_status = "pending") {
         reason: true,
         description: true,
         event_id: true,
+        chat_group_id: true,
         reviewed_by: true,
         user: { select: { name: true, email: true } },
         event: { select: { id: true, title: true, visibility: true } },
@@ -203,6 +210,7 @@ export async function getReportQueue(status: report_status = "pending") {
         messageDeleted: false,
         eventTitle: null,
         eventId: null,
+        room: false,
         reviewedBy: r.reviewed_by,
       })
     ),
@@ -227,6 +235,7 @@ export async function getReportQueue(status: report_status = "pending") {
         messageDeleted: group?.deleted_at != null,
         eventTitle: group?.chat_group?.event?.title ?? null,
         eventId: group?.chat_group?.event_id ?? null,
+        room: false,
         reviewedBy: r.reviewed_by,
       }
     }),
@@ -249,13 +258,16 @@ export async function getReportQueue(status: report_status = "pending") {
          * colleague. Delisting is the action that fits the subject.
          */
         subjectId: null,
-        subjectName: r.event?.title ?? "Deleted event",
+        subjectName: r.chat_group_id
+          ? `Room · ${r.event?.title ?? "Deleted event"}`
+          : (r.event?.title ?? "Deleted event"),
         subjectSuspended: false,
         excerpt: null,
         messageType: null,
         messageDeleted: false,
         eventTitle: r.event?.title ?? null,
         eventId: r.event_id,
+        room: r.chat_group_id !== null,
         reviewedBy: r.reviewed_by,
       })
     ),
@@ -305,7 +317,7 @@ export async function resolveReport(
       : kind === "event"
         ? await db.event_reports.findUnique({
             where: { id: reportId },
-            select: { id: true, status: true, event_id: true },
+            select: { id: true, status: true, event_id: true, chat_group_id: true },
           })
         : await db.message_reports.findUnique({
             where: { id: reportId },
@@ -348,6 +360,10 @@ export async function resolveReport(
 
   if (decision === "delist" && kind !== "event") {
     throw new Refusal("Only an event can be delisted")
+  }
+  // A report about the room is not a report about the listing.
+  if (decision === "delist" && (report as { chat_group_id: string | null }).chat_group_id) {
+    throw new Refusal("This report is about the event's room, not its listing")
   }
 
   const reviewed = {

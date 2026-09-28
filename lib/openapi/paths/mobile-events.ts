@@ -502,6 +502,36 @@ registry.registerPath({
   },
 })
 
+// GET /api/mobile/events/{eventId}/rating
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/rating",
+  tags: ["Mobile Events"],
+  summary: "My rating of this event",
+  description:
+    "Your own rating only — there is no route that returns anyone else's. `rating` is null when you have not rated (including when you never attended; " +
+    "the POST is what refuses). `ratedAt` is when you last set it. 404 `NOT_FOUND` for an unknown or deleted event.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: "Your rating",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              rating: z.number().int().min(1).max(5).nullable(),
+              review: z.string().nullable(),
+              ratedAt: z.string().datetime().nullable(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // POST /api/mobile/events/{eventId}/rating
 registry.registerPath({
   method: "post",
@@ -710,7 +740,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/chat",
   tags: ["Mobile Events"],
   summary: "Get event chat messages (must be checked in)",
-  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP inside the pre-event window); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404.",
+  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP inside the pre-event window); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404. Somebody who left the room themselves is NOT rejoined: 403 `LEFT_ROOM` with `chatGroupId` in the body (rejoin with `DELETE /chat/groups/{chatGroupId}/leave`, or by checking in). `mute` is your own mute of the room's pushes.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

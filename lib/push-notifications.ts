@@ -7,13 +7,14 @@ import { logger } from "./logger"
 import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk"
 import { db } from "./db"
 import { hit } from "./rate-limit-store"
+import { isRoomMuted } from "./room-mute"
 
 // Create a new Expo SDK client
 const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -77,6 +78,9 @@ export function deliveryFor(
       return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
     case "event_update":
       return replaced("events", data.eventId && `event:${data.eventId}`)
+    // One per event, and a second could only ever say the same thing.
+    case "rating_request":
+      return replaced("events", data.eventId && `rate:${data.eventId}`)
     case "announcement":
     case "waitlist_promoted":
       return data.eventId
@@ -720,10 +724,13 @@ export async function notifyAnnouncement(
 ): Promise<{ sent: number; failed: number }> {
   const members = await db.chat_group_members.findMany({
     where: { chat_group_id: chatGroupId, status: "active" },
-    select: { user_id: true },
+    select: { user_id: true, notification_preferences: true },
   })
 
   const userIds = members
+    // A person who muted the room hears nothing from it (`lib/room-mute.ts`),
+    // bell included — they still read the announcement in the room.
+    .filter((m) => !isRoomMuted(m.notification_preferences))
     .map((m) => m.user_id)
     .filter((id) => id !== senderId)
 

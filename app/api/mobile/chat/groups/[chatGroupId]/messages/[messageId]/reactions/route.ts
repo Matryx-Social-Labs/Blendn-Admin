@@ -4,7 +4,7 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { chatClosedMessage, mayWriteToRoom } from "@/lib/chat-window"
+import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom } from "@/lib/chat-window"
 import { bannedRefusal, mutedRefusal } from "@/lib/moderation/actions"
 import { emitChatReaction } from "@/lib/socket-server"
 import {
@@ -99,6 +99,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
       if (denial.reason === "muted") {
         return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
+      }
+      if (denial.reason === "left") {
+        return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM)
       }
       return errorResponse(
         chatClosedMessage(denial.reason),

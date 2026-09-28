@@ -30,6 +30,7 @@ import { Server } from "socket.io"
 import { io as connect, type Socket as ClientSocket } from "socket.io-client"
 import {
   emitChatMemberBanned,
+  emitChatMemberLeft,
   emitChatMemberMuted,
   emitChatMessage,
   emitChatMessageHidden,
@@ -307,5 +308,34 @@ describe("every recipient gets their own copy (SCRUM-371)", () => {
     expect(witness["chat:memberBanned"]).toEqual([{ chatGroupId: CHAT, userId: handle("pr-banned"), banned: true }])
     const inRoom = await io.in(`chat:${CHAT}`).fetchSockets()
     expect(inRoom.map((s) => s.data.userId)).not.toContain("pr-banned")
+  })
+
+  it("chat:memberLeft: the leaver hears their own id, the room their handle, a blocked member nothing — then the leaver is out", async () => {
+    const leaver = await listen("pr-leaver", [`chat:${CHAT}`])
+    const witness = await listen("pr-left-witness", [`chat:${CHAT}`])
+    const blocked = await listen("pr-left-blocked", [`chat:${CHAT}`])
+
+    emitChatMemberLeft(CHAT, "pr-leaver", ["pr-left-blocked"], EVENT)
+    await settle()
+
+    expect(leaver["chat:memberLeft"]).toEqual([{ chatGroupId: CHAT, userId: "pr-leaver" }])
+    expect(witness["chat:memberLeft"]).toEqual([{ chatGroupId: CHAT, userId: handle("pr-leaver") }])
+    expect(blocked["chat:memberLeft"]).toBeUndefined()
+    const inRoom = await io.in(`chat:${CHAT}`).fetchSockets()
+    expect(inRoom.map((s) => s.data.userId)).not.toContain("pr-leaver")
+    expect(inRoom.map((s) => s.data.userId)).toContain("pr-left-witness")
+  })
+
+  it("chat:memberLeft with unreadable blocks tells nobody and still takes the leaver out", async () => {
+    const leaver = await listen("pr-leaver-2", [`chat:${CHAT}`])
+    const witness = await listen("pr-left-witness-2", [`chat:${CHAT}`])
+
+    emitChatMemberLeft(CHAT, "pr-leaver-2", null, EVENT)
+    await settle()
+
+    expect(leaver["chat:memberLeft"]).toBeUndefined()
+    expect(witness["chat:memberLeft"]).toBeUndefined()
+    const inRoom = await io.in(`chat:${CHAT}`).fetchSockets()
+    expect(inRoom.map((s) => s.data.userId)).not.toContain("pr-leaver-2")
   })
 })
