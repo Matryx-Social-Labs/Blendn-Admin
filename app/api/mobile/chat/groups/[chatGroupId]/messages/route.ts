@@ -22,6 +22,7 @@ import {
   ErrorCode,
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
+import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
 
 const sendMessageSchema = z.object({
@@ -29,6 +30,8 @@ const sendMessageSchema = z.object({
   type: z.enum(["text", "image", "video"]).default("text"),
   metadata: z.record(z.string(), z.any()).optional(),
   parentId: z.string().uuid().optional(),
+  /** The app's own id for this send: a retry with it returns the first write (SCRUM-410). */
+  clientId: z.string().uuid().optional(),
 })
 
 export async function GET(
@@ -277,7 +280,16 @@ export async function POST(
       return validationErrorResponse(validation.error)
     }
 
-    const { content, type, metadata, parentId } = validation.data
+    const { content, type, metadata, parentId, clientId } = validation.data
+
+    /*
+     * A retry of a send that already landed: answered with the first write. Its
+     * full copy reached the room by socket; the app matches the retry by id.
+     */
+    if (clientId) {
+      const existing = await findRoomSend(user.userId, clientId)
+      if (existing) return answerRoomRetry(existing, chatGroupId)
+    }
 
     // Check if chat group exists and user is a member
     const chatGroup = await db.chat_groups.findUnique({
@@ -382,7 +394,9 @@ export async function POST(
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
-      const message = await db.chat_messages.create({
+      let message
+      try {
+        message = await db.chat_messages.create({
         data: {
           chat_group_id: chatGroupId,
           user_id: user.userId,
@@ -390,10 +404,17 @@ export async function POST(
           type,
           ...(metadata != null && { metadata }),
           parent_id: parentId || null,
+          ...(clientId && { client_id: clientId }),
           moderation_status: "hidden",
           deleted_at: new Date(),
         },
       })
+      } catch (error) {
+        // A concurrent retry with the same clientId wrote it first.
+        const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
+        if (!raced) throw error
+        return answerRoomRetry(raced, chatGroupId)
+      }
       // Flag for review and, for abuse rather than a phone number, count
       // toward an auto-mute (fire-and-forget)
       void flagForReview(message.id, chatGroupId, user.userId, preSave.result)
@@ -425,7 +446,9 @@ export async function POST(
      * module, so what a sender was told and what a moderator sees agree.
      */
     // Create the message
-    const message = await db.chat_messages.create({
+    let message
+    try {
+    message = await db.chat_messages.create({
       data: {
         chat_group_id: chatGroupId,
         user_id: user.userId,
@@ -440,6 +463,7 @@ export async function POST(
          */
         ...(metadata != null && { metadata }),
         parent_id: parentId || null,
+        ...(clientId && { client_id: clientId }),
       },
       include: {
         user: {
@@ -465,6 +489,13 @@ export async function POST(
         },
       },
     })
+    } catch (error) {
+      // Two sends with one clientId raced; the other wrote it first.
+      const raced =
+        clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
+      if (!raced) throw error
+      return answerRoomRetry(raced, chatGroupId)
+    }
 
     /*
      * Recorded here, not at the top, because a flag needs a message id -- and

@@ -171,3 +171,31 @@ describe("contact details in a room", () => {
     })
   }
 })
+
+describe("a retried send (SCRUM-410)", () => {
+  /*
+   * Database review of #500: the event route checked the clientId after its
+   * moderation early-return, so a retried flagged message tried a second
+   * insert, collided with its own first write and answered 500 — forever.
+   */
+  it.each([
+    ["group route", "group"],
+    ["event route", "event"],
+  ])("replays a hidden message on the %s instead of failing", async (_label, which) => {
+    const r = await liveRoom()
+    const clientId = "7b0d1c3e-4a5f-4b6c-8d7e-9f0a1b2c3d4e".replace(/^.{8}/, Math.random().toString(16).slice(2, 10).padEnd(8, "0"))
+    const url = which === "group"
+      ? `http://localhost/api/mobile/chat/groups/${r.groupId}/messages`
+      : `http://localhost/api/mobile/events/${r.eventId}/chat`
+    const send = async () => {
+      const res = which === "group"
+        ? await groupRoute.POST(post(url, r.token, { content: "call me on 98765 43210 tonight", type: "text", clientId }), { params: Promise.resolve({ chatGroupId: r.groupId }) })
+        : await eventRoute.POST(post(url, r.token, { content: "call me on 98765 43210 tonight", type: "text", clientId }), { params: Promise.resolve({ eventId: r.eventId }) })
+      return res.status
+    }
+    expect(await send()).toBeLessThan(300)
+    expect(await send()).toBeLessThan(300)
+    expect(await db.chat_messages.count({ where: { chat_group_id: r.groupId } })).toBe(1)
+  })
+})
+

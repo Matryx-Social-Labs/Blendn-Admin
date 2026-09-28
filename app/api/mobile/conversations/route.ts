@@ -1,3 +1,4 @@
+import { markInboxDelivered } from "@/lib/dm-thread"
 import { logger } from "@/lib/logger"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { NextRequest } from "next/server"
@@ -174,6 +175,12 @@ export async function GET(request: NextRequest) {
      * This is the more pointed of the two: a conversation list is the surface
      * most likely to need paging, and it had nowhere to put a cursor.
      */
+    // The app has your messages now: ✓✓ delivered for their senders
+    // (SCRUM-408). After the answer is built, and never allowed to fail it.
+    void markInboxDelivered(authUser.userId).catch((error) =>
+      logger.warn("Inbox delivery mark failed", { error: error instanceof Error ? error.message : String(error) })
+    )
+
     return successResponse({ conversations: formattedConversations })
   } catch (error) {
     logger.error("List conversations error", { error: error instanceof Error ? error.message : String(error) })
