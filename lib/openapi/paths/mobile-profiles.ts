@@ -7,6 +7,7 @@ import {
   ProfileResponseSchema,
   InterestsResponseSchema,
 } from "@/lib/openapi/schemas/profile"
+import { EventSessionSchema } from "@/lib/openapi/schemas/event"
 
 const bearerAuth = [{ BearerAuth: [] }]
 const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
@@ -199,6 +200,7 @@ registry.registerPath({
                   coverImage: z.record(z.string(), z.unknown()).nullable(),
                   startTime: z.string().datetime(),
                   endTime: z.string().datetime(),
+                  session: EventSessionSchema,
                   timezone: z.string(),
                   status: z.enum(["published", "cancelled", "completed"]),
                   venueName: z.string().nullable(),

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 import { db } from "@/lib/db"
+import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest) {
               cover_image_url: true,
               start_time: true,
               end_time: true,
+              occurrences: sessionOccurrencesSelect,
               timezone: true,
               status: true,
               venue_name: true,
@@ -98,6 +100,8 @@ export async function GET(request: NextRequest) {
       coverImage: event.media[0] ?? null,
       startTime: event.start_time,
       endTime: event.end_time,
+      // The Going tab's "Happening now" reads this, not the run. See `eventSession`.
+      session: eventSession(event),
       timezone: event.timezone,
       status: event.status,
       venueName: event.venue_name,

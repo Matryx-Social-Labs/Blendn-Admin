@@ -486,6 +486,24 @@ buffer. It used to be the stored column, which only circles kept in step — a
 outside. The field's name and type are unchanged; for an outline it is larger
 than before, which only ever makes the app more lenient than the door.
 
+**`session` is the window "live" is judged by** — on `GET /events`,
+`GET /events/:eventId` and `GET /me/rsvps`. `startTime`/`endTime` span the
+whole run, so a three-day festival read as LIVE for three days straight,
+through the nights between days and through a cancelled last day, while the
+door (which goes by occurrence) refused. `session` is `{ startTime, endTime }`
+of the day running now, else the next day going ahead, else the last day that
+went ahead (so it reads as ended); `null` when every day is cancelled. On a
+single-day event it equals `startTime`/`endTime`. Computed by `eventSession` in
+`lib/occurrences.ts`. The rating route's "once it has ended" uses the same
+window.
+
+**A check-in refused on the clock names the day** on a multi-day event:
+`Day 3 starts Tue, Sep 29, 12:45 AM.` (`EVENT_NOT_STARTED`), `Day 2 has been
+cancelled. Day 3 starts …` (`EVENT_NOT_STARTED`), or `Day 3 of 3 has been
+cancelled, so the event is over.` (`EVENT_ENDED`), in the event's timezone. A
+day still to come that is cancelled is skipped when finding the next one.
+Single-day events keep "Event has not started yet" / "Event has already ended".
+
 **Each category on an event now carries its `parent`** (or `null` at top level).
 Events are tagged to **leaves** — an event is "Classical and Carnatic", never
 "Music" — so a client wanting a whole family groups on the parent rather than

@@ -51,3 +51,70 @@ export function outOfRangeMessage(shortfallMetres: number): string {
   const km = Math.round(metres / 1000)
   return `You're about ${km}km from the venue, so check-in isn't available yet. Check in once you're there.`
 }
+
+/**
+ * What a check-in refused on the clock says.
+ *
+ * The door always answered "Event has not started yet" when no day was open,
+ * which on a multi-day event is wrong from day 2 on: the event started days
+ * ago. Driven on staging (`blr-design-festival`, 2026-09-28): the evening after
+ * day 2, with day 3 cancelled, a person standing at the venue was told the
+ * festival had not started. So a multi-day event names the day — which one is
+ * next, or which one was called off — in the event's own timezone.
+ *
+ * `ended` picks the code: `EVENT_ENDED` ("This one's over" on the phone) when
+ * nothing is left to come back for, `EVENT_NOT_STARTED` otherwise. A single-day
+ * event keeps its old sentences word for word.
+ */
+export function closedDoorMessage(
+  reason: "too_early" | "too_late" | "cancelled" | "none",
+  occurrence: { startTime: Date; cancelledAt: Date | null } | null,
+  slots: readonly { startTime: Date; cancelledAt: Date | null }[],
+  timezone: string,
+  now: Date
+): { message: string; ended: boolean } {
+  const multiDay = slots.length > 1
+  const dayOf = (s: { startTime: Date }) =>
+    slots.findIndex((x) => x.startTime.getTime() === s.startTime.getTime()) + 1
+  const next = slots.find((s) => !s.cancelledAt && s.startTime > now)
+  const starts = (s: { startTime: Date }) => `Day ${dayOf(s)} starts ${whenIn(s.startTime, timezone)}.`
+
+  if (reason === "too_early") {
+    // Before the first day, "not started" is still the truth.
+    if (!multiDay || !occurrence || dayOf(occurrence) <= 1) {
+      return { message: "Event has not started yet", ended: false }
+    }
+    return { message: starts(occurrence), ended: false }
+  }
+
+  if (reason === "cancelled") {
+    if (!multiDay || !occurrence) return { message: "This day has been cancelled", ended: true }
+    const called = `Day ${dayOf(occurrence)} has been cancelled.`
+    if (next) return { message: `${called} ${starts(next)}`, ended: false }
+    return {
+      message:
+        dayOf(occurrence) === slots.length
+          ? `Day ${slots.length} of ${slots.length} has been cancelled, so the event is over.`
+          : "The rest of this event has been cancelled.",
+      ended: true,
+    }
+  }
+
+  return { message: "Event has already ended", ended: true }
+}
+
+/** "Tue, Sep 29, 12:45 AM" in the event's timezone, falling back to UTC. */
+function whenIn(at: Date, timezone: string): string {
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }
+  try {
+    return new Intl.DateTimeFormat("en-US", { ...options, timeZone: timezone }).format(at)
+  } catch {
+    return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" }).format(at)
+  }
+}
