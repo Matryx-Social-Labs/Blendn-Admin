@@ -113,7 +113,7 @@ const routeContent: Record<string, { title: string; description: string }> = {
   },
   "/dashboard/attendees": {
     title: "Attendees",
-    description: "Who comes back, and who RSVPs but doesn't show.",
+    description: "Who comes back, who doesn't show. Labels only, never names.",
   },
   /*
    * "Venues", not "My venues": this route now serves two roles. An owner sees

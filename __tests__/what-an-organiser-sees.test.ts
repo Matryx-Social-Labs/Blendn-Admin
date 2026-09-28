@@ -146,13 +146,15 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
 })
 
 describe("W18 — the organiser roster", () => {
-  const src = code("app/dashboard/attendees/page.tsx")
+  // Built in the lib since SCRUM-383, so an integration test can hold it.
+  const src = code("lib/attendee-roster.ts")
 
   it("never serves an email address", () => {
     /*
      * `name ?? email` meant an attendee who had not set a name handed the
      * organiser a way to contact them off platform — where there is no block,
-     * no report and no record. Decision 7 is explicit.
+     * no report and no record. Since SCRUM-383 no name is served either; see
+     * `attendee-identity-boundary.test.ts`.
      */
     expect(src).not.toMatch(/\.email/)
     expect(src).not.toMatch(/email: true/)
@@ -164,8 +166,7 @@ describe("W18 — the organiser roster", () => {
      * participants list hands out, which is what turns a pseudonymous room back
      * into named people.
      */
-    expect(src).toMatch(/const label = attendeeLabel\(userId, labelScope\)/)
-    expect(src).toMatch(/id: label,/)
+    expect(src).toMatch(/id: attendeeLabel\(userId, labelScope\),/)
     expect(src).not.toMatch(/id: userId,/)
   })
 
@@ -176,8 +177,11 @@ describe("W18 — the organiser roster", () => {
      * `authz-scoping-boundary.test.ts` missed it because it scans for a
      * hand-rolled `organizer_id !==` comparison and this was a `where` clause.
      */
-    expect(src).toMatch(/await eventScopeFor\(session\.user\.role, session\.user\.id\)/)
-    expect(src).not.toMatch(/organizer_id: session\.user\.id/)
+    expect(src).toMatch(/await eventScopeFor\(role, userId\)/)
+    expect(src).not.toMatch(/organizer_id:/)
+    expect(code("app/dashboard/attendees/page.tsx")).toMatch(
+      /attendeeRoster\(\s*session\.user\.role,\s*session\.user\.id\s*\)/
+    )
   })
 
   it("counts events, not check-in rows", () => {

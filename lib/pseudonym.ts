@@ -1,7 +1,8 @@
 import { createHmac } from "crypto"
 
 /**
- * A stable, non-reversible label for an attendee in an export.
+ * A stable, non-reversible label for an attendee, wherever a host sees one:
+ * the exports and the Attendees screen (`lib/attendee-roster.ts`).
  *
  * The exports call themselves pseudonymous and built the label as
  * `attendee-${userId.slice(0, 8)}` -- the first eight characters of the real

@@ -1136,6 +1136,12 @@
       "mutation": "M1: notifyPrivateMessage without the burst throttle. M2: the reply push without the senderBlocked check. M3: recordNotification without the NOT_IN_THE_BELL skip. M4: GET /notifications without the NOT_IN_THE_BELL filter. M5: DMs on channel 'default'. M6: an ordinary room message pushes again. M7: both announceToBell calls removed (no notification:new on a bell write). M8: the reply push refuses a muted author.",
       "observed": "push-policy.test.ts + block-reaches-the-room.test.ts (38 tests): M1 3 failing, M2 2, M3 2, M4 1, M5 3, M6 1; M7 push-policy.test.ts 2 of 27 failing; M8 1 of 28. Route-level bell filters and the event-chat reply path are behavioural, in push-bursts.itest.ts (unread-count filter removed from either route: 1 failing).",
       "date": "2026-09-28"
+    },
+    "attendee-identity-boundary.test.ts": {
+      "guards": "SCRUM-383 (b): the organiser's attendee roster selects no name, email, image or phone (lib/attendee-roster.ts, the page, the table; the row type has no field for one), and no host-facing file under app/ (mobile excepted) reads a person's identity without an admin gate or an allowlisted reason. With integration/organiser-sees-labels.itest.ts, which asserts the serialised roster and room feed.",
+      "mutation": "M1: lib/attendee-roster.ts given back the pre-fix shape -- `user: { select: { name: true } }` on the check-ins, the second `db.user.findMany` for RSVP-only people, and `name` on AttendeeRow and the row. M2: app/dashboard/attendees/page.tsx replaced with its dev version (git show HEAD:...).",
+      "observed": "M1: this suite 2 of 8 failing (roster source; row type), organiser-sees-labels.itest.ts 1 of 6 failing (the serialised roster carried the name). M2: this suite 2 of 8 failing (page source; the whole-surface scan listed app/dashboard/attendees/page.tsx as an ungated identity read).",
+      "date": "2026-09-28"
     }
   },
   "grandfathered": [
