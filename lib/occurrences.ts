@@ -25,6 +25,11 @@ export interface OccurrenceSlot {
 /** How far before a session's start check-in opens. Doors, not the programme. */
 export const CHECK_IN_LEAD_MINUTES = 90
 
+/** What `pickOccurrence` decides about the door right now. */
+export type OccurrenceVerdict =
+  | { ok: true; occurrence: OccurrenceSlot }
+  | { ok: false; reason: "too_early" | "too_late" | "cancelled" | "none"; occurrence: OccurrenceSlot | null }
+
 /**
  * The occurrence someone checking in right now is checking in to.
  *
@@ -39,10 +44,7 @@ export const CHECK_IN_LEAD_MINUTES = 90
 export async function resolveOccurrence(
   eventId: string,
   now: Date = new Date()
-): Promise<
-  | { ok: true; occurrence: OccurrenceSlot }
-  | { ok: false; reason: "too_early" | "too_late" | "cancelled" | "none"; occurrence: OccurrenceSlot | null }
-> {
+): Promise<OccurrenceVerdict & { slots: OccurrenceSlot[] }> {
   const rows = await db.event_occurrences.findMany({
     where: { event_id: eventId },
     orderBy: { start_time: "asc" },
@@ -65,6 +67,20 @@ export async function resolveOccurrence(
     cancelledAt: r.cancelled_at,
   }))
 
+  return { ...pickOccurrence(slots, now), slots }
+}
+
+/**
+ * `resolveOccurrence` without the database. `slots` are in start order.
+ *
+ * "Too early" names the next day that is actually going ahead. It used to name
+ * the next day, full stop — so on a festival whose last day was called off,
+ * the evening after day 2 answered "Event has not started yet" about the
+ * cancelled day 3, two days after the festival had started (staging,
+ * `blr-design-festival`, 2026-09-28). When every day still to come is
+ * cancelled, that is the answer: `cancelled`, with the first of them.
+ */
+export function pickOccurrence(slots: readonly OccurrenceSlot[], now: Date): OccurrenceVerdict {
   if (slots.length === 0) return { ok: false, reason: "none", occurrence: null }
 
   const lead = CHECK_IN_LEAD_MINUTES * 60_000
@@ -79,10 +95,62 @@ export async function resolveOccurrence(
     return { ok: true, occurrence: open }
   }
 
-  const upcoming = slots.find((s) => now.getTime() < s.startTime.getTime() - lead)
-  if (upcoming) return { ok: false, reason: "too_early", occurrence: upcoming }
+  const upcoming = slots.filter((s) => now.getTime() < s.startTime.getTime() - lead)
+  const next = upcoming.find((s) => !s.cancelledAt)
+  if (next) return { ok: false, reason: "too_early", occurrence: next }
+  if (upcoming.length > 0) return { ok: false, reason: "cancelled", occurrence: upcoming[0] }
 
   return { ok: false, reason: "too_late", occurrence: slots[slots.length - 1] }
+}
+
+/** When the app should say an event happens, as the API sends it. */
+export interface EventSession {
+  startTime: Date
+  endTime: Date
+}
+
+/**
+ * The session the app should talk about right now: the one running, else the
+ * next one going ahead, else the last one that went ahead (so it reads as
+ * ended). Null when every day has been called off.
+ *
+ * This is the app's "is it live?" window. An event's own `start_time` and
+ * `end_time` are the whole run, so on a three-day festival they said LIVE for
+ * three days straight — through the nights between days and through a
+ * cancelled last day — while the door, which goes by occurrence, refused.
+ * Sending the session lets the app ask the same question the door does
+ * instead of re-deriving days on the phone.
+ *
+ * No check-in lead here: this says when it is on, not when doors open.
+ * Rows without occurrences (a caller that did not select them, or a legacy
+ * event) fall back to the event's own window — for a single-day event that is
+ * the same thing.
+ */
+export function eventSession(
+  event: {
+    start_time: Date
+    end_time: Date
+    occurrences?: readonly { start_time: Date; end_time: Date; cancelled_at: Date | null }[]
+  },
+  now: Date = new Date()
+): EventSession | null {
+  const slots = event.occurrences
+  if (!slots || slots.length === 0) return { startTime: event.start_time, endTime: event.end_time }
+
+  const held = slots
+    .filter((s) => !s.cancelled_at)
+    .sort((a, b) => a.start_time.getTime() - b.start_time.getTime())
+  if (held.length === 0) return null
+
+  // In start order, the first that has not ended is the running one or the next.
+  const current = held.find((s) => now < s.end_time) ?? held[held.length - 1]
+  return { startTime: current.start_time, endTime: current.end_time }
+}
+
+/** The occurrence columns `eventSession` reads, for a Prisma `select`. */
+export const sessionOccurrencesSelect = {
+  select: { start_time: true, end_time: true, cancelled_at: true },
+  orderBy: { start_time: "asc" as const },
 }
 
 /**

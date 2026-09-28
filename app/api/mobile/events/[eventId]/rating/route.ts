@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, status: true, end_time: true },
+      select: { id: true, status: true, start_time: true, end_time: true, occurrences: sessionOccurrencesSelect },
     })
 
     if (!event) {
@@ -114,7 +115,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!checkIn) {
       return errorResponse("You can rate an event you checked in to", 403, ErrorCode.FORBIDDEN)
     }
-    if (event.end_time.getTime() > Date.now()) {
+    /*
+     * Over when the run has ended, or earlier when the last day that went
+     * ahead has ended — the window the app reads (`session`). A run whose last
+     * day was cancelled is over when the day before it ends; waiting for the
+     * cancelled day's end would offer "Rate" on the phone and refuse it here.
+     *
+     * Only ever *earlier* than the run's end, never later. The occurrences
+     * are a second copy of the schedule; if one lags the event row (a write
+     * that moved the times without `syncOccurrences`), it must not hold a
+     * rating shut past the event's own end — that was the rule before, and
+     * `event-rating.itest.ts` pins it.
+     */
+    const now = Date.now()
+    const session = eventSession(event)
+    const over =
+      event.end_time.getTime() <= now || session === null || session.endTime.getTime() <= now
+    if (!over) {
       return errorResponse("You can rate this event once it has ended", 403, ErrorCode.FORBIDDEN)
     }
 
