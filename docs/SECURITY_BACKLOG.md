@@ -241,8 +241,9 @@ routes and searches every serialised response for the friend's id.
 
 **Left open, deliberately:**
 
-- **Quasi-identifiers link a person across rooms — open, product decision for
-  the owner.** This defeats per-event unlinkability, not just one profile's
+- **Quasi-identifiers link a person across rooms — accepted by the owner,
+  2026-09-28: age and city stay on pseudonymous rows and cards "as of now".**
+  Revisit before a wide release. This defeats per-event unlinkability, not just one profile's
   privacy. The roster puts age and city on every row, and `GET /users/:realId`
   returns age, city, interests, `memberSince` and attendance stats to any
   signed-in caller. A friend who holds your real id reads your (age, city)
@@ -253,8 +254,8 @@ routes and searches every serialised response for the friend's id.
   `GET /profiles/:handle` confirm it exactly. The handle removes the id; it
   cannot remove attributes the room chooses to show. Closing this means
   deciding what a pseudonymous row and card may say, and what an id lookup
-  returns to someone who cannot see who it is — the owner's call, deliberately
-  not changed here.
+  returns to someone who cannot see who it is — the owner's call, and the
+  answer for now is to leave both unchanged.
 - **The wave window is still keyed on the real pair across rooms** (by design: a
   new room is not a new window). The raw-id finder above is closed, but the same
   window links one person's handles in two rooms: wave at a handle in room A,
