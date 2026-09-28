@@ -13,7 +13,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -77,6 +77,9 @@ export function deliveryFor(
       return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
     case "event_update":
       return replaced("events", data.eventId && `event:${data.eventId}`)
+    // One per event, and a second could only ever say the same thing.
+    case "rating_request":
+      return replaced("events", data.eventId && `rate:${data.eventId}`)
     case "announcement":
     case "waitlist_promoted":
       return data.eventId
