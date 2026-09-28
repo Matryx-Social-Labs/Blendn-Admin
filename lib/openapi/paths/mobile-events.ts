@@ -710,7 +710,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/chat",
   tags: ["Mobile Events"],
   summary: "Get event chat messages (must be checked in)",
-  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP inside the pre-event window); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404.",
+  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP inside the pre-event window); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404. Somebody who left the room themselves is NOT rejoined: 403 `LEFT_ROOM` with `chatGroupId` in the body (rejoin with `DELETE /chat/groups/{chatGroupId}/leave`, or by checking in). `mute` is your own mute of the room's pushes.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

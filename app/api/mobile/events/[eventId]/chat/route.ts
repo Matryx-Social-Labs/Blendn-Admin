@@ -1,5 +1,5 @@
 import { logger } from "@/lib/logger"
-import { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { blockCounterparties } from "@/lib/conversations"
@@ -22,6 +22,8 @@ import {
   chatClosedMessage,
   chatWindowState,
   entitlementAdmits,
+  LEFT_ROOM_MESSAGE,
+  leftByChoice,
   mayWriteToRoom,
   roomEntitlement,
   roomReadDenial,
@@ -32,6 +34,7 @@ import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
+import { roomMuteState } from "@/lib/room-mute"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 
@@ -158,6 +161,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (readDenial === "banned" && membership) {
       return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
     }
+    /*
+     * Somebody who left the room themselves stays out of it. Without this the
+     * auto-join below would put them straight back — and the Room tab loads
+     * this for the event you are checked in to, so the leave would last until
+     * the tab was next shown. The way back is a check-in or an explicit rejoin
+     * (`DELETE /chat/groups/:id/leave`), and the refusal carries the group id
+     * so the app can offer it.
+     */
+    if (membership && leftByChoice(membership)) {
+      return NextResponse.json(
+        { success: false, error: LEFT_ROOM_MESSAGE, errorCode: ErrorCode.LEFT_ROOM, chatGroupId: chatGroup.id },
+        { status: 403 }
+      )
+    }
 
     /*
      * Auto-join, but never a resurrection.
@@ -227,6 +244,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             update: {
               status: "active",
               last_allowed_at: null,
+              left_at: null,
               updated_at: new Date(),
             },
           }),
@@ -393,7 +411,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       write: {
         allowed: denial === null,
         reason: denial?.reason ?? null,
-        message: denial && denial.reason !== "muted" && denial.reason !== "banned"
+        message: denial && denial.reason !== "muted" && denial.reason !== "banned" && denial.reason !== "left"
           ? chatClosedMessage(denial.reason)
           : null,
         /** When the 24-hour window shuts. Independent of the archive job. */
@@ -401,6 +419,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         /** Past this, the room is a read-only record of the night. */
         eventEndedAt: chatGroup.event.end_time,
       },
+      /**
+       * Whether you silenced this room's pushes (`POST /chat/groups/:id/mute`),
+       * and until when — null `until` is "until you unmute". Yours only.
+       */
+      mute: roomMuteState(membership?.notification_preferences),
       messages: messages.reverse().map((m) => {
         const isHidden = m.moderation_status === "hidden"
         return {
@@ -634,6 +657,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             403,
             ErrorCode.USER_MUTED
           )
+        }
+        if (denial.reason === "left") {
+          return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM)
         }
         return errorResponse(
           chatClosedMessage(denial.reason),

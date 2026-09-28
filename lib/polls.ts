@@ -67,7 +67,7 @@ export async function getPollResults(
             select: {
               event_id: true,
               event: { select: { status: true, deleted_at: true } },
-              members: { where: { user_id: reader.userId }, select: { status: true, banned_by: true } },
+              members: { where: { user_id: reader.userId }, select: { status: true, banned_by: true, left_at: true } },
             },
           },
         },

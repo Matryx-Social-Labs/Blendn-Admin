@@ -196,6 +196,12 @@ export interface ServerToClientEvents {
   "chat:messageDeleted": (data: { chatGroupId: string; messageId: string; moderation?: boolean; userId?: string }) => void
   "chat:memberBanned": (data: { chatGroupId: string; userId: string; banned: boolean }) => void
   "chat:memberMuted": (data: { chatGroupId: string; userId: string; muted: boolean; reason?: string }) => void
+  /**
+   * Somebody left the room themselves. `userId` is the leaver's handle in this
+   * event for everyone else, their own real id on their own sockets — the same
+   * rule as every roster payload (SCRUM-371). Drop them from the roster.
+   */
+  "chat:memberLeft": (data: { chatGroupId: string; userId: string }) => void
 
   // System events
   error: (data: { message: string; code?: string }) => void
@@ -1349,6 +1355,45 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
     eventId
   ).then(() => {
     if (banned) io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
+  })
+}
+
+/**
+ * Somebody left the room by choice: tell the room, then take them out of it.
+ *
+ * The same order as a ban, for the same reason — their own sockets hear the
+ * notice first (with their own id, so every open screen of theirs can close),
+ * and only then leave `chat:<room>`, on every instance through the adapter.
+ * Without the eviction a socket already in the room would keep receiving it
+ * until it disconnected, which is not what leaving means.
+ *
+ * Nobody in a block with the leaver hears it: they were never shown this
+ * person on the roster (SCRUM-338), so a departure would be news of somebody
+ * they cannot see. `null` for the exclusions means the blocks could not be
+ * read: then nobody is told, and the leaver is still taken out — telling a
+ * blocked person is the one outcome that must not happen, and a roster that
+ * drops somebody on its next load is harmless.
+ */
+export function emitChatMemberLeft(
+  chatGroupId: string,
+  userId: string,
+  excludeUserIds: readonly string[] | null,
+  eventId?: string
+): void {
+  const io = currentIo()
+  if (!io) return
+  if (excludeUserIds === null) {
+    io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
+    return
+  }
+  void toChatRoom(
+    chatGroupId,
+    io.in(`chat:${chatGroupId}`).except(excludeUserIds.map((id) => `user:${id}`)),
+    "chat:memberLeft",
+    (idFor) => ({ chatGroupId, userId: idFor(userId) }),
+    eventId
+  ).then(() => {
+    io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
   })
 }
 

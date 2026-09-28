@@ -67,7 +67,7 @@ export type ChatWindowState =
  * `deleted_at` is required wherever it is taken, so a caller that forgets to
  * select it fails to compile rather than silently letting the room through.
  */
-function eventHidesRoom(event: { status?: string; deleted_at: Date | null }): boolean {
+export function eventHidesRoom(event: { status?: string; deleted_at: Date | null }): boolean {
   return event.status === "draft" || event.deleted_at !== null
 }
 
@@ -124,7 +124,25 @@ export function chatClosesAt(event: { end_time: Date }): Date {
 /** Why a member cannot write. `null` from `mayWriteToRoom` means they can. */
 export type WriteDenial =
   | { reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden" }
-  | { reason: "muted" | "banned" }
+  | { reason: "muted" | "banned" | "left" }
+
+/**
+ * What a person who left a room hears when they try to use it.
+ *
+ * Says how back in, because leaving is the one removal that is theirs to undo.
+ */
+export const LEFT_ROOM_MESSAGE = "You left this room. Check in at the event again, or rejoin, to see it."
+
+/**
+ * Did this person leave the room themselves?
+ *
+ * `left` alone is not enough: the lifecycle sweeper and account deletion write
+ * it too, and those rows keep their old behaviour. `left_at` is set only by
+ * `POST /chat/groups/:id/leave`, and cleared by the next check-in or a rejoin.
+ */
+export function leftByChoice(membership: { status: string; left_at: Date | null }): boolean {
+  return membership.status === "left" && membership.left_at !== null
+}
 
 /**
  * The one rule for whether a **member** may write to an event's room.
@@ -189,6 +207,14 @@ export function mayWriteToRoom(
   const window = chatWindowState(event, group, now)
   if (!window.open) return { reason: window.reason }
 
+  /*
+   * After the window, so a member the sweeper released from an archived room
+   * still hears "this chat has closed" — the true reason — and only somebody
+   * who walked out of an open room hears that they left. `left` was never
+   * refused here at all: a person who had left could go on posting.
+   */
+  if (membership.status === "left") return { reason: "left" }
+
   return null
 }
 
@@ -235,12 +261,18 @@ export function bannedRefusal(membership: { banned_by: string | null }): string 
 export type ReadDenial = "hidden" | "not_member" | "banned"
 
 export function roomReadDenial(
-  membership: { status: string } | null | undefined,
+  membership: { status: string; left_at: Date | null } | null | undefined,
   event: { status: string; deleted_at: Date | null }
 ): ReadDenial | null {
   if (eventHidesRoom(event)) return "hidden"
   if (!membership) return "not_member"
   if (membership.status === "banned") return "banned"
+  /*
+   * Somebody who left by choice is not a member until they come back. `left_at`
+   * is required in the type so no reader can forget to select it and quietly
+   * keep serving the room to a person who walked out of it.
+   */
+  if (leftByChoice(membership)) return "not_member"
   return null
 }
 

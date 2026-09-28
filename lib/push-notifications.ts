@@ -7,6 +7,7 @@ import { logger } from "./logger"
 import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk"
 import { db } from "./db"
 import { hit } from "./rate-limit-store"
+import { isRoomMuted } from "./room-mute"
 
 // Create a new Expo SDK client
 const expo = new Expo()
@@ -723,10 +724,13 @@ export async function notifyAnnouncement(
 ): Promise<{ sent: number; failed: number }> {
   const members = await db.chat_group_members.findMany({
     where: { chat_group_id: chatGroupId, status: "active" },
-    select: { user_id: true },
+    select: { user_id: true, notification_preferences: true },
   })
 
   const userIds = members
+    // A person who muted the room hears nothing from it (`lib/room-mute.ts`),
+    // bell included — they still read the announcement in the room.
+    .filter((m) => !isRoomMuted(m.notification_preferences))
     .map((m) => m.user_id)
     .filter((id) => id !== senderId)
 

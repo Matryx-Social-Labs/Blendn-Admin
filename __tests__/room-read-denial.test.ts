@@ -16,7 +16,13 @@ it.each([
   ["left", null], // every member of an archived room; the transcript is theirs
   ["banned", "banned"],
 ] as const)("a %s member → %s", (status, expected) => {
-  expect(roomReadDenial({ status }, published)).toBe(expected)
+  expect(roomReadDenial({ status, left_at: null }, published)).toBe(expected)
+})
+
+it("refuses somebody who left the room themselves, as a non-member", () => {
+  // `left_at` is written only by POST /chat/groups/:id/leave. The socket join,
+  // the history, the roster and polls all read this one rule.
+  expect(roomReadDenial({ status: "left", left_at: new Date() }, published)).toBe("not_member")
 })
 
 it("refuses somebody with no membership row", () => {
@@ -25,11 +31,11 @@ it("refuses somebody with no membership row", () => {
 })
 
 it("hides a draft event's room even from an active member", () => {
-  expect(roomReadDenial({ status: "active" }, { status: "draft", deleted_at: null })).toBe("hidden")
+  expect(roomReadDenial({ status: "active", left_at: null }, { status: "draft", deleted_at: null })).toBe("hidden")
 })
 
 it("hides a deleted event's room even from an active member (SCRUM-303)", () => {
-  expect(roomReadDenial({ status: "active" }, { status: "published", deleted_at: new Date() })).toBe("hidden")
+  expect(roomReadDenial({ status: "active", left_at: null }, { status: "published", deleted_at: new Date() })).toBe("hidden")
 })
 
 it("says who removed them", () => {
