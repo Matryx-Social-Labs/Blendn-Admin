@@ -176,7 +176,7 @@ registry.registerPath({
   tags: ["Mobile Users"],
   summary: "Get user public profile",
   description:
-    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). `connection` is present only when `identityVisible` is true.",
+    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {

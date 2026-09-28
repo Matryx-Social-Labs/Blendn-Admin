@@ -19,7 +19,7 @@ registry.registerPath({
   tags: ["Mobile Profiles"],
   summary: "Get user profile",
   description:
-    "`userId` may be a room handle (SCRUM-371). `id` and `profile.id` echo it as sent — `profiles.id` is the user id, so both are echoed — except on your own profile.",
+    "`userId` may be a room handle (SCRUM-371). `id` and `profile.id` echo it as sent — `profiles.id` is the user id, so both are echoed — except on your own profile. A handle is answered in its room's terms: for somebody that room keeps anonymous the response is only `{ id, name, profile: { id, age, onboarded, location } }`, with `name` their pseudonym there.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
@@ -60,7 +60,7 @@ registry.registerPath({
   tags: ["Mobile Profiles"],
   summary: "Get user interests",
   description:
-    "A block, either way, answers **404** — the same as the profile itself (SCRUM-299). `userId` may be a room handle (SCRUM-371).",
+    "A block, either way, answers **404** — the same as the profile itself (SCRUM-299). `userId` may be a room handle (SCRUM-371); through a handle for somebody that room keeps anonymous the list is empty — the room card shows shared interests only, and the whole list is the same in every room.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
