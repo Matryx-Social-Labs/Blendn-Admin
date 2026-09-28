@@ -14,7 +14,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 const mockDb = {
   event_check_ins: { findFirst: jest.fn() },
   chat_group_members: { findFirst: jest.fn() },
-  event_match_preferences: { findUnique: jest.fn() },
+  event_match_preferences: { findMany: jest.fn() },
   user: { findUnique: jest.fn() },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -73,7 +73,7 @@ beforeEach(() => {
   mockBlocked.mockResolvedValue(false)
   mockClosed.mockResolvedValue(false)
   mockDb.chat_group_members.findFirst.mockResolvedValue({ anonymous_name: "Cosmic Panda" })
-  mockDb.event_match_preferences.findUnique.mockResolvedValue(null)
+  mockDb.event_match_preferences.findMany.mockResolvedValue([])
   mockDb.user.findUnique.mockResolvedValue({ name: "Arjun Rao" })
 })
 
@@ -89,8 +89,12 @@ it("sends, and emits room:wave to the recipient with the sender's pseudonym", as
 })
 
 it("uses the real name only for a sender who revealed in this room", async () => {
-  mockDb.event_match_preferences.findUnique.mockResolvedValue({ revealed: true })
+  // The roster's rule (`revealedInRoom`): revealed at THIS event.
+  mockDb.event_match_preferences.findMany.mockResolvedValue([{ user_id: ME }])
   await wave()
+  expect(mockDb.event_match_preferences.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({ where: expect.objectContaining({ event_id: EVENT, revealed: true }) })
+  )
   expect(mockEmitWave).toHaveBeenCalledWith(THEM, expect.objectContaining({ fromName: "Arjun Rao" }))
 })
 

@@ -17,6 +17,8 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { hit } from "@/lib/rate-limit-store"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
+import { roomPseudonymOf } from "@/lib/anonymous-names"
+import { revealedInRoom } from "@/lib/identity"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -156,20 +158,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
  * and degrading to the thing we are hiding turns the bug into a disclosure.
  */
 async function roomNameOf(eventId: string, userId: string): Promise<string> {
-  const [member, pref] = await Promise.all([
-    db.chat_group_members.findFirst({
-      where: { chat_group: { event_id: eventId }, user_id: userId },
-      select: { anonymous_name: true },
-    }),
-    db.event_match_preferences.findUnique({
-      where: { event_id_user_id: { event_id: eventId, user_id: userId } },
-      select: { revealed: true },
-    }),
+  const [pseudonym, revealed] = await Promise.all([
+    roomPseudonymOf(eventId, userId),
+    revealedInRoom(eventId, [userId]),
   ])
-  if (pref?.revealed) {
+  if (revealed.has(userId)) {
     const user = await db.user.findUnique({ where: { id: userId }, select: { name: true } })
     const name = user?.name?.trim()
     if (name) return name
   }
-  return member?.anonymous_name || "Attendee"
+  return pseudonym
 }

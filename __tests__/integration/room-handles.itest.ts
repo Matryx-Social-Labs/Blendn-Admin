@@ -336,17 +336,33 @@ describe("a friend who holds your real id reads the room and finds nothing", () 
     expect(await db.blocked_users.count({ where: { blocker_id: ana.id, blocked_id: ben.id } })).toBe(0)
   })
 
-  it("interests read through the roster's handle are Ben's", async () => {
+  it("interests read through the roster's handle follow the room: withheld while Ben is anonymous, his once he reveals", async () => {
     const slug = testId("rh-cat")
     categorySlugs.push(slug)
     const category = await db.categories.create({ data: { name: "Board games", slug } })
     await db.user_interests.create({ data: { user_id: ben.id, category_id: category.id } })
     const read = (ref: string) =>
       call(interestsRoute.GET, `/api/mobile/profiles/${ref}/interests`, ana, { params: { userId: ref } })
-    const [byHandle, byRawId] = [await read(hBen), await read(ben.id)]
-    expect(byHandle.status).toBe(200)
-    expect(byHandle.body.data.interests.map((i: { slug: string }) => i.slug)).toEqual([slug])
-    expect(byHandle).toEqual(byRawId)
+    const setRevealed = (revealed: boolean) =>
+      db.event_match_preferences.update({
+        where: { event_id_user_id: { event_id: eventId, user_id: ben.id } },
+        data: { revealed },
+      })
+
+    // The whole list is the same in every room, so a room that keeps him
+    // anonymous does not hand it out by his handle there.
+    const anonymous = await read(hBen)
+    expect(anonymous.status).toBe(200)
+    expect(anonymous.body.data.interests).toEqual([])
+
+    await setRevealed(true)
+    try {
+      const [byHandle, byRawId] = [await read(hBen), await read(ben.id)]
+      expect(byHandle.body.data.interests.map((i: { slug: string }) => i.slug)).toEqual([slug])
+      expect(byHandle).toEqual(byRawId)
+    } finally {
+      await setRevealed(false)
+    }
   })
 
   it("likes and waves take only this room's handles: a raw id or another room's handle is nobody", async () => {

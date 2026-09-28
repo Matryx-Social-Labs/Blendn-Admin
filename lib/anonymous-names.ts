@@ -159,6 +159,19 @@ export async function pseudonymsForEvent(eventId: string): Promise<Map<string, s
 }
 
 /**
+ * One person's pseudonym in one event's room — `pseudonymsForEvent` for a
+ * single card, without loading the whole room. Same "Attendee" fallback, for
+ * the same reason.
+ */
+export async function roomPseudonymOf(eventId: string, userId: string): Promise<string> {
+  const member = await db.chat_group_members.findFirst({
+    where: { chat_group: { event_id: eventId }, user_id: userId },
+    select: { anonymous_name: true },
+  })
+  return member?.anonymous_name || "Attendee"
+}
+
+/**
  * Mint a handle and persist it, retrying when somebody else took it first.
  *
  * ## The read is not a lock, and doors are when everyone arrives at once

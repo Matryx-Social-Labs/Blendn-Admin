@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
-import { maySeeIdentity } from "@/lib/identity"
+import { identityForRef } from "@/lib/identity"
 import { userIdFromRef } from "@/lib/room-handle"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -196,7 +196,9 @@ export async function POST(request: NextRequest) {
        * 409 — they know the answer already, and `GET /users/:id` hands the app
        * the same facts as `connection`.
        */
-      if (await maySeeIdentity(authUser.userId, recipientId)) return conflictResponse(refusal)
+      // In the terms of the room the ref came from: a reveal, like or DM
+      // elsewhere does not make this room's pseudonym someone you know.
+      if ((await identityForRef(authUser.userId, ref)).identified) return conflictResponse(refusal)
       return successResponse(
         {
           request: {
