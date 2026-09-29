@@ -2,6 +2,7 @@ import { PrismaClient, type connection_intent, type door_policy, type event_stat
 import { PrismaPg } from "@prisma/adapter-pg"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
+import { ensureOrgBrand } from "./seed-brand"
 import { mirrorToTigris, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { environmentRefusal, TEST_ORG_NAMES } from "./test-accounts"
 import { CROWD_CHAT, CROWD_REVIEWS, CROWD_SIZE, ensureCrowd } from "./seed-blr-crowd"
@@ -1306,11 +1307,15 @@ async function main() {
   console.log(`crowd: ${crowdIds.length} profiles ready`)
   const ids = (list: Person[] | undefined) => (list ?? []).map((p) => people[p]).filter((id): id is string => !!id)
 
+  // The brands org's one brand, however the product has since keyed it (SCRUM-456).
   const sponsor = brandsOrg
-    ? await db.sponsors.findFirst({ where: { name_key: "blue tokai", deleted_at: null } }) ??
-      (await db.sponsors.create({
-        data: { name: "Blue Tokai", name_key: "blue tokai", org_id: brandsOrg.id, website: "https://bluetokaicoffee.com", claimed_at: new Date(), created_by: admin.id },
-      }))
+    ? await ensureOrgBrand(db, {
+        name: "Blue Tokai",
+        orgId: brandsOrg.id,
+        createdBy: admin.id,
+        claimedAt: new Date(),
+        website: "https://bluetokaicoffee.com",
+      })
     : null
 
   /* ── remove ───────────────────────────────────────────────────────────── */

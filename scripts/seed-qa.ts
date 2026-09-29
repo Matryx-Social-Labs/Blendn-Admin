@@ -5,6 +5,8 @@ import { phoneCheckInRadius } from "../lib/geofence"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
+import { normaliseSponsorName } from "../lib/sponsor-name"
+import { ensureOrgBrand, findBrandByName } from "./seed-brand"
 import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS } from "./test-accounts"
 
@@ -1192,23 +1194,17 @@ async function main() {
 
   // ── sponsors and a brand claim ───────────────────────────────────────────
   const brandName = "Blue Tokai"
-  let sponsor = await db.sponsors.findFirst({ where: { name_key: brandName.toLowerCase() } })
-  if (!sponsor) {
-    sponsor = await db.sponsors.create({
-      data: {
-        name: brandName,
-        name_key: brandName.toLowerCase(),
-        org_id: orgs.brands.id,
-        claimed_at: hoursFromNow(-300),
-        created_by: users.admin,
-      },
-    })
-  }
+  await ensureOrgBrand(db, {
+    name: brandName,
+    orgId: orgs.brands.id,
+    createdBy: users.admin,
+    claimedAt: hoursFromNow(-300),
+  })
   // An unclaimed brand, so the claim queue has a target.
-  let unclaimedBrand = await db.sponsors.findFirst({ where: { name_key: "third wave" } })
+  let unclaimedBrand = await findBrandByName(db, "Third Wave")
   if (!unclaimedBrand) {
     unclaimedBrand = await db.sponsors.create({
-      data: { name: "Third Wave", name_key: "third wave", org_id: null, created_by: users.admin },
+      data: { name: "Third Wave", name_key: normaliseSponsorName("Third Wave"), org_id: null, created_by: users.admin },
     })
   }
   const existingBrandClaim = await db.sponsor_claims.findFirst({
