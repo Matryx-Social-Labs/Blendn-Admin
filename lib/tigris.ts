@@ -188,7 +188,11 @@ export async function deleteFile(key: string): Promise<void> {
  * deleted person's face for ever. The prefix is `profile/{userId}/`; the
  * caller passes it, this only lists and deletes.
  */
-export async function deletePrefix(prefix: string): Promise<number> {
+/**
+ * Delete every object under `prefix`, except the keys in `keep`: account
+ * deletion leaves removed content in place for its retention period (SCRUM-428).
+ */
+export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = new Set()): Promise<number> {
   const client = getS3Client()
   let deleted = 0
   let token: string | undefined
@@ -196,15 +200,20 @@ export async function deletePrefix(prefix: string): Promise<number> {
     const page = await client.send(
       new ListObjectsV2Command({ Bucket: bucketForKey(prefix), Prefix: prefix, ContinuationToken: token })
     )
-    const keys = (page.Contents ?? []).map((o) => o.Key).filter((k): k is string => Boolean(k))
+    const keys = (page.Contents ?? [])
+      .map((o) => o.Key)
+      .filter((k): k is string => Boolean(k) && !keep.has(k as string))
     if (keys.length > 0) {
-      await client.send(
+      const result = await client.send(
         new DeleteObjectsCommand({
           Bucket: bucketForKey(prefix),
           Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
         })
       )
-      deleted += keys.length
+      // Quiet mode reports only failures: count what actually went, and say which did not.
+      const failed = result?.Errors ?? []
+      if (failed.length > 0) logger.error("deletePrefix: objects not deleted", { prefix, keys: failed.map((e) => e.Key) })
+      deleted += keys.length - failed.length
     }
     token = page.IsTruncated ? page.NextContinuationToken : undefined
   } while (token)
