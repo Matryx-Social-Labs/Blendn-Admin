@@ -78,10 +78,13 @@ export async function authenticateDashboardSocket(
      */
     const user = await db.user.findUnique({
       where: { id: token.sub },
-      select: { id: true, email: true, role: true, suspended_at: true },
+      select: { id: true, email: true, role: true, suspended_at: true, deletedAt: true },
     })
     if (!user) return null
     if (user.suspended_at) return null
+    // An erased account's cookie can outlive it; deletion evicts the socket,
+    // and this keeps the reconnect out (SCRUM-449).
+    if (user.deletedAt) return null
 
     return { userId: user.id, email: user.email, role: user.role }
   } catch (error) {

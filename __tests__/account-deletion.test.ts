@@ -58,6 +58,8 @@ jest.mock("@/lib/mobile-auth", () => ({
   getAuthenticatedUser: (...a: unknown[]) => mockAuth(...a),
 }))
 jest.mock("@/lib/account-blocklist", () => ({ blockAccountNow: (...a: unknown[]) => mockBlockNow(...a) }))
+const mockEvict = jest.fn()
+jest.mock("@/lib/socket-server", () => ({ evictUserSockets: (...a: unknown[]) => mockEvict(...a) }))
 const mockPromote = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => mockPromote(...a) }))
 
@@ -196,6 +198,20 @@ describe("deleting an account scrubs the matching inputs", () => {
   it("kills the token that made the request, so it cannot write to the erased account for the rest of its life", async () => {
     await del()
     expect(mockBlockNow).toHaveBeenCalledWith(USER)
+  })
+
+  it("closes the sockets the account already had open, after the erasure commits (SCRUM-449)", async () => {
+    await del()
+    expect(mockEvict).toHaveBeenCalledWith(USER)
+    expect(mockEvict.mock.invocationCallOrder[0]).toBeGreaterThan(mockDb.$transaction.mock.invocationCallOrder[0])
+  })
+
+  it("leaves the token and the sockets alone when the erasure rolls back", async () => {
+    mockDb.$transaction.mockRejectedValueOnce(new Error("serialization failure"))
+    const res = await del()
+    expect(res.status).toBe(500)
+    expect(mockBlockNow).not.toHaveBeenCalled()
+    expect(mockEvict).not.toHaveBeenCalled()
   })
 
   it("does it all in one transaction", async () => {
