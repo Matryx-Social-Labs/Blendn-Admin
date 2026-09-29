@@ -81,7 +81,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/messages",
   tags: ["Mobile Chat"],
   summary: "Get group messages",
-  description: "Cursor-based pagination. Pass `before` (message UUID) to load older messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
+  description: "Messages are the stored rows, snake_case (`created_at`, `is_edited`, `parent_message`, `_count.replies`) — not the camelCase `ChatMessage` of `GET /events/{eventId}/chat`. Cursor-based pagination. Pass `before` (message UUID) to load older messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),

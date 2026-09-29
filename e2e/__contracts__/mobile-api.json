@@ -148,5 +148,205 @@
       "incoming",
       "outgoing"
     ]
+  },
+  "/api/mobile/events/:eventId": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "address",
+      "amenities",
+      "categories",
+      "chatGroup",
+      "checkInRadius",
+      "city",
+      "country",
+      "coverImageUrl",
+      "createdAt",
+      "currentCapacity",
+      "description",
+      "details",
+      "distance",
+      "doorPolicy",
+      "endTime",
+      "externalLink",
+      "id",
+      "isFeatured",
+      "isRecurring",
+      "latitude",
+      "longitude",
+      "maxCapacity",
+      "media",
+      "minAge",
+      "organizer",
+      "postalCode",
+      "session",
+      "shortDescription",
+      "slug",
+      "startTime",
+      "state",
+      "stats",
+      "status",
+      "timezone",
+      "title",
+      "userStatus",
+      "venueName",
+      "visibility"
+    ],
+    "nested": {
+      "chatGroup": [
+        "id",
+        "member_count",
+        "name",
+        "status"
+      ]
+    }
+  },
+  "/api/mobile/events/:eventId/interested-users": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "interestedCount",
+      "pagination",
+      "users"
+    ]
+  },
+  "/api/mobile/events/:eventId/chat": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "chatGroupId",
+      "chatGroupName",
+      "messages",
+      "mute",
+      "pagination",
+      "write"
+    ],
+    "nested": {
+      "write": [
+        "allowed",
+        "closesAt",
+        "eventEndedAt",
+        "message",
+        "reason"
+      ],
+      "mute": [
+        "muted",
+        "until"
+      ],
+      "messages[]": [
+        "content",
+        "createdAt",
+        "editedAt",
+        "id",
+        "isEdited",
+        "isOwn",
+        "isPinned",
+        "metadata",
+        "moderation_hidden",
+        "parentId",
+        "reactions",
+        "replyCount",
+        "type",
+        "user"
+      ]
+    }
+  },
+  "/api/mobile/chat/groups/:chatGroupId/messages": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "messages",
+      "pagination"
+    ],
+    "nested": {
+      "messages[]": [
+        "_count",
+        "chat_group_id",
+        "client_id",
+        "content",
+        "created_at",
+        "deleted_at",
+        "deleted_by",
+        "edited_at",
+        "id",
+        "is_edited",
+        "is_pinned",
+        "metadata",
+        "moderation_hidden",
+        "moderation_status",
+        "parent_id",
+        "parent_message",
+        "reactions",
+        "type",
+        "updated_at",
+        "user",
+        "user_id"
+      ],
+      "pagination": [
+        "hasMore",
+        "nextCursor"
+      ]
+    }
+  },
+  "/api/mobile/profiles/:userId (own)": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "createdAt",
+      "email",
+      "id",
+      "image",
+      "interests",
+      "name",
+      "profile"
+    ],
+    "nested": {
+      "profile": [
+        "age",
+        "bio",
+        "blur_photo",
+        "created_at",
+        "education",
+        "expertise",
+        "friends_see_me_in_rooms",
+        "gender",
+        "goals",
+        "id",
+        "intent_default",
+        "interested_in",
+        "interests",
+        "location",
+        "looking_for",
+        "name",
+        "occupation",
+        "onboarded",
+        "orientations",
+        "phone",
+        "photos",
+        "push_enabled",
+        "read_receipts",
+        "reveal_by_default",
+        "share_location",
+        "show_online",
+        "show_orientation",
+        "updated_at",
+        "work_field"
+      ]
+    }
   }
 }
