@@ -4,6 +4,7 @@ import { IconExternalLink } from "@tabler/icons-react"
 import { Card } from "@/components/ui/card"
 import { getAuth } from "@/lib/auth"
 import { claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
+import { isUuid } from "@/lib/api-input"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
 
@@ -42,6 +43,8 @@ export default async function ClaimEventPage({
   params: Promise<{ eventId: string }>
 }) {
   const { eventId } = await params
+  // events.id is a UUID column: anything else is a missing event, not a 500 (SCRUM-464).
+  if (!isUuid(eventId)) notFound()
 
   const event = await db.events.findUnique({
     where: claimPageWhere(eventId),

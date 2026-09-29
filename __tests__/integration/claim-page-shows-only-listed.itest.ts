@@ -93,3 +93,13 @@ it("still renders a published event, public or unlisted, and takes a claim on it
   const filed = await fileEventClaim({ eventId: open, contactEmail: app.contact_email, onboardingId: app.id })
   expect(filed).toMatchObject({ ok: true })
 })
+
+// SCRUM-464: a malformed id answered 500 — Postgres refuses a non-UUID for events.id.
+it("answers a malformed id as not found, and refuses a claim on it without throwing", async () => {
+  await expect(render("not-a-uuid")).rejects.toMatchObject(notFound)
+  const app = await application()
+  await expect(fileEventClaim({ eventId: "not-a-uuid", contactEmail: app.contact_email, onboardingId: app.id })).resolves.toEqual({
+    ok: false,
+    error: "Event not found",
+  })
+})
