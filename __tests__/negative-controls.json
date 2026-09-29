@@ -1289,8 +1289,8 @@
     },
     "apply-field-labels.test.ts": {
       "guards": "SCRUM-183: every /apply field is named by its caption: Field (app/apply/field.tsx) ties <label for> to the control's useId id, points the control at its hint with aria-describedby, gives two fields in one tree different ids, and the page keeps no second, unlabelled copy of the helper.",
-      "mutation": "M228 the Label's htmlFor removed. M229 the control's aria-describedby removed. M230 page.tsx defines its own Field again.",
-      "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). All reverted.",
+      "mutation": "M228 the Label's htmlFor removed. M229 the control's aria-describedby removed. M230 page.tsx defines its own Field again. M231 the hint guard removed (aria-describedby on every field). M232 a bare <Input> added to the page outside Field.",
+      "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). After ecc:pr-test-analyzer, two cases were added (no aria-describedby without a hint; the whole /apply page server-rendered, every input and textarea with a matching label[for]). M231: 1 of 6 failing. M232: 1 of 6 failing. All reverted.",
       "date": "2026-09-29"
     }
   },

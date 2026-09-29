@@ -3,6 +3,7 @@ import { join } from "path"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
+import ApplyPage from "@/app/apply/page"
 import { Field } from "@/app/apply/field"
 import { Input } from "@/components/ui/input"
 
@@ -41,6 +42,22 @@ it("gives two fields on one page different ids", () => {
   const ids = [...html.matchAll(/<input[^>]*id="([^"]+)"/g)].map((m) => m[1])
 
   expect(new Set(ids).size).toBe(2)
+})
+
+it("names nothing by a hint it does not have", () => {
+  // A dangling aria-describedby points a screen reader at an element that is not there.
+  expect(render({ label: "City" })).not.toMatch(/aria-describedby/)
+})
+
+it("labels every control the real /apply page renders, textareas included", () => {
+  const html = renderToStaticMarkup(createElement(ApplyPage))
+  const controls = [...html.matchAll(/<(input|textarea)\b[^>]*>/g)].map((m) => m[0])
+  const labelled = new Set([...html.matchAll(/<label[^>]*for="([^"]+)"/g)].map((m) => m[1]))
+  const unlabelled = controls.filter((c) => !labelled.has(c.match(/\bid="([^"]+)"/)?.[1] ?? ""))
+
+  expect(controls.length).toBeGreaterThanOrEqual(9)
+  expect(controls.some((c) => c.startsWith("<textarea"))).toBe(true)
+  expect(unlabelled).toEqual([])
 })
 
 it("leaves /apply with no field outside the labelled wrapper", () => {
