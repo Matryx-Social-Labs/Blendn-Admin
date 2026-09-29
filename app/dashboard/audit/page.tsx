@@ -20,13 +20,25 @@ export const dynamic = "force-dynamic"
  * sees only what their own members did. The scoping is enforced in
  * `lib/audit-actions.ts`, not here, so a route added later cannot forget it.
  */
-export default async function AuditPage() {
+export default async function AuditPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ action?: string | string[] }>
+}) {
   const session = await getAuth()
   if (!session?.user) redirect("/login")
 
+  /*
+   * The action filter runs in the query, over the whole scoped log. It ran in
+   * the browser over the newest 100 rows, so an older action read "0 of 406"
+   * while it existed (SCRUM-462).
+   */
+  const { action } = await searchParams
+  const filter = typeof action === "string" && action ? action : undefined
+
   let page
   try {
-    page = await getAuditLog()
+    page = await getAuditLog({ action: filter })
   } catch {
     // Thrown for a host who is only `staff` — they have no org to audit.
     redirect("/dashboard")
@@ -43,14 +55,15 @@ export default async function AuditPage() {
           : "Every organisation on the platform."}
       </p>
 
-      {page.entries.length === 0 ? (
+      {/* Empty only when nothing is filtered: a filter with no match keeps its dropdown. */}
+      {page.entries.length === 0 && !filter ? (
         <EmptyState
           icon={<IconHistory />}
           title="Nothing recorded yet"
           description="Role changes, suspensions, moderation decisions, invites and approvals are written here as they happen."
         />
       ) : (
-        <AuditTimeline page={page} />
+        <AuditTimeline page={page} action={filter ?? "all"} />
       )}
     </div>
   )
