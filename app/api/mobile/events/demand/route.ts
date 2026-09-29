@@ -12,6 +12,7 @@ import {
   validationErrorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
 
 /**
  * "I'm here and there's nothing on."
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("write", "city-demand", authUser.userId))
     if (limited) return limited
 
-    const parsed = demandSchema.safeParse(await request.json().catch(() => ({})))
+    const parsed = demandSchema.safeParse(await readJson(request))
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
     }

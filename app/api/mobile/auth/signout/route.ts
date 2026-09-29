@@ -12,6 +12,7 @@ import {
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readOptionalJson } from "@/lib/api-input"
 
 /**
  * Signing out has to take the push token with it.
@@ -49,12 +50,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Read the body once. A malformed or absent body is not an error here —
-    // it means "sign me out of everything", which is the safe reading.
-    let body: { refreshToken?: string; pushToken?: string } = {}
-    try {
-      body = await request.json()
-    } catch {
-      body = {}
+    // it means "sign me out of everything", which is the safe reading. So is a
+    // field of the wrong type, or one carrying a NUL: that reached the push-token
+    // delete after the refresh token was already revoked, and 500'd (SCRUM-434).
+    const raw = ((await readOptionalJson(request)) ?? {}) as { refreshToken?: unknown; pushToken?: unknown }
+    const body = {
+      refreshToken: typeof raw.refreshToken === "string" ? raw.refreshToken : undefined,
+      pushToken: typeof raw.pushToken === "string" ? raw.pushToken : undefined,
     }
 
     let revokedAll = false

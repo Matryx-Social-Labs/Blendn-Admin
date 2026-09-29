@@ -209,14 +209,27 @@ describe("one junk query value on a GET", () => {
   })
 })
 
-describe("a body that is not JSON, or has the wrong types", () => {
+/** Accepted, except every free-text field carries a NUL, which Postgres text cannot hold (SCRUM-434). */
+const withNul = () =>
+  JSON.stringify({
+    ...JSON.parse(accepted()),
+    ...Object.fromEntries(
+      ["content", "text", "body", "message", "reason", "description", "token", "password", "email", "refreshToken", "pushToken"].map(
+        (k) => [k, "a\u0000b"]
+      )
+    ),
+  })
+
+describe("a body that is not JSON, has the wrong types, or carries a NUL", () => {
   const cases = pairs((r, m) => m !== "GET" && r.readsBody).flatMap((c) => [
-    { ...c, what: "not JSON", body: '{"a":' },
-    { ...c, what: "the wrong types", body: WRONG_TYPES },
+    { ...c, what: "not JSON", body: () => '{"a":' },
+    { ...c, what: "the wrong types", body: () => WRONG_TYPES },
+    { ...c, what: "a NUL in its text", body: withNul },
+    { ...c, what: "nested 5,000 deep", body: () => "[".repeat(5000) + "]".repeat(5000) },
   ])
 
   it.each(cases.map((c) => [`${c.m} ${c.r.path}, ${c.what}`, c]))("%s", async (_, { r, m, body }) => {
-    expect(await call(r, m, withReal(r), "", body)).toBeLessThan(500)
+    expect(await call(r, m, withReal(r), "", body())).toBeLessThan(500)
   })
 })
 
@@ -253,5 +266,15 @@ describe("a body that is not JSON never takes the default action", () => {
   it("still takes it for no body at all", async () => {
     const r = route("/api/mobile/conversations/[conversationId]/leave")
     expect(await call(r, "POST", withReal(r), "", "")).toBe(200)
+  })
+})
+
+describe("a NUL in a dashboard search query", () => {
+  // The mobile API refuses %00 in middleware (nul-byte-refused.test.ts); these
+  // routes are not behind it, and a NUL cannot match a row anyway (SCRUM-434).
+  // (`/api/search` answers { hits: [] } for any failure, so it never 500s.)
+  it.each(["/api/search", "/api/leads/export"])("GET %s?q=%00", async (path) => {
+    const r = route(path)
+    expect(await call(r, "GET", withReal(r), "?q=a%00b")).toBeLessThan(500)
   })
 })
