@@ -160,5 +160,29 @@ describe("the private-message limit (30 a minute) counts a refused send", () => 
     // A known clientId aimed at another conversation is not a retry: counted.
     await expectLimited(await sendDm(me.token(), theirs, { text: "hi", clientId }))
     expect(await db.private_messages.count({ where: { sender_id: me.id } })).toBe(1)
+    // The allowance is theirs: somebody else is not in it.
+    expect((await sendDm(friend.token(), randomUUID(), { text: "hi" })).status).toBe(404)
+  })
+
+  it("under the limit, a clientId from another of your conversations is 409, and somebody else's is not your retry", async () => {
+    const me = await personWithId()
+    const a = await personWithId()
+    const b = await personWithId()
+    const withA = await conversationOf(me.id, a.id)
+    const withB = await conversationOf(me.id, b.id)
+    const clientId = randomUUID()
+    await db.private_messages.create({
+      data: { conversation_id: withA, sender_id: me.id, message_text: "hi", client_id: clientId },
+    })
+    expect((await sendDm(me.token(), withB, { text: "hi", clientId })).status).toBe(409)
+
+    const theirs = await db.private_messages.create({
+      data: { conversation_id: withA, sender_id: a.id, message_text: "hey", client_id: randomUUID() },
+    })
+    const res = await sendDm(me.token(), withA, { text: "mine", clientId: theirs.client_id! })
+    expect(res.status).toBe(200)
+    const sent = ((await res.json()) as { data: { id: string; senderId: string } }).data
+    expect(sent.id).not.toBe(theirs.id)
+    expect(sent.senderId).toBe(me.id)
   })
 })
