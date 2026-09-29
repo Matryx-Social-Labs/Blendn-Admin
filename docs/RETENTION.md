@@ -79,6 +79,12 @@ deletes their account:
 No sweeper or cascade removes any of these. The `User` row is never deleted,
 and neither are events or rooms.
 
+**Stored media is `no-cache`.** Every profile photo and chat image is the
+server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so
+deleting it (account deletion, a removed photo, a moderation takedown) stops it
+being served at once. Objects sealed before SCRUM-445 keep the storage default
+and stay fetchable at the edge for up to an hour after a delete.
+
 **Known gaps, not yet fixed:**
 
 - **Profile photos.** A photo that moderation rejects is unlinked from the

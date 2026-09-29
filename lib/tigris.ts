@@ -262,11 +262,14 @@ export async function sealUpload(
         MetadataDirective: "REPLACE",
         ContentType: source.contentType,
         /*
-         * No Cache-Control: Tigris's public endpoint serves a deleted object
-         * for as long as the header allows, so a year here kept a deleted
-         * account's photo up after the erasure (measured on staging). Without
-         * one it is the storage default, an hour, as every other object.
+         * `no-cache`, so an erasure takes at once. Tigris's public endpoint
+         * serves a deleted object for as long as this allows: a year kept a
+         * deleted account's photo up, and the default is an hour. With
+         * `no-cache` it answered 404 straight after the delete, for a
+         * revalidation per view at the edge, 12-24 ms warm (measured on
+         * staging, SCRUM-445). The app keeps its own image cache.
          */
+        CacheControl: "no-cache",
         Metadata: { "uploaded-by": userId },
       }),
       timeout()

@@ -73,20 +73,49 @@ const NO_GET: Record<string, number> = {
   "/api/mobile/account": 405,
 }
 
-type Shape = { status: number; envelope: string[]; data: string[] | string }
+/**
+ * Reads that need an id, recorded under their template so the snapshot holds
+ * no seeded uuid.
+ *
+ * `pin` records the keys of objects one level down as well, because the drift
+ * these were added for (SCRUM-460) lived there — `chatGroup.member_count`, the
+ * snake_case group history, the owner's profile row — where the top-level
+ * shape cannot see it. `messages[]` is the first message.
+ *
+ * Two of them write: the event read counts a view, and the event chat read
+ * moves the caller's read marker. Neither is a shape any spec records.
+ */
+type ParamRoute = { url: string; pin?: string[] }
+
+type Shape = {
+  status: number
+  envelope: string[]
+  data: string[] | string
+  nested?: Record<string, string[] | string>
+}
+
+const describe = (v: unknown): string[] | string => {
+  if (Array.isArray(v)) return v.length ? [`array<${String(describe(v[0]))}>`] : ["array<empty>"]
+  if (v && typeof v === "object") return Object.keys(v as object).sort()
+  return typeof v
+}
+
+/** `a.b[]` — `[]` takes the first element. */
+const at = (v: unknown, path: string): unknown =>
+  path.split(".").reduce<unknown>((node, segment) => {
+    const list = segment.endsWith("[]")
+    const value = (node as Record<string, unknown> | null)?.[list ? segment.slice(0, -2) : segment]
+    return list ? (value as unknown[] | undefined)?.[0] : value
+  }, v)
 
 /** Keys, not values — see the docblock. */
-function shapeOf(status: number, body: unknown): Shape {
-  const describe = (v: unknown): string[] | string => {
-    if (Array.isArray(v)) return v.length ? [`array<${String(describe(v[0]))}>`] : ["array<empty>"]
-    if (v && typeof v === "object") return Object.keys(v as object).sort()
-    return typeof v
-  }
+function shapeOf(status: number, body: unknown, pin: string[] = []): Shape {
   const top = body && typeof body === "object" ? (body as Record<string, unknown>) : {}
   return {
     status,
     envelope: Object.keys(top).sort(),
     data: describe(top.data ?? null),
+    ...(pin.length > 0 && { nested: Object.fromEntries(pin.map((p) => [p, describe(at(top.data, p))])) }),
   }
 }
 
@@ -118,8 +147,29 @@ test.describe("mobile API contract", () => {
       where: { email: "ananya.b@blendn.app" },
       select: { id: true, email: true },
     })
+    // The QA seed's live event, whose room it fills with one line per attendee.
+    const live = await db.events.findUnique({
+      where: { slug: "founders-filter-coffee" },
+      select: { id: true, chat_group: { select: { id: true } } },
+    })
     await db.$disconnect()
     expect(user, "the QA seed must have run — this is a seeded attendee").toBeTruthy()
+    expect(live?.chat_group, "the QA seed's live event must have its room").toBeTruthy()
+
+    const eventId = live!.id
+    const PARAM_ROUTES: Record<string, ParamRoute> = {
+      "/api/mobile/events/:eventId": { url: `/api/mobile/events/${eventId}`, pin: ["chatGroup"] },
+      "/api/mobile/events/:eventId/interested-users": { url: `/api/mobile/events/${eventId}/interested-users` },
+      "/api/mobile/events/:eventId/chat": {
+        url: `/api/mobile/events/${eventId}/chat`,
+        pin: ["write", "mute", "messages[]"],
+      },
+      "/api/mobile/chat/groups/:chatGroupId/messages": {
+        url: `/api/mobile/chat/groups/${live!.chat_group!.id}/messages`,
+        pin: ["messages[]", "pagination"],
+      },
+      "/api/mobile/profiles/:userId (own)": { url: `/api/mobile/profiles/${user!.id}`, pin: ["profile"] },
+    }
 
     const token = signAccessToken(user!.id, user!.email)
     const ctx = await playwrightRequest.newContext({
@@ -129,11 +179,15 @@ test.describe("mobile API contract", () => {
 
     const recorded: Record<string, Shape> = {}
     const notEnveloped: string[] = []
+    const reads: [string, ParamRoute][] = [
+      ...ROUTES.map((url): [string, ParamRoute] => [url, { url }]),
+      ...Object.entries(PARAM_ROUTES),
+    ]
 
-    for (const route of ROUTES) {
-      const res = await ctx.get(route)
+    for (const [route, { url, pin }] of reads) {
+      const res = await ctx.get(url)
       const body = await res.json().catch(() => null)
-      recorded[route] = shapeOf(res.status(), body)
+      recorded[route] = shapeOf(res.status(), body, pin)
 
       /*
        * The envelope is the migration's whole premise. `lib/api-response.ts`
