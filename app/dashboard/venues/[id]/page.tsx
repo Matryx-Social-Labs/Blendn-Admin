@@ -8,6 +8,7 @@ import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
+import { discloseStarsAcross, spreadsByEvent } from "@/lib/disclosure"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { turnUpPct } from "@/lib/counting"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
@@ -163,22 +164,17 @@ export default async function VenueDetailPage({
         },
       },
     }),
+    // Per event, so the total pools only events that could show their own.
     db.event_ratings.groupBy({
-      by: ["rating"],
+      by: ["event_id", "rating"],
       where: { event: { venue_id: id, deleted_at: null } },
       _count: { _all: true },
     }),
   ])
 
-  const ratings: [number, number, number, number, number] = [0, 0, 0, 0, 0]
-  for (const row of ratingRows) {
-    if (row.rating >= 1 && row.rating <= 5) ratings[row.rating - 1] = row._count._all
-  }
-  const ratingTotal = ratings.reduce((a, b) => a + b, 0)
-  const averageRating =
-    ratingTotal === 0
-      ? null
-      : Math.round((ratings.reduce((sum, n, i) => sum + n * (i + 1), 0) / ratingTotal) * 10) / 10
+  // Withheld under five raters, and pooled only from events that pass alone,
+  // like every rating a host sees (SCRUM-437).
+  const { ratings, averageRating, ratingCount: ratingTotal } = discloseStarsAcross(spreadsByEvent(ratingRows))
 
   /*
    * Attendance is a grouped query, not a `_count`: the table holds one row per
@@ -271,11 +267,13 @@ export default async function VenueDetailPage({
           <VenueEventsTable rows={rows} />
         </section>
         <section className="flex flex-col gap-3 border-t border-border pt-5">
-          <SectionTitle hint={ratingTotal ? `avg ${averageRating} · all-time` : "all-time"}>
+          <SectionTitle hint={averageRating === null ? "all-time" : `avg ${averageRating} · all-time`}>
             Ratings
           </SectionTitle>
           {ratingTotal === 0 ? (
             <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
+          ) : averageRating === null ? (
+            <p className="text-[0.8125rem] text-muted-foreground">Not enough ratings yet.</p>
           ) : (
             <RatingBars counts={ratings} />
           )}

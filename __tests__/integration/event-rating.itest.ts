@@ -18,6 +18,10 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, tes
 const ratingRoute = require("@/app/api/mobile/events/[eventId]/rating/route") as
   typeof import("@/app/api/mobile/events/[eventId]/rating/route")
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const eventRoute = require("@/app/api/mobile/events/[eventId]/route") as
+  typeof import("@/app/api/mobile/events/[eventId]/route")
+
 const users: string[] = []
 const events: string[] = []
 const HOUR = 60 * 60 * 1000
@@ -44,6 +48,15 @@ const rate = (token: string, eventId: string, body: unknown) =>
     }),
     { params: Promise.resolve({ eventId }) }
   )
+
+const detail = async (token: string, eventId: string) => {
+  const res = await eventRoute.GET(
+    new NextRequest(`http://localhost/api/mobile/events/${eventId}`, { headers: { authorization: `Bearer ${token}` } }),
+    { params: Promise.resolve({ eventId }) }
+  )
+  expect(res.status).toBe(200)
+  return (await res.json()).data as { stats: { ratingCount: number } }
+}
 
 describe("rating an event", () => {
   let host: string
@@ -76,13 +89,30 @@ describe("rating an event", () => {
 
     const res = await rate(fan.token, eventId, { rating: 4, review: "long bar queue" })
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ data: { eventStats: { averageRating: 4, ratingCount: 1 } } })
+    // A count and no average: one rating is this person's score (SCRUM-437).
+    const body = await res.json()
+    expect(body.data.eventStats).toEqual({ ratingCount: 1 })
 
     // Rating again edits the one row rather than adding a second.
     const again = await rate(fan.token, eventId, { rating: 5 })
     expect(again.status).toBe(200)
     const rows = await db.event_ratings.findMany({ where: { event_id: eventId, user_id: fan.id } })
     expect(rows.map((r) => r.rating)).toEqual([5])
+  })
+
+  it("never hands an attendee an average, at any count: polled, it reads each new score (SCRUM-437)", async () => {
+    const eventId = await eventEnded(2)
+    const occurrenceId = await occurrenceOf(eventId)
+    const fans = await Promise.all([1, 2, 3, 4, 5].map((n) => person(`rate-crowd${n}`)))
+    for (const fan of fans) await putInRoom({ eventId, occurrenceId, userId: fan.id })
+
+    for (const [i, fan] of fans.entries()) {
+      const reply = await rate(fan.token, eventId, { rating: [5, 4, 4, 3, 5][i] })
+      expect((await reply.json()).data.eventStats).toEqual({ ratingCount: i + 1 })
+      const stats = (await detail(fans[0].token, eventId)).stats
+      expect(stats.ratingCount).toBe(i + 1)
+      expect(stats).not.toHaveProperty("averageRating")
+    }
   })
 
   it("refuses someone who never checked in", async () => {
