@@ -1,5 +1,5 @@
-import { db } from "@/lib/db"
-import { resolveUserRef } from "@/lib/room-handle"
+import { db } from "./db"
+import { resolveUserRef } from "./room-handle"
 
 /**
  * Who may see whose real name and face.
@@ -88,6 +88,14 @@ export async function maySeeIdentityFor(
   targetIds: string[],
   scope: IdentityScope = {}
 ): Promise<Set<string>> {
+  /*
+   * In one room, only what that room shows — and in exactly the terms every
+   * room surface uses, because it is the same function (`visibleInRoom`). See
+   * `IdentityScope`: the mutual like and the open conversation are facts about
+   * a pair, not about this room, and the reveal branch narrows to this event.
+   */
+  if (scope.room) return visibleInRoom(viewerId, scope.room, targetIds)
+
   const visible = new Set<string>()
   const others = [...new Set(targetIds)].filter((id) => id !== viewerId)
   // It is always you. Added unconditionally so a caller passing only themselves
@@ -95,27 +103,15 @@ export async function maySeeIdentityFor(
   if (targetIds.includes(viewerId)) visible.add(viewerId)
   if (others.length === 0) return visible
 
-  /*
-   * In one room, only what that room shows. See `IdentityScope`: the mutual
-   * like and the open conversation are facts about a pair, not about this
-   * room, and the reveal branch narrows to this event.
-   */
-  const room = scope.room ?? null
-  const none = Promise.resolve([] as never[])
-
   const [sent, received, conversations, revealedTo, blocks, friendsOptedIn] = await Promise.all([
-    room
-      ? none
-      : db.event_likes.findMany({
-          where: { liker_id: viewerId, liked_id: { in: others } },
-          select: { event_id: true, liked_id: true },
-        }),
-    room
-      ? none
-      : db.event_likes.findMany({
-          where: { liked_id: viewerId, liker_id: { in: others } },
-          select: { event_id: true, liker_id: true },
-        }),
+    db.event_likes.findMany({
+      where: { liker_id: viewerId, liked_id: { in: others } },
+      select: { event_id: true, liked_id: true },
+    }),
+    db.event_likes.findMany({
+      where: { liked_id: viewerId, liker_id: { in: others } },
+      select: { event_id: true, liker_id: true },
+    }),
 
     /*
      * Open and closed in one read, because the fold needs both and they differ
@@ -140,18 +136,16 @@ export async function maySeeIdentityFor(
      * event gave one person several rows — so whether you could see someone's
      * name depended on which of their check-ins matched first.
      */
-    room
-      ? revealedInRoomTo(viewerId, room, others)
-      : db.event_match_preferences
-          .findMany({
-            where: {
-              user_id: { in: others },
-              revealed: true,
-              event: { check_ins: { some: { user_id: viewerId } } },
-            },
-            select: { user_id: true },
-          })
-          .then((rows) => new Set(rows.map((r) => r.user_id))),
+    db.event_match_preferences
+      .findMany({
+        where: {
+          user_id: { in: others },
+          revealed: true,
+          event: { check_ins: { some: { user_id: viewerId } } },
+        },
+        select: { user_id: true },
+      })
+      .then((rows) => new Set(rows.map((r) => r.user_id))),
 
     /*
      * A block, in **either** direction, because the harm is symmetric: the
@@ -207,9 +201,7 @@ export async function maySeeIdentityFor(
      * — undoing `friends_see_me_in_rooms` for anyone who ever said hello.
      * Closed still counts as closed above: leaving beats everything.
      */
-    // Not in a room's terms: a conversation is between the two of you, and
-    // says nothing about who you are in this room. Closed still counts.
-    else if (!c.origin_friendship && !room) open.add(other)
+    else if (!c.origin_friendship) open.add(other)
   }
   const friendVisible = new Set(
     friendsOptedIn.map((f) => (f.user1_id === viewerId ? f.user2_id : f.user1_id))
@@ -299,7 +291,7 @@ export async function userIdFromRefIfIdentified(viewerId: string, ref: string): 
  * So with `room`, the gate keeps only what that room itself shows, and the
  * room card and the profile it opens always agree:
  *
- * - **Revealed in this room** — the roster's own rule (`revealedInRoom`), and
+ * - **Revealed in this room** — the roster's own rule (`visibleInRoom`), and
  *   only for a viewer who was in it, as the roster is.
  * - **A friend who lets friends recognise them in rooms** — kept, because it is
  *   the person's own standing consent to be recognised in *any* room
@@ -316,32 +308,120 @@ export interface IdentityScope {
 }
 
 /**
- * Who chose "show who I am" in this event's room — the rule the roster, the
- * wave and the Grid card use to show a real name instead of the pseudonym.
+ * Whom `viewerId` may recognise in this event's room — the one rule every room
+ * surface uses to choose a real name and photo over the pseudonym: the roster,
+ * the live arrival, the wave, the match deck and the profile a card opens
+ * (through `identityForRef`, which is `maySeeIdentityFor` with a room).
  *
  * One definition, because two surfaces answering this differently is exactly
- * how a pseudonym gets linked to a person.
+ * how a pseudonym gets linked to a person — or, the other way round, how a
+ * friend who turned on "Friends can see who I am in rooms" stays a pseudonym on
+ * the roster while the profile behind the same card names them. The roster used
+ * to ask only the reveal and the profile asked both; this is both, for both.
+ *
+ * Visible when, for a viewer who was in the room:
+ *
+ * - **They revealed here** — "show who I am" at this event
+ *   (`event_match_preferences.revealed`), or
+ * - **You are friends and they let friends recognise them in rooms**
+ *   (`profiles.friends_see_me_in_rooms`, theirs to turn on, default off).
+ *
+ * and never when there is a block either way or a closed conversation between
+ * you: those beat both, as they beat everything in the unscoped gate.
+ *
+ * "Visible" is who they are, not which account: every room surface still sends
+ * the per-room handle (`idForViewer`), whether or not the name is shown.
  */
-export async function revealedInRoom(eventId: string, userIds: string[]): Promise<Set<string>> {
-  if (userIds.length === 0) return new Set()
-  const rows = await db.event_match_preferences.findMany({
-    where: { event_id: eventId, revealed: true, user_id: { in: userIds } },
-    select: { user_id: true },
-  })
-  return new Set(rows.map((r) => r.user_id))
+export async function visibleInRoom(viewerId: string, eventId: string, targetIds: string[]): Promise<Set<string>> {
+  const sees = await roomIdentity(eventId, [viewerId], targetIds)
+  return new Set(targetIds.filter((t) => sees(viewerId, t)))
 }
 
 /**
- * `revealedInRoom`, for a viewer who was in the room. The roster refuses
- * anybody without a check-in, and a handle can reach people who never had one
- * (the interest counter room hands them out), so this refuses them too.
+ * `visibleInRoom` asked the other way round: which of these viewers recognise
+ * `targetId` in this room. For a payload that goes to many people about one
+ * person — somebody arriving on everyone's live roster — so each copy can carry
+ * the name its recipient would see on the roster, without a gate per recipient.
  */
-async function revealedInRoomTo(viewerId: string, eventId: string, userIds: string[]): Promise<Set<string>> {
-  const [present, revealed] = await Promise.all([
-    db.event_check_ins.findFirst({ where: { event_id: eventId, user_id: viewerId }, select: { id: true } }),
-    revealedInRoom(eventId, userIds),
+export async function recognisedInRoomBy(eventId: string, targetId: string, viewerIds: string[]): Promise<Set<string>> {
+  const sees = await roomIdentity(eventId, viewerIds, [targetId])
+  return new Set(viewerIds.filter((v) => sees(v, targetId)))
+}
+
+/**
+ * The room rule over every (viewer, target) pair of two lists, in five reads
+ * however long either list is. Both public forms above are this with one side
+ * fixed, so they cannot disagree.
+ *
+ * The reads fetch the cross product and the fold keeps only what each pair
+ * needs, keyed by pair; a friendship row is read with both people's switches
+ * so the direction — the *target's* consent — is decided here, not by which
+ * `OR` branch happened to match.
+ */
+async function roomIdentity(
+  eventId: string,
+  viewerIds: string[],
+  targetIds: string[]
+): Promise<(viewer: string, target: string) => boolean> {
+  const viewers = [...new Set(viewerIds)]
+  const targets = [...new Set(targetIds)]
+  const self = (v: string, t: string) => v === t
+  // Nobody but yourself asked about (or nobody at all): no reads.
+  if (targets.every((t) => viewers.every((v) => v === t))) return self
+
+  const V = { in: viewers }
+  const T = { in: targets }
+  const optedIn = { select: { profile: { select: { friends_see_me_in_rooms: true } } } }
+
+  const [present, revealed, blocks, closed, friendships] = await Promise.all([
+    /*
+     * Only a viewer who was in the room. The roster refuses anybody without a
+     * check-in, and a handle can reach people who never had one (the interest
+     * counter room hands them out), so this refuses them too.
+     */
+    db.event_check_ins
+      .findMany({ where: { event_id: eventId, user_id: { in: viewers } }, select: { user_id: true } })
+      .then((rows) => new Set(rows.map((r) => r.user_id))),
+    // "Show who I am" in this event — one row per person per event.
+    db.event_match_preferences
+      .findMany({ where: { event_id: eventId, revealed: true, user_id: { in: targets } }, select: { user_id: true } })
+      .then((rows) => new Set(rows.map((r) => r.user_id))),
+    // Either direction: the one who blocked does not want to see, and the one
+    // blocked must not be seen.
+    db.blocked_users.findMany({
+      where: { OR: [{ blocker_id: V, blocked_id: T }, { blocker_id: T, blocked_id: V }] },
+      select: { blocker_id: true, blocked_id: true },
+    }),
+    // Leaving beats every positive branch, as it does unscoped. An open
+    // conversation is not a branch here: it is between the two of you, and says
+    // nothing about who you are in this room.
+    db.private_conversations.findMany({
+      where: { closed_at: { not: null }, OR: [{ user1_id: V, user2_id: T }, { user1_id: T, user2_id: V }] },
+      select: { user1_id: true, user2_id: true },
+    }),
+    db.friendships.findMany({
+      where: { OR: [{ user1_id: V, user2_id: T }, { user1_id: T, user2_id: V }] },
+      select: { user1_id: true, user2_id: true, user1: optedIn, user2: optedIn },
+    }),
   ])
-  return present ? revealed : new Set()
+
+  const pair = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
+  const apart = new Set([
+    ...blocks.map((b) => pair(b.blocker_id, b.blocked_id)),
+    ...closed.map((c) => pair(c.user1_id, c.user2_id)),
+  ])
+  // Directed: viewer→target only when the TARGET turned the switch on.
+  const friendSees = new Set<string>()
+  for (const f of friendships) {
+    if (f.user2.profile?.friends_see_me_in_rooms) friendSees.add(`${f.user1_id}>${f.user2_id}`)
+    if (f.user1.profile?.friends_see_me_in_rooms) friendSees.add(`${f.user2_id}>${f.user1_id}`)
+  }
+
+  return (viewer, target) => {
+    if (viewer === target) return true
+    if (!present.has(viewer) || apart.has(pair(viewer, target))) return false
+    return revealed.has(target) || friendSees.has(`${viewer}>${target}`)
+  }
 }
 
 /**

@@ -13,7 +13,7 @@ import type { Gender } from "@/lib/dating"
 import { ageFrom } from "@/lib/age"
 import { workFieldLabel } from "@/lib/work-fields"
 import { roomHandle } from "@/lib/room-handle"
-import { maySeeIdentityFor } from "@/lib/identity"
+import { visibleInRoom } from "@/lib/identity"
 
 /**
  * Everything `rankMatches` needs, gathered from the database.
@@ -185,7 +185,7 @@ export async function matchesForEvent(
     // three check-ins and exactly one answer.
     db.event_match_preferences.findMany({
       where: { event_id: eventId },
-      select: { user_id: true, intent: true, revealed: true },
+      select: { user_id: true, intent: true },
     }),
     db.blocked_users.findMany({
       where: { OR: [{ blocker_id: viewerId }, { blocked_id: viewerId }] },
@@ -217,9 +217,14 @@ export async function matchesForEvent(
    */
   // In this room's terms, like the roster and the card: a friend recognised
   // only because of a reveal at some other event is still a stranger here.
-  const recognisedFriends = friends.length
-    ? await maySeeIdentityFor(viewerId, friends, { room: eventId })
-    : new Set<string>()
+  //
+  // Asked once for the friends and the whole room together, because the same
+  // answer names a card below — so the deck names exactly whom the roster
+  // names, and blocks and closed pairs beat a reveal here as they do there.
+  const recognised = await visibleInRoom(viewerId, eventId, [
+    ...new Set([...friends, ...checkIns.map((c) => c.user_id)]),
+  ])
+  const recognisedFriends = new Set(friends.filter((id) => recognised.has(id)))
 
   // Blocks hide people in both directions. Someone you blocked should not
   // reappear as a suggestion, and neither should someone who blocked you.
@@ -418,7 +423,8 @@ export async function matchesForEvent(
     },
     insideNow: c.status === "checked_in",
     checkedInAt: c.check_in_time!,
-    revealed: prefsOf.get(c.user_id)?.revealed ?? false,
+    // The roster's rule, not the bare reveal flag (`visibleInRoom`).
+    revealed: recognised.has(c.user_id),
     name: c.user.name,
     /*
      * `photos[0]`, full stop.

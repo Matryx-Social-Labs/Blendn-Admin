@@ -522,16 +522,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     }
 
-    // Get the anonymous name for socket emit and push notification
-    const updatedMembership = await db.chat_group_members.findUnique({
-      where: {
-        chat_group_id_user_id: {
-          chat_group_id: chatGroup.id,
-          user_id: authUser.userId,
+    // Get the anonymous name for socket emit and push notification, and who
+    // they are for the recipients whose roster would name them.
+    const [updatedMembership, arriver] = await Promise.all([
+      db.chat_group_members.findUnique({
+        where: {
+          chat_group_id_user_id: {
+            chat_group_id: chatGroup.id,
+            user_id: authUser.userId,
+          },
         },
-      },
-      select: { anonymous_name: true },
-    })
+        select: { anonymous_name: true },
+      }),
+      db.user.findUnique({
+        where: { id: authUser.userId },
+        select: { name: true, profile: { select: { photos: true } } },
+      }),
+    ])
     const displayName = updatedMembership?.anonymous_name || "Someone"
 
     /*
@@ -541,12 +548,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     const blockedIds = await blockCounterparties(authUser.userId)
 
-    // Emit real-time check-in event (anonymous)
+    // Emit real-time check-in event: the pseudonym, except to whoever the
+    // roster lets recognise them (the emitter decides, per recipient).
     emitEventCheckIn(
       eventId,
       authUser.userId,
       displayName,
-      undefined,
+      { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
       blockedIds
     )
 
