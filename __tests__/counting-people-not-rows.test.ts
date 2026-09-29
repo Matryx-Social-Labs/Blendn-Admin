@@ -6,6 +6,7 @@ import {
   repeatAttendees,
   turnUpPct,
   noShowPct,
+  noShows,
   isAttendee,
 } from "@/lib/counting"
 
@@ -110,10 +111,24 @@ describe("turn-up and no-show", () => {
     expect(turnUpPct(620, 1000)).toBe(62)
   })
 
-  it("floors no-show at zero rather than going negative", () => {
-    // More walk-ins than RSVPs is zero no-shows plus some extra people, and
-    // those are different facts.
-    expect(noShowPct(130, 100)).toBe(0)
+  it("counts an RSVP with no check-in for that event as a no-show; a walk-in cancels nothing (SCRUM-467)", () => {
+    // Ten said they'd come and none did; ten others walked in. That is 100% no-show, not 0%.
+    const rsvps = Array.from({ length: 10 }, (_, i) => ({ user_id: `r${i}`, event_id: "e1" }))
+    const walkIns = Array.from({ length: 10 }, (_, i) => ({ user_id: `w${i}`, event_id: "e1" }))
+    const { total, byUser } = noShows(rsvps, walkIns)
+    expect(total).toBe(10)
+    expect(noShowPct(total, rsvps.length)).toBe(100)
+    expect(byUser.get("r0")).toBe(1)
+
+    // RSVP'd to A and B, skipped both, walked into C: two no-shows, not one.
+    const one = noShows(
+      [{ user_id: "u", event_id: "A" }, { user_id: "u", event_id: "B" }],
+      [{ user_id: "u", event_id: "C" }]
+    )
+    expect(one.total).toBe(2)
+
+    // Came to what they RSVP'd to, on any day of it: no no-show.
+    expect(noShows([{ user_id: "u", event_id: "A" }], [{ user_id: "u", event_id: "A" }, { user_id: "u", event_id: "A" }]).total).toBe(0)
   })
 
   it("returns null when nobody committed, rather than dividing by zero", () => {

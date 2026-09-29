@@ -1,3 +1,4 @@
+import { noShows } from "./counting"
 import type { user_role } from "@prisma/client"
 
 import { db } from "./db"
@@ -97,6 +98,9 @@ export async function attendeeRoster(role: user_role, userId: string): Promise<A
     rsvpByUser.set(rsvp.user_id, (rsvpByUser.get(rsvp.user_id) ?? 0) + 1)
   }
 
+  // Per (person, event): a walk-in cancels nothing (SCRUM-467).
+  const missed = noShows(rsvps, checkIns)
+
   const userIds = new Set([...attendedByUser.keys(), ...rsvpByUser.keys()])
   const rows: AttendeeRow[] = Array.from(userIds)
     .map((userId) => {
@@ -107,9 +111,7 @@ export async function attendeeRoster(role: user_role, userId: string): Promise<A
         id: attendeeLabel(userId, labelScope),
         attended: attendedCount,
         rsvps: rsvpCount,
-        // Floored at zero: walk-ins attend without an RSVP, so attended can
-        // legitimately exceed RSVPs and a negative no-show count is nonsense.
-        noShows: Math.max(0, rsvpCount - attendedCount),
+        noShows: missed.byUser.get(userId) ?? 0,
         lastAttendedAt: attended?.last?.toISOString() ?? null,
         repeat: attendedCount > 1,
       }
@@ -117,16 +119,11 @@ export async function attendeeRoster(role: user_role, userId: string): Promise<A
     .sort((a, b) => b.attended - a.attended || b.rsvps - a.rsvps)
 
   const totalCommitted = rsvps.length
-  // People, not rows. See the fold above.
-  const totalAttended = Array.from(attendedByUser.values()).reduce((n, a) => n + a.events.size, 0)
 
   return {
     rows,
     uniqueAttendees: attendedByUser.size,
     repeatCount: rows.filter((r) => r.repeat).length,
-    noShowPct:
-      totalCommitted === 0
-        ? null
-        : Math.max(0, 100 - (Math.min(totalAttended, totalCommitted) / totalCommitted) * 100),
+    noShowPct: totalCommitted === 0 ? null : (missed.total / totalCommitted) * 100,
   }
 }

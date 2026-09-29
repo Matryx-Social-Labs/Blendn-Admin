@@ -103,12 +103,32 @@ export function turnUpPct(attended: number, committed: number): number | null {
 }
 
 /**
- * No-show, as a percentage, or null when nobody committed.
+ * No-shows: RSVPs whose person never checked in to **that** event.
  *
- * Floored at zero because more walk-ins than RSVPs is not a negative no-show —
- * it is zero no-shows and some extra people, and those are different facts.
+ * Counted per (person, event), not netted as "committed minus attended". The
+ * subtraction let every walk-in cancel a real no-show: ten who RSVP'd and
+ * stayed home plus ten who walked in read 0%, and someone who skipped A and B
+ * and walked into C read one no-show, not two (SCRUM-467). A check-in on any
+ * day of the event counts; it's a set, so days don't matter.
  */
-export function noShowPct(attended: number, committed: number): number | null {
+export function noShows(
+  rsvps: Iterable<{ user_id: string; event_id: string }>,
+  attended: Iterable<{ user_id: string; event_id: string }>
+): { total: number; byUser: Map<string, number> } {
+  const came = new Set<string>()
+  for (const a of attended) came.add(`${a.user_id}|${a.event_id}`)
+  const byUser = new Map<string, number>()
+  let total = 0
+  for (const r of rsvps) {
+    if (came.has(`${r.user_id}|${r.event_id}`)) continue
+    byUser.set(r.user_id, (byUser.get(r.user_id) ?? 0) + 1)
+    total += 1
+  }
+  return { total, byUser }
+}
+
+/** No-shows as a percentage of committed RSVPs, or null when nobody committed. */
+export function noShowPct(noShowCount: number, committed: number): number | null {
   if (committed === 0) return null
-  return Math.max(0, Math.round(((committed - attended) / committed) * 100))
+  return Math.round((noShowCount / committed) * 100)
 }

@@ -7,7 +7,7 @@
 
 const mockDb = {
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },
-  placement_charges: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+  placement_charges: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
 }
 
 const mockAuth = jest.fn()
@@ -34,6 +34,7 @@ beforeEach(() => {
   })
   mockDb.placement_charges.findFirst.mockResolvedValue(null)
   mockDb.placement_charges.create.mockResolvedValue({ id: CHARGE })
+  mockDb.placement_charges.updateMany.mockResolvedValue({ count: 1 })
 })
 
 describe("who may touch money", () => {
@@ -121,7 +122,7 @@ describe("the status walk", () => {
     charge("draft")
     await advanceCharge(CHARGE, "agreed")
 
-    const data = mockDb.placement_charges.update.mock.calls[0][0].data
+    const data = mockDb.placement_charges.updateMany.mock.calls[0][0].data
     expect(data.status).toBe("agreed")
     // `agreed` is the moment it becomes a receivable. Collapsing it into `draft`
     // loses the difference between "we asked" and "they said yes".
@@ -131,7 +132,7 @@ describe("the status walk", () => {
   it("will not settle a charge nobody agreed to", async () => {
     charge("draft")
     await expect(advanceCharge(CHARGE, "settled", "NEFT-123")).rejects.toThrow(/cannot become/i)
-    expect(mockDb.placement_charges.update).not.toHaveBeenCalled()
+    expect(mockDb.placement_charges.updateMany).not.toHaveBeenCalled()
   })
 
   it("will not walk backwards", async () => {
@@ -146,14 +147,14 @@ describe("the status walk", () => {
     // this row exists to make checkable.
     await expect(advanceCharge(CHARGE, "settled")).rejects.toThrow(/reference/i)
     await expect(advanceCharge(CHARGE, "settled", "  ")).rejects.toThrow(/reference/i)
-    expect(mockDb.placement_charges.update).not.toHaveBeenCalled()
+    expect(mockDb.placement_charges.updateMany).not.toHaveBeenCalled()
   })
 
   it("settles with a reference", async () => {
     charge("agreed")
     await advanceCharge(CHARGE, "settled", "NEFT-99213")
 
-    const data = mockDb.placement_charges.update.mock.calls[0][0].data
+    const data = mockDb.placement_charges.updateMany.mock.calls[0][0].data
     expect(data.status).toBe("settled")
     expect(data.settled_at).toBeInstanceOf(Date)
     expect(data.external_ref).toBe("NEFT-99213")
@@ -165,14 +166,25 @@ describe("the status walk", () => {
       charge(from)
       // Money comes back sometimes. What must not happen is a settled charge
       // quietly becoming a draft again.
-      await advanceCharge(CHARGE, "void")
-      expect(mockDb.placement_charges.update.mock.calls[0][0].data.status).toBe("void")
+      // A void now carries its reason (SCRUM-173); the walk itself is unchanged.
+      await advanceCharge(CHARGE, "void", undefined, "duplicate invoice, re-raised")
+      expect(mockDb.placement_charges.updateMany.mock.calls[0][0].data.status).toBe("void")
     }
   })
 
   it("refuses to move an already-voided charge", async () => {
     charge("void")
     await expect(advanceCharge(CHARGE, "agreed")).rejects.toThrow(/voided/i)
+  })
+
+  it("writes only from the status it read, and audits nothing when that moved underneath", async () => {
+    charge("settled")
+    mockDb.placement_charges.updateMany.mockResolvedValue({ count: 0 })
+    const { auditLog } = jest.requireMock("@/lib/audit-log")
+
+    await expect(advanceCharge(CHARGE, "void", undefined, "duplicate invoice, re-raised")).rejects.toThrow(/someone else/i)
+    expect(mockDb.placement_charges.updateMany.mock.calls[0][0].where).toEqual({ id: CHARGE, status: "settled" })
+    expect(auditLog).not.toHaveBeenCalled()
   })
 })
 
@@ -207,13 +219,30 @@ describe("the ledger", () => {
     expect(ledger.placements[0].sends).toBe(4)
   })
 
-  it("ignores voided charges when reading the live one", async () => {
-    placements([base])
-    await getChargeLedger()
+  it("reads the live charge past voided ones, and keeps the voided ones as history", async () => {
+    // Behaviour, not query shape: the ledger now reads every charge and splits
+    // them, so a void stays visible on its placement (SCRUM-173). Newest first,
+    // as the query orders them.
+    placements([
+      {
+        ...base,
+        charges: [
+          { id: "live1", amount_minor: 90000, currency: "INR", status: "draft", agreed_at: null, settled_at: null, external_ref: null, created_at: new Date(), voided_at: null, voided_by: null, void_reason: null, pricer: null },
+          { id: "void2", amount_minor: 120000, currency: "INR", status: "void", agreed_at: null, settled_at: null, external_ref: "pricing note", created_at: new Date(), voided_at: new Date(), voided_by: null, void_reason: "typo in the fee", pricer: null },
+          { id: "void1", amount_minor: 150000, currency: "INR", status: "void", agreed_at: new Date(), settled_at: new Date(), external_ref: "NEFT-1", created_at: new Date(), voided_at: new Date(), voided_by: null, void_reason: "duplicate invoice", pricer: null },
+        ],
+      },
+    ])
+    const ledger = await getChargeLedger()
 
-    expect(mockDb.event_sponsors.findMany.mock.calls[0][0].select.charges.where.status).toEqual({
-      not: "void",
-    })
+    expect(ledger.placements[0].charge?.id).toBe("live1")
+    // A draft's `external_ref` is its pricing note, not a payment reference.
+    expect(ledger.placements[0].voided.map((v) => [v.id, v.fromStatus, v.externalRef])).toEqual([
+      ["void2", "draft", null],
+      ["void1", "settled", "NEFT-1"],
+    ])
+    // Money that was voided is not money settled.
+    expect(ledger.totals).toEqual([{ currency: "INR", settledMinor: 0, agreedMinor: 0 }])
   })
 
   it("totals per currency, never across them", async () => {
