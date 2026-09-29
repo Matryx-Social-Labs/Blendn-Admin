@@ -1304,6 +1304,12 @@
       "mutation": "M238 the un-cancel runs after syncOccurrences (the shipped order). M239 no un-cancel before the sync. M240 no capacity write. M241 capacity folded into the pre-sync write (a day the sync creates gets none).",
       "observed": "Red before the fix: 1 of 3 failing (the attended Saturday came back live). M238: that same 1 of 3. M239: 1 of 3 failing (a cancelled in-span day stayed cancelled). M240: 1 of 3 failing (capacity stayed 5). M241: 1 of 3 failing (the created Sunday had capacity null). All reverted.",
       "date": "2026-09-29"
+    },
+    "setup-rename-duplicates.itest.ts": {
+      "guards": "SCRUM-468: renameCategory refuses a sibling's name in any case (a category under another parent may share it; a row may change its own case); updateAmenity refuses another amenity's name in any case (its own case change allowed); createCategory refuses a name with no letter or digit, which slugged to \"\".",
+      "mutation": "M242 no category twin check. M243 the twin check across all parents. M244 the category matches itself. M245 no empty-slug refusal. M246 no amenity twin check. M247 the amenity matches itself.",
+      "observed": "Red before the fix: 3 of 6 failing (the sibling rename, the amenity rename, the \"!!\" create). M242–M247: each 1 of 6 failing. All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [
