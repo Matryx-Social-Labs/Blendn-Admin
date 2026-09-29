@@ -126,11 +126,12 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
       )}
 
       {/*
-        The chart takes the width until there are ratings to show beside it.
-        An organiser with no ratings yet used to get an empty dashed box for
-        40% of the top row, and the tile below already says "no ratings yet".
+        The chart takes the width until there are ratings to show beside it:
+        five or more, since fewer are withheld (SCRUM-437). An organiser with
+        none used to get an empty dashed box for 40% of the top row, and the
+        tile below already says why there is nothing.
       */}
-      <div className={data.ratingCount ? "grid gap-6 @3xl/main:grid-cols-[3fr_2fr]" : "grid gap-6"}>
+      <div className={data.averageRating !== null ? "grid gap-6 @3xl/main:grid-cols-[3fr_2fr]" : "grid gap-6"}>
         <PacingChart
           points={data.pacing}
           capacity={data.pacingCapacity}
@@ -138,7 +139,7 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
           windowDays={data.pacing.length ? data.pacing[0].daysOut : 21}
           empty={!nextEvent || data.pacing.every((p) => p.cumulative === 0)}
         />
-        {data.ratingCount ? (
+        {data.averageRating !== null ? (
           <div className="flex flex-col gap-3">
             <SectionTitle hint={`avg ${data.averageRating}`}>Ratings</SectionTitle>
             <RatingBars counts={data.ratings} />
@@ -164,7 +165,13 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
         <MetricTile
           label="Avg rating"
           value={data.averageRating}
-          hint={data.ratingCount ? `${formatNumber(data.ratingCount)} ratings` : "no ratings yet"}
+          hint={
+            data.ratingCount === 0
+              ? "no ratings yet"
+              : data.averageRating === null
+                ? "not enough ratings yet"
+                : `${formatNumber(data.ratingCount)} ratings`
+          }
         />
         <MetricTile
           label="Chat today"
