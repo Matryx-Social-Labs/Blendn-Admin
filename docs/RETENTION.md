@@ -72,7 +72,9 @@ deletes their account:
   kept images go at 180 days, with the registration record: the retention
   sweep erases everything left under `chat/<id>/` before it purges the record,
   and keeps a record whose images it could not erase for the next pass
-  (SCRUM-429). Images sent since SCRUM-427 are in the private bucket and served
+  (SCRUM-429). At 180 days they go whatever is still open on them: a report
+  nobody has reviewed, or a flag nobody cleared, loses its image then. Nothing
+  in the product records a legal hold that would stop it. Images sent since SCRUM-427 are in the private bucket and served
   only through signed URLs. Known gaps: images from before SCRUM-427 that are
   kept stay in the public bucket until then, and a report filed after the
   deletion finds the image already gone.

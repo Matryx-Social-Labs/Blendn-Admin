@@ -9,7 +9,8 @@ import { NextRequest } from "next/server"
  * it back with a failed one, and that the purge takes exactly the expired.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
-jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0), isConfigured: () => true }))
+const mockStorageConfigured = jest.fn(() => true)
+jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0), isConfigured: () => mockStorageConfigured() }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { purgeDeletedAccountRecords, recordDeletedAccount } from "@/lib/deleted-account-records"
@@ -200,7 +201,8 @@ it("erases what is left of the person's chat media with their record, and keeps 
   const mocked = deletePrefix as jest.Mock
   mocked.mockReset()
   mocked.mockImplementation(async (prefix: string) => {
-    if (prefix === `chat/${stuck}/`) throw new Error("storage down")
+    // deletePrefix throws when anything under the prefix was left (a refusal or a timeout).
+    if (prefix === `chat/${stuck}/`) throw new Error("deletePrefix: 1 object(s) under chat/ not deleted")
     return 2
   })
 
@@ -208,6 +210,8 @@ it("erases what is left of the person's chat media with their record, and keeps 
   await purgeDeletedAccountRecords(now)
   // Everything under the prefix: the 180 days were the only reason to keep any of it.
   expect(mocked).toHaveBeenCalledWith(`chat/${erased}/`)
+  // And profile/, whose erasure at deletion is never retried otherwise.
+  expect(mocked).toHaveBeenCalledWith(`profile/${erased}/`)
   const left = await db.deleted_account_records.findMany({ where: { user_id: { in: [erased, stuck] } }, select: { user_id: true } })
   expect(left.map((r) => r.user_id)).toEqual([stuck])
 
@@ -215,4 +219,23 @@ it("erases what is left of the person's chat media with their record, and keeps 
   mocked.mockResolvedValue(0)
   await purgeDeletedAccountRecords(now)
   expect(await db.deleted_account_records.count({ where: { user_id: { in: [erased, stuck] } } })).toBe(0)
+})
+
+it("keeps every due record when storage is not configured: the erasure cannot be done, and the record is the pointer", async () => {
+  const now = new Date()
+  const user_id = await makeUser("purge-no-storage")
+  users.push(user_id)
+  await db.deleted_account_records.create({
+    data: {
+      user_id,
+      email: `${user_id}@itest.invalid`,
+      account_created_at: new Date("1999-01-01T00:00:00Z"),
+      deleted_at: new Date(now.getTime() - 181 * DAY_MS),
+      sign_up_method: "email",
+      purge_after: new Date(now.getTime() - DAY_MS),
+    },
+  })
+  mockStorageConfigured.mockReturnValueOnce(false)
+  expect(await purgeDeletedAccountRecords(now)).toBe(0)
+  expect(await db.deleted_account_records.count({ where: { user_id } })).toBe(1)
 })

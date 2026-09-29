@@ -79,11 +79,28 @@ export async function purgeDeletedAccountRecords(now: Date = new Date()): Promis
     where: { purge_after: { lt: now } },
     select: { id: true, user_id: true },
   })
+  if (due.length === 0) return 0
+  /*
+   * Storage unset means the erasure cannot be done or checked. Keep the records
+   * and say so: a deployment that lost its TIGRIS_* variables would otherwise
+   * drop every pointer with the media still in the bucket.
+   */
+  if (!isConfigured()) {
+    logger.error("Deleted-account purge: storage not configured; records kept until their media can be erased", { due: due.length })
+    return 0
+  }
   const erased: string[] = []
   for (const record of due) {
     try {
-      // No storage configured means nothing was ever stored there to erase.
-      if (isConfigured()) await deletePrefix(`chat/${record.user_id}/`)
+      /*
+       * `profile/` as well: deletion erases it at once, but a failure there was
+       * logged and never retried. The guard is for a hand-written row: an
+       * empty id would make the prefix every person's.
+       */
+      if (record.user_id) {
+        await deletePrefix(`chat/${record.user_id}/`)
+        await deletePrefix(`profile/${record.user_id}/`)
+      }
       erased.push(record.id)
     } catch (error) {
       logger.error("Deleted-account purge: chat media NOT erased; record kept for the next sweep", {
