@@ -100,6 +100,18 @@ const sealed = (userId: string) =>
 /** An upload URL whose object never arrived. */
 const unfinished = (userId: string) => upload(userId).replace("-photo.jpg", "-missing.jpg")
 
+/**
+ * The route records an inline "clean" after it answers (`void db…update`), so a
+ * read straight after the 201 can land first. Wait for the verdict, bounded.
+ */
+async function statusAfterSend(id: string, want: string) {
+  for (let i = 0; ; i++) {
+    const { moderation_status } = await db.chat_messages.findUniqueOrThrow({ where: { id }, select: { moderation_status: true } })
+    if (moderation_status === want || i === 40) return moderation_status
+    await new Promise((r) => setTimeout(r, 25))
+  }
+}
+
 async function liveRoom() {
   const owner = await makeUser(testId("mm_own"), "organizer")
   users.push(owner)
@@ -246,7 +258,7 @@ describe("a room message's metadata comes from the client only as its own media"
       const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "hi" } })
       // The type is the client's word; the image is what the room sees.
       expect(moderateMessage).toHaveBeenCalledWith(row.id, "hi", "text", r.memberId, r.groupId, sealed(r.memberId))
-      expect(row.moderation_status).not.toBe("clean")
+      expect(await statusAfterSend(row.id, "clean")).not.toBe("clean")
     })
 
     it(`still checks the caption before the emit when there is media, on the ${name} (SCRUM-444)`, async () => {
@@ -264,7 +276,7 @@ describe("a room message's metadata comes from the client only as its own media"
       mockCheckText.mockResolvedValueOnce({ checked: true, result: null })
       expect((await send(r, { content: "just words", type: "text" })).status).toBe(201)
       const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "just words" } })
-      expect(row.moderation_status).toBe("clean")
+      expect(await statusAfterSend(row.id, "clean")).toBe("clean")
       expect(moderateMessage).not.toHaveBeenCalled()
     })
 
