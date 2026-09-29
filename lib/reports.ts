@@ -63,7 +63,13 @@ export const REPORTS: ReportDef[] = [
     key: "ratings",
     label: "Ratings",
     description: "Every rating left in the window, with the event it belongs to.",
-    roles: ["app_admin", "organizer", "venue_owner"],
+    /*
+     * The platform's alone. The app tells a rater the night's score is "only
+     * ever seen by us", and a row per score with the second it was given names
+     * the rater at a small event; unlike an average it cannot be withheld in
+     * part. Hosts see the average on each event from five raters (SCRUM-437).
+     */
+    roles: ["app_admin"],
   },
   {
     key: "organisations",

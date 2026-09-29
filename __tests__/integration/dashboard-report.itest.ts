@@ -218,7 +218,26 @@ describe("organiser overview", () => {
     users.push(owner)
     const event = await makeScheduledEvent(owner, { startsInDays: -2 })
 
-    const raters = await Promise.all([makeUser("ovw_r1"), makeUser("ovw_r2")])
+    // Five: the fewest the overview will show (SCRUM-437).
+    const raters = await Promise.all([1, 2, 3, 4, 5].map((n) => makeUser(`ovw_r${n}`)))
+    users.push(...raters)
+    await db.event_ratings.createMany({
+      data: [5, 1, 5, 1, 3].map((rating, i) => ({ event_id: event, user_id: raters[i], rating })),
+    })
+
+    const overview = (as("organizer", owner), await getDashboardOverview())
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+
+    // The mean is 3.0, which describes none of the raters.
+    expect(overview.averageRating).toBe(3)
+    expect(overview.ratings).toEqual([2, 0, 1, 0, 2])
+  })
+
+  it("withholds the average and the spread under five raters: two ratings are each other's (SCRUM-437)", async () => {
+    const owner = await makeUser("ovw_rating_few", "organizer")
+    users.push(owner)
+    const event = await makeScheduledEvent(owner, { startsInDays: -2 })
+    const raters = await Promise.all([makeUser("ovw_f1"), makeUser("ovw_f2")])
     users.push(...raters)
     await db.event_ratings.createMany({
       data: [
@@ -230,11 +249,10 @@ describe("organiser overview", () => {
     const overview = (as("organizer", owner), await getDashboardOverview())
     if (overview.role !== "organizer") throw new Error("wrong overview role")
 
-    // The mean is 3.0, which describes neither rater.
-    expect(overview.averageRating).toBe(3)
-    expect(overview.ratings[4]).toBe(1)
-    expect(overview.ratings[0]).toBe(1)
-    expect(overview.ratings[2]).toBe(0)
+    // Either rater could subtract their own score from 3.0 x 2 and read the other's.
+    expect(overview.averageRating).toBeNull()
+    expect(overview.ratings).toEqual([0, 0, 0, 0, 0])
+    expect(overview.ratingCount).toBe(2)
   })
 })
 
@@ -254,6 +272,25 @@ describe("venue owner overview", () => {
     const byName = Object.fromEntries(overview.venues.map((v) => [v.name, v.eventsInWindow]))
     expect(byName["Rooftop"]).toBe(2)
     expect(byName["Basement"]).toBe(1)
+  })
+
+  it("withholds a venue's rating under five raters, and says nothing about it skewing low (SCRUM-437)", async () => {
+    const owner = await makeUser("ovw_venue_rating", "organizer")
+    users.push(owner)
+    await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
+    const event = await makeScheduledEvent(owner, { startsInDays: -3, venue: "Snug" })
+    const rater = await makeUser("ovw_venue_r1")
+    users.push(rater)
+    await db.event_ratings.create({ data: { event_id: event, user_id: rater, rating: 1 } })
+
+    const overview = (as("venue_owner", owner), await getDashboardOverview())
+    if (overview.role !== "venue_owner") throw new Error("wrong overview role")
+
+    const snug = overview.venues.find((v) => v.name === "Snug")
+    expect(snug?.averageRating).toBeNull()
+    expect(snug?.ratings).toEqual([0, 0, 0, 0, 0])
+    expect(snug?.note).not.toBe("ratings skew low")
+    expect(snug?.tone).not.toBe("destructive")
   })
 
   it("fills the utilisation grid from event start times", async () => {

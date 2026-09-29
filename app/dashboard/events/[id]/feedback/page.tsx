@@ -43,7 +43,7 @@ export default async function FeedbackPage({
   const window = digest.windowOpen
     ? `feedback window closes in ${hoursUntil(digest.windowClosesAt)}h`
     : "feedback window closed"
-  const ratingCount = Object.values(digest.ratings).reduce((a, b) => a + b, 0)
+  const { ratingCount } = digest
 
   return (
     <div className="flex flex-col gap-5">
@@ -156,13 +156,23 @@ export default async function FeedbackPage({
                   <div className="flex items-baseline justify-between gap-2">
                     <SectionTitle>Stars</SectionTitle>
                     <span className="text-[0.75rem] text-faint-foreground">
-                      {digest.averageRating} · {ratingCount} rating{ratingCount === 1 ? "" : "s"}
+                      {digest.averageRating === null ? "" : `${digest.averageRating} · `}
+                      {ratingCount} rating{ratingCount === 1 ? "" : "s"}
                     </span>
                   </div>
-                  <RatingBars counts={digest.ratings} />
-                  <p className="text-[0.75rem] text-faint-foreground">
-                    Stars say how much; the messages say what.
-                  </p>
+                  {/* Withheld under five raters: each score is somebody's (SCRUM-437). */}
+                  {digest.averageRating === null ? (
+                    <p className="text-[0.8125rem] text-muted-foreground">
+                      Not enough ratings yet.
+                    </p>
+                  ) : (
+                    <>
+                      <RatingBars counts={digest.ratings} />
+                      <p className="text-[0.75rem] text-faint-foreground">
+                        Stars say how much; the messages say what.
+                      </p>
+                    </>
+                  )}
                 </section>
               ) : null}
             </div>

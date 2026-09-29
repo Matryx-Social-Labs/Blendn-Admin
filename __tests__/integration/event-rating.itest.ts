@@ -18,6 +18,10 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, tes
 const ratingRoute = require("@/app/api/mobile/events/[eventId]/rating/route") as
   typeof import("@/app/api/mobile/events/[eventId]/rating/route")
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const eventRoute = require("@/app/api/mobile/events/[eventId]/route") as
+  typeof import("@/app/api/mobile/events/[eventId]/route")
+
 const users: string[] = []
 const events: string[] = []
 const HOUR = 60 * 60 * 1000
@@ -44,6 +48,15 @@ const rate = (token: string, eventId: string, body: unknown) =>
     }),
     { params: Promise.resolve({ eventId }) }
   )
+
+const detail = async (token: string, eventId: string) => {
+  const res = await eventRoute.GET(
+    new NextRequest(`http://localhost/api/mobile/events/${eventId}`, { headers: { authorization: `Bearer ${token}` } }),
+    { params: Promise.resolve({ eventId }) }
+  )
+  expect(res.status).toBe(200)
+  return (await res.json()).data as { stats: { averageRating: number | null; ratingCount: number } }
+}
 
 describe("rating an event", () => {
   let host: string
@@ -76,13 +89,30 @@ describe("rating an event", () => {
 
     const res = await rate(fan.token, eventId, { rating: 4, review: "long bar queue" })
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ data: { eventStats: { averageRating: 4, ratingCount: 1 } } })
+    // One rating is this person's score: the average is withheld until five (SCRUM-437).
+    expect(await res.json()).toMatchObject({ data: { eventStats: { averageRating: null, ratingCount: 1 } } })
 
     // Rating again edits the one row rather than adding a second.
     const again = await rate(fan.token, eventId, { rating: 5 })
     expect(again.status).toBe(200)
     const rows = await db.event_ratings.findMany({ where: { event_id: eventId, user_id: fan.id } })
     expect(rows.map((r) => r.rating)).toEqual([5])
+  })
+
+  it("shows the average from the fifth rating, on the rating reply and the event page (SCRUM-437)", async () => {
+    const eventId = await eventEnded(2)
+    const occurrenceId = await occurrenceOf(eventId)
+    const fans = await Promise.all([1, 2, 3, 4, 5].map((n) => person(`rate-crowd${n}`)))
+    for (const fan of fans) await putInRoom({ eventId, occurrenceId, userId: fan.id })
+
+    // Four in: a rater who knows their own score could still work out the rest.
+    for (const [i, fan] of fans.slice(0, 4).entries()) await rate(fan.token, eventId, { rating: [5, 4, 4, 3][i] })
+    const four = await detail(fans[0].token, eventId)
+    expect(four.stats).toMatchObject({ averageRating: null, ratingCount: 4 })
+
+    const fifth = await rate(fans[4].token, eventId, { rating: 5 })
+    expect(await fifth.json()).toMatchObject({ data: { eventStats: { averageRating: 4.2, ratingCount: 5 } } })
+    expect((await detail(fans[0].token, eventId)).stats).toMatchObject({ averageRating: 4.2, ratingCount: 5 })
   })
 
   it("refuses someone who never checked in", async () => {

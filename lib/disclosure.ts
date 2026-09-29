@@ -134,6 +134,23 @@ export function discloseFigure(input: DiscloseInput): Disclosure {
 }
 
 /**
+ * A night's star rating, its average or its spread, or null below the
+ * minimum cell (SCRUM-437).
+ *
+ * The app tells everyone who rates the night that it is "only ever seen by
+ * us". An average of one rating is that person's score, printed beside a head
+ * count of who came; an average of two lets either rater subtract their own
+ * and read the other's. So every surface outside the database reads a rating
+ * through here, and shows nothing until `MIN_CELL` people have rated.
+ *
+ * ponytail: the floor only. Five ratings in one bar still say what each of the
+ * five gave; hold that back too if an event's raters are ever its whole room.
+ */
+export function discloseRating<T>(figure: T, raters: number): T | null {
+  return raters < MIN_CELL ? null : figure
+}
+
+/**
  * May this *text* be shown, attributed to a pseudonym?
  *
  * Stricter than a count, and the register's sharpest finding is why: the

@@ -8,7 +8,7 @@ import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { chatClosesAt } from "@/lib/chat-window"
-import { discloseFigure, mayQuote, type SuppressionReason } from "@/lib/disclosure"
+import { discloseFigure, discloseRating, mayQuote, type SuppressionReason } from "@/lib/disclosure"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { escalates } from "@/lib/sentiment/taxonomy"
@@ -52,8 +52,10 @@ export interface FeedbackDigest {
     suppressed: boolean
     suppressionReason: SuppressionReason | null
   }>
+  /** All zero, and the average null, until `MIN_CELL` people have rated. */
   ratings: [number, number, number, number, number]
   averageRating: number | null
+  ratingCount: number
   messages: FeedbackMessage[]
 }
 
@@ -182,11 +184,13 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
         }
       })
       .sort((a, b) => (b.count ?? 0) - (a.count ?? 0)),
-    ratings,
-    averageRating:
-      event.ratings.length === 0
-        ? null
-        : Math.round((ratingTotal / event.ratings.length) * 10) / 10,
+    // The stars too: under five raters they are individual scores (SCRUM-437).
+    ratings: discloseRating(ratings, event.ratings.length) ?? [0, 0, 0, 0, 0],
+    averageRating: discloseRating(
+      Math.round((ratingTotal / event.ratings.length) * 10) / 10,
+      event.ratings.length
+    ),
+    ratingCount: event.ratings.length,
     /*
      * The sharpest finding in the audit, and the one this module was written
      * for.

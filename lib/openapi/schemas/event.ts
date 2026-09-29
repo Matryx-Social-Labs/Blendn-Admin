@@ -351,7 +351,10 @@ export const RatingResponseSchema = z
       updatedAt: z.string().datetime(),
     }),
     eventStats: z.object({
-      averageRating: z.number(),
+      averageRating: z
+        .number()
+        .nullable()
+        .openapi({ description: "null until 5 people have rated: a smaller average gives away scores (SCRUM-437)." }),
       ratingCount: z.number(),
     }),
     message: z.string(),

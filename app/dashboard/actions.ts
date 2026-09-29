@@ -13,6 +13,7 @@ import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
+import { discloseRating } from "@/lib/disclosure"
 import { actorFor } from "@/lib/org-membership"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
@@ -304,12 +305,13 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
     pacing,
     pacingCapacity,
     benchmark,
-    ratings: toRatingCounts(ratingSpread),
+    // Withheld under five raters, like every rating a host sees (SCRUM-437).
+    ratings: discloseRating(toRatingCounts(ratingSpread), ratingAggregate._count.rating) ?? emptyRatings(),
     noShowRatePct: round1(noShowNow),
     noShowDelta:
       noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
     repeatAttendees: repeatAttendees(repeatRows),
-    averageRating: round1(ratingAggregate._avg.rating),
+    averageRating: discloseRating(round1(ratingAggregate._avg.rating), ratingAggregate._count.rating),
     ratingCount: ratingAggregate._count.rating,
     chatToday,
     events: eventRows.map((event) => ({
@@ -796,7 +798,9 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
           ratingCount += 1
         }
       }
-      const averageRating = ratingCount === 0 ? null : ratingTotal / ratingCount
+      // Withheld under five raters. The tone and note read it too, so "ratings
+      // skew low" cannot say what one person gave (SCRUM-437).
+      const averageRating = discloseRating(ratingTotal / ratingCount, ratingCount)
       const next = venueEvents.find((e) => e.start_time >= now && e.status === "published")
       const nightsPerWeek = inWindow.length / WINDOW_WEEKS
 
@@ -816,7 +820,7 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
         eventsInWindow: inWindow.length,
         nightsPerWeek: Math.round(nightsPerWeek * 10) / 10,
         averageRating: round1(averageRating),
-        ratings,
+        ratings: averageRating === null ? emptyRatings() : ratings,
         nextBooking: next
           ? {
               id: next.id,

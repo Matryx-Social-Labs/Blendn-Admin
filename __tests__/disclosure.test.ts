@@ -1,6 +1,7 @@
 import {
   discloseBreakdown,
   discloseFigure,
+  discloseRating,
   MIN_CELL,
   suppressedLabel,
 } from "@/lib/disclosure"
@@ -170,5 +171,13 @@ describe("the property that matters: nothing is recoverable", () => {
         }
       }
     }
+  })
+})
+
+describe("SCRUM-437 — a night's rating", () => {
+  it("is withheld until MIN_CELL people have rated: one rating is somebody's score", () => {
+    expect(discloseRating(4, 1)).toBeNull()
+    expect(discloseRating([0, 0, 0, 1, 1], MIN_CELL - 1)).toBeNull()
+    expect(discloseRating(4.2, MIN_CELL)).toBe(4.2)
   })
 })
