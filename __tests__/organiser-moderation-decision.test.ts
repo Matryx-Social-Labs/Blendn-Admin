@@ -24,19 +24,23 @@ jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn() } }))
 
 import { PATCH } from "@/app/api/events/[id]/chat/moderation/[flagId]/route"
 
+// Real ids are uuids, and the route refuses one that is not before it looks (SCRUM-430).
+const E1 = "00000000-0000-4000-8000-0000000000e1"
+const F1 = "00000000-0000-4000-8000-0000000000f1"
+
 function req(action: "approve" | "reject") {
-  return new Request("http://x/api/events/e1/chat/moderation/f1", {
+  return new Request(`http://x/api/events/${E1}/chat/moderation/${F1}`, {
     method: "PATCH",
     body: JSON.stringify({ action }),
     headers: { "content-type": "application/json" },
   }) as never
 }
-const params = Promise.resolve({ id: "e1", flagId: "f1" })
+const params = Promise.resolve({ id: E1, flagId: F1 })
 
 beforeEach(() => {
   jest.clearAllMocks()
   mockDb.events.findUnique.mockResolvedValue({
-    id: "e1", organizer_org_id: "org1", venue: null, chat_group: { id: "g1" },
+    id: E1, organizer_org_id: "org1", venue: null, chat_group: { id: "g1" },
   })
 })
 
@@ -48,7 +52,7 @@ function messageWrite() {
 describe("PATCH /api/events/[id]/chat/moderation/[flagId]", () => {
   it("reject hides a message that was never auto-hidden", async () => {
     mockDb.moderation_flags.findFirst.mockResolvedValue({
-      id: "f1", message_id: "m1", status: "pending", user_id: "u9", message: { deleted_at: null },
+      id: F1, message_id: "m1", status: "pending", user_id: "u9", message: { deleted_at: null },
     })
     const res = await PATCH(req("reject"), { params })
     expect(res.status).toBe(200)
@@ -56,13 +60,13 @@ describe("PATCH /api/events/[id]/chat/moderation/[flagId]", () => {
     expect(messageWrite().deleted_at).toBeInstanceOf(Date)
     // And the phones that have the room open are told, as auto-hide does.
     // With the event it already verified, so the emitter mints handles without a lookup.
-    expect(emitChatMessageHidden).toHaveBeenCalledWith("g1", "m1", "u9", "e1")
+    expect(emitChatMessageHidden).toHaveBeenCalledWith("g1", "m1", "u9", E1)
   })
 
   it("reject keeps the original deleted_at on a message that was already hidden", async () => {
     const hiddenAt = new Date("2026-09-01T00:00:00Z")
     mockDb.moderation_flags.findFirst.mockResolvedValue({
-      id: "f1", message_id: "m1", status: "pending", message: { deleted_at: hiddenAt },
+      id: F1, message_id: "m1", status: "pending", message: { deleted_at: hiddenAt },
     })
     await PATCH(req("reject"), { params })
     expect(messageWrite()).toEqual({ moderation_status: "hidden" })
@@ -70,13 +74,13 @@ describe("PATCH /api/events/[id]/chat/moderation/[flagId]", () => {
 
   it("approve restores, and both branches leave an audit row", async () => {
     mockDb.moderation_flags.findFirst.mockResolvedValue({
-      id: "f1", message_id: "m1", status: "pending", message: { deleted_at: new Date() },
+      id: F1, message_id: "m1", status: "pending", message: { deleted_at: new Date() },
     })
     await PATCH(req("approve"), { params })
     expect(messageWrite()).toEqual({ moderation_status: "clean", deleted_at: null })
     expect(emitChatMessageHidden).not.toHaveBeenCalled()
     expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "arjun", action: "moderation.flag_approved", resource: "moderation_flag", resourceId: "f1",
+      userId: "arjun", action: "moderation.flag_approved", resource: "moderation_flag", resourceId: F1,
     }))
 
     await PATCH(req("reject"), { params })

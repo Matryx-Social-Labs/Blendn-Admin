@@ -8,7 +8,9 @@ import {
   successResponse,
   unauthorizedResponse,
   serverErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -17,6 +19,7 @@ interface RouteParams {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)

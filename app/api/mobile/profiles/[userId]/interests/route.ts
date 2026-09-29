@@ -17,6 +17,7 @@ import {
 } from "@/lib/api-response"
 import { addInterestsSchema, removeInterestsSchema } from "@/lib/validations/profile"
 import { MAX_INTERESTS, PAGINATION } from "@/lib/constants"
+import { readJson } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -97,7 +98,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Cannot update another user's interests")
     }
 
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate input
     const parsed = addInterestsSchema.safeParse(body)
@@ -217,7 +218,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Cannot update another user's interests")
     }
 
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate input
     const parsed = removeInterestsSchema.safeParse(body)

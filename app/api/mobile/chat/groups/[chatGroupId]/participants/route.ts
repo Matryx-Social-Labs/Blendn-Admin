@@ -14,6 +14,8 @@ import {
   serverErrorResponse,
   ErrorCode,
 } from "@/lib/api-response"
+import { isUuid } from "@/lib/api-input"
+import { boundedInt } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ chatGroupId: string }>
@@ -28,17 +30,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { chatGroupId } = await params
 
-    // Validate chatGroupId is a valid UUID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(chatGroupId)) {
+    if (!isUuid(chatGroupId)) {
       return errorResponse("Invalid chat group ID format", 400)
     }
 
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
-    const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100)
-    const offset = parseInt(searchParams.get("offset") || "0")
+    const limit = boundedInt(searchParams.get("limit"), 50, 1, 100)
+    const offset = boundedInt(searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER)
 
     // Check if chat group exists
     const chatGroup = await db.chat_groups.findUnique({

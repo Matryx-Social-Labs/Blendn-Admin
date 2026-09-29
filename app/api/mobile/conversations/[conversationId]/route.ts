@@ -12,7 +12,9 @@ import {
   forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>
@@ -22,6 +24,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
+    if (!isUuid(conversationId)) return errorResponse("Invalid conversation ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
@@ -114,6 +117,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
+    if (!isUuid(conversationId)) return errorResponse("Invalid conversation ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {

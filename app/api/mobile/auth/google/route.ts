@@ -22,6 +22,7 @@ import {
 } from "@/lib/api-response"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { normalizeLocationToCity } from "@/lib/location"
+import { readJson } from "@/lib/api-input"
 
 const googleAuthSchema = z.object({
   idToken: z.string().min(1, "ID token is required"),
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate request body
     const validation = googleAuthSchema.safeParse(body)

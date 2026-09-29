@@ -5,10 +5,13 @@ import {
   serverErrorResponse,
   successResponse,
   unauthorizedResponse,
+  errorResponse,
 } from "@/lib/api-response"
 import { logger } from "@/lib/logger"
 import { matchesForEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { isUuid } from "@/lib/api-input"
+import { boundedInt } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -28,14 +31,12 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
-    const limit = Math.min(
-      Math.max(Number(request.nextUrl.searchParams.get("limit") ?? 50), 1),
-      100
-    )
+    const limit = boundedInt(request.nextUrl.searchParams.get("limit"), 50, 1, 100)
 
     const matches = await matchesForEvent(eventId, authUser.userId, limit)
     if (matches === null) {

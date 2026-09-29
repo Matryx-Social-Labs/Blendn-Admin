@@ -21,6 +21,7 @@ import {
   forbiddenResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
+import { readJson } from "@/lib/api-input"
 
 const createConversationSchema = z.object({
   otherUserId: z.string().min(1, "Other user ID is required"),
@@ -203,7 +204,7 @@ export async function POST(request: NextRequest) {
     const unfinished = await participationRefusal(authUser.userId)
     if (unfinished) return forbiddenResponse(unfinished)
 
-    const body = await request.json()
+    const body = await readJson(request)
     const parsed = createConversationSchema.safeParse(body)
 
     if (!parsed.success) {

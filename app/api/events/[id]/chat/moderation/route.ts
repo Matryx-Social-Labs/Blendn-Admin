@@ -4,6 +4,9 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
+import { isUuid } from "@/lib/api-input"
+import { errorResponse } from "@/lib/api-response"
+import { boundedInt } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -21,6 +24,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { id: eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get event with chat group
     const event = await db.events.findUnique({
@@ -58,8 +62,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get("status") || "pending"
-    const page = Math.max(1, parseInt(searchParams.get("page") || "1"))
-    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "20")))
+    if (!["pending", "approved", "rejected", "all"].includes(status)) {
+      return NextResponse.json({ error: "Invalid status" }, { status: 400 })
+    }
+    const page = boundedInt(searchParams.get("page"), 1, 1, Number.MAX_SAFE_INTEGER)
+    const limit = boundedInt(searchParams.get("limit"), 20, 1, 50)
 
     const where = {
       chat_group_id: event.chat_group.id,

@@ -18,6 +18,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { announceRoomMatch } from "@/lib/room-match"
 import { roomMemberFromRef } from "@/lib/room-handle"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -44,6 +45,7 @@ const likeSchema = z.object({ userId: z.string().min(1) })
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
@@ -51,7 +53,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "event-like", authUser.userId))
     if (limited) return limited
 
-    const parsed = likeSchema.safeParse(await request.json())
+    const parsed = likeSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     // Only the handle this room's deck showed you, or your own id (refused
     // just below). Anything else — a raw id, another room's handle, a forged

@@ -1,7 +1,7 @@
 import type { lead_status, lead_type, Prisma } from "@prisma/client"
 
 import { db } from "@/lib/db"
-import { OPEN_LEAD_STATUSES } from "@/lib/leads"
+import { CLOSED_LEAD_STATUSES, OPEN_LEAD_STATUSES } from "@/lib/leads"
 
 /**
  * Reading the lead inbox.
@@ -40,9 +40,16 @@ function whereFor(f: LeadFilters): Prisma.leadsWhereInput {
   const where: Prisma.leadsWhereInput = {}
 
   if (f.status && f.status !== "all") {
-    // "open" is the useful default view: work, not history.
+    // "open" is the useful default view: work, not history. A status no lead
+    // can have matches none, rather than reaching Postgres as an enum value it
+    // refuses (a 500 on `?status=nope`, SCRUM-430).
+    const known: readonly string[] = [...OPEN_LEAD_STATUSES, ...CLOSED_LEAD_STATUSES]
     where.status =
-      f.status === "open" ? { in: [...OPEN_LEAD_STATUSES] } : { equals: f.status }
+      f.status === "open"
+        ? { in: [...OPEN_LEAD_STATUSES] }
+        : known.includes(f.status)
+          ? { equals: f.status }
+          : { in: [] }
   }
   if (f.type) where.type = f.type
   if (f.assignedTo === "unassigned") where.assigned_to = null

@@ -5,11 +5,13 @@ import {
   serverErrorResponse,
   successResponse,
   unauthorizedResponse,
+  errorResponse,
 } from "@/lib/api-response"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string; postId: string }>
@@ -32,6 +34,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     const { eventId, postId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(postId)) return errorResponse("Invalid post ID format", 400)
     const now = new Date()
     const { count } = await db.board_posts.updateMany({
       where: { id: postId, event_id: eventId, author_id: user.userId, deleted_at: null },

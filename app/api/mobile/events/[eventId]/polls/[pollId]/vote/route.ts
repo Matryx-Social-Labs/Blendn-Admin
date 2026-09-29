@@ -13,6 +13,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { castVote, getPollResults } from "@/lib/polls"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string; pollId: string }>
@@ -30,6 +31,8 @@ const voteSchema = z.object({ optionId: z.string().uuid() })
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId, pollId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(pollId)) return errorResponse("Invalid poll ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
@@ -37,7 +40,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "poll-vote", authUser.userId))
     if (limited) return limited
 
-    const parsed = voteSchema.safeParse(await request.json())
+    const parsed = voteSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
     await castVote(pollId, parsed.data.optionId, authUser.userId, eventId)

@@ -11,6 +11,7 @@ import {
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { isUuid } from "@/lib/api-input"
 
 export async function POST(
   request: NextRequest,
@@ -27,9 +28,7 @@ export async function POST(
 
     const { eventId } = await params
 
-    // Validate eventId is a valid UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(eventId)) {
+    if (!isUuid(eventId)) {
       return errorResponse("Invalid event ID format", 400)
     }
 
@@ -98,9 +97,7 @@ export async function GET(
 
     const { eventId } = await params
 
-    // Validate eventId is a valid UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(eventId)) {
+    if (!isUuid(eventId)) {
       return errorResponse("Invalid event ID format", 400)
     }
 

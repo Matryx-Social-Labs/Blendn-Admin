@@ -21,7 +21,9 @@ import {
   notFoundResponse,
   conflictResponse,
   serverErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ requestId: string }>
@@ -67,8 +69,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     const { requestId } = await params
+    if (!isUuid(requestId)) return errorResponse("Invalid request ID format", 400)
 
-    const validation = decisionSchema.safeParse(await request.json())
+    const validation = decisionSchema.safeParse(await readJson(request))
     if (!validation.success) return validationErrorResponse(validation.error)
     const { action } = validation.data
 

@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { hashInviteToken } from "@/lib/org-invites"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
+import { readJson } from "@/lib/api-input"
 
 /**
  * Confirm an applicant's email address.
@@ -28,8 +29,8 @@ export async function POST(req: NextRequest) {
   if (limited) return limited
 
   try {
-    const { token } = (await req.json()) as { token?: string }
-    if (!token) {
+    const { token } = ((await readJson(req)) ?? {}) as { token?: unknown }
+    if (typeof token !== "string" || !token) {
       return NextResponse.json({ success: false, error: "Missing token." }, { status: 400 })
     }
 

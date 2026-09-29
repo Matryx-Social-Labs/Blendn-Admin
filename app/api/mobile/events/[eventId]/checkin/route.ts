@@ -26,6 +26,7 @@ import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
 import { activeMembership } from "@/lib/org-membership"
 import { canJoinEvent } from "@/lib/socket-auth"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -34,6 +35,7 @@ interface RouteParams {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const rateLimited = await rateLimit(request, userLimit("safety", "checkin", authUser.userId))
     if (rateLimited) return rateLimited
 
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate input
     const parsed = checkinSchema.safeParse(body)

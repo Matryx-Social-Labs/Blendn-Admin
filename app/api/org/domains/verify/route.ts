@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { hashInviteToken } from "@/lib/org-invites"
 import { rateLimit } from "@/lib/rate-limit"
+import { readJson } from "@/lib/api-input"
 
 /**
  * Confirm a domain from the link sent to one of its role addresses.
@@ -34,8 +35,8 @@ export async function POST(req: NextRequest) {
   if (limited) return limited
 
   try {
-    const { token } = (await req.json()) as { token?: string }
-    if (!token) {
+    const { token } = ((await readJson(req)) ?? {}) as { token?: unknown }
+    if (typeof token !== "string" || !token) {
       return NextResponse.json({ success: false, error: "Missing token." }, { status: 400 })
     }
 
