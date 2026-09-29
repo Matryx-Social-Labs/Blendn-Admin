@@ -15,7 +15,8 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
-import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
+import { getOccupancy } from "@/lib/occupancy"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const accountRoute = require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route")
@@ -141,4 +142,50 @@ it("leaves every room they were in, and keeps a ban", async () => {
 
   await db.chat_group_members.deleteMany({ where: { user_id: id } })
   await db.chat_groups.deleteMany({ where: { id: { in: groups.map((g) => g.id) } } })
+})
+
+it("stops being here now in a room they were standing in, and keeps the attendance (SCRUM-481)", async () => {
+  /*
+   * Driven on staging: three attendees checked in to a live event and deleted
+   * their accounts. Their check-ins stayed `checked_in` with no check-out, so
+   * the room read "4 here now" to the one person left, and Meet next offered
+   * the three erased people under their pseudonyms until the event ended.
+   */
+  const host = await makeUser("dep-host3", "organizer")
+  users.push(host)
+  const eventId = await makeEvent(host) // live: started an hour ago
+  events.push(eventId)
+  const occurrenceId = await occurrenceOf(eventId)
+
+  const [leaver, stayer] = await Promise.all([makeUser("dep-leaver3"), makeUser("dep-stayer3")])
+  users.push(leaver, stayer)
+  await db.profiles.create({ data: { id: leaver, name: "Leaver", date_of_birth: new Date("1996-05-12") } })
+  await putInRoom({ eventId, occurrenceId, userId: leaver })
+  await putInRoom({ eventId, occurrenceId, userId: stayer })
+  expect((await getOccupancy(eventId)).inside).toBe(2)
+
+  const { email } = await db.user.findUniqueOrThrow({ where: { id: leaver }, select: { email: true } })
+  const res = await accountRoute.DELETE(req("DELETE", "/api/mobile/account", signAccessToken(leaver, email)))
+  expect(res.status).toBe(200)
+
+  // Nobody is here who asked to be erased; the one who stayed still is.
+  expect((await getOccupancy(eventId)).inside).toBe(1)
+  // Attendance is the organiser's history: the row stays, closed.
+  const rows = await db.event_check_ins.findMany({
+    where: { event_id: eventId },
+    select: { user_id: true, status: true, check_out_time: true },
+  })
+  const byUser = Object.fromEntries(rows.map((r) => [r.user_id, r]))
+  expect(byUser[leaver]).toMatchObject({ status: "checked_out" })
+  expect(byUser[leaver].check_out_time).not.toBeNull()
+  expect(byUser[stayer]).toMatchObject({ status: "checked_in", check_out_time: null })
+  const sessions = await db.presence_sessions.findMany({
+    where: { event_id: eventId },
+    select: { user_id: true, departed_at: true },
+  })
+  expect(sessions.find((x) => x.user_id === leaver)?.departed_at).not.toBeNull()
+  expect(sessions.find((x) => x.user_id === stayer)?.departed_at).toBeNull()
+
+  await db.presence_sessions.deleteMany({ where: { event_id: eventId } })
+  await db.event_check_ins.deleteMany({ where: { event_id: eventId } })
 })
