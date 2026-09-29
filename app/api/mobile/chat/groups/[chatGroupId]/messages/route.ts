@@ -7,7 +7,7 @@ import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
-import { rateLimit } from "@/lib/rate-limit"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
@@ -248,23 +248,19 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ chatGroupId: string }> }
 ) {
-  // Rate limit: max 30 messages per user per minute per group
-  const rateLimited = await rateLimit(request, {
-    windowMs: 60 * 1000,
-    maxRequests: 30,
-    keyGenerator: (req) => {
-      const auth = req.headers.get("authorization") || "anon"
-      const url = req.nextUrl.pathname
-      return `groupmsg:${auth.slice(-16)}:${url}`
-    },
-  })
-  if (rateLimited) return rateLimited
-
   try {
     const user = await getAuthenticatedUser(request)
     if (!user) {
       return unauthorizedResponse("Authentication required")
     }
+
+    /*
+     * 30 a minute per person, shared with the event-chat POST: two doors into
+     * one table. This was keyed on the token's last 16 characters, which is its
+     * signature, so every refresh or second phone was a fresh 30 (SCRUM-439).
+     */
+    const limited = await rateLimit(request, userLimit("write", "room-message", user.userId))
+    if (limited) return limited
 
     const { chatGroupId } = await params
 
@@ -641,8 +637,11 @@ export async function POST(
      * anyone who already had the room open. Two write paths into one table, and
      * only one of them delivered.
      *
-     * Awaited rather than fire-and-forget: it never throws, and awaiting means
-     * the sender's 200 is not ahead of the room's copy.
+     * Awaited: it never throws, and a reply's push is looked up before the
+     * sender is answered. It does NOT put the room's copy ahead of the 201 —
+     * the emit inside is fire-and-forget (`void toChatRoom`), and across two
+     * connections, or the Redis adapter, arrival order is not ours to promise.
+     * The app takes the echo on either side of its response (SCRUM-440).
      */
     await deliverToRoom({
       chatGroupId,

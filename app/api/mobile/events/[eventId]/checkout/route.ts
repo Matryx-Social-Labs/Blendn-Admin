@@ -17,22 +17,20 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ eventId: string }> }
 ) {
-  // Rate limit: max 10 checkouts per user per 10 minutes
-  const rateLimited = await rateLimit(request, {
-    windowMs: 10 * 60 * 1000,
-    maxRequests: 10,
-    keyGenerator: (req) => {
-      const auth = req.headers.get("authorization") || "anon"
-      return `checkout:${auth.slice(-16)}`
-    },
-  })
-  if (rateLimited) return rateLimited
-
   try {
     const user = await getAuthenticatedUser(request)
     if (!user) {
       return unauthorizedResponse("Authentication required")
     }
+
+    // 10 checkouts per person per 10 minutes. Keyed on the user, not the
+    // token's tail, which changes with every refresh (SCRUM-439).
+    const rateLimited = await rateLimit(request, {
+      windowMs: 10 * 60 * 1000,
+      maxRequests: 10,
+      keyGenerator: () => `checkout:${user.userId}`,
+    })
+    if (rateLimited) return rateLimited
 
     const { eventId } = await params
 
