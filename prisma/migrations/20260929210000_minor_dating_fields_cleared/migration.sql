@@ -7,7 +7,8 @@
 -- profile whose age is known to be under 18.
 --
 -- Age is `ageFrom`'s rule (lib/age.ts): the birth date when it gives 0-149
--- whole years, else the stored `age`. An unknown age is left alone: it is not
+-- whole years on today's UTC date (as `wholeYearsBetween` counts), else the
+-- stored `age`. An unknown age is left alone: it is not
 -- known to be a minor, and clearing every age-less adult's orientation would
 -- destroy real data. The route still strips it on the next age write.
 --
@@ -19,8 +20,8 @@ WITH ages AS (
     id,
     COALESCE(
       CASE
-        WHEN date_part('year', age(CURRENT_DATE, date_of_birth)) BETWEEN 0 AND 149
-          THEN date_part('year', age(CURRENT_DATE, date_of_birth))::int
+        WHEN date_part('year', age((now() AT TIME ZONE 'UTC')::date, date_of_birth)) BETWEEN 0 AND 149
+          THEN date_part('year', age((now() AT TIME ZONE 'UTC')::date, date_of_birth))::int
       END,
       age
     ) AS years
@@ -31,11 +32,20 @@ SET
   orientations = '{}',
   interested_in = '{}',
   show_orientation = false,
-  looking_for = ARRAY(SELECT v FROM unnest(p.looking_for) AS v WHERE lower(v) !~ '\mdating\M'),
+  -- In the order they were chosen; a NULL list stays NULL.
+  looking_for = CASE
+    WHEN p.looking_for IS NULL THEN NULL
+    ELSE ARRAY(
+      SELECT v FROM unnest(p.looking_for) WITH ORDINALITY AS t (v, n)
+      WHERE lower(v) !~ '\mdating\M'
+      ORDER BY n
+    )
+  END,
   intent_default = array_remove(p.intent_default, 'dating'::connection_intent)
 FROM ages
 WHERE ages.id = p.id
   AND ages.years < 18
+  -- Only rows with something to clear: every other row is left as it is.
   AND (
     cardinality(p.orientations) > 0
     OR cardinality(p.interested_in) > 0
