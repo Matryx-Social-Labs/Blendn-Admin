@@ -5,6 +5,7 @@
 import { logger } from "./logger"
 import { db } from "./db"
 import { purgeDeletedAccountRecords } from "./deleted-account-records"
+import { purgeLeadPii } from "./leads"
 
 /**
  * Nothing pruned `notifications`, ever.
@@ -134,6 +135,14 @@ async function runSweep(): Promise<void> {
     if (deleted > 0) logger.info("Purged deleted-account records", { deleted })
   } catch (error) {
     logger.error("Deleted-account record purge failed", { error: String(error) })
+  }
+
+  // A lead's ip and user agent, past a year (docs/LEADS.md). A count only, same reason.
+  try {
+    const cleared = await purgeLeadPii()
+    if (cleared > 0) logger.info("Cleared lead ip/user_agent", { cleared })
+  } catch (error) {
+    logger.error("Lead PII purge failed", { error: String(error) })
   }
 }
 

@@ -206,11 +206,11 @@ it immediately. It deep-links to `?lead=<id>`, which opens the drawer directly.
 is worked — they exist to spot an abuse wave, and a year-old abuse wave is
 history.
 
-`scripts/purge-lead-pii.ts` clears both after `LEAD_PII_RETENTION_DAYS` (365).
-Dry-runs by default; `--apply` writes. The lead itself is kept: status, email
-and notes are the record of a business conversation.
-
-**Not yet scheduled.** Run it manually or wire it to the existing cron.
+`purgeLeadPii` (`lib/leads.ts`) clears both after `LEAD_PII_RETENTION_DAYS`
+(365). The retention sweeper (`lib/notification-retention.ts`) runs it on boot
+and every six hours, and logs `Cleared lead ip/user_agent` with a count when it
+changes anything. The lead itself is kept: status, email and notes are the
+record of a business conversation.
 
 ---
 
@@ -220,6 +220,7 @@ and notes are the record of a business conversation.
 |---|---|---|
 | `LANDING_INGEST_TOKEN` | for ingest | Comma-separated for rotation; 32+ chars |
 | `LEADS_NOTIFY_EMAIL` | no | Where a new demo request is announced |
+| `LEADS_SLACK_WEBHOOK_URL` | no | Slack incoming webhook a new demo request is posted to |
 
 Rotation is two deploys: add the new token to the list, update Vercel, drop the
 old one. Both work in between, or the window is an outage.
@@ -232,6 +233,7 @@ old one. Both work in between, or the window is an outage.
 |---|---|
 | `__tests__/leads.test.ts` | Token comparison, rotation, plus-stripping, IP sanitising, validation |
 | `__tests__/integration/leads-ingest.itest.ts` | The contract's acceptance checklist, against real Postgres |
+| `__tests__/integration/lead-pii-retention.itest.ts` | The background sweep clears year-old `ip`/`user_agent` and keeps the lead |
 
 The integration file is the **first test in this repo to invoke an API route
 handler**. Every other DB-touching test mocks `@/lib/db`, which is why it could
