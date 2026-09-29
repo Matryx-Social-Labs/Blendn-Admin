@@ -22,13 +22,20 @@ const mockDb = {
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
+const mockPurgeDeletedAccountRecords = jest.fn()
+const mockPurgeLeadPii = jest.fn()
+jest.mock("@/lib/deleted-account-records", () => ({ purgeDeletedAccountRecords: mockPurgeDeletedAccountRecords }))
+jest.mock("@/lib/leads", () => ({ purgeLeadPii: mockPurgeLeadPii }))
 
 import { storedBodyFor } from "@/lib/push-notifications"
 import {
   pruneNotifications,
   READ_RETENTION_DAYS,
   UNREAD_RETENTION_DAYS,
+  startNotificationRetentionSweeper,
+  stopNotificationRetentionSweeper,
 } from "@/lib/notification-retention"
+import { logger } from "@/lib/logger"
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -161,5 +168,28 @@ describe("the table stops growing forever", () => {
     expect(mockDb.notifications.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["a", "b"] } },
     })
+  })
+})
+
+describe("one step of the sweep failing", () => {
+  it("does not skip the lead purge after it, and the purge's own failure is caught", async () => {
+    /*
+     * Each step has its own try (SCRUM-431). Without one a throw escapes the
+     * sweep's unawaited IIFE as an unhandled rejection, which takes the
+     * process down; sharing one lets a deleted-account failure skip the lead
+     * purge every pass.
+     */
+    mockPurgeDeletedAccountRecords.mockRejectedValue(new Error("db blip"))
+    mockPurgeLeadPii.mockRejectedValue(new Error("db blip"))
+    const errors = jest.spyOn(logger, "error").mockImplementation(() => {})
+    const logged = () => errors.mock.calls.some(([message]) => message === "Lead PII purge failed")
+
+    startNotificationRetentionSweeper()
+    for (let i = 0; i < 100 && !logged(); i++) await new Promise((r) => setTimeout(r, 10))
+    stopNotificationRetentionSweeper()
+
+    expect(mockPurgeLeadPii).toHaveBeenCalled()
+    expect(logged()).toBe(true)
+    errors.mockRestore()
   })
 })

@@ -1,5 +1,8 @@
 import { timingSafeEqual } from "node:crypto"
 import { z } from "zod"
+// Relative, not `@/`: reachable from `server.ts` through the retention sweeper,
+// and `build:server` cannot resolve the alias (server-import-boundary.test.ts).
+import { db } from "./db"
 
 /**
  * Ingesting a lead from the organiser landing page.
@@ -153,3 +156,23 @@ export const LEAD_LIMITS = {
 
 /** How long the personal fields are kept. `ip` and `user_agent` are PII. */
 export const LEAD_PII_RETENTION_DAYS = 365
+
+/**
+ * Clear `ip` and `user_agent` from leads older than the retention window.
+ * Returns how many changed. The lead itself stays: status, email and notes are
+ * the record of a business conversation.
+ *
+ * Run by the retention sweeper (lib/notification-retention.ts). Unbatched, as
+ * the table grows by one row per demo request. Idempotent: a second pass
+ * matches nothing.
+ */
+export async function purgeLeadPii(now: Date = new Date()): Promise<number> {
+  const { count } = await db.leads.updateMany({
+    where: {
+      created_at: { lt: new Date(now.getTime() - LEAD_PII_RETENTION_DAYS * 24 * 60 * 60 * 1000) },
+      OR: [{ ip: { not: null } }, { user_agent: { not: null } }],
+    },
+    data: { ip: null, user_agent: null },
+  })
+  return count
+}
