@@ -206,6 +206,35 @@ describe("GET /me/attendance", () => {
     expect(new Date(conference.attendedAt).getTime()).toBe(firstCheckIn.check_in_time!.getTime())
   })
 
+  it("leaves a deleted event out of the count and the list alike, and pages past it", async () => {
+    /*
+     * SCRUM-432, driven on staging: `totalCount: 3` above a list of 1, because
+     * a re-seed had soft-deleted two events this person checked in to. The count
+     * read `event_check_ins` alone and the route dropped deleted events after
+     * the query — after its LIMIT, too, so a page whose newest event was deleted
+     * came back short, or empty with more to come.
+     *
+     * A person of their own, so the other tests' events cannot hide a short page.
+     */
+    const goer = await makeUser(testId("att_del"))
+    users.push(goer)
+    const kept = await pastEvent("kept", 1, 10)
+    const removed = await pastEvent("removed", 1, 2)
+    await attendEveryDay(goer, kept)
+    await attendEveryDay(goer, removed)
+    await db.events.update({ where: { id: removed.id }, data: { deleted_at: new Date() } })
+    const { email } = await db.user.findUniqueOrThrow({ where: { id: goer }, select: { email: true } })
+
+    const res = await fetchMine(signAccessToken(goer, email), "?limit=1")
+    const body = await res.json()
+
+    expect({
+      page: body.data.events.map((e: { id: string }) => e.id),
+      total: body.data.pagination.totalCount,
+      counted: await distinctEventsAttended(goer),
+    }).toEqual({ page: [kept.id], total: 1, counted: 1 })
+  })
+
   it("refuses an unauthenticated caller", async () => {
     const res = await meAttendance.GET(
       new NextRequest("http://localhost/api/mobile/me/attendance")

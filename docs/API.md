@@ -303,9 +303,9 @@ arrived, not when you last turned up.
 construction: the list and the count share one predicate, so they cannot
 disagree. Working an event as staff is not attending it, and appears in neither.
 
-A page may hold fewer events than `totalCount` suggests if the platform has
-since deleted one. That is deliberate — a deletion does not change how many
-events you went to.
+An event the platform has since deleted is in neither the list nor the count,
+so every page is full and `totalCount` is the number of events listed
+(SCRUM-432).
 
 ### GET /me/rsvps
 

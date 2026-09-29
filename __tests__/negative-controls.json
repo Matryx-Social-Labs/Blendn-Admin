@@ -1232,6 +1232,12 @@
       "mutation": "M173 the route's evictUserSockets(authUser.userId) commented out. M174 evictUserSockets disconnects every socket (io.disconnectSockets instead of io.in(`user:<id>`)). M175 the dashboard gate's deletedAt check removed. M176 the eviction hoisted above the erasure transaction.",
       "observed": "Red before the fix: 1 of 1, the route answered 200 and phoneA.closed was [] (expected ['io server disconnect']). M173: 1 of 1 failing, same assertion. M174: 1 of 1 failing, other.closed received 3 entries where [] was expected. After ecc:pr-test-analyzer and ecc:security-reviewer: M173 also 1 unit failing (account-deletion), M175 1 of 3 failing (dashboard-socket-gate: a deleted account got a principal), M176 2 unit failing (the ordering and the rollback case). All reverted.",
       "date": "2026-09-29"
+    },
+    "me-attendance.itest.ts": {
+      "guards": "SCRUM-432: an event the platform deleted is out of the 'events attended' count and the /me/attendance list alike, and a page whose newest attended event was deleted is still full (?limit=1 returns the next live event, totalCount 1). One LIVE_EVENT predicate in lib/attendee-counts.ts, taken by distinctEventsAttended and attendedEventIds.",
+      "mutation": "M183 LIVE_EVENT removed from distinctEventsAttended only. M184 LIVE_EVENT removed from attendedEventIds only.",
+      "observed": "Red before the fix: 1 of 7 failing, page [] total 2 counted 2 (expected [kept] 1 1), the staging shape (totalCount 3 above a list of 1). M183: 1 of 7 failing, total 2 and counted 2. M184: 1 of 7 failing, page []. All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [
