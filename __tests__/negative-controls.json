@@ -1282,9 +1282,9 @@
       "date": "2026-09-29"
     },
     "reset-link-check.itest.ts": {
-      "guards": "SCRUM-461: GET /api/auth/reset-password?token= says whether a reset link still works, without consuming it: a fresh one valid (used_at stays null); used, expired, tampered and empty all { valid: false } alike; a link for an erased account invalid. One usableResetToken predicate serves this and the POST that resets.",
-      "mutation": "M223 usableResetToken ignores used_at. M224 it ignores expires_at. M225 it ignores the account's deletedAt.",
-      "observed": "Red before the fix: 3 of 3 failing (route.GET is not a function). M223: 1 of 3 failing (the dead-links case). M224: 1 of 3 failing (the same). M225: 1 of 3 failing (the erased-account case). All reverted; approval-set-password.itest.ts (the POST) still green.",
+      "guards": "SCRUM-461: the reset refuses expired/erased-account links and changes no password; GET /api/auth/reset-password?token= says whether a reset link still works, without consuming it: a fresh one valid (used_at stays null); used, expired, tampered and empty all { valid: false } alike; a link for an erased account invalid. One usableResetToken predicate serves this and the POST that resets.",
+      "mutation": "M223 usableResetToken ignores used_at. M224 it ignores expires_at. M225 it ignores the account's deletedAt. M226 the check shares the reset's bucket (auth:reset:<ip>). M227 the POST bypasses usableResetToken and checks used_at only.",
+      "observed": "Red before the fix: 3 of 3 failing (route.GET is not a function). M223: 1 of 3 failing (the dead-links case). M224: 1 of 3 failing (the same). M225: 1 of 3 failing (the erased-account case). After ecc:pr-test-analyzer, two cases were added (the POST refuses expired/erased and changes no password; the check's own 30/15min bucket leaves the reset answerable). M226: 1 of 5 failing (the bucket case). M227: 1 of 5 failing (the POST case). All reverted; approval-set-password.itest.ts (the POST) still green.",
       "date": "2026-09-29"
     }
   },
