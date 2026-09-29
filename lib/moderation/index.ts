@@ -105,9 +105,17 @@ export async function moderateMessage(
       return
     }
 
-    // 4. Image moderation if applicable
+    /*
+     * 4. The media, whatever `type` says (SCRUM-444).
+     *
+     * This looked only when `type` was "image" or "gif", and the type is the
+     * client's word: `type: "text"` with a `metadata.mediaUrl` stored an image
+     * nobody screened, and `type: "video"` over a JPEG was recorded clean. A
+     * file the check can't read (a clip, a voice note) comes back unchecked,
+     * which is what it is.
+     */
     let imageExamined = true
-    if ((type === "image" || type === "gif") && mediaUrl) {
+    if (mediaUrl) {
       // The vendor fetches the image: a private one needs a signed URL, or it scores a 403 (SCRUM-427).
       const imageCheck = await checkImageContent(await readableUrl(mediaUrl))
       imageExamined = imageCheck.checked

@@ -27,6 +27,12 @@ jest.mock("@/lib/moderation", () => ({
   ...jest.requireActual("@/lib/moderation"),
   moderateMessage: jest.fn().mockResolvedValue(undefined),
 }))
+// The inline caption check, stubbed per test where a case needs it to have looked.
+const mockCheckText = jest.fn()
+jest.mock("@/lib/moderation/openai-moderation", () => {
+  const actual = jest.requireActual("@/lib/moderation/openai-moderation")
+  return { ...actual, checkTextContent: (text: string) => mockCheckText(text) ?? actual.checkTextContent(text) }
+})
 jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
   sealUpload: jest.fn(async (key: string, _folder: string, userId: string) =>
@@ -158,6 +164,29 @@ const ROUTES = [
 const written = (groupId: string, content: string) =>
   db.chat_messages.count({ where: { chat_group_id: groupId, content } })
 
+describe("a reply's quote of a message that was taken down (SCRUM-444)", () => {
+  it("shows neither its words nor its media, on the group route's list", async () => {
+    const r = await liveRoom()
+    const sendToGroup = ROUTES[0][1]
+    expect((await sendToGroup(r, { content: "look", type: "image", metadata: { mediaUrl: upload(r.memberId) } })).status).toBe(201)
+    const quoted = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "look" } })
+    // Replied to in the second before the image check hid it.
+    expect((await sendToGroup(r, { content: "nice", type: "text", parentId: quoted.id })).status).toBe(201)
+    await db.chat_messages.update({ where: { id: quoted.id }, data: { moderation_status: "hidden", deleted_at: new Date() } })
+
+    const res = await groupRoute.GET(
+      new NextRequest(`http://localhost/api/mobile/chat/groups/${r.groupId}/messages`, {
+        headers: { authorization: `Bearer ${r.token}` },
+      }),
+      { params: Promise.resolve({ chatGroupId: r.groupId }) }
+    )
+    const { data } = (await res.json()) as { data: { messages: Array<{ content: string | null; parent_message: unknown }> } }
+    const reply = data.messages.find((m) => m.content === "nice")
+    expect(reply?.parent_message).toMatchObject({ id: quoted.id, content: null, metadata: null, moderation_hidden: true })
+    expect(JSON.stringify(reply?.parent_message)).not.toContain("sealed-copy")
+  })
+})
+
 describe("a room message's metadata comes from the client only as its own media", () => {
   for (const [name, send] of ROUTES) {
     it(`refuses metadata that would draw the message as sponsored, on the ${name}`, async () => {
@@ -206,6 +235,37 @@ describe("a room message's metadata comes from the client only as its own media"
       for (const url of served) expect(url).toContain("X-Amz-Signature")
       // The image the moderator scans is the copy the room sees, not the source its URL can still rewrite.
       expect(moderateMessage).toHaveBeenCalledWith(row.id, "look", "image", r.memberId, r.groupId, sealed(r.memberId))
+    })
+
+    it(`screens the image on a "text" message that carries one, on the ${name} (SCRUM-444)`, async () => {
+      const r = await liveRoom()
+      // The caption was read inline and found clean: the image still has not been looked at.
+      mockCheckText.mockResolvedValueOnce({ checked: true, result: null })
+      const res = await send(r, { content: "hi", type: "text", metadata: { mediaUrl: upload(r.memberId) } })
+      expect(res.status).toBe(201)
+      const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "hi" } })
+      // The type is the client's word; the image is what the room sees.
+      expect(moderateMessage).toHaveBeenCalledWith(row.id, "hi", "text", r.memberId, r.groupId, sealed(r.memberId))
+      expect(row.moderation_status).not.toBe("clean")
+    })
+
+    it(`still checks the caption before the emit when there is media, on the ${name} (SCRUM-444)`, async () => {
+      const r = await liveRoom()
+      const hide = { action: "hide", source: "openai_text", categories: { hate: 0.99 }, confidence: 0.99 }
+      mockCheckText.mockResolvedValueOnce({ checked: true, result: hide })
+      const res = await send(r, { content: "a caption the model hides", type: "text", metadata: { mediaUrl: upload(r.memberId) } })
+      // Hidden before anything went out: the caption is what a push preview would carry.
+      expect(JSON.stringify(await res.json())).toContain('"moderation_hidden":true')
+      expect(moderateMessage).not.toHaveBeenCalled()
+    })
+
+    it(`writes a plain text message clean inline and leaves the pipeline out of it, on the ${name}`, async () => {
+      const r = await liveRoom()
+      mockCheckText.mockResolvedValueOnce({ checked: true, result: null })
+      expect((await send(r, { content: "just words", type: "text" })).status).toBe(201)
+      const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "just words" } })
+      expect(row.moderation_status).toBe("clean")
+      expect(moderateMessage).not.toHaveBeenCalled()
     })
 
     it(`copies nothing for a send it refuses, or for a retry, on the ${name}`, async () => {

@@ -138,6 +138,8 @@ export async function GET(
             type: true,
             metadata: true,
             content: true,
+            deleted_at: true,
+            moderation_status: true,
             user: {
               select: {
                 id: true,
@@ -223,13 +225,25 @@ export async function GET(
             image: null,
           },
           parent_message: m.parent_message
-            ? {
-                ...m.parent_message,
-                user: {
-                  id: idFor(m.parent_message.user.id),
-                  name: roomSenderName(m.parent_message, anonMap.get(m.parent_message.user.id), chatGroup.event),
-                },
-              }
+            ? (({ deleted_at, moderation_status, ...parent }) => {
+                /*
+                 * A quote of a message that was taken down shows neither its
+                 * words nor its media. A reply sent in the second before the
+                 * hide landed kept serving both, image signed, to the whole
+                 * room (SCRUM-444).
+                 */
+                const removed = deleted_at !== null || moderation_status === "hidden"
+                return {
+                  ...parent,
+                  content: removed ? null : parent.content,
+                  metadata: removed ? null : parent.metadata,
+                  moderation_hidden: removed,
+                  user: {
+                    id: idFor(parent.user.id),
+                    name: roomSenderName(parent, anonMap.get(parent.user.id), chatGroup.event),
+                  },
+                }
+              })(m.parent_message)
             : null,
         }
       }),
@@ -549,7 +563,13 @@ export async function POST(
             timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
           }),
         ]).finally(() => clearTimeout(timeoutHandle))
-        examinedInline = openaiCheck.checked
+        /*
+         * The caption is checked here, before the emit, with or without media:
+         * its words go out in the push preview. The inline check reads text
+         * only, so a message that carries media is not examined until the
+         * pipeline has looked at the image too (SCRUM-444).
+         */
+        examinedInline = openaiCheck.checked && !stored?.mediaUrl
         const openaiResult = openaiCheck.checked ? openaiCheck.result : null
         if (openaiResult && openaiResult.action === "hide") {
           // Hide immediately — never broadcast to other users
@@ -578,12 +598,12 @@ export async function POST(
          * messages are not a category that needs less moderation -- a slur is
          * five characters.
          */
-        if (!openaiCheck.checked) {
-          void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+        if (!examinedInline) {
+          void moderateMessage(message.id, content, type, user.userId, chatGroupId, stored?.mediaUrl)
         }
       } catch {
         // OpenAI failed — fall back to async moderation
-        void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+        void moderateMessage(message.id, content, type, user.userId, chatGroupId, stored?.mediaUrl)
       }
     } else {
       // For images/media, run full async moderation (can't block on image analysis)
