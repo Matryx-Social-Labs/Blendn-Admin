@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { ensureOrgBrand } from "./seed-brand"
+import { holdSeedOccurrences } from "./seed-occurrences"
 import { mirrorToTigris, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { environmentRefusal, TEST_ORG_NAMES } from "./test-accounts"
 import { CROWD_CHAT, CROWD_REVIEWS, CROWD_SIZE, ensureCrowd } from "./seed-blr-crowd"
@@ -1417,8 +1418,7 @@ async function main() {
       create: { slug: spec.slug, ...fields, created_at: createdAt },
     })
 
-    await syncOccurrences(event.id, start, end, TZ)
-    await db.event_occurrences.updateMany({ where: { event_id: event.id }, data: { capacity: spec.capacity, cancelled_at: null } })
+    await holdSeedOccurrences(db, event.id, spec.capacity, () => syncOccurrences(event.id, start, end, TZ))
     if (spec.cancelLastDay) {
       const last = await db.event_occurrences.findFirst({ where: { event_id: event.id }, orderBy: { start_time: "desc" } })
       if (last) await db.event_occurrences.update({ where: { id: last.id }, data: { cancelled_at: new Date(NOW.getTime() - 6 * HOUR) } })
