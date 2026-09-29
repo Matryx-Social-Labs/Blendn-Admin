@@ -1306,7 +1306,7 @@
       "date": "2026-09-29"
     },
     "api-docs-prebuilt.test.ts": {
-      "guards": "SCRUM-463: /api-docs imports swagger-ui-dist's prebuilt bundle and swagger-ui-react is not a dependency, so Turbopack never shakes apidom's refractor registrations out (the page threw oS.refract is not a function and drew 2 of 22 sections). Verified by grepping a local production build: 88 .refract= assignments in the chunk, against 3 with swagger-ui-react.",
+      "guards": "SCRUM-463: /api-docs imports swagger-ui-dist's prebuilt bundle and swagger-ui-react is not a dependency, so Turbopack never shakes apidom's refractor registrations out (the page threw oS.refract is not a function). Verified by grepping a local production build: 88 .refract= assignments in the chunk, against 3 with swagger-ui-react.",
       "mutation": "M298 the page imports swagger-ui-react again.",
       "observed": "M298: 1 of 1 failing. Reverted.",
       "date": "2026-09-29"
@@ -1321,6 +1321,24 @@
       "guards": "SCRUM-467: a no-show is an RSVP with no check-in to that event (lib/counting.ts noShows); a walk-in cancels nothing.",
       "mutation": "M305 (SCRUM-467) the overview nets RSVPs against people who checked in anywhere.",
       "observed": "Red before the fix: 1 failing. M305: 1 of 18 failing (one RSVP home + one walk-in read 0%, not 100%).",
+      "date": "2026-09-29"
+    },
+    "setup-screens-named.test.ts": {
+      "guards": "SCRUM-469: the Setup screens name every control: amenity row buttons are named after the amenity (Rename/Retire/Restore <name>), both rename boxes are named \"New name for <name>\", and the new category's Name and Parent captions are tied to their fields.",
+      "mutation": "M306 the amenity Rename button loses its name.",
+      "observed": "Red before the fix: 2 of 2 failing. M306: 1 of 2 failing. Reverted.",
+      "date": "2026-09-29"
+    },
+    "organiser-sees-labels.itest.ts": {
+      "guards": "SCRUM-466: the room feed labels each member's room role, and the member route refuses to mute or ban a room admin (the host or a colleague).",
+      "mutation": "M302 (SCRUM-466) the member route moderates a room admin. M303 the feed's members carry no role.",
+      "observed": "Red before the fix: 1 of 7 failing. M302: 1 of 7 failing (the host's own ban went through). M303: 1 of 7 failing.",
+      "date": "2026-09-29"
+    },
+    "room-scoped-identity.itest.ts": {
+      "guards": "SCRUM-458: GET /users/:id by raw id sends work_field (outside the gate) and, when the viewer may not see who this is, blurPhoto instead of image/photos; the room-handle card is unchanged.",
+      "mutation": "M300 (SCRUM-458) the card's unidentified branch sends no blurPhoto. M301 the card sends no work_field.",
+      "observed": "Red before the fix: 1 of 13 failing. M300: 1 of 13 failing. M301: 1 of 13 failing.",
       "date": "2026-09-29"
     },
     "audit-filter-whole-log.itest.ts": {

@@ -14,9 +14,13 @@ import "./swagger-dark.css"
  * dropped the modules that exist for their side effects: apidom attaches
  * `refract` to each OpenAPI 3.1 element class in `refractor/registration.mjs`,
  * which the package lists in `sideEffects` and Turbopack skipped anyway while
- * following its re-exports. `/api-docs` threw `oS.refract is not a function` and
- * drew 2 of 22 sections. Turning off every tree-shaking flag Next exposes did
- * not bring the module back, measured in a local production build.
+ * following its re-exports. `/api-docs` threw `oS.refract is not a function`.
+ * Turning off every tree-shaking flag Next exposes did not bring the module
+ * back, measured in a local production build.
+ *
+ * The operations list is virtualised: only the rows in view are in the DOM, so
+ * counting `.opblock-tag` without scrolling finds two or three sections even
+ * when all 22 render. Count while scrolling.
  *
  * `swagger-ui-dist` ships Swagger UI already built, one file with nothing left
  * for a bundler to shake, so the registrations run.

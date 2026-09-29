@@ -257,6 +257,9 @@ an opaque, url-safe string. Field names and shapes did not change.
   onboarded, location } }`; and `GET /profiles/:userId/interests` returns an
   empty list. The same rule decides the 409-or-201 answer of
   `POST /message-requests` and whether `POST /friends/requests` is refused.
+  Otherwise `GET /users/:userId` also sends `work_field`, and, when
+  `identityVisible` is false, `blurPhoto` (the stored derivative) in place of
+  `image` and `photos` (SCRUM-458).
 - **Echoes stay handles.** `GET /users/:userId`, `GET /profiles/:userId` (`id`
   and `profile.id`) and `POST /message-requests` (`recipientId`, `recipient.id`)
   return the ref you sent — a handle in, the same handle out — except for your
