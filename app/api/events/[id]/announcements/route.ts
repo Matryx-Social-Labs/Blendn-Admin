@@ -12,6 +12,7 @@ import { announcementSchema } from "@/lib/validations/event"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyAnnouncement } from "@/lib/push-notifications"
 import { PAGINATION } from "@/lib/constants"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -23,6 +24,7 @@ export async function GET(_: Request, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const eventForGet = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
     if (!eventForGet) return errorResponse("Not found", 404)
@@ -81,13 +83,14 @@ export async function POST(req: Request, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // An announcement pushes to every attendee of the event. Bound how fast a
     // single organiser account can fire them.
     const limited = await rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
     if (limited) return limited
 
-    const parsed = announcementSchema.safeParse(await req.json())
+    const parsed = announcementSchema.safeParse(await readJson(req))
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Invalid request", details: parsed.error.flatten().fieldErrors },

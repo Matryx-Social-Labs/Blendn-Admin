@@ -24,6 +24,23 @@ A refusal that names no specific code carries the one its status stands for:
 429 `RATE_LIMITED`, 5xx `SERVER_ERROR` (SCRUM-324). A bare 400 or 422 has no
 default, because it covers too many different mistakes to name one.
 
+**Bad input is a 4xx, never a 500** (SCRUM-430, SCRUM-433). Each was a 500
+until 2026-09: Postgres refused the uuid cast, or `request.json()` threw, and
+the route's catch-all called the caller's mistake an outage.
+
+- A path id that is not a UUID answers `400` "Invalid … ID format". The
+  handlers that already answered one `404` for malformed and unknown alike keep
+  it: room leave, mute and report, the rating GET, and friend requests.
+- A `before` or `cursor` that cannot be one answers `400` "Invalid cursor". An
+  empty one is no cursor.
+- A required body that is not JSON answers `400`: `VALIDATION_FAILED` from the
+  route's schema, or its own missing-field `400`.
+- An optional body (reveal, leaving a DM, board requests, marking notifications
+  read, mute) is the default when absent, and a `400` when present but not
+  JSON. A truncated body never takes the default.
+- A `limit`, `offset` or `page` that is not a whole number falls back to the
+  route's default, and is held to its bounds.
+
 ---
 
 ## Authentication

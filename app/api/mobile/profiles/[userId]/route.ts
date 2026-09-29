@@ -33,6 +33,7 @@ import {
 } from "@/lib/api-response"
 import { updateProfileSchema } from "@/lib/validations/profile"
 import { normalizeLocationToCity } from "@/lib/location"
+import { readJson } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -258,7 +259,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return forbiddenResponse("Cannot update another user's profile")
     }
 
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate input
     const parsed = updateProfileSchema.safeParse(body)

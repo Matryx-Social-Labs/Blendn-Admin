@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -30,6 +31,7 @@ export async function GET(_: Request, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },

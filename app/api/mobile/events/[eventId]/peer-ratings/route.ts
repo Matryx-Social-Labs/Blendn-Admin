@@ -14,6 +14,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { ratablePeers } from "@/lib/trust"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -37,6 +38,7 @@ const ratingSchema = z.object({
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
@@ -62,13 +64,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
     const limited = await rateLimit(request, userLimit("write", "peer-rating", authUser.userId))
     if (limited) return limited
 
-    const parsed = ratingSchema.safeParse(await request.json())
+    const parsed = ratingSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     const { userId: ratedId, rating, issue = "none", note } = parsed.data
 

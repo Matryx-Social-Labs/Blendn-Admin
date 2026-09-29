@@ -1,7 +1,6 @@
 import { db } from "@/lib/db"
+import { isUuid } from "@/lib/api-input"
 import { chatWindowState, eventHidesRoom } from "@/lib/chat-window"
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * A room and the caller's own row in it, for the routes a member acts on
@@ -20,7 +19,7 @@ export async function roomForMember(
   userId: string,
   opts: { allowHidden?: boolean } = {}
 ) {
-  if (!UUID.test(chatGroupId)) return null
+  if (!isUuid(chatGroupId)) return null
 
   const group = await db.chat_groups.findUnique({
     where: { id: chatGroupId },

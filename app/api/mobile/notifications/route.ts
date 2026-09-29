@@ -12,6 +12,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { isUuid } from "@/lib/api-input"
 
 /**
  * `GET /notifications` — the bell's feed, newest first.
@@ -48,6 +49,7 @@ export async function GET(request: NextRequest) {
       searchParams.get("cursor") ?? undefined,
       searchParams.get("limit") ?? undefined
     )
+    if (cursor && !isUuid(cursor)) return errorResponse("Invalid cursor", 400)
     const unreadOnly = searchParams.get("unread") === "true"
 
     const rows = await db.notifications.findMany({

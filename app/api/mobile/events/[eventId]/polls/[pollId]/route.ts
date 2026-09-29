@@ -6,11 +6,13 @@ import {
   serverErrorResponse,
   successResponse,
   unauthorizedResponse,
+  errorResponse,
 } from "@/lib/api-response"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { getPollResults } from "@/lib/polls"
 import { Refusal } from "@/lib/refusal"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string; pollId: string }>
@@ -27,6 +29,8 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId, pollId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(pollId)) return errorResponse("Invalid poll ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")

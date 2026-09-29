@@ -20,6 +20,7 @@ import { signupSchema } from "@/lib/validations/auth"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { checkPassword } from "@/lib/password"
 import { normalizeLocationToCity } from "@/lib/location"
+import { readJson } from "@/lib/api-input"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate input
     const parsed = signupSchema.safeParse(body)

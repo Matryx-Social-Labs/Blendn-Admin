@@ -13,14 +13,11 @@ import {
   forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson, isUuid } from "@/lib/api-input"
 
 type RouteParams = { params: Promise<{ requestId: string }> }
 
 const respondSchema = z.object({ action: z.enum(["accept", "dismiss"]) })
-
-// A request id is a uuid; anything else is a request that does not exist,
-// answered before Postgres is asked to parse it.
-const isUuid = (id: string) => z.string().uuid().safeParse(id).success
 
 /**
  * POST /api/mobile/friends/requests/:requestId — the recipient answers.
@@ -37,7 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "friend-respond", authUser.userId))
     if (limited) return limited
 
-    const parsed = respondSchema.safeParse(await request.json())
+    const parsed = respondSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
     const { requestId } = await params

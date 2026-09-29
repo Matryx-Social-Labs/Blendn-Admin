@@ -24,6 +24,8 @@ import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
 import { isOwnChatMedia, NOT_OWN_MEDIA } from "@/lib/validations/chat"
+import { readJson, isUuid } from "@/lib/api-input"
+import { boundedInt } from "@/lib/pagination"
 
 const sentInclude = {
   sender: { select: { id: true, name: true, image: true } },
@@ -52,9 +54,12 @@ const sendMessageSchema = z.object({
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
+    if (!isUuid(conversationId)) return errorResponse("Invalid conversation ID format", 400)
     const { searchParams } = new URL(request.url)
-    const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100)
-    const before = searchParams.get("before") // cursor for pagination
+    const limit = boundedInt(searchParams.get("limit"), 50, 1, 100)
+    const before = searchParams.get("before") // cursor for pagination: a timestamp
+    // A time after 1970: `Date.parse` takes year 0, which Postgres refuses.
+    if (before && !(Date.parse(before) >= 0)) return errorResponse("Invalid cursor", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
@@ -174,6 +179,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
+    if (!isUuid(conversationId)) return errorResponse("Invalid conversation ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
@@ -184,7 +190,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const unfinished = await participationRefusal(authUser.userId)
     if (unfinished) return forbiddenResponse(unfinished)
 
-    const body = await request.json()
+    const body = await readJson(request)
     const parsed = sendMessageSchema.safeParse(body)
 
     if (!parsed.success) {

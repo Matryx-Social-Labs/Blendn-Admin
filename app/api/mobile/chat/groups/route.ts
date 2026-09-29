@@ -11,6 +11,7 @@ import {
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { boundedInt } from "@/lib/pagination"
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,12 +27,8 @@ export async function GET(request: NextRequest) {
 
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams
-    const page = parseInt(searchParams.get("page") || "1")
-    const limit = Math.min(
-      parseInt(searchParams.get("limit") || String(PAGINATION.DEFAULT_LIMIT), 10) ||
-        PAGINATION.DEFAULT_LIMIT,
-      PAGINATION.MAX_LIMIT
-    )
+    const page = boundedInt(searchParams.get("page"), 1, 1, Number.MAX_SAFE_INTEGER)
+    const limit = boundedInt(searchParams.get("limit"), PAGINATION.DEFAULT_LIMIT, 1, PAGINATION.MAX_LIMIT)
 
     // Get total count of user's chat groups
     const totalCount = await db.chat_group_members.count({

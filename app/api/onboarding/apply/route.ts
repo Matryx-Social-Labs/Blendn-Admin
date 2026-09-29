@@ -8,6 +8,7 @@ import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { canSubmitApplication, onboardingTier, hashInviteToken, newInviteToken } from "@/lib/org-invites"
 import { validateGstin } from "@/lib/gstin"
 import { sendEmail, onboardingVerifyEmail, applyUrl, emailConfigured } from "@/lib/email"
+import { readJson } from "@/lib/api-input"
 
 /**
  * The public host application.
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
   if (limited) return limited
 
   try {
-    const parsed = applySchema.safeParse(await req.json())
+    const parsed = applySchema.safeParse(await readJson(req))
     if (!parsed.success) {
       return NextResponse.json(
         { success: false, error: parsed.error.issues[0]?.message ?? "Invalid application" },

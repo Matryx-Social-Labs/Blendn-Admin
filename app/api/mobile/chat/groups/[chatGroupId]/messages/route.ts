@@ -25,6 +25,8 @@ import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
 import { clientMessageMetadata, isOwnChatMedia, NOT_OWN_MEDIA } from "@/lib/validations/chat"
+import { readJson, isUuid } from "@/lib/api-input"
+import { boundedInt } from "@/lib/pagination"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
@@ -48,15 +50,14 @@ export async function GET(
     const { chatGroupId } = await params
     const { searchParams } = new URL(request.url)
 
-    // Validate chatGroupId is a valid UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(chatGroupId)) {
+    if (!isUuid(chatGroupId)) {
       return errorResponse("Invalid chat group ID format", 400)
     }
 
     // Pagination params
-    const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100)
+    const limit = boundedInt(searchParams.get("limit"), 50, 1, 100)
     const before = searchParams.get("before") // cursor for pagination
+    if (before && !isUuid(before)) return errorResponse("Invalid cursor", 400)
 
     // Check if chat group exists and user is a member
     const chatGroup = await db.chat_groups.findUnique({
@@ -267,13 +268,11 @@ export async function POST(
 
     const { chatGroupId } = await params
 
-    // Validate chatGroupId is a valid UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(chatGroupId)) {
+    if (!isUuid(chatGroupId)) {
       return errorResponse("Invalid chat group ID format", 400)
     }
 
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate request body
     const validation = sendMessageSchema.safeParse(body)

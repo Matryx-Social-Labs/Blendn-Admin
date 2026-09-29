@@ -7,6 +7,7 @@ import {
   successResponse,
   unauthorizedResponse,
   validationErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
 import { ageFrom, datingAgeRefusal } from "@/lib/age"
 import { db } from "@/lib/db"
@@ -14,6 +15,7 @@ import { intentsAreCoherent } from "@/lib/validations/profile"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -72,6 +74,7 @@ const preferencesSchema = z.object({
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
@@ -79,7 +82,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "match-prefs", authUser.userId))
     if (limited) return limited
 
-    const parsed = preferencesSchema.safeParse(await request.json())
+    const parsed = preferencesSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     const { intent, revealed, remember } = parsed.data
     // The deprecated flag means both, which is what it always did.

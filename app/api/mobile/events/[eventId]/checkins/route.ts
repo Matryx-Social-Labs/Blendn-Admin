@@ -14,8 +14,10 @@ import {
   notFoundResponse,
   forbiddenResponse,
   serverErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
+import { isUuid } from "@/lib/api-input"
 
 /**
  * Who is in the room.
@@ -48,6 +50,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)

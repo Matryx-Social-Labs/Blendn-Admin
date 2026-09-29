@@ -17,6 +17,7 @@ import {
   validationErrorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
 
 const presignedUrlSchema = z.object({
   filename: z.string().min(1, "Filename is required").max(255),
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
     )
     if (limited) return limited
 
-    const body = await request.json()
+    const body = await readJson(request)
     const validation = presignedUrlSchema.safeParse(body)
     if (!validation.success) {
       return validationErrorResponse(validation.error)

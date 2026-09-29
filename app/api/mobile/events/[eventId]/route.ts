@@ -28,6 +28,7 @@ import {
   serverErrorResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -36,6 +37,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
@@ -383,10 +385,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("heavy", "event-mutate", authUser.userId))
     if (limited) return limited
 
-    // Validate eventId is a valid UUID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(eventId)) {
+    if (!isUuid(eventId)) {
       return errorResponse("Invalid event ID format", 400)
     }
 
@@ -442,7 +441,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * so `{"status":"canceled"}` reached Prisma as an invalid enum value and
      * returned a 500 where a 400 belongs.
      */
-    const parsed = mobileEventPatchSchema.safeParse(await request.json())
+    const parsed = mobileEventPatchSchema.safeParse(await readJson(request))
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
     }
@@ -532,10 +531,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("heavy", "event-mutate", authUser.userId))
     if (limited) return limited
 
-    // Validate eventId is a valid UUID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(eventId)) {
+    if (!isUuid(eventId)) {
       return errorResponse("Invalid event ID format", 400)
     }
 

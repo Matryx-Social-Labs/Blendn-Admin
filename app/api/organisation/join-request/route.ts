@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { emailDomain } from "@/lib/org-invites"
+import { isUuid, readJson } from "@/lib/api-input"
 
 /**
  * Asking to join an organisation.
@@ -63,8 +64,8 @@ export async function POST(req: NextRequest) {
     const limited = await rateLimit(req, userLimit("heavy", "org:join-request", session.user.id))
     if (limited) return limited
 
-    const { orgId } = (await req.json()) as { orgId?: string }
-    if (!orgId) return NextResponse.json({ error: "Missing organisation." }, { status: 400 })
+    const { orgId } = ((await readJson(req)) ?? {}) as { orgId?: unknown }
+    if (!isUuid(orgId)) return NextResponse.json({ error: "Missing organisation." }, { status: 400 })
 
     const domain = emailDomain(session.user.email)
     if (!domain) return NextResponse.json({ error: "Invalid email address." }, { status: 400 })

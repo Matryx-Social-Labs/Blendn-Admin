@@ -38,8 +38,10 @@ export async function GET(req: NextRequest) {
   const limited = await rateLimit(req, userLimit("write", "footprint", session.user.id))
   if (limited) return limited
 
-  const lat = Number(req.nextUrl.searchParams.get("lat"))
-  const lng = Number(req.nextUrl.searchParams.get("lon"))
+  // `Number(null)` and `Number("")` are 0, a real coordinate: a missing one
+  // must not send (0, 0) to Overpass.
+  const lat = Number(req.nextUrl.searchParams.get("lat") || NaN)
+  const lng = Number(req.nextUrl.searchParams.get("lon") || NaN)
   if (!isValidLatLng(lat, lng)) {
     return NextResponse.json({ error: "lat and lon are required" }, { status: 400 })
   }

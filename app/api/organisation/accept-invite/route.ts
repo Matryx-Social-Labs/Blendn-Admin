@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { hashInviteToken, inviteState } from "@/lib/org-invites"
+import { readJson } from "@/lib/api-input"
 
 /**
  * Accepting an invitation to an organisation.
@@ -44,8 +45,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { token } = (await req.json()) as { token?: string }
-    if (!token) return NextResponse.json({ success: false, error: "Missing token." }, { status: 400 })
+    const { token } = ((await readJson(req)) ?? {}) as { token?: unknown }
+    if (typeof token !== "string" || !token) return NextResponse.json({ success: false, error: "Missing token." }, { status: 400 })
 
     const invite = await db.organisation_invites.findUnique({
       where: { token_hash: hashInviteToken(token) },

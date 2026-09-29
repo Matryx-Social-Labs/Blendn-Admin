@@ -11,6 +11,7 @@ import {
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
 
 /** What a person may delete of their own: their photos, their chat media, their event media. */
 const DELETABLE_FOLDERS: UploadFolder[] = ["profile", "chat", "events"]
@@ -29,7 +30,7 @@ export async function DELETE(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("upload", "upload-delete", authUser.userId))
     if (limited) return limited
 
-    const body = await request.json()
+    const body = await readJson(request)
     const parsed = deleteSchema.safeParse(body)
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)

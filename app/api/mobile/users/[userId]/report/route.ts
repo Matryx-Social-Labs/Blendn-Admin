@@ -13,6 +13,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Cannot report yourself", 400)
     }
 
-    const body = await request.json()
+    const body = await readJson(request)
     const validation = reportUserSchema.safeParse(body)
     if (!validation.success) {
       return validationErrorResponse(validation.error)

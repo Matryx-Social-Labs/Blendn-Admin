@@ -7,6 +7,7 @@ import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { hashInviteToken } from "@/lib/org-invites"
 import { checkPassword } from "@/lib/password"
+import { readJson } from "@/lib/api-input"
 
 /**
  * Consume a reset token and set a new password.
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
   if (limited) return limited
 
   try {
-    const { token, password } = (await req.json()) as { token?: string; password?: string }
+    const { token, password } = ((await readJson(req)) ?? {}) as { token?: unknown; password?: unknown }
 
     // One message for every token failure. Distinguishing "no such token" from
     // "expired" tells someone probing which of their guesses were once real.
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
       { error: "This reset link is invalid or has expired. Request a new one." },
       { status: 400 }
     )
-    if (!token || !password) return invalid
+    if (typeof token !== "string" || typeof password !== "string" || !token || !password) return invalid
 
     const row = await db.password_reset_tokens.findUnique({
       where: { token_hash: hashInviteToken(token) },

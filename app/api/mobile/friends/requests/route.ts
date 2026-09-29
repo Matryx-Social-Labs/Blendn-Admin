@@ -16,6 +16,7 @@ import {
   forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
 
 /**
  * GET /api/mobile/friends/requests — waiting for me, and waiting on others.
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
     const unfinished = await participationRefusal(me)
     if (unfinished) return forbiddenResponse(unfinished)
 
-    const parsed = createSchema.safeParse(await request.json())
+    const parsed = createSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
     const notFound = () => notFoundResponse("Not found")

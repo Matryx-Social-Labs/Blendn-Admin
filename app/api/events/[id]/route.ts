@@ -20,6 +20,7 @@ import {
   notifyEventDetailsChanged,
   materialEventChanges,
 } from "@/lib/services/event-notifications.service"
+import { isUuid, readJson } from "@/lib/api-input"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -40,6 +41,7 @@ interface RouteContext {
 export async function GET(_: Request, { params }: RouteContext) {
   try {
     const resolvedParams = await params
+    if (!isUuid(resolvedParams.id)) return errorResponse("Invalid event ID format", 400)
 
     /*
      * PATCH and DELETE below both authenticate and run `eventPermissions`.
@@ -93,7 +95,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     }
 
     const resolvedParams = await params
-    const body = await req.json()
+    if (!isUuid(resolvedParams.id)) return errorResponse("Invalid event ID format", 400)
+    const body = await readJson(req)
 
     /*
      * The last write endpoints in the codebase without a schema. The
@@ -558,6 +561,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     }
 
     const resolvedParams = await params
+    if (!isUuid(resolvedParams.id)) return errorResponse("Invalid event ID format", 400)
     const event = await db.events.findFirst({
       where: {
         id: resolvedParams.id,

@@ -10,7 +10,9 @@ import {
   unauthorizedResponse,
   notFoundResponse,
   serverErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -58,8 +60,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
-    const body = await request.json()
+    const body = await readJson(request)
     const validation = reportEventSchema.safeParse(body)
     if (!validation.success) {
       return validationErrorResponse(validation.error)

@@ -36,7 +36,8 @@ export function generateOpenApiDocument() {
         "API for the Blendn event discovery and social platform. " +
         "Mobile endpoints use JWT Bearer authentication. " +
         "Dashboard endpoints use NextAuth session cookies. " +
-        "Note: `/api/mobile/v1/*` is rewritten to `/api/mobile/*` by middleware — both URL prefixes work identically.",
+        "Note: `/api/mobile/v1/*` is rewritten to `/api/mobile/*` by middleware — both URL prefixes work identically. " +
+        "Bad input is a 4xx, never a 500: a path id or cursor that cannot be a row, or a body that is not JSON, answers 400 (see docs/API.md).",
     },
     servers: [{ url: "/" }],
     tags: [

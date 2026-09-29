@@ -8,6 +8,7 @@ import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import { sponsoredMessageCreateSchema } from "@/lib/validations/event"
 import { PAGINATION } from "@/lib/constants"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -16,6 +17,7 @@ interface RouteContext {
 export async function GET(_: Request, { params }: RouteContext) {
   try {
     const { id: eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
     const session = await getAuth()
     if (!session?.user) return errorResponse("Unauthorized", 401)
     const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
@@ -59,6 +61,7 @@ export async function POST(req: Request, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const event = await db.events.findUnique({ where: { id: eventId }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
     if (!event) return errorResponse("Not found", 404)
@@ -90,7 +93,7 @@ export async function POST(req: Request, { params }: RouteContext) {
     const limited = await rateLimit(req as never, createUserRateLimit("organiser-broadcast", session.user.id))
     if (limited) return limited
 
-    const parsed = sponsoredMessageCreateSchema.safeParse(await req.json())
+    const parsed = sponsoredMessageCreateSchema.safeParse(await readJson(req))
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Invalid request", details: parsed.error.flatten().fieldErrors },

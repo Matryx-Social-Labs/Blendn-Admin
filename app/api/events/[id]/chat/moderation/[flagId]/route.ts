@@ -6,6 +6,8 @@ import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
 import { emitChatMessageHidden } from "@/lib/socket-server"
+import { readJson, isUuid } from "@/lib/api-input"
+import { errorResponse } from "@/lib/api-response"
 
 interface RouteParams {
   params: Promise<{ id: string; flagId: string }>
@@ -24,6 +26,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const { id: eventId, flagId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(flagId)) return errorResponse("Invalid flag ID format", 400)
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
@@ -44,7 +48,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    const body = await request.json()
+    const body = (await readJson(request)) ?? {}
     const { action, notes } = body as { action: "approve" | "reject"; notes?: string }
 
     if (!action || !["approve", "reject"].includes(action)) {
