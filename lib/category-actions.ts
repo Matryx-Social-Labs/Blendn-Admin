@@ -1,6 +1,7 @@
 "use server"
 
 import { Refusal } from "./refusal"
+import { likeLiteral } from "./like-literal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -70,6 +71,22 @@ export async function getCategories(): Promise<CategoryRow[]> {
   }))
 }
 
+/**
+ * A sibling already called `name`, in any case (SCRUM-468).
+ *
+ * Two entries with one name in the same list are two identical choices in the
+ * app's filter that filter differently. The slug check on create did not catch
+ * it — a child created here slugs its own name, while the seeded siblings carry
+ * their parent's prefix — and rename had no check at all. Siblings only: two
+ * parents may each have a "Workshops".
+ */
+function siblingNamed(name: string, parentId: string | null) {
+  return db.categories.findFirst({
+    where: { parent_id: parentId, name: { equals: likeLiteral(name), mode: "insensitive" } },
+    select: { name: true },
+  })
+}
+
 export async function renameCategory(id: string, name: string): Promise<void> {
   const admin = await requireAdmin()
   const trimmed = name.trim()
@@ -80,14 +97,12 @@ export async function renameCategory(id: string, name: string): Promise<void> {
     select: { name: true, parent_id: true },
   })
 
-  // Create refuses a name already in the list (by slug); rename has to as well,
-  // or the app shows two identical choices that filter differently (SCRUM-468).
-  // Siblings only: two parents may each have a "Workshops".
-  const twin = await db.categories.findFirst({
-    where: { id: { not: id }, parent_id: before.parent_id, name: { equals: trimmed, mode: "insensitive" } },
-    select: { name: true },
-  })
-  if (twin) throw new Refusal(`"${twin.name}" already exists — merge into it instead.`)
+  // Only a real change is checked, so a row can re-case its own name, and one
+  // saved before this check existed is not locked by a twin it already has.
+  if (trimmed.toLowerCase() !== before.name.toLowerCase()) {
+    const twin = await siblingNamed(trimmed, before.parent_id)
+    if (twin) throw new Refusal(`"${twin.name}" already exists — merge into it instead.`)
+  }
 
   // The slug is deliberately NOT regenerated. It is what the mobile client
   // filters on and what every shared link contains; renaming "Live Music" to
@@ -253,6 +268,9 @@ export async function createCategory(name: string, parentId: string | null): Pro
     .replace(/^-+|-+$/g, "")
   // "!!" passes the length check and slugs to "", which the app cannot filter on.
   if (!slug) throw new Refusal("Use at least one letter or number in the name.")
+
+  const twin = await siblingNamed(trimmed, parentId)
+  if (twin) throw new Refusal(`"${twin.name}" already exists here.`)
 
   const clash = await db.categories.findUnique({ where: { slug }, select: { id: true } })
   if (clash) throw new Refusal("A category with that slug already exists.")

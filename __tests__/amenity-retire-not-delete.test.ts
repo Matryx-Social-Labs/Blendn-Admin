@@ -86,7 +86,7 @@ describe("retiring an amenity", () => {
 
 describe("renaming", () => {
   it("leaves the slug alone", async () => {
-    mockDb.amenities.findUnique.mockResolvedValue({ id: ID })
+    mockDb.amenities.findUnique.mockResolvedValue({ id: ID, name: "Open Bar" })
 
     await updateAmenity(ID, { name: "Free Bar" })
 

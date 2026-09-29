@@ -1306,9 +1306,9 @@
       "date": "2026-09-29"
     },
     "setup-rename-duplicates.itest.ts": {
-      "guards": "SCRUM-468: renameCategory refuses a sibling's name in any case (a category under another parent may share it; a row may change its own case); updateAmenity refuses another amenity's name in any case (its own case change allowed); createCategory refuses a name with no letter or digit, which slugged to \"\".",
-      "mutation": "M242 no category twin check. M243 the twin check across all parents. M244 the category matches itself. M245 no empty-slug refusal. M246 no amenity twin check. M247 the amenity matches itself.",
-      "observed": "Red before the fix: 3 of 6 failing (the sibling rename, the amenity rename, the \"!!\" create). M242–M247: each 1 of 6 failing. All reverted.",
+      "guards": "SCRUM-468: a category's name is unique among its siblings on create and on rename (in any case; a name under another parent is allowed; a row may re-case its own name); an amenity's name is unique on rename (in any case; a retired twin says restore it; an unchanged name with a pre-existing twin still saves); `_` and `%` in a name are literal, not ILIKE wildcards; createCategory refuses a name with no letter or digit.",
+      "mutation": "M242 no rename sibling check. M243 the check across all parents. M244 the category check runs on an unchanged name. M245 no empty-slug refusal. M246 no amenity rename check. M247 the amenity check runs on an unchanged name. M248 no sibling check on create. M249 no LIKE escaping.",
+      "observed": "Red before the fix: 3 of 6 failing (sibling rename, amenity rename, \"!!\" create); the review's cases (create beside a prefixed-slug sibling, refusal under a parent, retired twin, unchanged twin, underscore) added after. M242: 2 of 12. M243: 1. M244: 1. M245: 1. M246: 3. M247: 2. M248: 1. M249: 1 (\"Open_Deck\" refused beside \"Open Deck\"). All reverted.",
       "date": "2026-09-29"
     }
   },
