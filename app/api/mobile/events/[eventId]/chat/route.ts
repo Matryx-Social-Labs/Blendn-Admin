@@ -817,7 +817,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
           }),
         ]).finally(() => clearTimeout(timeoutHandle))
-        examinedInline = openaiCheck.checked
+        /*
+         * The caption is checked here, before the emit, with or without media:
+         * its words go out in the push preview. The inline check reads text
+         * only, so a message that carries media is not examined until the
+         * pipeline has looked at the image too (SCRUM-444).
+         */
+        examinedInline = openaiCheck.checked && !stored?.mediaUrl
         const openaiResult = openaiCheck.checked ? openaiCheck.result : null
         if (openaiResult && openaiResult.action === "hide") {
           await hideMessage(message.id, chatGroup.id, authUser.userId, openaiResult)
@@ -846,11 +852,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
          * messages are not a category that needs less moderation -- a slur is
          * five characters.
          */
-        if (!openaiCheck.checked) {
-          void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
+        if (!examinedInline) {
+          void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id, stored?.mediaUrl)
         }
       } catch {
-        void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
+        void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id, stored?.mediaUrl)
       }
     } else {
       void moderateMessage(
