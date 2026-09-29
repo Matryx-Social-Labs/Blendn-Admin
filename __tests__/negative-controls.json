@@ -1235,8 +1235,8 @@
     },
     "me-attendance.itest.ts": {
       "guards": "SCRUM-432: an event the platform deleted is out of the 'events attended' count and the /me/attendance list alike, and a page whose newest attended event was deleted is still full (?limit=1 returns the next live event, totalCount 1), and the profile's stats.eventsAttended (GET /users/:id) says 1 too. One LIVE_EVENT predicate in lib/attendee-counts.ts, taken by distinctEventsAttended and attendedEventIds.",
-      "mutation": "M183 LIVE_EVENT removed from distinctEventsAttended only. M184 LIVE_EVENT removed from attendedEventIds only. M185 the profile route counts distinct attended events itself, without the predicate (the pre-fix semantics).",
-      "observed": "Red before the fix: 1 of 7 failing, page [] total 2 counted 2 (expected [kept] 1 1), the staging shape (totalCount 3 above a list of 1). M183: 1 of 7 failing, total 2 and counted 2. M184: 1 of 7 failing, page []. (M183/M184 were run before the profile assertion was added, which ecc:pr-test-analyzer asked for.) M185: 1 of 7 failing, profile 2. All reverted.",
+      "mutation": "M189 LIVE_EVENT removed from distinctEventsAttended only. M190 LIVE_EVENT removed from attendedEventIds only. M191 the profile route counts distinct attended events itself, without the predicate (the pre-fix semantics).",
+      "observed": "Red before the fix: 1 of 7 failing, page [] total 2 counted 2 (expected [kept] 1 1), the staging shape (totalCount 3 above a list of 1). M189: 1 of 7 failing, total 2 and counted 2. M190: 1 of 7 failing, page []. (M189/M190 were run before the profile assertion was added, which ecc:pr-test-analyzer asked for.) M191: 1 of 7 failing, profile 2. All reverted.",
       "date": "2026-09-29"
     }
   },
