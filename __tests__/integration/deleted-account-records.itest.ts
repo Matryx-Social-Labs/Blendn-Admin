@@ -9,11 +9,12 @@ import { NextRequest } from "next/server"
  * it back with a failed one, and that the purge takes exactly the expired.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
-jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
+jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0), isConfigured: () => true }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { purgeDeletedAccountRecords, recordDeletedAccount } from "@/lib/deleted-account-records"
 import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
+import { deletePrefix } from "@/lib/tigris"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const accountRoute = require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route")
@@ -170,4 +171,48 @@ it("purges only the records past their date, and a second pass purges nothing", 
   expect(left.map((r) => r.user_id).sort()).toEqual([due.user_id, live.user_id].sort())
 
   expect(await purgeDeletedAccountRecords(now)).toBe(0)
+})
+
+/*
+ * SCRUM-429. Account deletion keeps a person's removed-content chat images for
+ * their 180 days (retainedChatMediaKeys), and nothing ever deleted them after.
+ * They go with the registration record: same period, same sweep.
+ */
+it("erases what is left of the person's chat media with their record, and keeps a record whose media it could not erase", async () => {
+  const now = new Date()
+  const make = async (label: string) => {
+    const user_id = await makeUser(label)
+    users.push(user_id)
+    await db.deleted_account_records.create({
+      data: {
+        user_id,
+        email: `${user_id}@itest.invalid`,
+        account_created_at: new Date("1999-01-01T00:00:00Z"),
+        deleted_at: new Date(now.getTime() - 181 * DAY_MS),
+        sign_up_method: "email",
+        purge_after: new Date(now.getTime() - DAY_MS),
+      },
+    })
+    return user_id
+  }
+  const erased = await make("purge-media-ok")
+  const stuck = await make("purge-media-fails")
+  const mocked = deletePrefix as jest.Mock
+  mocked.mockReset()
+  mocked.mockImplementation(async (prefix: string) => {
+    if (prefix === `chat/${stuck}/`) throw new Error("storage down")
+    return 2
+  })
+
+  // Other cases in this file leave records of their own, so read ours rather than the sweep's count.
+  await purgeDeletedAccountRecords(now)
+  // Everything under the prefix: the 180 days were the only reason to keep any of it.
+  expect(mocked).toHaveBeenCalledWith(`chat/${erased}/`)
+  const left = await db.deleted_account_records.findMany({ where: { user_id: { in: [erased, stuck] } }, select: { user_id: true } })
+  expect(left.map((r) => r.user_id)).toEqual([stuck])
+
+  // Storage back: the next sweep takes it.
+  mocked.mockResolvedValue(0)
+  await purgeDeletedAccountRecords(now)
+  expect(await db.deleted_account_records.count({ where: { user_id: { in: [erased, stuck] } } })).toBe(0)
 })

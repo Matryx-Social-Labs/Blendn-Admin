@@ -1299,6 +1299,12 @@
       "observed": "Red before the fix: this file 3 of 5 failing, message-media-owned 2 of 16; the quote case 1 of 1 against the committed route. M260: this file 4 of 6. M261: message-media-owned 1 of 21. M262: 1 of 21. M266: 1 of 21. M267: 1 of 21 (the hidden caption was not hidden before the emit). M268: 1 of 21. M269: this file 1 of 6. All reverted.",
       "date": "2026-09-29"
     },
+    "deleted-account-records.itest.ts": {
+      "guards": "SCRUM-429: the retention sweep erases what is left of a deleted person's chat/<id>/ media (the removed-content images kept for 180 days) before it purges their registration record, and keeps a record whose media it could not erase for the next pass.",
+      "mutation": "M293 the purge leaves chat/<id>/ alone. M294 records are purged even when their media was not erased.",
+      "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6 failing. M294: 1 of 6 failing. All reverted.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",

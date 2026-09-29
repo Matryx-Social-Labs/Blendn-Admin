@@ -68,10 +68,14 @@ deletes their account:
   - carrying a flag nobody cleared;
   - reported by someone else, with the report not dismissed.
 
-  If that set cannot be read, `chat/` is left alone rather than erased. Known
-  gaps (SCRUM-429): kept objects are not yet purged at 180 days, they stay in
-  the public bucket, and a report filed after the deletion finds the image
-  already gone.
+  If that set cannot be read, `chat/` is left alone rather than erased. The
+  kept images go at 180 days, with the registration record: the retention
+  sweep erases everything left under `chat/<id>/` before it purges the record,
+  and keeps a record whose images it could not erase for the next pass
+  (SCRUM-429). Images sent since SCRUM-427 are in the private bucket and served
+  only through signed URLs. Known gaps: images from before SCRUM-427 that are
+  kept stay in the public bucket until then, and a report filed after the
+  deletion finds the image already gone.
 - **Board posts:** `moderation_status = 'hidden'`. Account deletion deletes the
   author's other posts but keeps these.
 - **Events:** soft-deleted or delisted, with `event_reports` and `audit_logs`.
