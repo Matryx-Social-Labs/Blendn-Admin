@@ -490,9 +490,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * re-moderate the same three photos every time. Concurrently, not in
      * series -- six photos is one round trip, not six.
      */
+    // The sealed copy of each new photo, by the URL the client sent (SCRUM-425).
+    let sealedFor = new Map<string, string>()
     if (photos !== undefined && photos.length > 0) {
       const alreadyOnProfile = new Set(existing?.photos ?? [])
-      const fresh = photos.filter((u: string) => !alreadyOnProfile.has(u))
+      // Once each: a URL listed twice is one photo, and its source is gone after one seal.
+      const fresh = [...new Set(photos.filter((u: string) => !alreadyOnProfile.has(u)))]
 
       if (fresh.length > 0) {
         const verdicts = await Promise.all(
@@ -503,16 +506,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
           return errorResponse(bad.message, 400, bad.code)
         }
 
+        const sealed = verdicts.flatMap((v) => (v.ok ? [v.url] : []))
+        sealedFor = new Map(fresh.map((u: string, i: number) => [u, sealed[i]]))
+
         /*
          * Recorded as unchecked now; the vendor check runs after the
          * response and upgrades or pulls the photo. The person's spinner
          * used to wait on OpenAI fetching and scoring the image, with no
          * deadline, on the one write that makes a photo appear.
          */
-        await Promise.all(fresh.map((u: string) => recordPhotoCheck(u, userId, false)))
-        after(() => Promise.all(fresh.map((u: string) => moderateProfilePhoto(u, userId))))
+        await Promise.all(sealed.map((u: string) => recordPhotoCheck(u, userId, false)))
+        after(() => Promise.all(sealed.map((u: string) => moderateProfilePhoto(u, userId))))
       }
     }
+    const storedPhotos = photos?.map((u: string) => sealedFor.get(u) ?? u)
 
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
@@ -530,7 +537,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * column, so deleting every photo left the old image rendering on DM
      * avatars forever.
      */
-    if (photos !== undefined) userUpdate.image = photos[0] ?? null
+    if (storedPhotos !== undefined) userUpdate.image = storedPhotos[0] ?? null
     if (Object.keys(userUpdate).length > 0) {
       await db.user.update({
         where: { id: userId },
@@ -569,7 +576,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(occupation !== undefined && { occupation }),
         ...(education !== undefined && { education }),
         interests: interests || [],
-        photos: photos || [],
+        photos: storedPhotos || [],
         goals: goals || [],
         looking_for: looking_for || [],
         onboarded: onboarded ?? false,
@@ -621,7 +628,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(occupation !== undefined && { occupation }),
         ...(education !== undefined && { education }),
         ...(interests !== undefined && { interests }),
-        ...(photos !== undefined && { photos }),
+        ...(storedPhotos !== undefined && { photos: storedPhotos }),
         ...(goals !== undefined && { goals }),
         ...(looking_for !== undefined && { looking_for }),
         ...(stripsLookingFor && { looking_for: demotedLookingFor! }),

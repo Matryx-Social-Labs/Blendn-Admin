@@ -1,6 +1,7 @@
 import { SPONSORSHIP } from "./constants"
 import { logger } from "./logger"
 import {
+  CopyObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   S3Client,
@@ -151,9 +152,20 @@ export async function getPresignedUploadUrl(
     },
   })
 
-  // Generate presigned URL valid for 15 minutes
+  /*
+   * Valid for 15 minutes, and for the granted content type only (SCRUM-425).
+   * The presigner leaves `content-type` out of the signature by default, so
+   * the URL bound nothing but the host: an image grant stored an HTML page
+   * that the public URL then served as text/html. Tigris refuses a PUT whose
+   * type differs from a signed one (403, measured on staging). Every caller
+   * already sends the type it asked for, so nothing honest changes.
+   *
+   * The size is still unbound here: signing `content-length` needs the client
+   * to declare it first. What is attached is measured by `sealUpload`.
+   */
   const uploadUrl = await getSignedUrl(client, command, {
-    expiresIn: 900, // 15 minutes
+    expiresIn: 900,
+    signableHeaders: new Set(["content-type"]),
   })
 
   const publicUrl = getPublicUrl(key)
@@ -163,6 +175,101 @@ export async function getPresignedUploadUrl(
     publicUrl,
     key,
   }
+}
+
+export type SealRefusal = "missing" | "too_small" | "too_large" | "wrong_type"
+export type SealedObject = { key: string; url: string; bytes: number; contentType: string }
+
+const SEAL_TIMEOUT_MS = 10_000
+
+/**
+ * Copy an upload to a key nobody holds an upload URL for, and vouch for the
+ * copy (SCRUM-425). What a profile or a message stores is the copy.
+ *
+ * The URL `getPresignedUploadUrl` hands out can write its key again and again
+ * until it expires, so a photo could be swapped after it was attached and
+ * moderated. The copy's key is minted here and never signed for anyone, and
+ * the source is deleted once the copy is vouched for, so nothing is left for
+ * the URL to rewrite that anything points at.
+ *
+ * Checked twice. The source first, so an oversized or wrong file is refused
+ * before a byte is copied. Then the copy, because the source can change
+ * between the two and Tigris ignores `CopySourceIfMatch` (a copy with a
+ * stale ETag still copied the new bytes, measured on staging). The copy's
+ * headers are the server's (`REPLACE`), not whatever the uploader sent
+ * alongside the one header the URL signs.
+ *
+ * Refusals are the person's to fix and come back as a value. A storage
+ * failure is ours and throws, after removing any copy it left.
+ */
+export async function sealUpload(
+  key: string,
+  folder: "profile" | "chat",
+  userId: string,
+  minBytes = 1
+): Promise<SealedObject | { refused: SealRefusal }> {
+  // Callers bind the key with `ownedObjectKey`; this is the backstop.
+  if (!key.startsWith(`${folder}/${userId}/`)) throw new Error("sealUpload: key outside the caller's folder")
+  const client = getS3Client()
+  const Bucket = bucketFor(folder)
+  const timeout = () => ({ abortSignal: AbortSignal.timeout(SEAL_TIMEOUT_MS) })
+  const factsOf = async (Key: string) => {
+    try {
+      const head = await client.send(new HeadObjectCommand({ Bucket, Key }), timeout())
+      return { bytes: head.ContentLength ?? 0, contentType: head.ContentType ?? "" }
+    } catch (error) {
+      if (isNotFound(error)) return null
+      throw error
+    }
+  }
+  const refusalOf = (facts: { bytes: number; contentType: string } | null): SealRefusal | null =>
+    !facts ? "missing"
+    : facts.bytes < minBytes ? "too_small"
+    : facts.bytes > getMaxFileSize(folder) ? "too_large"
+    : !validateContentType(facts.contentType, folder) ? "wrong_type"
+    : null
+  const remove = (Key: string) =>
+    client.send(new DeleteObjectCommand({ Bucket, Key })).catch((error: unknown) => {
+      logger.warn("Seal: could not delete an object", { key: Key, error: error instanceof Error ? error.message : String(error) })
+    })
+
+  const source = await factsOf(key)
+  const early = refusalOf(source)
+  if (early || !source) return { refused: early ?? "missing" }
+
+  const sealedKey = generateKey(folder, "sealed", userId)
+  try {
+    await client.send(
+      new CopyObjectCommand({
+        Bucket,
+        Key: sealedKey,
+        CopySource: `${Bucket}/${key.split("/").map(encodeURIComponent).join("/")}`,
+        MetadataDirective: "REPLACE",
+        ContentType: source.contentType,
+        CacheControl: "public, max-age=31536000",
+        Metadata: { "uploaded-by": userId },
+      }),
+      timeout()
+    )
+    const copy = await factsOf(sealedKey)
+    const refused = refusalOf(copy)
+    if (refused || !copy) {
+      await remove(sealedKey)
+      return { refused: refused ?? "missing" }
+    }
+    await remove(key)
+    return { key: sealedKey, url: getPublicUrl(sealedKey), bytes: copy.bytes, contentType: copy.contentType }
+  } catch (error) {
+    // An aborted call does not cancel a copy the storage already started.
+    await remove(sealedKey)
+    if (isNotFound(error)) return { refused: "missing" }
+    throw error
+  }
+}
+
+function isNotFound(error: unknown): boolean {
+  const e = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+  return e.name === "NoSuchKey" || e.name === "NotFound" || e.$metadata?.httpStatusCode === 404
 }
 
 /**
@@ -327,34 +434,6 @@ export function ownedObjectKey(url: string, userId: string, folder: UploadFolder
   if (!key.startsWith(prefix) || key.length <= prefix.length) return null
 
   return key
-}
-
-/**
- * How large is this object, in bytes? `null` if it is not there.
- *
- * A metadata call, not a download: it never pulls the image, so it costs one
- * round trip and no memory regardless of file size.
- *
- * This is also the whole blank-image check. A solid colour, a lens cap or a
- * photo of a wall compresses to a few kilobytes where a real photograph is
- * hundreds -- so a size floor catches the class without decoding anything.
- * The alternative was `sharp` for per-channel standard deviation, which means
- * a native dependency in the Railway image and a full download per photo, to
- * separate "blank" from "nearly blank" more precisely than anyone needs.
- */
-export async function getObjectSize(key: string): Promise<number | null> {
-  const client = getS3Client()
-  try {
-    // The SDK has no default request timeout; this HEAD is on the profile
-    // PUT's path, and "the object is not there" must not take a minute.
-    const head = await client.send(
-      new HeadObjectCommand({ Bucket: bucketForKey(key), Key: key }),
-      { abortSignal: AbortSignal.timeout(5_000) }
-    )
-    return head.ContentLength ?? null
-  } catch {
-    return null
-  }
 }
 
 /**

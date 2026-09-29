@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { ownedObjectKey } from "@/lib/tigris"
+import { ownedObjectKey, sealUpload, type SealRefusal } from "@/lib/tigris"
 
 /**
  * What a client may put in a room message's `metadata`: its own media, and
@@ -22,6 +22,26 @@ export const NOT_OWN_MEDIA = "Send photos through the app rather than linking to
  */
 export function isOwnChatMedia(url: string, userId: string): boolean {
   return ownedObjectKey(url, userId, "chat") !== null
+}
+
+const SEAL_REFUSAL: Record<SealRefusal, string> = {
+  missing: "That photo did not finish uploading. Try again.",
+  too_small: "That photo is empty. Try again.",
+  too_large: "That file is too large to send.",
+  wrong_type: "That kind of file can't be sent.",
+}
+
+/**
+ * The sender's upload as a message stores it: its sealed copy (SCRUM-425),
+ * which nobody holds an upload URL for, so it cannot change after it was
+ * sent and moderated. Call after `isOwnChatMedia` and after a retry is
+ * answered, so a refused or retried send does not copy anything.
+ */
+export async function sealChatMedia(url: string, userId: string): Promise<{ url: string } | { refusal: string }> {
+  const key = ownedObjectKey(url, userId, "chat")
+  if (!key) return { refusal: NOT_OWN_MEDIA }
+  const sealed = await sealUpload(key, "chat", userId)
+  return "refused" in sealed ? { refusal: SEAL_REFUSAL[sealed.refused] } : { url: sealed.url }
 }
 
 export const sendMessageSchema = z.object({
