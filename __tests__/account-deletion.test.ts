@@ -63,6 +63,8 @@ jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => m
 
 const mockDeletePrefix = jest.fn().mockResolvedValue(3)
 jest.mock("@/lib/tigris", () => ({ deletePrefix: (...a: unknown[]) => mockDeletePrefix(...a) }))
+const RETAINED = new Set(["chat/kept-image.jpg"])
+jest.mock("@/lib/retained-media", () => ({ retainedChatMediaKeys: jest.fn(async () => RETAINED) }))
 jest.mock("@/lib/logger", () => ({ logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 jest.mock("@/lib/rate-limit", () => ({
   rateLimit: jest.fn().mockResolvedValue(null),
@@ -398,6 +400,28 @@ describe("the photos leave storage, not only the row", () => {
     const txOrder = mockDb.$transaction.mock.invocationCallOrder[0]
     const delOrder = mockDeletePrefix.mock.invocationCallOrder[0]
     expect(delOrder).toBeGreaterThan(txOrder)
+  })
+
+  it("erases the person's chat media too, not only their profile photos (SCRUM-428)", async () => {
+    /*
+     * DM and room images live under chat/{userId}/ in the public bucket. Only
+     * profile/ was listed, so on staging a deleted account's DM image was still
+     * in storage (HeadObject: 121427 bytes) and still served.
+     */
+    mockAuth.mockResolvedValue({ userId: USER })
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
+    // Minus the images of messages moderation removed or somebody reported:
+    // removed content is kept 180 days (docs/RETENTION.md, r.3(1)(g)).
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
+  })
+
+  it("one folder failing does not leave the other behind", async () => {
+    mockAuth.mockResolvedValue({ userId: USER })
+    mockDeletePrefix.mockRejectedValueOnce(new Error("listing failed"))
+    await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
   })
 
   it("a storage failure does not undo the erasure the database accepted, and is logged by user", async () => {

@@ -1172,6 +1172,12 @@
       "mutation": "M72: the DM route without the ownership check. M73: the group route's metadata back to z.record(z.string(), z.any()). M74: the group route without the ownership check. M75: the event route without the ownership check. M76: the shared sendMessageSchema metadata back to a free record. M77: isOwnChatMedia accepting anything.",
       "observed": "Run with an in-memory harness over message-media-owned.itest.ts (8 tests). M72: 1 failing (DM refusal). M73: 1 failing (sponsored metadata on the group route). M74: 1 failing (group media refusal). M75: 1 failing (event media refusal). M76: 1 failing (sponsored metadata on the event route). M77: 3 failing (all three media refusals).",
       "date": "2026-09-29"
+    },
+    "retained-chat-media.itest.ts": {
+      "guards": "SCRUM-428: account deletion erases everything the person uploaded from the app, profile/<id>/ and chat/<id>/, except the images of messages that are removed content (hidden or flagged by moderation, a moderation_flags row, or a message_reports row, in rooms and DMs), which are kept 180 days per docs/RETENTION.md (r.3(1)(g)). retainedChatMediaKeys is pinned against real Postgres, deletePrefix's keep set with a mocked S3 client (delete-prefix-keep.test.ts), and the route's calls in account-deletion.test.ts (grandfathered as a whole; M82, M83 and M87 are recorded here).",
+      "mutation": "M82: the route erasing profile/ only again. M83: a profile/ failure stopping the loop before chat/. M84: reported DMs not kept. M85: moderation_flags rows not kept. M86: deletePrefix ignoring its keep set. M87: the route erasing chat/ with no keep set.",
+      "observed": "M82: account-deletion.test.ts 2 of 24 failing (chat/ never erased). M83: 2 of 24 failing (the chat/ call missing after a profile/ failure). M84: retained-chat-media.itest.ts 1 of 1 failing (dm-reported missing from the kept set). M85: 1 of 1 failing (room-flag-row missing). M86: delete-prefix-keep.test.ts 2 of 3 failing (kept keys deleted, and a delete sent with everything kept). M87: account-deletion.test.ts 2 of 24 failing (called without RETAINED).",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

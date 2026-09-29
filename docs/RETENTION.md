@@ -60,6 +60,11 @@ deletes their account:
   are in `moderation_flags`, `message_reports` and `audit_logs`.
 - **DMs:** `moderation_status = 'hidden'`, with `message_reports`. Account
   deletion closes the conversation and keeps the messages.
+- **Images in those messages:** account deletion erases the person's
+  `chat/<id>/` objects except the images of messages that are hidden, flagged,
+  carry a `moderation_flags` row or were reported (`retainedChatMediaKeys`,
+  `lib/retained-media.ts`, SCRUM-428). Those objects stay for as long as the
+  message does.
 - **Board posts:** `moderation_status = 'hidden'`. Account deletion deletes the
   author's other posts but keeps these.
 - **Events:** soft-deleted or delisted, with `event_reports` and `audit_logs`.

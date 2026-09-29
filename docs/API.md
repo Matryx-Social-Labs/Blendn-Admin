@@ -2078,6 +2078,15 @@ photos, goals, looking_for, **gender, orientations, interested_in,
 intent_default, reveal_by_default, work_field**, plus the structured
 `user_interests` rows and every `event_match_preferences` row.
 
+Removed from storage, after the transaction: everything the person uploaded
+from the app, meaning `profile/<id>/` (photos) and `chat/<id>/` (images sent in
+DMs and rooms, SCRUM-428). The exception is an image in a message that
+moderation hid or flagged, or that someone reported: that is removed content,
+kept 180 days (`docs/RETENTION.md`). A failure is logged by user and folder,
+and the other folder is still erased. `events/`, `sponsored/` and `claims/` belong to an
+organisation's records and stay. A public URL can keep serving from Tigris'
+cache until its `max-age` runs out.
+
 Kept: the four settings booleans (how a dead account would behave, not who the
 person was), and `event_check_ins` — attendance is the organiser's history too,
 and it is the co-presence that keeps a conversation open for someone who
