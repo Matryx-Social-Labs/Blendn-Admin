@@ -930,8 +930,9 @@ it on the device (40 px wide), upload it like a photo, and send its `publicUrl`
 as `blur_photo` — with the photos or after them. It is held to the photo rules
 with two differences:
 
-- **Small, not large:** anything over 8 KB is `too_large`, because a file that
-  big is sharp enough to be the photo. There is no blank-image floor.
+- **Small, not large:** anything over 4 KB is `too_large` — the app's 40 px
+  JPEG is 1–2 KB, and a file much bigger is sharp enough to be the photo. There
+  is no blank-image floor. It is moderated and recorded like a photo.
 - **It never outlives its photo.** A save that changes `photos[0]` without a new
   `blur_photo`, or leaves no photos, clears it; so does moderation pulling the
   primary. A blur sent with no photo on the profile is refused (`no_photo`).

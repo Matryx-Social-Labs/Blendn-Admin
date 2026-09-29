@@ -481,18 +481,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         : null
 
     /*
-     * Every new photo is checked before it is stored.
-     *
-     * Nothing had ever checked a profile photo. `checkImageContent` was wired
-     * to chat media and never to profiles, so the one image a stranger sees on
-     * a match card was the one image nobody screened.
-     *
-     * Only URLs that are not already on the profile are checked: re-saving a
-     * profile is the commonest write there is, and it must not re-fetch and
-     * re-moderate the same three photos every time. Concurrently, not in
-     * series -- six photos is one round trip, not six.
-     */
-    /*
      * The blurred photo is a copy of the primary one (SCRUM-476), so it is
      * judged against the primary this request leaves behind. Refused before
      * anything is sealed: a blur of no photo at all is a client bug.
@@ -505,6 +493,38 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Add a photo before its blurred copy", 400, "no_photo")
     }
 
+    /*
+     * Written only as the caller's own small sealed upload, never a free URL:
+     * that would let anyone point every viewer's card at any image. And never
+     * outliving its photo — a new primary without a blur of its own, or no
+     * photo at all, clears it. `undefined` leaves the column alone.
+     *
+     * Before the photos: sealing consumes an upload, so a refused blur must
+     * not have used up the photos sent with it. A blur is cheap to make again.
+     */
+    let storedBlur: string | null | undefined
+    if (newBlur) {
+      const verdict = await checkBlurPhoto(newBlur, userId)
+      if (!verdict.ok) return errorResponse(verdict.message, 400, verdict.code)
+      storedBlur = verdict.url
+      await recordPhotoCheck(verdict.url, userId, false)
+      after(() => moderateBlurPhoto(verdict.url, userId))
+    } else if (touchesBlur && (blur_photo === null || !primaryAfter || primaryAfter !== primaryBefore)) {
+      storedBlur = null
+    }
+
+    /*
+     * Every new photo is checked before it is stored.
+     *
+     * Nothing had ever checked a profile photo. `checkImageContent` was wired
+     * to chat media and never to profiles, so the one image a stranger sees on
+     * a match card was the one image nobody screened.
+     *
+     * Only URLs that are not already on the profile are checked: re-saving a
+     * profile is the commonest write there is, and it must not re-fetch and
+     * re-moderate the same three photos every time. Concurrently, not in
+     * series -- six photos is one round trip, not six.
+     */
     // The sealed copy of each new photo, by the URL the client sent (SCRUM-425).
     let sealedFor = new Map<string, string>()
     if (photos !== undefined && photos.length > 0) {
@@ -536,21 +556,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
     const storedPhotos = photos?.map((u: string) => sealedFor.get(u) ?? u)
 
-    /*
-     * Written only as the caller's own small sealed upload, never a free URL:
-     * that would let anyone point every viewer's card at any image. And never
-     * outliving its photo — a new primary without a blur of its own, or no
-     * photo at all, clears it. `undefined` leaves the column alone.
-     */
-    let storedBlur: string | null | undefined
-    if (newBlur) {
-      const verdict = await checkBlurPhoto(newBlur, userId)
-      if (!verdict.ok) return errorResponse(verdict.message, 400, verdict.code)
-      storedBlur = verdict.url
-      after(() => moderateBlurPhoto(verdict.url, userId))
-    } else if (touchesBlur && (blur_photo === null || !primaryAfter || primaryAfter !== primaryBefore)) {
-      storedBlur = null
-    }
 
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}

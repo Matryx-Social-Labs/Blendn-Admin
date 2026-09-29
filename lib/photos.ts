@@ -72,11 +72,16 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
 /**
  * The largest file that is still a blur (SCRUM-476).
  *
- * The app's derivative is 40 pixels wide and a few KB. Anything big enough to
- * pass a photo's floor is sharp enough to be the photo, and the blurred copy
- * is exactly what a viewer who has not identified someone is allowed to see.
+ * The app's derivative is a 40-pixel-wide JPEG at quality 0.4: 1–2 KB for any
+ * portrait shape. The blurred copy is exactly what a viewer who has not
+ * identified someone is allowed to see, so the ceiling sits just above what the
+ * app makes rather than at a photo's floor (8 KB is a recognisable ~150 px).
+ *
+ * ponytail: bytes, not pixels — a sharp 40 px thumbnail passes. Reading the
+ * header's dimensions needs a ranged GET and a parser per format; add it if a
+ * client other than ours ever writes this.
  */
-export const MAX_BLUR_BYTES = MIN_PHOTO_BYTES
+export const MAX_BLUR_BYTES = 4_000
 
 /** The blurred copy of the primary photo: the caller's own upload, sealed, and small. */
 export async function checkBlurPhoto(url: string, userId: string): Promise<PhotoVerdict> {
@@ -171,8 +176,12 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
     const check = await checkImageContent(url)
     if (check.checked && check.result?.action === "hide") {
       await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
+      await recordPhotoCheck(url, userId, true)
       logger.warn("Blurred profile photo removed after moderation", { userId })
+      return
     }
+    // Recorded like a photo, so one that could not be checked is on the same list.
+    await recordPhotoCheck(url, userId, check.checked)
   } catch (error) {
     logger.error("Blurred photo moderation failed; left in place", {
       userId,

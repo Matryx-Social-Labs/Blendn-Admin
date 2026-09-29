@@ -16,12 +16,12 @@ process.env.MOBILE_JWT_SECRET = process.env.MOBILE_JWT_SECRET ?? "itest-mobile-s
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("next/server", () => ({ ...jest.requireActual("next/server"), after: jest.fn() }))
 jest.mock("@/lib/moderation/openai-moderation", () => ({ checkImageContent: jest.fn() }))
-/** Object sizes by name: a "blur" is a few KB, anything else is a photo. */
+/** Object sizes by name: a "blur" is 2 KB, the two edge names sit either side of 4 KB, anything else is a photo. */
 jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
   sealUpload: jest.fn(async (key: string, _folder: string, userId: string, minBytes = 1, maxBytes = Infinity) => {
     const name = key.split("/").pop()!
-    const bytes = name.includes("blur") ? 2_000 : 120_000
+    const bytes = name.includes("blur-edge") ? 4_000 : name.includes("blur-over") ? 4_001 : name.includes("blur") ? 2_000 : 120_000
     if (bytes < minBytes) return { refused: "too_small" }
     if (bytes > maxBytes) return { refused: "too_large" }
     return {
@@ -81,6 +81,11 @@ async function person() {
   return { id, put, view }
 }
 
+const codeOf = async (res: Response) => ((await res.json()) as { errorCode?: string }).errorCode
+
+/** Runs what the PUT handed to `after()`, as the server would once the response is sent. */
+const runAfter = () => Promise.all((after as jest.Mock).mock.calls.map(([fn]) => fn()))
+
 const blurOf = async (id: string) =>
   (await db.profiles.findUniqueOrThrow({ where: { id }, select: { blur_photo: true } })).blur_photo
 
@@ -104,8 +109,10 @@ describe("writing the blurred photo", () => {
     const { data } = await res.json()
     expect(data.profile.blurPhoto).toBe(sealedOf(p.id, "a-blur.jpg"))
     expect(data.profile.photos).toBeUndefined()
-    // Screened like a photo, after the response.
+    // Screened like a photo, after the response, and on the same list until it is.
     expect(after).toHaveBeenCalledTimes(2)
+    const check = await db.photo_checks.findUniqueOrThrow({ where: { url: sealedOf(p.id, "a-blur.jpg") } })
+    expect(check).toMatchObject({ user_id: p.id, checked: false })
   })
 
   it("refuses a URL that is not the caller's own upload, and stores nothing", async () => {
@@ -116,6 +123,7 @@ describe("writing the blurred photo", () => {
     for (const url of [upload(other.id, "x-blur.jpg"), "https://example.com/anyone-blur.jpg"]) {
       const res = await p.put({ blur_photo: url })
       expect(res.status).toBe(400)
+      expect(await codeOf(res)).toBe("not_ours")
     }
     expect(await blurOf(p.id)).toBeNull()
   })
@@ -126,12 +134,33 @@ describe("writing the blurred photo", () => {
 
     const res = await p.put({ blur_photo: upload(p.id, "a-sharp.jpg") })
     expect(res.status).toBe(400)
+    expect(await codeOf(res)).toBe("too_large")
     expect(await blurOf(p.id)).toBeNull()
+  })
+
+  it("draws the line at 4 KB: 4,000 bytes is a blur, 4,001 is not", async () => {
+    const p = await person()
+    expect((await p.put({ photos: [upload(p.id, "a.jpg")] })).status).toBe(200)
+    expect((await p.put({ blur_photo: upload(p.id, "a-blur-over.jpg") })).status).toBe(400)
+    expect((await p.put({ blur_photo: upload(p.id, "a-blur-edge.jpg") })).status).toBe(200)
+    expect(await blurOf(p.id)).toBe(sealedOf(p.id, "a-blur-edge.jpg"))
+  })
+
+  it("refuses a bad blur before sealing the photos sent with it, so those uploads can be sent again", async () => {
+    const p = await person()
+    const res = await p.put({ photos: [upload(p.id, "a.jpg")], blur_photo: upload(p.id, "a-sharp.jpg") })
+    expect(res.status).toBe(400)
+    // Only the blur was looked at; the photo's upload is untouched and nothing was stored.
+    expect((sealUpload as jest.Mock).mock.calls.map(([key]) => key.split("/").pop())).toEqual(["1790641297767-cfg6ta-a-sharp.jpg"])
+    const profile = await db.profiles.findUniqueOrThrow({ where: { id: p.id }, select: { photos: true, blur_photo: true } })
+    expect(profile).toEqual({ photos: [], blur_photo: null })
   })
 
   it("refuses a blur on a profile with no photo to be a blur of", async () => {
     const p = await person()
-    expect((await p.put({ blur_photo: upload(p.id, "a-blur.jpg") })).status).toBe(400)
+    const res = await p.put({ blur_photo: upload(p.id, "a-blur.jpg") })
+    expect(res.status).toBe(400)
+    expect(await codeOf(res)).toBe("no_photo")
     expect(sealUpload).not.toHaveBeenCalled()
     expect(await blurOf(p.id)).toBeNull()
   })
@@ -172,6 +201,14 @@ describe("a blur outlives nothing it was made from", () => {
     expect(await blurOf(p.id)).toBeNull()
   })
 
+  it("clears it on a new primary even when the save sends the old blur back: that blur is of the old photo", async () => {
+    const p = await withBlur()
+    expect((await p.put({ photos: [sealedOf(p.id, "a.jpg"), upload(p.id, "b.jpg")] })).status).toBe(200)
+    const res = await p.put({ photos: [sealedOf(p.id, "b.jpg"), sealedOf(p.id, "a.jpg")], blur_photo: sealedOf(p.id, "a-blur.jpg") })
+    expect(res.status).toBe(200)
+    expect(await blurOf(p.id)).toBeNull()
+  })
+
   it("takes the new blur when the new primary arrives with one", async () => {
     const p = await withBlur()
     const res = await p.put({ photos: [upload(p.id, "b.jpg")], blur_photo: upload(p.id, "b-blur.jpg") })
@@ -198,14 +235,28 @@ describe("a blur outlives nothing it was made from", () => {
     expect(await blurOf(p.id)).toBeNull()
   })
 
-  it("clears it when moderation flags the blur itself", async () => {
+  it("clears it when moderation flags the blur the PUT stored", async () => {
     const p = await withBlur()
+    ;(after as jest.Mock).mockClear()
+    // A new blur for the same photo: the only thing handed to after() is its moderation.
+    expect((await p.put({ blur_photo: upload(p.id, "a2-blur.jpg") })).status).toBe(200)
+    expect(after).toHaveBeenCalledTimes(1)
+
     ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "allow" } })
-    await moderateBlurPhoto(sealedOf(p.id, "a-blur.jpg"), p.id)
-    expect(await blurOf(p.id)).toBe(sealedOf(p.id, "a-blur.jpg"))
+    await runAfter()
+    expect(await blurOf(p.id)).toBe(sealedOf(p.id, "a2-blur.jpg"))
+    expect((await db.photo_checks.findUniqueOrThrow({ where: { url: sealedOf(p.id, "a2-blur.jpg") } })).checked).toBe(true)
 
     ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "hide" } })
-    await moderateBlurPhoto(sealedOf(p.id, "a-blur.jpg"), p.id)
+    await runAfter()
     expect(await blurOf(p.id)).toBeNull()
+  })
+
+  it("does not let a late verdict on an old blur clear the newer one", async () => {
+    const p = await withBlur()
+    expect((await p.put({ blur_photo: upload(p.id, "a2-blur.jpg") })).status).toBe(200)
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "hide" } })
+    await moderateBlurPhoto(sealedOf(p.id, "a-blur.jpg"), p.id)
+    expect(await blurOf(p.id)).toBe(sealedOf(p.id, "a2-blur.jpg"))
   })
 })
