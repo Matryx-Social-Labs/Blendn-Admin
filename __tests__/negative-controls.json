@@ -1317,6 +1317,12 @@
       "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6. M294: 1 of 6 (the record whose media failed was purged, and with it the only pointer). M295: delete-prefix-keep 1 of 6. M296: 1 of 7 (the record went with storage unset). M297: 1 of 7. All reverted.",
       "date": "2026-09-29"
     },
+    "setup-screens-named.test.ts": {
+      "guards": "SCRUM-469: the Setup screens name every control: amenity row buttons are named after the amenity (Rename/Retire/Restore <name>), both rename boxes are named \"New name for <name>\", and the new category's Name and Parent captions are tied to their fields.",
+      "mutation": "M306 the amenity Rename button loses its name.",
+      "observed": "Red before the fix: 2 of 2 failing. M306: 1 of 2 failing. Reverted.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",

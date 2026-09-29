@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useId, useMemo, useState, useTransition } from "react"
 import { IconArrowsJoin, IconPencil, IconPlus } from "@tabler/icons-react"
 import { toast } from "sonner"
 
@@ -190,6 +190,8 @@ function RenameInline({
       <Input
         value={name}
         onChange={(e) => setName(e.target.value)}
+        // Its only name was its value, so a screen reader read the old name back (SCRUM-469).
+        aria-label={`New name for ${row.name}`}
         className="h-8 max-w-64 text-[0.8125rem]"
         autoFocus
       />
@@ -221,17 +223,20 @@ function CreateForm({ parents, onDone }: { parents: CategoryRow[]; onDone: () =>
   const [name, setName] = useState("")
   const [parentId, setParentId] = useState("none")
   const [pending, start] = useTransition()
+  // Captions tied to their fields, as on /apply: the placeholder was the name (SCRUM-469).
+  const nameId = useId()
+  const parentFieldId = useId()
 
   return (
     <div className="flex flex-wrap items-end gap-2 border-l-2 border-border-strong pl-3">
       <div className="flex flex-1 flex-col gap-1.5">
-        <label className="text-[0.75rem] text-muted-foreground">Name</label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="IPL Streaming" className="h-9" />
+        <label htmlFor={nameId} className="text-[0.75rem] text-muted-foreground">Name</label>
+        <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} placeholder="IPL Streaming" className="h-9" />
       </div>
       <div className="flex flex-col gap-1.5">
-        <label className="text-[0.75rem] text-muted-foreground">Parent</label>
+        <label htmlFor={parentFieldId} className="text-[0.75rem] text-muted-foreground">Parent</label>
         <Select value={parentId} onValueChange={setParentId}>
-          <SelectTrigger size="sm" className="w-48">
+          <SelectTrigger id={parentFieldId} size="sm" className="w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
