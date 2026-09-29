@@ -29,7 +29,7 @@ import {
   roomReadDenial,
   type RoomEntitlement,
 } from "@/lib/chat-window"
-import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
+import { chatQuerySchema, isOwnChatMedia, NOT_OWN_MEDIA, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
@@ -487,6 +487,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const { content, type, parentId, metadata, clientId } = parsed.data
+
+    // The sender's own upload, or no media (SCRUM-426).
+    if (metadata?.mediaUrl && !isOwnChatMedia(metadata.mediaUrl, authUser.userId)) {
+      return errorResponse(NOT_OWN_MEDIA, 400)
+    }
 
     // Get chat group for event (create on demand if user is checked in)
     let chatGroup = await db.chat_groups.findUnique({

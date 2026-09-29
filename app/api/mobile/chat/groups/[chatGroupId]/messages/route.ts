@@ -24,11 +24,12 @@ import {
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
+import { clientMessageMetadata, isOwnChatMedia, NOT_OWN_MEDIA } from "@/lib/validations/chat"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
   type: z.enum(["text", "image", "video"]).default("text"),
-  metadata: z.record(z.string(), z.any()).optional(),
+  metadata: clientMessageMetadata.optional(),
   parentId: z.string().uuid().optional(),
   /** The app's own id for this send: a retry with it returns the first write (SCRUM-410). */
   clientId: z.string().uuid().optional(),
@@ -281,6 +282,11 @@ export async function POST(
     }
 
     const { content, type, metadata, parentId, clientId } = validation.data
+
+    // The sender's own upload, or no media (SCRUM-426).
+    if (metadata?.mediaUrl && !isOwnChatMedia(metadata.mediaUrl, user.userId)) {
+      return errorResponse(NOT_OWN_MEDIA, 400)
+    }
 
     /*
      * A retry of a send that already landed: answered with the first write. Its

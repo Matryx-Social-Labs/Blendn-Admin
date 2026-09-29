@@ -8,14 +8,24 @@ export const SendMessageRequestSchema = z
     content: z.string().min(1).max(4000),
     type: z.enum(["text", "image", "video"]).default("text"),
     parentId: z.string().uuid().optional(),
-    metadata: z.record(z.string(), z.unknown()).optional(),
+    metadata: z
+      .object({
+        mediaUrl: z.string().url().optional().openapi({
+          description: "The sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400.",
+        }),
+      })
+      .strict()
+      .optional()
+      .openapi({ description: "Only `mediaUrl`. Any other key is refused (400): the server writes the rest (SCRUM-426)." }),
   })
   .openapi("SendMessageRequest")
 
 export const SendDMRequestSchema = z
   .object({
     text: z.string().max(5000).optional(),
-    mediaUrl: z.string().url().optional(),
+    mediaUrl: z.string().url().optional().openapi({
+      description: "The sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400 (SCRUM-426).",
+    }),
     mediaType: z.enum(["image", "video"]).optional(),
   })
   .openapi("SendDMRequest")

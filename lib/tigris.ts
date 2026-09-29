@@ -93,7 +93,7 @@ function bucketForKey(key: string): string {
 /**
  * Generate a unique filename with folder prefix
  */
-function generateKey(folder: UploadFolder, filename: string, userId: string): string {
+export function generateKey(folder: UploadFolder, filename: string, userId: string): string {
   const timestamp = Date.now()
   const random = Math.random().toString(36).substring(2, 8)
   const sanitizedName = filename
@@ -281,17 +281,35 @@ export function ownedObjectKey(url: string, userId: string, folder: UploadFolder
   // https only. An http URL to our own bucket is still a downgrade we would be
   // performing on the user's behalf.
   if (parsed.protocol !== "https:") return null
+  /*
+   * The URL we would have written (SCRUM-426). Callers store the string as
+   * sent, so the string validated has to be the one later fetched: no
+   * credentials or port, and nothing the parser had to normalise
+   * (`host/x/../chat/<me>/f`, an upper-case host, a backslash). A query or
+   * fragment still fetches the same object from our bucket, and #204 lets a
+   * photo URL carry one, so those are tolerated.
+   */
+  if (parsed.username || parsed.password || parsed.port) return null
+  if (`${parsed.origin}${parsed.pathname}` !== url.split(/[?#]/)[0]) return null
   // Exact hostname match, never a substring or a suffix: `notblendn-media...`
   // and `...tigris.dev.evil.example` both fail here and would both pass a
   // `includes()` or `endsWith()` check.
   if (!ALLOWED_PHOTO_HOSTS.has(parsed.hostname)) return null
 
-  const key = decodeURIComponent(parsed.pathname.replace(/^\//, ""))
+  // A malformed escape ("%" with nothing after it) is not ours either, and must
+  // not throw: every caller turns null into a 400, and a throw into a 500.
+  let key: string
+  try {
+    key = decodeURIComponent(parsed.pathname.replace(/^\//, ""))
+  } catch {
+    return null
+  }
 
   // `..` cannot escape an S3 key the way it escapes a filesystem path, but the
   // key is used to build further requests, and a traversal-looking key is never
   // something we generated.
-  if (key.includes("..")) return null
+  // A `..` segment, not any two dots: "a..b.jpg" is a file its owner may attach.
+  if (key.split("/").includes("..")) return null
 
   // The folder AND the owner. `profile/<userId>/` is the only shape this
   // accepts, so somebody else's photo -- or a chat attachment, which is a
