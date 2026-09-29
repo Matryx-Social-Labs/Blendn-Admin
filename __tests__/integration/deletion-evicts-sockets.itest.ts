@@ -11,8 +11,8 @@ import { NextRequest } from "next/server"
  * deleted account went on receiving its rooms and DMs until it dropped.
  *
  * A real socket.io server, installed as the app's `io`, with each client's
- * server-side socket in `user:<id>` and a room, as the connection handler puts
- * it. The delete goes through the real route, on real rows.
+ * server-side socket in `user:<id>`, as the connection handler puts it. The
+ * delete goes through the real route, on real rows.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
@@ -33,7 +33,7 @@ const clients: ClientSocket[] = []
 io.on("connection", (socket) => {
   const userId = String(socket.handshake.auth.userId)
   socket.data.userId = userId
-  socket.join([`user:${userId}`, "chat:dev-shared-room"])
+  socket.join(`user:${userId}`)
 })
 
 async function open(userId: string) {
@@ -79,10 +79,13 @@ it("closes every socket the deleted account had open, and nobody else's", async 
     })
   )
   expect(res.status).toBe(200)
-  await new Promise((r) => setTimeout(r, 300))
+  for (let waited = 0; (phoneA.closed.length === 0 || phoneB.closed.length === 0) && waited < 3000; waited += 50) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
 
   expect(phoneA.closed).toEqual(["io server disconnect"])
   expect(phoneB.closed).toEqual(["io server disconnect"])
+  expect(phoneA.socket.connected).toBe(false)
   expect(phoneB.socket.connected).toBe(false)
   expect(other.closed).toEqual([])
   expect(other.socket.connected).toBe(true)

@@ -1222,9 +1222,9 @@
       "date": "2026-09-29"
     },
     "deletion-evicts-sockets.itest.ts": {
-      "guards": "SCRUM-449: deleting an account through DELETE /api/mobile/account closes every socket it already had open (two phones, both told 'io server disconnect') and nobody else's (a bystander stays connected). A real socket.io server installed as the app's io; the delete runs through the real route on real rows.",
-      "mutation": "M173 the route's evictUserSockets(authUser.userId) commented out. M174 evictUserSockets disconnects every socket (io.disconnectSockets instead of io.in(`user:<id>`)).",
-      "observed": "Red before the fix: 1 of 1, the route answered 200 and phoneA.closed was [] (expected ['io server disconnect']). M173: 1 of 1 failing, same assertion. M174: 1 of 1 failing, other.closed received 3 entries where [] was expected. Both reverted.",
+      "guards": "SCRUM-449: deleting an account through DELETE /api/mobile/account closes every socket it already had open (two phones, both told 'io server disconnect') and nobody else's (a bystander stays connected). A real socket.io server installed as the app's io; the delete runs through the real route on real rows. account-deletion.test.ts: the eviction comes after the erasure transaction, and neither the block nor the eviction happens when it rolls back. dashboard-socket-gate.test.ts: the dashboard socket gate refuses a deleted account whose cookie is still live (the reconnect after eviction).",
+      "mutation": "M173 the route's evictUserSockets(authUser.userId) commented out. M174 evictUserSockets disconnects every socket (io.disconnectSockets instead of io.in(`user:<id>`)). M175 the dashboard gate's deletedAt check removed. M176 the eviction hoisted above the erasure transaction.",
+      "observed": "Red before the fix: 1 of 1, the route answered 200 and phoneA.closed was [] (expected ['io server disconnect']). M173: 1 of 1 failing, same assertion. M174: 1 of 1 failing, other.closed received 3 entries where [] was expected. After ecc:pr-test-analyzer and ecc:security-reviewer: M173 also 1 unit failing (account-deletion), M175 1 of 3 failing (dashboard-socket-gate: a deleted account got a principal), M176 2 unit failing (the ordering and the rollback case). All reverted.",
       "date": "2026-09-29"
     }
   },
