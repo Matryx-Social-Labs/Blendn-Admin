@@ -1317,6 +1317,12 @@
       "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6. M294: 1 of 6 (the record whose media failed was purged, and with it the only pointer). M295: delete-prefix-keep 1 of 6. M296: 1 of 7 (the record went with storage unset). M297: 1 of 7. All reverted.",
       "date": "2026-09-29"
     },
+    "organiser-sees-labels.itest.ts": {
+      "guards": "SCRUM-466: the room feed labels each member's room role, and the member route refuses to mute or ban a room admin (the host or a colleague).",
+      "mutation": "M302 (SCRUM-466) the member route moderates a room admin. M303 the feed's members carry no role.",
+      "observed": "Red before the fix: 1 of 7 failing. M302: 1 of 7 failing (the host's own ban went through). M303: 1 of 7 failing.",
+      "date": "2026-09-29"
+    },
     "room-scoped-identity.itest.ts": {
       "guards": "SCRUM-458: GET /users/:id by raw id sends work_field (outside the gate) and, when the viewer may not see who this is, blurPhoto instead of image/photos; the room-handle card is unchanged.",
       "mutation": "M300 (SCRUM-458) the card's unidentified branch sends no blurPhoto. M301 the card sends no work_field.",

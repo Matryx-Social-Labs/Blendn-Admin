@@ -55,6 +55,8 @@ interface Violation {
 interface ChatMember {
   userId: string
   anonymousName: string | null
+  /** `admin` is the host, or a colleague, holding the room. */
+  role: string
   status: string
   bannedAt: string | null
   bannedByName: string | null
@@ -499,7 +501,8 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                     className="flex items-center justify-between rounded-lg border px-3 py-2 group hover:bg-muted/30 transition-colors"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <p className="text-sm truncate">{m.anonymousName ?? "Attendee"}</p>
+                      {/* The host's own row: named as such, and nothing to press (SCRUM-466). */}
+                      <p className="text-sm truncate">{m.role === "admin" ? "Host" : (m.anonymousName ?? "Attendee")}</p>
                       {m.violationCount > 0 && (
                         <span className="flex items-center gap-0.5 text-[10px] text-warning">
                           <IconAlertTriangle className="size-3" />
@@ -507,6 +510,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                         </span>
                       )}
                     </div>
+                    {m.role !== "admin" && (
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <Button
                         size="sm"
@@ -529,6 +533,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
                         Ban
                       </Button>
                     </div>
+                    )}
                   </div>
                 ))}
               </div>
