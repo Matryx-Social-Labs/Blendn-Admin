@@ -20,6 +20,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson, isUuid } from "@/lib/api-input"
 
 export async function POST(
   request: NextRequest,
@@ -36,10 +37,7 @@ export async function POST(
     const limited = await rateLimit(request, userLimit("broadcast", "announce", authUser.userId))
     if (limited) return limited
 
-    // Validate eventId is a valid UUID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(eventId)) {
+    if (!isUuid(eventId)) {
       return errorResponse("Invalid event ID format", 400)
     }
 
@@ -60,7 +58,7 @@ export async function POST(
       return notFoundResponse("Event not found")
     }
 
-    const body = await request.json()
+    const body = (await readJson(request)) ?? {}
     const { content, kind: rawKind, mediaUrl, mediaType } = body as {
       content?: string
       kind?: string

@@ -32,12 +32,20 @@ export function parsePagination(
   page?: number | string,
   limit?: number | string
 ): PaginationParams {
-  const p = Math.max(1, Number(page) || PAGINATION.DEFAULT_PAGE)
-  const l = Math.min(
-    PAGINATION.MAX_LIMIT,
-    Math.max(1, Number(limit) || PAGINATION.DEFAULT_LIMIT)
-  )
-  return { page: p, limit: l }
+  return {
+    page: boundedInt(page == null ? null : String(page), PAGINATION.DEFAULT_PAGE, 1, Number.MAX_SAFE_INTEGER),
+    limit: boundedInt(limit == null ? null : String(limit), PAGINATION.DEFAULT_LIMIT, 1, PAGINATION.MAX_LIMIT),
+  }
+}
+
+/**
+ * A whole number from a query string: `fallback` when it isn't one, then held
+ * to [min, max]. `parseInt("abc")` is NaN, and a NaN `take` is a Prisma error
+ * the route's catch-all reported as a 500 (SCRUM-430).
+ */
+export function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
+  const n = Number.parseInt(raw ?? "", 10)
+  return Math.min(max, Math.max(min, Number.isNaN(n) ? fallback : n))
 }
 
 /**
@@ -72,10 +80,7 @@ export function parseCursorPagination(
   cursor?: string,
   limit?: number | string
 ): CursorPaginationParams {
-  const l = Math.min(
-    PAGINATION.MAX_LIMIT,
-    Math.max(1, Number(limit) || PAGINATION.DEFAULT_CHAT_LIMIT)
-  )
+  const l = boundedInt(limit == null ? null : String(limit), PAGINATION.DEFAULT_CHAT_LIMIT, 1, PAGINATION.MAX_LIMIT)
   return { cursor: cursor || undefined, limit: l }
 }
 

@@ -12,6 +12,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { readOptionalJson } from "@/lib/api-input"
 
 /**
  * `ids` absent means "all of mine".
@@ -50,8 +51,7 @@ export async function POST(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("write", "notifications-read", user.userId))
     if (limited) return limited
 
-    const body = await request.json().catch(() => ({}))
-    const validation = markReadSchema.safeParse(body)
+    const validation = markReadSchema.safeParse(await readOptionalJson(request))
     if (!validation.success) return validationErrorResponse(validation.error)
 
     const { ids } = validation.data

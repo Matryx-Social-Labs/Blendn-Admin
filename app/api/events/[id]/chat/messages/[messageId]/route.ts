@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { emitChatMessageDeleted } from "@/lib/socket-server"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteContext {
   params: Promise<{ id: string; messageId: string }>
@@ -17,6 +18,8 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, messageId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(messageId)) return errorResponse("Invalid message ID format", 400)
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },

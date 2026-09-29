@@ -23,6 +23,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ chatGroupId: string; messageId: string }>
@@ -62,8 +63,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     const { chatGroupId, messageId } = await params
+    if (!isUuid(chatGroupId)) return errorResponse("Invalid chat group ID format", 400)
+    if (!isUuid(messageId)) return errorResponse("Invalid message ID format", 400)
 
-    const body = await request.json()
+    const body = await readJson(request)
     const validation = reactSchema.safeParse(body)
     if (!validation.success) return validationErrorResponse(validation.error)
     const { emoji } = validation.data

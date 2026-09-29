@@ -7,6 +7,7 @@ import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
 import { emitChatMemberBanned, emitChatMemberMuted } from "@/lib/socket-server"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteContext {
   params: Promise<{ id: string; userId: string }>
@@ -18,7 +19,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, userId: targetUserId } = await params
-    const { action } = await request.json() as { action: "ban" | "unban" | "mute" | "unmute" }
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    const { action } = ((await readJson(request)) ?? {}) as { action: "ban" | "unban" | "mute" | "unmute" }
 
     if (!["ban", "unban", "mute", "unmute"].includes(action)) {
       return errorResponse("Invalid action. Must be ban, unban, mute, or unmute.", 400)

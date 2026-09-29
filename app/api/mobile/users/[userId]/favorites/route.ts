@@ -11,6 +11,7 @@ import {
   forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { boundedInt } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -43,8 +44,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Parse query parameters
     const searchParams = request.nextUrl.searchParams
-    const page = parseInt(searchParams.get("page") || "1")
-    const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100)
+    const page = boundedInt(searchParams.get("page"), 1, 1, Number.MAX_SAFE_INTEGER)
+    const limit = boundedInt(searchParams.get("limit"), 20, 1, 100)
     // Fix #20: 'upcoming' (default) shows only future events; 'past' shows completed ones
     const timeFilter = searchParams.get("timeFilter") || "upcoming"
     const userLat = searchParams.get("lat")

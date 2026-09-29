@@ -8,6 +8,7 @@ import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { firstWindow } from "@/lib/sponsored-scheduler"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
 import { canActivate, creativeEditPatch, touchesCreative } from "@/lib/sponsored-moderation"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteContext {
   params: Promise<{ id: string; msgId: string }>
@@ -19,6 +20,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, msgId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(msgId)) return errorResponse("Invalid message ID format", 400)
 
     const event = await db.events.findUnique({
       where: { id: eventId },
@@ -37,7 +40,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       return errorResponse("Forbidden", 403)
     }
 
-    const parsed = sponsoredMessageUpdateSchema.safeParse(await req.json())
+    const parsed = sponsoredMessageUpdateSchema.safeParse(await readJson(req))
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
@@ -174,6 +177,8 @@ export async function DELETE(_: Request, { params }: RouteContext) {
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
     const { id: eventId, msgId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(msgId)) return errorResponse("Invalid message ID format", 400)
 
     const event = await db.events.findUnique({
       where: { id: eventId },

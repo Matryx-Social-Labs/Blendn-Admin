@@ -20,6 +20,8 @@ import {
   serverErrorResponse,
   forbiddenResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
+import { boundedInt } from "@/lib/pagination"
 
 const createRequestSchema = z.object({
   // User ids are cuid, not uuid — do not tighten this to z.string().uuid().
@@ -57,7 +59,7 @@ export async function POST(request: NextRequest) {
     const unfinished = await participationRefusal(authUser.userId)
     if (unfinished) return forbiddenResponse(unfinished)
 
-    const body = await request.json()
+    const body = await readJson(request)
     const parsed = createRequestSchema.safeParse(body)
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
@@ -289,8 +291,8 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get("status") || "pending"
-    const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 50)
-    const offset = parseInt(searchParams.get("offset") || "0")
+    const limit = boundedInt(searchParams.get("limit"), 20, 1, 50)
+    const offset = boundedInt(searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER)
 
     // Validate status
     const validStatuses = ["pending", "accepted", "declined", "blocked"]

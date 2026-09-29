@@ -11,9 +11,7 @@ import {
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-
-const uuidRegex =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+import { readJson, isUuid } from "@/lib/api-input"
 
 export async function POST(
   request: NextRequest,
@@ -27,13 +25,17 @@ export async function POST(
     if (limited) return limited
 
     const { eventId } = await params
-    if (!uuidRegex.test(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const denied = await attendeeEventAccess(user.userId, eventId, "participate")
     if (denied) return eventAccessResponse(denied)
 
-    const body = await request.json()
-    const status: "going" | "maybe" | "not_going" = body.status || "going"
+    // An empty object means "going", so a body that isn't an object must not read as one.
+    const body = await readJson(request)
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return errorResponse("Invalid JSON body", 400)
+    }
+    const status: "going" | "maybe" | "not_going" = (body as { status?: "going" | "maybe" | "not_going" }).status || "going"
 
     if (!["going", "maybe", "not_going"].includes(status)) {
       return errorResponse("Invalid RSVP status", 400)
@@ -64,7 +66,7 @@ export async function DELETE(
     if (limited) return limited
 
     const { eventId } = await params
-    if (!uuidRegex.test(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // A draft or a stranger's private event is not found here either — this
     // answered a real `going` count for any id. Withdrawing is never refused

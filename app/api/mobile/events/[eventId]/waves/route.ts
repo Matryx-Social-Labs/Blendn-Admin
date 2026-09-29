@@ -19,6 +19,7 @@ import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { visibleInRoom } from "@/lib/identity"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -49,6 +50,7 @@ const WAVE_WINDOW_MS = 10 * 60 * 1000
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
@@ -58,7 +60,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "event-wave", authUser.userId))
     if (limited) return limited
 
-    const parsed = waveSchema.safeParse(await request.json())
+    const parsed = waveSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     /*
      * Only a handle this room showed you — or your own id, refused just below.

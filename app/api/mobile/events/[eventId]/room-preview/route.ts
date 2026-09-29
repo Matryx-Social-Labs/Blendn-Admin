@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server"
 
-import { serverErrorResponse, successResponse, unauthorizedResponse } from "@/lib/api-response"
+import { serverErrorResponse, successResponse, unauthorizedResponse, errorResponse } from "@/lib/api-response"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { roomPreview } from "@/lib/room-preview"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -22,6 +23,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")

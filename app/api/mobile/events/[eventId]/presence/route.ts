@@ -14,6 +14,7 @@ import {
   PING_INTERVAL_MINUTES,
   type PresenceState,
 } from "@/lib/presence"
+import { isUuid } from "@/lib/api-input"
 
 export const dynamic = "force-dynamic"
 
@@ -38,6 +39,7 @@ export async function POST(
   { params }: { params: Promise<{ eventId: string }> }
 ) {
   const { eventId } = await params
+  if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
   const authUser = await getAuthenticatedUser(request)
   if (!authUser) return unauthorizedResponse()

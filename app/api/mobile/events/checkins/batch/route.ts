@@ -10,6 +10,7 @@ import {
   validationErrorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
 
 const batchCheckinsSchema = z.object({
   eventIds: z.array(z.string().uuid()).min(1).max(50),
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    const body = await request.json()
+    const body = await readJson(request)
     const parsed = batchCheckinsSchema.safeParse(body)
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)

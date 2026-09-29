@@ -12,7 +12,9 @@ import {
   forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
+  errorResponse,
 } from "@/lib/api-response"
+import { isUuid, readOptionalJson } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>
@@ -69,6 +71,7 @@ const leaveSchema = z.object({
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
+    if (!isUuid(conversationId)) return errorResponse("Invalid conversation ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
@@ -81,7 +84,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     )
     if (limited) return limited
 
-    const parsed = leaveSchema.safeParse(await request.json().catch(() => ({})))
+    const parsed = leaveSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     const { action, report } = parsed.data
 

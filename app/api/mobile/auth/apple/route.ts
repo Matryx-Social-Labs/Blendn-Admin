@@ -22,6 +22,7 @@ import {
 } from "@/lib/api-response"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { normalizeLocationToCity } from "@/lib/location"
+import { readJson } from "@/lib/api-input"
 
 const appleAuthSchema = z.object({
   identityToken: z.string().min(1, "Identity token is required"),
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json()
+    const body = await readJson(request)
 
     const validation = appleAuthSchema.safeParse(body)
     if (!validation.success) {

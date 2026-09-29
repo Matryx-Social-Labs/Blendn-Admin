@@ -16,6 +16,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ requestId: string }>
@@ -37,14 +38,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { requestId } = await params
 
-    // Validate requestId is a valid UUID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(requestId)) {
+    if (!isUuid(requestId)) {
       return errorResponse("Invalid request ID format", 400)
     }
 
-    const body = await request.json()
+    const body = await readJson(request)
     const parsed = respondSchema.safeParse(body)
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)

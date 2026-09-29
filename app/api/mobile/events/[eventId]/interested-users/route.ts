@@ -10,6 +10,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { parsePagination, paginationMeta } from "@/lib/pagination"
+import { isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -24,10 +25,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { eventId } = await params
 
-    // Validate eventId is a valid UUID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(eventId)) {
+    if (!isUuid(eventId)) {
       return errorResponse("Invalid event ID format", 400)
     }
 

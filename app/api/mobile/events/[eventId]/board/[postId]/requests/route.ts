@@ -21,6 +21,7 @@ import {
   conflictResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { isUuid, readOptionalJson } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string; postId: string }>
@@ -56,9 +57,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     const { eventId, postId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    if (!isUuid(postId)) return errorResponse("Invalid post ID format", 400)
 
-    const body = await request.json().catch(() => ({}))
-    const validation = requestSchema.safeParse(body ?? {})
+    const validation = requestSchema.safeParse(await readOptionalJson(request))
     if (!validation.success) return validationErrorResponse(validation.error)
     const { message } = validation.data
 

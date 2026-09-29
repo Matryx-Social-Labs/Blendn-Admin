@@ -38,6 +38,7 @@ import { idForViewer } from "@/lib/room-handle"
 import { roomMuteState } from "@/lib/room-mute"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
+import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -83,6 +84,7 @@ async function resolveEntitlement(
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
@@ -468,6 +470,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
 
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
@@ -478,7 +481,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "event-chat", authUser.userId))
     if (limited) return limited
 
-    const body = await request.json()
+    const body = await readJson(request)
 
     // Validate input
     const parsed = sendMessageSchema.safeParse(body)

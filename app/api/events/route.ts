@@ -16,6 +16,7 @@ import { phoneCheckInRadius } from "@/lib/geofence"
 import { syncOccurrences } from "@/lib/occurrences"
 import { auditLog } from "@/lib/audit-log"
 import { getOccupancies } from "@/lib/occupancy"
+import { readJson } from "@/lib/api-input"
 
 const parseJsonField = (value: unknown) => {
   if (typeof value !== "string") return value
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
       return errorResponse("Forbidden", 403)
     }
 
-    const body = await req.json()
+    const body = await readJson(req)
 
     /*
      * The last write endpoints in the codebase without a schema. The

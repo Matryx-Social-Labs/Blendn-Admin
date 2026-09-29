@@ -14,6 +14,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { isUuid, readOptionalJson } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>
@@ -64,6 +65,7 @@ const revealSchema = z.object({
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { conversationId } = await params
+    if (!isUuid(conversationId)) return errorResponse("Invalid conversation ID format", 400)
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
@@ -74,7 +76,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     )
     if (limited) return limited
 
-    const parsed = revealSchema.safeParse(await request.json().catch(() => ({})))
+    const parsed = revealSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     const { ask } = parsed.data
 
