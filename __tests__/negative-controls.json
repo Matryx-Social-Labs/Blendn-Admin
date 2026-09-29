@@ -1306,7 +1306,7 @@
       "date": "2026-09-29"
     },
     "api-docs-prebuilt.test.ts": {
-      "guards": "SCRUM-463: /api-docs imports swagger-ui-dist's prebuilt bundle and swagger-ui-react is not a dependency, so Turbopack never shakes apidom's refractor registrations out (the page threw oS.refract is not a function and drew 2 of 22 sections). Verified by grepping a local production build: 88 .refract= assignments in the chunk, against 3 with swagger-ui-react.",
+      "guards": "SCRUM-463: /api-docs imports swagger-ui-dist's prebuilt bundle and swagger-ui-react is not a dependency, so Turbopack never shakes apidom's refractor registrations out (the page threw oS.refract is not a function). Verified by grepping a local production build: 88 .refract= assignments in the chunk, against 3 with swagger-ui-react.",
       "mutation": "M298 the page imports swagger-ui-react again.",
       "observed": "M298: 1 of 1 failing. Reverted.",
       "date": "2026-09-29"
