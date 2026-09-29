@@ -1298,6 +1298,12 @@
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
       "observed": "Red before the fix: 1 of 2 failing (filtering by the old action returned the newest 100 rows). M236: 1 of 2 failing. M237: 1 of 2 failing (the dropdown held only the filtered action). All reverted.",
       "date": "2026-09-29"
+    },
+    "seed-occurrences.itest.ts": {
+      "guards": "SCRUM-471: the scenario seed's occurrence step (scripts/seed-occurrences.ts) leaves a re-timed event's dropped day cancelled when people attended it and deletes it when nobody did; every day in the span is held again at the spec's capacity.",
+      "mutation": "M238 the un-cancel runs after syncOccurrences (the shipped order). M239 no un-cancel before the sync. M240 no capacity write. M241 capacity folded into the pre-sync write (a day the sync creates gets none).",
+      "observed": "Red before the fix: 1 of 3 failing (the attended Saturday came back live). M238: that same 1 of 3. M239: 1 of 3 failing (a cancelled in-span day stayed cancelled). M240: 1 of 3 failing (capacity stayed 5). M241: 1 of 3 failing (the created Sunday had capacity null). All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

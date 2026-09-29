@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { ensureOrgBrand } from "./seed-brand"
+import { holdSeedOccurrences } from "./seed-occurrences"
 import { mirrorToTigris, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { environmentRefusal, TEST_ORG_NAMES } from "./test-accounts"
 import { CROWD_CHAT, CROWD_REVIEWS, CROWD_SIZE, ensureCrowd } from "./seed-blr-crowd"
@@ -1417,10 +1418,9 @@ async function main() {
       create: { slug: spec.slug, ...fields, created_at: createdAt },
     })
 
-    await syncOccurrences(event.id, start, end, TZ)
-    await db.event_occurrences.updateMany({ where: { event_id: event.id }, data: { capacity: spec.capacity, cancelled_at: null } })
+    await holdSeedOccurrences(db, event.id, spec.capacity, () => syncOccurrences(event.id, start, end, TZ))
     if (spec.cancelLastDay) {
-      const last = await db.event_occurrences.findFirst({ where: { event_id: event.id }, orderBy: { start_time: "desc" } })
+      const last = await db.event_occurrences.findFirst({ where: { event_id: event.id, cancelled_at: null }, orderBy: { start_time: "desc" } })
       if (last) await db.event_occurrences.update({ where: { id: last.id }, data: { cancelled_at: new Date(NOW.getTime() - 6 * HOUR) } })
     }
 
@@ -1556,7 +1556,9 @@ async function seedSocial(
   }
 
   // Check-ins land on the occurrence that holds the moment they arrived.
-  const occurrences = await db.event_occurrences.findMany({ where: { event_id: eventId }, orderBy: { start_time: "asc" } })
+  // Held days only: a day the event moved off stays cancelled with its old
+  // attendance (SCRUM-471), and this run's guests belong on the days it runs.
+  const occurrences = await db.event_occurrences.findMany({ where: { event_id: eventId, cancelled_at: null }, orderBy: { start_time: "asc" } })
   const occurrenceAt = (t: Date) =>
     occurrences.find((o) => t >= new Date(o.start_time.getTime() - 90 * MIN) && t <= o.end_time) ?? occurrences[0]
   const arrive = (i: number) => new Date(Math.max(start.getTime(), NOW.getTime() - 3 * HOUR) + i * 3 * MIN)
