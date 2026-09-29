@@ -29,7 +29,7 @@ import {
   roomReadDenial,
   type RoomEntitlement,
 } from "@/lib/chat-window"
-import { chatQuerySchema, isOwnChatMedia, NOT_OWN_MEDIA, sendMessageSchema } from "@/lib/validations/chat"
+import { chatQuerySchema, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
@@ -708,6 +708,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (existing) return answerRoomRetry(existing, chatGroup.id)
     }
 
+    /*
+     * What is stored is the upload's sealed copy, which nobody can write to
+     * (SCRUM-425). Made here, after every gate, so a refused send copies nothing.
+     */
+    const media = metadata?.mediaUrl ? await sealChatMedia(metadata.mediaUrl, authUser.userId) : null
+    if (media && "refusal" in media) return errorResponse(media.refusal, 400)
+    const stored = media ? { ...metadata, mediaUrl: media.url } : metadata
+
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users
@@ -721,7 +729,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           type,
           parent_id: parentId ?? null,
           ...(clientId && { client_id: clientId }),
-          ...(metadata != null && { metadata: metadata as Prisma.InputJsonValue }),
+          ...(stored != null && { metadata: stored as Prisma.InputJsonValue }),
           moderation_status: "hidden",
           deleted_at: new Date(),
         },
@@ -763,7 +771,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
          * `metadata || undefined`, in a shape the ratchet could not see. Found
          * by POSTing a text message through this route.
          */
-        ...(metadata != null && { metadata: metadata as Prisma.InputJsonValue }),
+        ...(stored != null && { metadata: stored as Prisma.InputJsonValue }),
       },
     })
     } catch (error) {
@@ -851,7 +859,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         type,
         authUser.userId,
         chatGroup.id,
-        (metadata as Record<string, string> | undefined)?.mediaUrl
+        stored?.mediaUrl
       )
     }
 

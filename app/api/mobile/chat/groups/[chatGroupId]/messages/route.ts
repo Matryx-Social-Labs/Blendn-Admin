@@ -24,7 +24,7 @@ import {
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
-import { clientMessageMetadata, isOwnChatMedia, NOT_OWN_MEDIA } from "@/lib/validations/chat"
+import { clientMessageMetadata, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
@@ -392,6 +392,14 @@ export async function POST(
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
+    /*
+     * What is stored is the upload's sealed copy, which nobody can write to
+     * (SCRUM-425). Made here, after every gate, so a refused send copies nothing.
+     */
+    const media = metadata?.mediaUrl ? await sealChatMedia(metadata.mediaUrl, user.userId) : null
+    if (media && "refusal" in media) return errorResponse(media.refusal, 400)
+    const stored = media ? { ...metadata, mediaUrl: media.url } : metadata
+
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
@@ -403,7 +411,7 @@ export async function POST(
           user_id: user.userId,
           content,
           type,
-          ...(metadata != null && { metadata }),
+          ...(stored != null && { metadata: stored }),
           parent_id: parentId || null,
           ...(clientId && { client_id: clientId }),
           moderation_status: "hidden",
@@ -462,7 +470,7 @@ export async function POST(
          * `chat_messages.create` throw — every message sent from the app into
          * a room returned 500. Found by sending one from a phone.
          */
-        ...(metadata != null && { metadata }),
+        ...(stored != null && { metadata: stored }),
         parent_id: parentId || null,
         ...(clientId && { client_id: clientId }),
       },
@@ -585,7 +593,7 @@ export async function POST(
         type,
         user.userId,
         chatGroupId,
-        (metadata as Record<string, string> | undefined)?.mediaUrl
+        stored?.mediaUrl
       )
     }
 

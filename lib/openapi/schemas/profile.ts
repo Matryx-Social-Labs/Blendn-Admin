@@ -358,7 +358,10 @@ export const PresignedUrlRequestSchema = z
 
 export const PresignedUrlResponseSchema = z
   .object({
-    uploadUrl: z.string().url(),
+    uploadUrl: z.string().url().openapi({
+      description:
+        "PUT the file here with exactly the requested Content-Type; any other is refused (403). Attaching the upload stores a copy under a new URL (SCRUM-425).",
+    }),
     publicUrl: z.string().url(),
     key: z.string(),
     maxSize: z.number(),

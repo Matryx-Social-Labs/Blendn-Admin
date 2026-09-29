@@ -14,10 +14,36 @@ import { NextRequest } from "next/server"
  * our bucket.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+/*
+ * And what is stored is the sealed copy, never the URL the client uploaded to,
+ * which can still be written for 15 minutes (SCRUM-425). The copy itself is
+ * `sealUpload`'s, tested in upload-seal.test.ts; here, that the routes store it.
+ */
+jest.mock("@/lib/moderation", () => ({
+  ...jest.requireActual("@/lib/moderation"),
+  moderateMessage: jest.fn().mockResolvedValue(undefined),
+}))
+jest.mock("@/lib/tigris", () => ({
+  ...jest.requireActual("@/lib/tigris"),
+  sealUpload: jest.fn(async (key: string, _folder: string, userId: string) =>
+    key.endsWith("-missing.jpg")
+      ? { refused: "missing" }
+      : {
+          key: `chat/${userId}/sealed-copy`,
+          url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${userId}/sealed-copy`,
+          bytes: 120_000,
+          contentType: "image/jpeg",
+        }
+  ),
+}))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
 import { NOT_OWN_MEDIA } from "@/lib/validations/chat"
+import { moderateMessage } from "@/lib/moderation"
+import { sealUpload } from "@/lib/tigris"
+
+beforeEach(() => jest.clearAllMocks())
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const groupRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as
@@ -59,6 +85,10 @@ afterAll(async () => {
 const upload = (userId: string) =>
   `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${userId}/1790641297767-cfg6ta-photo.jpg`
 const OUTSIDE = "https://example.com/pixel.gif"
+const sealed = (userId: string) =>
+  `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${userId}/sealed-copy`
+/** An upload URL whose object never arrived. */
+const unfinished = (userId: string) => upload(userId).replace("-photo.jpg", "-missing.jpg")
 
 async function liveRoom() {
   const owner = await makeUser(testId("mm_own"), "organizer")
@@ -159,12 +189,39 @@ describe("a room message's metadata comes from the client only as its own media"
       expect(await written(r.groupId, "look")).toBe(0)
     })
 
-    it(`accepts the sender's own upload, on the ${name}`, async () => {
+    it(`accepts the sender's own upload and stores its sealed copy, on the ${name}`, async () => {
       const r = await liveRoom()
       const res = await send(r, { content: "look", type: "image", metadata: { mediaUrl: upload(r.memberId) } })
       expect(res.status).toBe(201)
       const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "look" } })
-      expect(row.metadata).toEqual({ mediaUrl: upload(r.memberId) })
+      expect(row.metadata).toEqual({ mediaUrl: sealed(r.memberId) })
+      // The image the moderator scans is the copy the room sees, not the source its URL can still rewrite.
+      expect(moderateMessage).toHaveBeenCalledWith(row.id, "look", "image", r.memberId, r.groupId, sealed(r.memberId))
+    })
+
+    it(`copies nothing for a send it refuses, or for a retry, on the ${name}`, async () => {
+      const r = await liveRoom()
+      // Not a member: refused before anything is copied.
+      const stranger = await makeUser(testId("mm_str"))
+      users.push(stranger)
+      const { email } = await db.user.findUniqueOrThrow({ where: { id: stranger }, select: { email: true } })
+      const refused = await send({ ...r, memberId: stranger, token: signAccessToken(stranger, email) }, {
+        content: "look", type: "image", metadata: { mediaUrl: upload(stranger) },
+      })
+      expect(refused.status).toBeGreaterThanOrEqual(400)
+      expect(sealUpload).not.toHaveBeenCalled()
+      // A retry of a send that landed is answered with the first write, and copies nothing more.
+      const body = { content: "again", type: "image", metadata: { mediaUrl: upload(r.memberId) }, clientId: "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f".replace(/^.{8}/, Math.random().toString(16).slice(2, 10).padEnd(8, "0")) }
+      expect((await send(r, body)).status).toBeLessThan(300)
+      expect((await send(r, body)).status).toBeLessThan(300)
+      expect(sealUpload).toHaveBeenCalledTimes(1)
+    })
+
+    it(`refuses an upload that cannot be sealed, and writes nothing, on the ${name}`, async () => {
+      const r = await liveRoom()
+      const res = await send(r, { content: "look", type: "image", metadata: { mediaUrl: unfinished(r.memberId) } })
+      expect(res.status).toBe(400)
+      expect(await written(r.groupId, "look")).toBe(0)
     })
   }
 })
@@ -196,11 +253,27 @@ describe("a DM's media is the sender's own upload", () => {
     expect(await db.private_messages.count({ where: { conversation_id: p.conversationId } })).toBe(0)
   })
 
-  it("accepts the sender's own upload", async () => {
+  it("accepts the sender's own upload and stores its sealed copy", async () => {
     const p = await pair()
     const res = await send(p, { mediaUrl: upload(p.a), mediaType: "image" })
     expect(res.status).toBe(200)
     const row = await db.private_messages.findFirstOrThrow({ where: { conversation_id: p.conversationId } })
-    expect(row.media_url).toBe(upload(p.a))
+    expect(row.media_url).toBe(sealed(p.a))
+  })
+
+  it("copies nothing for a send it refuses: a block either way", async () => {
+    const p = await pair()
+    await db.blocked_users.create({ data: { blocker_id: p.b, blocked_id: p.a } })
+    const res = await send(p, { mediaUrl: upload(p.a), mediaType: "image" })
+    expect(res.status).toBe(403)
+    expect(sealUpload).not.toHaveBeenCalled()
+    await db.blocked_users.deleteMany({ where: { blocker_id: p.b, blocked_id: p.a } })
+  })
+
+  it("refuses an upload that cannot be sealed, and writes nothing", async () => {
+    const p = await pair()
+    const res = await send(p, { mediaUrl: unfinished(p.a), mediaType: "image" })
+    expect(res.status).toBe(400)
+    expect(await db.private_messages.count({ where: { conversation_id: p.conversationId } })).toBe(0)
   })
 })
