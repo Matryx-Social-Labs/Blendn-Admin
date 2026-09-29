@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useRef, useState, useTransition } from "react"
+import { flushSync } from "react-dom"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -94,6 +95,7 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
   const [voiding, setVoiding] = useState(false)
   const [why, setWhy] = useState("")
   const [pending, start] = useTransition()
+  const voidTrigger = useRef<HTMLButtonElement>(null)
 
   function price() {
     start(async () => {
@@ -187,7 +189,7 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
             // One inline step, in words, like a creative rejection: a void can
             // undo money that arrived and cannot be undone (SCRUM-173).
             <div className="flex w-full max-w-xl flex-col gap-2">
-              <Label htmlFor={`void-${charge.id}`} className="text-[0.75rem] font-normal text-muted-foreground">
+              <Label htmlFor={`void-${charge.id}`} className="text-[0.75rem] leading-snug font-normal text-muted-foreground">
                 Why is this charge void? It goes in the audit log and stays on this row.
               </Label>
               <Textarea
@@ -195,9 +197,12 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
                 value={why}
                 onChange={(e) => setWhy(e.target.value)}
                 placeholder="e.g. duplicate invoice, re-raised as the October package"
+                maxLength={500}
+                aria-describedby={`void-${charge.id}-hint`}
                 autoFocus
               />
-              {charge.externalRef ? (
+              {/* Before settlement `externalRef` is the pricing note, not a payment. */}
+              {charge.status === "settled" && charge.externalRef ? (
                 <span className="text-[0.75rem] text-faint-foreground">
                   It was settled with reference {charge.externalRef}. Voiding it does not refund the sponsor.
                 </span>
@@ -212,10 +217,20 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
                   {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}
                   Void {money(charge.amountMinor, charge.currency)}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setVoiding(false)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    // Back to the button that opened this, not to the page top.
+                    flushSync(() => setVoiding(false))
+                    voidTrigger.current?.focus()
+                  }}
+                >
                   Back
                 </Button>
-                <span className="text-[0.75rem] text-faint-foreground">10 characters at least</span>
+                <span id={`void-${charge.id}-hint`} className="text-[0.75rem] text-faint-foreground">
+                  10 characters at least
+                </span>
               </div>
             </div>
           ) : settling ? (
@@ -252,7 +267,7 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
                 </Button>
               ) : null}
               {charge.status !== "void" ? (
-                <Button size="sm" variant="ghost" disabled={pending} onClick={() => setVoiding(true)}>
+                <Button ref={voidTrigger} size="sm" variant="ghost" disabled={pending} onClick={() => setVoiding(true)}>
                   Void…
                 </Button>
               ) : null}
@@ -289,9 +304,10 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
             <span className="font-bold text-destructive">voided</span> from {v.fromStatus}
           </span>
           {v.externalRef ? <span>ref {v.externalRef}</span> : null}
-          {v.reason ? <span>“{v.reason}”</span> : null}
+          {v.reason ? <span className="min-w-0 break-words">“{v.reason}”</span> : null}
           <span>
-            {v.voidedByName ?? "someone since deleted"}
+            {/* A void from before reasons were kept has no voider either. */}
+            {v.reason ? (v.voidedByName ?? "someone since deleted") : "before reasons were recorded"}
             {v.voidedAt ? ` · ${formatDay(v.voidedAt.toISOString())}` : ""}
           </span>
         </p>

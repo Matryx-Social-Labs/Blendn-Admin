@@ -53,6 +53,8 @@ const priceSchema = z.object({
 
 /** The shortest void reason that can say anything, as for a suspension. */
 const MIN_VOID_REASON = 10
+/** As long as a pricing note; it is copied into the audit row as well. */
+const MAX_VOID_REASON = 500
 
 async function requireAdmin() {
   const session = await getAuth()
@@ -95,7 +97,9 @@ export interface VoidedCharge {
   currency: string
   /** Where it was when voided, read from the stamps it had reached. */
   fromStatus: "draft" | "agreed" | "settled"
+  /** The payment reference, when it had been settled; before that `external_ref` holds the pricing note. */
   externalRef: string | null
+  /** Null only on a void from before reasons were kept — those have no voider either. */
   reason: string | null
   voidedAt: Date | null
   voidedByName: string | null
@@ -215,7 +219,7 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
           amountMinor: c.amount_minor,
           currency: c.currency,
           fromStatus: c.settled_at ? ("settled" as const) : c.agreed_at ? ("agreed" as const) : ("draft" as const),
-          externalRef: c.external_ref,
+          externalRef: c.settled_at ? c.external_ref : null,
           reason: c.void_reason,
           voidedAt: c.voided_at,
           voidedByName: (c.voided_by && voiders.get(c.voided_by)) ?? null,
@@ -355,9 +359,14 @@ export async function advanceCharge(
   if (to === "void" && why.length < MIN_VOID_REASON) {
     throw new Refusal("Give a reason — the next person reconciling this needs to know why.")
   }
+  if (why.length > MAX_VOID_REASON) throw new Refusal(`Keep the reason under ${MAX_VOID_REASON} characters.`)
 
-  await db.placement_charges.update({
-    where: { id: chargeId },
+  /*
+   * Only from the status read above. Two voids at once both passed that check,
+   * and the second overwrote the first one's who and why.
+   */
+  const { count } = await db.placement_charges.updateMany({
+    where: { id: chargeId, status: charge.status },
     data: {
       status: to,
       ...(to === "agreed" ? { agreed_at: new Date() } : {}),
@@ -366,6 +375,7 @@ export async function advanceCharge(
       ...(ref ? { external_ref: ref } : {}),
     },
   })
+  if (count !== 1) throw new Refusal("Someone else changed that charge just now. Reload and look again.")
 
   auditLog({
     userId: admin.id,
@@ -379,7 +389,8 @@ export async function advanceCharge(
       currency: charge.currency,
       // The reference the charge carries, not only one passed in now: a void
       // arrives with none, and "which payment was undone" is its whole point.
-      externalRef: ref || charge.external_ref || null,
+      // Before settlement `external_ref` is the pricing note, not a payment.
+      externalRef: ref || (charge.status === "settled" ? charge.external_ref : null) || null,
       ...(to === "void" ? { reason: why } : {}),
     },
   })

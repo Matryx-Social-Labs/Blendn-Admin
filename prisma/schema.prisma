@@ -1956,7 +1956,9 @@ model placement_charges {
   settled_at   DateTime?     @db.Timestamptz(6)
   /// When, by whom and why the charge was voided (SCRUM-173). A void can undo a
   /// payment that arrived; the ledger keeps it as history and these say what
-  /// happened. `voided_by` is a user id, like `priced_by`.
+  /// happened. `voided_by` is a user id with no foreign key, unlike `priced_by`:
+  /// the void's audit row keeps the same id, and a voider can still be deleted.
+  /// Voids from before this column are NULL here and in `void_reason`.
   voided_at    DateTime?     @db.Timestamptz(6)
   voided_by    String?
   void_reason  String?

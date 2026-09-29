@@ -1366,9 +1366,9 @@
       "date": "2026-09-29"
     },
     "charge-void.itest.ts": {
-      "guards": "SCRUM-173: advanceCharge refuses a void without a reason of 10+ characters and writes nothing; a void records voided_at, voided_by and void_reason; the charge.void audit row carries the reason and the payment reference the charge carried; getChargeLedger keeps voided charges on their placement as history (from-state, ref, reason, who).",
-      "mutation": "M276 no reason check. M277 the audit reference taken from the argument only. M278 voided history dropped from the ledger. M279 voided_by not stored.",
-      "observed": "Red before the fix: 3 of 3 failing (a void with no reason succeeded). M276: 3 of 3. M277: 1 of 3 (externalRef null). M278: 1 of 3. M279: 2 of 3. All reverted.",
+      "guards": "SCRUM-173: advanceCharge refuses a void without a reason of 10+ characters and writes nothing; a void records voided_at, voided_by and void_reason; the charge.void audit row carries the reason and the payment reference the charge carried; getChargeLedger keeps voided charges on their placement as history (from-state, ref, reason, who). Review pass: the write is conditional on the status read (two simultaneous voids — one wins, its reason kept); a reason over 500 characters is refused; exactly 10 is taken; a draft's external_ref (its pricing note) is not audited or shown as a payment reference; voided history is newest first above a re-raised charge.",
+      "mutation": "M276 no reason check. M277 the audit reference taken from the argument only. M278 voided history dropped from the ledger. M279 voided_by not stored. M304 status guard dropped from the update. M305 audit reference falls back to external_ref at any status. M306 ledger shows external_ref at any status. M307 no maximum. M308 minimum off by one (<=).",
+      "observed": "Red before the fix: 3 of 3 failing (a void with no reason succeeded). M276: 3 of 3. M277: 1 of 3 (externalRef null). M278: 1 of 3. M279: 2 of 3. All reverted. M304: 1 of 5 (both voids fulfilled) + charges.test 1. M305: 1 of 5 (externalRef = the note). M306: 1 of 5 + charges.test 1. M307: 4 of 5. M308: 2 of 5 (a 10-character reason refused). All reverted.",
       "date": "2026-09-29"
     }
   },

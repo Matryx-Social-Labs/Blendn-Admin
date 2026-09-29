@@ -2,7 +2,7 @@ let session: { user: { id: string; role: "app_admin" } } | null = null
 jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
-import { advanceCharge, getChargeLedger } from "@/lib/charge-actions"
+import { advanceCharge, getChargeLedger, pricePlacement } from "@/lib/charge-actions"
 
 import { db, closeDb, makeUser, makeEvent, testId } from "./helpers"
 
@@ -52,7 +52,8 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await db.audit_logs.deleteMany({ where: { resource_id: chargeId } })
+  const charges = await db.placement_charges.findMany({ where: { placement_id: placementId }, select: { id: true } })
+  await db.audit_logs.deleteMany({ where: { resource_id: { in: charges.map((c) => c.id) } } })
   await db.placement_charges.deleteMany({ where: { placement_id: placementId } })
   await db.event_sponsors.deleteMany({ where: { id: placementId } })
   await db.sponsors.deleteMany({ where: { id: { in: sponsors } } })
@@ -62,12 +63,35 @@ afterAll(async () => {
   await closeDb()
 })
 
-const row = () => db.placement_charges.findUniqueOrThrow({ where: { id: chargeId } })
+const row = (id = chargeId) => db.placement_charges.findUniqueOrThrow({ where: { id } })
+
+/** `auditLog` does not await its write, so the row is polled for. */
+async function audited(resourceId: string, action: string) {
+  for (let i = 0; i < 40; i++) {
+    const found = await db.audit_logs.findFirst({ where: { resource_id: resourceId, action } })
+    if (found) return found
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  throw new Error(`no ${action} audit row for ${resourceId}`)
+}
+
+async function ledgerRow() {
+  const ledger = await getChargeLedger()
+  return ledger.placements.find((p) => p.placementId === placementId)
+}
+
+async function raise(amount: number, note?: string) {
+  await pricePlacement(placementId, { amount, note })
+  return (await db.placement_charges.findFirstOrThrow({ where: { placement_id: placementId, status: "draft" } })).id
+}
 
 describe("voiding a charge", () => {
   it("refuses a void with no reason, or one too short to mean anything, and writes nothing", async () => {
     await expect(advanceCharge(chargeId, "void")).rejects.toThrow(/reason/i)
     await expect(advanceCharge(chargeId, "void", undefined, "oops")).rejects.toThrow(/reason/i)
+    await expect(advanceCharge(chargeId, "void", undefined, "123456789")).rejects.toThrow(/reason/i)
+    await expect(advanceCharge(chargeId, "void", undefined, " ".repeat(12))).rejects.toThrow(/reason/i)
+    await expect(advanceCharge(chargeId, "void", undefined, "x".repeat(501))).rejects.toThrow(/under 500/i)
     expect((await row()).status).toBe("settled")
   })
 
@@ -80,7 +104,7 @@ describe("voiding a charge", () => {
     expect(after.voided_by).toBe(admin)
     expect(after.void_reason).toBe("duplicate invoice, re-raised as the October package")
 
-    const audit = await db.audit_logs.findFirstOrThrow({ where: { resource_id: chargeId, action: "charge.void" } })
+    const audit = await audited(chargeId, "charge.void")
     expect(audit.details).toMatchObject({
       from: "settled",
       externalRef: "NEFT-QA-173",
@@ -89,8 +113,7 @@ describe("voiding a charge", () => {
   })
 
   it("keeps the voided charge on its placement's ledger row as history", async () => {
-    const ledger = await getChargeLedger()
-    const placement = ledger.placements.find((p) => p.placementId === placementId)
+    const placement = await ledgerRow()
 
     expect(placement?.charge).toBeNull()
     expect(placement?.voided).toEqual([
@@ -104,5 +127,30 @@ describe("voiding a charge", () => {
         voidedByName: "Void Admin",
       }),
     ])
+  })
+
+  it("puts a corrected charge on top of the void, and a draft's note is not a payment reference", async () => {
+    const draft = await raise(2000, "pricing note, not a payment")
+    // Exactly ten characters, the shortest reason taken.
+    await advanceCharge(draft, "void", undefined, "typo'd fee")
+
+    expect((await audited(draft, "charge.void")).details).toMatchObject({ from: "draft", externalRef: null })
+    const placement = await ledgerRow()
+    expect(placement?.voided.map((v) => [v.id, v.fromStatus, v.externalRef, v.reason])).toEqual([
+      [draft, "draft", null, "typo'd fee"],
+      [chargeId, "settled", "NEFT-QA-173", "duplicate invoice, re-raised as the October package"],
+    ])
+  })
+
+  it("lets one of two simultaneous voids through, and keeps that one's reason", async () => {
+    const draft = await raise(3000)
+    const reasons = ["first admin: wrong brand on it", "second admin: wrong amount on it"]
+
+    const outcomes = await Promise.allSettled(reasons.map((r) => advanceCharge(draft, "void", undefined, r)))
+
+    expect(outcomes.map((o) => o.status).sort()).toEqual(["fulfilled", "rejected"])
+    const winner = reasons[outcomes.findIndex((o) => o.status === "fulfilled")]
+    expect((await row(draft)).void_reason).toBe(winner)
+    expect((await audited(draft, "charge.void")).details).toMatchObject({ reason: winner })
   })
 })
