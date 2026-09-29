@@ -27,6 +27,43 @@ import { readJson } from "@/lib/api-input"
  * there is a reason to, and is noted rather than pretended about.
  */
 
+/**
+ * The token's row if it can still reset a password, else null: unused,
+ * unexpired, for an account that still exists. The reset and the page's check
+ * both ask this, so the page cannot promise a link the reset then refuses.
+ */
+async function usableResetToken(token: string) {
+  const row = await db.password_reset_tokens.findUnique({
+    where: { token_hash: hashInviteToken(token) },
+    select: {
+      token_hash: true,
+      used_at: true,
+      expires_at: true,
+      user: { select: { id: true, email: true, deletedAt: true } },
+    },
+  })
+  if (!row || row.used_at || row.expires_at.getTime() <= Date.now() || row.user.deletedAt) return null
+  return row
+}
+
+/**
+ * Does this link still work? Asked by the page on load, so a used, expired or
+ * tampered link says so before anyone types a password (SCRUM-461). Consumes
+ * nothing, and answers every dead link the same way, as the reset does.
+ * Its own limit, so opening the page never spends a reset attempt.
+ */
+export async function GET(req: NextRequest) {
+  const limited = await rateLimit(req, {
+    windowMs: 15 * 60 * 1000,
+    maxRequests: 30,
+    keyGenerator: (r) => `auth:reset-check:${clientIpFrom(r.headers)}`,
+  })
+  if (limited) return limited
+
+  const token = req.nextUrl.searchParams.get("token")
+  return NextResponse.json({ valid: !!token && (await usableResetToken(token)) !== null })
+}
+
 export async function POST(req: NextRequest) {
   const limited = await rateLimit(req, {
     windowMs: 15 * 60 * 1000,
@@ -47,17 +84,8 @@ export async function POST(req: NextRequest) {
     )
     if (typeof token !== "string" || typeof password !== "string" || !token || !password) return invalid
 
-    const row = await db.password_reset_tokens.findUnique({
-      where: { token_hash: hashInviteToken(token) },
-      select: {
-        token_hash: true,
-        used_at: true,
-        expires_at: true,
-        user: { select: { id: true, email: true, deletedAt: true } },
-      },
-    })
-    if (!row || row.used_at || row.expires_at.getTime() <= Date.now()) return invalid
-    if (row.user.deletedAt) return invalid
+    const row = await usableResetToken(token)
+    if (!row) return invalid
 
     // Checked here as well as in the form — the form's copy of the rule is a
     // courtesy, this is the rule.

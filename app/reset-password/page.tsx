@@ -30,9 +30,21 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
+  const [linkDead, setLinkDead] = useState(false)
 
   useEffect(() => {
-    setToken(new URLSearchParams(window.location.search).get("token"))
+    const t = new URLSearchParams(window.location.search).get("token")
+    setToken(t)
+    if (!t) return
+    // Asked before the form is filled in: a used or expired link used to take
+    // two typed passwords to say so (SCRUM-461). If the check itself fails the
+    // form stays, and the reset still refuses a dead token.
+    fetch(`/api/auth/reset-password?token=${encodeURIComponent(t)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        if (body?.valid === false) setLinkDead(true)
+      })
+      .catch(() => {})
   }, [])
 
   // Live, so the requirement is visible before submitting rather than after.
@@ -86,12 +98,14 @@ export default function ResetPasswordPage() {
           <Image src="/brand/monogram-gradient.png" alt="Blend'n" width={64} height={64} priority />
           <div className="text-center">
             <h1 className="text-[length:var(--text-h1)] font-bold">
-              {done ? "Password changed" : "Set a new password"}
+              {done ? "Password changed" : linkDead ? "This link no longer works" : "Set a new password"}
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
               {done
                 ? "Signing you back in…"
-                : `At least ${MIN_PASSWORD_LENGTH} characters. Length beats symbols.`}
+                : linkDead
+                  ? "Reset links work once, and for an hour."
+                  : `At least ${MIN_PASSWORD_LENGTH} characters. Length beats symbols.`}
             </p>
           </div>
         </div>
@@ -105,6 +119,15 @@ export default function ResetPasswordPage() {
             </p>
             <Button asChild>
               <Link href="/login">Sign in</Link>
+            </Button>
+          </div>
+        ) : linkDead ? (
+          <div className="flex flex-col items-center gap-4 rounded-[var(--radius)] border border-border bg-card p-6 text-center">
+            <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+              It has been used already, or it has expired. Ask for a new one and use the newest email.
+            </p>
+            <Button asChild>
+              <Link href="/forgot-password">Request a new link</Link>
             </Button>
           </div>
         ) : (

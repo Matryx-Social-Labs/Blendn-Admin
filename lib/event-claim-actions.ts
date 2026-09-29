@@ -8,6 +8,7 @@ import { clientIpFrom } from "@/lib/client-ip"
 import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
 import { CLAIM_LIMITS, CLAIM_PAGE, claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
+import { isUuid } from "@/lib/api-input"
 import { db } from "@/lib/db"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { owningOrgFor } from "@/lib/event-ownership"
@@ -88,6 +89,9 @@ async function overClaimLimit(email: string, eventId: string): Promise<string | 
 export async function fileEventClaim(
   input: FileClaimInput
 ): Promise<{ ok: true; claimId: string } | { ok: false; error: string }> {
+  // events.id is a UUID column; a malformed id is a missing event, not a throw (SCRUM-464).
+  if (!isUuid(input.eventId)) return { ok: false, error: "Event not found" }
+
   /*
    * Deliberately not authenticated — but not unbounded, and not trusting.
    *

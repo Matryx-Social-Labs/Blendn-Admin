@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, useSyncExternalStore } from "react"
+import { useRouter } from "next/navigation"
 import { IconChevronRight } from "@tabler/icons-react"
 
 import { Input } from "@/components/ui/input"
@@ -33,9 +34,13 @@ function actionTone(action: string): string {
   return WEIGHTY.test(action) ? "font-bold text-destructive" : "text-foreground"
 }
 
-export function AuditTimeline({ page }: { page: AuditPage }) {
-  const [action, setAction] = useState("all")
+export function AuditTimeline({ page, action }: { page: AuditPage; action: string }) {
+  const router = useRouter()
   const [query, setQuery] = useState("")
+  // The action filter is the page's query (SCRUM-462): it reaches every row in
+  // scope, not only the newest 100 the page loads.
+  const setAction = (next: string) =>
+    router.push(next === "all" ? "/dashboard/audit" : `/dashboard/audit?action=${encodeURIComponent(next)}`)
   /*
    * Day headings and times are in the reader's timezone, which only the
    * browser knows. This component is server-rendered first, in the
@@ -53,13 +58,12 @@ export function AuditTimeline({ page }: { page: AuditPage }) {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return page.entries.filter((e) => {
-      if (action !== "all" && e.action !== action) return false
       if (!needle) return true
       return [e.action, e.resource, e.resourceId, e.actor?.name, e.actor?.email]
         .filter(Boolean)
         .some((field) => String(field).toLowerCase().includes(needle))
     })
-  }, [page.entries, action, query])
+  }, [page.entries, query])
 
   // Grouped by day, so scanning "what happened Tuesday" does not mean reading
   // every timestamp.
@@ -98,8 +102,9 @@ export function AuditTimeline({ page }: { page: AuditPage }) {
           </SelectContent>
         </Select>
         <span className="text-[0.75rem] text-faint-foreground">
-          {filtered.length} of {page.total} shown
-          {page.total > page.entries.length ? " · most recent 100 loaded" : ""}
+          {page.total} {action === "all" ? "entries" : `"${action}"`}
+          {page.total > page.entries.length ? " · newest 100 loaded" : ""}
+          {query.trim() ? ` · the search covers the ${page.entries.length} loaded` : ""}
         </span>
       </div>
 

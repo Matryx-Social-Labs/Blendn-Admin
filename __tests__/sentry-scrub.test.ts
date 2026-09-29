@@ -116,6 +116,10 @@ describe("SENTRY_DATA_COLLECTION", () => {
     expect(SENTRY_DATA_COLLECTION.graphQL).toEqual({ document: false, variables: false })
   })
 
+  it("keeps a link's one-time token out of captured URLs", () => {
+    expect(SENTRY_DATA_COLLECTION.urlQueryParams.deny).toContain("token")
+  })
+
   it.each(["instrumentation-client.ts", "sentry.server.config.ts", "sentry.edge.config.ts"])(
     "is what %s passes to Sentry.init",
     (file) => {

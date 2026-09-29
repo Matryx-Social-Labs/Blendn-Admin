@@ -170,7 +170,8 @@ describe("filing with somebody else's application", () => {
       selecting({ id: "req1", contact_email: "events@toit.in", org_id: "org9" })
     )
     const result = await fileEventClaim({
-      eventId: "e1",
+      // A well-formed id: a malformed one is refused before the application is read (SCRUM-464).
+      eventId: "0b6f3a52-6a7e-4c3e-9d0e-5f2d7c1a9b41",
       contactEmail: "evil@example.com",
       onboardingId: "req1",
     })
