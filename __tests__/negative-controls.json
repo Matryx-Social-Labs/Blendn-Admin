@@ -1341,6 +1341,12 @@
       "observed": "Red before the fix: 1 of 13 failing. M300: 1 of 13 failing. M301: 1 of 13 failing.",
       "date": "2026-09-29"
     },
+    "minor-dating-fields-cleared.itest.ts": {
+      "guards": "SCRUM-477: prisma/migrations/20260929210000_minor_dating_fields_cleared clears orientations, interested_in, show_orientation, 'dating' in intent_default and the word 'dating' in looking_for on every profile whose age is known to be under 18 by ageFrom's rule (a plausible birth date wins, else the stored age); adults, an 18-year-old and unknown ages keep theirs, 'updating' is not 'dating', and a second run moves nothing.",
+      "mutation": "M307: `ages.years < 18` -> `<= 18`. M308: the stored-age fallback replaced with NULL. M309: the 0-149 plausibility check on the birth date replaced with `date_of_birth IS NOT NULL`. M310: the looking_for match without word boundaries (`!~ 'dating'`). M311: intent_default left as it was. M312: an unknown age counted as 0. M313: the stored age consulted before the birth date.",
+      "observed": "Each: minor-dating-fields-cleared.itest.ts 1 of 1 failing. Restored; 1 of 1.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
