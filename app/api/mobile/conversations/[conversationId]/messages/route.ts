@@ -23,6 +23,7 @@ import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
+import { isOwnChatMedia, NOT_OWN_MEDIA } from "@/lib/validations/chat"
 
 const sentInclude = {
   sender: { select: { id: true, name: true, image: true } },
@@ -191,6 +192,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const { text, mediaUrl, mediaType, replyToId, clientId } = parsed.data
+
+    // The sender's own upload, or no media (SCRUM-426).
+    if (mediaUrl && !isOwnChatMedia(mediaUrl, authUser.userId)) {
+      return errorResponse(NOT_OWN_MEDIA, 400)
+    }
 
     // Verify conversation exists and user has access
     const conversation = await db.private_conversations.findUnique({

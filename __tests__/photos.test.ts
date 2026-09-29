@@ -128,6 +128,34 @@ describe("the delete route binds the key the way the fetch path does", () => {
     expect(ownedObjectKey(`https://evil.example/?x=blendn-media.fly.storage.tigris.dev/chat/${USER}/a`, USER, "chat")).toBeNull()
   })
 
+  it("refuses the shapes a message's media URL could try, without throwing (SCRUM-426)", async () => {
+    const { ownedObjectKey } = await import("@/lib/tigris")
+    const host = "https://blendn-media.fly.storage.tigris.dev"
+    // A malformed escape threw URIError out of decodeURIComponent: a 500, not a 400.
+    expect(ownedObjectKey(`${host}/chat/${USER}/%`, USER, "chat")).toBeNull()
+    // A user id that merely starts with ours; an encoded traversal; plain http; an empty tail.
+    expect(ownedObjectKey(`${host}/chat/${USER}x/1-a.jpg`, USER, "chat")).toBeNull()
+    expect(ownedObjectKey(`${host}/chat/${USER}/%2e%2e/other/1-a.jpg`, USER, "chat")).toBeNull()
+    expect(ownedObjectKey(`http://blendn-media.fly.storage.tigris.dev/chat/${USER}/1-a.jpg`, USER, "chat")).toBeNull()
+    expect(ownedObjectKey(`${host}/chat/${USER}/`, USER, "chat")).toBeNull()
+    // Validated as parsed but stored as sent: the two must be the same string.
+    expect(ownedObjectKey(`https://x@blendn-media.fly.storage.tigris.dev/chat/${USER}/1-a.jpg`, USER, "chat")).toBeNull()
+    expect(ownedObjectKey(`https://blendn-media.fly.storage.tigris.dev:8443/chat/${USER}/1-a.jpg`, USER, "chat")).toBeNull()
+    expect(ownedObjectKey(`${host}/x/../chat/${USER}/1-a.jpg`, USER, "chat")).toBeNull()
+    expect(ownedObjectKey(`https://BLENDN-MEDIA.fly.storage.tigris.dev/chat/${USER}/1-a.jpg`, USER, "chat")).toBeNull()
+    // The other host the bucket answers on is ours too.
+    expect(ownedObjectKey(`https://blendn-media.t3.storage.dev/chat/${USER}/1-a.jpg`, USER, "chat")).toBe(`chat/${USER}/1-a.jpg`)
+  })
+
+  it("accepts every key it generates, whatever the file was called", async () => {
+    // "a..b.jpg" kept its dots and came back as a key its own uploader could not attach.
+    const { generateKey, ownedObjectKey } = await import("@/lib/tigris")
+    for (const name of ["a..b.jpg", "../../x.jpg", "photo.jpg", "my photo (1).JPG"]) {
+      const key = generateKey("chat", name, USER)
+      expect(ownedObjectKey(`https://blendn-media.fly.storage.tigris.dev/${key}`, USER, "chat")).toBe(key)
+    }
+  })
+
   it("the route uses it, and no longer the loose parser", async () => {
     const { readFileSync } = await import("fs")
     const { join } = await import("path")

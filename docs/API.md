@@ -743,8 +743,10 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 
 ### POST /chat/groups/:chatGroupId/messages
 ```json
-{ "content": "string", "type": "text|image|video", "metadata": {}, "parentId": "uuid?" }
+{ "content": "string", "type": "text|image|video", "metadata": { "mediaUrl": "url?" }, "parentId": "uuid?" }
 ```
+**Media (SCRUM-426).** `metadata` takes `mediaUrl` and nothing else; any other key is `400`. The server writes the rest, such as `sponsored_message_id`, which the app uses to draw a sponsored card. `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket). Anything else is `400` "Send photos through the app rather than linking to them". The same rules apply to `POST /events/:eventId/chat`.
+
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
 1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
 2. **Keyword filter** (sync, <1ms) — slurs/profanity in 9 languages → saves as hidden, returns `moderation_hidden: true`
@@ -809,7 +811,7 @@ does not offer Delist.
 | POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
-| POST | `/conversations/:id/messages` | Send message |
+| POST | `/conversations/:id/messages` | Send message. A `mediaUrl` must be the sender's own chat upload, or `400` (SCRUM-426) |
 | DELETE | `/conversations/:id` | **Leave — closes it for both people, permanently** |
 
 #### Opening a thread, delivery, replies and retries (SCRUM-406, 408, 409, 410)
