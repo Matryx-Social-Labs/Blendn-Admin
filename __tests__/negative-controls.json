@@ -1259,8 +1259,8 @@
     },
     "claim-page-shows-only-listed.itest.ts": {
       "guards": "SCRUM-455: the public claim page /claim/<id> and fileEventClaim load only events a stranger could have found (claimPageWhere: published or completed, not private, not deleted). A draft, a private and a cancelled event answer notFound and a claim on them is refused as 'Event not found' with no row written; a published public or unlisted event still renders and takes a claim. SCRUM-464: a malformed id is a missing event: the page answers notFound and fileEventClaim returns 'Event not found' without throwing (events.id is a UUID column; it was a 500).",
-      "mutation": "M208 the status filter removed from claimPageWhere. M209 the visibility filter removed. M210 the page back on its own id+deleted_at lookup. M211 fileEventClaim back on its own lookup. M228 the page's isUuid guard removed. M229 fileEventClaim's isUuid guard removed.",
-      "observed": "Red before the fix: 3 of 4 failing (the page rendered the draft, the private and the cancelled event). M208: 2 of 4 failing. M209: 1 of 4 failing. M210: 3 of 4 failing. M211: 3 of 4 failing. All reverted. SCRUM-464 red before the fix: 1 of 5 failing (the page threw a Prisma error, not a 404). M228: 1 of 5 failing. M229: 1 of 5 failing. All reverted.",
+      "mutation": "M208 the status filter removed from claimPageWhere. M209 the visibility filter removed. M210 the page back on its own id+deleted_at lookup. M211 fileEventClaim back on its own lookup. M234 the page's isUuid guard removed. M235 fileEventClaim's isUuid guard removed.",
+      "observed": "Red before the fix: 3 of 4 failing (the page rendered the draft, the private and the cancelled event). M208: 2 of 4 failing. M209: 1 of 4 failing. M210: 3 of 4 failing. M211: 3 of 4 failing. All reverted. SCRUM-464 red before the fix: 1 of 5 failing (the page threw a Prisma error, not a 404). M234: 1 of 5 failing. M235: 1 of 5 failing. All reverted.",
       "date": "2026-09-29"
     },
     "event-wall-clock.test.ts": {
@@ -1291,6 +1291,12 @@
       "guards": "SCRUM-183: every /apply field is named by its caption: Field (app/apply/field.tsx) ties <label for> to the control's useId id, points the control at its hint with aria-describedby, gives two fields in one tree different ids, and the page keeps no second, unlabelled copy of the helper.",
       "mutation": "M228 the Label's htmlFor removed. M229 the control's aria-describedby removed. M230 page.tsx defines its own Field again. M231 the hint guard removed (aria-describedby on every field). M232 a bare <Input> added to the page outside Field.",
       "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). After ecc:pr-test-analyzer, two cases were added (no aria-describedby without a hint; the whole /apply page server-rendered, every input and textarea with a matching label[for]). M231: 1 of 6 failing. M232: 1 of 6 failing. All reverted.",
+      "date": "2026-09-29"
+    },
+    "audit-filter-whole-log.itest.ts": {
+      "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
+      "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
+      "observed": "Red before the fix: 1 of 2 failing (filtering by the old action returned the newest 100 rows). M236: 1 of 2 failing. M237: 1 of 2 failing (the dropdown held only the filtered action). All reverted.",
       "date": "2026-09-29"
     }
   },

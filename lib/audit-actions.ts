@@ -95,6 +95,9 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
     and.push({ user_id: { in: colleagues.map((c) => c.user_id) } })
   }
 
+  // The dropdown lists every action in scope, not only the filtered one (SCRUM-462).
+  const scopeOnly: Prisma.audit_logsWhereInput = and.length ? { AND: [...and] } : {}
+
   if (typeof filters.action === "string") and.push({ action: filters.action })
   if (typeof filters.actorId === "string") and.push({ user_id: filters.actorId })
   if (typeof filters.resource === "string") and.push({ resource: filters.resource })
@@ -116,7 +119,7 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
       take: PAGE_SIZE,
     }),
     db.audit_logs.count({ where }),
-    db.audit_logs.groupBy({ by: ["action"], where, _count: { action: true } }),
+    db.audit_logs.groupBy({ by: ["action"], where: scopeOnly, _count: { action: true } }),
   ])
 
   // One query for the actors rather than a join per row; `user_id` is nullable
