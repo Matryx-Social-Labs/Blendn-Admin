@@ -214,8 +214,11 @@ export interface VenueRow {
   eventsInWindow: number
   /** Events per week over the trailing 8 weeks. */
   nightsPerWeek: number
+  /** Null, with `ratings` all zero, until `MIN_CELL` people have rated (SCRUM-437). */
   averageRating: number | null
   ratings: RatingCounts
+  /** How many ratings there are, withheld or not, so "none" and "too few" read differently. */
+  ratingCount: number
   nextBooking: { id: string; name: string; startAt: string; going: number } | null
   capacityProxy: number | null
   tone: "success" | "neutral" | "destructive"

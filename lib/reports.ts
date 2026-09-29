@@ -63,7 +63,13 @@ export const REPORTS: ReportDef[] = [
     key: "ratings",
     label: "Ratings",
     description: "Every rating left in the window, with the event it belongs to.",
-    roles: ["app_admin", "organizer", "venue_owner"],
+    /*
+     * The platform's alone. The app tells a rater the night's score is "only
+     * ever seen by us", and a row per score with the second it was given names
+     * the rater at a small event; unlike an average it cannot be withheld in
+     * part. Hosts see the average on each event from five raters (SCRUM-437).
+     */
+    roles: ["app_admin"],
   },
   {
     key: "organisations",
@@ -157,6 +163,8 @@ export async function buildReport(
   userId: string,
   range: DateRange
 ): Promise<string> {
+  // The route checks first; this holds for any caller that doesn't (SCRUM-437).
+  if (!canRunReport(key, role)) throw new Error(`The ${key} report is not open to ${role}`)
   const scope = await eventScopeFor(role, userId)
   const labelScope = await pseudonymScope(role, userId)
   const inWindow = { gte: range.from, lt: range.to }
