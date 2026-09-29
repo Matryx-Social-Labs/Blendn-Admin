@@ -121,29 +121,35 @@ export function TimezoneSelect({
           placeholder="Search timezone…"
         />
       </PopoverAnchor>
-      {filtered.length > 0 && (
-        <PopoverContent
-          align="start"
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          // The search box is outside the content; a click in it is not a dismissal.
-          onInteractOutside={(e) => {
-            if ((e.target as Element | null)?.closest?.("[data-timezone-search]")) e.preventDefault()
-          }}
-          className="w-[var(--radix-popover-trigger-width)] p-0 max-h-48 overflow-y-auto"
-        >
-          {filtered.map((tz) => (
-            <Button
-              key={tz}
-              type="button"
-              variant="ghost"
-              className={`w-full justify-start rounded-none px-3 py-1.5 h-auto text-left text-sm font-normal hover:bg-muted ${tz === value ? "font-medium" : ""}`}
-              onClick={() => select(tz)}
-            >
-              {tz}
-            </Button>
-          ))}
-        </PopoverContent>
-      )}
+      {/*
+       * Rendered even with no matches: with nothing mounted, Escape and a click
+       * outside reached no dismiss handler, and the box kept showing text the
+       * form would not save.
+       */}
+      <PopoverContent
+        align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        // The search box is outside the content; a click in it is not a dismissal.
+        onInteractOutside={(e) => {
+          if ((e.target as Element | null)?.closest?.("[data-timezone-search]")) e.preventDefault()
+        }}
+        className="w-[var(--radix-popover-trigger-width)] p-0 max-h-48 overflow-y-auto"
+      >
+        {filtered.length === 0 && (
+          <p className="px-3 py-2 text-sm text-muted-foreground">No timezone matches “{query}”.</p>
+        )}
+        {filtered.map((tz) => (
+          <Button
+            key={tz}
+            type="button"
+            variant="ghost"
+            className={`w-full justify-start rounded-none px-3 py-1.5 h-auto text-left text-sm font-normal hover:bg-muted ${tz === value ? "font-medium" : ""}`}
+            onClick={() => select(tz)}
+          >
+            {tz}
+          </Button>
+        ))}
+      </PopoverContent>
     </Popover>
   )
 }

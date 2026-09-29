@@ -10,6 +10,7 @@ import { toast } from "sonner"
 
 import { LocationPicker, type LocationData } from "@/components/location-picker"
 import { currentZoneName, TimezoneSelect } from "@/components/event-form/timezone-select"
+import { wallClockToUtc } from "@/lib/event-wall-clock"
 import { Button } from "@/components/ui/button"
 import {
   Form,
@@ -125,8 +126,9 @@ export function CurateForm({ defaultCity }: { defaultCity?: string }) {
         // filters on, and a typed "bangalore" against a geocoded "Bengaluru"
         // makes the event invisible in its own city.
         city: location.city ?? defaultCity ?? "",
-        start_time: new Date(values.start_time).toISOString(),
-        end_time: new Date(values.end_time).toISOString(),
+        // Wall-clock time where the event happens, not in the admin's browser.
+        start_time: wallClockToUtc(values.start_time, values.timezone),
+        end_time: wallClockToUtc(values.end_time, values.timezone),
         timezone: values.timezone,
         source_url: values.source_url.trim(),
       })
