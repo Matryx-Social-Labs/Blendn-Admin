@@ -1317,6 +1317,12 @@
       "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6. M294: 1 of 6 (the record whose media failed was purged, and with it the only pointer). M295: delete-prefix-keep 1 of 6. M296: 1 of 7 (the record went with storage unset). M297: 1 of 7. All reverted.",
       "date": "2026-09-29"
     },
+    "room-scoped-identity.itest.ts": {
+      "guards": "SCRUM-458: GET /users/:id by raw id sends work_field (outside the gate) and, when the viewer may not see who this is, blurPhoto instead of image/photos; the room-handle card is unchanged.",
+      "mutation": "M300 (SCRUM-458) the card's unidentified branch sends no blurPhoto. M301 the card sends no work_field.",
+      "observed": "Red before the fix: 1 of 13 failing. M300: 1 of 13 failing. M301: 1 of 13 failing.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",

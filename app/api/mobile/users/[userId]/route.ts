@@ -61,6 +61,8 @@ export async function GET(
             education: true,
             interests: true,
             photos: true,
+            work_field: true,
+            blur_photo: true,
           },
         },
         user_interests: {
@@ -168,6 +170,12 @@ export async function GET(
        * about as well as a photograph does.
        */
       name: identified ? user.profile?.name || user.name : "Attendee",
+      /*
+       * Outside the gate, as on `/profiles/:id`: "works in design" is an
+       * attribute, not an address. The app reads it for the card's subtitle
+       * and this route never sent it (SCRUM-458).
+       */
+      work_field: user.profile?.work_field ?? null,
       ...(identified
         ? {
             image: user.image,
@@ -176,7 +184,14 @@ export async function GET(
             occupation: user.profile?.occupation || null,
             education: user.profile?.education || null,
           }
-        : {}),
+        : {
+            /*
+             * The blurred photo for someone who may not see the real one: a
+             * stored derivative, never the real URL (see `/profiles/:id`). The
+             * app drew no photo at all here, since this route never sent it.
+             */
+            blurPhoto: user.profile?.blur_photo ?? null,
+          }),
       // Derived — see `ageFrom` in lib/age.ts. The date itself is read here and
       // never returned; this response is an explicit field list, not a spread.
       age: ageFrom(user.profile),

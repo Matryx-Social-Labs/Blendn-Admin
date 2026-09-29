@@ -260,6 +260,23 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect(res.body.data).toHaveProperty("stats")
   })
 
+  it("by raw id the card carries the work field, and the blur rather than the photo to someone not identified (SCRUM-458)", async () => {
+    // Identified (revealed at A): her photo and work field, and no blur.
+    const her = (await card(tanvi.id, viewer)).body.data
+    expect(her).toMatchObject({ work_field: "design", image: PHOTO, photos: [PHOTO] })
+    expect(her).not.toHaveProperty("blurPhoto")
+
+    // Not identified (co-present at C only): the blur and the work field, never a photo.
+    const STRANGER_BLUR = `${BLUR}-stranger`
+    await db.user.update({ where: { id: stranger.id }, data: { image: `${PHOTO}-stranger` } })
+    await db.profiles.update({ where: { id: stranger.id }, data: { blur_photo: STRANGER_BLUR, work_field: "design", photos: [`${PHOTO}-stranger`] } })
+    const them = (await card(stranger.id, viewer)).body.data
+    expect(them).toMatchObject({ name: "Attendee", identityVisible: false, work_field: "design", blurPhoto: STRANGER_BLUR })
+    expect(them).not.toHaveProperty("image")
+    expect(them).not.toHaveProperty("photos")
+    expect(JSON.stringify(them)).not.toContain(`${PHOTO}-stranger`)
+  })
+
   it("the card and the profile agree in every room", async () => {
     for (const e of [A, B, C]) {
       const row = seen.get(e)!
