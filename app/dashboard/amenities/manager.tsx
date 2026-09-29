@@ -182,7 +182,12 @@ function Row({
       <div className="min-w-0">
         {editing ? (
           <div className="flex items-center gap-2">
-            <Input value={editName} onChange={(e) => onEditName(e.target.value)} />
+            <Input
+              value={editName}
+              onChange={(e) => onEditName(e.target.value)}
+              // Named for the amenity: it had no name at all (SCRUM-469).
+              aria-label={`New name for ${amenity.name}`}
+            />
             <Button size="sm" disabled={pending} onClick={onSave}>
               Save
             </Button>
@@ -208,11 +213,17 @@ function Row({
       {!editing ? (
         <div className="flex items-center gap-1.5">
           {amenity.isActive ? (
-            <Button size="sm" variant="ghost" disabled={pending} onClick={onStartEdit}>
+            <Button size="sm" variant="ghost" disabled={pending} onClick={onStartEdit} aria-label={`Rename ${amenity.name}`}>
               Rename
             </Button>
           ) : null}
-          <Button size="sm" variant="ghost" disabled={pending} onClick={onToggle}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={pending}
+            onClick={onToggle}
+            aria-label={`${amenity.isActive ? "Retire" : "Restore"} ${amenity.name}`}
+          >
             {amenity.isActive ? "Retire" : "Restore"}
           </Button>
         </div>
