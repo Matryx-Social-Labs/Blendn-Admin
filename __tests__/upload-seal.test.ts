@@ -134,6 +134,12 @@ describe("sealing an upload", () => {
     expect(sentOf(CopyObjectCommand)).toHaveLength(0)
   })
 
+  it("applies a caller's ceiling: a blurred photo the size of a real one is refused before a copy (SCRUM-476)", async () => {
+    storageHolds({ ContentLength: 120_000, ContentType: "image/jpeg" })
+    expect(await sealUpload(`profile/${USER}/1-a-blur.jpg`, "profile", USER, 1, 8_000)).toEqual({ refused: "too_large" })
+    expect(sentOf(CopyObjectCommand)).toHaveLength(0)
+  })
+
   it("says missing when there is nothing there, and copies nothing", async () => {
     storageHolds(null)
     expect(await sealUpload(SOURCE, "chat", USER)).toEqual({ refused: "missing" })

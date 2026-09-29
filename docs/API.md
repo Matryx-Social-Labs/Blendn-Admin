@@ -924,6 +924,21 @@ scores harm, not subject matter — a photo of a dog passes.
 Google are no longer taken at signup: an avatar is not a choice, and it had
 never been through the checks above. Clearing every photo clears it too.
 
+**`blur_photo` is the blurred copy of `photos[0]`** (SCRUM-476), and what a
+viewer who cannot identify you sees instead of your photos (`blurPhoto`). Make
+it on the device (40 px wide), upload it like a photo, and send its `publicUrl`
+as `blur_photo` — with the photos or after them. It is held to the photo rules
+with two differences:
+
+- **Small, not large:** anything over 8 KB is `too_large`, because a file that
+  big is sharp enough to be the photo. There is no blank-image floor.
+- **It never outlives its photo.** A save that changes `photos[0]` without a new
+  `blur_photo`, or leaves no photos, clears it; so does moderation pulling the
+  primary. A blur sent with no photo on the profile is refused (`no_photo`).
+
+Like `photos`, it comes back as the sealed copy's URL; sending that back
+unchanged does not copy it again. `null` clears it.
+
 ### Revealing
 
 A conversation opened by a mutual like carries **the same pseudonym the match

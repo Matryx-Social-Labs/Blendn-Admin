@@ -50,7 +50,8 @@ describe("checkProfilePhoto (request path)", () => {
     seal.mockResolvedValue({ key: "profile/u1/2-b-sealed", url: SEALED, bytes: 200_000, contentType: "image/jpeg" })
     await expect(checkProfilePhoto(URL, "u1")).resolves.toEqual({ ok: true, checked: false, url: SEALED })
     // The blank-photo floor is applied to the copy, which is what is stored.
-    expect(seal).toHaveBeenCalledWith("profile/u1/1-a-photo.jpg", "profile", "u1", MIN_PHOTO_BYTES)
+    // No ceiling of its own: a photo is held to the folder's (a blur is not, SCRUM-476).
+    expect(seal).toHaveBeenCalledWith("profile/u1/1-a-photo.jpg", "profile", "u1", MIN_PHOTO_BYTES, undefined)
     expect(vendor).not.toHaveBeenCalled()
   })
 
@@ -78,7 +79,8 @@ describe("moderateProfilePhoto (after the response)", () => {
 
     await moderateProfilePhoto(URL, "u1")
 
-    expect(db.profiles.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { photos: ["https://cdn/b.jpg"] } })
+    // The primary went, so the blur made from it goes too (SCRUM-476).
+    expect(db.profiles.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { photos: ["https://cdn/b.jpg"], blur_photo: null } })
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { image: "https://cdn/b.jpg" } })
     expect(record).toHaveBeenCalledWith(URL, "u1", true)
   })

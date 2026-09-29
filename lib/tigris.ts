@@ -216,12 +216,16 @@ const SEAL_TIMEOUT_MS = 10_000
  *
  * Refusals are the person's to fix and come back as a value. A storage
  * failure is ours and throws, after removing any copy it left.
+ *
+ * `maxBytes` narrows the folder's ceiling for one kind of object: a blurred
+ * photo is refused at a size that would make it the photo (SCRUM-476).
  */
 export async function sealUpload(
   key: string,
   folder: "profile" | "chat",
   userId: string,
-  minBytes = 1
+  minBytes = 1,
+  maxBytes = getMaxFileSize(folder)
 ): Promise<SealedObject | { refused: SealRefusal }> {
   // Callers bind the key with `ownedObjectKey`; this is the backstop.
   if (!key.startsWith(`${folder}/${userId}/`)) throw new Error("sealUpload: key outside the caller's folder")
@@ -240,7 +244,7 @@ export async function sealUpload(
   const refusalOf = (facts: { bytes: number; contentType: string } | null): SealRefusal | null =>
     !facts ? "missing"
     : facts.bytes < minBytes ? "too_small"
-    : facts.bytes > getMaxFileSize(folder) ? "too_large"
+    : facts.bytes > maxBytes ? "too_large"
     : !validateContentType(facts.contentType, folder) ? "wrong_type"
     : null
   const remove = (Key: string) =>

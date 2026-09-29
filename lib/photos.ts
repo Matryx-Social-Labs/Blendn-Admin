@@ -66,6 +66,30 @@ export const MIN_PHOTO_BYTES = 8_000
  * one, and the moderation screen's unchecked count is where it shows.
  */
 export async function checkProfilePhoto(url: string, userId: string): Promise<PhotoVerdict> {
+  return sealOwn(url, userId, MIN_PHOTO_BYTES, undefined, PHOTO_REFUSAL)
+}
+
+/**
+ * The largest file that is still a blur (SCRUM-476).
+ *
+ * The app's derivative is 40 pixels wide and a few KB. Anything big enough to
+ * pass a photo's floor is sharp enough to be the photo, and the blurred copy
+ * is exactly what a viewer who has not identified someone is allowed to see.
+ */
+export const MAX_BLUR_BYTES = MIN_PHOTO_BYTES
+
+/** The blurred copy of the primary photo: the caller's own upload, sealed, and small. */
+export async function checkBlurPhoto(url: string, userId: string): Promise<PhotoVerdict> {
+  return sealOwn(url, userId, 1, MAX_BLUR_BYTES, BLUR_REFUSAL)
+}
+
+async function sealOwn(
+  url: string,
+  userId: string,
+  minBytes: number,
+  maxBytes: number | undefined,
+  refusals: Record<SealRefusal, PhotoRejection>
+): Promise<PhotoVerdict> {
   const key = ownedPhotoKey(url, userId)
   if (!key) {
     return {
@@ -80,8 +104,8 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
    * for another after it was attached and moderated; nobody holds one for the
    * copy.
    */
-  const sealed = await sealUpload(key, "profile", userId, MIN_PHOTO_BYTES)
-  if ("refused" in sealed) return PHOTO_REFUSAL[sealed.refused]
+  const sealed = await sealUpload(key, "profile", userId, minBytes, maxBytes)
+  if ("refused" in sealed) return refusals[sealed.refused]
   return { ok: true, checked: false, url: sealed.url }
 }
 
@@ -92,6 +116,11 @@ const PHOTO_REFUSAL: Record<SealRefusal, PhotoRejection> = {
   too_small: { ok: false, code: "too_small", message: "That looks like a blank image. Pick a photo of yourself." },
   too_large: { ok: false, code: "too_large", message: "That photo is too large. Pick one under 10 MB." },
   wrong_type: { ok: false, code: "wrong_type", message: "That file isn't a photo. Pick a JPEG, PNG or WebP." },
+}
+
+const BLUR_REFUSAL: Record<SealRefusal, PhotoRejection> = {
+  ...PHOTO_REFUSAL,
+  too_large: { ok: false, code: "too_large", message: "The blurred copy of your photo is too sharp to send. Update the app and try again." },
 }
 
 /**
@@ -106,9 +135,12 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
     const check = await checkImageContent(url)
     if (check.checked && check.result?.action === "hide") {
       const profile = await db.profiles.findUnique({ where: { id: userId }, select: { photos: true } })
-      const remaining = (profile?.photos ?? []).filter((u) => u !== url)
+      const photos = profile?.photos ?? []
+      const remaining = photos.filter((u) => u !== url)
+      // The blur is of the primary (SCRUM-476): a pulled primary takes its blur with it.
+      const blur = photos[0] === url ? { blur_photo: null } : {}
       await db.$transaction([
-        db.profiles.update({ where: { id: userId }, data: { photos: remaining } }),
+        db.profiles.update({ where: { id: userId }, data: { photos: remaining, ...blur } }),
         db.user.update({ where: { id: userId }, data: { image: remaining[0] ?? null } }),
       ])
       await recordPhotoCheck(url, userId, true)
@@ -121,6 +153,28 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
     // console.error, which is not where this app's errors go. A photo that
     // should have come down and did not is worth a real log line.
     logger.error("Profile photo moderation failed; photo left in place", {
+      userId,
+      url,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
+ * The vendor check for a blurred photo, after the response (SCRUM-476).
+ *
+ * Only clears the column if it still holds this URL: a newer blur saved in the
+ * meantime is not this verdict's to remove.
+ */
+export async function moderateBlurPhoto(url: string, userId: string): Promise<void> {
+  try {
+    const check = await checkImageContent(url)
+    if (check.checked && check.result?.action === "hide") {
+      await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
+      logger.warn("Blurred profile photo removed after moderation", { userId })
+    }
+  } catch (error) {
+    logger.error("Blurred photo moderation failed; left in place", {
       userId,
       url,
       error: error instanceof Error ? error.message : String(error),

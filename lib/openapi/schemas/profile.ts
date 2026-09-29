@@ -51,7 +51,7 @@ export const UpdateProfileRequestSchema = z
       .nullable()
       .openapi({
         description:
-          "A 40px derivative of the primary photo, generated client-side by `createBlurDerivative`. Served ONLY to viewers who have not earned the real photos — the matched-but-unrevealed state. Never send the real URL with a blur applied in the app: the original then sits in the payload and the device cache, where the blur is undone in one step.",
+          "A 40px derivative of the primary photo, made on the device (`createBlurDerivative`) and uploaded like a photo: the `publicUrl` of your own upload, stored as a sealed copy, 8 KB at most (`too_large` above — a file that big is the photo), moderated after the response. Cleared when a save changes `photos[0]` without a new one or leaves no photos, and when moderation pulls the primary; refused (`no_photo`) on a profile with no photo. `null` clears it. Served ONLY to viewers who have not earned the real photos — the matched-but-unrevealed state. Never send the real URL with a blur applied in the app: the original then sits in the payload and the device cache, where the blur is undone in one step.",
       }),
     goals: z.array(z.string()).optional(),
     looking_for: z.array(z.string()).optional(),
