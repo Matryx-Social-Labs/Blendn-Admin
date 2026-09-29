@@ -1,6 +1,7 @@
 "use server"
 
 import { Refusal } from "./refusal"
+import { likeLiteral } from "./like-literal"
 import { revalidatePath } from "next/cache"
 
 import { auditLog } from "@/lib/audit-log"
@@ -138,7 +139,7 @@ export async function createAmenity(input: {
    * then offered Cloakroom twice. Found by adding one that already existed.
    */
   const same = await db.amenities.findFirst({
-    where: { name: { equals: name, mode: "insensitive" } },
+    where: { name: { equals: likeLiteral(name), mode: "insensitive" } },
     select: { is_active: true },
   })
   if (same) {
@@ -188,11 +189,27 @@ export async function updateAmenity(
 ): Promise<void> {
   const user = await requireAdmin()
 
-  const existing = await db.amenities.findUnique({ where: { id }, select: { id: true } })
+  const existing = await db.amenities.findUnique({ where: { id }, select: { id: true, name: true } })
   if (!existing) throw new Refusal("Amenity not found")
 
   const name = input.name?.trim()
   if (name !== undefined && name.length < 2) throw new Refusal("Name is required")
+  // The same rule as create, or a rename puts two "Open Bar"s in the picker
+  // (SCRUM-468). Only a real change is checked, so a row can re-case its own
+  // name and one saved before this check is not locked by an existing twin.
+  if (name !== undefined && name.toLowerCase() !== existing.name.toLowerCase()) {
+    const twin = await db.amenities.findFirst({
+      where: { name: { equals: likeLiteral(name), mode: "insensitive" } },
+      select: { name: true, is_active: true },
+    })
+    if (twin) {
+      throw new Refusal(
+        twin.is_active
+          ? `"${twin.name}" already exists — rename that one instead`
+          : `"${twin.name}" exists but is retired — restore it instead`
+      )
+    }
+  }
 
   await db.amenities.update({
     where: { id },
