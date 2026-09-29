@@ -78,9 +78,11 @@ it("finds a brand by name under the product's key and under the seeds' old one",
 })
 
 it("leaves no seed writing a sponsor key of its own", () => {
-  // The next seed to hand-roll `name_key` reopens the same split.
+  // The next seed to hand-roll `name_key` (a literal, a template, a variable)
+  // reopens the same split, so every key a seed writes goes through the product.
   for (const file of ["scripts/seed-qa.ts", "scripts/seed-blr-scenarios.ts"]) {
     const src = readFileSync(join(__dirname, "../..", file), "utf8")
-    expect({ file, keys: src.match(/name_key:\s*("[^"]*"|[\w.]+\.toLowerCase\(\))/g) ?? [] }).toEqual({ file, keys: [] })
+    const keys = src.match(/name_key:(?!\s*normaliseSponsorName\()[^,}\n]*/g) ?? []
+    expect({ file, keys }).toEqual({ file, keys: [] })
   }
 })
