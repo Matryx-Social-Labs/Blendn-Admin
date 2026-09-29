@@ -1,61 +1,66 @@
 "use client"
 
-import dynamic from "next/dynamic"
+import { useEffect, useRef, useState } from "react"
 
-/*
- * The base stylesheet stays a static import while the component is lazy.
- *
- * A CSS import is resolved by the bundler as a stylesheet, not as a module
- * graph edge — it does not pull `swagger-ui-react`'s JavaScript (and therefore
- * not `js-yaml`) into this chunk. Dropping it while lazy-loading the component
- * renders the reference completely unstyled, because `swagger-dark.css` is an
- * override and not a replacement.
- */
-import "swagger-ui-react/swagger-ui.css"
+import "swagger-ui-dist/swagger-ui.css"
 import "./swagger-dark.css"
 
 /**
  * The API reference — admin-only, and loaded only when one opens it.
  *
- * ## Two separate problems, two separate fixes
+ * ## Swagger UI prebuilt, not bundled (SCRUM-463)
  *
- * **It was public.** This page and `/api/docs` had no check of any kind, so the
- * complete map of the mobile API — every endpoint, its parameters, and which of
- * them need a token — was readable by anyone who guessed the path. That is not
- * a vulnerability by itself; it is the reconnaissance step that makes finding
- * one cheap. `middleware.ts` now requires `app_admin`, and answers the JSON
- * route with a 404 rather than a 401, because telling an anonymous caller that
- * a spec exists here is half the disclosure.
+ * `swagger-ui-react` handed its module graph to our bundler, and Turbopack
+ * dropped the modules that exist for their side effects: apidom attaches
+ * `refract` to each OpenAPI 3.1 element class in `refractor/registration.mjs`,
+ * which the package lists in `sideEffects` and Turbopack skipped anyway while
+ * following its re-exports. `/api-docs` threw `oS.refract is not a function` and
+ * drew 2 of 22 sections. Turning off every tree-shaking flag Next exposes did
+ * not bring the module back, measured in a local production build.
  *
- * **It shipped a flagged parser.** `swagger-ui-react` is a production
- * dependency and pulls in `js-yaml`, which carries a high-severity advisory
- * (quadratic CPU on `!!omap`) whose fix was **not backported** — 4.3.1 is both
- * the latest release and the affected one, so pinning buys nothing and there is
- * no version to upgrade to.
+ * `swagger-ui-dist` ships Swagger UI already built, one file with nothing left
+ * for a bundler to shake, so the registrations run.
  *
- * What is left is blast radius, so that is what changed. `next/dynamic` with
- * `ssr: false` puts Swagger UI in its own chunk, fetched only when an admin
- * opens this page. It is no longer in any other route's bundle, is never
- * evaluated during SSR, and is unreachable without an admin session.
+ * ## Why it is gated and lazy
  *
- * The residual risk is narrow, and worth stating rather than implying away: the
- * parser only ever reads `/api/docs`, our own generated JSON on the same
- * origin. An attacker cannot point it at hostile YAML without already
- * controlling the spec route.
+ * **It was public.** `middleware.ts` requires `app_admin` here and answers
+ * `/api/docs` with a 404 rather than a 401: the map of the mobile API is the
+ * reconnaissance step that makes finding a vulnerability cheap.
  *
- * If `swagger-ui-react` is dropped later, `/api/docs` still serves the spec and
- * any local viewer renders it — the endpoint is the durable half, the UI is the
- * convenience.
+ * **It carries a flagged parser.** The bundle includes `js-yaml`, whose
+ * high-severity advisory (quadratic CPU on `!!omap`) has no fixed release. So
+ * the bundle is fetched only when an admin opens this page, never evaluated
+ * during SSR, and only ever parses `/api/docs`, our own JSON on this origin.
+ *
+ * If the viewer goes, `/api/docs` still serves the spec to any local viewer.
  */
-const SwaggerUI = dynamic(() => import("swagger-ui-react"), {
-  ssr: false,
-  loading: () => <p className="p-8 text-sm text-muted-foreground">Loading the API reference…</p>,
-})
-
 export default function ApiDocsPage() {
+  const host = useRef<HTMLDivElement>(null)
+  const [state, setState] = useState<"loading" | "ready" | "failed">("loading")
+
+  useEffect(() => {
+    let cancelled = false
+    import("swagger-ui-dist/swagger-ui-bundle.js")
+      .then(({ default: SwaggerUIBundle }) => {
+        if (cancelled || !host.current) return
+        SwaggerUIBundle({ domNode: host.current, url: "/api/docs" })
+        setState("ready")
+      })
+      .catch(() => setState("failed"))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Swagger UI renders its own React tree into `host`, so nothing of ours goes inside it.
   return (
     <div className="swagger-container">
-      <SwaggerUI url="/api/docs" />
+      {state !== "ready" && (
+        <p className="p-8 text-sm text-muted-foreground">
+          {state === "failed" ? "The API reference didn't load. The spec is at /api/docs." : "Loading the API reference…"}
+        </p>
+      )}
+      <div ref={host} />
     </div>
   )
 }

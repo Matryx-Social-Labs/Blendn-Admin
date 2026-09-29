@@ -1305,6 +1305,12 @@
       "observed": "Red before the fix: this file 3 of 5 failing, message-media-owned 2 of 16; the quote case 1 of 1 against the committed route. M260: this file 4 of 6. M261: message-media-owned 1 of 21. M262: 1 of 21. M266: 1 of 21. M267: 1 of 21 (the hidden caption was not hidden before the emit). M268: 1 of 21. M269: this file 1 of 6. All reverted.",
       "date": "2026-09-29"
     },
+    "api-docs-prebuilt.test.ts": {
+      "guards": "SCRUM-463: /api-docs imports swagger-ui-dist's prebuilt bundle and swagger-ui-react is not a dependency, so Turbopack never shakes apidom's refractor registrations out (the page threw oS.refract is not a function and drew 2 of 22 sections). Verified by grepping a local production build: 88 .refract= assignments in the chunk, against 3 with swagger-ui-react.",
+      "mutation": "M298 the page imports swagger-ui-react again.",
+      "observed": "M298: 1 of 1 failing. Reverted.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
