@@ -92,6 +92,16 @@ export async function hereCountFor(eventId: string): Promise<number> {
 }
 
 /**
+ * An event the platform deleted is out of the count and the list alike
+ * (SCRUM-432). The count used to keep it while the list dropped it after its
+ * LIMIT, so a profile said 3 above a list of 1, and a page whose newest event
+ * was deleted came back short. Both queries below take this.
+ */
+const LIVE_EVENT = Prisma.sql`
+  AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.deleted_at IS NULL)
+`
+
+/**
  * How many distinct *events* this person has attended.
  *
  * `_count.event_check_ins` on a user counts attendance-days, so somebody whose
@@ -105,6 +115,7 @@ export async function distinctEventsAttended(userId: string): Promise<number> {
     WHERE user_id = ${userId}
       AND status::text IN (${Prisma.join(ATTENDED)})
       AND kind = 'attendee'
+      ${LIVE_EVENT}
   `
   return Number(row?.events ?? 0)
 }
@@ -138,6 +149,7 @@ export async function attendedEventIds(
       WHERE user_id = ${userId}
         AND status::text IN (${Prisma.join(ATTENDED)})
         AND kind = 'attendee'
+        ${LIVE_EVENT}
       ORDER BY event_id, COALESCE(check_in_time, created_at) ASC
     ) AS attended
     ORDER BY first_seen DESC
