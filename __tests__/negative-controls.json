@@ -1238,6 +1238,12 @@
       "mutation": "M189 LIVE_EVENT removed from distinctEventsAttended only. M190 LIVE_EVENT removed from attendedEventIds only. M191 the profile route counts distinct attended events itself, without the predicate (the pre-fix semantics).",
       "observed": "Red before the fix: 1 of 7 failing, page [] total 2 counted 2 (expected [kept] 1 1), the staging shape (totalCount 3 above a list of 1). M189: 1 of 7 failing, total 2 and counted 2. M190: 1 of 7 failing, page []. (M189/M190 were run before the profile assertion was added, which ecc:pr-test-analyzer asked for.) M191: 1 of 7 failing, profile 2. All reverted.",
       "date": "2026-09-29"
+    },
+    "email-allowlist.test.ts": {
+      "guards": "SCRUM-452: outside Railway's `production` environment, sendEmail delivers only to blendn.app, matrixsociallabs.com and resend.dev (exact domain, case-insensitive) or an exact address in EMAIL_ALLOWLIST; a refused recipient never reaches Resend, returns {sent:false, reason:'not_configured'}, and the warning names the domain, not the address.",
+      "mutation": "M189 the allowlist check in sendEmail removed (`if (false && !mayDeliverTo(...))`). M190 the production check removed (and, separately, inverted to `!== \"production\"`). M191 a suffix match instead of the exact domain (`address.endsWith(d)`). M192 EMAIL_ALLOWLIST ignored (`|| listed.includes(address)` dropped).",
+      "observed": "Red before the fix: 6 of 11 failing (every refusal case, and the warning). M189: 6 of 11 failing, fetch was called for x@toit.in, the lookalikes, local and the gmail domain. M190 removed: 1 of 11 failing, production did not send to x@toit.in; inverted: 7 of 11 failing. M191: 1 of 11 failing, x@evil-blendn.app was sent. M192: 1 of 11 failing, owner@gmail.com was not sent. All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

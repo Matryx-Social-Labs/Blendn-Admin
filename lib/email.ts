@@ -74,6 +74,27 @@ export function applyUrl(): string {
   return configured ? configured.replace(/\/$/, "") : appUrl()
 }
 
+/*
+ * Outside production, mail goes only to our own and test domains (SCRUM-452).
+ *
+ * Staging has RESEND_API_KEY and EMAIL_FROM set, and its seed data carried
+ * real businesses' addresses, so a tester deciding a seeded claim emailed a
+ * real company — a gmail.com applicant got a staging mail on 2026-09-15.
+ *
+ * Production is Railway's environment named `production`; anything else,
+ * including a laptop with no Railway environment at all, is not. The domain
+ * matches exactly: a suffix match would let `evil-blendn.app` through.
+ * EMAIL_ALLOWLIST adds exact addresses, for a tester's own inbox.
+ */
+const OWN_DOMAINS = new Set(["blendn.app", "matrixsociallabs.com", "resend.dev"])
+
+function mayDeliverTo(to: string): boolean {
+  if (process.env.RAILWAY_ENVIRONMENT_NAME === "production") return true
+  const address = to.trim().toLowerCase()
+  const listed = (process.env.EMAIL_ALLOWLIST ?? "").split(",").map((a) => a.trim().toLowerCase())
+  return OWN_DOMAINS.has(address.split("@").pop() ?? "") || listed.includes(address)
+}
+
 export async function sendEmail(opts: {
   to: string
   subject: string
@@ -91,6 +112,18 @@ export async function sendEmail(opts: {
       subject: opts.subject,
     })
     return { sent: false, reason: "not_configured" }
+  }
+
+  if (!mayDeliverTo(opts.to)) {
+    // "not_configured" rather than a new reason: this environment is not
+    // configured to mail that address, and every caller already reads it as
+    // not-sent (an invite hands over its link). The domain only — the address
+    // is somebody's, and this is a log line.
+    logger.warn("Email not sent — recipient outside the non-production allowlist", {
+      domain: opts.to.split("@").pop(),
+      subject: opts.subject,
+    })
+    return { sent: false, reason: "not_configured", detail: "recipient not allowlisted outside production" }
   }
 
   try {

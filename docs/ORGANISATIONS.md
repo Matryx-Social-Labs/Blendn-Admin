@@ -256,6 +256,8 @@ set-password link to pass on by hand. What must never happen is a silent
 swallow — an invite reporting success while nothing was sent leaves someone
 waiting for a mail that is not coming.
 
+**Staging only mails the allowlist.** Outside Railway's `production` environment, `sendEmail` delivers only to `blendn.app`, `matrixsociallabs.com`, `resend.dev` and exact addresses in `EMAIL_ALLOWLIST`; anything else returns `not_configured` (SCRUM-452).
+
 ## Tests
 
 | File | Covers |
