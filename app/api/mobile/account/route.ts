@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
+import { evictUserSockets } from "@/lib/socket-server"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix } from "@/lib/tigris"
@@ -348,6 +349,10 @@ export async function DELETE(request: NextRequest) {
     // The token that made this request is dead from here: without this, it
     // could put a name back on the profile just erased (SCRUM-132).
     blockAccountNow(authUser.userId)
+    // And so is every socket it already had open. The handshake gate refuses
+    // a new one, but a second phone's live connection kept its rooms and DMs
+    // coming after the erasure (SCRUM-449). Suspension does the same.
+    evictUserSockets(authUser.userId)
 
     // Seats they held are free now; the waitlist moves, per event.
     for (const eventId of openEventIds) {

@@ -1220,6 +1220,12 @@
       "mutation": "M163 chat back in PUBLIC_FOLDERS. M164 readableUrl signs nothing. M165 resolveMediaFields without the media keys. M166 the DM socket copy unsigned. M167 the moderator gets the private URL. M168 erasure sweeps only the new bucket. M169 the private host is not ours. M170 any private key signed. M171 deleteFile misses the public copy. M172 the keep set ignored.",
       "observed": "Red before the fix: 7 of 7 (readableUrl missing), then 2 more for the socket and moderation paths. Over chat-media-private (9) + message-media-owned (14): cases failing: M163 3 unit, M164 4 unit + 1 itest, M165 1 unit + 1 itest, M166 1 unit, M167 1 unit, M168 2 unit, M169 1 unit + 6 itest. Measured on the staging bucket first: the private bucket answers an anonymous GET 403 and a signed one 200; the public bucket is public as a whole (the per-folder policy does not apply there). Added after ecc:pr-test-analyzer (two suites the move broke: delete-prefix-keep, upload-seal — now bucket-aware) and ecc:security-reviewer (signing unrestricted to chat/): M170 1 failing, M171 1 failing, M172 4 failing (chat-media-private + delete-prefix-keep, 18 cases).",
       "date": "2026-09-29"
+    },
+    "deletion-evicts-sockets.itest.ts": {
+      "guards": "SCRUM-449: deleting an account through DELETE /api/mobile/account closes every socket it already had open (two phones, both told 'io server disconnect') and nobody else's (a bystander stays connected). A real socket.io server installed as the app's io; the delete runs through the real route on real rows.",
+      "mutation": "M173 the route's evictUserSockets(authUser.userId) commented out. M174 evictUserSockets disconnects every socket (io.disconnectSockets instead of io.in(`user:<id>`)).",
+      "observed": "Red before the fix: 1 of 1, the route answered 200 and phoneA.closed was [] (expected ['io server disconnect']). M173: 1 of 1 failing, same assertion. M174: 1 of 1 failing, other.closed received 3 entries where [] was expected. Both reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [
