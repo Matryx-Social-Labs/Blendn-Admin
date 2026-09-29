@@ -9,9 +9,10 @@
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/db", () => ({ db: {} }))
-process.env.TIGRIS_ENDPOINT ??= "https://fly.storage.tigris.dev"
-process.env.TIGRIS_ACCESS_KEY ??= "test-access"
-process.env.TIGRIS_SECRET_KEY ??= "test-secret"
+process.env.TIGRIS_ENDPOINT = "https://fly.storage.tigris.dev"
+process.env.TIGRIS_ACCESS_KEY = "test-access"
+process.env.TIGRIS_SECRET_KEY = "test-secret"
+process.env.TIGRIS_BUCKET = "blendn-media-test"
 
 const USER = "cmuser0000000000000000001"
 const media = `https://blendn-media-test-private.fly.storage.tigris.dev/chat/${USER}/1790000000000-abc123-sealed`
@@ -46,8 +47,17 @@ describe("room media is screened whatever the message's type says", () => {
     expect(recordExamined).toHaveBeenCalledWith("m1", false)
   })
 
-  it("does not call the image check for a message with no media", async () => {
+  it("does not call the image check for a message with no media, null or left out", async () => {
     await moderateMessage("m1", "hello", "text", USER, "g1", null)
+    await moderateMessage("m2", "hello", "text", USER, "g1")
     expect(checkImageContent).not.toHaveBeenCalled()
+  })
+
+  it("hands the check the media itself, signed", async () => {
+    checkImageContent.mockResolvedValue({ checked: true, result: null })
+    await moderateMessage("m1", "look", "text", USER, "g1", media)
+    const url = new URL(checkImageContent.mock.calls[0][0])
+    expect(url.pathname.endsWith(new URL(media).pathname)).toBe(true)
+    expect(url.searchParams.has("X-Amz-Signature")).toBe(true)
   })
 })

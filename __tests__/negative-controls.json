@@ -1294,9 +1294,9 @@
       "date": "2026-09-29"
     },
     "room-media-always-moderated.test.ts": {
-      "guards": "SCRUM-444: a room message's media is screened whatever its declared type: moderateMessage sends any mediaUrl to the image check (a file it can't read is recorded unchecked, never clean), and both room routes send a \"text\" message that carries media down the full pipeline with its sealed URL. Companion case: message-media-owned.itest.ts (\"screens the image on a text message\").",
-      "mutation": "M260 moderateMessage checks the image only for type image/gif. M261 the group route's inline text branch takes a text message with media. M262 the event route's does.",
-      "observed": "Red before the fix: this file 3 of 5 failing (text and video never reached the image check; the unread clip was recorded clean), message-media-owned 2 of 16 (moderateMessage called without the URL on both routes). M260: 3 of 5 failing. M261: message-media-owned 1 of 16 (the group route). M262: 1 of 16 (the event route). All reverted.",
+      "guards": "SCRUM-444: a room message's media is screened whatever its declared type: moderateMessage sends any mediaUrl to the image check, signed (a file it can't read is recorded unchecked, never clean); both room routes still check a text message's caption inline before the emit, but count it examined only when there is no media, and hand the media to the pipeline with its sealed URL; the group route's list serves a reply's quote of a taken-down message with neither its words nor its media. Companion cases: message-media-owned.itest.ts.",
+      "mutation": "M260 moderateMessage checks media only for type image/gif. M261 the group route counts a text+media message examined inline. M262 the event route does. M266 the group route's pipeline call drops the URL. M267 the event route skips the inline caption check when there is media (the first version of this fix, which ecc:security-reviewer caught: the raw caption reached the push). M268 the quote of a hidden message is served as is. M269 moderateMessage screens media that is merely not null (undefined passes).",
+      "observed": "Red before the fix: this file 3 of 5 failing, message-media-owned 2 of 16; the quote case 1 of 1 against the committed route. M260: this file 4 of 6. M261: message-media-owned 1 of 21. M262: 1 of 21. M266: 1 of 21. M267: 1 of 21 (the hidden caption was not hidden before the emit). M268: 1 of 21. M269: this file 1 of 6. All reverted.",
       "date": "2026-09-29"
     },
     "audit-filter-whole-log.itest.ts": {
