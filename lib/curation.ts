@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
 import type { Geofence } from "./geofence"
 
@@ -30,6 +31,18 @@ import type { Geofence } from "./geofence"
  * and this answers *what happened*. Keeping them apart means a later transfer
  * between organisations does not make an event look uncurated.
  */
+
+/*
+ * The events a stranger may see on the public claim page, or file a claim on:
+ * published or finished, and not private. The page is unauthenticated, and it
+ * loaded any event that was not deleted -- a draft, a private or a cancelled
+ * event showed its title, venue and time to anyone with the link, and a draft
+ * was told it "already has an organiser" (SCRUM-455). Those are answered like
+ * a missing id instead.
+ */
+export function claimPageWhere(id: string): Prisma.eventsWhereUniqueInput {
+  return { id, deleted_at: null, status: { in: ["published", "completed"] }, visibility: { not: "private" } }
+}
 
 /** The columns every function here needs. Spread it; do not hand-pick. */
 export const curationSelect = {
