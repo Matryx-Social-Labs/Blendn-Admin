@@ -1293,6 +1293,12 @@
       "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). After ecc:pr-test-analyzer, two cases were added (no aria-describedby without a hint; the whole /apply page server-rendered, every input and textarea with a matching label[for]). M231: 1 of 6 failing. M232: 1 of 6 failing. All reverted.",
       "date": "2026-09-29"
     },
+    "organisers-add-venues.itest.ts": {
+      "guards": "SCRUM-423: venue.updated records only the fields whose value changed (in the form's names), with the outline's shape before and after when it changed, and a save that changes nothing writes no row. The comparison is deep, since jsonb returns the stored outline with its keys reordered. Case: organisers-add-venues.itest.ts \"venue.updated records what changed\".",
+      "mutation": "M263 the audit records Object.keys(input) again. M264 values compared by JSON text. M265 a save that changes nothing still writes a row.",
+      "observed": "Red before the fix: 1 of 12 failing (the outline-only save recorded 8 fields). M263: 1 failing. M264: 1 failing (the unchanged outline read as changed; the no-op save wrote a geofence row). M265: 1 failing (a row with fields []). All reverted.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
