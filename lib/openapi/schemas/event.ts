@@ -142,36 +142,29 @@ export const EventCitiesResponseSchema = z
 
 // Response schemas
 const OrganizerSchema = z.object({
-  id: z.string(),
+  id: z.string().nullable().openapi({
+    description: "Null when the host is the platform itself (a curated event); `image` is then null too.",
+  }),
   name: z.string(),
   image: z.string().nullable(),
   // No email. A host's public identity is their name and picture; the address
   // was returned by the detail endpoint only, and is no longer sent.
 })
 
+// The leaf the event is tagged to, as stored. No parent is sent (SCRUM-460).
 const EventCategorySchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
   slug: z.string(),
+  description: z.string().nullable(),
   icon: z.string().nullable(),
-  parent: z
-    .object({
-      id: z.string().uuid(),
-      name: z.string(),
-      slug: z.string(),
-    })
-    .nullable()
-    .openapi({
-      description:
-        "The parent category, or null if this one is top level. Events are tagged to leaves — an event is 'Classical and Carnatic', never 'Music' — so group by this when you want a whole family rather than one leaf.",
-    }),
 })
 
 const EventStatsSchema = z.object({
   checkInCount: z.number(),
   favoriteCount: z.number(),
   ratingCount: z.number(),
-  rsvpCount: z.number().optional(),
+  rsvpCount: z.number().openapi({ description: "RSVPs with status `going`." }),
 })
 
 const UserStatusSchema = z.object({
@@ -250,20 +243,64 @@ export const EventDetailSchema = z
     }),
     isFeatured: z.boolean(),
     isRecurring: z.boolean(),
+    doorPolicy: z.enum(["open", "guest_list", "members_only", "invite_only"]).openapi({
+      description:
+        "The organiser's description of the door, not a gate this API keeps. `open` for almost every event, and draws nothing.",
+    }),
     externalLink: z.string().nullable(),
     createdAt: z.string().datetime(),
     organizer: OrganizerSchema,
+    details: z
+      .object({
+        fullDescription: z.string(),
+        houseRules: z.string().nullable(),
+        cancellationPolicy: z.string().nullable(),
+        additionalInfo: z.unknown().nullable(),
+        faq: z.unknown().nullable(),
+        accessibilityInfo: z.unknown().nullable(),
+        covidGuidelines: z.string().nullable(),
+      })
+      .nullable(),
     categories: z.array(EventCategorySchema),
-    media: z.array(z.object({ id: z.string(), url: z.string(), type: z.string() })),
-    chatGroup: z.object({
-      id: z.string().uuid(),
-      name: z.string(),
-      status: z.string(),
-      memberCount: z.number(),
-    }).nullable(),
+    amenities: z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          name: z.string(),
+          slug: z.string(),
+          subtitle: z.string().nullable(),
+          icon: z.string().nullable(),
+        })
+      )
+      .openapi({ description: "In the vocabulary's own order; do not re-sort. Detail only — the list carries none." }),
+    media: z.array(
+      z.object({
+        id: z.string(),
+        type: z.enum(["image", "video", "document"]),
+        url: z.string(),
+        thumbnailUrl: z.string().nullable(),
+        title: z.string().nullable(),
+        description: z.string().nullable(),
+        order: z.number().int(),
+      })
+    ),
+    // The row as selected, so snake_case — unlike every other key here.
+    chatGroup: z
+      .object({
+        id: z.string().uuid(),
+        name: z.string(),
+        status: z.enum(["active", "archived", "locked"]),
+        member_count: z.number().int(),
+      })
+      .nullable(),
     stats: EventStatsSchema,
     userStatus: UserStatusSchema,
-    distance: z.number().optional(),
+    distance: z.number().nullable().openapi({
+      description: "Kilometres from `lat`/`lon`. Null unless both are sent and the event has a pin.",
+    }),
+    interestedUsers: z.array(z.unknown()).max(0).optional().openapi({
+      description: "Only with `include=interestedUsers`, and always empty: who favourited an event is not disclosed.",
+    }),
   })
   .openapi("EventDetail")
 
@@ -503,13 +540,10 @@ export const AttendeeListResponseSchema = z
 
 export const InterestedUsersResponseSchema = z
   .object({
-    users: z.array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        avatar: z.string().nullable(),
-      })
-    ),
+    users: z.array(z.unknown()).max(0).openapi({
+      description: "Always empty. Kept so a build iterating it gets zero rather than a crash.",
+    }),
+    interestedCount: z.number().int().openapi({ description: "How many people favourited the event." }),
     pagination: PaginationMetaSchema,
   })
   .openapi("InterestedUsersResponse")

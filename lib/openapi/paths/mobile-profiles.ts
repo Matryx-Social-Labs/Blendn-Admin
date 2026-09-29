@@ -19,7 +19,7 @@ registry.registerPath({
   tags: ["Mobile Profiles"],
   summary: "Get user profile",
   description:
-    "`userId` may be a room handle (SCRUM-371). `id` and `profile.id` echo it as sent — `profiles.id` is the user id, so both are echoed — except on your own profile. A handle is answered in its room's terms: for somebody that room keeps anonymous the response is only `{ id, name, profile: { id, age, onboarded, location } }`, with `name` their pseudonym there.",
+    "`userId` may be a room handle (SCRUM-371). `id` and `profile.id` echo it as sent — `profiles.id` is the user id, so both are echoed — except on your own profile. A handle is answered in its room's terms: for somebody that room keeps anonymous the response is only `{ id, name, profile: { id, age, onboarded, location } }`, with `name` their pseudonym there. Your own profile carries `email` and the whole `profile` row but `date_of_birth`; anybody else's carries the subset `profile` describes.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {

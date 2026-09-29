@@ -178,9 +178,12 @@ const InterestSchema = z.object({
 export const ProfileResponseSchema = z
   .object({
     id: z.string(),
-    email: z.string().email(),
-    name: z.string(),
-    image: z.string().nullable(),
+    email: z.string().email().optional().describe("Your own profile only."),
+    name: z
+      .string()
+      .nullable()
+      .describe("`Attendee` when you cannot see who they are; their pseudonym there through a room handle that keeps them anonymous."),
+    image: z.string().nullable().optional().describe("Absent when you cannot see who they are."),
     createdAt: z
       .string()
       .datetime()
@@ -189,21 +192,36 @@ export const ProfileResponseSchema = z
     profile: z.object({
       id: z.string().uuid(),
       phone: z.string().nullable(),
+      name: z.string().nullable(),
       age: z.number().nullable(),
       location: z.string().nullable(),
       bio: z.string().nullable(),
       occupation: z.string().nullable(),
       education: z.string().nullable(),
-      photos: z.array(z.string()).nullable(),
+      photos: z.array(z.string()),
+      /*
+       * The blurred still, under two names: `blur_photo` on your own profile
+       * (the row), `blurPhoto` on somebody who cannot yet be identified — sent
+       * there instead of `photos`.
+       */
+      blur_photo: z.string().nullable(),
+      blurPhoto: z.string().nullable().optional(),
+      interests: z.array(z.string()).describe("The profile row's own strings. Category interests are the top-level `interests`."),
       goals: z.array(z.string()),
       looking_for: z.array(z.string()),
+      intent_default: z.array(z.enum(["dating", "networking", "friendship", "just_here"])),
+      reveal_by_default: z.boolean(),
+      gender: z.string().nullable(),
+      interested_in: z.array(z.string()),
       work_field: z.string().nullable(),
       expertise: z
         .array(z.string())
         .describe(
-          "LABELS, not slugs — 'UX Research'. Outside the identity gate for the same reason work_field is: a subject, not a person. Empty for anyone who has not picked."
+          "On your own profile the stored slugs (`design_ux_research`), which PUT takes back. On anybody else's, LABELS — 'UX Research'. Outside the identity gate for the same reason work_field is: a subject, not a person. Empty for anyone who has not picked."
         ),
       onboarded: z.boolean(),
+      created_at: z.string().datetime(),
+      updated_at: z.string().datetime(),
 
       /*
        * Present for the owner, so the settings switch can render in the state
@@ -222,7 +240,11 @@ export const ProfileResponseSchema = z
       read_receipts: z.boolean(),
       share_location: z.boolean(),
       friends_see_me_in_rooms: z.boolean(),
-    }).nullable(),
+    }).nullable().describe(
+      "Your own profile: every column but `date_of_birth`, with `age` derived. Anybody else's is a subset: " +
+        "`id, age, onboarded, location, interests, work_field, expertise`, plus `bio, occupation, education, photos` " +
+        "(and `orientations` when shown) if you can see who they are, else `blurPhoto`."
+    ),
     interests: z
       .array(InterestSchema)
       .optional()

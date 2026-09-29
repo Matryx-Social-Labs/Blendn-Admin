@@ -97,12 +97,38 @@ export const RoomMuteSchema = z
   })
   .openapi("RoomMute")
 
+/** Whether the room takes writes from the caller, and why not (`mayWriteToRoom`, `lib/chat-window.ts`). */
+export const RoomWriteSchema = z
+  .object({
+    allowed: z.boolean(),
+    reason: z
+      .enum(["archived", "locked", "window_closed", "not_open_yet", "hidden", "muted", "banned", "left"])
+      .nullable()
+      .describe("Null when `allowed`."),
+    message: z
+      .string()
+      .nullable()
+      .describe("A sentence for the composer. Null when allowed, and for `muted`, `banned` and `left`."),
+    closesAt: z.string().datetime().describe("When the 24-hour window after the event shuts."),
+    eventEndedAt: z.string().datetime().describe("Past this, the room is a read-only record of the night."),
+  })
+  .openapi("RoomWrite")
+
 export const EventChatResponseSchema = z
   .object({
     chatGroupId: z.string().uuid(),
     chatGroupName: z.string(),
+    write: RoomWriteSchema,
     mute: RoomMuteSchema,
-    messages: z.array(ChatMessageSchema),
+    // Every key is sent on this read, the ones ChatMessage leaves optional too.
+    messages: z.array(
+      ChatMessageSchema.extend({
+        moderation_hidden: z.boolean(),
+        editedAt: z.string().datetime().nullable(),
+        replyCount: z.number().int(),
+        isOwn: z.boolean(),
+      })
+    ),
     pagination: PaginationMetaSchema,
   })
   .openapi("EventChatResponse")
@@ -163,9 +189,51 @@ export const ChatGroupListResponseSchema = z
   })
   .openapi("ChatGroupListResponse")
 
+/**
+ * The stored `chat_messages` row, snake_case, with its includes — not the
+ * camelCase `ChatMessage` that `GET /events/{eventId}/chat` builds.
+ */
+export const GroupChatMessageSchema = z
+  .object({
+    id: z.string().uuid(),
+    chat_group_id: z.string().uuid(),
+    user_id: RoomUserRefSchema,
+    parent_id: z.string().uuid().nullable(),
+    type: z.enum(["text", "image", "video", "system", "sponsored", "announcement", "poll"]),
+    content: z.string().nullable().describe("Null when `moderation_hidden`."),
+    metadata: z.unknown().nullable(),
+    is_edited: z.boolean(),
+    edited_at: z.string().datetime().nullable(),
+    is_pinned: z.boolean(),
+    client_id: z.string().uuid().nullable().describe("The sender's own id for the send (SCRUM-410)."),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+    deleted_at: z.string().datetime().nullable(),
+    deleted_by: RoomUserRefSchema.nullable(),
+    moderation_status: z.string().nullable().describe("`clean`, `flagged` or `hidden`; null when never examined."),
+    moderation_hidden: z.boolean(),
+    user: RoomChatUserSchema,
+    reactions: z.array(ReactionSchema),
+    parent_message: z
+      .object({
+        id: z.string().uuid(),
+        type: z.string(),
+        metadata: z.unknown().nullable(),
+        content: z.string().nullable(),
+        moderation_hidden: z
+          .boolean()
+          .describe("The quoted message was taken down: its content and metadata are null (SCRUM-444)."),
+        user: z.object({ id: RoomUserRefSchema, name: z.string() }),
+      })
+      .nullable()
+      .describe("The message this one replies to."),
+    _count: z.object({ replies: z.number().int() }),
+  })
+  .openapi("GroupChatMessage")
+
 export const GroupMessagesResponseSchema = z
   .object({
-    messages: z.array(ChatMessageSchema),
+    messages: z.array(GroupChatMessageSchema),
     pagination: z.object({
       hasMore: z.boolean(),
       nextCursor: z.string().nullable(),
@@ -265,7 +333,9 @@ const schemas = {
   SendDMRequest: SendDMRequestSchema,
   CreateConversationRequest: CreateConversationRequestSchema,
   ChatMessage: ChatMessageSchema,
+  RoomWrite: RoomWriteSchema,
   EventChatResponse: EventChatResponseSchema,
+  GroupChatMessage: GroupChatMessageSchema,
   ChatGroup: ChatGroupSchema,
   ChatGroupListResponse: ChatGroupListResponseSchema,
   GroupMessagesResponse: GroupMessagesResponseSchema,
