@@ -14,6 +14,8 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
+import { likeLiteral } from "@/lib/like-literal"
+import { cityKey } from "@/lib/address"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -112,8 +114,10 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    if (city) {
-      where.city = { equals: city, mode: "insensitive" }
+    // Trimmed like the events filter, so the two agree on what a city is.
+    const cityScope = cityKey(city)
+    if (cityScope) {
+      where.city = { equals: likeLiteral(cityScope), mode: "insensitive" }
     }
 
     if (venueType) {

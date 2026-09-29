@@ -93,9 +93,11 @@ it("honours the keep set on every page, and follows the continuation token", asy
   expect(privateLists.map((c) => c.input.ContinuationToken)).toEqual([undefined, "1"])
 })
 
-it("does not count an object the store refused to delete", async () => {
+it("deletes the rest, then fails naming what the store refused: a partial erasure is not done (SCRUM-429)", async () => {
   refused = ["chat/u1/2-b.jpg"]
-  expect(await deletePrefix("chat/u1/")).toBe(2)
+  await expect(deletePrefix("chat/u1/")).rejects.toThrow(/1 object\(s\) under chat\/u1\/ not deleted/)
+  // It still asked for all three: one refusal does not stop the others going.
+  expect(deleted()).toEqual(listed)
 })
 
 it("sweeps the public bucket too, where chat media lived before SCRUM-427, and keeps a retained key in both", async () => {

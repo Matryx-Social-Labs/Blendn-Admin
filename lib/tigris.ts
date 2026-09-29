@@ -321,13 +321,19 @@ export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = n
   return deleted
 }
 
+/** Per storage call, so a hung request cannot stall the retention sweep behind it (SCRUM-429). */
+const DELETE_CALL_TIMEOUT_MS = 30_000
+
 async function deletePrefixIn(bucket: string, prefix: string, keep: ReadonlySet<string>): Promise<number> {
   const client = getS3Client()
+  const deleteDeadline = () => ({ abortSignal: AbortSignal.timeout(DELETE_CALL_TIMEOUT_MS) })
   let deleted = 0
+  let refused = 0
   let token: string | undefined
   do {
     const page = await client.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token })
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
+      deleteDeadline()
     )
     const keys = (page.Contents ?? [])
       .map((o) => o.Key)
@@ -337,15 +343,23 @@ async function deletePrefixIn(bucket: string, prefix: string, keep: ReadonlySet<
         new DeleteObjectsCommand({
           Bucket: bucket,
           Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
-        })
+        }),
+        deleteDeadline()
       )
       // Quiet mode reports only failures: count what actually went, and say which did not.
       const failed = result?.Errors ?? []
       if (failed.length > 0) logger.error("deletePrefix: objects not deleted", { prefix, bucket, keys: failed.map((e) => e.Key) })
       deleted += keys.length - failed.length
+      refused += failed.length
     }
     token = page.IsTruncated ? page.NextContinuationToken : undefined
   } while (token)
+  /*
+   * After every page, so it deletes all it can: then an erasure that left
+   * something behind says so. It returned a count, and the retention sweep read
+   * a partial erasure as done and dropped the only pointer to what was left.
+   */
+  if (refused > 0) throw new Error(`deletePrefix: ${refused} object(s) under ${prefix} not deleted`)
   return deleted
 }
 

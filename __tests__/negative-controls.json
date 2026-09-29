@@ -1305,6 +1305,12 @@
       "observed": "Red before the fix: this file 3 of 5 failing, message-media-owned 2 of 16; the quote case 1 of 1 against the committed route. M260: this file 4 of 6. M261: message-media-owned 1 of 21. M262: 1 of 21. M266: 1 of 21. M267: 1 of 21 (the hidden caption was not hidden before the emit). M268: 1 of 21. M269: this file 1 of 6. All reverted.",
       "date": "2026-09-29"
     },
+    "deleted-account-records.itest.ts": {
+      "guards": "SCRUM-429: the retention sweep erases what is left of a deleted person's chat/<id>/ and profile/<id>/ before it purges their registration record; keeps a record whose erasure failed (deletePrefix now throws when anything under the prefix was left) for the next pass; and keeps every due record when storage is not configured, since the erasure cannot be done. Companion case: delete-prefix-keep.test.ts (a refusal fails the call after the rest is deleted).",
+      "mutation": "M293 the purge leaves chat/<id>/ alone. M294 records are purged even when their media was not erased. M295 deletePrefix returns a count when the store refused some objects (delete-prefix-keep.test.ts). M296 storage unset: records purged anyway. M297 profile/<id>/ not retried.",
+      "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6. M294: 1 of 6 (the record whose media failed was purged, and with it the only pointer). M295: delete-prefix-keep 1 of 6. M296: 1 of 7 (the record went with storage unset). M297: 1 of 7. All reverted.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
@@ -1333,6 +1339,12 @@
       "guards": "SCRUM-437: any file in app/, lib/ or components/ that reads rating scores in bulk (event_ratings aggregate/groupBy/findMany, a ratings { select { rating } } include, or _avg of rating) calls discloseRating, discloseStars, discloseStarsAcross or poolStars, except the admin-only export and the push-audience select; and no app/api/mobile file returns averageRating or averages ratings.",
       "mutation": "M255 the rating reply carries an average. M256 the mobile event page carries an average. M259 the venue page reads the spread without a disclosure call.",
       "observed": "M255: 1 of 3 failing (the mobile no-average case). M256: 1 of 3 failing (the same). M259: 1 of 3 failing (app/dashboard/venues/[id]/page.tsx listed as an undisclosed reader). All reverted.",
+      "date": "2026-09-29"
+    },
+    "city-filter-literal.itest.ts": {
+      "guards": "SCRUM-473/474: ?city= on GET /api/mobile/events and /venues, and getCurationQueue(city), match the city literally and case-insensitively ('%', '_' and '\\\\' are not ILIKE syntax; a city named with them finds itself); the events and venues filters use the trimmed city the events cache key holds, so a padded or blank city can neither miss nor cache an empty page under another request's key.",
+      "mutation": "M270 the events route passes city unescaped. M271 the venues route passes city unescaped. M272 the curation queue passes city unescaped. M273 the events filter uses the raw city, not cityKey. M274 the venues filter uses the raw city. M275 likeLiteral does not escape the backslash.",
+      "observed": "Red before the fix: 2 of 4 failing ('%' returned the fixture event and venue); the review's cases (empty result for '%', padded and blank city, the cache-poisoning sequence, a city containing %, _ and a backslash) added after. M270, M271, M272, M274, M275: each 1 of 10 failing. M273: 2 of 10. All reverted.",
       "date": "2026-09-29"
     }
   },
