@@ -40,6 +40,8 @@ the route's catch-all called the caller's mistake an outage.
   JSON. A truncated body never takes the default.
 - A `limit`, `offset` or `page` that is not a whole number falls back to the
   route's default, and is held to its bounds.
+- A NUL byte (`%00` in a URL, `\u0000` in a body) answers `400`: Postgres text
+  cannot hold one, and nothing legitimate sends one (SCRUM-434).
 
 ---
 

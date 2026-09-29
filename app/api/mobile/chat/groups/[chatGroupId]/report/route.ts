@@ -12,6 +12,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { readJson } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ chatGroupId: string }>
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("safety", "report-room", authUser.userId))
     if (limited) return limited
 
-    const validation = reportRoomSchema.safeParse(await request.json().catch(() => null))
+    const validation = reportRoomSchema.safeParse(await readJson(request))
     if (!validation.success) return validationErrorResponse(validation.error)
 
     const { chatGroupId } = await params

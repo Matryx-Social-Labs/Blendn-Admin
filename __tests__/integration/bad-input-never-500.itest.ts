@@ -209,14 +209,24 @@ describe("one junk query value on a GET", () => {
   })
 })
 
-describe("a body that is not JSON, or has the wrong types", () => {
+/** Accepted, except every free-text field carries a NUL, which Postgres text cannot hold (SCRUM-434). */
+const withNul = () =>
+  JSON.stringify({
+    ...JSON.parse(accepted()),
+    ...Object.fromEntries(
+      ["content", "text", "body", "message", "reason", "description", "token", "password"].map((k) => [k, "a\u0000b"])
+    ),
+  })
+
+describe("a body that is not JSON, has the wrong types, or carries a NUL", () => {
   const cases = pairs((r, m) => m !== "GET" && r.readsBody).flatMap((c) => [
-    { ...c, what: "not JSON", body: '{"a":' },
-    { ...c, what: "the wrong types", body: WRONG_TYPES },
+    { ...c, what: "not JSON", body: () => '{"a":' },
+    { ...c, what: "the wrong types", body: () => WRONG_TYPES },
+    { ...c, what: "a NUL in its text", body: withNul },
   ])
 
   it.each(cases.map((c) => [`${c.m} ${c.r.path}, ${c.what}`, c]))("%s", async (_, { r, m, body }) => {
-    expect(await call(r, m, withReal(r), "", body)).toBeLessThan(500)
+    expect(await call(r, m, withReal(r), "", body())).toBeLessThan(500)
   })
 })
 
