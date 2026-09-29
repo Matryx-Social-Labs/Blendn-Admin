@@ -10,6 +10,7 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix } from "@/lib/tigris"
 import { retainedChatMediaKeys } from "@/lib/retained-media"
 import { promoteFromWaitlist } from "@/lib/waitlist"
+import { performCheckout } from "@/lib/checkout"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // DELETE /api/mobile/account — Delete the authenticated user's own account.
@@ -359,6 +360,26 @@ export async function DELETE(request: NextRequest) {
       await promoteFromWaitlist(eventId).catch((error) =>
         logger.warn("Account deletion: waitlist promotion failed", {
           eventId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+
+    /*
+     * Out of every room they were standing in. The check-in stays, as above,
+     * but an open one kept an erased person "here now": in the live headcount,
+     * and offered under Meet next until the event ended (SCRUM-481).
+     * `performCheckout` is the one path that ends a check-in and its presence
+     * session together.
+     */
+    const standing = await db.event_check_ins.findMany({
+      where: { user_id: authUser.userId, status: "checked_in" },
+      select: { id: true },
+    })
+    for (const { id } of standing) {
+      await performCheckout(id, "manual", deletedAt).catch((error) =>
+        logger.warn("Account deletion: checkout failed", {
+          checkInId: id,
           error: error instanceof Error ? error.message : String(error),
         })
       )

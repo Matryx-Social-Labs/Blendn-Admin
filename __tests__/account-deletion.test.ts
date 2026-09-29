@@ -38,7 +38,8 @@ const mockDb = {
   session: { deleteMany: jest.fn() },
   // Rows that deliberately SURVIVE the deletion and are scrubbed in place —
   // attendance is somebody else's history, the coordinates are not.
-  event_check_ins: { updateMany: jest.fn() },
+  // `findMany` is the open check-ins the deletion then checks out (SCRUM-481; covered by the itest).
+  event_check_ins: { updateMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   presence_sessions: { updateMany: jest.fn() },
   notifications: { deleteMany: jest.fn() },
   password_reset_tokens: { deleteMany: jest.fn() },
