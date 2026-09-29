@@ -88,11 +88,20 @@ export function applyUrl(): string {
  */
 const OWN_DOMAINS = new Set(["blendn.app", "matrixsociallabs.com", "resend.dev"])
 
+/*
+ * One bare address. Resend is handed the whole `to`, so a second "@", a list,
+ * a quoted local part or a display name could end in blendn.app and still
+ * reach somebody else; none of those shapes is let through.
+ */
+const ONE_ADDRESS = /^[^\s@,<>"]+@([^\s@,<>"]+)$/
+
 function mayDeliverTo(to: string): boolean {
   if (process.env.RAILWAY_ENVIRONMENT_NAME === "production") return true
   const address = to.trim().toLowerCase()
+  const domain = ONE_ADDRESS.exec(address)?.[1]
+  if (!domain) return false
   const listed = (process.env.EMAIL_ALLOWLIST ?? "").split(",").map((a) => a.trim().toLowerCase())
-  return OWN_DOMAINS.has(address.split("@").pop() ?? "") || listed.includes(address)
+  return OWN_DOMAINS.has(domain) || listed.includes(address)
 }
 
 export async function sendEmail(opts: {
@@ -118,10 +127,10 @@ export async function sendEmail(opts: {
     // "not_configured" rather than a new reason: this environment is not
     // configured to mail that address, and every caller already reads it as
     // not-sent (an invite hands over its link). The domain only — the address
-    // is somebody's, and this is a log line.
+    // is somebody's, and this is a log line. Not the subject either: a lead
+    // alert's subject carries the person's name.
     logger.warn("Email not sent — recipient outside the non-production allowlist", {
       domain: opts.to.split("@").pop(),
-      subject: opts.subject,
     })
     return { sent: false, reason: "not_configured", detail: "recipient not allowlisted outside production" }
   }
