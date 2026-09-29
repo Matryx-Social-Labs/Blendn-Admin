@@ -13,6 +13,10 @@ import { NextRequest } from "next/server"
  * and every media URL, room or DM, is the sender's own `chat/<id>/` upload on
  * our bucket.
  */
+// Signing a private URL is local HMAC: fake credentials are enough (SCRUM-427).
+process.env.TIGRIS_ENDPOINT ??= "https://fly.storage.tigris.dev"
+process.env.TIGRIS_ACCESS_KEY ??= "test-access"
+process.env.TIGRIS_SECRET_KEY ??= "test-secret"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 /*
  * And what is stored is the sealed copy, never the URL the client uploaded to,
@@ -30,7 +34,7 @@ jest.mock("@/lib/tigris", () => ({
       ? { refused: "missing" }
       : {
           key: `chat/${userId}/sealed-copy`,
-          url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${userId}/sealed-copy`,
+          url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/${userId}/sealed-copy`,
           bytes: 120_000,
           contentType: "image/jpeg",
         }
@@ -81,12 +85,12 @@ afterAll(async () => {
   await closeDb()
 })
 
-/** The shape `getPresignedUploadUrl` gives a chat upload, on the bucket the tests run against. */
+/** The shape `getPresignedUploadUrl` gives a chat upload: the private bucket since SCRUM-427. */
 const upload = (userId: string) =>
-  `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${userId}/1790641297767-cfg6ta-photo.jpg`
+  `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/${userId}/1790641297767-cfg6ta-photo.jpg`
 const OUTSIDE = "https://example.com/pixel.gif"
 const sealed = (userId: string) =>
-  `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${userId}/sealed-copy`
+  `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/${userId}/sealed-copy`
 /** An upload URL whose object never arrived. */
 const unfinished = (userId: string) => upload(userId).replace("-photo.jpg", "-missing.jpg")
 
@@ -195,6 +199,11 @@ describe("a room message's metadata comes from the client only as its own media"
       expect(res.status).toBe(201)
       const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "look" } })
       expect(row.metadata).toEqual({ mediaUrl: sealed(r.memberId) })
+      // The response hands the media back signed, and nowhere bare (SCRUM-427).
+      const body = JSON.stringify(await res.json())
+      const served = [...body.matchAll(/https:[^"]*\/chat\/[^"]*sealed-copy[^"]*/g)].map((m) => m[0])
+      expect(served.length).toBeGreaterThan(0)
+      for (const url of served) expect(url).toContain("X-Amz-Signature")
       // The image the moderator scans is the copy the room sees, not the source its URL can still rewrite.
       expect(moderateMessage).toHaveBeenCalledWith(row.id, "look", "image", r.memberId, r.groupId, sealed(r.memberId))
     })
@@ -259,6 +268,11 @@ describe("a DM's media is the sender's own upload", () => {
     expect(res.status).toBe(200)
     const row = await db.private_messages.findFirstOrThrow({ where: { conversation_id: p.conversationId } })
     expect(row.media_url).toBe(sealed(p.a))
+    // Stored as the bare private reference; handed back signed and short-lived (SCRUM-427).
+    const served = new URL(((await res.json()) as { data: { mediaUrl: string } }).data.mediaUrl)
+    expect(served.searchParams.has("X-Amz-Signature")).toBe(true)
+    expect(served.searchParams.get("X-Amz-Expires")).toBe("900")
+    expect(served.pathname).toContain(`/chat/${p.a}/sealed-copy`)
   })
 
   it("copies nothing for a send it refuses: a block either way", async () => {

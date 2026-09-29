@@ -1,5 +1,5 @@
-import { SPONSORSHIP } from "./constants"
 import { logger } from "./logger"
+import { getMaxFileSize, validateContentType } from "./upload-rules"
 import {
   CopyObjectCommand,
   GetObjectCommand,
@@ -68,11 +68,18 @@ function getS3Client(): S3Client {
 // Folder types for organizing uploads
 export type UploadFolder = "profile" | "chat" | "events" | "sponsored" | "claims"
 
+// The per-folder type and size rules, re-exported for existing callers.
+export { getMaxFileSize, validateContentType }
+
 /**
  * The folders the bucket policy makes world-readable.
  *
- * Everything the product shows to anyone — covers, avatars, chat media,
- * sponsored creatives — lives here and needs no signing. `claims` is not in
+ * Everything the product shows to anyone — covers, avatars, sponsored
+ * creatives — lives here and needs no signing. `chat` left the list with
+ * SCRUM-427: a DM or room image is for the people in that chat, and it was
+ * readable by anyone holding the URL, for ever. It is signed on the way out
+ * (`readableUrl`). Note the staging bucket is public as a whole — the policy
+ * below does not apply there — so the private bucket is what makes it private. `claims` is not in
  * the list on purpose: a venue claim's trade licence, FSSAI or liquor licence
  * names an address, a proprietor and often a GSTIN, and the only person who
  * should read it is the admin deciding the claim. It was uploaded under
@@ -80,7 +87,15 @@ export type UploadFolder = "profile" | "chat" | "events" | "sponsored" | "claims
  * re-applied on every boot by `ensureBucketExists`, so a folder missing from
  * this list is private by construction, not by remembering.
  */
-export const PUBLIC_FOLDERS: readonly UploadFolder[] = ["profile", "chat", "events", "sponsored"]
+export const PUBLIC_FOLDERS: readonly UploadFolder[] = ["profile", "events", "sponsored"]
+
+/** Folders whose older objects may still sit in the public bucket, from before they moved. */
+const MOVED_FROM_PUBLIC: readonly UploadFolder[] = ["chat"]
+
+/** Where a folder's objects can be: its bucket, and for a folder that moved, the one it moved from. */
+function bucketsHolding(folder: UploadFolder): string[] {
+  return MOVED_FROM_PUBLIC.includes(folder) ? [bucketFor(folder), TIGRIS_BUCKET] : [bucketFor(folder)]
+}
 
 /** The bucket a folder lives in: the public one, or the private one. */
 export function bucketFor(folder: UploadFolder): string {
@@ -282,35 +297,34 @@ function isNotFound(error: unknown): boolean {
  */
 export async function deleteFile(key: string): Promise<void> {
   const client = getS3Client()
-
-  const command = new DeleteObjectCommand({
-    Bucket: bucketForKey(key),
-    Key: key,
-  })
-
-  await client.send(command)
+  for (const Bucket of bucketsHolding(key.split("/")[0] as UploadFolder)) {
+    await client.send(new DeleteObjectCommand({ Bucket, Key: key }))
+  }
 }
 
 /**
- * Delete every object under a prefix. Returns how many went.
+ * Delete every object under a prefix, except the keys in `keep`. Returns how many went.
  *
  * Account deletion nulled `profiles.photos` and left the objects in a
  * public-read bucket under deterministic keys, so any URL another person had
- * seen -- a match card, a chat, a screenshot -- kept resolving to the
- * deleted person's face for ever. The prefix is `profile/{userId}/`; the
- * caller passes it, this only lists and deletes.
- */
-/**
- * Delete every object under `prefix`, except the keys in `keep`: account
- * deletion leaves removed content in place for its retention period (SCRUM-428).
+ * seen kept resolving to the deleted person's face for ever. `keep` is removed
+ * content, retained for its period (SCRUM-428).
  */
 export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = new Set()): Promise<number> {
+  let deleted = 0
+  for (const bucket of bucketsHolding(prefix.split("/")[0] as UploadFolder)) {
+    deleted += await deletePrefixIn(bucket, prefix, keep)
+  }
+  return deleted
+}
+
+async function deletePrefixIn(bucket: string, prefix: string, keep: ReadonlySet<string>): Promise<number> {
   const client = getS3Client()
   let deleted = 0
   let token: string | undefined
   do {
     const page = await client.send(
-      new ListObjectsV2Command({ Bucket: bucketForKey(prefix), Prefix: prefix, ContinuationToken: token })
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token })
     )
     const keys = (page.Contents ?? [])
       .map((o) => o.Key)
@@ -318,13 +332,13 @@ export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = n
     if (keys.length > 0) {
       const result = await client.send(
         new DeleteObjectsCommand({
-          Bucket: bucketForKey(prefix),
+          Bucket: bucket,
           Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
         })
       )
       // Quiet mode reports only failures: count what actually went, and say which did not.
       const failed = result?.Errors ?? []
-      if (failed.length > 0) logger.error("deletePrefix: objects not deleted", { prefix, keys: failed.map((e) => e.Key) })
+      if (failed.length > 0) logger.error("deletePrefix: objects not deleted", { prefix, bucket, keys: failed.map((e) => e.Key) })
       deleted += keys.length - failed.length
     }
     token = page.IsTruncated ? page.NextContinuationToken : undefined
@@ -378,7 +392,43 @@ export function extractKeyFromUrl(url: string): string | null {
 const ALLOWED_PHOTO_HOSTS = new Set([
   `${TIGRIS_BUCKET}.fly.storage.tigris.dev`,
   `${TIGRIS_BUCKET}.t3.storage.dev`,
+  // Chat media is referenced on the private bucket's host (SCRUM-427). The
+  // folder, not the host, still decides which bucket an object is read from.
+  `${TIGRIS_PRIVATE_BUCKET}.fly.storage.tigris.dev`,
+  `${TIGRIS_PRIVATE_BUCKET}.t3.storage.dev`,
 ])
+
+const PRIVATE_HOSTS = new Set([`${TIGRIS_PRIVATE_BUCKET}.fly.storage.tigris.dev`, `${TIGRIS_PRIVATE_BUCKET}.t3.storage.dev`])
+
+/**
+ * A stored media reference as a reader may fetch it: signed for 15 minutes if
+ * it is on the private bucket, unchanged otherwise (SCRUM-427).
+ *
+ * Never throws. It runs on every response (`resolveMediaFields`), so a signing
+ * failure returns the bare reference, which the private bucket answers 403 —
+ * closed, not open.
+ */
+export async function readableUrl(url: string): Promise<string> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return url
+  }
+  if (!PRIVATE_HOSTS.has(parsed.hostname)) return url
+  try {
+    const key = decodeURIComponent(parsed.pathname.replace(/^\//, ""))
+    // Chat media only. The same bucket holds venue-claim documents, and a
+    // stored reference is not proof the reader may have them.
+    if (!key.startsWith("chat/") || key.split("/").includes("..")) return url
+    return await getSignedUrl(getS3Client(), new GetObjectCommand({ Bucket: TIGRIS_PRIVATE_BUCKET, Key: key }), {
+      expiresIn: 900,
+    })
+  } catch (error) {
+    logger.warn("Could not sign a private media URL", { error: error instanceof Error ? error.message : String(error) })
+    return url
+  }
+}
 
 export function ownedPhotoKey(url: string, userId: string): string | null {
   return ownedObjectKey(url, userId, "profile")
@@ -490,71 +540,6 @@ export function getAccessibleMediaUrl(urlOrKey: string): string {
   return getPublicUrl(key)
 }
 
-/**
- * Validate content type for uploads
- */
-export function validateContentType(contentType: string, folder: UploadFolder): boolean {
-  const allowedTypes: Record<UploadFolder, string[]> = {
-    profile: ["image/jpeg", "image/png", "image/webp", "image/gif"],
-    chat: [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "image/gif",
-      "video/mp4",
-      "video/quicktime",
-      "audio/mpeg",
-      "audio/mp4",
-    ],
-    /*
-     * `video/mp4` because an event gallery has always been able to hold a clip
-     * and could never receive one.
-     *
-     * The Gallery offers Type = Video, its file input accepts `video/mp4`, the
-     * help text specifies the encode down to faststart, `media-section.tsx`
-     * says "video has always been supported here", the seed attaches clips to
-     * two events, and the app's feed card cycles them. The only thing that said
-     * otherwise was this list, which had no comment — the one below it is about
-     * `sponsored`. So every organiser upload 400'd at the presigned-url step
-     * and the clip could only ever arrive by pasting a URL.
-     *
-     * The 20MB ceiling in `getMaxFileSize` was already sized for video; images
-     * are capped at 8MB by the form's own copy.
-     */
-    events: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
-    /*
-     * Deliberately narrower than `chat`, which allows GIF, QuickTime and audio.
-     *
-     * An animated GIF in a room is a loop nobody can stop. QuickTime does not
-     * play inline on Android. Audio has no poster frame, so it cannot be
-     * rendered as anything a person can decline to open. Sponsored media is the
-     * one kind an attendee did not choose to receive, so the format has to be
-     * one every phone plays inline, muted, on demand.
-     */
-    sponsored: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
-    // A scan or a photo of a licence; nothing that plays.
-    claims: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
-  }
-
-  return allowedTypes[folder]?.includes(contentType) ?? false
-}
-
-/**
- * Get maximum file size for a folder (in bytes)
- */
-export function getMaxFileSize(folder: UploadFolder): number {
-  const maxSizes: Record<UploadFolder, number> = {
-    profile: 10 * 1024 * 1024, // 10MB
-    chat: 50 * 1024 * 1024, // 50MB
-    events: 20 * 1024 * 1024, // 20MB
-    // The ceiling for the folder. `lib/upload-grant-actions.ts` narrows it
-    // further per content type — an image has no business being 100MB.
-    sponsored: SPONSORSHIP.MAX_VIDEO_BYTES,
-    claims: 20 * 1024 * 1024, // 20MB
-  }
-
-  return maxSizes[folder] ?? 10 * 1024 * 1024
-}
 
 /**
  * Check if Tigris is configured

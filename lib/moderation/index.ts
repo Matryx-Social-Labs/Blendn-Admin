@@ -3,6 +3,7 @@ import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent } from "./openai-moderation"
 import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
 import { checkContactInfo } from "./contact-info"
+import { readableUrl } from "@/lib/tigris"
 import type { ModerationResult } from "./types"
 
 /**
@@ -107,7 +108,8 @@ export async function moderateMessage(
     // 4. Image moderation if applicable
     let imageExamined = true
     if ((type === "image" || type === "gif") && mediaUrl) {
-      const imageCheck = await checkImageContent(mediaUrl)
+      // The vendor fetches the image: a private one needs a signed URL, or it scores a 403 (SCRUM-427).
+      const imageCheck = await checkImageContent(await readableUrl(mediaUrl))
       imageExamined = imageCheck.checked
       const imageResult = imageCheck.checked ? imageCheck.result : null
       if (imageResult && imageResult.action === "hide") {

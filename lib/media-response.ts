@@ -1,7 +1,9 @@
-import { getAccessibleMediaUrl } from "@/lib/tigris"
+import { getAccessibleMediaUrl, readableUrl } from "@/lib/tigris"
 
 const IMAGE_FIELD_KEYS = new Set(["image", "avatar"])
 const IMAGE_ARRAY_FIELD_KEYS = new Set(["photos"])
+/** A message's media: signed on the way out when it is private (SCRUM-427). */
+const SIGNED_FIELD_KEYS = new Set(["mediaUrl", "media_url"])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false
@@ -23,6 +25,10 @@ export async function resolveMediaFields<T>(value: T): Promise<T> {
     Object.entries(value).map(async ([key, fieldValue]) => {
       if (IMAGE_FIELD_KEYS.has(key) && typeof fieldValue === "string") {
         return [key, await getAccessibleMediaUrl(fieldValue)] as const
+      }
+
+      if (SIGNED_FIELD_KEYS.has(key) && typeof fieldValue === "string") {
+        return [key, await readableUrl(fieldValue)] as const
       }
 
       if (IMAGE_ARRAY_FIELD_KEYS.has(key) && Array.isArray(fieldValue)) {

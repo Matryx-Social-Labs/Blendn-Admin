@@ -73,7 +73,7 @@ describe("sealing an upload", () => {
 
     const [copy] = sentOf(CopyObjectCommand)
     expect(copy.input).toMatchObject({
-      CopySource: `blendn-media-test/${SOURCE}`,
+      CopySource: `blendn-media-test-private/${SOURCE}`,
       // Not the uploader's headers: only content-type was signed, so anything else they sent is theirs.
       MetadataDirective: "REPLACE",
       ContentType: "image/jpeg",
@@ -95,7 +95,7 @@ describe("sealing an upload", () => {
     expect(sentOf(DeleteObjectCommand).map((d) => d.input.Key)).toEqual([SOURCE])
     expect(sealed).toEqual({
       key: sealedKey,
-      url: `https://blendn-media-test.fly.storage.tigris.dev/${sealedKey}`,
+      url: `https://blendn-media-test-private.fly.storage.tigris.dev/${sealedKey}`,
       bytes: 120_000,
       contentType: "image/jpeg",
     })

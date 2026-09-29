@@ -1757,6 +1757,14 @@ upload stores a **copy** under a new key nobody can upload to, and the URL you
 get back (`photos`, `metadata.mediaUrl`, a DM's `mediaUrl`) is the copy's,
 not the `publicUrl` you sent.
 
+**Chat media is private (SCRUM-427).** `folder: "chat"` uploads go to the
+private bucket; `publicUrl` is the stored reference, which answers an
+anonymous GET with `403`. Wherever a message's media comes back (the send
+response, history, the `private:message` socket event), `mediaUrl` is a signed
+URL valid for **15 minutes**. Load it when you draw the message, not later;
+refetch the history for a fresh one. Profile photos, event media and sponsored
+creatives stay public.
+
 ---
 
 ## Content Moderation (Admin API)
