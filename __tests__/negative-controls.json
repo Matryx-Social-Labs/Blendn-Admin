@@ -1293,6 +1293,12 @@
       "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). After ecc:pr-test-analyzer, two cases were added (no aria-describedby without a hint; the whole /apply page server-rendered, every input and textarea with a matching label[for]). M231: 1 of 6 failing. M232: 1 of 6 failing. All reverted.",
       "date": "2026-09-29"
     },
+    "room-media-always-moderated.test.ts": {
+      "guards": "SCRUM-444: a room message's media is screened whatever its declared type: moderateMessage sends any mediaUrl to the image check, signed (a file it can't read is recorded unchecked, never clean); both room routes still check a text message's caption inline before the emit, but count it examined only when there is no media, and hand the media to the pipeline with its sealed URL; the group route's list serves a reply's quote of a taken-down message with neither its words nor its media. Companion cases: message-media-owned.itest.ts.",
+      "mutation": "M260 moderateMessage checks media only for type image/gif. M261 the group route counts a text+media message examined inline. M262 the event route does. M266 the group route's pipeline call drops the URL. M267 the event route skips the inline caption check when there is media (the first version of this fix, which ecc:security-reviewer caught: the raw caption reached the push). M268 the quote of a hidden message is served as is. M269 moderateMessage screens media that is merely not null (undefined passes).",
+      "observed": "Red before the fix: this file 3 of 5 failing, message-media-owned 2 of 16; the quote case 1 of 1 against the committed route. M260: this file 4 of 6. M261: message-media-owned 1 of 21. M262: 1 of 21. M266: 1 of 21. M267: 1 of 21 (the hidden caption was not hidden before the emit). M268: 1 of 21. M269: this file 1 of 6. All reverted.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
