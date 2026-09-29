@@ -246,7 +246,12 @@ export async function sealUpload(
         CopySource: `${Bucket}/${key.split("/").map(encodeURIComponent).join("/")}`,
         MetadataDirective: "REPLACE",
         ContentType: source.contentType,
-        CacheControl: "public, max-age=31536000",
+        /*
+         * No Cache-Control: Tigris's public endpoint serves a deleted object
+         * for as long as the header allows, so a year here kept a deleted
+         * account's photo up after the erasure (measured on staging). Without
+         * one it is the storage default, an hour, as every other object.
+         */
         Metadata: { "uploaded-by": userId },
       }),
       timeout()
