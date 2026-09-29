@@ -3,7 +3,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { normaliseSponsorName } from "@/lib/sponsor-name"
-import { getSponsorRegister } from "@/lib/sponsor-actions"
+import { getSponsorRegister, mergeSponsors } from "@/lib/sponsor-actions"
 
 import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 
@@ -40,4 +40,20 @@ it("clusters two brands whose stored keys disagree about the same name", async (
   const cluster = register.duplicates.find((c) => c.some((r) => brands.includes(r.id)))
   expect(cluster?.map((r) => r.id).sort()).toEqual([...brands].sort())
   expect(register.rest.some((r) => brands.includes(r.id))).toBe(false)
+})
+
+it("re-keys the brand a merge keeps, so the next duplicate check can see it", async () => {
+  const admin = await makeUser(testId("reg-admin2"), "app_admin")
+  users.push(admin)
+  mockGetAuth.mockResolvedValue({ user: { id: admin, role: "app_admin" } })
+  const name = `Blue Tokai ${testId("m")}`
+  // The admin keeps the seed's row, the one with the stale key.
+  const keep = await db.sponsors.create({ data: { name, name_key: name.toLowerCase(), created_by: admin } })
+  const drop = await db.sponsors.create({ data: { name, name_key: normaliseSponsorName(name), created_by: admin } })
+  brands.push(keep.id, drop.id)
+
+  await mergeSponsors(drop.id, keep.id, "same brand, two keys (SCRUM-456)")
+
+  const kept = await db.sponsors.findUniqueOrThrow({ where: { id: keep.id }, select: { name_key: true } })
+  expect(kept.name_key).toBe(normaliseSponsorName(name))
 })

@@ -369,6 +369,14 @@ export async function mergeSponsors(loserId: string, winnerId: string, note: str
       where: { id: loserId },
       data: { merged_into: winnerId, deleted_at: new Date() },
     })
+
+    // The kept brand may carry a key written under an older rule. Left stale,
+    // the next exact-name check misses it and a third copy gets created
+    // (SCRUM-456).
+    await tx.sponsors.update({
+      where: { id: winnerId },
+      data: { name_key: normaliseSponsorName(winner.name) },
+    })
   })
 
   auditLog({

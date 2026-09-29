@@ -25,7 +25,12 @@ export function findBrandByName(db: Db, name: string) {
   })
 }
 
-/** The organisation's one brand: the one it owns, else the one by that name, else a new one. */
+/**
+ * The organisation's one brand: the one it owns, else the unowned one by that
+ * name (claimed for it), else a new one. Another organisation's brand of the
+ * same name is an error, not a fallback: returning it left this organisation
+ * with no brand and hung its placements on someone else's.
+ */
 export async function ensureOrgBrand(
   db: Db,
   brand: { name: string; orgId: string; createdBy: string; claimedAt: Date; website?: string }
@@ -33,7 +38,15 @@ export async function ensureOrgBrand(
   const owned = await db.sponsors.findFirst({ where: { ...LIVE, org_id: brand.orgId }, orderBy: OLDEST })
   if (owned) return owned
   const named = await findBrandByName(db, brand.name)
-  if (named) return named
+  if (named?.org_id) {
+    throw new Error(`"${brand.name}" belongs to another organisation (${named.org_id}). Merge or rename it before seeding.`)
+  }
+  if (named) {
+    return db.sponsors.update({
+      where: { id: named.id },
+      data: { org_id: brand.orgId, claimed_at: brand.claimedAt, name_key: normaliseSponsorName(named.name) },
+    })
+  }
   return db.sponsors.create({
     data: {
       name: brand.name,
