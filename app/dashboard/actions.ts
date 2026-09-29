@@ -25,7 +25,7 @@ import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
 import { normaliseVenueName } from "@/lib/venue-name"
-import { repeatAttendees, turnUpPct, noShowPct } from "@/lib/counting"
+import { repeatAttendees, turnUpPct, noShowPct, noShows } from "@/lib/counting"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import type {
   AdminOverview,
@@ -192,26 +192,30 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
 
   // No-show rate over the last 30 days, and the 30 before it, so the delta says
   // whether it is getting better rather than just what it is.
-  const [committedNow, attendedNow, committedPrior, attendedPrior, repeatRows] = await Promise.all([
-    db.event_rsvps.count({
+  /*
+   * (person, event) pairs on both sides, so a no-show is an RSVP with no
+   * check-in to that event. This compared RSVP rows with the number of people
+   * who checked in anywhere in the window: a walk-in cancelled a no-show, and
+   * one regular at five events cancelled four (SCRUM-467). One row per person
+   * per day on the check-in side is harmless now, since it is a set.
+   */
+  const pairs = { user_id: true, event_id: true } as const
+  const [rsvpsNow, attendedNow, rsvpsPrior, attendedPrior, repeatRows] = await Promise.all([
+    db.event_rsvps.findMany({
       where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
+      select: pairs,
     }),
-    /*
-     * Grouped by user, not counted. `event_check_ins` holds one row per person
-     * per day, so a three-day conference contributed three attendances against
-     * one RSVP — turn-up clamped to exactly 100% and no-show floored at 0%,
-     * which is the number this whole block exists to report.
-     */
-    db.event_check_ins.groupBy({
-      by: ["user_id"],
+    db.event_check_ins.findMany({
       where: { status: { in: ATTENDED }, kind: "attendee", event: { ...pastEvents, start_time: { gte: windowStart, lt: now } } },
+      select: pairs,
     }),
-    db.event_rsvps.count({
+    db.event_rsvps.findMany({
       where: { status: { in: COMMITTED }, event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
+      select: pairs,
     }),
-    db.event_check_ins.groupBy({
-      by: ["user_id"],
+    db.event_check_ins.findMany({
       where: { status: { in: ATTENDED }, kind: "attendee", event: { ...pastEvents, start_time: { gte: priorStart, lt: windowStart } } },
+      select: pairs,
     }),
     /*
      * Rows, not a grouped row-count.
@@ -229,13 +233,12 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
   ])
 
   /*
-   * The clamp is gone. It was justified as "walk-ins check in without RSVPing",
-   * but its real job was absorbing the row-counting inflation above — and in
-   * doing so it hid the walk-ins it named. `noShowPct` floors at zero, because
-   * more people than RSVPs is zero no-shows plus some extra, not a negative.
+   * No clamp and no floor: `noShows` counts RSVPs without a check-in to that
+   * event, so it can't exceed the RSVPs or go negative, and a walk-in is simply
+   * someone extra, not a cancelled no-show (SCRUM-467).
    */
-  const noShowNow = noShowPct(attendedNow.length, committedNow)
-  const noShowPrior = noShowPct(attendedPrior.length, committedPrior)
+  const noShowNow = noShowPct(noShows(rsvpsNow, attendedNow).total, rsvpsNow.length)
+  const noShowPrior = noShowPct(noShows(rsvpsPrior, attendedPrior).total, rsvpsPrior.length)
 
   let nextEvent: NextEvent | null = null
   let pacing: PacingPoint[] = []

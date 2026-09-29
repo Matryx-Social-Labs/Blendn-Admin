@@ -189,6 +189,23 @@ describe("organiser overview", () => {
     expect(overview.noShowRatePct).toBe(0)
   })
 
+  it("a walk-in does not cancel a no-show: one RSVP stayed home, one stranger came, 100% (SCRUM-467)", async () => {
+    const owner = await makeUser("ovw_ns_owner", "organizer")
+    users.push(owner)
+    const past = await makeScheduledEvent(owner, { startsInDays: -4, capacity: 50 })
+    const [stayedHome, walkedIn] = await Promise.all([makeUser("ovw_ns_home"), makeUser("ovw_ns_walkin")])
+    users.push(stayedHome, walkedIn)
+    await db.event_rsvps.create({ data: { event_id: past, user_id: stayedHome, status: "going" } })
+    await db.event_check_ins.create({
+      data: { event_id: past, occurrence_id: await occurrenceOf(past), user_id: walkedIn, status: "checked_in", check_in_time: new Date() },
+    })
+
+    const overview = (as("organizer", owner), await getDashboardOverview())
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+    // It read 0%: one person checked in, against one RSVP.
+    expect(overview.noShowRatePct).toBe(100)
+  })
+
   it("counts repeat attendees, not repeat check-ins", async () => {
     const owner = await makeUser("ovw_repeat", "organizer")
     users.push(owner)
