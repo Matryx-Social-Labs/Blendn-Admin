@@ -109,6 +109,18 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
   const origin = req.headers.get("origin")
 
+  // Postgres text cannot hold a NUL and nothing legitimate sends one, so a
+  // mobile URL carrying `%00` is refused here, before any route asks the
+  // database: `?q=%00` on search was a 500 (SCRUM-434). Bodies: lib/api-input.
+  if (pathname.startsWith("/api/mobile") && /%00/i.test(pathname + req.nextUrl.search)) {
+    const refused = NextResponse.json(
+      { success: false, error: "Invalid character in URL", errorCode: "VALIDATION_FAILED" },
+      { status: 400 }
+    )
+    Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => refused.headers.set(key, value))
+    return refused
+  }
+
   // API versioning: rewrite /api/mobile/v1/* to /api/mobile/*
   if (pathname.startsWith("/api/mobile/v1/") || pathname === "/api/mobile/v1") {
     const rewritten = pathname.replace("/api/mobile/v1", "/api/mobile")

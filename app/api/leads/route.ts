@@ -14,6 +14,7 @@ import {
   tokenOk,
 } from "@/lib/leads"
 import { notifyNewLead } from "@/lib/lead-notify"
+import { readJson } from "@/lib/api-input"
 
 /**
  * POST /api/leads — ingest from the organiser landing page.
@@ -50,12 +51,8 @@ export async function POST(req: NextRequest) {
     return fail(401, "unauthorized")
   }
 
-  let body: unknown
-  try {
-    body = await req.json()
-  } catch {
-    return fail(400, "validation_failed", "body is not valid JSON")
-  }
+  const body = await readJson(req)
+  if (body === undefined) return fail(400, "validation_failed", "body is not valid JSON")
 
   const parsed = leadInputSchema.safeParse(body)
   if (!parsed.success) {

@@ -7,6 +7,7 @@ import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { emailDomain } from "@/lib/org-invites"
 import { sendEmail, passwordResetEmail, emailConfigured } from "@/lib/email"
 import { issuePasswordResetLink } from "@/lib/password-reset"
+import { readJson } from "@/lib/api-input"
 
 /**
  * Request a password reset.
@@ -42,8 +43,8 @@ export async function POST(req: NextRequest) {
   })
 
   try {
-    const { email } = (await req.json()) as { email?: string }
-    const address = email?.trim().toLowerCase()
+    const { email } = ((await readJson(req)) ?? {}) as { email?: unknown }
+    const address = typeof email === "string" ? email.trim().toLowerCase() : ""
     if (!address || !emailDomain(address)) return ok
 
     const perAddress = await rateLimit(req, {
