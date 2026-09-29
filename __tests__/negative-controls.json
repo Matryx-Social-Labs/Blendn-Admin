@@ -1293,6 +1293,12 @@
       "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). After ecc:pr-test-analyzer, two cases were added (no aria-describedby without a hint; the whole /apply page server-rendered, every input and textarea with a matching label[for]). M231: 1 of 6 failing. M232: 1 of 6 failing. All reverted.",
       "date": "2026-09-29"
     },
+    "upload-seal.test.ts (SCRUM-445)": {
+      "guards": "SCRUM-445: the sealed copy every profile photo and chat image is stored as carries Cache-Control no-cache, so an erasure stops the edge serving it at once (a year, then the one-hour default, kept deleted photos up).",
+      "mutation": "M292 the copy is written with no Cache-Control (the storage default, an hour).",
+      "observed": "Red before the fix: 1 of 12 failing (CacheControl undefined). M292: 1 of 12 failing. Reverted.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",

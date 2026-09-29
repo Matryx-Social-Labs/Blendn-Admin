@@ -80,12 +80,13 @@ describe("sealing an upload", () => {
     })
     expect(copy.input.ContentEncoding).toBeUndefined()
     /*
-     * And no Cache-Control of its own. Tigris's public endpoint keeps serving a
-     * deleted object for as long as the header says (measured on staging: the
-     * one-year header this first set left a deleted account's photo up after
-     * the erasure; with none, the storage default is an hour).
+     * And `no-cache`. Tigris's public endpoint keeps serving a deleted object
+     * for as long as the header allows: a year left a deleted account's photo
+     * up after the erasure, and no header is the storage default, an hour.
+     * With `no-cache` a deleted object answered 404 at once (measured on
+     * staging, SCRUM-445).
      */
-    expect(copy.input.CacheControl).toBeUndefined()
+    expect(copy.input.CacheControl).toBe("no-cache")
     const sealedKey = copy.input.Key!
     expect(sealedKey).not.toBe(SOURCE)
     expect(sealedKey.startsWith(`chat/${USER}/`)).toBe(true)
