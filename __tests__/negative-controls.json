@@ -1280,6 +1280,12 @@
       "mutation": "M217 the register back on the stored name_key (name_key: r.name_key). M222 mergeSponsors no longer re-keys the brand it keeps.",
       "observed": "Red before the fix: 1 of 1 failing, no cluster held the two rows (received undefined). M217: the same failure. The merge case (added after ecc:pr-test-analyzer) was red first, the kept row's key still 'blue tokai ...'. M222: 1 of 9 failing, that case. All reverted.",
       "date": "2026-09-29"
+    },
+    "apply-field-labels.test.ts": {
+      "guards": "SCRUM-183: every /apply field is named by its caption: Field (app/apply/field.tsx) ties <label for> to the control's useId id, points the control at its hint with aria-describedby, gives two fields in one tree different ids, and the page keeps no second, unlabelled copy of the helper.",
+      "mutation": "M228 the Label's htmlFor removed. M229 the control's aria-describedby removed. M230 page.tsx defines its own Field again.",
+      "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [
