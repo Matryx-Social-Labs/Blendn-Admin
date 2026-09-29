@@ -51,6 +51,11 @@ const priceSchema = z.object({
   note: z.string().trim().max(500).optional(),
 })
 
+/** The shortest void reason that can say anything, as for a suspension. */
+const MIN_VOID_REASON = 10
+/** As long as a pricing note; it is copied into the audit row as well. */
+const MAX_VOID_REASON = 500
+
 async function requireAdmin() {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
@@ -82,6 +87,22 @@ export interface ChargeablePlacement {
   sends: number
   /** The live charge, if one has been raised. Voided ones are history. */
   charge: ChargeRow | null
+  /** Voided charges, newest first — kept on the row so a reversal is never invisible (SCRUM-173). */
+  voided: VoidedCharge[]
+}
+
+export interface VoidedCharge {
+  id: string
+  amountMinor: number
+  currency: string
+  /** Where it was when voided, read from the stamps it had reached. */
+  fromStatus: "draft" | "agreed" | "settled"
+  /** The payment reference, when it had been settled; before that `external_ref` holds the pricing note. */
+  externalRef: string | null
+  /** Null only on a void from before reasons were kept — those have no voider either. */
+  reason: string | null
+  voidedAt: Date | null
+  voidedByName: string | null
 }
 
 export interface ChargeLedger {
@@ -133,8 +154,9 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
           },
         },
       },
+      // Every charge, split below: the live one, and the voided ones kept as history.
       charges: {
-        where: { status: { not: "void" } },
+        orderBy: { created_at: "desc" },
         select: {
           id: true,
           amount_minor: true,
@@ -144,9 +166,11 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
           settled_at: true,
           external_ref: true,
           created_at: true,
+          voided_at: true,
+          voided_by: true,
+          void_reason: true,
           pricer: { select: { name: true } },
         },
-        take: 1,
       },
     },
     orderBy: { event: { start_time: "desc" } },
@@ -154,8 +178,15 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
 
   const now = new Date()
 
+  const voiderIds = [...new Set(rows.flatMap((r) => r.charges.map((c) => c.voided_by)).filter((id): id is string => !!id))]
+  const voiders = new Map(
+    (voiderIds.length ? await db.user.findMany({ where: { id: { in: voiderIds } }, select: { id: true, name: true } }) : []).map(
+      (u) => [u.id, u.name]
+    )
+  )
+
   const placements: ChargeablePlacement[] = rows.map((r) => {
-    const charge = r.charges[0]
+    const charge = r.charges.find((c) => c.status !== "void")
     return {
       placementId: r.id,
       eventId: r.event.id,
@@ -181,6 +212,18 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
             createdAt: charge.created_at,
           }
         : null,
+      voided: r.charges
+        .filter((c) => c.status === "void")
+        .map((c) => ({
+          id: c.id,
+          amountMinor: c.amount_minor,
+          currency: c.currency,
+          fromStatus: c.settled_at ? ("settled" as const) : c.agreed_at ? ("agreed" as const) : ("draft" as const),
+          externalRef: c.settled_at ? c.external_ref : null,
+          reason: c.void_reason,
+          voidedAt: c.voided_at,
+          voidedByName: (c.voided_by && voiders.get(c.voided_by)) ?? null,
+        })),
     }
   })
 
@@ -275,13 +318,14 @@ export async function pricePlacement(placementId: string, input: unknown): Promi
 export async function advanceCharge(
   chargeId: string,
   to: "agreed" | "settled" | "void",
-  externalRef?: string
+  externalRef?: string,
+  reason?: string
 ): Promise<void> {
   const admin = await requireAdmin()
 
   const charge = await db.placement_charges.findUnique({
     where: { id: chargeId },
-    select: { id: true, status: true, placement_id: true, amount_minor: true, currency: true },
+    select: { id: true, status: true, placement_id: true, amount_minor: true, currency: true, external_ref: true },
   })
   if (!charge) throw new Refusal("Charge not found")
   if (charge.status === "void") throw new Refusal("That charge was voided.")
@@ -306,15 +350,32 @@ export async function advanceCharge(
     throw new Refusal("Record the payment reference — it is what makes this checkable.")
   }
 
-  await db.placement_charges.update({
-    where: { id: chargeId },
+  /*
+   * A void can undo money that arrived, and it cannot be undone (SCRUM-173). It
+   * was one click with nothing asked; now it needs a reason the next person can
+   * read, like a suspension or a brand merge.
+   */
+  const why = reason?.trim() ?? ""
+  if (to === "void" && why.length < MIN_VOID_REASON) {
+    throw new Refusal("Give a reason — the next person reconciling this needs to know why.")
+  }
+  if (why.length > MAX_VOID_REASON) throw new Refusal(`Keep the reason under ${MAX_VOID_REASON} characters.`)
+
+  /*
+   * Only from the status read above. Two voids at once both passed that check,
+   * and the second overwrote the first one's who and why.
+   */
+  const { count } = await db.placement_charges.updateMany({
+    where: { id: chargeId, status: charge.status },
     data: {
       status: to,
       ...(to === "agreed" ? { agreed_at: new Date() } : {}),
       ...(to === "settled" ? { settled_at: new Date() } : {}),
+      ...(to === "void" ? { voided_at: new Date(), voided_by: admin.id, void_reason: why } : {}),
       ...(ref ? { external_ref: ref } : {}),
     },
   })
+  if (count !== 1) throw new Refusal("Someone else changed that charge just now. Reload and look again.")
 
   auditLog({
     userId: admin.id,
@@ -326,7 +387,11 @@ export async function advanceCharge(
       from: charge.status,
       amountMinor: charge.amount_minor,
       currency: charge.currency,
-      externalRef: ref || null,
+      // The reference the charge carries, not only one passed in now: a void
+      // arrives with none, and "which payment was undone" is its whole point.
+      // Before settlement `external_ref` is the pricing note, not a payment.
+      externalRef: ref || (charge.status === "settled" ? charge.external_ref : null) || null,
+      ...(to === "void" ? { reason: why } : {}),
     },
   })
 
