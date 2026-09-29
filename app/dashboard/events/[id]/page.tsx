@@ -17,7 +17,7 @@ import { eventRefusals, refusalSummary } from "@/lib/check-in-refusals"
 import { CurationHealth } from "./curation-health"
 import { EventVenueLink } from "./venue-link"
 import { EventLifecycle } from "@/components/dashboard/event-lifecycle"
-import { eventStateFor } from "@/lib/event-phase"
+import { eventClock, eventStateFor } from "@/lib/event-phase"
 import { CHAT_WINDOW_HOURS } from "@/lib/chat-window"
 
 export const dynamic = "force-dynamic"
@@ -72,6 +72,7 @@ export default async function EventDetailPage({
       created_at: true,
       start_time: true,
       end_time: true,
+      timezone: true,
       venue_name: true,
       city: true,
       organizer_id: true,
@@ -104,9 +105,10 @@ export default async function EventDetailPage({
 
   const venueName = event.venue?.name ?? event.venue_name
   const lifecycleState = eventStateFor(event)
-  const day = (d: Date) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(d)
-  const time = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeStyle: "short" }).format(d)
-  const daysUntil = Math.ceil((event.start_time.getTime() - now.getTime()) / 86_400_000)
+  // The event's own clock, not the server's (SCRUM-421).
+  const clock = eventClock(event.timezone)
+  const { day, time } = clock
+  const daysUntil = clock.daysUntil(event.start_time, now)
   const lifecycleDates = {
     draft: `created ${day(event.created_at)}`,
     upcoming:
@@ -129,7 +131,7 @@ export default async function EventDetailPage({
           {/* One line: when, where, and — for somebody who may edit a linked venue — the way out of a wrong link. */}
           <p className="flex flex-wrap items-center gap-x-1 text-[0.8125rem] text-muted-foreground">
             <span>
-              {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(event.start_time)}
+              {clock.dateTime(event.start_time)}
               {" – "}
               {time(event.end_time)}
               {venueName ? ` · ${venueName}` : ""}
@@ -160,6 +162,7 @@ export default async function EventDetailPage({
           eventId={event.id}
           startAt={event.start_time.toISOString()}
           endAt={event.end_time.toISOString()}
+          timezone={event.timezone}
           /*
            * Server-fetched rather than socket-pushed, deliberately. The alerts
            * above are live; this is the record of what already happened, and

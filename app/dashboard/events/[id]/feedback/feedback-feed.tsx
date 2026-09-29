@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+
+import { eventClock } from "@/lib/event-phase"
 import type { feedback_sentiment, issue_category } from "@prisma/client"
 
 import { Badge } from "@/components/ui/badge"
@@ -40,7 +42,8 @@ function toneClass(sentiment: feedback_sentiment) {
  * minutes" is a routine case rather than an edge one. Friction here means
  * hosts stop correcting and the digest quietly drifts from the truth.
  */
-export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
+export function FeedbackFeed({ messages, timezone }: { messages: FeedbackMessage[]; timezone: string }) {
+  const clock = eventClock(timezone)
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [acting, setActing] = useState<string | null>(null)
@@ -92,10 +95,7 @@ export function FeedbackFeed({ messages }: { messages: FeedbackMessage[] }) {
               </b>
               {m.at ? (
                 <span>
-                  {new Date(m.at).toLocaleTimeString("en-GB", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {clock.time(new Date(m.at))}
                 </span>
               ) : null}
 

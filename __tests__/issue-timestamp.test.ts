@@ -23,18 +23,18 @@ describe("when an issue opened", () => {
      * event wants `21:40 · lasted 12 min`, not a date on every row.
      */
     const now = new Date("2026-09-10T17:47:00Z")
-    expect(issueOpenedLabel("2026-09-10T17:54:44.088Z", now)).toBe("17:54")
+    expect(issueOpenedLabel("2026-09-10T17:54:44.088Z", "UTC", now)).toBe("17:54")
   })
 
   it("names the day when it did not", () => {
     // The row that read as the future.
     const now = new Date("2026-09-10T17:47:00Z")
-    expect(issueOpenedLabel("2026-09-09T17:54:44.088Z", now)).toBe("9 Sept, 17:54")
+    expect(issueOpenedLabel("2026-09-09T17:54:44.088Z", "UTC", now)).toBe("9 Sept, 17:54")
   })
 
   it("names the day for something days back", () => {
     const now = new Date("2026-09-10T17:47:00Z")
-    expect(issueOpenedLabel("2026-09-04T22:04:54.013Z", now)).toBe("4 Sept, 22:04")
+    expect(issueOpenedLabel("2026-09-04T22:04:54.013Z", "UTC", now)).toBe("4 Sept, 22:04")
   })
 
   it("names the day across midnight even twenty minutes later", () => {
@@ -43,22 +43,20 @@ describe("when an issue opened", () => {
      * the same ambiguity in miniature, and an hours-based rule would miss it.
      */
     const now = new Date("2026-09-11T00:10:00Z")
-    expect(issueOpenedLabel("2026-09-10T23:50:00Z", now)).toBe("10 Sept, 23:50")
+    expect(issueOpenedLabel("2026-09-10T23:50:00Z", "UTC", now)).toBe("10 Sept, 23:50")
   })
 
-  it("uses the reader's own clock, not UTC", () => {
+  it("uses the event's clock, not UTC and not the reader's (SCRUM-421)", () => {
     /*
-     * The date shown is the local one, because it is the organiser's calendar
-     * the panel is claiming things about. Asserted through the ambient
-     * timezone rather than by reading the implementation, so a switch to a
-     * fixed offset would fail here.
+     * Every other time on the page is told in the event's zone, so this one is
+     * too. The second case is the one a UTC or reader-local rule gets wrong:
+     * 23:50 on the 28th, read twenty minutes later on the 29th, in IST, while
+     * both instants fall on the 28th in UTC.
      */
-    const shown = issueOpenedLabel("2026-09-04T22:04:54.013Z", new Date("2026-09-10T17:47:00Z"))
-    const local = new Date("2026-09-04T22:04:54.013Z").toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-    expect(shown).toContain(local)
+    expect(issueOpenedLabel("2026-09-28T23:20:00Z", "Asia/Kolkata", new Date("2026-09-28T23:40:00Z"))).toBe("04:50")
+    expect(issueOpenedLabel("2026-09-28T18:20:00Z", "Asia/Kolkata", new Date("2026-09-28T18:40:00Z"))).toBe(
+      "28 Sept, 23:50"
+    )
   })
 })
 
