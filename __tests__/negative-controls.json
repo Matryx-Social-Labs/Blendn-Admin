@@ -421,8 +421,8 @@
     },
     "counting-people-not-rows.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
-      "mutation": "Replace app/dashboard/actions.ts with an empty stub (`export {}`), run this suite, revert",
-      "observed": "1 failing",
+      "mutation": "Replace app/dashboard/actions.ts with an empty stub (`export {}`), run this suite, revert M304 (SCRUM-467) any check-in by the person, at any event, cancels their RSVP.",
+      "observed": "1 failing M304: 1 of 20 failing (skipped A and B, walked into C: read 0 no-shows for A and B).",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },
@@ -1315,6 +1315,12 @@
       "guards": "SCRUM-429: the retention sweep erases what is left of a deleted person's chat/<id>/ and profile/<id>/ before it purges their registration record; keeps a record whose erasure failed (deletePrefix now throws when anything under the prefix was left) for the next pass; and keeps every due record when storage is not configured, since the erasure cannot be done. Companion case: delete-prefix-keep.test.ts (a refusal fails the call after the rest is deleted).",
       "mutation": "M293 the purge leaves chat/<id>/ alone. M294 records are purged even when their media was not erased. M295 deletePrefix returns a count when the store refused some objects (delete-prefix-keep.test.ts). M296 storage unset: records purged anyway. M297 profile/<id>/ not retried.",
       "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6. M294: 1 of 6 (the record whose media failed was purged, and with it the only pointer). M295: delete-prefix-keep 1 of 6. M296: 1 of 7 (the record went with storage unset). M297: 1 of 7. All reverted.",
+      "date": "2026-09-29"
+    },
+    "dashboard-report.itest.ts": {
+      "guards": "SCRUM-467: a no-show is an RSVP with no check-in to that event (lib/counting.ts noShows); a walk-in cancels nothing.",
+      "mutation": "M305 (SCRUM-467) the overview nets RSVPs against people who checked in anywhere.",
+      "observed": "Red before the fix: 1 failing. M305: 1 of 18 failing (one RSVP home + one walk-in read 0%, not 100%).",
       "date": "2026-09-29"
     },
     "setup-screens-named.test.ts": {
