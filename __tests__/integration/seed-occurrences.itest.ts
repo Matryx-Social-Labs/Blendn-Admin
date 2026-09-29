@@ -78,15 +78,20 @@ describe("holdSeedOccurrences", () => {
 
     await place(eventId, SUN)
 
-    expect((await days(eventId)).map((d) => iso(d.occurs_on))).toEqual(["2026-10-04"])
+    // The day the sync creates carries the capacity too, not only the ones it kept.
+    expect(await days(eventId)).toEqual([{ occurs_on: new Date("2026-10-04T00:00:00Z"), cancelled_at: null, capacity: 40 }])
   })
 
   it("holds every day in the span again and sets its capacity", async () => {
-    const eventId = await seededOn(SAT)
+    const weekend = { start: SAT.start, end: SUN.end }
+    const eventId = await seededOn(weekend)
     await db.event_occurrences.updateMany({ where: { event_id: eventId }, data: { cancelled_at: new Date(), capacity: 5 } })
 
-    await place(eventId, SAT)
+    await place(eventId, weekend)
 
-    expect(await days(eventId)).toEqual([{ occurs_on: new Date("2026-10-03T00:00:00Z"), cancelled_at: null, capacity: 40 }])
+    expect(await days(eventId)).toEqual([
+      { occurs_on: new Date("2026-10-03T00:00:00Z"), cancelled_at: null, capacity: 40 },
+      { occurs_on: new Date("2026-10-04T00:00:00Z"), cancelled_at: null, capacity: 40 },
+    ])
   })
 })
