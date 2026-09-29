@@ -13,7 +13,7 @@ import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
-import { discloseRating } from "@/lib/disclosure"
+import { discloseStarsAcross, spreadsByEvent } from "@/lib/disclosure"
 import { actorFor } from "@/lib/org-membership"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
@@ -96,13 +96,6 @@ function emptyRatings(): RatingCounts {
   return [0, 0, 0, 0, 0]
 }
 
-function toRatingCounts(rows: Array<{ rating: number; _count: { _all: number } }>): RatingCounts {
-  const counts = emptyRatings()
-  for (const row of rows) {
-    if (row.rating >= 1 && row.rating <= 5) counts[row.rating - 1] = row._count._all
-  }
-  return counts
-}
 
 /* -------------------------------------------------------------------------- */
 /* Organiser                                                                   */
@@ -131,7 +124,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
   todayStart.setHours(0, 0, 0, 0)
   const pastEvents = { ...scope, start_time: { lt: now } }
 
-  const [next, previous, ratingSpread, ratingAggregate, chatToday, eventRows] = await Promise.all([
+  const [next, previous, ratingRows, chatToday, eventRows] = await Promise.all([
     db.events.findFirst({
       where: { ...scope, status: "published", start_time: { gte: now } },
       orderBy: { start_time: "asc" },
@@ -159,15 +152,11 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
         rsvps: { where: { status: { in: COMMITTED } }, select: { created_at: true } },
       },
     }),
+    // Per event, so the total pools only events that could show their own.
     db.event_ratings.groupBy({
-      by: ["rating"],
+      by: ["event_id", "rating"],
       where: { event: scope },
       _count: { _all: true },
-    }),
-    db.event_ratings.aggregate({
-      where: { event: scope },
-      _avg: { rating: true },
-      _count: { rating: true },
     }),
     db.chat_messages.count({
       where: {
@@ -306,13 +295,11 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
     pacingCapacity,
     benchmark,
     // Withheld under five raters, like every rating a host sees (SCRUM-437).
-    ratings: discloseRating(toRatingCounts(ratingSpread), ratingAggregate._count.rating) ?? emptyRatings(),
+    ...discloseStarsAcross(spreadsByEvent(ratingRows)),
     noShowRatePct: round1(noShowNow),
     noShowDelta:
       noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
     repeatAttendees: repeatAttendees(repeatRows),
-    averageRating: discloseRating(round1(ratingAggregate._avg.rating), ratingAggregate._count.rating),
-    ratingCount: ratingAggregate._count.rating,
     chatToday,
     events: eventRows.map((event) => ({
       id: event.id,
@@ -788,19 +775,18 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
   const venues: VenueRow[] = Array.from(byVenue.values())
     .map(({ id, label: name, events: venueEvents }) => {
       const inWindow = venueEvents.filter((e) => e.start_time >= windowStart && e.start_time < now)
-      const ratings = emptyRatings()
-      let ratingTotal = 0
-      let ratingCount = 0
-      for (const event of venueEvents) {
+      const spreads = venueEvents.map((event) => {
+        const spread = emptyRatings()
         for (const { rating } of event.ratings) {
-          if (rating >= 1 && rating <= 5) ratings[rating - 1] += 1
-          ratingTotal += rating
-          ratingCount += 1
+          if (rating >= 1 && rating <= 5) spread[rating - 1] += 1
         }
-      }
-      // Withheld under five raters. The tone and note read it too, so "ratings
-      // skew low" cannot say what one person gave (SCRUM-437).
-      const averageRating = discloseRating(ratingTotal / ratingCount, ratingCount)
+        return spread
+      })
+      // Withheld under five raters, pooled only from events that pass alone.
+      // The tone and note read it too, so "ratings skew low" cannot say what
+      // one person gave (SCRUM-437).
+      const stars = discloseStarsAcross(spreads)
+      const { averageRating } = stars
       const next = venueEvents.find((e) => e.start_time >= now && e.status === "published")
       const nightsPerWeek = inWindow.length / WINDOW_WEEKS
 
@@ -819,9 +805,7 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
         name,
         eventsInWindow: inWindow.length,
         nightsPerWeek: Math.round(nightsPerWeek * 10) / 10,
-        averageRating: round1(averageRating),
-        ratings: averageRating === null ? emptyRatings() : ratings,
-        ratingCount,
+        ...stars,
         nextBooking: next
           ? {
               id: next.id,

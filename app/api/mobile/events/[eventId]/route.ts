@@ -1,7 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { discloseRating } from "@/lib/disclosure"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
@@ -209,12 +208,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }),
       ])
 
-    // Calculate average rating
-    const avgRating = await db.event_ratings.aggregate({
-      where: { event_id: eventId },
-      _avg: { rating: true },
-    })
-
     // Calculate distance if coordinates provided
     let distance: number | null = null
     if (
@@ -334,9 +327,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       stats: {
         checkInCount: attendedCounts.get(eventId) ?? 0,
         favoriteCount: event._count.favorites,
+        /*
+         * No average. Anyone who can open the event could poll it as people
+         * rate and read each new score from the change, and the app promises
+         * a rater the night's score is "only ever seen by us" (SCRUM-437).
+         */
         ratingCount: event._count.ratings,
-        // Withheld under five raters: two ratings are each other's (SCRUM-437).
-        averageRating: discloseRating(avgRating._avg.rating, event._count.ratings),
         rsvpCount: event._count.rsvps,
       },
       userStatus: {

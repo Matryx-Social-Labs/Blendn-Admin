@@ -254,6 +254,31 @@ describe("organiser overview", () => {
     expect(overview.ratings).toEqual([0, 0, 0, 0, 0])
     expect(overview.ratingCount).toBe(2)
   })
+
+  it("pools only events that pass alone: the org's bars minus a visible event are never a withheld one's (SCRUM-437)", async () => {
+    const owner = await makeUser("ovw_rating_pool", "organizer")
+    users.push(owner)
+    const [open, small] = await Promise.all([
+      makeScheduledEvent(owner, { startsInDays: -2 }),
+      makeScheduledEvent(owner, { startsInDays: -4 }),
+    ])
+    const raters = await Promise.all([1, 2, 3, 4, 5, 6].map((n) => makeUser(`ovw_p${n}`)))
+    users.push(...raters)
+    await db.event_ratings.createMany({
+      data: [
+        ...[5, 4, 4, 3, 5].map((rating, i) => ({ event_id: open, user_id: raters[i], rating })),
+        { event_id: small, user_id: raters[5], rating: 1 },
+      ],
+    })
+
+    const overview = (as("organizer", owner), await getDashboardOverview())
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+
+    // The one-rater event's 1 is not in the total, or total minus `open` would show it.
+    expect(overview.ratings).toEqual([0, 0, 1, 2, 2])
+    expect(overview.averageRating).toBe(4.2)
+    expect(overview.ratingCount).toBe(5)
+  })
 })
 
 describe("venue owner overview", () => {
@@ -293,6 +318,26 @@ describe("venue owner overview", () => {
     expect(snug?.ratingCount).toBe(1)
     expect(snug?.note).not.toBe("ratings skew low")
     expect(snug?.tone).not.toBe("destructive")
+  })
+
+  it("shows a venue's rating from five raters, and flags it when it skews low (SCRUM-437)", async () => {
+    const owner = await makeUser("ovw_venue_low", "organizer")
+    users.push(owner)
+    await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
+    const event = await makeScheduledEvent(owner, { startsInDays: -3, venue: "Cellar" })
+    const raters = await Promise.all([1, 2, 3, 4, 5].map((n) => makeUser(`ovw_venue_low${n}`)))
+    users.push(...raters)
+    await db.event_ratings.createMany({
+      data: [1, 2, 2, 3, 4].map((rating, i) => ({ event_id: event, user_id: raters[i], rating })),
+    })
+
+    const overview = (as("venue_owner", owner), await getDashboardOverview())
+    if (overview.role !== "venue_owner") throw new Error("wrong overview role")
+
+    const cellar = overview.venues.find((v) => v.name === "Cellar")
+    expect(cellar).toMatchObject({ averageRating: 2.4, ratings: [1, 2, 1, 1, 0], ratingCount: 5 })
+    expect(cellar?.note).toBe("ratings skew low")
+    expect(cellar?.tone).toBe("destructive")
   })
 
   it("fills the utilisation grid from event start times", async () => {

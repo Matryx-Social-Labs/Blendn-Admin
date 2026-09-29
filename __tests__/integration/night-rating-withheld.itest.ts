@@ -10,7 +10,7 @@ let session: { user: { id: string; role: "app_admin" } } | null = null
 jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
 
 import { getFeedbackDigest } from "@/app/dashboard/events/[id]/feedback/actions"
-import { canRunReport, reportsFor } from "@/lib/reports"
+import { buildReport, canRunReport, reportsFor } from "@/lib/reports"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 const users: string[] = []
@@ -58,5 +58,10 @@ describe("the ratings export", () => {
     expect(canRunReport("ratings", "venue_owner")).toBe(false)
     expect(canRunReport("ratings", "app_admin")).toBe(true)
     expect(reportsFor("organizer").map((r) => r.key)).not.toContain("ratings")
+  })
+
+  it("is refused by buildReport itself, not only by the route in front of it", async () => {
+    const range = { key: "custom" as const, from: new Date(0), to: new Date() }
+    await expect(buildReport("ratings", "organizer", "anyone", range)).rejects.toThrow(/not open to organizer/)
   })
 })

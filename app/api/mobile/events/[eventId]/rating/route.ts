@@ -1,7 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { discloseRating } from "@/lib/disclosure"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -160,12 +159,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Calculate new average rating
-    const avgRating = await db.event_ratings.aggregate({
-      where: { event_id: eventId },
-      _avg: { rating: true },
-      _count: true,
-    })
+    // A count and no average: the rater could subtract their own (SCRUM-437).
+    const ratingCount = await db.event_ratings.count({ where: { event_id: eventId } })
 
     return successResponse({
       rating: {
@@ -175,11 +170,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         createdAt: eventRating.created_at,
         updatedAt: eventRating.updated_at,
       },
-      eventStats: {
-        // Withheld under five raters: the rater could subtract their own (SCRUM-437).
-        averageRating: discloseRating(avgRating._avg.rating, avgRating._count),
-        ratingCount: avgRating._count,
-      },
+      eventStats: { ratingCount },
       message: "Rating submitted successfully",
     })
   } catch (error) {

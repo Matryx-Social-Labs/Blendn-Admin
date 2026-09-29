@@ -171,7 +171,6 @@ const EventStatsSchema = z.object({
   checkInCount: z.number(),
   favoriteCount: z.number(),
   ratingCount: z.number(),
-  averageRating: z.number().nullable(),
   rsvpCount: z.number().optional(),
 })
 
@@ -351,10 +350,7 @@ export const RatingResponseSchema = z
       updatedAt: z.string().datetime(),
     }),
     eventStats: z.object({
-      averageRating: z
-        .number()
-        .nullable()
-        .openapi({ description: "null until 5 people have rated: a smaller average gives away scores (SCRUM-437)." }),
+      // No average: a rater could subtract their own (SCRUM-437).
       ratingCount: z.number(),
     }),
     message: z.string(),

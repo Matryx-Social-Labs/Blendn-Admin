@@ -163,6 +163,8 @@ export async function buildReport(
   userId: string,
   range: DateRange
 ): Promise<string> {
+  // The route checks first; this holds for any caller that doesn't (SCRUM-437).
+  if (!canRunReport(key, role)) throw new Error(`The ${key} report is not open to ${role}`)
   const scope = await eventScopeFor(role, userId)
   const labelScope = await pseudonymScope(role, userId)
   const inWindow = { gte: range.from, lt: range.to }

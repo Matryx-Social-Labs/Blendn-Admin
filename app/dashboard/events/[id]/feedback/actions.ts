@@ -8,7 +8,7 @@ import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { chatClosesAt } from "@/lib/chat-window"
-import { discloseFigure, discloseRating, mayQuote, type SuppressionReason } from "@/lib/disclosure"
+import { discloseFigure, discloseStars, mayQuote, type SuppressionReason } from "@/lib/disclosure"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { escalates } from "@/lib/sentiment/taxonomy"
@@ -150,7 +150,6 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
   for (const { rating } of event.ratings) {
     if (rating >= 1 && rating <= 5) ratings[rating - 1] += 1
   }
-  const ratingTotal = event.ratings.reduce((sum, r) => sum + r.rating, 0)
 
   const closesAt = chatClosesAt({ end_time: event.end_time })
 
@@ -185,12 +184,7 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
       })
       .sort((a, b) => (b.count ?? 0) - (a.count ?? 0)),
     // The stars too: under five raters they are individual scores (SCRUM-437).
-    ratings: discloseRating(ratings, event.ratings.length) ?? [0, 0, 0, 0, 0],
-    averageRating: discloseRating(
-      Math.round((ratingTotal / event.ratings.length) * 10) / 10,
-      event.ratings.length
-    ),
-    ratingCount: event.ratings.length,
+    ...discloseStars(ratings),
     /*
      * The sharpest finding in the audit, and the one this module was written
      * for.

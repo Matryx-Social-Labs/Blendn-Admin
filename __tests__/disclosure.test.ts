@@ -2,7 +2,11 @@ import {
   discloseBreakdown,
   discloseFigure,
   discloseRating,
+  discloseStars,
+  discloseStarsAcross,
   MIN_CELL,
+  poolStars,
+  spreadsByEvent,
   suppressedLabel,
 } from "@/lib/disclosure"
 import { SPONSORSHIP } from "@/lib/constants"
@@ -179,5 +183,38 @@ describe("SCRUM-437 — a night's rating", () => {
     expect(discloseRating(4, 1)).toBeNull()
     expect(discloseRating([0, 0, 0, 1, 1], MIN_CELL - 1)).toBeNull()
     expect(discloseRating(4.2, MIN_CELL)).toBe(4.2)
+  })
+
+  it("withholds the bars and the average at four raters, keeping the count; shows them at five", () => {
+    expect(discloseStars([0, 1, 0, 1, 2])).toEqual({ ratings: [0, 0, 0, 0, 0], averageRating: null, ratingCount: 4 })
+    expect(discloseStars([0, 1, 0, 2, 2])).toEqual({ ratings: [0, 1, 0, 2, 2], averageRating: 4, ratingCount: 5 })
+  })
+
+  it("pools only events that pass alone: a visible event subtracted from the total reveals nothing", () => {
+    const six: [number, number, number, number, number] = [1, 0, 1, 2, 2]
+    const one: [number, number, number, number, number] = [1, 0, 0, 0, 0]
+    expect(poolStars([six, one])).toEqual(six)
+    expect(poolStars([one, [0, 0, 0, 4, 0]])).toEqual([0, 0, 0, 0, 0])
+  })
+
+  it("across events, counts every rating when none can be shown, and only the shown ones when some can", () => {
+    expect(discloseStarsAcross([[1, 0, 0, 0, 0], [0, 0, 0, 1, 0]])).toEqual({
+      ratings: [0, 0, 0, 0, 0],
+      averageRating: null,
+      ratingCount: 2,
+    })
+    expect(discloseStarsAcross([[1, 0, 1, 2, 2], [1, 0, 0, 0, 0]])).toMatchObject({ ratingCount: 6, averageRating: 3.7 })
+  })
+
+  it("turns groupBy rows into one spread per event", () => {
+    const rows = [
+      { event_id: "a", rating: 5, _count: { _all: 3 } },
+      { event_id: "b", rating: 1, _count: { _all: 1 } },
+      { event_id: "a", rating: 2, _count: { _all: 2 } },
+    ]
+    expect(spreadsByEvent(rows)).toEqual([
+      [0, 2, 0, 0, 3],
+      [1, 0, 0, 0, 0],
+    ])
   })
 })
