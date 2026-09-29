@@ -1533,15 +1533,18 @@ export function emitPrivateMessage(
   if (!io) return
 
   /*
-   * One emit to both rooms: the conversation (whoever has the chat open) and
-   * the recipient's own room (the chat list, when it is not open). socket.io
-   * unions the rooms and delivers once per socket. It was two emits, and a
-   * recipient with the chat open is in both rooms, so every message arrived
-   * twice and the chat list counted it twice (SCRUM-337).
+   * One emit to three rooms: the conversation (whoever has the chat open), the
+   * recipient's own room (the chat list, when it is not open), and the
+   * sender's own room, so their other device's chat list moves too (SCRUM-446:
+   * it heard nothing until it refetched). socket.io unions the rooms and
+   * delivers once per socket. It was two emits, and a recipient with the chat
+   * open is in both rooms, so every message arrived twice and the chat list
+   * counted it twice (SCRUM-337). The sender's devices ack delivery only for
+   * messages that aren't theirs (the app's socket client).
    */
   // The media as a recipient may fetch it: signed when it is private (SCRUM-427). Never rejects.
   void (message.mediaUrl ? readableUrl(message.mediaUrl) : Promise.resolve(null)).then((mediaUrl) => {
-    io.to(`conversation:${conversationId}`).to(`user:${recipientId}`).emit("private:message", {
+    io.to(`conversation:${conversationId}`).to(`user:${recipientId}`).to(`user:${message.senderId}`).emit("private:message", {
       conversationId,
       message: { ...message, mediaUrl },
     })

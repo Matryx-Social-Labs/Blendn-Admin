@@ -54,10 +54,12 @@ afterAll(async () => {
   await new Promise<void>((resolve) => io.close(() => resolve()))
 })
 
-it("reaches each socket once: the open chat, the chat list, and the sender's own open chat", async () => {
+it("reaches each socket once: the open chat, the chat list, the sender's open chat and the sender's other device (SCRUM-446)", async () => {
   const chatOpen = await listen(RECIPIENT, [`conversation:${CONVO}`])
   const onList = await listen(RECIPIENT, [])
   const senderChat = await listen(SENDER, [`conversation:${CONVO}`])
+  // The sender's second phone, on the Banter list: in its user room only.
+  const senderOtherDevice = await listen(SENDER, [])
 
   emitPrivateMessage(CONVO, RECIPIENT, {
     id: "m1",
@@ -75,4 +77,5 @@ it("reaches each socket once: the open chat, the chat list, and the sender's own
   expect(chatOpen).toEqual([`${CONVO}/m1`])
   expect(onList).toEqual([`${CONVO}/m1`])
   expect(senderChat).toEqual([`${CONVO}/m1`])
+  expect(senderOtherDevice).toEqual([`${CONVO}/m1`])
 })
