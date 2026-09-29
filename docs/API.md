@@ -845,6 +845,7 @@ does not offer Delist.
   The sender is told over the socket. Delivered is shown whatever the recipient's `read_receipts` setting; read stays gated.
 - **Replies.** `POST` takes `replyToId`, which must be a message in the same conversation, otherwise `400`. Every message carries `replyTo: { id, senderName, text, mediaType, unavailable }`. `senderName` resolves through the reveal rules (a pseudonym until revealed). A quote of a hidden message is `unavailable: true` with no text.
 - **Retries.** `POST` takes `clientId` (a uuid the app makes per message). A repeat with the same `clientId` returns the first write instead of writing a second; a `clientId` already used in another conversation gets `409`. Both room write paths accept `clientId` the same way.
+- **Rate limit.** 30 sends a minute per person → `429 RATE_LIMITED`, counted before the conversation is looked up, so sends refused with `404`/`403`/`400` count too (SCRUM-451). A retry of a send that landed is answered over the limit and does not count.
 
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
