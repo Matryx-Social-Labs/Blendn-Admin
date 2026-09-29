@@ -1268,6 +1268,12 @@
       "mutation": "M212 ensureOrgBrand's org lookup removed (by name only). M213 findBrandByName matches the old toLowerCase key only. M214 seed-blr-scenarios given back a literal name_key \"blue tokai\", and separately a template-string one.",
       "observed": "Red before the fix: 1 of 4 failing, the source check listed name_key: brandName.toLowerCase() x2 and name_key: \"third wave\" x2 in seed-qa.ts. M212: 1 of 4 failing (the renamed-brand case). M213: 1 of 4 failing (the product-key lookup). M214: 1 of 4 failing (the source check), both forms, after the check was widened from literals and toLowerCase() to any key not built by normaliseSponsorName. All reverted.",
       "date": "2026-09-29"
+    },
+    "sponsor-register-stale-key.itest.ts": {
+      "guards": "SCRUM-456: the admin brand register (getSponsorRegister) clusters two brands whose stored name_key disagree about the same name (the product's 'bluetokai' and a seed's 'blue tokai'), so the duplicate shows and the merge that repairs it is offered. On staging the register said 'every name is distinct' over sponsor@'s two Blue Tokai rows.",
+      "mutation": "M215 the register back on the stored name_key (name_key: r.name_key).",
+      "observed": "Red before the fix: 1 of 1 failing, no cluster held the two rows (received undefined). M215: the same failure. Reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

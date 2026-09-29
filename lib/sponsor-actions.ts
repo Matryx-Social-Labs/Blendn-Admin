@@ -961,7 +961,10 @@ export async function getSponsorRegister(): Promise<SponsorRegister> {
   const mapped: AdminSponsorRow[] = rows.map((r) => ({
     id: r.id,
     name: r.name,
-    name_key: r.name_key,
+    // The key of the name as it is now, not the stored one: a row keyed by an
+    // older rule (a seed's `toLowerCase()`) hid a duplicate from this screen,
+    // and with it the only merge that repairs it (SCRUM-456).
+    name_key: normaliseSponsorName(r.name),
     website: r.website,
     ownerName: r.org?.display_name ?? null,
     claimed: r.claimed_at !== null,
