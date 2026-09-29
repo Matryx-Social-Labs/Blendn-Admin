@@ -17,7 +17,7 @@ import { randomUUID } from "crypto"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
-import { db, closeDb, makeUser } from "./helpers"
+import { db, closeDb, makeUser, onboard } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const groupRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as
@@ -28,20 +28,33 @@ const eventChatRoute = require("@/app/api/mobile/events/[eventId]/chat/route") a
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const checkoutRoute = require("@/app/api/mobile/events/[eventId]/checkout/route") as
   typeof import("@/app/api/mobile/events/[eventId]/checkout/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const dmRoute = require("@/app/api/mobile/conversations/[conversationId]/messages/route") as
+  typeof import("@/app/api/mobile/conversations/[conversationId]/messages/route")
 
 const users: string[] = []
+const conversations: string[] = []
 
 afterAll(async () => {
+  if (conversations.length) {
+    await db.private_messages.deleteMany({ where: { conversation_id: { in: conversations } } })
+    await db.private_conversations.deleteMany({ where: { id: { in: conversations } } })
+  }
   if (users.length) await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
 })
 
 async function person() {
+  return (await personWithId()).token
+}
+
+async function personWithId() {
   const id = await makeUser("limit")
   users.push(id)
+  await onboard(id)
   let n = 0
   // A different token every call: the claim `n` changes the signature.
-  return () => jwt.sign({ userId: id, email: `${id}@itest.invalid`, type: "access", n: n++ }, process.env.MOBILE_JWT_SECRET!, { expiresIn: "15m" })
+  return { id, token: () => jwt.sign({ userId: id, email: `${id}@itest.invalid`, type: "access", n: n++ }, process.env.MOBILE_JWT_SECRET!, { expiresIn: "15m" }) }
 }
 
 const post = (url: string, token: string, body: object) =>
@@ -101,5 +114,51 @@ describe("the checkout limit (10 in ten minutes) is the person's", () => {
     // Somebody else checking out of the same event is not in that bucket.
     const other = await person()
     expect((await checkout(other())).status).toBe(404)
+  })
+})
+
+describe("the private-message limit (30 a minute) counts a refused send", () => {
+  const conversationOf = async (a: string, b: string) => {
+    const c = await db.private_conversations.create({
+      data: { user1_id: a, user2_id: b, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" },
+    })
+    conversations.push(c.id)
+    return c.id
+  }
+  const sendDm = (token: string, conversationId: string, body: object) =>
+    dmRoute.POST(post(`http://localhost/api/mobile/conversations/${conversationId}/messages`, token, body), {
+      params: Promise.resolve({ conversationId }),
+    })
+
+  /*
+   * SCRUM-451: the limiter ran after the lookups that refuse, so sends to a
+   * random id, to somebody else's conversation or quoting a message from
+   * elsewhere were never counted. A retry of a send that landed (SCRUM-410)
+   * still does not spend it.
+   */
+  it("refuses the 31st after 30 refused sends, and still answers a retry", async () => {
+    const me = await personWithId()
+    const friend = await personWithId()
+    const strangers = [await personWithId(), await personWithId()]
+    const mine = await conversationOf(me.id, friend.id)
+    const theirs = await conversationOf(strangers[0].id, strangers[1].id)
+    const clientId = randomUUID()
+    const landed = await db.private_messages.create({
+      data: { conversation_id: mine, sender_id: me.id, message_text: "hi", client_id: clientId },
+    })
+
+    for (let i = 0; i < 10; i++) {
+      expect((await sendDm(me.token(), randomUUID(), { text: "hi" })).status).toBe(404)
+      expect((await sendDm(me.token(), theirs, { text: "hi" })).status).toBe(403)
+      expect((await sendDm(me.token(), mine, { text: "hi", replyToId: randomUUID() })).status).toBe(400)
+    }
+    await expectLimited(await sendDm(me.token(), mine, { text: "hi" }))
+
+    const retry = await sendDm(me.token(), mine, { text: "hi", clientId })
+    expect(retry.status).toBe(200)
+    expect(((await retry.json()) as { data: { id: string } }).data.id).toBe(landed.id)
+    // A known clientId aimed at another conversation is not a retry: counted.
+    await expectLimited(await sendDm(me.token(), theirs, { text: "hi", clientId }))
+    expect(await db.private_messages.count({ where: { sender_id: me.id } })).toBe(1)
   })
 })

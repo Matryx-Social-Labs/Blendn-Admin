@@ -204,6 +204,25 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(NOT_OWN_MEDIA, 400)
     }
 
+    /*
+     * A retry of a send that already landed (SCRUM-410): the request reached
+     * us, the response did not reach the phone, and "Tap to retry" sent it
+     * again. Answered with the first write, below, and a retry does not spend
+     * the rate limit. Every other send does, before the lookups that refuse
+     * it: a random id, somebody else's conversation or a quote from elsewhere
+     * went uncounted when the limit came after them (SCRUM-451).
+     */
+    const retried = clientId
+      ? await db.private_messages.findUnique({
+          where: { sender_id_client_id: { sender_id: authUser.userId, client_id: clientId } },
+          include: sentInclude,
+        })
+      : null
+    if (retried?.conversation_id !== conversationId) {
+      const limited = await rateLimit(request, createUserRateLimit("private-message", authUser.userId))
+      if (limited) return limited
+    }
+
     // Verify conversation exists and user has access
     const conversation = await db.private_conversations.findUnique({
       where: { id: conversationId },
@@ -230,8 +249,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("Conversation not found")
     }
 
-    // Group chat sends and check-ins are rate limited; DM sends were not, so a
-    // single account could flood a conversation and its push notifications.
     /** One shape for a new message and for a retry that finds its first write. */
     const sentData = (m: SentMessage) => ({
       id: m.id,
@@ -256,23 +273,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         ? successResponse({ ...sentData(m), text: null, moderation_hidden: true })
         : successResponse(sentData(m))
 
-    /*
-     * A retry of a send that already landed (SCRUM-410): the request reached
-     * us, the response did not reach the phone, and "Tap to retry" sent it
-     * again. Answered with the first write — before the rate limit, which a
-     * retry should not spend, and before the checks, which it already passed.
-     */
-    if (clientId) {
-      const existing = await db.private_messages.findUnique({
-        where: { sender_id_client_id: { sender_id: authUser.userId, client_id: clientId } },
-        include: sentInclude,
-      })
-      if (existing) {
-        if (existing.conversation_id !== conversationId) {
-          return errorResponse("That message id belongs to another conversation", 409)
-        }
-        return answer(existing)
+    // The retry, answered before the checks it already passed.
+    if (retried) {
+      if (retried.conversation_id !== conversationId) {
+        return errorResponse("That message id belongs to another conversation", 409)
       }
+      return answer(retried)
     }
 
     if (replyToId) {
@@ -282,9 +288,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
       if (!quoted) return errorResponse("You can only reply to a message in this conversation", 400)
     }
-
-    const limited = await rateLimit(request, createUserRateLimit("private-message", authUser.userId))
-    if (limited) return limited
 
     // Check if the recipient has blocked the sender
     const recipientId =
