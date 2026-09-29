@@ -323,14 +323,14 @@ const DELETE_CALL_TIMEOUT_MS = 30_000
 
 async function deletePrefixIn(bucket: string, prefix: string, keep: ReadonlySet<string>): Promise<number> {
   const client = getS3Client()
-  const timeout = () => ({ abortSignal: AbortSignal.timeout(DELETE_CALL_TIMEOUT_MS) })
+  const deleteDeadline = () => ({ abortSignal: AbortSignal.timeout(DELETE_CALL_TIMEOUT_MS) })
   let deleted = 0
   let refused = 0
   let token: string | undefined
   do {
     const page = await client.send(
       new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
-      timeout()
+      deleteDeadline()
     )
     const keys = (page.Contents ?? [])
       .map((o) => o.Key)
@@ -341,7 +341,7 @@ async function deletePrefixIn(bucket: string, prefix: string, keep: ReadonlySet<
           Bucket: bucket,
           Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
         }),
-        timeout()
+        deleteDeadline()
       )
       // Quiet mode reports only failures: count what actually went, and say which did not.
       const failed = result?.Errors ?? []
