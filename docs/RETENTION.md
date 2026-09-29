@@ -61,10 +61,17 @@ deletes their account:
 - **DMs:** `moderation_status = 'hidden'`, with `message_reports`. Account
   deletion closes the conversation and keeps the messages.
 - **Images in those messages:** account deletion erases the person's
-  `chat/<id>/` objects except the images of messages that are hidden, flagged,
-  carry a `moderation_flags` row or were reported (`retainedChatMediaKeys`,
-  `lib/retained-media.ts`, SCRUM-428). Those objects stay for as long as the
-  message does.
+  `chat/<id>/` objects except the images of their messages that are removed
+  content (`retainedChatMediaKeys`, `lib/retained-media.ts`, SCRUM-428):
+  - hidden or flagged;
+  - deleted by someone other than the author;
+  - carrying a flag nobody cleared;
+  - reported by someone else, with the report not dismissed.
+
+  If that set cannot be read, `chat/` is left alone rather than erased. Known
+  gaps (SCRUM-429): kept objects are not yet purged at 180 days, they stay in
+  the public bucket, and a report filed after the deletion finds the image
+  already gone.
 - **Board posts:** `moderation_status = 'hidden'`. Account deletion deletes the
   author's other posts but keeps these.
 - **Events:** soft-deleted or delisted, with `event_reports` and `audit_logs`.

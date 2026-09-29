@@ -58,35 +58,51 @@ it("keeps the images of hidden, flagged and reported messages, in rooms and DMs,
   events.push(event.id)
   const group = await db.chat_groups.create({ data: { event_id: event.id, name: "room", status: "active" } })
 
-  const room = (name: string, moderation_status: string | null = null) =>
+  const room = (
+    name: string,
+    moderation_status: string | null = null,
+    extra: { user_id?: string; deleted_at?: Date; deleted_by?: string } = {}
+  ) =>
     db.chat_messages.create({
       data: {
         chat_group_id: group.id,
-        user_id: me,
+        user_id: extra.user_id ?? me,
         content: name,
         type: "image",
         metadata: { mediaUrl: url(me, name) },
         moderation_status,
+        ...(extra.deleted_at && { deleted_at: extra.deleted_at, deleted_by: extra.deleted_by }),
       },
+    })
+  const flag = (messageId: string, status?: "pending" | "approved" | "rejected") =>
+    db.moderation_flags.create({
+      data: {
+        message_id: messageId,
+        chat_group_id: group.id,
+        user_id: me,
+        source: "auto_image",
+        categories: { sexual: 0.9 },
+        confidence: 0.9,
+        ...(status && { status }),
+      },
+    })
+  const report = (messageId: string, type: "group" | "private", by: string, status?: "pending" | "reviewed" | "resolved") =>
+    db.message_reports.create({
+      data: { reporter_id: by, message_id: messageId, message_type: type, reason: "harassment", ...(status && { status }) },
     })
   await room("room-plain")
   await room("room-hidden", "hidden")
   await room("room-flagged-status", "flagged")
-  const flagged = await room("room-flag-row")
-  await db.moderation_flags.create({
-    data: {
-      message_id: flagged.id,
-      chat_group_id: group.id,
-      user_id: me,
-      source: "auto_image",
-      categories: { sexual: 0.9 },
-      confidence: 0.9,
-    },
-  })
-  const reportedRoom = await room("room-reported")
-  await db.message_reports.create({
-    data: { reporter_id: other, message_id: reportedRoom.id, message_type: "group", reason: "harassment" },
-  })
+  await flag((await room("room-flag-row")).id)
+  await report((await room("room-reported")).id, "group", other)
+  await room("room-host-deleted", null, { deleted_at: new Date(), deleted_by: owner })
+  // Cleared or dismissed is not removed content; nor is the author's own act.
+  await flag((await room("room-flag-cleared")).id, "approved")
+  await report((await room("room-report-dismissed")).id, "group", other, "reviewed")
+  await report((await room("room-self-reported")).id, "group", me)
+  await room("room-self-deleted", null, { deleted_at: new Date(), deleted_by: me })
+  // Somebody else's removed message carrying my key: scoped to my own messages.
+  await room("room-theirs-with-my-key", "hidden", { user_id: other })
   // Hidden, but no image: nothing to keep.
   await db.chat_messages.create({
     data: { chat_group_id: group.id, user_id: me, content: "text only", type: "text", moderation_status: "hidden" },
@@ -96,24 +112,25 @@ it("keeps the images of hidden, flagged and reported messages, in rooms and DMs,
     data: { user1_id: me, user2_id: other, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" },
   })
   conversations.push(conversation.id)
-  const dm = (sender: string, name: string, moderation_status: string | null = null) =>
+  const dm = (sender: string, name: string, moderation_status: string | null = null, owner = sender) =>
     db.private_messages.create({
       data: {
         conversation_id: conversation.id,
         sender_id: sender,
-        media_url: url(sender, name),
+        media_url: url(owner, name),
         media_type: "image",
         moderation_status,
       },
     })
   await dm(me, "dm-plain")
   await dm(me, "dm-hidden", "hidden")
-  const reportedDm = await dm(me, "dm-reported")
-  await db.message_reports.create({
-    data: { reporter_id: other, message_id: reportedDm.id, message_type: "private", reason: "spam" },
-  })
-  // Someone else's hidden image is theirs to keep or lose, not mine.
+  await dm(me, "dm-flagged", "flagged")
+  await report((await dm(me, "dm-reported")).id, "private", other)
+  await report((await dm(me, "dm-report-dismissed")).id, "private", other, "reviewed")
+  await report((await dm(me, "dm-self-reported")).id, "private", me)
+  // Someone else's hidden image is theirs; and their hidden DM carrying my key is not my message.
   await dm(other, "their-hidden", "hidden")
+  await dm(other, "dm-theirs-with-my-key", "hidden", me)
 
   const kept = await retainedChatMediaKeys(me)
   expect([...kept].sort()).toEqual(
@@ -122,7 +139,9 @@ it("keeps the images of hidden, flagged and reported messages, in rooms and DMs,
       key(me, "room-flagged-status"),
       key(me, "room-flag-row"),
       key(me, "room-reported"),
+      key(me, "room-host-deleted"),
       key(me, "dm-hidden"),
+      key(me, "dm-flagged"),
       key(me, "dm-reported"),
     ].sort()
   )

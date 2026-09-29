@@ -2080,9 +2080,10 @@ intent_default, reveal_by_default, work_field**, plus the structured
 
 Removed from storage, after the transaction: everything the person uploaded
 from the app, meaning `profile/<id>/` (photos) and `chat/<id>/` (images sent in
-DMs and rooms, SCRUM-428). The exception is an image in a message that
-moderation hid or flagged, or that someone reported: that is removed content,
-kept 180 days (`docs/RETENTION.md`). A failure is logged by user and folder,
+DMs and rooms, SCRUM-428). The exception is removed content, kept 180 days
+(`docs/RETENTION.md`): an image in a message that moderation hid or flagged,
+that someone else deleted, or that someone else reported, where the flag or
+report was not dismissed. If that set can't be read, `chat/` is left alone. A failure is logged by user and folder,
 and the other folder is still erased. `events/`, `sponsored/` and `claims/` belong to an
 organisation's records and stay. A public URL can keep serving from Tigris'
 cache until its `max-age` runs out.

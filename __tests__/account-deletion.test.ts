@@ -424,6 +424,18 @@ describe("the photos leave storage, not only the row", () => {
     expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
   })
 
+  it("fails closed: if the retained set cannot be read, chat/ is left alone and profile/ still goes", async () => {
+    // Erasing without it would destroy removed content kept for 180 days.
+    mockAuth.mockResolvedValue({ userId: USER })
+    const { retainedChatMediaKeys } = jest.requireMock("@/lib/retained-media") as { retainedChatMediaKeys: jest.Mock }
+    retainedChatMediaKeys.mockRejectedValueOnce(new Error("query failed"))
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    expect(mockDeletePrefix).not.toHaveBeenCalledWith(`chat/${USER}/`, expect.anything())
+    expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/storage/i), expect.objectContaining({ folder: "chat" }))
+  })
+
   it("a storage failure does not undo the erasure the database accepted, and is logged by user", async () => {
     mockAuth.mockResolvedValue({ userId: USER })
     mockDeletePrefix.mockRejectedValueOnce(new Error("listing failed"))

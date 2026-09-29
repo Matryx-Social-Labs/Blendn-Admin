@@ -13,6 +13,9 @@ process.env.TIGRIS_BUCKET = "blendn-media-test"
 
 const sent: { name: string; input: Record<string, unknown> }[] = []
 const listed = ["chat/u1/1-a.jpg", "chat/u1/2-b.jpg", "chat/u1/3-c.jpg"]
+// One page by default; a test can split the listing and name keys the delete refuses.
+let pages: string[][] = [listed]
+let refused: string[] = []
 
 jest.mock("@aws-sdk/s3-request-presigner", () => ({ getSignedUrl: jest.fn() }))
 jest.mock("@aws-sdk/client-s3", () => {
@@ -25,7 +28,12 @@ jest.mock("@aws-sdk/client-s3", () => {
     S3Client: class {
       async send(command: { name: string; input: Record<string, unknown> }) {
         sent.push(command)
-        if (command.name === "ListObjectsV2") return { Contents: listed.map((Key) => ({ Key })), IsTruncated: false }
+        if (command.name === "ListObjectsV2") {
+          const i = command.input.ContinuationToken ? Number(command.input.ContinuationToken) : 0
+          const more = i + 1 < pages.length
+          return { Contents: pages[i].map((Key) => ({ Key })), IsTruncated: more, NextContinuationToken: more ? String(i + 1) : undefined }
+        }
+        if (command.name === "DeleteObjects") return { Errors: refused.map((Key) => ({ Key, Code: "AccessDenied" })) }
         return {}
       }
     },
@@ -51,6 +59,8 @@ const deleted = () =>
 
 beforeEach(() => {
   sent.length = 0
+  pages = [listed]
+  refused = []
 })
 
 it("deletes everything under the prefix when told to keep nothing", async () => {
@@ -66,4 +76,16 @@ it("leaves the keys it is told to keep, and counts only what it deleted", async 
 it("sends no delete at all when everything listed is kept", async () => {
   expect(await deletePrefix("chat/u1/", new Set(listed))).toBe(0)
   expect(sent.some((c) => c.name === "DeleteObjects")).toBe(false)
+})
+
+it("honours the keep set on every page, and follows the continuation token", async () => {
+  pages = [["chat/u1/1-a.jpg", "chat/u1/2-b.jpg"], ["chat/u1/3-c.jpg", "chat/u1/4-d.jpg"]]
+  expect(await deletePrefix("chat/u1/", new Set(["chat/u1/4-d.jpg"]))).toBe(3)
+  expect(deleted()).toEqual(["chat/u1/1-a.jpg", "chat/u1/2-b.jpg", "chat/u1/3-c.jpg"])
+  expect(sent.filter((c) => c.name === "ListObjectsV2").map((c) => c.input.ContinuationToken)).toEqual([undefined, "1"])
+})
+
+it("does not count an object the store refused to delete", async () => {
+  refused = ["chat/u1/2-b.jpg"]
+  expect(await deletePrefix("chat/u1/")).toBe(2)
 })
