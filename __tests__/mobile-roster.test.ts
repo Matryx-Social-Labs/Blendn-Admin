@@ -18,6 +18,10 @@ const mockDb = {
   blocked_users: { findMany: jest.fn() },
   // The reveal flag: "Show who I am" in the room. Empty unless a case sets it.
   event_match_preferences: { findMany: jest.fn() },
+  // The rest of the room identity rule (`visibleInRoom`): closed pairs and
+  // friends who let friends recognise them in rooms. Empty unless a case sets it.
+  private_conversations: { findMany: jest.fn() },
+  friendships: { findMany: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -47,15 +51,26 @@ const bare = {
   check_in_time: new Date("2026-08-10T18:00:00.000Z"),
 }
 
+/** The roster's rows. `visibleInRoom`'s own read — was the viewer here? — answers yes. */
+let rows: unknown[] = []
+const roster = (r: unknown[]) => {
+  rows = r
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockAuth.mockResolvedValue({ userId: "u1" })
   mockDb.events.findUnique.mockResolvedValue({ id: EVENT })
   mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "ci1" })
   mockDb.event_check_ins.count.mockResolvedValue(1)
-  mockDb.event_check_ins.findMany.mockResolvedValue([bare])
+  roster([bare])
+  mockDb.event_check_ins.findMany.mockImplementation(async (args: { select?: { user_id?: boolean } }) =>
+    args.select?.user_id ? [{ user_id: "u1" }] : rows
+  )
   mockDb.event_match_preferences.findMany.mockResolvedValue([])
   mockDb.blocked_users.findMany.mockResolvedValue([])
+  mockDb.private_conversations.findMany.mockResolvedValue([])
+  mockDb.friendships.findMany.mockResolvedValue([])
 })
 
 describe("blocks reach the roster", () => {
@@ -127,7 +142,7 @@ describe("GET /events/:id/checkins — who counts as present", () => {
   it("lists the viewer by their own id and everyone else by a handle, never a real id", async () => {
     // The app leaves itself off its own roster by comparing ids, so yours stays
     // real; a friend who holds someone's real id must not find it here.
-    mockDb.event_check_ins.findMany.mockResolvedValue([
+    roster([
       bare,
       { user: { id: "u1", profile: { age: 30, location: "Bengaluru" } }, check_in_time: bare.check_in_time },
     ])
@@ -149,7 +164,7 @@ describe("GET /events/:id/checkins — who counts as present", () => {
 
 describe("GET /events/:id/checkins — what it discloses", () => {
   it("still returns the pseudonym, never the real name or photo", async () => {
-    mockDb.event_check_ins.findMany.mockResolvedValue([
+    roster([
       { ...bare, user: { ...bare.user, name: "Ananya Bhat", profile: { ...bare.user.profile, photos: ["https://cdn/a.jpg"] } } },
     ])
     const body = await (await GET(req(), { params })).json()
@@ -165,7 +180,7 @@ describe("GET /events/:id/checkins — what it discloses", () => {
      * name, and this roster beside it still said "Cosmic Panda" (L2.5). Same
      * rule as lib/matching.ts, scoped to the event the flag was set in.
      */
-    mockDb.event_check_ins.findMany.mockResolvedValue([
+    roster([
       { ...bare, user: { ...bare.user, name: "Ananya Bhat", profile: { ...bare.user.profile, photos: ["https://cdn/a.jpg"] } } },
     ])
     mockDb.event_match_preferences.findMany.mockResolvedValue([{ user_id: "u2" }])
@@ -177,8 +192,39 @@ describe("GET /events/:id/checkins — what it discloses", () => {
     expect(where).toMatchObject({ event_id: EVENT, revealed: true })
   })
 
+  it("names a friend who lets friends recognise them in rooms, as their profile does", async () => {
+    /*
+     * The profile a card opens honoured "Friends can see who I am in rooms"
+     * and this roster did not, so the same friend was "Cosmic Panda" here and
+     * their name one tap later. One rule (`visibleInRoom`) now answers both.
+     */
+    roster([
+      { ...bare, user: { ...bare.user, name: "Ananya Bhat", profile: { ...bare.user.profile, photos: ["https://cdn/a.jpg"] } } },
+    ])
+    const friends = (u2OptedIn: boolean) => [
+      {
+        user1_id: "u1",
+        user2_id: "u2",
+        user1: { profile: { friends_see_me_in_rooms: true } },
+        user2: { profile: { friends_see_me_in_rooms: u2OptedIn } },
+      },
+    ]
+
+    mockDb.friendships.findMany.mockResolvedValue(friends(true))
+    let [a] = (await (await GET(req(), { params })).json()).data.attendees
+    expect(a.name).toBe("Ananya Bhat")
+    expect(a.image).toBe("https://cdn/a.jpg")
+    expect(a.userId.startsWith("rh_")).toBe(true)
+
+    // The switch is the TARGET's consent: the viewer's own switch does not count.
+    mockDb.friendships.findMany.mockResolvedValue(friends(false))
+    ;[a] = (await (await GET(req(), { params })).json()).data.attendees
+    expect(a.name).toBe("Cosmic Panda")
+    expect(a).not.toHaveProperty("image")
+  })
+
   it("falls back to Attendee when the room has no pseudonym for someone", async () => {
-    mockDb.event_check_ins.findMany.mockResolvedValue([
+    roster([
       { ...bare, user: { ...bare.user, id: "stranger" } },
     ])
     const body = await (await GET(req(), { params })).json()
