@@ -230,3 +230,51 @@ describe("the duplicate check still finds the neighbour when the district is bus
   })
 })
 
+
+/*
+ * SCRUM-423. The manage form sends every field on each save, and the audit row
+ * recorded what was sent: an outline-only edit read as name, type, address,
+ * city, capacity, lat, lng and geofence. It records what changed now, with the
+ * outline's corner count before and after, so a disputed door can be traced.
+ */
+describe("venue.updated records what changed", () => {
+  /** The audit write is fire-and-forget; wait for it. */
+  async function audits(id: string, expected: number) {
+    for (let i = 0; i < 40; i++) {
+      const rows = await db.audit_logs.findMany({
+        where: { resource_id: id, action: "venue.updated" },
+        orderBy: { created_at: "asc" },
+        select: { details: true },
+      })
+      if (rows.length >= expected) return rows.map((r) => r.details)
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    return (await db.audit_logs.findMany({ where: { resource_id: id, action: "venue.updated" }, select: { details: true } })).map((r) => r.details)
+  }
+
+  it("an outline-only save names the outline alone, with its corners before and after; a no-op save writes no row", async () => {
+    const host = await member("oav-audit", "organizer")
+    host.as()
+    const c = { lat: base.lat + 0.07, lng: base.lng }
+    const id = await added(c)
+    const r = await db.venues.findUniqueOrThrow({ where: { id }, select: { name: true, venue_type: true } })
+    // Everything the form sends, unchanged but for the outline, which loses a corner.
+    const form = { name: r.name, venueType: r.venue_type, address: null, city: null, capacity: null, lat: c.lat, lng: c.lng }
+    const three = { ...outline(c), ring: outline(c).ring.slice(0, 3) }
+
+    await updateVenue(id, { ...form, geofence: three })
+    expect(await audits(id, 1)).toEqual([{ fields: ["geofence"], geofence: { before: 4, after: 3 } }])
+
+    await updateVenue(id, { ...form, geofence: three })
+    await updateVenue(id, { ...form, name: "Renamed", geofence: three })
+    expect(await audits(id, 2)).toEqual([
+      { fields: ["geofence"], geofence: { before: 4, after: 3 } },
+      { fields: ["name"] },
+    ])
+
+    // The pin nudged and the outline swapped for a circle round it: the form's names, and the shape either side.
+    const pin = { lat: c.lat + 0.0001, lng: c.lng + 0.0001 }
+    await updateVenue(id, { ...form, name: "Renamed", ...pin, geofence: { type: "circle", ...pin, radius: 80, buffer: 20 } })
+    expect((await audits(id, 3))[2]).toEqual({ fields: ["geofence", "lat", "lng"], geofence: { before: 3, after: "circle" } })
+  })
+})

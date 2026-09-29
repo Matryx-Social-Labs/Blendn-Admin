@@ -1,5 +1,6 @@
 "use server"
 
+import { isDeepStrictEqual } from "node:util"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
@@ -366,6 +367,25 @@ function refuseUnknownVenueType(type: venue_type | null | undefined): void {
   if (type != null && !VENUE_TYPES.includes(type)) throw new Refusal("That is not a venue type this list knows.")
 }
 
+/** The form's name for each column an update writes, as the audit row records it. */
+const FORM_FIELD = {
+  name: "name",
+  venue_type: "venueType",
+  address: "address",
+  city: "city",
+  capacity: "capacity",
+  latitude: "lat",
+  longitude: "lng",
+  geofence: "geofence",
+} as const
+
+/** A polygon's corner count, "circle", or null for no outline. */
+function fenceShape(value: unknown): number | "circle" | null {
+  const parsed = validateGeofence(value)
+  if (!parsed.ok || !parsed.fence) return null
+  return parsed.fence.type === "polygon" ? parsed.fence.ring.length : "circle"
+}
+
 /**
  * Edit a venue. Owners edit their own; admins edit any.
  *
@@ -397,6 +417,21 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
     }
   }
 
+  // The row as it stands: the drift checks below read it, and the audit says what changed from it.
+  const before = await db.venues.findUniqueOrThrow({
+    where: { id },
+    select: {
+      name: true,
+      venue_type: true,
+      address: true,
+      city: true,
+      capacity: true,
+      latitude: true,
+      longitude: true,
+      geofence: true,
+    },
+  })
+
   let geofence: Geofence | undefined
   if (input.geofence !== undefined) {
     const parsed = validateGeofence(input.geofence)
@@ -405,9 +440,9 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
       // Against the pin as it will be after this request.
       const pin = movingPin
         ? (input as { lat: number; lng: number })
-        : await db.venues
-            .findUniqueOrThrow({ where: { id }, select: { latitude: true, longitude: true } })
-            .then((v) => (v.latitude !== null && v.longitude !== null ? { lat: v.latitude, lng: v.longitude } : null))
+        : before.latitude !== null && before.longitude !== null
+          ? { lat: before.latitude, lng: before.longitude }
+          : null
       // A venue with no pin yet has nothing for the fence to drift from.
       if (pin) refuseIfFenceDrifted(parsed.fence, pin)
     }
@@ -420,35 +455,48 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
      * because the drift test only ran on a fence that came with the request
      * (SCRUM-204). Same limit, same message, against what is already stored.
      */
-    const stored = await db.venues.findUniqueOrThrow({ where: { id }, select: { geofence: true } })
-    const existing = validateGeofence(stored.geofence)
+    const existing = validateGeofence(before.geofence)
     if (existing.ok && existing.fence) {
       refuseIfFenceDrifted(existing.fence, input as { lat: number; lng: number })
     }
   }
 
-  await db.venues.update({
-    where: { id },
-    data: {
-      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
-      ...(input.venueType !== undefined ? { venue_type: input.venueType } : {}),
-      ...(input.address !== undefined ? { address: input.address?.trim() || null } : {}),
-      ...(input.city !== undefined ? { city: input.city?.trim() || null } : {}),
-      ...(input.capacity !== undefined
-        ? { capacity: input.capacity && input.capacity > 0 ? Math.round(input.capacity) : null }
-        : {}),
-      ...(geofence ? { geofence: geofence as object } : {}),
-      ...(movingPin ? { latitude: input.lat, longitude: input.lng } : {}),
-    },
-  })
+  const data = {
+    ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+    ...(input.venueType !== undefined ? { venue_type: input.venueType } : {}),
+    ...(input.address !== undefined ? { address: input.address?.trim() || null } : {}),
+    ...(input.city !== undefined ? { city: input.city?.trim() || null } : {}),
+    ...(input.capacity !== undefined
+      ? { capacity: input.capacity && input.capacity > 0 ? Math.round(input.capacity) : null }
+      : {}),
+    ...(geofence ? { geofence: geofence as object } : {}),
+    ...(movingPin ? { latitude: input.lat, longitude: input.lng } : {}),
+  }
+  await db.venues.update({ where: { id }, data })
 
-  auditLog({
-    userId: user.id,
-    action: "venue.updated",
-    resource: "venue",
-    resourceId: id,
-    details: { fields: Object.keys(input) },
-  })
+  /*
+   * What changed, not what was sent (SCRUM-423). The manage form sends every
+   * field on each save, so an outline-only edit was recorded as name, type,
+   * address, city, capacity, lat, lng and geofence. A save that changes nothing
+   * writes no row.
+   */
+  const changed = (Object.keys(data) as (keyof typeof data)[]).filter(
+    // Deep, not by JSON text: jsonb hands the stored outline back with its keys reordered.
+    (column) => !isDeepStrictEqual(data[column], before[column])
+  )
+  if (changed.length > 0) {
+    auditLog({
+      userId: user.id,
+      action: "venue.updated",
+      resource: "venue",
+      resourceId: id,
+      details: {
+        fields: changed.map((column) => FORM_FIELD[column]),
+        // The outline's shape either side, so a disputed door can be traced.
+        ...(changed.includes("geofence") ? { geofence: { before: fenceShape(before.geofence), after: fenceShape(geofence) } } : {}),
+      },
+    })
+  }
   revalidatePath("/dashboard/venues")
   revalidatePath(`/dashboard/venues/${id}`)
 }
