@@ -9,7 +9,7 @@ import { stripComments } from "./support/strip-comments"
  * `swagger-ui-react` handed apidom's module graph to Turbopack, which skipped
  * the modules that attach `refract` to each OpenAPI 3.1 element class (they
  * exist for their side effects, and their exports are re-exports). The page
- * threw `oS.refract is not a function` and drew 2 of 22 sections, and no Next
+ * threw `oS.refract is not a function`, and no Next
  * tree-shaking flag brought the modules back. Nothing but a browser on a
  * production build shows it, so this keeps the page on the prebuilt bundle.
  */
