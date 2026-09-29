@@ -1341,6 +1341,12 @@
       "observed": "Red before the fix: 1 of 13 failing. M300: 1 of 13 failing. M301: 1 of 13 failing.",
       "date": "2026-09-29"
     },
+    "minor-dating-fields-cleared.itest.ts": {
+      "guards": "SCRUM-477: prisma/migrations/20260929210000_minor_dating_fields_cleared clears orientations, interested_in, show_orientation, 'dating' in intent_default and the word 'dating' in looking_for on every profile whose age is known to be under 18 by ageFrom's rule (a birth date not in the future giving 0-149 whole years on today's UTC date wins, else the stored age). Any one of the five is reason to clear; adults, an 18-year-old, someone turning 18 today, a birth date days or months ahead with an adult age, and unknown ages keep theirs; 'dating' is matched with JS \\b's ASCII boundaries ('datingß', 'Dating-app' go; 'updating', 'datingapp' stay); looking_for keeps its order and a NULL list stays NULL; name, bio, age and birth date do not move; a row with nothing to clear is not rewritten; a second run rewrites nothing.",
+      "mutation": "M307: `ages.years < 18` -> `<= 18`. M308: the stored-age fallback replaced with NULL. M309: the plausibility check (not future, <= 149 years) replaced with `date_of_birth IS NOT NULL`. M310: the looking_for match without word boundaries (`!~ 'dating'`, and separately without the closing `\\M`). M311: intent_default left as it was. M312: an unknown age counted as 0. M313: the stored age consulted before the birth date. M314: `OR p.show_orientation` dropped from the has-something-to-clear guard. M315: the guard made always true. M316: the upper bound 149 -> 100000. M317: today's date one day early. M318: looking_for re-ordered by value. M319: a NULL looking_for turned into '{}'. M320: the not-in-the-future guard on the birth date dropped (age() reads a date up to a year ahead as 0). M321: Postgres \\m/\\M word boundaries in place of the ASCII ones.",
+      "observed": "Each: minor-dating-fields-cleared.itest.ts 1 of 1 failing. Restored; 1 of 1.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
