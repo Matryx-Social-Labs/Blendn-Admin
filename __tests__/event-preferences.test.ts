@@ -29,6 +29,10 @@ const mockDb = {
   event_likes: { findMany: jest.fn(), groupBy: jest.fn() },
   chat_group_members: { findMany: jest.fn() },
   categories: { findMany: jest.fn() },
+  // The room identity rule (`visibleInRoom`) also reads closed pairs and
+  // friendships. None here: these fixtures are about multi-day check-ins.
+  private_conversations: { findMany: jest.fn() },
+  friendships: { findMany: jest.fn() },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -87,6 +91,8 @@ beforeEach(() => {
   mockDb.event_likes.groupBy.mockResolvedValue([])
   mockDb.chat_group_members.findMany.mockResolvedValue([])
   mockDb.categories.findMany.mockResolvedValue([])
+  mockDb.private_conversations.findMany.mockResolvedValue([])
+  mockDb.friendships.findMany.mockResolvedValue([])
 })
 
 describe("a three-day event", () => {
@@ -169,10 +175,12 @@ describe("preferences are read per event, not per check-in", () => {
     ])
 
     await matchesForEvent(EVENT, VIEWER)
-    expect(mockDb.event_match_preferences.findMany).toHaveBeenCalledTimes(1)
-    expect(mockDb.event_match_preferences.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { event_id: EVENT } })
-    )
+    // Two reads, each for the whole room: the answers themselves, and who
+    // revealed here (`visibleInRoom`, the roster's rule for naming a card).
+    const wheres = mockDb.event_match_preferences.findMany.mock.calls.map(([a]) => a.where)
+    expect(wheres).toHaveLength(2)
+    expect(wheres).toContainEqual({ event_id: EVENT })
+    expect(wheres).toContainEqual({ event_id: EVENT, revealed: true, user_id: { in: expect.arrayContaining(["a", "b"]) } })
   })
 
   it("keeps someone anonymous when they have no preferences row at all", async () => {

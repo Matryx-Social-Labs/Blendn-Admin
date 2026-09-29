@@ -12,10 +12,15 @@ process.env.NEXTAUTH_SECRET = "room-waves-test-secret-at-least-32-chars"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 const mockDb = {
-  event_check_ins: { findFirst: jest.fn() },
+  event_check_ins: { findFirst: jest.fn(), findMany: jest.fn() },
   chat_group_members: { findFirst: jest.fn() },
   event_match_preferences: { findMany: jest.fn() },
   user: { findUnique: jest.fn() },
+  // The rest of the room identity rule (`visibleInRoom`): blocks, closed pairs
+  // and friends. Empty unless a case sets them.
+  blocked_users: { findMany: jest.fn() },
+  private_conversations: { findMany: jest.fn() },
+  friendships: { findMany: jest.fn() },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
@@ -63,6 +68,10 @@ function inside(...ids: string[]) {
   mockDb.event_check_ins.findFirst.mockImplementation(async ({ where }: { where: { user_id: string } }) =>
     ids.includes(where.user_id) ? { id: `ci-${where.user_id}` } : null
   )
+  // `visibleInRoom` asks whether the recipient was in the room at all.
+  mockDb.event_check_ins.findMany.mockImplementation(async ({ where }: { where: { user_id: { in: string[] } } }) =>
+    where.user_id.in.filter((id) => ids.includes(id)).map((user_id) => ({ user_id }))
+  )
 }
 
 beforeEach(() => {
@@ -75,6 +84,9 @@ beforeEach(() => {
   mockDb.chat_group_members.findFirst.mockResolvedValue({ anonymous_name: "Cosmic Panda" })
   mockDb.event_match_preferences.findMany.mockResolvedValue([])
   mockDb.user.findUnique.mockResolvedValue({ name: "Arjun Rao" })
+  mockDb.blocked_users.findMany.mockResolvedValue([])
+  mockDb.private_conversations.findMany.mockResolvedValue([])
+  mockDb.friendships.findMany.mockResolvedValue([])
 })
 
 it("sends, and emits room:wave to the recipient with the sender's pseudonym", async () => {
@@ -89,7 +101,7 @@ it("sends, and emits room:wave to the recipient with the sender's pseudonym", as
 })
 
 it("uses the real name only for a sender who revealed in this room", async () => {
-  // The roster's rule (`revealedInRoom`): revealed at THIS event.
+  // The roster's rule (`visibleInRoom`): revealed at THIS event.
   mockDb.event_match_preferences.findMany.mockResolvedValue([{ user_id: ME }])
   await wave()
   expect(mockDb.event_match_preferences.findMany).toHaveBeenCalledWith(

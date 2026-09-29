@@ -11,6 +11,7 @@ import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle } from "./room-handle"
+import { recognisedInRoomBy } from "./identity"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -991,6 +992,10 @@ type Payload<E extends keyof ServerToClientEvents> = Parameters<ServerToClientEv
  *
  * `skipSocketId` is `socket.to()`'s "not back to the sender" for typing.
  *
+ * `about`, for a payload that names one person: each copy is also told whether
+ * its recipient may recognise that person in this room (`recognisedInRoomBy`,
+ * the roster's rule), asked once for everybody the audience holds.
+ *
  * ponytail: one `fetchSockets` and one packet per socket per event, where a
  * broadcast was one packet. Fine at one instance and rooms of hundreds; if a
  * public event's counter room grows to thousands, every payload here names one
@@ -1001,10 +1006,13 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   audience: { fetchSockets(): Promise<RemoteSocket<ServerToClientEvents, Partial<SocketData> | undefined>[]> },
   eventId: string,
   event: E,
-  build: (idFor: (userId: string) => string) => Payload<E>,
-  skipSocketId?: string
+  build: (idFor: (userId: string) => string, recognises: boolean) => Payload<E>,
+  skipSocketId?: string,
+  about?: string
 ): Promise<void> {
   const sockets = await audience.fetchSockets()
+  const viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
+  const recognising = about ? await recognisedInRoomBy(eventId, about, viewers) : new Set<string>()
   const handles = new Map<string, string>()
   const handleOf = (userId: string) => {
     let handle = handles.get(userId)
@@ -1017,7 +1025,10 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
     // No user on the socket means nobody is "own": every id goes out handled.
     const viewer = recipient.data?.userId ?? ""
     let copy = copies.get(viewer)
-    if (!copy) copies.set(viewer, (copy = build((userId) => (userId === viewer ? userId : handleOf(userId)))))
+    if (!copy) {
+      const idFor = (userId: string) => (userId === viewer ? userId : handleOf(userId))
+      copies.set(viewer, (copy = build(idFor, recognising.has(viewer))))
+    }
     ;(recipient.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
   }
 }
@@ -1036,7 +1047,7 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
   chatGroupId: string,
   audience: Parameters<typeof emitAsSeenBy<E>>[0],
   event: E,
-  build: (idFor: (userId: string) => string) => Payload<E>,
+  build: Parameters<typeof emitAsSeenBy<E>>[3],
   knownEventId?: string
 ): Promise<void> {
   try {
@@ -1094,8 +1105,14 @@ function sendWithHereCount(eventId: string, send: (hereCount: number | undefined
 export function emitEventCheckIn(
   eventId: string,
   userId: string,
+  /** Their pseudonym in this room: what everybody who may not recognise them sees. */
   userName: string,
-  userImage?: string,
+  /**
+   * Who they are, for the recipients who may recognise them here — the same
+   * people whose roster names them (`visibleInRoom`). Omit to send the
+   * pseudonym to everybody.
+   */
+  identity?: { name: string | null; image: string | null },
   /** The arriver's block counterparties: kept off the roster, as off the push (SCRUM-338). */
   excludeUserIds: readonly string[] = []
 ): void {
@@ -1128,18 +1145,31 @@ export function emitEventCheckIn(
         checkInTime,
         hereCount,
       })),
+      /*
+       * Per recipient, like the roster this arrival lands on: the real name
+       * and photo only for somebody who may recognise the arriver in this room
+       * (an opted-in friend, or anyone once they have revealed here), the
+       * pseudonym and no photo for everybody else. One pseudonym for the whole
+       * room made an opted-in friend arrive as "Cosmic Panda" and turn into
+       * their name on the next refresh.
+       */
       emitAsSeenBy(
         io.in(`event:room:${eventId}`).except(excludeUserIds.map((id) => `user:${id}`)),
         eventId,
         "event:room:checkin",
-        (idFor) => ({
-          eventId,
-          userId: idFor(userId),
-          userName,
-          userImage,
-          checkInTime,
-          hereCount,
-        })
+        (idFor, recognises) => {
+          const named = recognises && identity?.name?.trim()
+          return {
+            eventId,
+            userId: idFor(userId),
+            userName: named || userName,
+            ...(named && identity?.image ? { userImage: identity.image } : {}),
+            checkInTime,
+            hereCount,
+          }
+        },
+        undefined,
+        identity ? userId : undefined
       ),
     ]).then(() => undefined)
   })

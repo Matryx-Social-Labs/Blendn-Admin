@@ -7,7 +7,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { normalizeLocationToCity } from "@/lib/location"
 import { idForViewer } from "@/lib/room-handle"
-import { revealedInRoom } from "@/lib/identity"
+import { visibleInRoom } from "@/lib/identity"
 import {
   successResponse,
   unauthorizedResponse,
@@ -36,8 +36,10 @@ import { parsePagination, paginationMeta, paginationSkip } from "@/lib/paginatio
  * leaves you off your own roster.
  *
  * Age and city remain because they are what someone decides to say hello with,
- * and neither identifies. When the reveal flag lands, real name and photo become
- * available for attendees who have chosen it — never by default.
+ * and neither identifies. Real name and photo appear only for somebody the
+ * viewer may recognise in this room (`visibleInRoom`): they revealed here, or
+ * they are the viewer's friend and turned on "Friends can see who I am in
+ * rooms" — never by default, and the handle stays the id either way.
  */
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -168,31 +170,31 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     /*
-     * The reveal flag the header promised. "Show who I am" in the room sets
-     * `event_match_preferences.revealed`; the Grid card already answers it
-     * (`lib/matching.ts`: `revealed && name ? name : pseudonym`) and this list
-     * did not — driven: the card read "Ananya Bhat" while the roster beside
-     * it still said "Cosmic Panda" (L2.5). Same rule, same two fields, only
-     * for people who chose it, and only inside this event.
+     * Who the viewer may recognise here: revealed in this room ("Show who I
+     * am"), or a friend who lets friends recognise them in rooms.
+     *
+     * This read only the reveal, while the profile a card opens
+     * (`identityForRef`) also honoured the friend switch — so an opted-in
+     * friend was "Cosmic Panda" on the roster and their name one tap later,
+     * and the Settings promise ("Friends can see who I am in rooms") was kept
+     * on the profile and broken on the list. One function now answers both.
      */
-    const [pseudonyms, revealed] = await Promise.all([
+    const [pseudonyms, visible] = await Promise.all([
       pseudonymsForEvent(eventId),
-      // The one definition, shared with the profile a card opens
-      // (`identityForRef`), so the card and the profile cannot disagree.
-      revealedInRoom(eventId, checkIns.map((c) => c.user.id)),
+      visibleInRoom(authUser.userId, eventId, checkIns.map((c) => c.user.id)),
     ])
 
     return successResponse({
       attendees: await Promise.all(
         checkIns.map(async (c) => {
-          const shown = revealed.has(c.user.id) && c.user.name
+          const shown = visible.has(c.user.id) && c.user.name
           return {
             // A message request, a block and a report all need to name a
             // person; this names them only inside this room (SCRUM-371).
             userId: idForViewer(authUser.userId, eventId, c.user.id),
             name: shown ? c.user.name : pseudonyms.get(c.user.id) ?? "Attendee",
-            // Present only for somebody who revealed in this room; the header
-            // explains why it is otherwise absent.
+            // Present only for somebody the viewer may recognise here; the
+            // header explains why it is otherwise absent.
             ...(shown && { image: c.user.profile?.photos?.[0] ?? null }),
             // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
             // now, so the age it shows should be the one they are now.

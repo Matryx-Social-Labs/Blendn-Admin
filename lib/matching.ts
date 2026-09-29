@@ -220,7 +220,10 @@ export interface MatchCandidate {
   /** Currently checked in, as opposed to having attended earlier. */
   insideNow: boolean
   checkedInAt: Date
-  /** Chose to be named at this event. */
+  /**
+   * The viewer may recognise them in this room (`visibleInRoom`): revealed
+   * here, or a friend who lets friends recognise them in rooms.
+   */
   revealed: boolean
   name: string | null
   photo: string | null

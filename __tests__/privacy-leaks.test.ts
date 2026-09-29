@@ -72,11 +72,17 @@ describe("B3 — the socket roster is for people in the room", () => {
     expect(open![0]).toContain("userId: idFor(userId)")
 
     // The `.except(...)` keeps the arriver's block counterparties off it (SCRUM-338).
-    const roster = /io\.in\(`event:room:\$\{eventId\}`\)\.except\([^\n]*\),\s*eventId,\s*"event:room:checkin",\s*\(idFor\) => \(\{[^}]*\}/.exec(src)
+    const roster = /io\.in\(`event:room:\$\{eventId\}`\)\.except\([^\n]*\),\s*eventId,\s*"event:room:checkin",\s*\(idFor, recognises\) => \{[\s\S]*?identity \? userId : undefined\s*\)/.exec(src)
     expect(roster).not.toBeNull()
     expect(roster![0]).toContain("userName")
     expect(roster![0]).toContain("userId: idFor(userId)")
     expect(roster![0]).toContain(".except(excludeUserIds.map(")
+    // The real name and photo go only to a recipient who may recognise the
+    // arriver in this room (`recognisedInRoomBy`, the roster's rule); everybody
+    // else gets the pseudonym and no photo.
+    expect(roster![0]).toContain("const named = recognises && identity?.name?.trim()")
+    expect(roster![0]).toContain("userName: named || userName")
+    expect(roster![0]).toMatch(/\.\.\.\(named && identity\?\.image \? \{ userImage: identity\.image \} : \{\}\)/)
   })
 
   it("gates the roster room on a check-in", () => {

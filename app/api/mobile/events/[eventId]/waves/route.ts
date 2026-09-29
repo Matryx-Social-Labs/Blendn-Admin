@@ -18,7 +18,7 @@ import { hit } from "@/lib/rate-limit-store"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
-import { revealedInRoom } from "@/lib/identity"
+import { visibleInRoom } from "@/lib/identity"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -138,7 +138,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    emitRoomWave(toUserId, { eventId, fromUserId, fromName: await roomNameOf(eventId, fromUserId) })
+    emitRoomWave(toUserId, { eventId, fromUserId, fromName: await roomNameOf(eventId, fromUserId, toUserId) })
 
     return successResponse({ sent: true })
   } catch (error) {
@@ -150,20 +150,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 }
 
 /**
- * The sender as the room sees them — the roster's rule, verbatim.
+ * The sender as the recipient sees them on the roster — the roster's rule,
+ * verbatim (`visibleInRoom`).
  *
- * Real name only for somebody who chose "show who I am" in THIS event
- * (`event_match_preferences.revealed`); otherwise their pseudonym here. Falls
- * back to "Attendee", never to the real name: a missing pseudonym is a bug,
- * and degrading to the thing we are hiding turns the bug into a disclosure.
+ * Real name only for somebody the recipient may recognise in THIS room: they
+ * chose "show who I am" here, or they are the recipient's friend and let
+ * friends recognise them in rooms. Otherwise their pseudonym here. Falls back
+ * to "Attendee", never to the real name: a missing pseudonym is a bug, and
+ * degrading to the thing we are hiding turns the bug into a disclosure.
  */
-async function roomNameOf(eventId: string, userId: string): Promise<string> {
-  const [pseudonym, revealed] = await Promise.all([
-    roomPseudonymOf(eventId, userId),
-    revealedInRoom(eventId, [userId]),
+async function roomNameOf(eventId: string, fromUserId: string, toUserId: string): Promise<string> {
+  const [pseudonym, visible] = await Promise.all([
+    roomPseudonymOf(eventId, fromUserId),
+    visibleInRoom(toUserId, eventId, [fromUserId]),
   ])
-  if (revealed.has(userId)) {
-    const user = await db.user.findUnique({ where: { id: userId }, select: { name: true } })
+  if (visible.has(fromUserId)) {
+    const user = await db.user.findUnique({ where: { id: fromUserId }, select: { name: true } })
     const name = user?.name?.trim()
     if (name) return name
   }
