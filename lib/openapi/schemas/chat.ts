@@ -219,7 +219,10 @@ export const GroupChatMessageSchema = z
         id: z.string().uuid(),
         type: z.string(),
         metadata: z.unknown().nullable(),
-        content: z.string(),
+        content: z.string().nullable(),
+        moderation_hidden: z
+          .boolean()
+          .describe("The quoted message was taken down: its content and metadata are null (SCRUM-444)."),
         user: z.object({ id: RoomUserRefSchema, name: z.string() }),
       })
       .nullable()
