@@ -229,8 +229,14 @@ export function EventsTable({
                 {
                   label: "Delete",
                   tone: "destructive" as const,
+                  /*
+                   * What it does: the events leave the app, the lists and the
+                   * reports (all scoped on `deleted_at`). It said it deleted their
+                   * chat rooms and attendance records, and it deletes neither
+                   * (SCRUM-441).
+                   */
                   confirm:
-                    "Deletes {n} event(s), their chat rooms and their attendance records. This cannot be undone.",
+                    "Removes {n} event(s) from the app, your lists and your reports. The dashboard can't bring them back.",
                   onAction: (ids: string[]) => void deleteEvents(ids),
                 },
               ]
