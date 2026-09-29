@@ -75,12 +75,13 @@ export const updateProfileSchema = z.object({
   photos: z.array(z.string().url()).max(6).optional(),
   /*
    * The tiny copy of `photos[0]` shown to viewers who have not earned the real
-   * one. `createBlurDerivative` makes it client-side at 40px; the server stores
-   * the URL and serves it only in the unrevealed branch.
+   * one. `createBlurDerivative` makes it client-side at 40px; the PUT stores it
+   * only as the caller's own small sealed upload, moderates it like a photo, and
+   * serves it only in the unrevealed branch (SCRUM-476).
    *
-   * Nullable so removing your last photo can clear it. Someone could upload
-   * something sharp as their own "blur" -- that exposes only their own face and
-   * nobody else's, which is self-harm rather than an attack.
+   * Nullable so it can be cleared. The byte ceiling keeps it a blur; it is
+   * moderated because nothing proves it is a blur *of their photo* — it could be
+   * any small image, which is why it is screened like one.
    */
   blur_photo: z.string().url().nullish(),
   goals: z.array(z.string()).optional(),

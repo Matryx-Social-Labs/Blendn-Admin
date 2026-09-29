@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
-import { checkProfilePhoto, moderateProfilePhoto } from "@/lib/photos"
+import { checkBlurPhoto, checkProfilePhoto, moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
 import { recordPhotoCheck } from "@/lib/photo-checks"
 import {
   ADULTS_ONLY,
@@ -268,7 +268,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const {
-      name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos,
+      name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos, blur_photo,
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
       push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
@@ -335,7 +335,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       touchesOrientationGate ||
       touchesExpertise ||
       finishesOnboarding ||
-      photos !== undefined
+      photos !== undefined ||
+      blur_photo !== undefined
         ? await db.profiles.findUnique({
             where: { id: userId },
             select: {
@@ -348,6 +349,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               orientations: true,
               show_orientation: true,
               photos: true,
+              blur_photo: true,
               work_field: true,
               expertise: true,
             },
@@ -479,6 +481,39 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         : null
 
     /*
+     * The blurred photo is a copy of the primary one (SCRUM-476), so it is
+     * judged against the primary this request leaves behind. Refused before
+     * anything is sealed: a blur of no photo at all is a client bug.
+     */
+    const touchesBlur = photos !== undefined || blur_photo !== undefined
+    const primaryBefore = existing?.photos?.[0] ?? null
+    const primaryAfter = photos !== undefined ? (photos[0] ?? null) : primaryBefore
+    const newBlur = typeof blur_photo === "string" && blur_photo !== existing?.blur_photo ? blur_photo : null
+    if (newBlur && !primaryAfter) {
+      return errorResponse("Add a photo before its blurred copy", 400, "no_photo")
+    }
+
+    /*
+     * Written only as the caller's own small sealed upload, never a free URL:
+     * that would let anyone point every viewer's card at any image. And never
+     * outliving its photo — a new primary without a blur of its own, or no
+     * photo at all, clears it. `undefined` leaves the column alone.
+     *
+     * Before the photos: sealing consumes an upload, so a refused blur must
+     * not have used up the photos sent with it. A blur is cheap to make again.
+     */
+    let storedBlur: string | null | undefined
+    if (newBlur) {
+      const verdict = await checkBlurPhoto(newBlur, userId)
+      if (!verdict.ok) return errorResponse(verdict.message, 400, verdict.code)
+      storedBlur = verdict.url
+      await recordPhotoCheck(verdict.url, userId, false)
+      after(() => moderateBlurPhoto(verdict.url, userId))
+    } else if (touchesBlur && (blur_photo === null || !primaryAfter || primaryAfter !== primaryBefore)) {
+      storedBlur = null
+    }
+
+    /*
      * Every new photo is checked before it is stored.
      *
      * Nothing had ever checked a profile photo. `checkImageContent` was wired
@@ -520,6 +555,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
     const storedPhotos = photos?.map((u: string) => sealedFor.get(u) ?? u)
+
 
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
@@ -577,6 +613,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(education !== undefined && { education }),
         interests: interests || [],
         photos: storedPhotos || [],
+        ...(storedBlur !== undefined && { blur_photo: storedBlur }),
         goals: goals || [],
         looking_for: looking_for || [],
         onboarded: onboarded ?? false,
@@ -629,6 +666,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(education !== undefined && { education }),
         ...(interests !== undefined && { interests }),
         ...(storedPhotos !== undefined && { photos: storedPhotos }),
+        ...(storedBlur !== undefined && { blur_photo: storedBlur }),
         ...(goals !== undefined && { goals }),
         ...(looking_for !== undefined && { looking_for }),
         ...(stripsLookingFor && { looking_for: demotedLookingFor! }),
