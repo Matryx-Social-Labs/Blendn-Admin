@@ -90,7 +90,9 @@ export const SENTRY_DATA_COLLECTION = {
   cookies: false,
   httpHeaders: { request: DENY_NETWORK_IDENTITY, response: DENY_NETWORK_IDENTITY },
   httpBodies: [],
-  urlQueryParams: DENY_NETWORK_IDENTITY,
+  // A reset, verify or invite link carries its one-time token in `?token=`
+  // (SCRUM-461); a breadcrumb holding a live one is a copy nobody expires.
+  urlQueryParams: { deny: [...DENY_NETWORK_IDENTITY.deny, "token"] },
   genAI: { inputs: false, outputs: false },
   databaseQueryData: false,
   queues: false,
