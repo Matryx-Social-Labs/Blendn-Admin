@@ -59,7 +59,8 @@ function whereFor(f: LeadFilters): Prisma.leadsWhereInput {
     where.created_at = { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lte: f.to } : {}) }
   }
 
-  const q = f.q?.trim()
+  // Postgres text cannot hold a NUL, and no lead contains one (SCRUM-434).
+  const q = f.q?.replaceAll("\0", "").trim()
   if (q) {
     where.OR = [
       { email: { contains: q, mode: "insensitive" } },

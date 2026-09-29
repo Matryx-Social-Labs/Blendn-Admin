@@ -13,24 +13,29 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const isUuid = (value: unknown): value is string => typeof value === "string" && UUID.test(value)
 
 /**
- * Postgres text cannot hold \u0000, so a body carrying one anywhere (a value or
- * a key, at any depth) is refused like one that isn't JSON (SCRUM-434).
+ * A JSON string can carry a NUL only as the escape `\u0000` (a raw NUL is not
+ * valid JSON), and Postgres text cannot hold one, so a body with that escape is
+ * refused like one that isn't JSON (SCRUM-434). Checked on the raw text before
+ * parsing: linear, with nothing to recurse into on a deeply nested body. An
+ * escaped backslash followed by `u0000` is literal text and passes.
  */
-const hasNul = (value: unknown): boolean =>
-  typeof value === "string"
-    ? value.includes("\0")
-    : typeof value === "object" && value !== null
-      ? Object.entries(value).some(([key, v]) => key.includes("\0") || hasNul(v))
-      : false
+const NUL_ESCAPE = /(?<!\\)(?:\\\\)*\\u0000/
 
-const refuseNul = (value: unknown): unknown => (hasNul(value) ? undefined : value)
+function parseBody(raw: string): unknown {
+  if (NUL_ESCAPE.test(raw)) return undefined
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * The request body, or `undefined` when it isn't JSON, so the route's schema
  * refuses it with a 400. For a body the route requires; see `readOptionalJson`.
  */
-export const readJson = (request: Request): Promise<unknown> =>
-  request.json().then(refuseNul, () => undefined)
+export const readJson = async (request: Request): Promise<unknown> =>
+  parseBody(await request.text().catch(() => ""))
 
 /**
  * For a route whose body is optional: `{}` when there is none, and `undefined`
@@ -40,10 +45,5 @@ export const readJson = (request: Request): Promise<unknown> =>
  */
 export async function readOptionalJson(request: Request): Promise<unknown> {
   const raw = await request.text()
-  if (!raw.trim()) return {}
-  try {
-    return refuseNul(JSON.parse(raw))
-  } catch {
-    return undefined
-  }
+  return raw.trim() ? parseBody(raw) : {}
 }

@@ -14,6 +14,19 @@ describe("readJson — a body the route requires", () => {
     expect(await readJson(post('{"a":[1,"b"]}'))).toEqual({ a: [1, "b"] })
   })
 
+  it("takes a body nested 5,000 deep without throwing: nothing walks it", async () => {
+    const deep = "[".repeat(5000) + "]".repeat(5000)
+    await expect(readJson(post(deep))).resolves.toBeInstanceOf(Array)
+  })
+
+  it("keeps an escaped backslash followed by u0000: that is text, not a NUL", async () => {
+    expect(await readJson(post('{"a":"\\\\u0000"}'))).toEqual({ a: "\\u0000" })
+  })
+
+  it("refuses three backslashes and u0000: the last one escapes a NUL", async () => {
+    expect(await readJson(post('{"a":"\\\\\\u0000"}'))).toBeUndefined()
+  })
+
   it.each([
     ["no body", undefined],
     ["a body that isn't JSON", '{"a":'],
