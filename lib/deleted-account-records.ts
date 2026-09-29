@@ -1,6 +1,8 @@
 // Relative, not `@/`: reachable from `server.ts` through the retention sweeper,
 // and `build:server` cannot resolve the alias (server-import-boundary.test.ts).
 import { db } from "./db"
+import { logger } from "./logger"
+import { deletePrefix, isConfigured } from "./tigris"
 
 /**
  * India's IT (Intermediary Guidelines) Rules 2021, r.3(1)(h): registration
@@ -62,12 +64,52 @@ export function recordDeletedAccount(userId: string, deletedAt: Date) {
 /**
  * Hard-delete every record past its purge date. Returns how many went.
  *
+ * The person's chat images go with it (SCRUM-429). Account deletion keeps the
+ * ones in removed content for these same 180 days (`retainedChatMediaKeys`),
+ * and nothing deleted them afterwards, so the storage kept them for ever.
+ * Everything left under `chat/<id>/` goes: the period was the only reason to
+ * keep any of it. A record whose media could not be erased stays, and the
+ * next sweep tries again; losing the record first would lose the only pointer.
+ *
  * Idempotent: the predicate is an absolute timestamp, so a second pass deletes
  * nothing. Unbatched because the table grows by one row per deleted account.
  */
 export async function purgeDeletedAccountRecords(now: Date = new Date()): Promise<number> {
-  const { count } = await db.deleted_account_records.deleteMany({
+  const due = await db.deleted_account_records.findMany({
     where: { purge_after: { lt: now } },
+    select: { id: true, user_id: true },
   })
+  if (due.length === 0) return 0
+  /*
+   * Storage unset means the erasure cannot be done or checked. Keep the records
+   * and say so: a deployment that lost its TIGRIS_* variables would otherwise
+   * drop every pointer with the media still in the bucket.
+   */
+  if (!isConfigured()) {
+    logger.error("Deleted-account purge: storage not configured; records kept until their media can be erased", { due: due.length })
+    return 0
+  }
+  const erased: string[] = []
+  for (const record of due) {
+    try {
+      /*
+       * `profile/` as well: deletion erases it at once, but a failure there was
+       * logged and never retried. The guard is for a hand-written row: an
+       * empty id would make the prefix every person's.
+       */
+      if (record.user_id) {
+        await deletePrefix(`chat/${record.user_id}/`)
+        await deletePrefix(`profile/${record.user_id}/`)
+      }
+      erased.push(record.id)
+    } catch (error) {
+      logger.error("Deleted-account purge: chat media NOT erased; record kept for the next sweep", {
+        recordId: record.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  if (erased.length === 0) return 0
+  const { count } = await db.deleted_account_records.deleteMany({ where: { id: { in: erased } } })
   return count
 }
