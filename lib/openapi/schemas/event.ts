@@ -171,7 +171,6 @@ const EventStatsSchema = z.object({
   checkInCount: z.number(),
   favoriteCount: z.number(),
   ratingCount: z.number(),
-  averageRating: z.number().nullable(),
   rsvpCount: z.number().optional(),
 })
 
@@ -351,7 +350,7 @@ export const RatingResponseSchema = z
       updatedAt: z.string().datetime(),
     }),
     eventStats: z.object({
-      averageRating: z.number(),
+      // No average: a rater could subtract their own (SCRUM-437).
       ratingCount: z.number(),
     }),
     message: z.string(),

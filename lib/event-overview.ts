@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { discloseRating } from "@/lib/disclosure"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
@@ -87,10 +88,10 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
    * that says an event outperformed what it was promised.
    */
   const turnUpPct = turnUp(attendedPeople, going)
-  const avgRating =
-    ratings.length === 0
-      ? null
-      : Math.round((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) * 10) / 10
+  const avgRating = discloseRating(
+    Math.round((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) * 10) / 10,
+    ratings.length
+  )
 
   const blockers = publishBlockers({
     ...event,
@@ -190,7 +191,12 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
               {
                 label: "Rating",
                 value: avgRating === null ? null : `${avgRating}`,
-                hint: ratings.length === 0 ? "nobody rated it" : `${ratings.length} ratings`,
+                hint:
+                  ratings.length === 0
+                    ? "nobody rated it"
+                    : avgRating === null
+                      ? "not enough ratings yet"
+                      : `${ratings.length} ratings`,
               },
             ]
 

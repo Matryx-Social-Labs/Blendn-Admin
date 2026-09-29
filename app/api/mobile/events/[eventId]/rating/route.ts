@@ -159,12 +159,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Calculate new average rating
-    const avgRating = await db.event_ratings.aggregate({
-      where: { event_id: eventId },
-      _avg: { rating: true },
-      _count: true,
-    })
+    // A count and no average: the rater could subtract their own (SCRUM-437).
+    const ratingCount = await db.event_ratings.count({ where: { event_id: eventId } })
 
     return successResponse({
       rating: {
@@ -174,10 +170,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         createdAt: eventRating.created_at,
         updatedAt: eventRating.updated_at,
       },
-      eventStats: {
-        averageRating: avgRating._avg.rating,
-        ratingCount: avgRating._count,
-      },
+      eventStats: { ratingCount },
       message: "Rating submitted successfully",
     })
   } catch (error) {

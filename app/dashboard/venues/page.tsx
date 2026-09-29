@@ -137,12 +137,24 @@ export default async function MyVenuesPage({
                 value={venue.capacityProxy}
                 hint={venue.capacityProxy === null ? "none declared" : "largest declared"}
               />
-              <MetricTile label="Avg rating" value={venue.averageRating} />
+              <MetricTile
+                label="Avg rating"
+                value={venue.averageRating}
+                hint={
+                  venue.ratingCount === 0
+                    ? "no ratings yet"
+                    : venue.averageRating === null
+                      ? "not enough ratings yet"
+                      : `${formatNumber(venue.ratingCount)} ratings`
+                }
+              />
             </div>
 
             <div className="grid gap-5 @2xl/main:grid-cols-2">
-              {venue.ratings.every((n) => n === 0) ? (
+              {venue.ratingCount === 0 ? (
                 <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
+              ) : venue.averageRating === null ? (
+                <p className="text-[0.8125rem] text-muted-foreground">Not enough ratings yet.</p>
               ) : (
                 <RatingBars counts={venue.ratings} />
               )}
