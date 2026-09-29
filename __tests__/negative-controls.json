@@ -1199,8 +1199,8 @@
     },
     "limits-follow-the-person.itest.ts": {
       "guards": "SCRUM-439: a per-person limit counts the person, not the token. The room-message POST (30 a minute) is keyed on the user after authentication and shares one allowance with the event-chat POST; the checkout POST (10 in ten minutes) is keyed on the user. Both were keyed on the Authorization header's last 16 characters, the JWT signature, so every refresh or second phone was a fresh bucket.",
-      "mutation": "M136 the group route's key back on the token tail. M137 the event-chat POST on its own `event-chat` bucket. M138 the checkout key back on the token tail.",
-      "observed": "limits-follow-the-person.itest.ts (3 cases): red before the fix 3 of 3 (the extra request answered 404, not 429). M136 2 of 3 failing, M137 1 of 3, M138 1 of 3.",
+      "mutation": "M136 the group route's key back on the token tail. M137 the event-chat POST on its own `event-chat` bucket. M138 the checkout key back on the token tail. M139 checkout on one bucket for everyone (`checkout:all`). M140 the group route on one bucket for everyone.",
+      "observed": "limits-follow-the-person.itest.ts (3 cases): red before the fix 3 of 3 (the extra request answered 404, not 429). M136 2 of 3 failing, M137 1 of 3, M138 1 of 3, M139 1 of 3, M140 1 of 3. M139 and M140 survived until ecc:pr-test-analyzer pointed out every case used one person; each case now also shows a second person is not in the first one's bucket, and asserts errorCode RATE_LIMITED.",
       "date": "2026-09-29"
     }
   },

@@ -56,6 +56,12 @@ const sendToGroup = (token: string, groupId: string, body: object) =>
     params: Promise.resolve({ chatGroupId: groupId }),
   })
 
+/** Refused by the limiter, not by anything after it. */
+async function expectLimited(res: Response) {
+  expect(res.status).toBe(429)
+  expect(((await res.json()) as { errorCode?: string }).errorCode).toBe("RATE_LIMITED")
+}
+
 describe("the room-message limit (30 a minute) is the person's", () => {
   it("refuses the 31st send on a fresh token", async () => {
     const token = await person()
@@ -63,7 +69,10 @@ describe("the room-message limit (30 a minute) is the person's", () => {
     for (let i = 0; i < 30; i++) {
       expect((await sendToGroup(token(), groupId, { content: "hi", type: "text" })).status).toBe(404)
     }
-    expect((await sendToGroup(token(), groupId, { content: "hi", type: "text" })).status).toBe(429)
+    await expectLimited(await sendToGroup(token(), groupId, { content: "hi", type: "text" }))
+    // The allowance is theirs: somebody else in the same room still gets through.
+    const other = await person()
+    expect((await sendToGroup(other(), groupId, { content: "hi", type: "text" })).status).toBe(404)
   })
 
   it("counts the event-chat door in the same allowance", async () => {
@@ -75,7 +84,7 @@ describe("the room-message limit (30 a minute) is the person's", () => {
       })
       expect(res.status).toBe(400)
     }
-    expect((await sendToGroup(token(), randomUUID(), { content: "hi", type: "text" })).status).toBe(429)
+    await expectLimited(await sendToGroup(token(), randomUUID(), { content: "hi", type: "text" }))
   })
 })
 
@@ -83,11 +92,14 @@ describe("the checkout limit (10 in ten minutes) is the person's", () => {
   it("refuses the 11th checkout on a fresh token", async () => {
     const token = await person()
     const eventId = randomUUID()
-    const checkout = () =>
-      checkoutRoute.POST(post(`http://localhost/api/mobile/events/${eventId}/checkout`, token(), {}), {
+    const checkout = (t: string) =>
+      checkoutRoute.POST(post(`http://localhost/api/mobile/events/${eventId}/checkout`, t, {}), {
         params: Promise.resolve({ eventId }),
       })
-    for (let i = 0; i < 10; i++) expect((await checkout()).status).toBe(404)
-    expect((await checkout()).status).toBe(429)
+    for (let i = 0; i < 10; i++) expect((await checkout(token())).status).toBe(404)
+    await expectLimited(await checkout(token()))
+    // Somebody else checking out of the same event is not in that bucket.
+    const other = await person()
+    expect((await checkout(other())).status).toBe(404)
   })
 })
