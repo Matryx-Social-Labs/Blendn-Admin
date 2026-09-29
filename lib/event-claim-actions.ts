@@ -7,7 +7,7 @@ import { auditLog } from "@/lib/audit-log"
 import { clientIpFrom } from "@/lib/client-ip"
 import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
-import { CLAIM_LIMITS, CLAIM_PAGE, claimRefusal, curationSelect } from "@/lib/curation"
+import { CLAIM_LIMITS, CLAIM_PAGE, claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { owningOrgFor } from "@/lib/event-ownership"
@@ -153,7 +153,7 @@ export async function fileEventClaim(
   if (limited) return { ok: false, error: limited }
 
   const event = await db.events.findUnique({
-    where: { id: input.eventId, deleted_at: null },
+    where: claimPageWhere(input.eventId),
     select: { id: true, title: true, source_url: true, ...curationSelect },
   })
   if (!event) return { ok: false, error: "Event not found" }

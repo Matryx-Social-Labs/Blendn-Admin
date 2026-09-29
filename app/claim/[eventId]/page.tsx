@@ -3,7 +3,7 @@ import { IconExternalLink } from "@tabler/icons-react"
 
 import { Card } from "@/components/ui/card"
 import { getAuth } from "@/lib/auth"
-import { claimRefusal, curationSelect } from "@/lib/curation"
+import { claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
 
@@ -44,7 +44,7 @@ export default async function ClaimEventPage({
   const { eventId } = await params
 
   const event = await db.events.findUnique({
-    where: { id: eventId, deleted_at: null },
+    where: claimPageWhere(eventId),
     select: {
       id: true,
       title: true,

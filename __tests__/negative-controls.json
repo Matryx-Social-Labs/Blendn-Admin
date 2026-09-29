@@ -1256,6 +1256,18 @@
       "mutation": "M192 the allowlist check in sendEmail removed (`if (false && !mayDeliverTo(...))`). M193 the production check removed (and, separately, inverted to `!== \"production\"`). M194 a suffix match instead of the exact domain (`address.endsWith(d)`). M195 EMAIL_ALLOWLIST ignored (`|| listed.includes(address)` dropped). M196 the one-address parse removed (domain after the last @). M197 EMAIL_ALLOWLIST matched as a substring of the raw list. M198 the subject logged again. M199 production matched as /^prod/i.",
       "observed": "Red before the fix: 6 of 11 failing (every refusal case, and the warning). M192: 6 of 11 failing, fetch was called for x@toit.in, the lookalikes, local and the gmail domain. M193 removed: 1 of 11 failing, production did not send to x@toit.in; inverted: 7 of 11 failing. M194: 1 of 11 failing, x@evil-blendn.app was sent. M195: 1 of 11 failing, owner@gmail.com was not sent. All reverted. Red before the review fixes: 8 of 25 failing. M196: 5 of 25 failing. M197: 1 of 25 failing. M198: 1 of 25 failing. M199: 3 of 25 failing. All reverted.",
       "date": "2026-09-29"
+    },
+    "claim-page-shows-only-listed.itest.ts": {
+      "guards": "SCRUM-455: the public claim page /claim/<id> and fileEventClaim load only events a stranger could have found (claimPageWhere: published or completed, not private, not deleted). A draft, a private and a cancelled event answer notFound and a claim on them is refused as 'Event not found' with no row written; a published public or unlisted event still renders and takes a claim.",
+      "mutation": "M208 the status filter removed from claimPageWhere. M209 the visibility filter removed. M210 the page back on its own id+deleted_at lookup. M211 fileEventClaim back on its own lookup.",
+      "observed": "Red before the fix: 3 of 4 failing (the page rendered the draft, the private and the cancelled event). M208: 2 of 4 failing. M209: 1 of 4 failing. M210: 3 of 4 failing. M211: 3 of 4 failing. All reverted.",
+      "date": "2026-09-29"
+    },
+    "event-wall-clock.test.ts": {
+      "guards": "SCRUM-453 follow-up: a time typed on an event form is wall-clock time where the event happens. wallClockToUtc('2026-10-10T18:00','Asia/Kolkata') is 12:30Z (Berlin 16:00Z), and both the curate form and the organiser editor convert through it, never new Date(value) (the browser's zone).",
+      "mutation": "M212 the curate form back on new Date(values.start_time).toISOString(). M213 wallClockToUtc reading the machine zone (new Date(local)).",
+      "observed": "Red before the fix: the suite failed to load (no lib/event-wall-clock). M212: 1 of 3 failing (the curate-form source check). M213: 1 of 3 failing (Kolkata 18:00 came back 18:00Z under TZ=UTC). All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

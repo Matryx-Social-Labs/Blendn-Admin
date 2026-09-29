@@ -8,7 +8,8 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import { format } from "date-fns"
-import { toZonedTime, fromZonedTime } from "date-fns-tz"
+import { toZonedTime } from "date-fns-tz"
+import { wallClockToUtc } from "@/lib/event-wall-clock"
 import type { AmenityOption } from "@/components/event-form/amenities-section"
 import { EventForm, type EventFormValues } from "@/components/event-form"
 import { toast } from "sonner"
@@ -171,8 +172,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
 
       // Convert datetimes from event timezone → UTC before sending to API
       const tz = data.timezone || "Asia/Kolkata"
-      const toUtcIso = (localStr: string) =>
-        localStr ? fromZonedTime(localStr, tz).toISOString() : localStr
+      const toUtcIso = (localStr: string) => (localStr ? wallClockToUtc(localStr, tz) : localStr)
 
       // Transform structured arrays back to JSON for the API
       const payload = {
