@@ -458,6 +458,7 @@ export async function getEventClaimQueue(): Promise<{ rows: EventClaimRow[]; tot
       note: true,
       flags: true,
       created_at: true,
+      onboarding_id: true,
       org: { select: { display_name: true } },
       event: {
         select: {
@@ -481,9 +482,24 @@ export async function getEventClaimQueue(): Promise<{ rows: EventClaimRow[]; tot
   })
   const claimsPerEvent = new Map(counts.map((c) => [c.event_id, c._count._all]))
 
+  /*
+   * A no-account claim's organisation, once its application is approved, is
+   * on the request -- where the hand-over already looks (decideEventClaim).
+   * The row read only the claim's own org_id, so it went on saying "No
+   * account yet — approve their application first" after the approval
+   * (SCRUM-454). One query for the page.
+   */
+  const approvedRequests = await db.organiser_onboarding_requests.findMany({
+    where: { id: { in: claims.flatMap((c) => (c.onboarding_id ? [c.onboarding_id] : [])) }, org_id: { not: null } },
+    select: { id: true, org: { select: { display_name: true } } },
+  })
+  const requestOrg = new Map(approvedRequests.map((r) => [r.id, r.org?.display_name ?? null]))
+
   const now = Date.now()
   const rows = claims.map((c) => {
     const refusal = claimRefusal(c.event)
+    const orgName = c.org?.display_name ?? (c.onboarding_id ? requestOrg.get(c.onboarding_id) : null) ?? null
+    const flags = Array.isArray(c.flags) ? (c.flags as ClaimFlag[]) : []
     return {
       id: c.id,
       eventId: c.event.id,
@@ -491,10 +507,11 @@ export async function getEventClaimQueue(): Promise<{ rows: EventClaimRow[]; tot
       eventCity: c.event.city,
       eventStartsAt: c.event.start_time.toISOString(),
       sourceUrl: c.event.source_url,
-      orgName: c.org?.display_name ?? null,
+      orgName,
       contactEmail: c.contact_email,
       note: c.note,
-      flags: Array.isArray(c.flags) ? (c.flags as ClaimFlag[]) : [],
+      // Filed before the organisation existed; it exists now.
+      flags: orgName ? flags.filter((f) => f !== "no_organisation_yet") : flags,
       claimNumber: claimsPerEvent.get(c.event.id) ?? 1,
       createdAt: c.created_at.toISOString(),
       ageHours: Math.floor((now - c.created_at.getTime()) / (60 * 60 * 1000)),
