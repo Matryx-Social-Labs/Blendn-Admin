@@ -11,6 +11,7 @@ import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle } from "./room-handle"
+import { readableUrl } from "./tigris"
 import { recognisedInRoomBy } from "./identity"
 import type { LiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
@@ -1538,8 +1539,11 @@ export function emitPrivateMessage(
    * recipient with the chat open is in both rooms, so every message arrived
    * twice and the chat list counted it twice (SCRUM-337).
    */
-  io.to(`conversation:${conversationId}`).to(`user:${recipientId}`).emit("private:message", {
-    conversationId,
-    message,
+  // The media as a recipient may fetch it: signed when it is private (SCRUM-427). Never rejects.
+  void (message.mediaUrl ? readableUrl(message.mediaUrl) : Promise.resolve(null)).then((mediaUrl) => {
+    io.to(`conversation:${conversationId}`).to(`user:${recipientId}`).emit("private:message", {
+      conversationId,
+      message: { ...message, mediaUrl },
+    })
   })
 }
