@@ -155,6 +155,7 @@ Mobile clients call the shared web endpoints; there is no `/api/mobile` twin.
 |--------|----------|-------------|------------|
 | POST | `/api/auth/forgot-password` | Request a reset link | 5/15min per IP, 3/hr per address |
 | POST | `/api/auth/reset-password` | Set a new password with the token | 10/15min |
+| GET | `/api/auth/reset-password?token=` | Does the link still work? `{ valid }`, consumes nothing; one answer for used, expired, tampered or erased (SCRUM-461) | 30/15min |
 
 `forgot-password` always responds `{ ok: true }` with the same message whether or
 not the address exists. The emailed link opens the **web** reset page in the
