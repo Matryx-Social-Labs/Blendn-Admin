@@ -29,7 +29,7 @@ function duration(from: string, to: string): string {
   return `${h}h ${mins % 60}m`
 }
 
-export function IssueLog({ issues }: { issues: IssueRow[] }) {
+export function IssueLog({ issues, timezone }: { issues: IssueRow[]; timezone: string }) {
   const [pending, startTransition] = useTransition()
   const [acked, setAcked] = useState<Set<string>>(new Set())
 
@@ -63,7 +63,7 @@ export function IssueLog({ issues }: { issues: IssueRow[] }) {
               <span className="text-[0.8125rem] text-muted-foreground tabular-nums">
                 {/* Opened, and how long it lasted — a five-minute queue and a
                     two-hour one are different nights. */}
-                {issueOpenedLabel(i.openedAt)}
+                {issueOpenedLabel(i.openedAt, timezone)}
                 {open
                   ? ` · ongoing ${duration(i.openedAt, i.lastSeenAt)}`
                   : ` · lasted ${duration(i.openedAt, i.resolvedAt!)}`}

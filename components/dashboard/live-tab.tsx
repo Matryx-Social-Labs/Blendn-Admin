@@ -247,7 +247,7 @@ export function LiveTab({
           */}
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-bold">Earlier</h3>
-            <IssueLog issues={earlier} />
+            <IssueLog issues={earlier} timezone={timezone} />
           </div>
 
           <SentimentBar snapshot={snapshot} />

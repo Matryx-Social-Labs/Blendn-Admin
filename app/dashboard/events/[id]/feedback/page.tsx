@@ -7,6 +7,7 @@ import { EmptyState, RatingBars, SectionTitle } from "@/components/dashboard/pri
 
 import { getFeedbackDigest } from "./actions"
 import { FeedbackFeed } from "./feedback-feed"
+import { eventClock } from "@/lib/event-phase"
 
 export const dynamic = "force-dynamic"
 
@@ -34,9 +35,11 @@ export default async function FeedbackPage({
   const share = (n: number) => (total === 0 ? 0 : (n / total) * 100)
   const topIssue = digest.categories[0]
 
-  const ended = new Intl.DateTimeFormat("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(
-    new Date(digest.endedAt)
-  )
+  const ended = eventClock(digest.timezone).format(new Date(digest.endedAt), {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
   const window = digest.windowOpen
     ? `feedback window closes in ${hoursUntil(digest.windowClosesAt)}h`
     : "feedback window closed"
@@ -132,7 +135,7 @@ export default async function FeedbackPage({
                   tap a label to correct it — the classifier misses sarcasm
                 </span>
               </div>
-              <FeedbackFeed messages={digest.messages} />
+              <FeedbackFeed messages={digest.messages} timezone={digest.timezone} />
             </section>
 
             <div className="flex flex-col gap-5">

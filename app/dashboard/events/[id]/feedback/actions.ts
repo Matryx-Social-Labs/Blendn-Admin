@@ -38,6 +38,8 @@ export interface FeedbackMessage {
 export interface FeedbackDigest {
   eventTitle: string
   endedAt: string
+  /** The event's own zone: its times are told in it (SCRUM-421). */
+  timezone: string
   /** False while the room is still live — the tab is reachable before the end. */
   ended: boolean
   windowClosesAt: string
@@ -72,6 +74,7 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
       ...eventPermissionSelect,
       title: true,
       end_time: true,
+      timezone: true,
       ratings: { select: { rating: true } },
     },
   })
@@ -152,6 +155,7 @@ export async function getFeedbackDigest(eventId: string): Promise<FeedbackDigest
   return {
     eventTitle: event.title,
     endedAt: event.end_time.toISOString(),
+    timezone: event.timezone,
     windowClosesAt: closesAt.toISOString(),
     windowOpen: Date.now() < closesAt.getTime(),
     ended: Date.now() >= event.end_time.getTime(),

@@ -145,6 +145,22 @@ describe("an event's times are told in its own timezone (SCRUM-421)", () => {
   })
 
   it("falls back to UTC for a zone the runtime does not know, rather than throwing", () => {
-    expect(eventClock("Not/AZone").time(start)).toBe("23:00")
+    // Asserted on the zone, not only the output: under jest's TZ=UTC, "UTC" and
+    // "whatever the server has" format identically.
+    const unknown = eventClock("Not/AZone")
+    expect(unknown.zone).toBe("UTC")
+    expect(unknown.time(start)).toBe("23:00")
+    expect(ist.zone).toBe("Asia/Kolkata")
+  })
+
+  it("counts whole days across a daylight-saving change, either way", () => {
+    // New York springs forward on 8 March 2026. 23:30 on the 7th to 00:30 on
+    // the 9th is two calendar days, but only 24 hours.
+    const ny = eventClock("America/New_York")
+    expect(ny.daysUntil(new Date("2026-03-09T04:30:00Z"), new Date("2026-03-08T04:30:00Z"))).toBe(2)
+    // London falls back on 25 October 2026. 23:30 on the 24th to 00:30 on the
+    // 26th is two calendar days, and 26 hours.
+    const london = eventClock("Europe/London")
+    expect(london.daysUntil(new Date("2026-10-26T00:30:00Z"), new Date("2026-10-24T22:30:00Z"))).toBe(2)
   })
 })

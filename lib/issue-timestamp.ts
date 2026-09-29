@@ -1,7 +1,9 @@
+import { eventClock } from "@/lib/event-phase"
+
 /**
  * When an issue opened, said in a way that cannot be read as today.
  *
- * The live tab rendered `toLocaleTimeString(...)` — time of day, no date —
+ * The live tab rendered `toLocaleTimeString` — time of day, no date —
  * under a heading reading *"Tonight's issues"*. `issuesFor` is not scoped to
  * tonight: it returns the event's whole history, newest open first.
  *
@@ -20,24 +22,24 @@
  * The date is added only when it is needed. A one-night event is the ordinary
  * case and `21:40 · lasted 12 min` is the right density for it; bolting a date
  * onto every row to cover the multi-day case would make the common one worse.
+ *
+ * Told on the event's clock, like every other time on the page (SCRUM-421).
+ * It used the reader's, which beside a hero reading "doors 04:30" in the
+ * event's zone put a London admin's issue at "23:20".
  */
-export function issueOpenedLabel(openedAt: string, now: Date = new Date()): string {
+export function issueOpenedLabel(openedAt: string, timezone: string, now: Date = new Date()): string {
+  const clock = eventClock(timezone)
   const opened = new Date(openedAt)
-  const time = opened.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+  const time = clock.time(opened)
 
   /*
    * Calendar day, not elapsed hours. An issue that opened at 23:50 and is read
    * at 00:10 is twenty minutes old and still wants a date, because "23:50"
    * under a clock reading "00:10" is the same ambiguity in miniature.
    */
-  const sameDay =
-    opened.getFullYear() === now.getFullYear() &&
-    opened.getMonth() === now.getMonth() &&
-    opened.getDate() === now.getDate()
-  if (sameDay) return time
+  if (clock.daysUntil(opened, now) === 0) return time
 
-  const date = opened.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
-  return `${date}, ${time}`
+  return `${clock.format(opened, { day: "numeric", month: "short" })}, ${time}`
 }
 
 /**

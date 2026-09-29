@@ -39,9 +39,13 @@ export function eventClock(timezone: string) {
   const calendarDay = format({}, "en-CA") // YYYY-MM-DD
 
   return {
+    /** The zone actually used: the event's, or UTC when the runtime does not know it. */
+    zone,
     day: (d: Date) => day.format(d),
     time: (d: Date) => time.format(d),
     dateTime: (d: Date) => dateTime.format(d),
+    /** Any other shape, on the same clock. */
+    format: (d: Date, options: Intl.DateTimeFormatOptions) => format(options).format(d),
     /** Whole calendar days from `now` to `d` on the event's clock: 0 is today. */
     daysUntil: (d: Date, now: Date) =>
       Math.round((Date.parse(calendarDay.format(d)) - Date.parse(calendarDay.format(now))) / 86_400_000),
