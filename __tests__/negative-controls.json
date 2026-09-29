@@ -1295,8 +1295,8 @@
     },
     "organisers-add-venues.itest.ts": {
       "guards": "SCRUM-423: venue.updated records only the fields whose value changed (in the form's names), with the outline's shape before and after when it changed, and a save that changes nothing writes no row. The comparison is deep, since jsonb returns the stored outline with its keys reordered. Case: organisers-add-venues.itest.ts \"venue.updated records what changed\".",
-      "mutation": "M263 the audit records Object.keys(input) again. M264 values compared by JSON text. M265 a save that changes nothing still writes a row.",
-      "observed": "Red before the fix: 1 of 12 failing (the outline-only save recorded 8 fields). M263: 1 failing. M264: 1 failing (the unchanged outline read as changed; the no-op save wrote a geofence row). M265: 1 failing (a row with fields []). All reverted.",
+      "mutation": "M263 the audit records Object.keys(input) again. M264 values compared by JSON text. M265 a save that changes nothing still writes a row. M290 latitude and longitude swapped in the form-name map. M291 a circle outline recorded as no outline.",
+      "observed": "Red before the fix: 1 of 12 failing (the outline-only save recorded 8 fields). M263: 1 failing. M264: 1 failing (the unchanged outline read as changed; the no-op save wrote a geofence row). M265: 1 failing (a row with fields []). M290: 1 failing (fields [geofence, lng, lat]). M291: 1 failing (after: null). All reverted.",
       "date": "2026-09-29"
     },
     "audit-filter-whole-log.itest.ts": {

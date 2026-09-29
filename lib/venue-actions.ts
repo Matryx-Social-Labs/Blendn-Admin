@@ -367,13 +367,6 @@ function refuseUnknownVenueType(type: venue_type | null | undefined): void {
   if (type != null && !VENUE_TYPES.includes(type)) throw new Refusal("That is not a venue type this list knows.")
 }
 
-/**
- * Edit a venue. Owners edit their own; admins edit any.
- *
- * Not rate limited, deliberately (SCRUM-360): an edit reaches only venues the
- * caller's organisation may write, so it cannot flood the directory or map it
- * the way a create or a look-up can.
- */
 /** The form's name for each column an update writes, as the audit row records it. */
 const FORM_FIELD = {
   name: "name",
@@ -393,6 +386,13 @@ function fenceShape(value: unknown): number | "circle" | null {
   return parsed.fence.type === "polygon" ? parsed.fence.ring.length : "circle"
 }
 
+/**
+ * Edit a venue. Owners edit their own; admins edit any.
+ *
+ * Not rate limited, deliberately (SCRUM-360): an edit reaches only venues the
+ * caller's organisation may write, so it cannot flood the directory or map it
+ * the way a create or a look-up can.
+ */
 export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
   const user = await requireUser()
   await venueForWrite(id, user)

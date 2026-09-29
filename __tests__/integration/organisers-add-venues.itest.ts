@@ -271,5 +271,10 @@ describe("venue.updated records what changed", () => {
       { fields: ["geofence"], geofence: { before: 4, after: 3 } },
       { fields: ["name"] },
     ])
+
+    // The pin nudged and the outline swapped for a circle round it: the form's names, and the shape either side.
+    const pin = { lat: c.lat + 0.0001, lng: c.lng + 0.0001 }
+    await updateVenue(id, { ...form, name: "Renamed", ...pin, geofence: { type: "circle", ...pin, radius: 80, buffer: 20 } })
+    expect((await audits(id, 3))[2]).toEqual({ fields: ["geofence", "lat", "lng"], geofence: { before: 3, after: "circle" } })
   })
 })
