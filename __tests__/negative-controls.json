@@ -77,8 +77,8 @@
     },
     "dm-delivered-once.test.ts": {
       "guards": "SCRUM-337: with a real socket.io server installed as the app's io, one DM reaches each socket exactly once — the recipient with the chat open (conversation + user rooms), the recipient on the chat list (user room only), and the sender with the chat open",
-      "mutation": "M1: in lib/socket-server.ts emitPrivateMessage, the single `io.to(conversation).to(user:recipient).emit(...)` split back into two emits, one per room.",
-      "observed": "M1: 1 of 1 failing — the open-chat socket received [\"m1\", \"m1\"] (one extra).",
+      "mutation": "M1: in lib/socket-server.ts emitPrivateMessage, the single `io.to(conversation).to(user:recipient).emit(...)` split back into two emits, one per room. M299 (SCRUM-446) the sender's user room left out of the emit.",
+      "observed": "M1: 1 of 1 failing — the open-chat socket received [\"m1\", \"m1\"] (one extra). M299: 1 of 1 failing (the sender's other device heard nothing).",
       "date": "2026-09-27"
     },
     "event-where-one-map.test.ts": {
