@@ -1263,16 +1263,22 @@
       "observed": "Red before the fix: 3 of 4 failing (the page rendered the draft, the private and the cancelled event). M208: 2 of 4 failing. M209: 1 of 4 failing. M210: 3 of 4 failing. M211: 3 of 4 failing. All reverted.",
       "date": "2026-09-29"
     },
+    "event-wall-clock.test.ts": {
+      "guards": "SCRUM-453 follow-up: a time typed on an event form is wall-clock time where the event happens. wallClockToUtc('2026-10-10T18:00','Asia/Kolkata') is 12:30Z (Berlin 16:00Z), and both the curate form and the organiser editor convert through it, never new Date(value) (the browser's zone).",
+      "mutation": "M212 the curate form back on new Date(values.start_time).toISOString(). M213 wallClockToUtc reading the machine zone (new Date(local)).",
+      "observed": "Red before the fix: the suite failed to load (no lib/event-wall-clock). M212: 1 of 3 failing (the curate-form source check). M213: 1 of 3 failing (Kolkata 18:00 came back 18:00Z under TZ=UTC). All reverted.",
+      "date": "2026-09-29"
+    },
     "seed-brand.itest.ts": {
       "guards": "SCRUM-456: the seeds keep an organisation to one brand, keyed as the product keys it. ensureOrgBrand (scripts/seed-brand.ts) returns the org's existing brand even after the product renamed and re-keyed it; creates one under normaliseSponsorName otherwise; findBrandByName finds a brand under the product key and the seeds' old toLowerCase key; and no seed hand-writes a sponsor name_key (source check over seed-qa.ts and seed-blr-scenarios.ts).",
-      "mutation": "M216 the cross-org refusal removed (another org's brand returned). M217 an unowned brand returned without being claimed. M218 LIVE dropped from the org lookup. M219 OLDEST reversed. M212 ensureOrgBrand's org lookup removed (by name only). M213 findBrandByName matches the old toLowerCase key only. M214 seed-blr-scenarios given back a literal name_key \"blue tokai\", and separately a template-string one.",
-      "observed": "Added after ecc:pr-test-analyzer: 3 cases (cross-org refusal red first, unowned claim red first, deleted/oldest a guard). M216, M217, M218, M219: each 1 of 9 failing, its own case. Red before the fix: 1 of 4 failing, the source check listed name_key: brandName.toLowerCase() x2 and name_key: \"third wave\" x2 in seed-qa.ts. M212: 1 of 4 failing (the renamed-brand case). M213: 1 of 4 failing (the product-key lookup). M214: 1 of 4 failing (the source check), both forms, after the check was widened from literals and toLowerCase() to any key not built by normaliseSponsorName. All reverted.",
+      "mutation": "M218 the cross-org refusal removed (another org's brand returned). M219 an unowned brand returned without being claimed. M220 LIVE dropped from the org lookup. M221 OLDEST reversed. M214 ensureOrgBrand's org lookup removed (by name only). M215 findBrandByName matches the old toLowerCase key only. M216 seed-blr-scenarios given back a literal name_key \"blue tokai\", and separately a template-string one.",
+      "observed": "Added after ecc:pr-test-analyzer: 3 cases (cross-org refusal red first, unowned claim red first, deleted/oldest a guard). M218, M219, M220, M221: each 1 of 9 failing, its own case. Red before the fix: 1 of 4 failing, the source check listed name_key: brandName.toLowerCase() x2 and name_key: \"third wave\" x2 in seed-qa.ts. M214: 1 of 4 failing (the renamed-brand case). M215: 1 of 4 failing (the product-key lookup). M216: 1 of 4 failing (the source check), both forms, after the check was widened from literals and toLowerCase() to any key not built by normaliseSponsorName. All reverted.",
       "date": "2026-09-29"
     },
     "sponsor-register-stale-key.itest.ts": {
       "guards": "SCRUM-456: mergeSponsors re-keys the brand it keeps; the admin brand register (getSponsorRegister) clusters two brands whose stored name_key disagree about the same name (the product's 'bluetokai' and a seed's 'blue tokai'), so the duplicate shows and the merge that repairs it is offered. On staging the register said 'every name is distinct' over sponsor@'s two Blue Tokai rows.",
-      "mutation": "M215 the register back on the stored name_key (name_key: r.name_key). M220 mergeSponsors no longer re-keys the brand it keeps.",
-      "observed": "Red before the fix: 1 of 1 failing, no cluster held the two rows (received undefined). M215: the same failure. The merge case (added after ecc:pr-test-analyzer) was red first, the kept row's key still 'blue tokai ...'. M220: 1 of 9 failing, that case. All reverted.",
+      "mutation": "M217 the register back on the stored name_key (name_key: r.name_key). M222 mergeSponsors no longer re-keys the brand it keeps.",
+      "observed": "Red before the fix: 1 of 1 failing, no cluster held the two rows (received undefined). M217: the same failure. The merge case (added after ecc:pr-test-analyzer) was red first, the kept row's key still 'blue tokai ...'. M222: 1 of 9 failing, that case. All reverted.",
       "date": "2026-09-29"
     }
   },
