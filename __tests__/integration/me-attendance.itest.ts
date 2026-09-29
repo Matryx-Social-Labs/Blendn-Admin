@@ -28,6 +28,9 @@ import { db, closeDb, makeUser, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const meAttendance = require("@/app/api/mobile/me/attendance/route") as
   typeof import("@/app/api/mobile/me/attendance/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const userRoute = require("@/app/api/mobile/users/[userId]/route") as
+  typeof import("@/app/api/mobile/users/[userId]/route")
 
 const users: string[] = []
 const events: string[] = []
@@ -225,14 +228,21 @@ describe("GET /me/attendance", () => {
     await db.events.update({ where: { id: removed.id }, data: { deleted_at: new Date() } })
     const { email } = await db.user.findUniqueOrThrow({ where: { id: goer }, select: { email: true } })
 
-    const res = await fetchMine(signAccessToken(goer, email), "?limit=1")
-    const body = await res.json()
+    const token = signAccessToken(goer, email)
+    const body = await (await fetchMine(token, "?limit=1")).json()
+    // The other reader of the count: the profile's "events attended".
+    const profile = await (
+      await userRoute.GET(
+        new NextRequest(`http://localhost/api/mobile/users/${goer}`, { headers: { authorization: `Bearer ${token}` } }),
+        { params: Promise.resolve({ userId: goer }) }
+      )
+    ).json()
 
     expect({
       page: body.data.events.map((e: { id: string }) => e.id),
       total: body.data.pagination.totalCount,
-      counted: await distinctEventsAttended(goer),
-    }).toEqual({ page: [kept.id], total: 1, counted: 1 })
+      profile: profile.data?.stats?.eventsAttended,
+    }).toEqual({ page: [kept.id], total: 1, profile: 1 })
   })
 
   it("refuses an unauthenticated caller", async () => {
