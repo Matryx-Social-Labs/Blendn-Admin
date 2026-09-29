@@ -193,6 +193,14 @@ export async function updateAmenity(
 
   const name = input.name?.trim()
   if (name !== undefined && name.length < 2) throw new Refusal("Name is required")
+  if (name !== undefined) {
+    // The same rule as create, or a rename puts two "Open Bar"s in the picker (SCRUM-468).
+    const twin = await db.amenities.findFirst({
+      where: { id: { not: id }, name: { equals: name, mode: "insensitive" } },
+      select: { name: true },
+    })
+    if (twin) throw new Refusal(`"${twin.name}" already exists — rename that one instead`)
+  }
 
   await db.amenities.update({
     where: { id },

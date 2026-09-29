@@ -77,8 +77,17 @@ export async function renameCategory(id: string, name: string): Promise<void> {
 
   const before = await db.categories.findUniqueOrThrow({
     where: { id },
+    select: { name: true, parent_id: true },
+  })
+
+  // Create refuses a name already in the list (by slug); rename has to as well,
+  // or the app shows two identical choices that filter differently (SCRUM-468).
+  // Siblings only: two parents may each have a "Workshops".
+  const twin = await db.categories.findFirst({
+    where: { id: { not: id }, parent_id: before.parent_id, name: { equals: trimmed, mode: "insensitive" } },
     select: { name: true },
   })
+  if (twin) throw new Refusal(`"${twin.name}" already exists — merge into it instead.`)
 
   // The slug is deliberately NOT regenerated. It is what the mobile client
   // filters on and what every shared link contains; renaming "Live Music" to
@@ -242,6 +251,8 @@ export async function createCategory(name: string, parentId: string | null): Pro
     .replace(/&/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
+  // "!!" passes the length check and slugs to "", which the app cannot filter on.
+  if (!slug) throw new Refusal("Use at least one letter or number in the name.")
 
   const clash = await db.categories.findUnique({ where: { slug }, select: { id: true } })
   if (clash) throw new Refusal("A category with that slug already exists.")
