@@ -11,8 +11,7 @@
  */
 jest.mock("@/lib/tigris", () => ({
   ownedPhotoKey: jest.fn(),
-  getObjectSize: jest.fn(),
-  getMaxFileSize: () => 10 * 1024 * 1024,
+  sealUpload: jest.fn(),
 }))
 jest.mock("@/lib/moderation/openai-moderation", () => ({
   checkImageContent: jest.fn(),
@@ -29,16 +28,17 @@ jest.mock("@/lib/db", () => ({
 
 import { checkImageContent } from "@/lib/moderation/openai-moderation"
 import { recordPhotoCheck } from "@/lib/photo-checks"
-import { getObjectSize, ownedPhotoKey } from "@/lib/tigris"
+import { ownedPhotoKey, sealUpload } from "@/lib/tigris"
 import { db } from "@/lib/db"
-import { checkProfilePhoto, moderateProfilePhoto } from "@/lib/photos"
+import { checkProfilePhoto, MIN_PHOTO_BYTES, moderateProfilePhoto } from "@/lib/photos"
 import { logger } from "@/lib/logger"
 
 const own = ownedPhotoKey as jest.Mock
-const size = getObjectSize as jest.Mock
+const seal = sealUpload as jest.Mock
 const vendor = checkImageContent as jest.Mock
 const record = recordPhotoCheck as jest.Mock
 const URL = "https://blendn-media.fly.storage.tigris.dev/profile/u1/1-a-photo.jpg"
+const SEALED = "https://blendn-media.fly.storage.tigris.dev/profile/u1/2-b-sealed"
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -46,21 +46,27 @@ beforeEach(() => {
 })
 
 describe("checkProfilePhoto (request path)", () => {
-  it("never calls the vendor", async () => {
-    size.mockResolvedValue(200_000)
-    await expect(checkProfilePhoto(URL, "u1")).resolves.toEqual({ ok: true, checked: false })
+  it("never calls the vendor, and answers with the sealed copy (SCRUM-425)", async () => {
+    seal.mockResolvedValue({ key: "profile/u1/2-b-sealed", url: SEALED, bytes: 200_000, contentType: "image/jpeg" })
+    await expect(checkProfilePhoto(URL, "u1")).resolves.toEqual({ ok: true, checked: false, url: SEALED })
+    // The blank-photo floor is applied to the copy, which is what is stored.
+    expect(seal).toHaveBeenCalledWith("profile/u1/1-a-photo.jpg", "profile", "u1", MIN_PHOTO_BYTES)
     expect(vendor).not.toHaveBeenCalled()
   })
 
-  it("still refuses what the cheap gates catch: missing, blank, huge, not ours", async () => {
-    size.mockResolvedValueOnce(null)
-    expect((await checkProfilePhoto(URL, "u1")) as { code?: string }).toMatchObject({ ok: false, code: "too_small" })
-    size.mockResolvedValueOnce(2_000)
-    expect((await checkProfilePhoto(URL, "u1")) as { code?: string }).toMatchObject({ ok: false, code: "too_small" })
-    size.mockResolvedValueOnce(11 * 1024 * 1024)
-    expect((await checkProfilePhoto(URL, "u1")) as { code?: string }).toMatchObject({ ok: false, code: "too_large" })
+  it("still refuses what the cheap gates catch: missing, blank, huge, not a photo, not ours", async () => {
+    for (const [refused, code] of [
+      ["missing", "too_small"],
+      ["too_small", "too_small"],
+      ["too_large", "too_large"],
+      ["wrong_type", "wrong_type"],
+    ]) {
+      seal.mockResolvedValueOnce({ refused })
+      expect((await checkProfilePhoto(URL, "u1")) as { code?: string }).toMatchObject({ ok: false, code })
+    }
     own.mockReturnValueOnce(null)
     expect((await checkProfilePhoto("https://evil/x.jpg", "u1")) as { code?: string }).toMatchObject({ ok: false, code: "not_ours" })
+    expect(seal).toHaveBeenCalledTimes(4)
     expect(vendor).not.toHaveBeenCalled()
   })
 })
@@ -122,8 +128,11 @@ describe("the vendor calls have a deadline", () => {
     const { readFileSync } = await import("fs")
     const src = readFileSync(require.resolve("@/lib/moderation/openai-moderation"), "utf8")
     expect(src.match(/signal: AbortSignal\.timeout\(MODERATION_TIMEOUT_MS\)/g)?.length).toBe(2)
+    // The seal's copy and HEAD are on the profile PUT's path too.
     const tigris = readFileSync(require.resolve("@/lib/tigris"), "utf8")
-    expect(tigris).toMatch(/new HeadObjectCommand\(\{ Bucket: bucketForKey\(key\), Key: key \}\),\s*\{ abortSignal: AbortSignal\.timeout\(5_000\) \}/)
+    expect(tigris).toMatch(/const timeout = \(\) => \(\{ abortSignal: AbortSignal\.timeout\(SEAL_TIMEOUT_MS\) \}\)/)
+    // Used by the HEADs and the copy.
+    expect(tigris.match(/timeout\(\)/g)?.length).toBe(2)
   })
 })
 
@@ -133,7 +142,8 @@ describe("the profile PUT hands the vendor check to after()", () => {
     const { join } = await import("path")
     const src = readFileSync(join(__dirname, "..", "app/api/mobile/profiles/[userId]/route.ts"), "utf8")
     expect(src).toMatch(/import \{ NextRequest, after \} from "next\/server"/)
-    expect(src).toMatch(/after\(\(\) => Promise\.all\(fresh\.map\(\(u: string\) => moderateProfilePhoto\(u, userId\)\)\)\)/)
+    // The sealed copies, the URLs the profile stores (SCRUM-425).
+    expect(src).toMatch(/after\(\(\) => Promise\.all\(sealed\.map\(\(u: string\) => moderateProfilePhoto\(u, userId\)\)\)\)/)
     // The vendor is reached only through lib/photos, after the response.
     expect(src).not.toMatch(/import .*checkImageContent/)
   })

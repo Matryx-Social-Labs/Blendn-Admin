@@ -10,6 +10,16 @@ import { NextRequest } from "next/server"
  * this does: post, read the row.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+// The stored URL is the upload's sealed copy (SCRUM-425); the copy is tested in upload-seal.test.ts.
+jest.mock("@/lib/tigris", () => ({
+  ...jest.requireActual("@/lib/tigris"),
+  sealUpload: jest.fn(async (key: string) => ({
+    key: `${key}-sealed`,
+    url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/${key}-sealed`,
+    bytes: 120_000,
+    contentType: "image/jpeg",
+  })),
+}))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
@@ -82,5 +92,5 @@ it("writes a media-only message with a null text, not an explicit undefined", as
   expect([200, 201]).toContain(res.status)
   const body = (await res.json()) as { data: { id: string } }
   const row = await db.private_messages.findUniqueOrThrow({ where: { id: body.data.id } })
-  expect(row).toMatchObject({ message_text: null, media_url: photo, media_type: "image" })
+  expect(row).toMatchObject({ message_text: null, media_url: `${photo}-sealed`, media_type: "image" })
 })

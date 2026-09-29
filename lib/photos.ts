@@ -1,5 +1,5 @@
 import { checkImageContent } from "./moderation/openai-moderation"
-import { getMaxFileSize, getObjectSize, ownedPhotoKey } from "./tigris"
+import { ownedPhotoKey, sealUpload, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
 import { recordPhotoCheck } from "./photo-checks"
@@ -38,8 +38,10 @@ export type PhotoRejection =
   | { ok: false; code: "too_small"; message: string }
   | { ok: false; code: "unsafe"; message: string }
   | { ok: false; code: "too_large"; message: string }
+  | { ok: false; code: "wrong_type"; message: string }
 
-export type PhotoVerdict = { ok: true; checked: boolean } | PhotoRejection
+/** `url` is the sealed copy: the one the profile stores (SCRUM-425). */
+export type PhotoVerdict = { ok: true; checked: boolean; url: string } | PhotoRejection
 
 /**
  * 8 KB.
@@ -48,7 +50,7 @@ export type PhotoVerdict = { ok: true; checked: boolean } | PhotoRejection
  * phone camera is hundreds of KB even after the client's compression pass. The
  * floor sits below anything real and above anything empty, and it is a floor
  * rather than a range because "suspiciously large" is not a thing we care about
- * — the presigned upload already caps size.
+ * — the folder's ceiling is applied to the sealed copy.
  */
 export const MIN_PHOTO_BYTES = 8_000
 
@@ -72,30 +74,24 @@ export async function checkProfilePhoto(url: string, userId: string): Promise<Ph
       message: "Upload photos through the app rather than linking to them",
     }
   }
-  const size = await getObjectSize(key)
-  if (size === null) {
-    // The object is not there. Almost always a client posting the URL before
-    // the upload finished, which is worth saying plainly rather than calling
-    // it a rejection.
-    return {
-      ok: false,
-      code: "too_small",
-      message: "That photo did not finish uploading. Try again.",
-    }
-  }
-  if (size < MIN_PHOTO_BYTES) {
-    return {
-      ok: false,
-      code: "too_small",
-      message: "That looks like a blank image. Pick a photo of yourself.",
-    }
-  }
-  if (size > getMaxFileSize("profile")) {
-    // The presigned PUT cannot bound size; this is the first place the
-    // server sees the object, so it is where the ceiling is enforced.
-    return { ok: false, code: "too_large", message: "That photo is too large. Pick one under 10 MB." }
-  }
-  return { ok: true, checked: false }
+  /*
+   * The copy is what is measured and stored (SCRUM-425). The URL the client
+   * uploaded to can write for 15 minutes, which is how a photo was swapped
+   * for another after it was attached and moderated; nobody holds one for the
+   * copy.
+   */
+  const sealed = await sealUpload(key, "profile", userId, MIN_PHOTO_BYTES)
+  if ("refused" in sealed) return PHOTO_REFUSAL[sealed.refused]
+  return { ok: true, checked: false, url: sealed.url }
+}
+
+const PHOTO_REFUSAL: Record<SealRefusal, PhotoRejection> = {
+  // Almost always a client posting the URL before the upload finished, which
+  // is worth saying plainly rather than calling it a rejection.
+  missing: { ok: false, code: "too_small", message: "That photo did not finish uploading. Try again." },
+  too_small: { ok: false, code: "too_small", message: "That looks like a blank image. Pick a photo of yourself." },
+  too_large: { ok: false, code: "too_large", message: "That photo is too large. Pick one under 10 MB." },
+  wrong_type: { ok: false, code: "wrong_type", message: "That file isn't a photo. Pick a JPEG, PNG or WebP." },
 }
 
 /**

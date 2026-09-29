@@ -764,7 +764,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 ```json
 { "content": "string", "type": "text|image|video", "metadata": { "mediaUrl": "url?" }, "parentId": "uuid?" }
 ```
-**Media (SCRUM-426).** `metadata` takes `mediaUrl` and nothing else; any other key is `400`. The server writes the rest, such as `sponsored_message_id`, which the app uses to draw a sponsored card. `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket). Anything else is `400` "Send photos through the app rather than linking to them". The same rules apply to `POST /events/:eventId/chat`.
+**Media (SCRUM-426).** `metadata` takes `mediaUrl` and nothing else; any other key is `400`. The server writes the rest, such as `sponsored_message_id`, which the app uses to draw a sponsored card. `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket). Anything else is `400` "Send photos through the app rather than linking to them". The same rules apply to `POST /events/:eventId/chat`. What is stored and sent to the room is a copy of the upload that nobody can write to (SCRUM-425), so `metadata.mediaUrl` comes back different from the one you sent. An upload that never arrived, is over 50 MB, or is not an allowed type is `400`. The same applies to a DM's `mediaUrl`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
 1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
@@ -896,6 +896,11 @@ stored. Three gates, cheapest first:
 2. **Not blank** (`too_small`). One metadata call, no download. A solid colour
    or a lens cap compresses to a few KB where a photograph is hundreds.
 3. **Not harmful** (`unsafe`). OpenAI omni-moderation, which is free.
+
+What is stored, checked and moderated is a copy of the upload with a key of
+its own (SCRUM-425), so `photos` comes back with different URLs from the ones
+you sent. Send those back when you reorder or remove. The blank and size gates
+are applied to the copy; a file that is not an image is `wrong_type`.
 
 Only URLs not already on your profile are checked, so re-saving is cheap, and
 the checks run concurrently.
@@ -1743,6 +1748,14 @@ be seen.
 { "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events" }
 ```
 Note: `events` folder requires organiser/admin role.
+
+PUT the file to `uploadUrl` with **exactly** the `Content-Type` you asked for.
+The type is signed into the URL, so any other type, or none, is refused by
+storage with `403 SignatureDoesNotMatch` (SCRUM-425). The URL can write its
+key for 15 minutes, so a profile or a message never stores it: attaching the
+upload stores a **copy** under a new key nobody can upload to, and the URL you
+get back (`photos`, `metadata.mediaUrl`, a DM's `mediaUrl`) is the copy's,
+not the `publicUrl` you sent.
 
 ---
 

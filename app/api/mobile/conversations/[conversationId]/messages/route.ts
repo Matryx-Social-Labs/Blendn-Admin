@@ -23,7 +23,7 @@ import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
-import { isOwnChatMedia, NOT_OWN_MEDIA } from "@/lib/validations/chat"
+import { isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
@@ -325,6 +325,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
     const hidden = screen.verdict === "hide"
 
+    /*
+     * What is stored is the upload's sealed copy, which nobody can write to
+     * (SCRUM-425). Made here, after every gate, so a refused send copies nothing.
+     */
+    const media = mediaUrl ? await sealChatMedia(mediaUrl, authUser.userId) : null
+    if (media && "refusal" in media) return errorResponse(media.refusal, 400)
+
     // Create the message
     let message: SentMessage
     try {
@@ -340,7 +347,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // sent — which is every DM. Explicit undefined threw under
         // `strictUndefinedChecks`, so sending a DM returned 500. Found by
         // sending one from the simulator after a match.
-        ...(mediaUrl != null && { media_url: mediaUrl }),
+        ...(media != null && { media_url: media.url }),
         ...(mediaType != null && { media_type: mediaType as media_type }),
         moderation_status: screen.status,
         ...(replyToId && { reply_to_id: replyToId }),
