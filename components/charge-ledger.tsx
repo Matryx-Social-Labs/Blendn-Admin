@@ -8,6 +8,8 @@ import { IconLoader2, IconReceipt } from "@tabler/icons-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
 import { cn } from "@/lib/utils"
 import {
@@ -89,6 +91,8 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
   const [amount, setAmount] = useState("")
   const [ref, setRef] = useState("")
   const [settling, setSettling] = useState(false)
+  const [voiding, setVoiding] = useState(false)
+  const [why, setWhy] = useState("")
   const [pending, start] = useTransition()
 
   function price() {
@@ -107,12 +111,19 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
   function advance(to: "agreed" | "settled" | "void") {
     start(async () => {
       try {
-        await advanceCharge(placement.charge!.id, to, to === "settled" ? ref : undefined)
+        await advanceCharge(
+          placement.charge!.id,
+          to,
+          to === "settled" ? ref : undefined,
+          to === "void" ? why : undefined
+        )
         toast.success(
           to === "void" ? "Voided. Raise a corrected charge when you are ready." : `Marked ${to}.`
         )
         setRef("")
+        setWhy("")
         setSettling(false)
+        setVoiding(false)
         router.refresh()
       } catch (err) {
         toast.error(refusalMessage(err, "Could not update that"))
@@ -172,7 +183,42 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
             {charge.externalRef ? ` · ${charge.externalRef}` : ""}
           </span>
 
-          {settling ? (
+          {voiding ? (
+            // One inline step, in words, like a creative rejection: a void can
+            // undo money that arrived and cannot be undone (SCRUM-173).
+            <div className="flex w-full max-w-xl flex-col gap-2">
+              <Label htmlFor={`void-${charge.id}`} className="text-[0.75rem] font-normal text-muted-foreground">
+                Why is this charge void? It goes in the audit log and stays on this row.
+              </Label>
+              <Textarea
+                id={`void-${charge.id}`}
+                value={why}
+                onChange={(e) => setWhy(e.target.value)}
+                placeholder="e.g. duplicate invoice, re-raised as the October package"
+                autoFocus
+              />
+              {charge.externalRef ? (
+                <span className="text-[0.75rem] text-faint-foreground">
+                  It was settled with reference {charge.externalRef}. Voiding it does not refund the sponsor.
+                </span>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={pending || why.trim().length < 10}
+                  onClick={() => advance("void")}
+                >
+                  {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}
+                  Void {money(charge.amountMinor, charge.currency)}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setVoiding(false)}>
+                  Back
+                </Button>
+                <span className="text-[0.75rem] text-faint-foreground">10 characters at least</span>
+              </div>
+            </div>
+          ) : settling ? (
             <div className="flex w-full items-center gap-2">
               <Input
                 value={ref}
@@ -206,8 +252,8 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
                 </Button>
               ) : null}
               {charge.status !== "void" ? (
-                <Button size="sm" variant="ghost" disabled={pending} onClick={() => advance("void")}>
-                  Void
+                <Button size="sm" variant="ghost" disabled={pending} onClick={() => setVoiding(true)}>
+                  Void…
                 </Button>
               ) : null}
             </div>
@@ -230,6 +276,26 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
           </Button>
         </div>
       )}
+
+      {/* A void stays on its placement as a receipt, not only in the audit
+          log: "unbilled" alone read as if nothing had ever been billed. */}
+      {placement.voided.map((v) => (
+        <p
+          key={v.id}
+          className="flex flex-wrap gap-x-2.5 gap-y-0.5 border-l-2 border-border-strong pl-2.5 text-[0.8125rem] text-muted-foreground"
+        >
+          <s className="font-bold text-faint-foreground">{money(v.amountMinor, v.currency)}</s>
+          <span>
+            <span className="font-bold text-destructive">voided</span> from {v.fromStatus}
+          </span>
+          {v.externalRef ? <span>ref {v.externalRef}</span> : null}
+          {v.reason ? <span>“{v.reason}”</span> : null}
+          <span>
+            {v.voidedByName ?? "someone since deleted"}
+            {v.voidedAt ? ` · ${formatDay(v.voidedAt.toISOString())}` : ""}
+          </span>
+        </p>
+      ))}
     </div>
   )
 }

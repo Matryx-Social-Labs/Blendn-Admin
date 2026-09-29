@@ -165,7 +165,8 @@ describe("the status walk", () => {
       charge(from)
       // Money comes back sometimes. What must not happen is a settled charge
       // quietly becoming a draft again.
-      await advanceCharge(CHARGE, "void")
+      // A void now carries its reason (SCRUM-173); the walk itself is unchanged.
+      await advanceCharge(CHARGE, "void", undefined, "duplicate invoice, re-raised")
       expect(mockDb.placement_charges.update.mock.calls[0][0].data.status).toBe("void")
     }
   })
@@ -207,13 +208,22 @@ describe("the ledger", () => {
     expect(ledger.placements[0].sends).toBe(4)
   })
 
-  it("ignores voided charges when reading the live one", async () => {
-    placements([base])
-    await getChargeLedger()
+  it("reads the live charge past voided ones, and keeps the voided ones as history", async () => {
+    // Behaviour, not query shape: the ledger now reads every charge and splits
+    // them, so a void stays visible on its placement (SCRUM-173).
+    placements([
+      {
+        ...base,
+        charges: [
+          { id: "void1", amount_minor: 150000, currency: "INR", status: "void", agreed_at: new Date(), settled_at: new Date(), external_ref: "NEFT-1", created_at: new Date(), voided_at: new Date(), voided_by: null, void_reason: "duplicate invoice", pricer: null },
+          { id: "live1", amount_minor: 90000, currency: "INR", status: "draft", agreed_at: null, settled_at: null, external_ref: null, created_at: new Date(), voided_at: null, voided_by: null, void_reason: null, pricer: null },
+        ],
+      },
+    ])
+    const ledger = await getChargeLedger()
 
-    expect(mockDb.event_sponsors.findMany.mock.calls[0][0].select.charges.where.status).toEqual({
-      not: "void",
-    })
+    expect(ledger.placements[0].charge?.id).toBe("live1")
+    expect(ledger.placements[0].voided.map((v) => [v.id, v.fromStatus, v.externalRef])).toEqual([["void1", "settled", "NEFT-1"]])
   })
 
   it("totals per currency, never across them", async () => {

@@ -1954,6 +1954,12 @@ model placement_charges {
   priced_by    String
   agreed_at    DateTime?     @db.Timestamptz(6)
   settled_at   DateTime?     @db.Timestamptz(6)
+  /// When, by whom and why the charge was voided (SCRUM-173). A void can undo a
+  /// payment that arrived; the ledger keeps it as history and these say what
+  /// happened. `voided_by` is a user id, like `priced_by`.
+  voided_at    DateTime?     @db.Timestamptz(6)
+  voided_by    String?
+  void_reason  String?
   /// External reference. No payment provider is integrated.
   external_ref String?
   created_at   DateTime      @default(now()) @db.Timestamptz(6)

@@ -1364,6 +1364,12 @@
       "mutation": "M270 the events route passes city unescaped. M271 the venues route passes city unescaped. M272 the curation queue passes city unescaped. M273 the events filter uses the raw city, not cityKey. M274 the venues filter uses the raw city. M275 likeLiteral does not escape the backslash.",
       "observed": "Red before the fix: 2 of 4 failing ('%' returned the fixture event and venue); the review's cases (empty result for '%', padded and blank city, the cache-poisoning sequence, a city containing %, _ and a backslash) added after. M270, M271, M272, M274, M275: each 1 of 10 failing. M273: 2 of 10. All reverted.",
       "date": "2026-09-29"
+    },
+    "charge-void.itest.ts": {
+      "guards": "SCRUM-173: advanceCharge refuses a void without a reason of 10+ characters and writes nothing; a void records voided_at, voided_by and void_reason; the charge.void audit row carries the reason and the payment reference the charge carried; getChargeLedger keeps voided charges on their placement as history (from-state, ref, reason, who).",
+      "mutation": "M276 no reason check. M277 the audit reference taken from the argument only. M278 voided history dropped from the ledger. M279 voided_by not stored.",
+      "observed": "Red before the fix: 3 of 3 failing (a void with no reason succeeded). M276: 3 of 3. M277: 1 of 3 (externalRef null). M278: 1 of 3. M279: 2 of 3. All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [
