@@ -136,6 +136,16 @@ describe("getEventOverview — over", () => {
     const rating = o?.tiles.find((t) => t.label === "Rating")
     expect(rating).toEqual({ label: "Rating", value: null, hint: "nobody rated it" })
   })
+
+  it("withholds the rating until five people gave one: one rating beside 'Checked in 1' is that person's (SCRUM-437)", async () => {
+    arrange({ event: over, going: 4, ratings: [4, 2, 5, 5] })
+    const few = (await getEventOverview("e1"))?.tiles.find((t) => t.label === "Rating")
+    expect(few).toEqual({ label: "Rating", value: null, hint: "not enough ratings yet" })
+
+    arrange({ event: over, going: 5, ratings: [5, 4, 4, 3, 5] })
+    const five = (await getEventOverview("e1"))?.tiles.find((t) => t.label === "Rating")
+    expect(five).toEqual({ label: "Rating", value: "4.2", hint: "5 ratings" })
+  })
 })
 
 describe("getEventOverview — draft", () => {

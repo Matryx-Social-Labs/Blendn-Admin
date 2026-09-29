@@ -134,6 +134,84 @@ export function discloseFigure(input: DiscloseInput): Disclosure {
 }
 
 /**
+ * A night's star rating, its average or its spread, or null below the
+ * minimum cell (SCRUM-437).
+ *
+ * The app tells everyone who rates the night that it is "only ever seen by
+ * us". An average of one rating is that person's score, printed beside a head
+ * count of who came; an average of two lets either rater subtract their own
+ * and read the other's. So every surface outside the database reads a rating
+ * through here, and shows nothing until `MIN_CELL` people have rated.
+ *
+ * ponytail: the floor only. Five ratings in one bar still say what each of the
+ * five gave; hold that back too if an event's raters are ever its whole room.
+ */
+export function discloseRating<T>(figure: T, raters: number): T | null {
+  return raters < MIN_CELL ? null : figure
+}
+
+/** Ratings of 1 to 5 stars, counted per star. */
+export type StarSpread = [number, number, number, number, number]
+
+/**
+ * A star spread as a host sees it: the bars, the average to one place, and how
+ * many rated. Under `MIN_CELL` raters the bars are all zero and the average is
+ * null, but the count stays, so a screen can say "not enough ratings yet"
+ * rather than "nobody rated" (SCRUM-437).
+ */
+export function discloseStars(spread: StarSpread): {
+  ratings: StarSpread
+  averageRating: number | null
+  ratingCount: number
+} {
+  const ratingCount = spread.reduce((a, b) => a + b, 0)
+  const average = discloseRating(
+    Math.round((spread.reduce((sum, n, i) => sum + n * (i + 1), 0) / ratingCount) * 10) / 10,
+    ratingCount
+  )
+  return average === null
+    ? { ratings: [0, 0, 0, 0, 0], averageRating: null, ratingCount }
+    : { ratings: spread, averageRating: average, ratingCount }
+}
+
+/**
+ * Stars across several events (an organisation's, a venue's), pooled only from
+ * events that could show their own. Pool them all and a host subtracts an event
+ * they can see from the total to read one they can't: the organisation's bars
+ * minus a six-rater event's bars are a one-rater event's score (SCRUM-437).
+ */
+export function poolStars(perEvent: Iterable<StarSpread>): StarSpread {
+  const pooled: StarSpread = [0, 0, 0, 0, 0]
+  for (const spread of perEvent) {
+    if (discloseStars(spread).averageRating === null) continue
+    spread.forEach((n, i) => (pooled[i] += n))
+  }
+  return pooled
+}
+
+/**
+ * Several events' stars as a host sees them: pooled from the events that pass
+ * alone, and when none do, the count of every rating, so the screen says "not
+ * enough ratings yet" rather than "nobody rated".
+ */
+export function discloseStarsAcross(perEvent: StarSpread[]): ReturnType<typeof discloseStars> {
+  const stars = discloseStars(poolStars(perEvent))
+  if (stars.averageRating !== null) return stars
+  return { ...stars, ratingCount: perEvent.flat().reduce((a, b) => a + b, 0) }
+}
+
+/** `groupBy(["event_id", "rating"])` rows as one star spread per event. */
+export function spreadsByEvent(rows: Array<{ event_id: string; rating: number; _count: { _all: number } }>): StarSpread[] {
+  const byEvent = new Map<string, StarSpread>()
+  for (const row of rows) {
+    const spread = byEvent.get(row.event_id) ?? [0, 0, 0, 0, 0]
+    if (row.rating >= 1 && row.rating <= 5) spread[row.rating - 1] = row._count._all
+    byEvent.set(row.event_id, spread)
+  }
+  return [...byEvent.values()]
+}
+
+/**
  * May this *text* be shown, attributed to a pseudonym?
  *
  * Stricter than a count, and the register's sharpest finding is why: the
