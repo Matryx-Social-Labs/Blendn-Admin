@@ -59,12 +59,8 @@ export async function GET(request: NextRequest) {
       distinctEventsAttended(authUser.userId),
     ])
 
-    /*
-     * Deleted events are filtered here rather than in the count, on purpose:
-     * the count answers "how many did you go to", which a later deletion does
-     * not change. A page that renders fewer cards than its total is the honest
-     * shape when the missing one is an event the platform removed.
-     */
+    // Deleted events are already out of both queries (SCRUM-432). This filter
+    // only covers one deleted between the two reads.
     const events = attended.length
       ? await db.events.findMany({
           where: { id: { in: attended.map((a) => a.event_id) }, deleted_at: null },

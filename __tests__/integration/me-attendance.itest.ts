@@ -28,6 +28,9 @@ import { db, closeDb, makeUser, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const meAttendance = require("@/app/api/mobile/me/attendance/route") as
   typeof import("@/app/api/mobile/me/attendance/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const userRoute = require("@/app/api/mobile/users/[userId]/route") as
+  typeof import("@/app/api/mobile/users/[userId]/route")
 
 const users: string[] = []
 const events: string[] = []
@@ -204,6 +207,42 @@ describe("GET /me/attendance", () => {
       select: { check_in_time: true },
     })
     expect(new Date(conference.attendedAt).getTime()).toBe(firstCheckIn.check_in_time!.getTime())
+  })
+
+  it("leaves a deleted event out of the count and the list alike, and pages past it", async () => {
+    /*
+     * SCRUM-432, driven on staging: `totalCount: 3` above a list of 1, because
+     * a re-seed had soft-deleted two events this person checked in to. The count
+     * read `event_check_ins` alone and the route dropped deleted events after
+     * the query — after its LIMIT, too, so a page whose newest event was deleted
+     * came back short, or empty with more to come.
+     *
+     * A person of their own, so the other tests' events cannot hide a short page.
+     */
+    const goer = await makeUser(testId("att_del"))
+    users.push(goer)
+    const kept = await pastEvent("kept", 1, 10)
+    const removed = await pastEvent("removed", 1, 2)
+    await attendEveryDay(goer, kept)
+    await attendEveryDay(goer, removed)
+    await db.events.update({ where: { id: removed.id }, data: { deleted_at: new Date() } })
+    const { email } = await db.user.findUniqueOrThrow({ where: { id: goer }, select: { email: true } })
+
+    const token = signAccessToken(goer, email)
+    const body = await (await fetchMine(token, "?limit=1")).json()
+    // The other reader of the count: the profile's "events attended".
+    const profile = await (
+      await userRoute.GET(
+        new NextRequest(`http://localhost/api/mobile/users/${goer}`, { headers: { authorization: `Bearer ${token}` } }),
+        { params: Promise.resolve({ userId: goer }) }
+      )
+    ).json()
+
+    expect({
+      page: body.data.events.map((e: { id: string }) => e.id),
+      total: body.data.pagination.totalCount,
+      profile: profile.data?.stats?.eventsAttended,
+    }).toEqual({ page: [kept.id], total: 1, profile: 1 })
   })
 
   it("refuses an unauthenticated caller", async () => {
