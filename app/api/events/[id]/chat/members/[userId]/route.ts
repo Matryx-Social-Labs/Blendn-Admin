@@ -36,6 +36,18 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }
     if (!event.chat_group) return errorResponse("No chat group", 404)
 
+    /*
+     * A room admin (the host, or a colleague holding the room) is not
+     * moderated here. The Members list offered Mute and Ban on the host's own
+     * row, and this updated any member once `canOperate` passed, so a host
+     * could lock themselves or a colleague out of their own room (SCRUM-466).
+     */
+    const target = await db.chat_group_members.findUnique({
+      where: { chat_group_id_user_id: { chat_group_id: event.chat_group.id, user_id: targetUserId } },
+      select: { role: true },
+    })
+    if (target?.role === "admin") return errorResponse("The host can't be muted or banned in their own room", 409)
+
     const statusMap = {
       ban: "banned" as const,
       unban: "active" as const,

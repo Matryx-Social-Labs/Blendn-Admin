@@ -82,6 +82,7 @@ export async function GET(_: Request, { params }: RouteContext) {
         select: {
           user_id: true,
           anonymous_name: true,
+          role: true,
           status: true,
           banned_at: true,
           banned_by: true,
@@ -171,6 +172,8 @@ export async function GET(_: Request, { params }: RouteContext) {
       members: members.map((m) => ({
         userId: m.user_id,
         anonymousName: m.anonymous_name,
+        // `admin` is the host (or a colleague) holding the room: not moderated here (SCRUM-466).
+        role: m.role,
         status: m.status,
         bannedAt: m.banned_at?.toISOString() ?? null,
         bannedByName: m.banned_by ? bannedByMap.get(m.banned_by) ?? null : null,

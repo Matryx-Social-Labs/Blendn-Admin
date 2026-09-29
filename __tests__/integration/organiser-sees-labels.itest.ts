@@ -243,6 +243,35 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
       expect(member).toEqual({ status: "muted", muted_by: hostA })
     })
 
+    it("marks the host's own room-admin membership, and refuses to mute or ban it (SCRUM-466)", async () => {
+      await db.chat_group_members.create({
+        data: { chat_group_id: chatGroupId, user_id: hostA, role: "admin", anonymous_name: null },
+      })
+      as("organizer", hostA)
+      const res = await roomFeed(new Request(`http://localhost/api/events/${firstA.id}/chat/messages`), {
+        params: Promise.resolve({ id: firstA.id }),
+      })
+      const { members } = (await res.json()) as { members: { userId: string; role: string }[] }
+      expect(members.find((m) => m.userId === hostA)?.role).toBe("admin")
+      expect(members.find((m) => m.userId === priya)?.role).toBe("member")
+
+      for (const action of ["ban", "mute"]) {
+        const refused = await moderateMember(
+          new NextRequest(`http://localhost/api/events/${firstA.id}/chat/members/${hostA}`, {
+            method: "PATCH",
+            body: JSON.stringify({ action }),
+          }),
+          { params: Promise.resolve({ id: firstA.id, userId: hostA }) }
+        )
+        expect(refused.status).toBe(409)
+      }
+      const host = await db.chat_group_members.findUniqueOrThrow({
+        where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: hostA } },
+        select: { status: true, banned_at: true },
+      })
+      expect(host).toEqual({ status: "active", banned_at: null })
+    })
+
     it("shows a platform admin who wrote it", async () => {
       as("app_admin", admin)
       const [message] = (await feed()).messages

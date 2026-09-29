@@ -1323,6 +1323,18 @@
       "observed": "Red before the fix: 2 of 2 failing. M306: 1 of 2 failing. Reverted.",
       "date": "2026-09-29"
     },
+    "organiser-sees-labels.itest.ts": {
+      "guards": "SCRUM-466: the room feed labels each member's room role, and the member route refuses to mute or ban a room admin (the host or a colleague).",
+      "mutation": "M302 (SCRUM-466) the member route moderates a room admin. M303 the feed's members carry no role.",
+      "observed": "Red before the fix: 1 of 7 failing. M302: 1 of 7 failing (the host's own ban went through). M303: 1 of 7 failing.",
+      "date": "2026-09-29"
+    },
+    "room-scoped-identity.itest.ts": {
+      "guards": "SCRUM-458: GET /users/:id by raw id sends work_field (outside the gate) and, when the viewer may not see who this is, blurPhoto instead of image/photos; the room-handle card is unchanged.",
+      "mutation": "M300 (SCRUM-458) the card's unidentified branch sends no blurPhoto. M301 the card sends no work_field.",
+      "observed": "Red before the fix: 1 of 13 failing. M300: 1 of 13 failing. M301: 1 of 13 failing.",
+      "date": "2026-09-29"
+    },
     "audit-filter-whole-log.itest.ts": {
       "guards": "SCRUM-462: /dashboard/audit's action filter reaches getAuditLog, so an action older than the newest 100 rows is found (the page rendered with ?action=<rare> hands the timeline exactly that row, total 1); the dropdown lists every action in scope while filtered.",
       "mutation": "M236 the page calls getAuditLog without the action. M237 the action list grouped from the filtered query.",
