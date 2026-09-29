@@ -184,6 +184,74 @@ test.describe("a room never carries another attendee's real name", () => {
     ).toEqual({ leaked: [], hint: "" })
   })
 
+  test("the room's own lists carry handles, never a peer's name, email or id", async ({ baseURL }) => {
+    /*
+     * The room's own routes (SCRUM-282). The surfaces above reach the room
+     * through its event; the app's chat screen pages it and opens its member
+     * list through `/chat/groups/:id/…`, which build their payloads separately
+     * — and the member list was not read anywhere. Checked the same way, with
+     * the same controls: another member's words and handle must be there.
+     */
+    const now = new Date()
+    const group = await db.chat_groups.findFirst({
+      where: {
+        status: "active",
+        event: { deleted_at: null, status: "published", end_time: { gte: now } },
+        members: { some: { status: "active", role: "member" } },
+        messages: { some: { deleted_at: null } },
+      },
+      select: {
+        id: true,
+        members: { where: { status: "active", role: "member" }, select: { user_id: true, anonymous_name: true } },
+      },
+    })
+    test.skip(!group, "no live room - see the first test")
+    const members = await db.user.findMany({
+      where: { id: { in: group!.members.map((m) => m.user_id) } },
+      select: { id: true, name: true, email: true },
+    })
+    const [viewer, ...others] = members
+    const named = others.filter((p) => p.name && p.name.trim().length > 2)
+    expect(named.length, "need at least one other named member").toBeGreaterThan(0)
+
+    // The controls: another member's words and handle must be in what the viewer reads.
+    const theirs = await db.chat_messages.findFirst({
+      where: {
+        chat_group_id: group!.id,
+        user_id: { in: others.map((p) => p.id) },
+        deleted_at: null,
+        // A bare `not` would drop every NULL status, which is what the seed writes.
+        OR: [{ moderation_status: null }, { moderation_status: { not: "hidden" } }],
+      },
+      select: { content: true },
+    })
+    expect(theirs, "the room must hold a message from someone other than the viewer").not.toBeNull()
+    const handles = group!.members.filter((m) => m.user_id !== viewer.id).flatMap((m) => (m.anonymous_name ? [m.anonymous_name] : []))
+
+    const ctx = await playwrightRequest.newContext({
+      baseURL,
+      extraHTTPHeaders: { Authorization: `Bearer ${signAccessToken(viewer.id, viewer.email!)}` },
+    })
+    const leaked: string[] = []
+    for (const [url, control] of [
+      [`/api/mobile/chat/groups/${group!.id}/messages`, theirs!.content],
+      [`/api/mobile/chat/groups/${group!.id}/participants`, handles],
+    ] as const) {
+      const res = await ctx.get(url)
+      expect(res.status(), `${url} must answer, or this proves nothing`).toBeLessThan(400)
+      const body = await res.text()
+      const shown = typeof control === "string" ? [control] : control
+      expect(shown.some((c) => body.includes(c)), `${url} must carry another member's words or handle`).toBe(true)
+      for (const person of named) if (body.includes(person.name!)) leaked.push(`${url} carried "${person.name}"`)
+      for (const person of others) {
+        if (person.email && body.includes(person.email)) leaked.push(`${url} carried "${person.email}"`)
+        if (body.includes(`"${person.id}"`)) leaked.push(`${url} carried the real id of ${person.id}`)
+      }
+    }
+    await ctx.dispose()
+    expect(leaked, "a room list carried a peer's identity").toEqual([])
+  })
+
   test("no stored notification carries a real name", async () => {
     /*
      * `notifications` is the copy that outlives the push.
