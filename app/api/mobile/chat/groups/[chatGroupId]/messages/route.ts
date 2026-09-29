@@ -525,7 +525,8 @@ export async function POST(
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     // Run OpenAI moderation before broadcasting. If it takes >1s, emit anyway
     // and fall back to the post-emit hide behavior for safety.
-    if (type === "text") {
+    // Media goes to the full pipeline whatever the type says: the inline check reads text only (SCRUM-444).
+    if (type === "text" && !stored?.mediaUrl) {
       try {
         /*
          * The loser of this race used to keep its timer alive: `Promise.race`

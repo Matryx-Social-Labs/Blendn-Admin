@@ -793,7 +793,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     let examinedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
-    if (type === "text") {
+    // Media goes to the full pipeline whatever the type says: the inline check reads text only (SCRUM-444).
+    if (type === "text" && !stored?.mediaUrl) {
       try {
         /*
          * The loser of this race used to keep its timer alive: `Promise.race`

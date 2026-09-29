@@ -208,6 +208,15 @@ describe("a room message's metadata comes from the client only as its own media"
       expect(moderateMessage).toHaveBeenCalledWith(row.id, "look", "image", r.memberId, r.groupId, sealed(r.memberId))
     })
 
+    it(`screens the image on a "text" message that carries one, on the ${name} (SCRUM-444)`, async () => {
+      const r = await liveRoom()
+      const res = await send(r, { content: "hi", type: "text", metadata: { mediaUrl: upload(r.memberId) } })
+      expect(res.status).toBe(201)
+      const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "hi" } })
+      // The type is the client's word; the image is what the room sees.
+      expect(moderateMessage).toHaveBeenCalledWith(row.id, "hi", "text", r.memberId, r.groupId, sealed(r.memberId))
+    })
+
     it(`copies nothing for a send it refuses, or for a retry, on the ${name}`, async () => {
       const r = await liveRoom()
       // Not a member: refused before anything is copied.
