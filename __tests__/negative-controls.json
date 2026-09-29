@@ -1340,6 +1340,12 @@
       "mutation": "M255 the rating reply carries an average. M256 the mobile event page carries an average. M259 the venue page reads the spread without a disclosure call.",
       "observed": "M255: 1 of 3 failing (the mobile no-average case). M256: 1 of 3 failing (the same). M259: 1 of 3 failing (app/dashboard/venues/[id]/page.tsx listed as an undisclosed reader). All reverted.",
       "date": "2026-09-29"
+    },
+    "city-filter-literal.itest.ts": {
+      "guards": "SCRUM-473/474: ?city= on GET /api/mobile/events and /venues, and getCurationQueue(city), match the city literally and case-insensitively ('%', '_' and '\\\\' are not ILIKE syntax; a city named with them finds itself); the events and venues filters use the trimmed city the events cache key holds, so a padded or blank city can neither miss nor cache an empty page under another request's key.",
+      "mutation": "M270 the events route passes city unescaped. M271 the venues route passes city unescaped. M272 the curation queue passes city unescaped. M273 the events filter uses the raw city, not cityKey. M274 the venues filter uses the raw city. M275 likeLiteral does not escape the backslash.",
+      "observed": "Red before the fix: 2 of 4 failing ('%' returned the fixture event and venue); the review's cases (empty result for '%', padded and blank city, the cache-poisoning sequence, a city containing %, _ and a backslash) added after. M270, M271, M272, M274, M275: each 1 of 10 failing. M273: 2 of 10. All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [
