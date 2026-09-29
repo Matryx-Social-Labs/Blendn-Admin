@@ -126,9 +126,10 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
       )}
 
       {/*
-        The chart takes the width until there are ratings to show beside it.
-        An organiser with no ratings yet used to get an empty dashed box for
-        40% of the top row, and the tile below already says "no ratings yet".
+        The chart takes the width until there are ratings to show beside it:
+        five or more, since fewer are withheld (SCRUM-437). An organiser with
+        none used to get an empty dashed box for 40% of the top row, and the
+        tile below already says why there is nothing.
       */}
       <div className={data.averageRating !== null ? "grid gap-6 @3xl/main:grid-cols-[3fr_2fr]" : "grid gap-6"}>
         <PacingChart

@@ -821,6 +821,7 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
         nightsPerWeek: Math.round(nightsPerWeek * 10) / 10,
         averageRating: round1(averageRating),
         ratings: averageRating === null ? emptyRatings() : ratings,
+        ratingCount,
         nextBooking: next
           ? {
               id: next.id,

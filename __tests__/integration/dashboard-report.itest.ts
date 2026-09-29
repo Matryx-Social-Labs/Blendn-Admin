@@ -289,6 +289,8 @@ describe("venue owner overview", () => {
     const snug = overview.venues.find((v) => v.name === "Snug")
     expect(snug?.averageRating).toBeNull()
     expect(snug?.ratings).toEqual([0, 0, 0, 0, 0])
+    // Counted, so the screen can say "not enough ratings yet" rather than "nobody".
+    expect(snug?.ratingCount).toBe(1)
     expect(snug?.note).not.toBe("ratings skew low")
     expect(snug?.tone).not.toBe("destructive")
   })
