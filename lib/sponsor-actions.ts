@@ -369,6 +369,14 @@ export async function mergeSponsors(loserId: string, winnerId: string, note: str
       where: { id: loserId },
       data: { merged_into: winnerId, deleted_at: new Date() },
     })
+
+    // The kept brand may carry a key written under an older rule. Left stale,
+    // the next exact-name check misses it and a third copy gets created
+    // (SCRUM-456).
+    await tx.sponsors.update({
+      where: { id: winnerId },
+      data: { name_key: normaliseSponsorName(winner.name) },
+    })
   })
 
   auditLog({
@@ -961,7 +969,10 @@ export async function getSponsorRegister(): Promise<SponsorRegister> {
   const mapped: AdminSponsorRow[] = rows.map((r) => ({
     id: r.id,
     name: r.name,
-    name_key: r.name_key,
+    // The key of the name as it is now, not the stored one: a row keyed by an
+    // older rule (a seed's `toLowerCase()`) hid a duplicate from this screen,
+    // and with it the only merge that repairs it (SCRUM-456).
+    name_key: normaliseSponsorName(r.name),
     website: r.website,
     ownerName: r.org?.display_name ?? null,
     claimed: r.claimed_at !== null,
