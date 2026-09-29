@@ -49,8 +49,8 @@ const ROW_MARKER: Record<string, string> = {
   "/dashboard/organisers": "organizer@blendn.app",
   "/dashboard/venue-owners": "venue.owner@blendn.app",
   "/dashboard/organisations": "Nightshift Collective",
-  "/dashboard/onboarding": "delivered+apply-hummingtree@resend.dev",
-  "/dashboard/claims": "delivered+claim-toit@resend.dev",
+  "/dashboard/onboarding": "founder@thehummingtree.com",
+  "/dashboard/claims": "events@toit.in",
   "/dashboard/sponsors": "Blue Tokai",
   /*
    * The unclaimed venue, deliberately — it is the row the admin index exists

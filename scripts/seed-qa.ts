@@ -1094,41 +1094,22 @@ async function main() {
   const openId = curatedIds["seeded-curated-open"]
   const claimedId = curatedIds["seeded-curated-claimed"]
 
-  /*
-   * Every claimant and applicant address is a resend.dev test inbox (SCRUM-452).
-   *
-   * These were real businesses' addresses — events@toit.in,
-   * bookings@in.bookmyshow.com — and staging has email configured, so deciding
-   * a seeded claim mailed a real company. `sendEmail` now refuses them outside
-   * production anyway; this keeps the seed from depending on that. The flags
-   * are stated rather than derived, so they keep describing the claimant each
-   * row stands for; `org` is what the address's domain used to say.
-   */
   const eventClaimSpecs = [
-    { eventId: openId, email: "delivered+claim-toit@resend.dev", org: "toit.in", status: "pending" as const,
+    { eventId: openId, email: "events@toit.in", status: "pending" as const,
       flags: ["domain_matches_source"], note: "We run this every Sunday." },
-    { eventId: openId, email: "delivered+claim-bookmyshow@resend.dev", org: "in.bookmyshow.com", status: "pending" as const,
+    { eventId: openId, email: "bookings@in.bookmyshow.com", status: "pending" as const,
       flags: ["source_is_aggregator", "no_organisation_yet"], note: "Listing is ours." },
-    { eventId: claimedId, email: "delivered+claim-permitroom@resend.dev", org: "permitroom.in", status: "approved" as const,
+    { eventId: claimedId, email: "hello@permitroom.in", status: "approved" as const,
       flags: [], note: "Approved — this is what a handed-over event looks like." },
-    { eventId: claimedId, email: "delivered+claim-superseded@resend.dev", org: "else.com", status: "superseded" as const,
+    { eventId: claimedId, email: "someone@else.com", status: "superseded" as const,
       flags: ["no_organisation_yet"], note: "Lost the race. Superseded, not declined." },
-    { eventId: openId, email: "delivered+claim-chancer@resend.dev", org: "gmail.com", status: "declined" as const,
+    { eventId: openId, email: "chancer@gmail.com", status: "declined" as const,
       flags: ["free_email_provider"], note: "Declined, with a reason." },
   ]
   for (const spec of eventClaimSpecs) {
     if (!spec.eventId) continue
-    /*
-     * The approved claim is found by status, not address: an event has at most
-     * one (`event_claims_one_approved_per_event`), and a database seeded before
-     * SCRUM-452 holds it under the old address — looking it up by the new one
-     * would insert a second and fail the whole re-seed on that index.
-     */
     const existing = await db.event_claims.findFirst({
-      where:
-        spec.status === "approved"
-          ? { event_id: spec.eventId, status: "approved" }
-          : { event_id: spec.eventId, contact_email: spec.email },
+      where: { event_id: spec.eventId, contact_email: spec.email },
     })
     if (existing) continue
     /*
@@ -1166,8 +1147,8 @@ async function main() {
           await db.organiser_onboarding_requests.create({
             data: {
               kind: "company",
-              display_name: spec.org,
-              legal_name: `${spec.org} Pvt Ltd`,
+              display_name: spec.email.split("@")[1] ?? spec.email,
+              legal_name: `${spec.email.split("@")[1] ?? spec.email} Pvt Ltd`,
               city: CITY.bengaluru.name,
               contact_name: "Seeded Claimant",
               contact_email: spec.email,
@@ -1252,19 +1233,19 @@ async function main() {
    * difference.
    */
   const APPLICATIONS = [
-    { email: "delivered+apply-hummingtree@resend.dev", display: "The Humming Tree", contact: "Priya Rao",
+    { email: "founder@thehummingtree.com", display: "The Humming Tree", contact: "Priya Rao",
       status: "pending" as const, tier: "domain" as const, website: null,
       why: "Automatic path — company domain, passes the gate with nothing else." },
-    { email: "delivered+apply-basementsix@resend.dev", display: "Basement Six", contact: "Dev Kumar",
+    { email: "nights@gmail.com", display: "Basement Six", contact: "Dev Kumar",
       status: "pending" as const, tier: "needs_proof" as const, website: "https://basementsix.in",
       why: "Manual path — free provider, carried a website instead." },
-    { email: "delivered+apply-toit@resend.dev", display: "Toit Brewpub", contact: "Anita Shah",
+    { email: "unverified@toit.in", display: "Toit Brewpub", contact: "Anita Shah",
       status: "email_pending" as const, tier: "domain" as const, website: null,
       why: "Sent a confirmation link and is waiting on it. Never reaches a reviewer." },
-    { email: "delivered+apply-permitroom@resend.dev", display: "The Permit Room", contact: "Rahul Nayak",
+    { email: "approved@permitroom.in", display: "The Permit Room", contact: "Rahul Nayak",
       status: "approved" as const, tier: "domain" as const, website: null,
       why: "Approved. An org, a user and a membership should exist for it." },
-    { email: "delivered+apply-spam@resend.dev", display: "Definitely Real Events", contact: "A Person",
+    { email: "spam@gmail.com", display: "Definitely Real Events", contact: "A Person",
       status: "declined" as const, tier: "needs_proof" as const, website: null,
       why: "Declined, with a reason the applicant receives." },
   ]
