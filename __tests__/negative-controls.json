@@ -1286,6 +1286,12 @@
       "mutation": "M223 usableResetToken ignores used_at. M224 it ignores expires_at. M225 it ignores the account's deletedAt. M226 the check shares the reset's bucket (auth:reset:<ip>). M227 the POST bypasses usableResetToken and checks used_at only.",
       "observed": "Red before the fix: 3 of 3 failing (route.GET is not a function). M223: 1 of 3 failing (the dead-links case). M224: 1 of 3 failing (the same). M225: 1 of 3 failing (the erased-account case). After ecc:pr-test-analyzer, two cases were added (the POST refuses expired/erased and changes no password; the check's own 30/15min bucket leaves the reset answerable). M226: 1 of 5 failing (the bucket case). M227: 1 of 5 failing (the POST case). All reverted; approval-set-password.itest.ts (the POST) still green.",
       "date": "2026-09-29"
+    },
+    "apply-field-labels.test.ts": {
+      "guards": "SCRUM-183: every /apply field is named by its caption: Field (app/apply/field.tsx) ties <label for> to the control's useId id, points the control at its hint with aria-describedby, gives two fields in one tree different ids, and the page keeps no second, unlabelled copy of the helper.",
+      "mutation": "M228 the Label's htmlFor removed. M229 the control's aria-describedby removed. M230 page.tsx defines its own Field again. M231 the hint guard removed (aria-describedby on every field). M232 a bare <Input> added to the page outside Field.",
+      "observed": "Red before the fix: the suite failed to run (no app/apply/field). M228: 1 of 4 failing (the caption case). M229: 1 of 4 failing (the hint case). M230: 1 of 4 failing (the page case). After ecc:pr-test-analyzer, two cases were added (no aria-describedby without a hint; the whole /apply page server-rendered, every input and textarea with a matching label[for]). M231: 1 of 6 failing. M232: 1 of 6 failing. All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

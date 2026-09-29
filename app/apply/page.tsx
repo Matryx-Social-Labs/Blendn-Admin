@@ -9,10 +9,11 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { onboardingTier } from "@/lib/org-invites"
 import { refusalMessage } from "@/lib/refusal"
+
+import { Field } from "./field"
 
 /**
  * The public host application.
@@ -350,25 +351,3 @@ export default function ApplyPage() {
   )
 }
 
-function Field({
-  label,
-  required,
-  hint,
-  children,
-}: {
-  label: string
-  required?: boolean
-  hint?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-sm font-medium text-foreground">
-        {label}
-        {required ? <span className="text-muted-foreground"> *</span> : null}
-      </Label>
-      {children}
-      {hint ? <p className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
-    </div>
-  )
-}
