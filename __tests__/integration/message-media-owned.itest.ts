@@ -17,6 +17,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
+import { NOT_OWN_MEDIA } from "@/lib/validations/chat"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const groupRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as
@@ -127,18 +128,33 @@ describe("a room message's metadata comes from the client only as its own media"
   for (const [name, send] of ROUTES) {
     it(`refuses metadata that would draw the message as sponsored, on the ${name}`, async () => {
       const r = await liveRoom()
-      const res = await send(r, { content: "buy now", type: "text", metadata: { sponsored_message_id: "fake" } })
-      expect(res.status).toBe(400)
+      for (const metadata of [
+        { sponsored_message_id: "fake" },
+        // A permitted key does not carry a forbidden one in with it.
+        { mediaUrl: upload(r.memberId), sponsored_message_id: "fake" },
+      ]) {
+        const res = await send(r, { content: "buy now", type: "text", metadata })
+        expect(res.status).toBe(400)
+        expect(JSON.stringify(await res.json())).toMatch(/metadata/)
+      }
       expect(await written(r.groupId, "buy now")).toBe(0)
+      // The same message without it is an ordinary send.
+      expect((await send(r, { content: "buy now", type: "text" })).status).toBe(201)
     })
 
     it(`refuses a media URL that is not the sender's own upload, on the ${name}`, async () => {
       const r = await liveRoom()
       const other = await makeUser(testId("mm_other"))
       users.push(other)
-      for (const mediaUrl of [OUTSIDE, upload(other)]) {
-        const res = await send(r, { content: "look", type: "image", metadata: { mediaUrl } })
+      for (const [type, mediaUrl] of [
+        ["image", OUTSIDE],
+        ["image", upload(other)],
+        // Not gated on the type: a "text" message cannot carry one either.
+        ["text", OUTSIDE],
+      ]) {
+        const res = await send(r, { content: "look", type, metadata: { mediaUrl } })
         expect(res.status).toBe(400)
+        expect(((await res.json()) as { error?: string }).error).toBe(NOT_OWN_MEDIA)
       }
       expect(await written(r.groupId, "look")).toBe(0)
     })
@@ -175,6 +191,7 @@ describe("a DM's media is the sender's own upload", () => {
     for (const mediaUrl of [OUTSIDE, upload(p.b)]) {
       const res = await send(p, { mediaUrl, mediaType: "image" })
       expect(res.status).toBe(400)
+      expect(((await res.json()) as { error?: string }).error).toBe(NOT_OWN_MEDIA)
     }
     expect(await db.private_messages.count({ where: { conversation_id: p.conversationId } })).toBe(0)
   })

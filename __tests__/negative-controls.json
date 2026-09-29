@@ -794,8 +794,8 @@
     },
     "photos.test.ts": {
       "guards": "ownedPhotoKey / ownedObjectKey bind a URL to the uploader and a folder (exact host, https, decoded, no traversal); the delete route uses ownedObjectKey over an allow-list of folders rather than extractKeyFromUrl",
-      "mutation": "In app/api/mobile/uploads/delete/route.ts, replace the ownedObjectKey lookup with extractKeyFromUrl and a split('/')[1] check.",
-      "observed": "1 failing ('the route uses it, and no longer the loose parser'). Grandfathered guards in the same file (the SSRF cases) predate the registry.",
+      "mutation": "In app/api/mobile/uploads/delete/route.ts, replace the ownedObjectKey lookup with extractKeyFromUrl and a split('/')[1] check. SCRUM-426: M78 ownedObjectKey's decodeURIComponent unguarded; M79 any two dots refused instead of a `..` segment; M80 credentials and port allowed; M81 a path the parser normalised allowed.",
+      "observed": "1 failing ('the route uses it, and no longer the loose parser'). Grandfathered guards in the same file (the SSRF cases) predate the registry. M78: photos.test.ts 1 of 24 failing (a malformed % threw URIError). M79: 1 of 24 (a generated key for \"a..b.jpg\" refused). M80: 1 of 24 (userinfo and :8443 accepted). M81: 1 of 24 (host/x/../chat/<me>/f and an upper-case host accepted).",
       "date": "2026-09-11"
     },
     "users-deleted-state.test.ts": {
