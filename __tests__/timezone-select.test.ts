@@ -1,7 +1,7 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { TimezoneSelect, timezoneOptions } from "@/components/event-form/timezone-select"
+import { currentZoneName, TimezoneSelect, timezoneOptions, zoneForEnter } from "@/components/event-form/timezone-select"
 
 /*
  * The event's timezone can be changed (SCRUM-453).
@@ -40,5 +40,26 @@ describe("timezoneOptions", () => {
 
   it("narrows to what is typed once it differs from the current value", () => {
     expect(timezoneOptions("Berl", "Asia/Kolkata")).toEqual(["Europe/Berlin"])
+  })
+})
+
+describe("zoneForEnter", () => {
+  // Enter in the search box picks rather than submitting the form with the old zone.
+  it("picks the first zone for what is typed", () => {
+    expect(zoneForEnter("Kolk", "Europe/Berlin")).toBe("Asia/Kolkata")
+  })
+
+  it("keeps the current value when nothing new was typed or nothing matches", () => {
+    expect(zoneForEnter("", "Europe/Berlin")).toBe("Europe/Berlin")
+    expect(zoneForEnter("Europe/Berlin", "Europe/Berlin")).toBe("Europe/Berlin")
+    expect(zoneForEnter("Atlantis", "Europe/Berlin")).toBe("Europe/Berlin")
+  })
+})
+
+describe("currentZoneName", () => {
+  // The curate form seeds from the browser, which reports Asia/Calcutta in India.
+  it("gives the current name for an old id, and leaves others alone", () => {
+    expect(currentZoneName("Asia/Calcutta")).toBe("Asia/Kolkata")
+    expect(currentZoneName("Europe/Berlin")).toBe("Europe/Berlin")
   })
 })

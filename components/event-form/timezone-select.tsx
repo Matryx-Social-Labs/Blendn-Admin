@@ -55,6 +55,20 @@ export function timezoneOptions(query: string, value: string): string[] {
   return ALL_TIMEZONES.filter((tz) => tz.toLowerCase().includes(q)).slice(0, 50)
 }
 
+/** The current name for a zone id a browser reports: Asia/Calcutta → Asia/Kolkata. */
+export function currentZoneName(tz: string): string {
+  return CURRENT_NAME[tz] ?? tz
+}
+
+/**
+ * What Enter picks: the first zone for what is typed, or the current value
+ * when nothing new was typed or nothing matches.
+ */
+export function zoneForEnter(query: string, value: string): string {
+  if (!query.trim() || query === value) return value
+  return timezoneOptions(query, value)[0] ?? value
+}
+
 export function TimezoneSelect({
   value,
   onChange,
@@ -73,8 +87,15 @@ export function TimezoneSelect({
     setOpen(false)
   }
 
+  // Closing without a pick puts the box back to the value the form holds, so
+  // it never shows a zone that will not be saved.
+  const onOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) setQuery(value)
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       {/*
        * An anchor, not a trigger. PopoverTrigger gives its child type="button",
        * and an <input type="button"> takes no typing, so the timezone could
@@ -89,6 +110,14 @@ export function TimezoneSelect({
           }}
           onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return
+            // Enter in a text box submits the form, with the old zone. Here it picks.
+            e.preventDefault()
+            select(zoneForEnter(query, value))
+          }}
+          aria-expanded={open}
+          data-timezone-search=""
           placeholder="Search timezone…"
         />
       </PopoverAnchor>
@@ -96,6 +125,10 @@ export function TimezoneSelect({
         <PopoverContent
           align="start"
           onOpenAutoFocus={(e) => e.preventDefault()}
+          // The search box is outside the content; a click in it is not a dismissal.
+          onInteractOutside={(e) => {
+            if ((e.target as Element | null)?.closest?.("[data-timezone-search]")) e.preventDefault()
+          }}
           className="w-[var(--radix-popover-trigger-width)] p-0 max-h-48 overflow-y-auto"
         >
           {filtered.map((tz) => (

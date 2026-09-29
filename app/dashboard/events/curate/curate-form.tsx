@@ -9,7 +9,7 @@ import { IconMapPin } from "@tabler/icons-react"
 import { toast } from "sonner"
 
 import { LocationPicker, type LocationData } from "@/components/location-picker"
-import { TimezoneSelect } from "@/components/event-form/timezone-select"
+import { currentZoneName, TimezoneSelect } from "@/components/event-form/timezone-select"
 import { Button } from "@/components/ui/button"
 import {
   Form,
@@ -101,7 +101,7 @@ export function CurateForm({ defaultCity }: { defaultCity?: string }) {
        * field is visible and required, so an admin curating elsewhere has to
        * look at it — which is the whole point of it being a field.
        */
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezone: currentZoneName(Intl.DateTimeFormat().resolvedOptions().timeZone),
       venue_name: "",
     },
   })
