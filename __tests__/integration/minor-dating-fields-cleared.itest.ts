@@ -56,8 +56,9 @@ const FULL: Required<Fields> = {
   orientations: ["gay", "bisexual"],
   interested_in: ["man"],
   show_orientation: true,
-  // Dating as a word goes, however it was written; a word that only contains it stays.
-  looking_for: ["Dating", "casual dating", "Friends", "updating my playlist", "datingapp"],
+  // Dating as a word goes, however it was written, with JS `\b`'s ASCII
+  // boundaries ("datingß" is a word boundary there); a word that only contains it stays.
+  looking_for: ["Dating", "casual dating", "Dating-app", "datingß", "Friends", "updating my playlist", "datingapp"],
   intent_default: ["dating", "friendship"],
 }
 const CLEARED = {
@@ -115,6 +116,9 @@ it("clears a minor's orientation, interested-in, consent and dating choices by a
   const kept = {
     dob25age16: await person("mdf-dob25-age16", { dob: day(-25), age: 16 }),
     futureAge30: await person("mdf-future-age30", { dob: day(2), age: 30 }),
+    // Months ahead is still the future: SQL's age() reads it as 0 years, `ageFrom` as none.
+    soonAge30: await person("mdf-soon-age30", { dob: day(0, 90), age: 30 }),
+    soonUnknown: await person("mdf-soon-unknown", { dob: day(0, 1) }),
     dob25: await person("mdf-dob25", { dob: day(-25) }),
     age18: await person("mdf-age18", { age: 18 }),
     eighteenToday: await person("mdf-18-today", { dob: day(-18) }),
