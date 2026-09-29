@@ -68,17 +68,19 @@ it("writes a media-only message with a null text, not an explicit undefined", as
     data: { user1_id: a.id, user2_id: b.id, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" },
   })
   conversations.push(conversation.id)
+  // The sender's own chat upload: any other URL is refused (SCRUM-426).
+  const photo = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/chat/${a.id}/1790641297767-cfg6ta-photo.jpg`
 
   const res = await route.POST(
     new NextRequest(`http://localhost/api/mobile/conversations/${conversation.id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${a.token}` },
-      body: JSON.stringify({ mediaUrl: "https://cdn.example/photo.jpg", mediaType: "image" }),
+      body: JSON.stringify({ mediaUrl: photo, mediaType: "image" }),
     }),
     { params: Promise.resolve({ conversationId: conversation.id }) }
   )
   expect([200, 201]).toContain(res.status)
   const body = (await res.json()) as { data: { id: string } }
   const row = await db.private_messages.findUniqueOrThrow({ where: { id: body.data.id } })
-  expect(row).toMatchObject({ message_text: null, media_url: "https://cdn.example/photo.jpg", media_type: "image" })
+  expect(row).toMatchObject({ message_text: null, media_url: photo, media_type: "image" })
 })
