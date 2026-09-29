@@ -272,6 +272,16 @@ export const UserPublicProfileSchema = z
     bio: z.string().nullable().optional(),
     occupation: z.string().nullable().optional(),
     education: z.string().nullable().optional(),
+    work_field: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("The coarse work bucket, outside the identity gate (SCRUM-458). Absent through a room handle for somebody that room keeps anonymous."),
+    blurPhoto: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("A stored blurred derivative, present only when `identityVisible` is false and the ref is not a room handle (SCRUM-458). Never the real photo."),
     interests: z
       .array(InterestSchema)
       .optional()
