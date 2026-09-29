@@ -9,7 +9,7 @@ import { EventSponsors } from "@/components/event-sponsors"
 import { ChatFeed } from "@/components/chat-feed"
 import { ModerationQueue } from "@/components/moderation-queue"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { eventStateFor, STATE_LABEL } from "@/lib/event-phase"
+import { eventClock, eventStateFor, STATE_LABEL } from "@/lib/event-phase"
 
 interface Props {
   params: Promise<{ id: string }>
@@ -28,6 +28,7 @@ export default async function EventMessagingPage({ params }: Props) {
       title: true,
       start_time: true,
       end_time: true,
+      timezone: true,
       status: true,
       venue_name: true,
       organizer_org_id: true,
@@ -62,8 +63,9 @@ export default async function EventMessagingPage({ params }: Props) {
   if (!permissions.canOperate) redirect("/dashboard/chatrooms")
 
   const state = eventStateFor(event)
-  const fmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
-  const when = `${fmt.format(event.start_time)} – ${new Intl.DateTimeFormat("en-GB", { timeStyle: "short" }).format(event.end_time)}`
+  // The event's own clock, not the server's (SCRUM-421).
+  const clock = eventClock(event.timezone)
+  const when = `${clock.format(event.start_time, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} – ${clock.time(event.end_time)}`
 
   return (
     <div className="flex flex-col gap-5">
