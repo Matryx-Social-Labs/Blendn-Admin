@@ -478,7 +478,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    const limited = await rateLimit(request, userLimit("write", "event-chat", authUser.userId))
+    // One allowance with the group-messages POST: the same room, another door.
+    const limited = await rateLimit(request, userLimit("write", "room-message", authUser.userId))
     if (limited) return limited
 
     const body = await readJson(request)

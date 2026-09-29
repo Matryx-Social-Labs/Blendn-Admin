@@ -1196,6 +1196,12 @@
       "mutation": "M128 the raw NUL check removed (the state SCRUM-434 found). M129 the middleware check disabled. M131 readOptionalJson parsing without the check. M132 the naive /\\\\u0000/ check (refuses an escaped backslash). M133 signout back to request.json(). M134 dashboard search without NUL stripping (reverted: that route swallows every failure into { hits: [] }, so the change had no behaviour to guard). M135 the leads q filter without NUL stripping.",
       "observed": "M128: 8 of 1317 itest cases failing (room/DM messages, event chat, three reports, announcements, signout). M129: 4 of 5 in nul-byte-refused.test.ts. M131: 1 of 22 in api-input.test.ts (an optional body with a NUL). M132: 1 of 22 (the escaped-backslash case). M133: 1 of 1317 (signout with a NUL pushToken, which 500'd after revoking the refresh token). M134: survived, so the change was removed. M135: 1 of 1317 (leads export ?q=a%00b). An earlier draft used a recursive hasNul after parsing; ecc:security-reviewer showed a 3,000-deep body overflowed it (500) and a 10 MB body blocked the loop 1.1 s, so the check moved to the raw text and api-input.test.ts parses 5,000 deep.",
       "date": "2026-09-29"
+    },
+    "limits-follow-the-person.itest.ts": {
+      "guards": "SCRUM-439: a per-person limit counts the person, not the token. The room-message POST (30 a minute) is keyed on the user after authentication and shares one allowance with the event-chat POST; the checkout POST (10 in ten minutes) is keyed on the user. Both were keyed on the Authorization header's last 16 characters, the JWT signature, so every refresh or second phone was a fresh bucket.",
+      "mutation": "M136 the group route's key back on the token tail. M137 the event-chat POST on its own `event-chat` bucket. M138 the checkout key back on the token tail.",
+      "observed": "limits-follow-the-person.itest.ts (3 cases): red before the fix 3 of 3 (the extra request answered 404, not 429). M136 2 of 3 failing, M137 1 of 3, M138 1 of 3.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

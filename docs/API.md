@@ -776,6 +776,8 @@ If OpenAI times out (>1s), message is broadcast and moderation falls back to asy
 
 **Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `SPAM_BLOCKED` (429)
 
+**Rate limit:** 30 sends a minute per person, across this route and `POST /events/:eventId/chat` together, whichever token or device they send from → `429 RATE_LIMITED` (SCRUM-439).
+
 ### Event Chat: POST /events/:eventId/chat
 Same moderation pipeline and error codes apply.
 
