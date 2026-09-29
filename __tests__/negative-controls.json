@@ -1334,6 +1334,12 @@
       "mutation": "M255 the rating reply carries an average. M256 the mobile event page carries an average. M259 the venue page reads the spread without a disclosure call.",
       "observed": "M255: 1 of 3 failing (the mobile no-average case). M256: 1 of 3 failing (the same). M259: 1 of 3 failing (app/dashboard/venues/[id]/page.tsx listed as an undisclosed reader). All reverted.",
       "date": "2026-09-29"
+    },
+    "city-filter-literal.itest.ts": {
+      "guards": "SCRUM-473: ?city= on GET /api/mobile/events and /venues, and getCurationQueue(city), match the city literally and case-insensitively: '%' and '_' are not ILIKE wildcards.",
+      "mutation": "M270 the events route passes city unescaped. M271 the venues route passes city unescaped. M272 the curation queue passes city unescaped.",
+      "observed": "Red before the fix: 2 of 4 failing ('%' returned the fixture event and venue); the curation-queue cases were added with the fix. M270, M271, M272: each 1 of 6 failing. All reverted.",
+      "date": "2026-09-29"
     }
   },
   "grandfathered": [

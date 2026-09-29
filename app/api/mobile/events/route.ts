@@ -21,6 +21,7 @@ import {
 } from "@/lib/services/events.service"
 import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
 import { buildEventsCacheKey } from "@/lib/events-cache-key"
+import { likeLiteral } from "@/lib/like-literal"
 
 /**
  * The most events a distance sort will pull into memory at once.
@@ -193,7 +194,7 @@ export async function GET(request: NextRequest) {
      * `scripts/backfill-event-cities.ts` is what gives the older rows a city.
      */
     if (city) {
-      where.city = { equals: city, mode: "insensitive" }
+      where.city = { equals: likeLiteral(city), mode: "insensitive" }
     }
 
     /*
