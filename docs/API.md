@@ -2107,6 +2107,8 @@ several other relations cascade on `User`, so removing the row would destroy
 other people's event and chat history to honour one person's request. Instead
 the row is kept, every field on it is scrubbed, `deletedAt` is set, and all auth
 is revoked — refresh tokens, push tokens, OAuth links and dashboard sessions.
+Sockets the account already had open are closed too (`io server disconnect`),
+so a second phone stops receiving its rooms and DMs at once (SCRUM-449).
 The account can never be signed back into.
 
 That decision has a cost worth stating: **nothing is removed automatically**, so
