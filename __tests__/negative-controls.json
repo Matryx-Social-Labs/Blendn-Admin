@@ -1400,6 +1400,18 @@
       "mutation": "M365 the group route's flag and count run side by side again (void, void). M366 the same on the event route. Review pass: M367 the autoMute guard dropped on both routes (.then(() => checkAndAutoMute(...)).",
       "observed": "Red before the fix: 2 of 2 failing (written 3, status active). M365: 1 of 2 (the group route), and 1 of 4 after the review pass. M366: 1 of 2 (the event route), and 1 of 4. M367: 2 of 4 (the contact case on each route: muted). All reverted.",
       "date": "2026-09-30"
+    },
+    "seed-refresh.itest.ts": {
+      "guards": "SCRUM-482: --refresh-times (scripts/seed-occurrences.ts refreshSeededEvent, used by seed-qa.ts and seed-blr-scenarios.ts) leaves a soft-deleted seeded event untouched and reports it; a live one is re-timed, its days synced, and its archived room reopened only when the new end is still ahead.",
+      "mutation": "M359 the deleted_at check removed (a soft-deleted event is moved and synced). M360 an archived room reopened whatever the new end. Review pass: M361 the reopen not scoped to the event (every archived room reopened). M362 every member of a reopened room made active (bans lifted). M363 the caller's data (cover, reminded_at) not written.",
+      "observed": "M359: 1 of 4 failing (soft-deleted event moved, sync called). M360: 1 of 4 failing (room reopened after a past end). M361: 1 of 4. M362: 1 of 4. M363: 1 of 4. All reverted.",
+      "date": "2026-09-30"
+    },
+    "seed-refresh-callers.test.ts": {
+      "guards": "SCRUM-482: both --refresh-times loops (scripts/seed-qa.ts, scripts/seed-blr-scenarios.ts) go through refreshSeededEvent and never look an event up by slug themselves, which is what re-timed soft-deleted events.",
+      "mutation": "M364 seed-qa's refreshTimes gains a bare db.events.findUnique by slug.",
+      "observed": "M364: 1 of 2 failing (seed-qa.ts). Reverted.",
+      "date": "2026-09-30"
     }
   },
   "grandfathered": [

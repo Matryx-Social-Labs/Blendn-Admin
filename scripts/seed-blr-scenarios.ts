@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { ensureOrgBrand } from "./seed-brand"
-import { holdSeedOccurrences } from "./seed-occurrences"
+import { describeLive, describeRefresh, holdSeedOccurrences, refreshSeededEvent } from "./seed-occurrences"
 import { mirrorToTigris, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { environmentRefusal, TEST_ORG_NAMES } from "./test-accounts"
 import { CROWD_CHAT, CROWD_REVIEWS, CROWD_SIZE, ensureCrowd } from "./seed-blr-crowd"
@@ -52,6 +52,7 @@ import PHOTOS from "./seed-blr-photos.json"
  * Run:
  *   DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts            # dry run
  *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --apply
+ *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --refresh-times
  *
  * Staging or localhost only (`environmentRefusal`).
  */
@@ -61,6 +62,7 @@ const db = new PrismaClient({
 })
 
 const APPLY = process.argv.includes("--apply")
+const REFRESH_TIMES = process.argv.includes("--refresh-times")
 
 const CITY = "Bengaluru"
 const STATE = "Karnataka"
@@ -1249,6 +1251,44 @@ const cityMatch = {
 const KEEP_SLUG_PREFIXES = ["me-demo-"]
 const notOurs = { AND: [{ slug: { not: { startsWith: SLUG_PREFIX } } }, ...KEEP_SLUG_PREFIXES.map((p) => ({ NOT: { slug: { startsWith: p } } }))] }
 
+/** As if the reminder sweep already ran, except on the event that is waiting for it. */
+const remindedAt = (spec: EventSpec, start: Date): Date | null =>
+  !spec.reminderPending && start.getTime() - NOW.getTime() < 60 * MIN ? new Date(start.getTime() - 60 * MIN) : null
+
+/** Every day of the span at the spec's capacity, and the last one cancelled when the spec says so. */
+async function placeDays(spec: EventSpec, eventId: string, start: Date, end: Date) {
+  await holdSeedOccurrences(db, eventId, spec.capacity, () => syncOccurrences(eventId, start, end, TZ))
+  if (!spec.cancelLastDay) return
+  const last = await db.event_occurrences.findFirst({ where: { event_id: eventId, cancelled_at: null }, orderBy: { start_time: "desc" } })
+  if (last) await db.event_occurrences.update({ where: { id: last.id }, data: { cancelled_at: new Date(NOW.getTime() - 6 * HOUR) } })
+}
+
+/**
+ * `--refresh-times`: every scenario event back at its offset from now, its days
+ * re-synced, and a room the archive sweep closed reopened — nothing else
+ * (SCRUM-482). `--apply` resets these events' RSVPs, check-ins and rooms under
+ * whoever is testing, and soft-deletes every other Bengaluru event, seed-qa's
+ * live one included; this is the only way back to a live event that does
+ * neither. The seeded check-ins and RSVPs stay where they were, as with
+ * `seed-qa.ts --refresh-times`.
+ */
+async function refreshTimes() {
+  const live: string[] = []
+  for (const spec of EVENTS) {
+    if (spec.deleted) continue
+    const { start, end } = spec.when()
+    const result = await refreshSeededEvent(
+      db,
+      spec.slug,
+      { start, end, data: { reminded_at: remindedAt(spec, start) } },
+      (event) => placeDays(spec, event.id, start, end)
+    )
+    console.log(describeRefresh(spec.slug, result, start))
+    if (result.status === "moved" && start <= NOW && end > NOW) live.push(spec.slug)
+  }
+  console.log(describeLive(live))
+}
+
 async function main() {
   const host = (() => {
     try {
@@ -1258,12 +1298,22 @@ async function main() {
     }
   })()
   console.log(`\ndatabase: ${host}`)
-  console.log(APPLY ? "mode:     APPLY — this will write\n" : "mode:     dry run\n")
+  console.log(
+    REFRESH_TIMES
+      ? "mode:     REFRESH TIMES — event times, days and closed rooms only\n"
+      : APPLY
+        ? "mode:     APPLY — this will write\n"
+        : "mode:     dry run\n"
+  )
 
   const refusal = environmentRefusal(process.env)
   if (refusal) {
     console.error(`REFUSING: ${refusal}`)
     process.exitCode = 1
+    return
+  }
+  if (REFRESH_TIMES) {
+    await refreshTimes()
     return
   }
 
@@ -1369,7 +1419,6 @@ async function main() {
     hotlinked.push(...media.hotlinked)
 
     const linked = spec.venueLink ? (venueIds[spec.venue] ?? null) : null
-    const reminded = !spec.reminderPending && start.getTime() - NOW.getTime() < 60 * MIN ? new Date(start.getTime() - 60 * MIN) : null
     const curatedAt = spec.curated ? new Date(start.getTime() - 21 * 24 * HOUR) : null
     const claimed = spec.curated?.claimed ?? true
     const createdAt = new Date(Math.min(start.getTime(), NOW.getTime()) - 18 * 24 * HOUR)
@@ -1409,7 +1458,7 @@ async function main() {
       is_recurring: spec.recurring ?? false,
       check_in_radius: venue.fence.type === "circle" ? venue.fence.radius : 150,
       geofence: venue.fence,
-      reminded_at: reminded,
+      reminded_at: remindedAt(spec, start),
       pre_suspension_status: null,
     }
     const event = await db.events.upsert({
@@ -1418,11 +1467,7 @@ async function main() {
       create: { slug: spec.slug, ...fields, created_at: createdAt },
     })
 
-    await holdSeedOccurrences(db, event.id, spec.capacity, () => syncOccurrences(event.id, start, end, TZ))
-    if (spec.cancelLastDay) {
-      const last = await db.event_occurrences.findFirst({ where: { event_id: event.id, cancelled_at: null }, orderBy: { start_time: "desc" } })
-      if (last) await db.event_occurrences.update({ where: { id: last.id }, data: { cancelled_at: new Date(NOW.getTime() - 6 * HOUR) } })
-    }
+    await placeDays(spec, event.id, start, end)
 
     await db.event_details.upsert({
       where: { event_id: event.id },
