@@ -1402,9 +1402,9 @@
       "date": "2026-09-29"
     },
     "automute-third-hidden.itest.ts": {
-      "guards": "SCRUM-483: a sender is auto-muted (muted_by NULL) on their AUTO_MUTE_HIDDEN_COUNT-th keyword-hidden message in a room, on both the group route and the event route, and the next clean message is refused USER_MUTED and not written. The pre-save branch writes the flag before counting (flagForReview(...).then(checkAndAutoMute)). The same number of contact-detail hides (autoMute: false) never mutes, and the next clean message is delivered.",
-      "mutation": "M365 the group route's flag and count run side by side again (void, void). M366 the same on the event route. Review pass: M367 the autoMute guard dropped on both routes (.then(() => checkAndAutoMute(...)).",
-      "observed": "Red before the fix: 2 of 2 failing (written 3, status active). M365: 1 of 2 (the group route), and 1 of 4 after the review pass. M366: 1 of 2 (the event route), and 1 of 4. M367: 2 of 4 (the contact case on each route: muted). All reverted.",
+      "guards": "SCRUM-483: a sender is auto-muted (muted_by NULL) on their AUTO_MUTE_HIDDEN_COUNT-th keyword-hidden message in a room, on both the group route and the event route, and the next clean message is refused USER_MUTED and not written. The pre-save branch writes the flag before counting (flagForReview(...).then(checkAndAutoMute)). The same number of contact-detail hides (autoMute: false) never mutes, and the next clean message is delivered. Once the hour is up (hidden flags older than AUTO_MUTE_WINDOW_MS, muted_by NULL), the first clean message on either route is delivered (201) and the member is active again (SCRUM-486: the event route judged it on the pre-unmute membership).",
+      "mutation": "M365 the group route's flag and count run side by side again (void, void). M366 the same on the event route. Review pass: M367 the autoMute guard dropped on both routes (.then(() => checkAndAutoMute(...)). SCRUM-486: M390 the event route's fix reverted (mayWriteToRoom sees the stale membership). M391 the unmuted flag never set.",
+      "observed": "Red before the fix: 2 of 2 failing (written 3, status active). M365: 1 of 2 (the group route), and 1 of 4 after the review pass. M366: 1 of 2 (the event route), and 1 of 4. M367: 2 of 4 (the contact case on each route: muted). All reverted. SCRUM-486, red before the fix: 1 of 6 (event route 403, expected 201). M390: 1 of 6. M391: 1 of 6. Reverted.",
       "date": "2026-09-30"
     },
     "seed-refresh.itest.ts": {
