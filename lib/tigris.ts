@@ -92,9 +92,14 @@ export const PUBLIC_FOLDERS: readonly UploadFolder[] = ["profile", "events", "sp
 /** Folders whose older objects may still sit in the public bucket, from before they moved. */
 const MOVED_FROM_PUBLIC: readonly UploadFolder[] = ["chat"]
 
-/** Where a folder's objects can be: its bucket, and for a folder that moved, the one it moved from. */
+/** Public folders whose removed objects are withdrawn to the private bucket and kept (SCRUM-479). */
+const WITHDRAWN_TO_PRIVATE: readonly UploadFolder[] = ["profile"]
+
+/** Where a folder's objects can be: its bucket, and the other one if objects move between them. */
 function bucketsHolding(folder: UploadFolder): string[] {
-  return MOVED_FROM_PUBLIC.includes(folder) ? [bucketFor(folder), TIGRIS_BUCKET] : [bucketFor(folder)]
+  if (MOVED_FROM_PUBLIC.includes(folder)) return [bucketFor(folder), TIGRIS_BUCKET]
+  if (WITHDRAWN_TO_PRIVATE.includes(folder)) return [bucketFor(folder), TIGRIS_PRIVATE_BUCKET]
+  return [bucketFor(folder)]
 }
 
 /** The bucket a folder lives in: the public one, or the private one. */
@@ -307,6 +312,33 @@ export async function deleteFile(key: string): Promise<void> {
   for (const Bucket of bucketsHolding(key.split("/")[0] as UploadFolder)) {
     await client.send(new DeleteObjectCommand({ Bucket, Key: key }))
   }
+}
+
+/**
+ * Take a public object out of public reach, and keep it (SCRUM-479).
+ *
+ * Copied to the private bucket under the same key, then deleted from the public
+ * one. Removed content is kept for its 180 days (docs/RETENTION.md,
+ * r.3(1)(g)), but not at a URL every viewer who was ever served it can still
+ * fetch. Sealed objects are `no-cache` (SCRUM-445), so the public URL answers
+ * 404 at once. Account deletion keeps the copy; the purge takes it with the
+ * rest of `profile/<id>/`. Already withdrawn, or never there: nothing to do.
+ */
+export async function withdrawFromPublic(key: string): Promise<void> {
+  const client = getS3Client()
+  try {
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: TIGRIS_PRIVATE_BUCKET,
+        Key: key,
+        CopySource: `${TIGRIS_BUCKET}/${key.split("/").map(encodeURIComponent).join("/")}`,
+      })
+    )
+  } catch (error) {
+    if (isNotFound(error)) return
+    throw error
+  }
+  await client.send(new DeleteObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }))
 }
 
 /**

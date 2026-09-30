@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { ownedObjectKey } from "@/lib/tigris"
+import { ownedObjectKey, ownedPhotoKey } from "@/lib/tigris"
 
 /**
  * A person's chat images that must outlive their account (SCRUM-428).
@@ -48,5 +48,17 @@ export async function retainedChatMediaKeys(userId: string): Promise<Set<string>
   const keys = rows
     .map((r) => (r.url ? ownedObjectKey(r.url, userId, "chat") : null))
     .filter((k): k is string => k !== null)
+  return new Set(keys)
+}
+
+/**
+ * A person's profile photos that moderation pulled (SCRUM-479): removed
+ * content, kept 180 days after the account goes like the chat images above.
+ * `moderateProfilePhoto` has already moved them to the private bucket; the
+ * purge erases them with the rest of `profile/<id>/`.
+ */
+export async function retainedProfilePhotoKeys(userId: string): Promise<Set<string>> {
+  const rows = await db.photo_checks.findMany({ where: { user_id: userId, hidden: true }, select: { url: true } })
+  const keys = rows.map((r) => ownedPhotoKey(r.url, userId)).filter((k): k is string => k !== null)
   return new Set(keys)
 }

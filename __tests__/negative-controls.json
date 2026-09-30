@@ -1418,6 +1418,18 @@
       "mutation": "M364 seed-qa's refreshTimes gains a bare db.events.findUnique by slug.",
       "observed": "M364: 1 of 2 failing (seed-qa.ts). Reverted.",
       "date": "2026-09-30"
+    },
+    "pulled-photo-stays-pulled.itest.ts": {
+      "guards": "SCRUM-479: a hide verdict on a profile photo records photo_checks.hidden (recordPhotoPulled), removes it from photos in one statement with a pulled primary's blur, re-mirrors User.image, and withdraws both objects to the private bucket; a pulled blur likewise; the profile PUT drops a pulled URL from photos and ignores a pulled blur_photo; account deletion keeps hidden verdicts and passes their keys to deletePrefix as keep (retainedProfilePhotoKeys); the purge deletes the rest of profile/<id>/ and the photo_checks rows.",
+      "mutation": "M371 the photo verdict not recorded. M372 the PUT keeps a pulled URL in photos. M373 the pulled photo not withdrawn. M374 a pulled primary's blur not withdrawn. M375 account deletion deletes hidden verdicts too. M376 account deletion keeps nothing (no keep set). M377 the purge leaves photo_checks rows. M378 the PUT writes a pulled blur back. M379 the blur verdict not recorded.",
+      "observed": "Green 5 of 5 on the fix. M371: 4 of 5 failing. M372: 1 of 5. M373: 2 of 5. M374: 1 of 5. M375: 1 of 5. M376: 1 of 5. M377: 1 of 5. M378: 2 of 5. M379: 1 of 5. All reverted.",
+      "date": "2026-09-30"
+    },
+    "withdraw-from-public.test.ts": {
+      "guards": "SCRUM-479: withdrawFromPublic copies into the private bucket and only then deletes the public object; a failed copy deletes nothing and throws; an object already gone is a no-op.",
+      "mutation": "M380 delete before copy. M381 every copy failure swallowed. M382 a failed copy still deletes.",
+      "observed": "M380: 3 of 3 failing. M381: 1 of 3. M382: 1 of 3. All reverted.",
+      "date": "2026-09-30"
     }
   },
   "grandfathered": [

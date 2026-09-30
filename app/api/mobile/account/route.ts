@@ -8,7 +8,7 @@ import { evictUserSockets } from "@/lib/socket-server"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix } from "@/lib/tigris"
-import { retainedChatMediaKeys } from "@/lib/retained-media"
+import { retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
 import { promoteFromWaitlist } from "@/lib/waitlist"
 import { performCheckout } from "@/lib/checkout"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
@@ -162,8 +162,9 @@ export async function DELETE(request: NextRequest) {
       db.mobile_refresh_tokens.deleteMany({ where: { user_id: authUser.userId } }),
       db.push_tokens.deleteMany({ where: { user_id: authUser.userId } }),
       // The keys carry the user id, and the profile they described has just
-      // been scrubbed.
-      db.photo_checks.deleteMany({ where: { user_id: authUser.userId } }),
+      // been scrubbed. A pulled photo's verdict stays with its kept object
+      // until the purge (docs/RETENTION.md, SCRUM-479).
+      db.photo_checks.deleteMany({ where: { user_id: authUser.userId, hidden: false } }),
       // Someone who leaves takes their demand signal with them. The row cascades
       // on the foreign key too; this is explicit so the deletion path lists
       // everything it removes rather than relying on a constraint to be read.
@@ -403,14 +404,15 @@ export async function DELETE(request: NextRequest) {
      * next.
      *
      * Except removed content: an image in a message moderation hid, flagged or
-     * someone reported stays for its 180 days (docs/RETENTION.md, r.3(1)(g)).
+     * someone reported, and a profile photo moderation pulled, stay for their
+     * 180 days (docs/RETENTION.md, r.3(1)(g)).
      */
     for (const folder of ["profile", "chat"] as const) {
       try {
         const gone =
           folder === "chat"
             ? await deletePrefix(`chat/${authUser.userId}/`, await retainedChatMediaKeys(authUser.userId))
-            : await deletePrefix(`profile/${authUser.userId}/`)
+            : await deletePrefix(`profile/${authUser.userId}/`, await retainedProfilePhotoKeys(authUser.userId))
         logger.info("Account deletion: uploads removed from storage", { userId: authUser.userId, folder, gone })
       } catch (error) {
         logger.error("Account deletion: uploads NOT removed from storage", {

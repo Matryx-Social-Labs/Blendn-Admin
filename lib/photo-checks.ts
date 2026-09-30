@@ -33,6 +33,31 @@ export async function recordPhotoCheck(
   }
 }
 
+/**
+ * Record that moderation pulled a photo (SCRUM-479).
+ *
+ * Not best-effort, unlike the audit row above: this verdict is what stops a
+ * save that re-sends the URL from putting it back, and what account deletion
+ * keeps for its 180 days. The caller logs a failure.
+ */
+export async function recordPhotoPulled(url: string, userId: string): Promise<void> {
+  await db.photo_checks.upsert({
+    where: { url },
+    update: { checked: true, hidden: true },
+    create: { url, user_id: userId, checked: true, hidden: true },
+  })
+}
+
+/** Which of these URLs moderation has pulled. */
+export async function pulledPhotos(urls: readonly string[]): Promise<Set<string>> {
+  if (urls.length === 0) return new Set()
+  const rows = await db.photo_checks.findMany({
+    where: { url: { in: [...urls] }, hidden: true },
+    select: { url: true },
+  })
+  return new Set(rows.map((r) => r.url))
+}
+
 /** Photos that were let through without moderation, oldest first. */
 export async function unmoderatedPhotos(limit = 100) {
   return db.photo_checks.findMany({
