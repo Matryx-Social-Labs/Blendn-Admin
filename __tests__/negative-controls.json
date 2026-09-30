@@ -1349,8 +1349,8 @@
     },
     "deletion-erases-participation.itest.ts": {
       "guards": "SCRUM-481: DELETE /account ends every open check-in through performCheckout, so an erased person is not 'here now' in a live room (getOccupancy drops them) while the check-in row stays, closed, as the organiser's attendance, and their presence session is departed. Another attendee in the same room is untouched. Review pass: every open check-in goes (a second event's too), each session is closed as departed_source 'user', and a failure to read them never costs the storage erasure (account-deletion.test.ts: still 200, both folders deleted).",
-      "mutation": "M322: the performCheckout call in the deletion route's open-check-in loop replaced with a no-op. Review pass: M362 the check-in read outside the try (a rejection skips the uploads). M363 only the first open row checked out. M364 the checkout reason left_area instead of manual.",
-      "observed": "deletion-erases-participation.itest.ts 1 of 3 failing ('stops being here now…': inside 2, expected 1). Restored; 3 of 3. M362: account-deletion.test.ts 1 of 28 (500, no deletePrefix). M363: 1 of 3 (an open check-in left: expected 0, received 1). M364: 1 of 3 (departed_source sweeper). All reverted.",
+      "mutation": "M322: the performCheckout call in the deletion route's open-check-in loop replaced with a no-op. Review pass: M368 the check-in read outside the try (a rejection skips the uploads). M369 only the first open row checked out. M370 the checkout reason left_area instead of manual.",
+      "observed": "deletion-erases-participation.itest.ts 1 of 3 failing ('stops being here now…': inside 2, expected 1). Restored; 3 of 3. M368: account-deletion.test.ts 1 of 28 (500, no deletePrefix). M369: 1 of 3 (an open check-in left: expected 0, received 1). M370: 1 of 3 (departed_source sweeper). All reverted.",
       "date": "2026-09-30"
     },
     "audit-filter-whole-log.itest.ts": {
