@@ -788,8 +788,8 @@
     },
     "photo-moderation-off-the-request-path.test.ts": {
       "guards": "checkProfilePhoto never calls the vendor on the profile PUT's request path; moderateProfilePhoto runs after the response via after(), and a hide verdict pulls the photo AND re-mirrors User.image; both OpenAI fetches and the Tigris HEAD carry a deadline",
-      "mutation": "A: `const check = await checkImageContent(url)` back inside checkProfilePhoto. B: drop the db.user.update from moderateProfilePhoto's hide branch.",
-      "observed": "A: 1 failing ('never calls the vendor'). B: 1 failing ('a hide verdict pulls the photo and re-mirrors the primary'). The perf pass measured the wall clock: the one write that makes a photo appear waited on OpenAI fetching and scoring the image with no timeout, while the client gave up at 15s and the write then landed anyway from the abandoned request.",
+      "mutation": "A: `const check = await checkImageContent(url)` back inside checkProfilePhoto. B: drop the db.user.update from moderateProfilePhoto's hide branch. SCRUM-479: M387 one failed withdrawal skips the next (the per-object catch in withdraw() dropped).",
+      "observed": "A: 1 failing ('never calls the vendor'). B: 1 failing ('a hide verdict pulls the photo and re-mirrors the primary', since SCRUM-479 '...and withdraws it with its blur'). M387: 1 of 11 ('a withdrawal that fails does not keep the blur's from running'). The perf pass measured the wall clock: the one write that makes a photo appear waited on OpenAI fetching and scoring the image with no timeout, while the client gave up at 15s and the write then landed anyway from the abandoned request.",
       "date": "2026-09-11"
     },
     "photos.test.ts": {
@@ -1417,6 +1417,18 @@
       "guards": "SCRUM-482: both --refresh-times loops (scripts/seed-qa.ts, scripts/seed-blr-scenarios.ts) go through refreshSeededEvent and never look an event up by slug themselves, which is what re-timed soft-deleted events.",
       "mutation": "M364 seed-qa's refreshTimes gains a bare db.events.findUnique by slug.",
       "observed": "M364: 1 of 2 failing (seed-qa.ts). Reverted.",
+      "date": "2026-09-30"
+    },
+    "pulled-photo-stays-pulled.itest.ts": {
+      "guards": "SCRUM-479: a hide verdict on a profile photo records photo_checks.hidden (recordPhotoPulled), removes it from photos in one statement with a pulled primary's blur, re-mirrors User.image, and withdraws both objects to the private bucket; a pulled blur likewise; the profile PUT drops a pulled URL from photos and ignores a pulled blur_photo; account deletion keeps hidden verdicts and passes their keys to deletePrefix as keep (retainedProfilePhotoKeys); the purge deletes the rest of profile/<id>/ and the photo_checks rows.",
+      "mutation": "M371 the photo verdict not recorded. M372 the PUT keeps a pulled URL in photos. M373 the pulled photo not withdrawn. M374 a pulled primary's blur not withdrawn. M375 account deletion deletes hidden verdicts too. M376 account deletion keeps nothing (no keep set). M377 the purge leaves photo_checks rows. M378 the PUT writes a pulled blur back. M379 the blur verdict not recorded. Security pass: M385 pulled URLs matched on the exact string (a ?v= variant written back). M386 account deletion sweeps profile/ without withdrawing the kept keys first, so `keep` spares a public copy (fails in account-deletion.test.ts, grandfathered).",
+      "observed": "Green 5 of 5 on the fix. M371: 4 of 5 failing. M372: 1 of 5. M373: 2 of 5. M374: 1 of 5. M375: 1 of 5. M376: 1 of 5. M377: 1 of 5. M378: 2 of 5. M379: 1 of 5. M385: 1 of 7. M386: account-deletion.test 1 of 29. All reverted.",
+      "date": "2026-09-30"
+    },
+    "withdraw-from-public.test.ts": {
+      "guards": "SCRUM-479: withdrawFromPublic copies into the private bucket and only then deletes the public object; a failed copy deletes nothing and throws; a missing bucket throws; an object already gone is a no-op; deleteFile on profile/ never touches the private bucket.",
+      "mutation": "M380 delete before copy. M381 every copy failure swallowed. M382 a failed copy still deletes. Security pass: M383 deleteFile (a user's own delete) reaches the private bucket. M384 NoSuchBucket read as already withdrawn.",
+      "observed": "M380: 3 of 3 failing. M381: 1 of 3. M382: 1 of 3. M383: 1 of 5. M384: 1 of 5. All reverted.",
       "date": "2026-09-30"
     }
   },

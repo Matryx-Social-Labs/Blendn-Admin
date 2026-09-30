@@ -12,23 +12,29 @@
 jest.mock("@/lib/tigris", () => ({
   ownedPhotoKey: jest.fn(),
   sealUpload: jest.fn(),
+  withdrawFromPublic: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/moderation/openai-moderation", () => ({
   checkImageContent: jest.fn(),
 }))
-jest.mock("@/lib/photo-checks", () => ({ recordPhotoCheck: jest.fn().mockResolvedValue(undefined) }))
+jest.mock("@/lib/photo-checks", () => ({
+  recordPhotoCheck: jest.fn().mockResolvedValue(undefined),
+  recordPhotoPulled: jest.fn().mockResolvedValue(undefined),
+}))
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 jest.mock("@/lib/db", () => ({
   db: {
     profiles: { findUnique: jest.fn(), update: jest.fn((a) => a) },
     user: { update: jest.fn((a) => a) },
-    $transaction: jest.fn(async (ops: unknown[]) => ops),
+    $queryRaw: jest.fn(),
+    // The pull and the User.image mirror run in one transaction (SCRUM-479).
+    $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(jest.requireMock("@/lib/db").db)),
   },
 }))
 
 import { checkImageContent } from "@/lib/moderation/openai-moderation"
-import { recordPhotoCheck } from "@/lib/photo-checks"
-import { ownedPhotoKey, sealUpload } from "@/lib/tigris"
+import { recordPhotoCheck, recordPhotoPulled } from "@/lib/photo-checks"
+import { ownedPhotoKey, sealUpload, withdrawFromPublic } from "@/lib/tigris"
 import { db } from "@/lib/db"
 import { checkProfilePhoto, MIN_PHOTO_BYTES, moderateProfilePhoto } from "@/lib/photos"
 import { logger } from "@/lib/logger"
@@ -37,6 +43,10 @@ const own = ownedPhotoKey as jest.Mock
 const seal = sealUpload as jest.Mock
 const vendor = checkImageContent as jest.Mock
 const record = recordPhotoCheck as jest.Mock
+const pulled = recordPhotoPulled as jest.Mock
+const withdraw = withdrawFromPublic as jest.Mock
+const pull = db.$queryRaw as unknown as jest.Mock
+const BLUR = "https://blendn-media.fly.storage.tigris.dev/profile/u1/3-c-sealed"
 const URL = "https://blendn-media.fly.storage.tigris.dev/profile/u1/1-a-photo.jpg"
 const SEALED = "https://blendn-media.fly.storage.tigris.dev/profile/u1/2-b-sealed"
 
@@ -73,41 +83,61 @@ describe("checkProfilePhoto (request path)", () => {
 })
 
 describe("moderateProfilePhoto (after the response)", () => {
-  it("a hide verdict pulls the photo and re-mirrors the primary", async () => {
+  it("a hide verdict pulls the photo, re-mirrors the primary and withdraws it with its blur (SCRUM-479)", async () => {
     vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
-    ;(db.profiles.findUnique as jest.Mock).mockResolvedValue({ photos: [URL, "https://cdn/b.jpg"] })
+    // The primary went, so the blur made from it goes too (SCRUM-476).
+    pull.mockResolvedValue([{ photos: ["https://cdn/b.jpg"], cleared_blur: BLUR }])
 
     await moderateProfilePhoto(URL, "u1")
 
-    // The primary went, so the blur made from it goes too (SCRUM-476).
-    expect(db.profiles.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { photos: ["https://cdn/b.jpg"], blur_photo: null } })
+    // One statement against this person's row, keyed on the pulled URL.
+    const [, ...values] = pull.mock.calls[0]
+    expect(values).toEqual([URL, URL, "u1", URL])
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { image: "https://cdn/b.jpg" } })
-    expect(record).toHaveBeenCalledWith(URL, "u1", true)
+    expect(pulled.mock.calls).toEqual([[URL, "u1"], [BLUR, "u1"]])
+    expect(withdraw).toHaveBeenCalledTimes(2)
+    expect(record).not.toHaveBeenCalled()
   })
 
   it("a hide verdict on a non-primary photo leaves User.image on the primary", async () => {
     vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
-    ;(db.profiles.findUnique as jest.Mock).mockResolvedValue({ photos: ["https://cdn/a.jpg", URL, "https://cdn/c.jpg"] })
+    pull.mockResolvedValue([{ photos: ["https://cdn/a.jpg", "https://cdn/c.jpg"], cleared_blur: null }])
 
     await moderateProfilePhoto(URL, "u1")
 
-    expect(db.profiles.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { photos: ["https://cdn/a.jpg", "https://cdn/c.jpg"] } })
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { image: "https://cdn/a.jpg" } })
+    expect(pulled.mock.calls).toEqual([[URL, "u1"]])
+    expect(withdraw).toHaveBeenCalledTimes(1)
+  })
+
+  it("a withdrawal that fails does not keep the blur's from running, and says the copy is still public", async () => {
+    vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
+    pull.mockResolvedValue([{ photos: [], cleared_blur: BLUR }])
+    withdraw.mockRejectedValueOnce(new Error("slow down"))
+
+    await moderateProfilePhoto(URL, "u1")
+
+    expect(withdraw).toHaveBeenCalledTimes(2)
+    expect(logger.error).toHaveBeenCalledWith(
+      "Pulled photo is still in the public bucket; withdrawal failed",
+      expect.objectContaining({ userId: "u1", error: "slow down" })
+    )
   })
 
   it("a failure inside the after() task is logged with the user and url, not thrown into console.error", async () => {
     // Nothing above this function: Next reports a rejected after() task with
     // a bare console.error, which is not where this app's errors go.
     vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
-    ;(db.profiles.findUnique as jest.Mock).mockResolvedValue({ photos: [URL] })
-    ;(db.$transaction as jest.Mock).mockRejectedValueOnce(new Error("connection closed"))
+    pull.mockRejectedValueOnce(new Error("connection closed"))
 
     await expect(moderateProfilePhoto(URL, "u1")).resolves.toBeUndefined()
     expect(logger.error).toHaveBeenCalledWith(
       "Profile photo moderation failed; photo left in place",
       expect.objectContaining({ userId: "u1", url: URL, error: "connection closed" })
     )
-    expect(record).not.toHaveBeenCalled()
+    // The verdict went first, so a save that re-sends the URL still drops it.
+    expect(pulled).toHaveBeenCalledWith(URL, "u1")
+    expect(withdraw).not.toHaveBeenCalled()
   })
 
   it("a clean verdict upgrades the record and touches nothing else", async () => {
