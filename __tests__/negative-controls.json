@@ -1397,8 +1397,8 @@
     },
     "seed-refresh.itest.ts": {
       "guards": "SCRUM-482: --refresh-times (scripts/seed-occurrences.ts refreshSeededEvent, used by seed-qa.ts and seed-blr-scenarios.ts) leaves a soft-deleted seeded event untouched and reports it; a live one is re-timed, its days synced, and its archived room reopened only when the new end is still ahead.",
-      "mutation": "M359 the deleted_at check removed (a soft-deleted event is moved and synced). M360 an archived room reopened whatever the new end.",
-      "observed": "M359: 1 of 4 failing (soft-deleted event moved, sync called). M360: 1 of 4 failing (room reopened after a past end). Both reverted.",
+      "mutation": "M359 the deleted_at check removed (a soft-deleted event is moved and synced). M360 an archived room reopened whatever the new end. Review pass: M361 the reopen not scoped to the event (every archived room reopened). M362 every member of a reopened room made active (bans lifted). M363 the caller's data (cover, reminded_at) not written. M364 seed-qa's refreshTimes looks an event up by slug itself (seed-refresh-callers.test.ts).",
+      "observed": "M359: 1 of 4 failing (soft-deleted event moved, sync called). M360: 1 of 4 failing (room reopened after a past end). M361: 1 of 4. M362: 1 of 4. M363: 1 of 4. M364: seed-refresh-callers 1 of 2. All reverted.",
       "date": "2026-09-30"
     }
   },
