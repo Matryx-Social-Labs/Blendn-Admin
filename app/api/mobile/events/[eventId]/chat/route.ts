@@ -569,6 +569,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     // Check muted/banned BEFORE auto-join logic — do not re-activate restricted users
+    let unmuted = false
     if (membership?.status === "muted") {
       // Check if the auto-mute window has expired (1 hour)
       const wasUnmuted = await checkAndAutoUnmute(authUser.userId, chatGroup.id)
@@ -576,6 +577,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
       }
       // User was auto-unmuted, proceed with sending
+      unmuted = true
     }
     if (membership?.status === "banned") {
       return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
@@ -633,8 +635,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    // The status the unmute above left behind, not the one read before it: the
+    // send that lifted an expired mute was refused as muted (SCRUM-486). The
+    // group route carries the same thing as `effectiveStatus`.
     const membershipFresh = membership
-      ? membership
+      ? unmuted
+        ? { ...membership, status: "active" as const }
+        : membership
       : await db.chat_group_members.findUnique({
           where: {
             chat_group_id_user_id: {
