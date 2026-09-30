@@ -14,6 +14,8 @@ jest.mock("@/lib/tigris", () => ({
   ownedObjectKey: jest.requireActual("@/lib/tigris").ownedObjectKey,
   ownedPhotoKey: jest.requireActual("@/lib/tigris").ownedPhotoKey,
   withdrawFromPublic: jest.fn().mockResolvedValue(undefined),
+  sealedChatKey: jest.requireActual("@/lib/tigris").sealedChatKey,
+  deleteFile: jest.fn().mockResolvedValue(undefined),
   deletePrefix: jest.fn().mockResolvedValue(0),
   isConfigured: () => mockStorageConfigured(),
 }))
@@ -215,7 +217,8 @@ it("erases what is left of the person's chat media with their record, and keeps 
   // Other cases in this file leave records of their own, so read ours rather than the sweep's count.
   await purgeDeletedAccountRecords(now)
   // Everything under the prefix: the 180 days were the only reason to keep any of it.
-  expect(mocked).toHaveBeenCalledWith(`chat/${erased}/`)
+  // Nothing kept any more, through `eraseChatMedia` (SCRUM-448), which also takes the copies the messages name.
+  expect(mocked).toHaveBeenCalledWith(`chat/${erased}/`, new Set())
   // And profile/, whose erasure at deletion is never retried otherwise.
   expect(mocked).toHaveBeenCalledWith(`profile/${erased}/`)
   const left = await db.deleted_account_records.findMany({ where: { user_id: { in: [erased, stuck] } }, select: { user_id: true } })

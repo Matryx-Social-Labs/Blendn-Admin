@@ -8,7 +8,7 @@ import { evictUserSockets } from "@/lib/socket-server"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
-import { retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
+import { eraseChatMedia, retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
 import { promoteFromWaitlist } from "@/lib/waitlist"
 import { performCheckout } from "@/lib/checkout"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
@@ -411,7 +411,8 @@ export async function DELETE(request: NextRequest) {
       try {
         let gone: number
         if (folder === "chat") {
-          gone = await deletePrefix(`chat/${authUser.userId}/`, await retainedChatMediaKeys(authUser.userId))
+          // The uploads and older copies by prefix; copies sealed since SCRUM-448 through the messages.
+          gone = await eraseChatMedia(authUser.userId, await retainedChatMediaKeys(authUser.userId))
         } else {
           const kept = await retainedProfilePhotoKeys(authUser.userId)
           // Off the public bucket first: `keep` spares a key in both buckets,

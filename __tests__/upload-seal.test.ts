@@ -89,7 +89,13 @@ describe("sealing an upload", () => {
     expect(copy.input.CacheControl).toBe("no-cache")
     const sealedKey = copy.input.Key!
     expect(sealedKey).not.toBe(SOURCE)
-    expect(sealedKey.startsWith(`chat/${USER}/`)).toBe(true)
+    /*
+     * No user id in a chat copy's key (SCRUM-448). The signed URL shows its
+     * path to everyone who sees the message, so `chat/<id>/…` let someone in
+     * two rooms with a person match that person's images across both.
+     */
+    expect(sealedKey).toMatch(/^chat\/sealed\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(sealedKey).not.toContain(USER)
     // The source first, then the copy: the copy is what is vouched for.
     expect(sentOf(HeadObjectCommand).map((h) => h.input.Key)).toEqual([SOURCE, sealedKey])
     // Nothing the upload URL can still write is left for anything to point at.
@@ -126,6 +132,12 @@ describe("sealing an upload", () => {
   ])("holds a profile photo to the profile folder's rules, not chat's: %s", async (_label, head, refused) => {
     storageHolds(head)
     expect(await sealUpload(`profile/${USER}/1-a-me.jpg`, "profile", USER)).toEqual({ refused })
+  })
+
+  it("keeps a profile copy under its owner's prefix: a profile is not pseudonymous", async () => {
+    storageHolds({ ContentLength: 120_000, ContentType: "image/jpeg" })
+    await sealUpload(`profile/${USER}/1-a-me.jpg`, "profile", USER)
+    expect(sentOf(CopyObjectCommand)[0].input.Key!.startsWith(`profile/${USER}/`)).toBe(true)
   })
 
   it("applies a caller's floor: a profile photo below it is refused", async () => {
