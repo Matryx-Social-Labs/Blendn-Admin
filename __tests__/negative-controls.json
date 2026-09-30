@@ -1223,8 +1223,8 @@
     },
     "upload-seal.test.ts": {
       "guards": "SCRUM-425: an upload URL signs the content type it was granted (X-Amz-SignedHeaders=content-type;host; Tigris answers a PUT of another type 403, measured on staging). sealUpload checks the source (refusing oversized, wrong-type, blank or missing before copying a byte), copies it with the server's headers (REPLACE) to a key nobody holds an upload URL for, checks the COPY again (Tigris ignores CopySourceIfMatch, measured), deletes a refused copy, deletes the source once sealed, removes a half-made copy on a storage failure, holds each folder to its own rules, and refuses a key outside the caller's folder. checkProfilePhoto seals with the blank-photo floor.",
-      "mutation": "M141 signableHeaders removed. M142 the copy is never checked (the source is checked twice). M143 a refused copy is left. M156 MetadataDirective COPY (the uploader's headers carried over). M157 the source is kept. M158 copy before checking the source. M159 a failed copy is not cleaned up. M160 no folder backstop. M154 a profile photo held to chat's rules. M148 no blank-photo floor on a profile photo. M162 the copy carries a one-year Cache-Control. M292 (SCRUM-445) the copy is written with no Cache-Control, the storage default of an hour.",
-      "observed": "Red before the fix: 8 of 8 (sealUpload missing; the URL signed only `host`). Over upload-seal + photo-moderation-off-the-request-path (22 cases): M141 1 failing, M142 2, M143 1, M156 1, M157 1, M158 4, M159 1, M160 1, M154 2, M148 1. M162 1 of 12 (upload-seal): added after the staging drive showed a deleted account's sealed photo still served 200 from Tigris's cache under that header (probe: none → the storage default public max-age=3600, still served after delete; one year → served; no-cache → 404 at once). The real sealUpload run once against the staging bucket: source deleted, copy image/jpeg with the server's cache-control and no Content-Encoding (the source had gzip), HTML refused wrong_type, missing refused. M292: 1 of 12 failing (CacheControl undefined, where no-cache is required so an erasure takes at once).",
+      "mutation": "M141 signableHeaders removed. M142 the copy is never checked (the source is checked twice). M143 a refused copy is left. M156 MetadataDirective COPY (the uploader's headers carried over). M157 the source is kept. M158 copy before checking the source. M159 a failed copy is not cleaned up. M160 no folder backstop. M154 a profile photo held to chat's rules. M148 no blank-photo floor on a profile photo. M162 the copy carries a one-year Cache-Control. M292 (SCRUM-445) the copy is written with no Cache-Control, the storage default of an hour. SCRUM-448: M388 the chat copy's key carries the sender again (generateKey). M389 the chat copy keeps x-amz-meta-uploaded-by.",
+      "observed": "Red before the fix: 8 of 8 (sealUpload missing; the URL signed only `host`). Over upload-seal + photo-moderation-off-the-request-path (22 cases): M141 1 failing, M142 2, M143 1, M156 1, M157 1, M158 4, M159 1, M160 1, M154 2, M148 1. M162 1 of 12 (upload-seal): added after the staging drive showed a deleted account's sealed photo still served 200 from Tigris's cache under that header (probe: none → the storage default public max-age=3600, still served after delete; one year → served; no-cache → 404 at once). The real sealUpload run once against the staging bucket: source deleted, copy image/jpeg with the server's cache-control and no Content-Encoding (the source had gzip), HTML refused wrong_type, missing refused. M292: 1 of 12 failing (CacheControl undefined, where no-cache is required so an erasure takes at once). M388: 1 of 14. M389: 1 of 14. Both reverted.",
       "date": "2026-09-29"
     },
     "profile-photo-sealed.itest.ts": {
@@ -1313,8 +1313,8 @@
     },
     "deleted-account-records.itest.ts": {
       "guards": "SCRUM-429: the retention sweep erases what is left of a deleted person's chat/<id>/ and profile/<id>/ before it purges their registration record; keeps a record whose erasure failed (deletePrefix now throws when anything under the prefix was left) for the next pass; and keeps every due record when storage is not configured, since the erasure cannot be done. Companion case: delete-prefix-keep.test.ts (a refusal fails the call after the rest is deleted).",
-      "mutation": "M293 the purge leaves chat/<id>/ alone. M294 records are purged even when their media was not erased. M295 deletePrefix returns a count when the store refused some objects (delete-prefix-keep.test.ts). M296 storage unset: records purged anyway. M297 profile/<id>/ not retried.",
-      "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6. M294: 1 of 6 (the record whose media failed was purged, and with it the only pointer). M295: delete-prefix-keep 1 of 6. M296: 1 of 7 (the record went with storage unset). M297: 1 of 7. All reverted.",
+      "mutation": "M293 the purge leaves chat/<id>/ alone. M294 records are purged even when their media was not erased. M295 deletePrefix returns a count when the store refused some objects (delete-prefix-keep.test.ts). M296 storage unset: records purged anyway. M297 profile/<id>/ not retried. SCRUM-448: M393 the purge sweeps chat/<id>/ only, missing the uid-free sealed copies.",
+      "observed": "Red before the fix: 1 of 6 failing. M293: 1 of 6. M294: 1 of 6 (the record whose media failed was purged, and with it the only pointer). M295: delete-prefix-keep 1 of 6. M296: 1 of 7 (the record went with storage unset). M297: 1 of 7. All reverted. M393: 1 of 7. Reverted.",
       "date": "2026-09-29"
     },
     "dashboard-report.itest.ts": {
@@ -1429,6 +1429,18 @@
       "guards": "SCRUM-479: withdrawFromPublic copies into the private bucket and only then deletes the public object; a failed copy deletes nothing and throws; a missing bucket throws; an object already gone is a no-op; deleteFile on profile/ never touches the private bucket.",
       "mutation": "M380 delete before copy. M381 every copy failure swallowed. M382 a failed copy still deletes. Security pass: M383 deleteFile (a user's own delete) reaches the private bucket. M384 NoSuchBucket read as already withdrawn.",
       "observed": "M380: 3 of 3 failing. M381: 1 of 3. M382: 1 of 3. M383: 1 of 5. M384: 1 of 5. All reverted.",
+      "date": "2026-09-30"
+    },
+    "chat-media-erasure.itest.ts": {
+      "guards": "SCRUM-448: sentChatMediaKeys finds a person's chat/sealed/<uuid> copies through their own chat_messages and private_messages (nobody else's); retainedChatMediaKeys recognises the sealed shape as well as chat/<id>/; eraseChatMedia sweeps chat/<id>/ with keep and deletes every sealed copy except the kept ones, and the purge (keep none) deletes them all.",
+      "mutation": "M390 erasure misses DMs (private_messages dropped from sentChatMediaKeys). M391 account deletion erases kept copies (keep ignored). M392 the retained set knows only the old chat/<id>/ key shape.",
+      "observed": "M390: 3 of 4 failing. M391: 1 of 4. M392: 2 of 4. All reverted.",
+      "date": "2026-09-30"
+    },
+    "unsent-chat-media-discarded.test.ts": {
+      "guards": "SCRUM-448: discardSealedChatMedia removes a sealed chat copy whose message was never written and touches nothing else; each of the three send routes calls it in every P2002 race handler after sealing.",
+      "mutation": "M394 the DM route forgets to discard. M395 discard removes any chat key, not only a sealed one.",
+      "observed": "M394: 1 of 6 failing. M395: 1 of 6. Both reverted.",
       "date": "2026-09-30"
     }
   },
