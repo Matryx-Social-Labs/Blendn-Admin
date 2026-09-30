@@ -456,7 +456,7 @@ describe("the photos leave storage, not only the row", () => {
     mockDb.event_check_ins.findMany.mockRejectedValueOnce(new Error("pool exhausted"))
     const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(res.status).toBe(200)
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`, RETAINED_PHOTOS)
     expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
   })
 
