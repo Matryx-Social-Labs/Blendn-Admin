@@ -1394,6 +1394,18 @@
       "mutation": "M285 blur stored unsealed. M286 no blur ceiling. M287 a new primary keeps the old blur. M288 moderation pulling the primary keeps the blur. M289 blur accepted with no photo. M350 a bio-only save clears the blur (touchesBlur guard dropped). M351 blur moderation never clears. M352 sealUpload ignores maxBytes. Review pass: M353 blur sealed after the photos (a refused blur used up their uploads). M354 after() moderates the raw upload URL instead of the sealed copy. M355 a verdict on an old blur clears the newer one. M356 ceiling one byte loose. Security pass: M357 the stored blur not recorded in photo_checks. M358 a pass verdict not recorded.",
       "observed": "Red before the fix: 12 of 12 failing (blur_photo null, refusals 200). Each mutant fails: M285: 12 of 13. M286: 1 of 13. M287: 1 of 13. M288: 1 of 13 + photo-moderation-off-the-request-path 1. M289: 1 of 13. M350: 1 of 13. M351: 1 of 13. M352: upload-seal.test 1. M353: 1 of 17. M354: 1 of 17. M355: 1 of 17. M356: 1 of 17 (re-run at 4 KB). M357: 1 of 17. M358: 1 of 17. All reverted.",
       "date": "2026-09-29"
+    },
+    "seed-refresh.itest.ts": {
+      "guards": "SCRUM-482: --refresh-times (scripts/seed-occurrences.ts refreshSeededEvent, used by seed-qa.ts and seed-blr-scenarios.ts) leaves a soft-deleted seeded event untouched and reports it; a live one is re-timed, its days synced, and its archived room reopened only when the new end is still ahead.",
+      "mutation": "M359 the deleted_at check removed (a soft-deleted event is moved and synced). M360 an archived room reopened whatever the new end. Review pass: M361 the reopen not scoped to the event (every archived room reopened). M362 every member of a reopened room made active (bans lifted). M363 the caller's data (cover, reminded_at) not written.",
+      "observed": "M359: 1 of 4 failing (soft-deleted event moved, sync called). M360: 1 of 4 failing (room reopened after a past end). M361: 1 of 4. M362: 1 of 4. M363: 1 of 4. All reverted.",
+      "date": "2026-09-30"
+    },
+    "seed-refresh-callers.test.ts": {
+      "guards": "SCRUM-482: both --refresh-times loops (scripts/seed-qa.ts, scripts/seed-blr-scenarios.ts) go through refreshSeededEvent and never look an event up by slug themselves, which is what re-timed soft-deleted events.",
+      "mutation": "M364 seed-qa's refreshTimes gains a bare db.events.findUnique by slug.",
+      "observed": "M364: 1 of 2 failing (seed-qa.ts). Reverted.",
+      "date": "2026-09-30"
     }
   },
   "grandfathered": [
