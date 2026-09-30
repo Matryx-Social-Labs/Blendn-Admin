@@ -286,7 +286,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * card shows nothing rather than the photo, and the next save drops it. A
      * conditional write on the photos read here closes it, if that is ever seen.
      */
-    const pulled = await pulledPhotos([...(sentPhotos ?? []), ...(typeof sentBlur === "string" ? [sentBlur] : [])])
+    const pulled = await pulledPhotos([...(sentPhotos ?? []), ...(typeof sentBlur === "string" ? [sentBlur] : [])], userId)
     const photos = sentPhotos?.filter((u: string) => !pulled.has(u))
     const blur_photo = typeof sentBlur === "string" && pulled.has(sentBlur) ? undefined : sentBlur
     const normalizedLocation = await normalizeLocationToCity(location)

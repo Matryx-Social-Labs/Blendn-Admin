@@ -10,7 +10,13 @@ import { NextRequest } from "next/server"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 const mockStorageConfigured = jest.fn(() => true)
-jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0), isConfigured: () => mockStorageConfigured() }))
+jest.mock("@/lib/tigris", () => ({
+  ownedObjectKey: jest.requireActual("@/lib/tigris").ownedObjectKey,
+  ownedPhotoKey: jest.requireActual("@/lib/tigris").ownedPhotoKey,
+  withdrawFromPublic: jest.fn().mockResolvedValue(undefined),
+  deletePrefix: jest.fn().mockResolvedValue(0),
+  isConfigured: () => mockStorageConfigured(),
+}))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { purgeDeletedAccountRecords, recordDeletedAccount } from "@/lib/deleted-account-records"

@@ -41,7 +41,7 @@ jest.mock("@aws-sdk/client-s3", () => {
   }
 })
 
-import { withdrawFromPublic } from "@/lib/tigris"
+import { deleteFile, withdrawFromPublic } from "@/lib/tigris"
 
 const KEY = "profile/u1/1790641297767-ab12cd-sealed"
 
@@ -65,6 +65,20 @@ it("deletes nothing when the copy fails", async () => {
 
   await expect(withdrawFromPublic(KEY)).rejects.toThrow("slow down")
   expect(sent.map((c) => c.name)).toEqual(["CopyObject"])
+})
+
+it("throws when the private bucket is missing, rather than calling it withdrawn", async () => {
+  copyFails = Object.assign(new Error("no bucket"), { name: "NoSuchBucket", $metadata: { httpStatusCode: 404 } })
+
+  await expect(withdrawFromPublic(KEY)).rejects.toThrow("no bucket")
+  expect(sent.map((c) => c.name)).toEqual(["CopyObject"])
+})
+
+it("a user's own delete never reaches the kept copy in the private bucket", async () => {
+  // `DELETE /uploads/delete` calls this for any profile/<me>/ URL.
+  await deleteFile(KEY)
+
+  expect(sent.map((c) => [c.name, c.input.Bucket])).toEqual([["DeleteObject", "blendn-media-test"]])
 })
 
 it("is done already when the public object is gone", async () => {

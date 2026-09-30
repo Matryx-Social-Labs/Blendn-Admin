@@ -146,24 +146,31 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
     if (check.checked && check.result?.action === "hide") {
       await recordPhotoPulled(url, userId)
       /*
-       * One statement, against the row as it is now. The read-then-write this
+       * Against the row as it is now, locked. The read-then-write this
        * replaces wrote back a list read before the write, so a photo the
        * person added in between went with the pulled one. The blur is of the
-       * primary (SCRUM-476): a pulled primary takes its blur with it. `old` is
-       * the row before the update, which is how the cleared blur comes back.
+       * primary (SCRUM-476): a pulled primary takes its blur with it. `prior`
+       * is the locked row before the update, which is how the cleared blur
+       * comes back; an unlocked self-join reads the statement's snapshot and
+       * names the wrong blur when a save commits first (reproduced on PG 17).
+       * Not `old`, which PG 18 reserves in RETURNING.
+       * `User.image` in the same transaction, as the PUT writes both.
        */
-      const [row] = await db.$queryRaw<{ photos: string[]; cleared_blur: string | null }[]>`
-        UPDATE profiles p
-           SET photos = array_remove(p.photos, ${url}),
-               blur_photo = CASE WHEN p.photos[1] = ${url} THEN NULL ELSE p.blur_photo END
-          FROM profiles old
-         WHERE old.id = p.id AND p.id = ${userId}
-     RETURNING p.photos,
-               CASE WHEN old.photos[1] = ${url} THEN old.blur_photo END AS cleared_blur
-      `
-      if (row) {
-        await db.user.update({ where: { id: userId }, data: { image: row.photos[0] ?? null } })
-      }
+      const row = await db.$transaction(async (tx) => {
+        const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null }[]>`
+          UPDATE profiles p
+             SET photos = array_remove(p.photos, ${url}),
+                 blur_photo = CASE WHEN p.photos[1] = ${url} THEN NULL ELSE p.blur_photo END
+            FROM (SELECT id, photos, blur_photo FROM profiles WHERE id = ${userId} FOR UPDATE) prior
+           WHERE prior.id = p.id
+       RETURNING p.photos,
+                 CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur
+        `
+        if (pulledRow) {
+          await tx.user.update({ where: { id: userId }, data: { image: pulledRow.photos[0] ?? null } })
+        }
+        return pulledRow
+      })
       // The blur of a pulled photo is that photo, smaller: pulled with it.
       if (row?.cleared_blur) await recordPhotoPulled(row.cleared_blur, userId)
       await withdraw(url, userId)
@@ -211,8 +218,26 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
   }
 }
 
-/** Off the public bucket, if it is the person's own photo; anything else was never stored. */
+/**
+ * Off the public bucket, if it is the person's own photo; anything else was
+ * never stored. A failure is logged here rather than thrown, so one object that
+ * would not move does not leave the other where it was, and the line says what
+ * is true: the row is already changed, the public copy is not.
+ *
+ * ponytail: not retried while the account lives. Account deletion withdraws
+ * every pulled key again before it sweeps; a sweep over `hidden` rows is the
+ * upgrade if these lines ever show up.
+ */
 async function withdraw(url: string, userId: string): Promise<void> {
   const key = ownedPhotoKey(url, userId)
-  if (key) await withdrawFromPublic(key)
+  if (!key) return
+  try {
+    await withdrawFromPublic(key)
+  } catch (error) {
+    logger.error("Pulled photo is still in the public bucket; withdrawal failed", {
+      userId,
+      key,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
 }

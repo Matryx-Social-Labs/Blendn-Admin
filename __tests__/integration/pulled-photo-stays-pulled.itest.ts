@@ -125,6 +125,28 @@ describe("a pulled primary photo", () => {
   })
 })
 
+describe("the same pulled photo under another spelling", () => {
+  it("is dropped all the same: matched on the object, not the string", async () => {
+    const { id, p, q, r, put } = await person()
+    ;(checkImageContent as jest.Mock).mockResolvedValue(HIDE)
+    await moderateProfilePhoto(p, id)
+
+    expect((await put({ photos: [`${p}?v=2`, q, r] })).status).toBe(200)
+    expect((await rowOf(id)).photos).toEqual([q, r])
+  })
+
+  it("tells a stranger nothing: someone else's pulled URL is refused as not theirs, like any other", async () => {
+    const owner = await person()
+    ;(checkImageContent as jest.Mock).mockResolvedValue(HIDE)
+    await moderateProfilePhoto(owner.p, owner.id)
+    const stranger = await person()
+
+    const res = await stranger.put({ photos: [owner.p] })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { errorCode?: string }).errorCode).toBe("not_ours")
+  })
+})
+
 describe("a pulled photo that is not the primary", () => {
   it("keeps the primary's blur and withdraws only itself", async () => {
     const { id, key, p, q, r, blur } = await person()

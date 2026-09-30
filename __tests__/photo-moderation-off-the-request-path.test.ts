@@ -27,6 +27,8 @@ jest.mock("@/lib/db", () => ({
     profiles: { findUnique: jest.fn(), update: jest.fn((a) => a) },
     user: { update: jest.fn((a) => a) },
     $queryRaw: jest.fn(),
+    // The pull and the User.image mirror run in one transaction (SCRUM-479).
+    $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(jest.requireMock("@/lib/db").db)),
   },
 }))
 
@@ -106,6 +108,20 @@ describe("moderateProfilePhoto (after the response)", () => {
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { image: "https://cdn/a.jpg" } })
     expect(pulled.mock.calls).toEqual([[URL, "u1"]])
     expect(withdraw).toHaveBeenCalledTimes(1)
+  })
+
+  it("a withdrawal that fails does not keep the blur's from running, and says the copy is still public", async () => {
+    vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
+    pull.mockResolvedValue([{ photos: [], cleared_blur: BLUR }])
+    withdraw.mockRejectedValueOnce(new Error("slow down"))
+
+    await moderateProfilePhoto(URL, "u1")
+
+    expect(withdraw).toHaveBeenCalledTimes(2)
+    expect(logger.error).toHaveBeenCalledWith(
+      "Pulled photo is still in the public bucket; withdrawal failed",
+      expect.objectContaining({ userId: "u1", error: "slow down" })
+    )
   })
 
   it("a failure inside the after() task is logged with the user and url, not thrown into console.error", async () => {

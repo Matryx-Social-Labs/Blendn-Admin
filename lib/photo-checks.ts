@@ -1,6 +1,7 @@
 // Relative, not "@/lib/db" — see lib/live-snapshot.ts for why. Enforced by
 // __tests__/server-import-boundary.test.ts.
 import { db } from "./db"
+import { ownedPhotoKey } from "./tigris"
 
 /**
  * Record that we looked at a photo, and whether we actually managed to.
@@ -48,14 +49,24 @@ export async function recordPhotoPulled(url: string, userId: string): Promise<vo
   })
 }
 
-/** Which of these URLs moderation has pulled. */
-export async function pulledPhotos(urls: readonly string[]): Promise<Set<string>> {
+/**
+ * Which of these URLs are this person's photos that moderation pulled.
+ *
+ * Matched on the storage key, not the string: a query string, a fragment, an
+ * encoded path or the other host name all name the same object and would pass
+ * an exact comparison. Scoped to the person, so a stranger's pulled URL tells
+ * the caller nothing about its verdict.
+ */
+export async function pulledPhotos(urls: readonly string[], userId: string): Promise<Set<string>> {
   if (urls.length === 0) return new Set()
-  const rows = await db.photo_checks.findMany({
-    where: { url: { in: [...urls] }, hidden: true },
-    select: { url: true },
-  })
-  return new Set(rows.map((r) => r.url))
+  const rows = await db.photo_checks.findMany({ where: { user_id: userId, hidden: true }, select: { url: true } })
+  const pulledKeys = new Set(rows.map((r) => ownedPhotoKey(r.url, userId)).filter((k): k is string => k !== null))
+  return new Set(
+    urls.filter((u) => {
+      const key = ownedPhotoKey(u, userId)
+      return key !== null && pulledKeys.has(key)
+    })
+  )
 }
 
 /** Photos that were let through without moderation, oldest first. */

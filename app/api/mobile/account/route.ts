@@ -7,7 +7,7 @@ import { blockAccountNow } from "@/lib/account-blocklist"
 import { evictUserSockets } from "@/lib/socket-server"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { deletePrefix } from "@/lib/tigris"
+import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
 import { retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
 import { promoteFromWaitlist } from "@/lib/waitlist"
 import { performCheckout } from "@/lib/checkout"
@@ -409,10 +409,16 @@ export async function DELETE(request: NextRequest) {
      */
     for (const folder of ["profile", "chat"] as const) {
       try {
-        const gone =
-          folder === "chat"
-            ? await deletePrefix(`chat/${authUser.userId}/`, await retainedChatMediaKeys(authUser.userId))
-            : await deletePrefix(`profile/${authUser.userId}/`, await retainedProfilePhotoKeys(authUser.userId))
+        let gone: number
+        if (folder === "chat") {
+          gone = await deletePrefix(`chat/${authUser.userId}/`, await retainedChatMediaKeys(authUser.userId))
+        } else {
+          const kept = await retainedProfilePhotoKeys(authUser.userId)
+          // Off the public bucket first: `keep` spares a key in both buckets,
+          // and this retries a withdrawal that failed when the photo was pulled.
+          for (const key of kept) await withdrawFromPublic(key)
+          gone = await deletePrefix(`profile/${authUser.userId}/`, kept)
+        }
         logger.info("Account deletion: uploads removed from storage", { userId: authUser.userId, folder, gone })
       } catch (error) {
         logger.error("Account deletion: uploads NOT removed from storage", {

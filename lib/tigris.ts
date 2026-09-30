@@ -92,14 +92,17 @@ export const PUBLIC_FOLDERS: readonly UploadFolder[] = ["profile", "events", "sp
 /** Folders whose older objects may still sit in the public bucket, from before they moved. */
 const MOVED_FROM_PUBLIC: readonly UploadFolder[] = ["chat"]
 
-/** Public folders whose removed objects are withdrawn to the private bucket and kept (SCRUM-479). */
+/**
+ * Public folders whose removed objects are withdrawn to the private bucket and
+ * kept (SCRUM-479). Only a prefix sweep reaches them there (account deletion,
+ * the purge): `deleteFile` is what a user's own delete calls, and a copy kept
+ * for 180 days is not theirs to delete.
+ */
 const WITHDRAWN_TO_PRIVATE: readonly UploadFolder[] = ["profile"]
 
-/** Where a folder's objects can be: its bucket, and the other one if objects move between them. */
+/** Where a folder's objects can be: its bucket, and for a folder that moved, the one it moved from. */
 function bucketsHolding(folder: UploadFolder): string[] {
-  if (MOVED_FROM_PUBLIC.includes(folder)) return [bucketFor(folder), TIGRIS_BUCKET]
-  if (WITHDRAWN_TO_PRIVATE.includes(folder)) return [bucketFor(folder), TIGRIS_PRIVATE_BUCKET]
-  return [bucketFor(folder)]
+  return MOVED_FROM_PUBLIC.includes(folder) ? [bucketFor(folder), TIGRIS_BUCKET] : [bucketFor(folder)]
 }
 
 /** The bucket a folder lives in: the public one, or the private one. */
@@ -335,7 +338,9 @@ export async function withdrawFromPublic(key: string): Promise<void> {
       })
     )
   } catch (error) {
-    if (isNotFound(error)) return
+    // The object, not the bucket: a missing private bucket answers 404 too, and
+    // that must not read as "already withdrawn".
+    if (isNotFound(error) && (error as { name?: string }).name !== "NoSuchBucket") return
     throw error
   }
   await client.send(new DeleteObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }))
@@ -350,8 +355,10 @@ export async function withdrawFromPublic(key: string): Promise<void> {
  * content, retained for its period (SCRUM-428).
  */
 export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = new Set()): Promise<number> {
+  const folder = prefix.split("/")[0] as UploadFolder
+  const buckets = WITHDRAWN_TO_PRIVATE.includes(folder) ? [...bucketsHolding(folder), TIGRIS_PRIVATE_BUCKET] : bucketsHolding(folder)
   let deleted = 0
-  for (const bucket of bucketsHolding(prefix.split("/")[0] as UploadFolder)) {
+  for (const bucket of buckets) {
     deleted += await deletePrefixIn(bucket, prefix, keep)
   }
   return deleted
