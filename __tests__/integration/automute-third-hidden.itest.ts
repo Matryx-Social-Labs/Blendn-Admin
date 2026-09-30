@@ -111,9 +111,7 @@ type State = { written: number; status: string; muted_by: string | null }
 
 /** The flag and the mute are written after the response: poll until `done`, bounded. */
 async function stateOf(r: Room, done: (s: State) => boolean): Promise<State> {
-  let s: State = { written: 0, status: "", muted_by: null }
-  for (let i = 0; i < 80 && !done(s); i++) {
-    if (i > 0) await new Promise((res) => setTimeout(res, 25))
+  for (let i = 0; ; i++) {
     const [written, member] = await Promise.all([
       db.moderation_flags.count({ where: { chat_group_id: r.groupId, user_id: r.memberId, auto_action: "hidden" } }),
       db.chat_group_members.findUniqueOrThrow({
@@ -121,9 +119,10 @@ async function stateOf(r: Room, done: (s: State) => boolean): Promise<State> {
         select: { status: true, muted_by: true },
       }),
     ])
-    s = { written, ...member }
+    const s = { written, ...member }
+    if (done(s) || i === 79) return s
+    await new Promise((res) => setTimeout(res, 25))
   }
-  return s
 }
 
 describe.each(ROUTES)("the %s", (_name, send) => {
@@ -148,5 +147,18 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     expect(clean.status).toBe(403)
     expect((await clean.json()).errorCode).toBe("USER_MUTED")
     expect(await db.chat_messages.count({ where: { chat_group_id: r.groupId, content: "hello again" } })).toBe(0)
+  })
+
+  it("never mutes for contact details alone, however many", async () => {
+    // Sharing your own number is hidden and flagged, not abuse (`autoMute: false`).
+    const r = await liveRoom()
+    for (let i = 1; i <= AUTO_MUTE_HIDDEN_COUNT; i++) {
+      expect((await send(r, `call me on 98765 4321${i} tonight`)).status).toBe(200)
+      await stateOf(r, (s) => s.written === i)
+    }
+    // Long enough for a mute that was coming to have landed.
+    await new Promise((res) => setTimeout(res, 300))
+    expect(await stateOf(r, () => true)).toEqual({ written: AUTO_MUTE_HIDDEN_COUNT, status: "active", muted_by: null })
+    expect((await send(r, "hello again")).status).toBe(201)
   })
 })

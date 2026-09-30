@@ -1396,9 +1396,9 @@
       "date": "2026-09-29"
     },
     "automute-third-hidden.itest.ts": {
-      "guards": "SCRUM-483: a sender is auto-muted (muted_by NULL) on their AUTO_MUTE_HIDDEN_COUNT-th keyword-hidden message in a room, on both the group route and the event route, and the next clean message is refused USER_MUTED and not written. The pre-save branch writes the flag before counting (flagForReview(...).then(checkAndAutoMute)).",
-      "mutation": "M359 the group route's flag and count run side by side again (void, void). M360 the same on the event route.",
-      "observed": "Red before the fix: 2 of 2 failing (written 3, status active). M359: 1 of 2 (the group route). M360: 1 of 2 (the event route). All reverted.",
+      "guards": "SCRUM-483: a sender is auto-muted (muted_by NULL) on their AUTO_MUTE_HIDDEN_COUNT-th keyword-hidden message in a room, on both the group route and the event route, and the next clean message is refused USER_MUTED and not written. The pre-save branch writes the flag before counting (flagForReview(...).then(checkAndAutoMute)). The same number of contact-detail hides (autoMute: false) never mutes, and the next clean message is delivered.",
+      "mutation": "M359 the group route's flag and count run side by side again (void, void). M360 the same on the event route. Review pass: M361 the autoMute guard dropped on both routes (.then(() => checkAndAutoMute(...)).",
+      "observed": "Red before the fix: 2 of 2 failing (written 3, status active). M359: 1 of 2 (the group route), and 1 of 4 after the review pass. M360: 1 of 2 (the event route), and 1 of 4. M361: 2 of 4 (the contact case on each route: muted). All reverted.",
       "date": "2026-09-30"
     }
   },

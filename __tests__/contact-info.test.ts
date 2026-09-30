@@ -140,7 +140,8 @@ describe("the verdict, per surface", () => {
       const src = readFileSync(join(process.cwd(), route), "utf8")
       expect(src).toMatch(/const preSave = preSaveCheck\(content\)/)
       expect(src).not.toMatch(/checkKeywords\(content\)/)
-      expect(src).toMatch(/if \(preSave\.autoMute\) void checkAndAutoMute/)
+      // Counted only for abuse, and only once its flag is written (SCRUM-483).
+      expect(src).toMatch(/\.then\(\(\) =>\s+preSave\.autoMute \? checkAndAutoMute\(/)
     }
   })
 
