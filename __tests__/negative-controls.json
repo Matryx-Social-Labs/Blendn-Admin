@@ -1442,6 +1442,12 @@
       "mutation": "M394 the DM route forgets to discard. M395 discard removes any chat key, not only a sealed one.",
       "observed": "M394: 1 of 6 failing. M395: 1 of 6. Both reverted.",
       "date": "2026-09-30"
+    },
+    "departure-source.itest.ts": {
+      "guards": "SCRUM-484: performCheckout records how a presence session ended through one table (DEPARTURE_SOURCE): a switch (checkOutOfOtherEvents) is 'switch', a manual checkout 'user', leaving the fence 'sweeper', and the event's end 'sweeper' (inferred, so departureQuality counts it as inference).",
+      "mutation": "M400 switched_event mapped back to 'sweeper'. M401 occurrence_ended mapped to 'ended'.",
+      "observed": "Red before the fix: 1 of 4 failing (switch recorded as sweeper). M400: 1 of 4 failing. M401: 1 of 4 failing (the event's end recorded as ended). Reverted.",
+      "date": "2026-09-30"
     }
   },
   "grandfathered": [
