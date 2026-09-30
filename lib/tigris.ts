@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto"
+
 import { logger } from "./logger"
 import { getMaxFileSize, validateContentType } from "./upload-rules"
 import {
@@ -264,7 +266,7 @@ export async function sealUpload(
   const early = refusalOf(source)
   if (early || !source) return { refused: early ?? "missing" }
 
-  const sealedKey = generateKey(folder, "sealed", userId)
+  const sealedKey = folder === "chat" ? `${SEALED_CHAT_PREFIX}${randomUUID()}` : generateKey(folder, "sealed", userId)
   try {
     await client.send(
       new CopyObjectCommand({
@@ -282,7 +284,12 @@ export async function sealUpload(
          * staging, SCRUM-445). The app keeps its own image cache.
          */
         CacheControl: "no-cache",
-        Metadata: { "uploaded-by": userId },
+        /*
+         * Not on a chat copy (SCRUM-448): every viewer of the message can GET
+         * it through the signed URL, and `x-amz-meta-uploaded-by` would name
+         * the sender next to the image just as the old key did.
+         */
+        Metadata: folder === "chat" ? {} : { "uploaded-by": userId },
       }),
       timeout()
     )
@@ -313,7 +320,11 @@ function isNotFound(error: unknown): boolean {
 export async function deleteFile(key: string): Promise<void> {
   const client = getS3Client()
   for (const Bucket of bucketsHolding(key.split("/")[0] as UploadFolder)) {
-    await client.send(new DeleteObjectCommand({ Bucket, Key: key }))
+    // A deadline, like the prefix sweep's: erasure now deletes one sealed chat
+    // copy at a time (SCRUM-448), and one hung call must not stall the purge.
+    await client.send(new DeleteObjectCommand({ Bucket, Key: key }), {
+      abortSignal: AbortSignal.timeout(DELETE_CALL_TIMEOUT_MS),
+    })
   }
 }
 
@@ -494,14 +505,8 @@ export function ownedPhotoKey(url: string, userId: string): string | null {
   return ownedObjectKey(url, userId, "profile")
 }
 
-/**
- * The same binding for any folder the person may own an object in. `folder`
- * is an allow-list value, never something read out of the URL: the delete
- * route used to accept whatever `extractKeyFromUrl` produced -- the function
- * whose own docstring calls it "useless as a security check" -- and matched
- * only `pathParts[1]` against the caller.
- */
-export function ownedObjectKey(url: string, userId: string, folder: UploadFolder): string | null {
+/** The key a URL names in one of our buckets, parsed as strictly as we write them; null for anything else. */
+function ourObjectKey(url: string): string | null {
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -541,7 +546,39 @@ export function ownedObjectKey(url: string, userId: string, folder: UploadFolder
   // something we generated.
   // A `..` segment, not any two dots: "a..b.jpg" is a file its owner may attach.
   if (key.split("/").includes("..")) return null
+  return key
+}
 
+/**
+ * A sealed chat copy's key (SCRUM-448): `chat/sealed/<uuid>`, with no user id.
+ * The signed URL's path is seen by everyone who sees the message, and
+ * `chat/<id>/…` let someone in two rooms with a person match that person's
+ * images across both. The upload keeps `chat/<id>/`: ownership is proven on
+ * it before sealing, and nobody else is ever shown it.
+ */
+const SEALED_CHAT_PREFIX = "chat/sealed/"
+const SEALED_CHAT_KEY = /^chat\/sealed\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/**
+ * The key of a sealed chat copy this URL names, or null. Which person it
+ * belongs to is not in the key any more: erasure reads it off that person's
+ * own message rows (`lib/retained-media.ts`).
+ */
+export function sealedChatKey(url: string): string | null {
+  const key = ourObjectKey(url)
+  return key !== null && SEALED_CHAT_KEY.test(key) ? key : null
+}
+
+/**
+ * The same binding for any folder the person may own an object in. `folder`
+ * is an allow-list value, never something read out of the URL: the delete
+ * route used to accept whatever `extractKeyFromUrl` produced -- the function
+ * whose own docstring calls it "useless as a security check" -- and matched
+ * only `pathParts[1]` against the caller.
+ */
+export function ownedObjectKey(url: string, userId: string, folder: UploadFolder): string | null {
+  const key = ourObjectKey(url)
+  if (key === null) return null
   // The folder AND the owner. `profile/<userId>/` is the only shape this
   // accepts, so somebody else's photo -- or a chat attachment, which is a
   // different trust class -- is refused.

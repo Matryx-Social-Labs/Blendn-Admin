@@ -29,7 +29,7 @@ import {
   roomReadDenial,
   type RoomEntitlement,
 } from "@/lib/chat-window"
-import { chatQuerySchema, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia, sendMessageSchema } from "@/lib/validations/chat"
+import { chatQuerySchema, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
@@ -742,6 +742,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         },
       })
       } catch (error) {
+        await discardSealedChatMedia(media)
         // A concurrent retry with the same clientId wrote it first.
         const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(authUser.userId, clientId) : null
         if (!raced) throw error
@@ -785,6 +786,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
     } catch (error) {
+      await discardSealedChatMedia(media)
       // Two sends with one clientId raced; the other wrote it first.
       const raced =
         clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(authUser.userId, clientId) : null

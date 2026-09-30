@@ -771,7 +771,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 ```json
 { "content": "string", "type": "text|image|video", "metadata": { "mediaUrl": "url?" }, "parentId": "uuid?" }
 ```
-**Media (SCRUM-426).** `metadata` takes `mediaUrl` and nothing else; any other key is `400`. The server writes the rest, such as `sponsored_message_id`, which the app uses to draw a sponsored card. `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket). Anything else is `400` "Send photos through the app rather than linking to them". The same rules apply to `POST /events/:eventId/chat`. What is stored and sent to the room is a copy of the upload that nobody can write to (SCRUM-425), so `metadata.mediaUrl` comes back different from the one you sent. An upload that never arrived, is over 50 MB, or is not an allowed type is `400`. The same applies to a DM's `mediaUrl`.
+**Media (SCRUM-426).** `metadata` takes `mediaUrl` and nothing else; any other key is `400`. The server writes the rest, such as `sponsored_message_id`, which the app uses to draw a sponsored card. `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket). Anything else is `400` "Send photos through the app rather than linking to them". The same rules apply to `POST /events/:eventId/chat`. What is stored and sent to the room is a copy of the upload that nobody can write to (SCRUM-425), so `metadata.mediaUrl` comes back different from the one you sent. That copy's key is `chat/sealed/<uuid>` and names nobody (SCRUM-448); the upload's `chat/<yourId>/` key is never shown to anyone else. An upload that never arrived, is over 50 MB, or is not an allowed type is `400`. The same applies to a DM's `mediaUrl`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
 1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
@@ -2157,7 +2157,8 @@ intent_default, reveal_by_default, work_field**, plus the structured
 
 Removed from storage, after the transaction: everything the person uploaded
 from the app, meaning `profile/<id>/` (photos) and `chat/<id>/` (images sent in
-DMs and rooms, SCRUM-428). The exception is removed content, kept 180 days
+DMs and rooms, SCRUM-428), plus the `chat/sealed/<uuid>` copies their own messages point at
+(SCRUM-448). The exception is removed content, kept 180 days
 (`docs/RETENTION.md`): an image in a message that moderation hid or flagged,
 that someone else deleted, or that someone else reported, where the flag or
 report was not dismissed. If that set can't be read, `chat/` is left alone. A failure is logged by user and folder,

@@ -61,8 +61,11 @@ deletes their account:
 - **DMs:** `moderation_status = 'hidden'`, with `message_reports`. Account
   deletion closes the conversation and keeps the messages.
 - **Images in those messages:** account deletion erases the person's
-  `chat/<id>/` objects except the images of their messages that are removed
-  content (`retainedChatMediaKeys`, `lib/retained-media.ts`, SCRUM-428):
+  `chat/<id>/` objects, and the `chat/sealed/<uuid>` copies their own messages
+  point at (a sealed copy's key names nobody since SCRUM-448, so the messages
+  are how it is found: `eraseChatMedia`), except the images of their messages
+  that are removed content (`retainedChatMediaKeys`, `lib/retained-media.ts`,
+  SCRUM-428):
   - hidden or flagged;
   - deleted by someone other than the author;
   - carrying a flag nobody cleared;
@@ -70,7 +73,8 @@ deletes their account:
 
   If that set cannot be read, `chat/` is left alone rather than erased. The
   kept images go at 180 days, with the registration record: the retention
-  sweep erases everything left under `chat/<id>/` before it purges the record,
+  sweep erases everything left under `chat/<id>/`, and every sealed copy the
+  person's messages still point at, before it purges the record,
   and keeps a record whose images it could not erase for the next pass
   (SCRUM-429). At 180 days they go whatever is still open on them: a report
   nobody has reviewed, or a flag nobody cleared, loses its image then. Nothing
