@@ -109,11 +109,11 @@ describe("erasing a person's chat uploads", () => {
     send.mockRestore()
   })
 
-  it("sweeps only the public bucket for a profile prefix", async () => {
+  it("sweeps both buckets for a profile prefix: pulled photos are kept in the private one (SCRUM-479)", async () => {
     const send = jest.spyOn(S3Client.prototype, "send").mockImplementation(async () => ({ Contents: [], IsTruncated: false }))
     await deletePrefix(`profile/${USER}/`)
     const listed = send.mock.calls.map(([c]) => c as unknown).filter((c): c is ListObjectsV2Command => c instanceof ListObjectsV2Command)
-    expect(listed.map((c) => c.input.Bucket)).toEqual(["blendn-media-test"])
+    expect(listed.map((c) => c.input.Bucket)).toEqual(["blendn-media-test", "blendn-media-test-private"])
     send.mockRestore()
   })
 })

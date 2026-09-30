@@ -67,7 +67,11 @@ jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => m
 const mockDeletePrefix = jest.fn().mockResolvedValue(3)
 jest.mock("@/lib/tigris", () => ({ deletePrefix: (...a: unknown[]) => mockDeletePrefix(...a) }))
 const RETAINED = new Set(["chat/kept-image.jpg"])
-jest.mock("@/lib/retained-media", () => ({ retainedChatMediaKeys: jest.fn(async () => RETAINED) }))
+const RETAINED_PHOTOS = new Set(["profile/u1/pulled.jpg"])
+jest.mock("@/lib/retained-media", () => ({
+  retainedChatMediaKeys: jest.fn(async () => RETAINED),
+  retainedProfilePhotoKeys: jest.fn(async () => RETAINED_PHOTOS),
+}))
 jest.mock("@/lib/logger", () => ({ logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 jest.mock("@/lib/rate-limit", () => ({
   rateLimit: jest.fn().mockResolvedValue(null),
@@ -412,7 +416,7 @@ describe("the photos leave storage, not only the row", () => {
     mockAuth.mockResolvedValue({ userId: USER })
     const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(res.status).toBe(200)
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`, RETAINED_PHOTOS)
     // After, not inside: the transaction is the erasure; storage is cleanup.
     const txOrder = mockDb.$transaction.mock.invocationCallOrder[0]
     const delOrder = mockDeletePrefix.mock.invocationCallOrder[0]
@@ -437,7 +441,7 @@ describe("the photos leave storage, not only the row", () => {
     mockAuth.mockResolvedValue({ userId: USER })
     mockDeletePrefix.mockRejectedValueOnce(new Error("listing failed"))
     await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`, RETAINED_PHOTOS)
     expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
   })
 
@@ -459,9 +463,20 @@ describe("the photos leave storage, not only the row", () => {
     retainedChatMediaKeys.mockRejectedValueOnce(new Error("query failed"))
     const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(res.status).toBe(200)
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`, RETAINED_PHOTOS)
     expect(mockDeletePrefix).not.toHaveBeenCalledWith(`chat/${USER}/`, expect.anything())
     expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/storage/i), expect.objectContaining({ folder: "chat" }))
+  })
+
+  it("fails closed for profile/ too: a pulled photo is kept, so no pulled set means no sweep (SCRUM-479)", async () => {
+    mockAuth.mockResolvedValue({ userId: USER })
+    const { retainedProfilePhotoKeys } = jest.requireMock("@/lib/retained-media") as { retainedProfilePhotoKeys: jest.Mock }
+    retainedProfilePhotoKeys.mockRejectedValueOnce(new Error("query failed"))
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
+    expect(mockDeletePrefix).not.toHaveBeenCalledWith(`profile/${USER}/`, expect.anything())
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
+    expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/storage/i), expect.objectContaining({ folder: "profile" }))
   })
 
   it("a storage failure does not undo the erasure the database accepted, and is logged by user", async () => {
