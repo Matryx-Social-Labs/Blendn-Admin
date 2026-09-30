@@ -439,9 +439,12 @@ export async function POST(
         return answerRoomRetry(raced, chatGroupId)
       }
       // Flag for review and, for abuse rather than a phone number, count
-      // toward an auto-mute (fire-and-forget)
-      void flagForReview(message.id, chatGroupId, user.userId, preSave.result)
-      if (preSave.autoMute) void checkAndAutoMute(user.userId, chatGroupId)
+      // toward an auto-mute (fire-and-forget). The flag first: the count reads
+      // flags, and run side by side it missed this message's own, so the mute
+      // landed on the fourth hidden message instead of the third (SCRUM-483).
+      void flagForReview(message.id, chatGroupId, user.userId, preSave.result).then(() =>
+        preSave.autoMute ? checkAndAutoMute(user.userId, chatGroupId) : undefined
+      )
       // Return success to sender but message is already hidden — never emitted to others
       return successResponse({
         id: message.id,

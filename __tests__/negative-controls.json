@@ -1395,6 +1395,12 @@
       "observed": "Red before the fix: 12 of 12 failing (blur_photo null, refusals 200). Each mutant fails: M285: 12 of 13. M286: 1 of 13. M287: 1 of 13. M288: 1 of 13 + photo-moderation-off-the-request-path 1. M289: 1 of 13. M350: 1 of 13. M351: 1 of 13. M352: upload-seal.test 1. M353: 1 of 17. M354: 1 of 17. M355: 1 of 17. M356: 1 of 17 (re-run at 4 KB). M357: 1 of 17. M358: 1 of 17. All reverted.",
       "date": "2026-09-29"
     },
+    "automute-third-hidden.itest.ts": {
+      "guards": "SCRUM-483: a sender is auto-muted (muted_by NULL) on their AUTO_MUTE_HIDDEN_COUNT-th keyword-hidden message in a room, on both the group route and the event route, and the next clean message is refused USER_MUTED and not written. The pre-save branch writes the flag before counting (flagForReview(...).then(checkAndAutoMute)). The same number of contact-detail hides (autoMute: false) never mutes, and the next clean message is delivered.",
+      "mutation": "M365 the group route's flag and count run side by side again (void, void). M366 the same on the event route. Review pass: M367 the autoMute guard dropped on both routes (.then(() => checkAndAutoMute(...)).",
+      "observed": "Red before the fix: 2 of 2 failing (written 3, status active). M365: 1 of 2 (the group route), and 1 of 4 after the review pass. M366: 1 of 2 (the event route), and 1 of 4. M367: 2 of 4 (the contact case on each route: muted). All reverted.",
+      "date": "2026-09-30"
+    },
     "seed-refresh.itest.ts": {
       "guards": "SCRUM-482: --refresh-times (scripts/seed-occurrences.ts refreshSeededEvent, used by seed-qa.ts and seed-blr-scenarios.ts) leaves a soft-deleted seeded event untouched and reports it; a live one is re-timed, its days synced, and its archived room reopened only when the new end is still ahead.",
       "mutation": "M359 the deleted_at check removed (a soft-deleted event is moved and synced). M360 an archived room reopened whatever the new end. Review pass: M361 the reopen not scoped to the event (every archived room reopened). M362 every member of a reopened room made active (bans lifted). M363 the caller's data (cover, reminded_at) not written.",
