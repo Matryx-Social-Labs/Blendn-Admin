@@ -33,25 +33,30 @@ jest.mock("@/lib/moderation/openai-moderation", () => {
   const actual = jest.requireActual("@/lib/moderation/openai-moderation")
   return { ...actual, checkTextContent: (text: string) => mockCheckText(text) ?? actual.checkTextContent(text) }
 })
+// Each seal mints its own chat/sealed/<uuid>, as sealUpload does since SCRUM-448: no user id in it.
+// `mockSealDelayMs` holds a seal open so two racing sends both get past the retry lookup.
+let mockSealDelayMs = 0
 jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
-  sealUpload: jest.fn(async (key: string, _folder: string, userId: string) =>
-    key.endsWith("-missing.jpg")
-      ? { refused: "missing" }
-      : {
-          key: `chat/${userId}/sealed-copy`,
-          url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/${userId}/sealed-copy`,
-          bytes: 120_000,
-          contentType: "image/jpeg",
-        }
-  ),
+  deleteFile: jest.fn().mockResolvedValue(undefined),
+  sealUpload: jest.fn(async (key: string) => {
+    if (key.endsWith("-missing.jpg")) return { refused: "missing" }
+    if (mockSealDelayMs) await new Promise((resolve) => setTimeout(resolve, mockSealDelayMs))
+    const sealedKey = `chat/sealed/${jest.requireActual("crypto").randomUUID()}`
+    return {
+      key: sealedKey,
+      url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/${sealedKey}`,
+      bytes: 120_000,
+      contentType: "image/jpeg",
+    }
+  }),
 }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
 import { NOT_OWN_MEDIA } from "@/lib/validations/chat"
 import { moderateMessage } from "@/lib/moderation"
-import { sealUpload } from "@/lib/tigris"
+import { deleteFile, sealUpload } from "@/lib/tigris"
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -95,8 +100,8 @@ afterAll(async () => {
 const upload = (userId: string) =>
   `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/${userId}/1790641297767-cfg6ta-photo.jpg`
 const OUTSIDE = "https://example.com/pixel.gif"
-const sealed = (userId: string) =>
-  `https://${process.env.TIGRIS_BUCKET || "blendn-media"}-private.fly.storage.tigris.dev/chat/${userId}/sealed-copy`
+/** The URL of the copy the last seal minted. */
+const sealed = () => (sealUpload as jest.Mock).mock.results.at(-1)!.value.then((r: { url: string }) => r.url) as Promise<string>
 /** An upload URL whose object never arrived. */
 const unfinished = (userId: string) => upload(userId).replace("-photo.jpg", "-missing.jpg")
 
@@ -195,7 +200,7 @@ describe("a reply's quote of a message that was taken down (SCRUM-444)", () => {
     const { data } = (await res.json()) as { data: { messages: Array<{ content: string | null; parent_message: unknown }> } }
     const reply = data.messages.find((m) => m.content === "nice")
     expect(reply?.parent_message).toMatchObject({ id: quoted.id, content: null, metadata: null, moderation_hidden: true })
-    expect(JSON.stringify(reply?.parent_message)).not.toContain("sealed-copy")
+    expect(JSON.stringify(reply?.parent_message)).not.toContain("chat/sealed/")
   })
 })
 
@@ -239,14 +244,16 @@ describe("a room message's metadata comes from the client only as its own media"
       const res = await send(r, { content: "look", type: "image", metadata: { mediaUrl: upload(r.memberId) } })
       expect(res.status).toBe(201)
       const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "look" } })
-      expect(row.metadata).toEqual({ mediaUrl: sealed(r.memberId) })
+      const copy = await sealed()
+      expect(row.metadata).toEqual({ mediaUrl: copy })
+      expect(copy).not.toContain(r.memberId)
       // The response hands the media back signed, and nowhere bare (SCRUM-427).
       const body = JSON.stringify(await res.json())
-      const served = [...body.matchAll(/https:[^"]*\/chat\/[^"]*sealed-copy[^"]*/g)].map((m) => m[0])
+      const served = [...body.matchAll(/https:[^"]*\/chat\/sealed\/[^"]*/g)].map((m) => m[0])
       expect(served.length).toBeGreaterThan(0)
       for (const url of served) expect(url).toContain("X-Amz-Signature")
       // The image the moderator scans is the copy the room sees, not the source its URL can still rewrite.
-      expect(moderateMessage).toHaveBeenCalledWith(row.id, "look", "image", r.memberId, r.groupId, sealed(r.memberId))
+      expect(moderateMessage).toHaveBeenCalledWith(row.id, "look", "image", r.memberId, r.groupId, copy)
     })
 
     it(`screens the image on a "text" message that carries one, on the ${name} (SCRUM-444)`, async () => {
@@ -257,7 +264,7 @@ describe("a room message's metadata comes from the client only as its own media"
       expect(res.status).toBe(201)
       const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId, content: "hi" } })
       // The type is the client's word; the image is what the room sees.
-      expect(moderateMessage).toHaveBeenCalledWith(row.id, "hi", "text", r.memberId, r.groupId, sealed(r.memberId))
+      expect(moderateMessage).toHaveBeenCalledWith(row.id, "hi", "text", r.memberId, r.groupId, await sealed())
       expect(await statusAfterSend(row.id, "clean")).not.toBe("clean")
     })
 
@@ -296,6 +303,24 @@ describe("a room message's metadata comes from the client only as its own media"
       expect((await send(r, body)).status).toBeLessThan(300)
       expect((await send(r, body)).status).toBeLessThan(300)
       expect(sealUpload).toHaveBeenCalledTimes(1)
+    })
+
+    it(`removes the copy a racing retry sealed and did not keep, on the ${name} (SCRUM-448)`, async () => {
+      const r = await liveRoom()
+      const clientId = "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f".replace(/^.{8}/, Math.random().toString(16).slice(2, 10).padEnd(8, "0"))
+      const body = { content: "race", type: "image", metadata: { mediaUrl: upload(r.memberId) }, clientId }
+      mockSealDelayMs = 300
+      const [a, b] = await Promise.all([send(r, body), send(r, body)]).finally(() => (mockSealDelayMs = 0))
+      expect([a.status, b.status].every((s) => s < 300)).toBe(true)
+      const rows = await db.chat_messages.findMany({ where: { chat_group_id: r.groupId, content: "race" } })
+      expect(rows).toHaveLength(1)
+      const kept = (rows[0].metadata as { mediaUrl: string }).mediaUrl
+      const minted = await Promise.all((sealUpload as jest.Mock).mock.results.map((m) => m.value.then((v: { key?: string }) => v.key)))
+      // Both got past the retry lookup and sealed; the loser's copy is the one removed.
+      expect(minted).toHaveLength(2)
+      const lost = minted.filter((k) => k && !kept.endsWith(k))
+      expect(lost).toHaveLength(1)
+      expect((deleteFile as jest.Mock).mock.calls.map(([k]) => k)).toEqual(lost)
     })
 
     it(`refuses an upload that cannot be sealed, and writes nothing, on the ${name}`, async () => {
@@ -339,12 +364,14 @@ describe("a DM's media is the sender's own upload", () => {
     const res = await send(p, { mediaUrl: upload(p.a), mediaType: "image" })
     expect(res.status).toBe(200)
     const row = await db.private_messages.findFirstOrThrow({ where: { conversation_id: p.conversationId } })
-    expect(row.media_url).toBe(sealed(p.a))
+    expect(row.media_url).toBe(await sealed())
     // Stored as the bare private reference; handed back signed and short-lived (SCRUM-427).
     const served = new URL(((await res.json()) as { data: { mediaUrl: string } }).data.mediaUrl)
     expect(served.searchParams.has("X-Amz-Signature")).toBe(true)
     expect(served.searchParams.get("X-Amz-Expires")).toBe("900")
-    expect(served.pathname).toContain(`/chat/${p.a}/sealed-copy`)
+    // Signed path-style against the private bucket: the key is what must match.
+    expect(served.pathname.endsWith(new URL(row.media_url!).pathname)).toBe(true)
+    expect(served.pathname).not.toContain(p.a)
   })
 
   it("copies nothing for a send it refuses: a block either way", async () => {

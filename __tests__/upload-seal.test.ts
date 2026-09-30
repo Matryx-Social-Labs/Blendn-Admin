@@ -27,7 +27,7 @@ jest.mock("@aws-sdk/s3-request-presigner", () => {
 
 import { CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
-import { getPresignedUploadUrl, sealUpload } from "@/lib/tigris"
+import { getPresignedUploadUrl, sealedChatKey, sealUpload } from "@/lib/tigris"
 
 const USER = "cmuser0000000000000000001"
 const SOURCE = `chat/${USER}/1790641297767-cfg6ta-photo.jpg`
@@ -134,6 +134,18 @@ describe("sealing an upload", () => {
   ])("holds a profile photo to the profile folder's rules, not chat's: %s", async (_label, head, refused) => {
     storageHolds(head)
     expect(await sealUpload(`profile/${USER}/1-a-me.jpg`, "profile", USER)).toEqual({ refused })
+  })
+
+  it("names the chat copy so sealedChatKey reads it back, and nothing looser (SCRUM-448)", async () => {
+    storageHolds({ ContentLength: 120_000, ContentType: "image/jpeg" })
+    const sealed = await sealUpload(SOURCE, "chat", USER)
+    if (!("url" in sealed)) throw new Error("expected a sealed copy")
+    expect(sealedChatKey(sealed.url)).toBe(sealed.key)
+    const host = "https://blendn-media-test-private.fly.storage.tigris.dev"
+    for (const key of ["chat/sealed/not-a-uuid", `${sealed.key}/x`, `chat/${USER}/1-a-sealed`, sealed.key.toUpperCase()]) {
+      expect(sealedChatKey(`${host}/${key}`)).toBeNull()
+    }
+    expect(sealedChatKey(`https://example.com/${sealed.key}`)).toBeNull()
   })
 
   it("keeps a profile copy under its owner's prefix: a profile is not pseudonymous", async () => {

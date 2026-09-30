@@ -320,7 +320,11 @@ function isNotFound(error: unknown): boolean {
 export async function deleteFile(key: string): Promise<void> {
   const client = getS3Client()
   for (const Bucket of bucketsHolding(key.split("/")[0] as UploadFolder)) {
-    await client.send(new DeleteObjectCommand({ Bucket, Key: key }))
+    // A deadline, like the prefix sweep's: erasure now deletes one sealed chat
+    // copy at a time (SCRUM-448), and one hung call must not stall the purge.
+    await client.send(new DeleteObjectCommand({ Bucket, Key: key }), {
+      abortSignal: AbortSignal.timeout(DELETE_CALL_TIMEOUT_MS),
+    })
   }
 }
 
