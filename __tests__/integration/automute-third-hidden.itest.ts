@@ -161,4 +161,40 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     expect(await stateOf(r, () => true)).toEqual({ written: AUTO_MUTE_HIDDEN_COUNT, status: "active", muted_by: null })
     expect((await send(r, "hello again")).status).toBe(201)
   })
+
+  it("lets the first message through once the hour is up, and says the mute is over (SCRUM-486)", async () => {
+    /*
+     * Driven on staging: the send that lifted an expired auto-mute was itself
+     * refused, "You are muted in this chat.", because the event route judged
+     * it on the membership it read before the unmute. Only the next one sent.
+     */
+    const r = await liveRoom()
+    const room = { chat_group_id: r.groupId, user_id: r.memberId }
+    const staleMessage = await db.chat_messages.create({
+      data: { chat_group_id: r.groupId, user_id: r.memberId, content: "old", moderation_status: "hidden", deleted_at: new Date() },
+    })
+    const twoHoursAgo = new Date(Date.now() - 2 * HOUR)
+    for (let i = 0; i < AUTO_MUTE_HIDDEN_COUNT; i++) {
+      await db.moderation_flags.create({
+        data: {
+          ...room,
+          message_id: staleMessage.id,
+          source: "auto_keyword",
+          auto_action: "hidden",
+          confidence: 0.95,
+          categories: {},
+          created_at: twoHoursAgo,
+        },
+      })
+    }
+    await db.chat_group_members.update({
+      where: { chat_group_id_user_id: room },
+      data: { status: "muted", muted_at: twoHoursAgo, muted_by: null },
+    })
+
+    const res = await send(r, "back after the hour")
+    expect(res.status).toBe(201)
+    expect(await db.chat_messages.count({ where: { chat_group_id: r.groupId, content: "back after the hour" } })).toBe(1)
+    expect(await stateOf(r, () => true)).toMatchObject({ status: "active", muted_by: null })
+  })
 })
