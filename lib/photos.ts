@@ -1,8 +1,8 @@
 import { checkImageContent } from "./moderation/openai-moderation"
-import { ownedPhotoKey, sealUpload, type SealRefusal } from "./tigris"
+import { ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
-import { recordPhotoCheck } from "./photo-checks"
+import { recordPhotoCheck, recordPhotoPulled } from "./photo-checks"
 
 /**
  * Whether a photo may go on a profile.
@@ -134,21 +134,47 @@ const BLUR_REFUSAL: Record<SealRefusal, PhotoRejection> = {
  * Runs inside `after()` from the profile PUT, so nobody is waiting on it.
  * A `hide` verdict removes the URL from the profile and, if it was the
  * primary, from `User.image` too — the same two writes the PUT made, undone.
+ *
+ * Pulled means pulled (SCRUM-479): the verdict is recorded first, so a save
+ * that re-sends the URL drops it (the profile PUT reads `pulledPhotos`), and
+ * the object leaves the public bucket, kept privately for its 180 days
+ * (docs/RETENTION.md). A viewer who was already served the URL gets a 404.
  */
 export async function moderateProfilePhoto(url: string, userId: string): Promise<void> {
   try {
     const check = await checkImageContent(url)
     if (check.checked && check.result?.action === "hide") {
-      const profile = await db.profiles.findUnique({ where: { id: userId }, select: { photos: true } })
-      const photos = profile?.photos ?? []
-      const remaining = photos.filter((u) => u !== url)
-      // The blur is of the primary (SCRUM-476): a pulled primary takes its blur with it.
-      const blur = photos[0] === url ? { blur_photo: null } : {}
-      await db.$transaction([
-        db.profiles.update({ where: { id: userId }, data: { photos: remaining, ...blur } }),
-        db.user.update({ where: { id: userId }, data: { image: remaining[0] ?? null } }),
-      ])
-      await recordPhotoCheck(url, userId, true)
+      await recordPhotoPulled(url, userId)
+      /*
+       * Against the row as it is now, locked. The read-then-write this
+       * replaces wrote back a list read before the write, so a photo the
+       * person added in between went with the pulled one. The blur is of the
+       * primary (SCRUM-476): a pulled primary takes its blur with it. `prior`
+       * is the locked row before the update, which is how the cleared blur
+       * comes back; an unlocked self-join reads the statement's snapshot and
+       * names the wrong blur when a save commits first (reproduced on PG 17).
+       * Not `old`, which PG 18 reserves in RETURNING.
+       * `User.image` in the same transaction, as the PUT writes both.
+       */
+      const row = await db.$transaction(async (tx) => {
+        const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null }[]>`
+          UPDATE profiles p
+             SET photos = array_remove(p.photos, ${url}),
+                 blur_photo = CASE WHEN p.photos[1] = ${url} THEN NULL ELSE p.blur_photo END
+            FROM (SELECT id, photos, blur_photo FROM profiles WHERE id = ${userId} FOR UPDATE) prior
+           WHERE prior.id = p.id
+       RETURNING p.photos,
+                 CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur
+        `
+        if (pulledRow) {
+          await tx.user.update({ where: { id: userId }, data: { image: pulledRow.photos[0] ?? null } })
+        }
+        return pulledRow
+      })
+      // The blur of a pulled photo is that photo, smaller: pulled with it.
+      if (row?.cleared_blur) await recordPhotoPulled(row.cleared_blur, userId)
+      await withdraw(url, userId)
+      if (row?.cleared_blur) await withdraw(row.cleared_blur, userId)
       logger.warn("Profile photo removed after moderation", { userId })
       return
     }
@@ -175,8 +201,9 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
   try {
     const check = await checkImageContent(url)
     if (check.checked && check.result?.action === "hide") {
+      await recordPhotoPulled(url, userId)
       await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
-      await recordPhotoCheck(url, userId, true)
+      await withdraw(url, userId)
       logger.warn("Blurred profile photo removed after moderation", { userId })
       return
     }
@@ -186,6 +213,30 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
     logger.error("Blurred photo moderation failed; left in place", {
       userId,
       url,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
+ * Off the public bucket, if it is the person's own photo; anything else was
+ * never stored. A failure is logged here rather than thrown, so one object that
+ * would not move does not leave the other where it was, and the line says what
+ * is true: the row is already changed, the public copy is not.
+ *
+ * ponytail: not retried while the account lives. Account deletion withdraws
+ * every pulled key again before it sweeps; a sweep over `hidden` rows is the
+ * upgrade if these lines ever show up.
+ */
+async function withdraw(url: string, userId: string): Promise<void> {
+  const key = ownedPhotoKey(url, userId)
+  if (!key) return
+  try {
+    await withdrawFromPublic(key)
+  } catch (error) {
+    logger.error("Pulled photo is still in the public bucket; withdrawal failed", {
+      userId,
+      key,
       error: error instanceof Error ? error.message : String(error),
     })
   }

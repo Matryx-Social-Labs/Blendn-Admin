@@ -19,6 +19,8 @@ jest.mock("@/lib/moderation/openai-moderation", () => ({ checkImageContent: jest
 /** Object sizes by name: a "blur" is 2 KB, the two edge names sit either side of 4 KB, anything else is a photo. */
 jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
+  // A pulled blur leaves the public bucket (SCRUM-479); not against real storage here.
+  withdrawFromPublic: jest.fn().mockResolvedValue(undefined),
   sealUpload: jest.fn(async (key: string, _folder: string, userId: string, minBytes = 1, maxBytes = Infinity) => {
     const name = key.split("/").pop()!
     const bytes = name.includes("blur-edge") ? 4_000 : name.includes("blur-over") ? 4_001 : name.includes("blur") ? 2_000 : 120_000

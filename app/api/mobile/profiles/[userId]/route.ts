@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
 import { checkBlurPhoto, checkProfilePhoto, moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
-import { recordPhotoCheck } from "@/lib/photo-checks"
+import { pulledPhotos, recordPhotoCheck } from "@/lib/photo-checks"
 import {
   ADULTS_ONLY,
   ageFrom,
@@ -268,11 +268,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const {
-      name, phone, age, dateOfBirth, location, bio, occupation, education, interests, photos, blur_photo,
+      name, phone, age, dateOfBirth, location, bio, occupation, education, interests,
+      photos: sentPhotos, blur_photo: sentBlur,
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
       push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
     } = parsed.data
+
+    /*
+     * A photo moderation pulled stays pulled (SCRUM-479). The app sends back
+     * the list it last saw, so a save from a screen opened before the pull put
+     * the photo back, on the profile and unchecked. Dropped, not refused: the
+     * rest of the save is still what the person meant.
+     *
+     * ponytail: a pull landing between this read and the write below still
+     * writes the URL back. Its object is already off the public bucket, so the
+     * card shows nothing rather than the photo, and the next save drops it. A
+     * conditional write on the photos read here closes it, if that is ever seen.
+     */
+    const pulled = await pulledPhotos([...(sentPhotos ?? []), ...(typeof sentBlur === "string" ? [sentBlur] : [])], userId)
+    const photos = sentPhotos?.filter((u: string) => !pulled.has(u))
+    const blur_photo = typeof sentBlur === "string" && pulled.has(sentBlur) ? undefined : sentBlur
     const normalizedLocation = await normalizeLocationToCity(location)
 
     /*

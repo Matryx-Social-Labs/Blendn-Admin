@@ -99,7 +99,9 @@ export async function purgeDeletedAccountRecords(now: Date = new Date()): Promis
        */
       if (record.user_id) {
         await deletePrefix(`chat/${record.user_id}/`)
+        // Both buckets: a photo moderation pulled was kept in the private one (SCRUM-479).
         await deletePrefix(`profile/${record.user_id}/`)
+        await db.photo_checks.deleteMany({ where: { user_id: record.user_id } })
       }
       erased.push(record.id)
     } catch (error) {

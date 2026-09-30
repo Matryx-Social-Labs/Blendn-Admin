@@ -917,6 +917,15 @@ Moderation **degrades open**: if it cannot run, the upload succeeds and the row
 records `checked: false` for a later sweep. A vendor outage must not stop
 somebody having a profile picture.
 
+**A photo moderation pulls stays pulled** (SCRUM-479). The check runs after
+the response, and a `hide` verdict takes the photo off `photos` (and
+`User.image`, and a primary's `blur_photo` with it). The object leaves the
+public bucket, so its URL answers 404 for everyone who was already served it.
+It is kept privately for its 180 days, per docs/RETENTION.md. A later save that
+still lists the URL, or re-sends that `blur_photo`, has it dropped silently. The
+rest of the save goes through, so the app should re-read `photos` from the
+response.
+
 **It does not verify the photo is of you**, or of a person at all. Moderation
 scores harm, not subject matter — a photo of a dog passes.
 

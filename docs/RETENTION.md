@@ -78,6 +78,14 @@ deletes their account:
   only through signed URLs. Known gaps: images from before SCRUM-427 that are
   kept stay in the public bucket until then, and a report filed after the
   deletion finds the image already gone.
+- **Profile photos** (SCRUM-479): a photo moderation pulls, and the blur of a
+  pulled primary, are recorded `photo_checks.hidden` and moved from the public
+  bucket to the private one under the same key, so the URL answers 404. Account
+  deletion keeps those objects and their `photo_checks` rows
+  (`retainedProfilePhotoKeys`) and erases the rest of `profile/<id>/`. The
+  180-day purge erases what is left under `profile/<id>/` in both buckets, and
+  the rows with it. Photos pulled before SCRUM-479 recorded no verdict and are
+  not kept.
 - **Board posts:** `moderation_status = 'hidden'`. Account deletion deletes the
   author's other posts but keeps these.
 - **Events:** soft-deleted or delisted, with `event_reports` and `audit_logs`.
@@ -93,10 +101,6 @@ and stay fetchable at the edge for up to an hour after a delete.
 
 **Known gaps, not yet fixed:**
 
-- **Profile photos.** A photo that moderation rejects is unlinked from the
-  profile, but the file stays in storage. Its `photo_checks` row looks the same
-  as a pass. Account deletion then deletes both (`deletePrefix('profile/<id>/')`
-  and `photo_checks.deleteMany`). Keeping them needs a verdict on `photo_checks`.
 - **User file deletes.** `DELETE /api/mobile/uploads/delete` lets a user delete
   their own files in `profile/`, `chat/` and `events/` whatever their moderation
   state. That includes images in hidden or reported messages.

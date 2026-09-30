@@ -92,6 +92,14 @@ export const PUBLIC_FOLDERS: readonly UploadFolder[] = ["profile", "events", "sp
 /** Folders whose older objects may still sit in the public bucket, from before they moved. */
 const MOVED_FROM_PUBLIC: readonly UploadFolder[] = ["chat"]
 
+/**
+ * Public folders whose removed objects are withdrawn to the private bucket and
+ * kept (SCRUM-479). Only a prefix sweep reaches them there (account deletion,
+ * the purge): `deleteFile` is what a user's own delete calls, and a copy kept
+ * for 180 days is not theirs to delete.
+ */
+const WITHDRAWN_TO_PRIVATE: readonly UploadFolder[] = ["profile"]
+
 /** Where a folder's objects can be: its bucket, and for a folder that moved, the one it moved from. */
 function bucketsHolding(folder: UploadFolder): string[] {
   return MOVED_FROM_PUBLIC.includes(folder) ? [bucketFor(folder), TIGRIS_BUCKET] : [bucketFor(folder)]
@@ -310,6 +318,35 @@ export async function deleteFile(key: string): Promise<void> {
 }
 
 /**
+ * Take a public object out of public reach, and keep it (SCRUM-479).
+ *
+ * Copied to the private bucket under the same key, then deleted from the public
+ * one. Removed content is kept for its 180 days (docs/RETENTION.md,
+ * r.3(1)(g)), but not at a URL every viewer who was ever served it can still
+ * fetch. Sealed objects are `no-cache` (SCRUM-445), so the public URL answers
+ * 404 at once. Account deletion keeps the copy; the purge takes it with the
+ * rest of `profile/<id>/`. Already withdrawn, or never there: nothing to do.
+ */
+export async function withdrawFromPublic(key: string): Promise<void> {
+  const client = getS3Client()
+  try {
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: TIGRIS_PRIVATE_BUCKET,
+        Key: key,
+        CopySource: `${TIGRIS_BUCKET}/${key.split("/").map(encodeURIComponent).join("/")}`,
+      })
+    )
+  } catch (error) {
+    // The object, not the bucket: a missing private bucket answers 404 too, and
+    // that must not read as "already withdrawn".
+    if (isNotFound(error) && (error as { name?: string }).name !== "NoSuchBucket") return
+    throw error
+  }
+  await client.send(new DeleteObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }))
+}
+
+/**
  * Delete every object under a prefix, except the keys in `keep`. Returns how many went.
  *
  * Account deletion nulled `profiles.photos` and left the objects in a
@@ -318,8 +355,10 @@ export async function deleteFile(key: string): Promise<void> {
  * content, retained for its period (SCRUM-428).
  */
 export async function deletePrefix(prefix: string, keep: ReadonlySet<string> = new Set()): Promise<number> {
+  const folder = prefix.split("/")[0] as UploadFolder
+  const buckets = WITHDRAWN_TO_PRIVATE.includes(folder) ? [...bucketsHolding(folder), TIGRIS_PRIVATE_BUCKET] : bucketsHolding(folder)
   let deleted = 0
-  for (const bucket of bucketsHolding(prefix.split("/")[0] as UploadFolder)) {
+  for (const bucket of buckets) {
     deleted += await deletePrefixIn(bucket, prefix, keep)
   }
   return deleted

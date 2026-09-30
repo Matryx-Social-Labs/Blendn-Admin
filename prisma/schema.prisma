@@ -1335,6 +1335,10 @@ model photo_checks {
   /// false when the moderation call could not run — an outage, or no API key.
   /// These are the rows a sweeper would revisit.
   checked    Boolean  @default(false)
+  /// Pulled by moderation (SCRUM-479). A pass and a hide both set `checked`;
+  /// this is what tells them apart. The object is withdrawn from the public
+  /// bucket and kept 180 days after account deletion (docs/RETENTION.md).
+  hidden     Boolean  @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
