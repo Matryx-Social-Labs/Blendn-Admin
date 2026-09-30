@@ -18,7 +18,7 @@ jest.mock("@/lib/moderation", () => ({
 }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
-import { AUTO_MUTE_HIDDEN_COUNT } from "@/lib/moderation/config"
+import { AUTO_MUTE_HIDDEN_COUNT, AUTO_MUTE_WINDOW_MS } from "@/lib/moderation/config"
 import { db, closeDb, makeUser, onboard, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -162,18 +162,13 @@ describe.each(ROUTES)("the %s", (_name, send) => {
     expect((await send(r, "hello again")).status).toBe(201)
   })
 
-  it("lets the first message through once the hour is up, and says the mute is over (SCRUM-486)", async () => {
-    /*
-     * Driven on staging: the send that lifted an expired auto-mute was itself
-     * refused, "You are muted in this chat.", because the event route judged
-     * it on the membership it read before the unmute. Only the next one sent.
-     */
-    const r = await liveRoom()
+  /** Three hidden flags from before the window, and a mute: automatic, or an organiser's. */
+  async function mutedLongAgo(r: Room, mutedBy: string | null) {
     const room = { chat_group_id: r.groupId, user_id: r.memberId }
     const staleMessage = await db.chat_messages.create({
       data: { chat_group_id: r.groupId, user_id: r.memberId, content: "old", moderation_status: "hidden", deleted_at: new Date() },
     })
-    const twoHoursAgo = new Date(Date.now() - 2 * HOUR)
+    const longAgo = new Date(Date.now() - AUTO_MUTE_WINDOW_MS - HOUR)
     for (let i = 0; i < AUTO_MUTE_HIDDEN_COUNT; i++) {
       await db.moderation_flags.create({
         data: {
@@ -183,18 +178,41 @@ describe.each(ROUTES)("the %s", (_name, send) => {
           auto_action: "hidden",
           confidence: 0.95,
           categories: {},
-          created_at: twoHoursAgo,
+          created_at: longAgo,
         },
       })
     }
     await db.chat_group_members.update({
       where: { chat_group_id_user_id: room },
-      data: { status: "muted", muted_at: twoHoursAgo, muted_by: null },
+      data: { status: "muted", muted_at: longAgo, muted_by: mutedBy },
     })
+  }
+
+  it("lets the first message through once an automatic mute's hour is up (SCRUM-486)", async () => {
+    /*
+     * Driven on staging: the send that lifted an expired auto-mute was itself
+     * refused, "You are muted in this chat.", because the event route judged
+     * it on the membership it read before the unmute. Only the next one sent.
+     */
+    const r = await liveRoom()
+    await mutedLongAgo(r, null)
 
     const res = await send(r, "back after the hour")
     expect(res.status).toBe(201)
     expect(await db.chat_messages.count({ where: { chat_group_id: r.groupId, content: "back after the hour" } })).toBe(1)
     expect(await stateOf(r, () => true)).toMatchObject({ status: "active", muted_by: null })
+  })
+
+  it("never lifts an organiser's mute, however long ago", async () => {
+    // A human's decision is undone by a human (`checkAndAutoUnmute`, `muted_by`).
+    const r = await liveRoom()
+    const { organizer_id: host } = await db.events.findUniqueOrThrow({ where: { id: r.eventId }, select: { organizer_id: true } })
+    await mutedLongAgo(r, host)
+
+    const res = await send(r, "still muted?")
+    expect(res.status).toBe(403)
+    expect((await res.json()).errorCode).toBe("USER_MUTED")
+    expect(await db.chat_messages.count({ where: { chat_group_id: r.groupId, content: "still muted?" } })).toBe(0)
+    expect(await stateOf(r, () => true)).toMatchObject({ status: "muted", muted_by: host })
   })
 })
