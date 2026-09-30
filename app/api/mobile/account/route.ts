@@ -372,17 +372,26 @@ export async function DELETE(request: NextRequest) {
      * `performCheckout` is the one path that ends a check-in and its presence
      * session together.
      */
-    const standing = await db.event_check_ins.findMany({
-      where: { user_id: authUser.userId, status: "checked_in" },
-      select: { id: true },
-    })
-    for (const { id } of standing) {
-      await performCheckout(id, "manual", deletedAt).catch((error) =>
-        logger.warn("Account deletion: checkout failed", {
-          checkInId: id,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      )
+    try {
+      const standing = await db.event_check_ins.findMany({
+        where: { user_id: authUser.userId, status: "checked_in" },
+        select: { id: true },
+      })
+      for (const { id } of standing) {
+        await performCheckout(id, "manual", deletedAt).catch((error) =>
+          logger.warn("Account deletion: checkout failed", {
+            checkInId: id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        )
+      }
+    } catch (error) {
+      // Never at the cost of the storage erasure below. The account is already
+      // gone and a retry is a 401, so a 500 here would keep the uploads for ever.
+      logger.warn("Account deletion: open check-ins not read", {
+        userId: authUser.userId,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
 
     /*

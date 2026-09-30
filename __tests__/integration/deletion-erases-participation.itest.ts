@@ -163,6 +163,11 @@ it("stops being here now in a room they were standing in, and keeps the attendan
   await putInRoom({ eventId, occurrenceId, userId: leaver })
   await putInRoom({ eventId, occurrenceId, userId: stayer })
   expect((await getOccupancy(eventId)).inside).toBe(2)
+  // A second event's check-in still open too: a multi-day event leaves the
+  // earlier day's row open beside today's until the sweeper closes it.
+  const otherEventId = await makeEvent(host)
+  events.push(otherEventId)
+  await putInRoom({ eventId: otherEventId, occurrenceId: await occurrenceOf(otherEventId), userId: leaver })
 
   const { email } = await db.user.findUniqueOrThrow({ where: { id: leaver }, select: { email: true } })
   const res = await accountRoute.DELETE(req("DELETE", "/api/mobile/account", signAccessToken(leaver, email)))
@@ -181,11 +186,16 @@ it("stops being here now in a room they were standing in, and keeps the attendan
   expect(byUser[stayer]).toMatchObject({ status: "checked_in", check_out_time: null })
   const sessions = await db.presence_sessions.findMany({
     where: { event_id: eventId },
-    select: { user_id: true, departed_at: true },
+    select: { user_id: true, departed_at: true, departed_source: true },
   })
+  // They left; nobody inferred it from silence.
+  expect(sessions.find((x) => x.user_id === leaver)).toMatchObject({ departed_source: "user" })
   expect(sessions.find((x) => x.user_id === leaver)?.departed_at).not.toBeNull()
   expect(sessions.find((x) => x.user_id === stayer)?.departed_at).toBeNull()
+  // And out of the other room as well.
+  expect(await db.event_check_ins.count({ where: { user_id: leaver, status: "checked_in" } })).toBe(0)
+  expect(await db.presence_sessions.count({ where: { user_id: leaver, departed_at: null } })).toBe(0)
 
-  await db.presence_sessions.deleteMany({ where: { event_id: eventId } })
-  await db.event_check_ins.deleteMany({ where: { event_id: eventId } })
+  await db.presence_sessions.deleteMany({ where: { event_id: { in: [eventId, otherEventId] } } })
+  await db.event_check_ins.deleteMany({ where: { event_id: { in: [eventId, otherEventId] } } })
 })

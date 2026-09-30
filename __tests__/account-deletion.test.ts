@@ -441,6 +441,17 @@ describe("the photos leave storage, not only the row", () => {
     expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
   })
 
+  it("still erases the uploads when the open check-ins cannot be read (SCRUM-481)", async () => {
+    // The erasure has committed and a retry is a 401: a 500 here would leave
+    // the photos and chat images in the bucket for good.
+    mockAuth.mockResolvedValue({ userId: USER })
+    mockDb.event_check_ins.findMany.mockRejectedValueOnce(new Error("pool exhausted"))
+    const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
+    expect(res.status).toBe(200)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
+  })
+
   it("fails closed: if the retained set cannot be read, chat/ is left alone and profile/ still goes", async () => {
     // Erasing without it would destroy removed content kept for 180 days.
     mockAuth.mockResolvedValue({ userId: USER })
