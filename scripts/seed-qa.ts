@@ -7,6 +7,7 @@ import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
 import { normaliseSponsorName } from "../lib/sponsor-name"
 import { ensureOrgBrand, findBrandByName } from "./seed-brand"
+import { describeLive, describeRefresh, refreshSeededEvent } from "./seed-occurrences"
 import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS } from "./test-accounts"
 
@@ -360,45 +361,31 @@ function reportHotlinked(keys: readonly string[]): void {
  */
 async function refreshTimes() {
   const hotlinked: string[] = []
+  const live: string[] = []
+  const now = new Date()
   for (const spec of EVENTS) {
-    const event = await db.events.findUnique({
-      where: { slug: spec.slug },
-      select: { id: true, timezone: true },
-    })
-    if (!event) {
-      console.log(`  !  ${spec.slug} is not seeded yet — run --apply once`)
-      continue
-    }
     const start = hoursFromNow(spec.startsIn)
     const end = hoursFromNow(spec.startsIn + spec.hours)
     const { coverUrl, clipUrl, hotlinked: left } = await seededMedia(spec)
+    const result = await refreshSeededEvent(
+      db,
+      spec.slug,
+      { start, end, data: { cover_image_url: coverUrl } },
+      (event) => syncOccurrences(event.id, start, end, event.timezone)
+    )
+    console.log(describeRefresh(spec.slug, result, start))
+    if (result.status !== "moved") continue
+
     hotlinked.push(...left)
-    await db.events.update({
-      where: { id: event.id },
-      data: { start_time: start, end_time: end, cover_image_url: coverUrl },
-    })
     if (clipUrl) {
       await db.event_media.updateMany({
-        where: { event_id: event.id, type: "video" },
+        where: { event_id: result.eventId, type: "video" },
         data: { url: clipUrl, thumbnail_url: coverUrl },
       })
     }
-    await syncOccurrences(event.id, start, end, event.timezone)
-
-    const archived = await db.chat_groups.findMany({
-      where: { event_id: event.id, status: "archived" },
-      select: { id: true },
-    })
-    if (archived.length && end > new Date()) {
-      const ids = archived.map((g) => g.id)
-      await db.chat_groups.updateMany({ where: { id: { in: ids } }, data: { status: "active" } })
-      await db.chat_group_members.updateMany({
-        where: { chat_group_id: { in: ids }, status: "left" },
-        data: { status: "active" },
-      })
-    }
-    console.log(`  ${spec.slug.padEnd(34)} ${start.toISOString()}${archived.length ? "  (room reopened)" : ""}`)
+    if (start <= now && end > now) live.push(spec.slug)
   }
+  console.log(describeLive(live))
   await reviveCopiedCovers()
   reportHotlinked(hotlinked)
 }

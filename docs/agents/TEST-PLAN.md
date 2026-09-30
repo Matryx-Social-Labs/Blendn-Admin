@@ -146,7 +146,25 @@ few hours after a re-seed. Check first:
 npm run -s qa world     # live now and within 48 h, odd room memberships, device locks
 ```
 
-**No live event? Refresh the times — this is safe with others testing:**
+**No live event? Refresh the times — this is safe with others testing.**
+Staging's Bengaluru events are the scenario seed's (`blr-*`):
+`seed-blr-scenarios.ts --apply` soft-deletes every other Bengaluru event, and
+that includes seed-qa's Founders & Filter Coffee (SCRUM-482). So refresh the
+scenario seed:
+
+```bash
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" \
+  npx tsx scripts/seed-blr-scenarios.ts --refresh-times
+```
+
+It moves every scenario event back to its offset from now, re-syncs its days,
+and reopens a room the archive sweep closed. It ends with `live now: …` and
+names the events that are live. Nothing else changes: RSVPs, check-ins,
+memberships, bans, profiles and claims stay as they are. Post one line on
+SCRUM-208.
+
+seed-qa's own events outside Bengaluru refresh the same way, with covers and
+clips put back on the seed's current source:
 
 ```bash
 RV="$(railway variables --environment staging --service Blendn-Admin --json)"
@@ -156,11 +174,10 @@ RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL="$(cat ~/.blendn-qa/pgurl)" \
   npx tsx scripts/seed-qa.ts --refresh-times; unset RV
 ```
 
-It moves every seeded event back to its offset from now (Founders & Filter
-Coffee is live for the next ~2.5 h), reopens a room the archive sweep closed,
-and puts the seeded covers and clips back on the seed's current source (a cover
-changed on the dashboard is put back). Nothing else changes: memberships, bans,
-profiles, claims stay as they are. Post one line on SCRUM-208.
+Both skip a soft-deleted event with `! <slug> is soft-deleted — skipped`
+rather than moving it. When neither run says `live now`, the way to get a live
+event is to move your own fixture event to now in the dashboard editor. Log that
+on SCRUM-208 too.
 
 **A full re-seed (`--apply`) resets memberships and moderation state.** Run it
 only when no unit labelled `needs-live-event` is In Progress (the *Needs a live
