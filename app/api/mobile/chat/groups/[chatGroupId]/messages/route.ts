@@ -24,7 +24,7 @@ import {
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
-import { clientMessageMetadata, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
+import { clientMessageMetadata, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
@@ -433,6 +433,7 @@ export async function POST(
         },
       })
       } catch (error) {
+        await discardSealedChatMedia(media)
         // A concurrent retry with the same clientId wrote it first.
         const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
         if (!raced) throw error
@@ -516,6 +517,7 @@ export async function POST(
       },
     })
     } catch (error) {
+      await discardSealedChatMedia(media)
       // Two sends with one clientId raced; the other wrote it first.
       const raced =
         clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null

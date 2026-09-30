@@ -23,7 +23,7 @@ import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
-import { isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
+import { discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
@@ -359,6 +359,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       include: sentInclude,
     })
     } catch (error) {
+      await discardSealedChatMedia(media)
       // Two sends with one clientId raced, and the other wrote it first. The
       // driver adapter nests the constraint, so the code is all we can read.
       const raced =

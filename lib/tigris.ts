@@ -284,7 +284,12 @@ export async function sealUpload(
          * staging, SCRUM-445). The app keeps its own image cache.
          */
         CacheControl: "no-cache",
-        Metadata: { "uploaded-by": userId },
+        /*
+         * Not on a chat copy (SCRUM-448): every viewer of the message can GET
+         * it through the signed URL, and `x-amz-meta-uploaded-by` would name
+         * the sender next to the image just as the old key did.
+         */
+        Metadata: folder === "chat" ? {} : { "uploaded-by": userId },
       }),
       timeout()
     )

@@ -96,6 +96,8 @@ describe("sealing an upload", () => {
      */
     expect(sealedKey).toMatch(/^chat\/sealed\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     expect(sealedKey).not.toContain(USER)
+    // Nor in its metadata: a GET on the signed URL returns x-amz-meta-* to every viewer.
+    expect(copy.input.Metadata).toEqual({})
     // The source first, then the copy: the copy is what is vouched for.
     expect(sentOf(HeadObjectCommand).map((h) => h.input.Key)).toEqual([SOURCE, sealedKey])
     // Nothing the upload URL can still write is left for anything to point at.
@@ -138,6 +140,7 @@ describe("sealing an upload", () => {
     storageHolds({ ContentLength: 120_000, ContentType: "image/jpeg" })
     await sealUpload(`profile/${USER}/1-a-me.jpg`, "profile", USER)
     expect(sentOf(CopyObjectCommand)[0].input.Key!.startsWith(`profile/${USER}/`)).toBe(true)
+    expect(sentOf(CopyObjectCommand)[0].input.Metadata).toEqual({ "uploaded-by": USER })
   })
 
   it("applies a caller's floor: a profile photo below it is refused", async () => {
