@@ -1,5 +1,6 @@
 import { z } from "zod"
-import { ownedObjectKey, sealUpload, type SealRefusal } from "@/lib/tigris"
+import { logger } from "@/lib/logger"
+import { deleteFile, ownedObjectKey, sealedChatKey, sealUpload, type SealRefusal } from "@/lib/tigris"
 
 /**
  * What a client may put in a room message's `metadata`: its own media, and
@@ -42,6 +43,28 @@ export async function sealChatMedia(url: string, userId: string): Promise<{ url:
   if (!key) return { refusal: NOT_OWN_MEDIA }
   const sealed = await sealUpload(key, "chat", userId)
   return "refused" in sealed ? { refusal: SEAL_REFUSAL[sealed.refused] } : { url: sealed.url }
+}
+
+/**
+ * A sealed copy the send did not keep: the message was never written (a
+ * failure, or a retry that lost the race and answers with the first write).
+ * Its key names nobody (SCRUM-448), so erasure, which finds copies through the
+ * messages that point at them, could never reach it. Best-effort: the send's
+ * own error is what the caller reports.
+ *
+ * ponytail: a process that dies between the seal and the write still leaves
+ * one; a table of (key, owner) written at seal time is the upgrade if that is
+ * ever seen.
+ */
+export async function discardSealedChatMedia(media: { url: string } | { refusal: string } | null): Promise<void> {
+  const key = media && "url" in media ? sealedChatKey(media.url) : null
+  if (!key) return
+  await deleteFile(key).catch((error) =>
+    logger.warn("Unsent chat image's sealed copy not removed", {
+      key,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  )
 }
 
 export const sendMessageSchema = z.object({

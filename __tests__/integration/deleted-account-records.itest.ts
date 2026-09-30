@@ -14,6 +14,8 @@ jest.mock("@/lib/tigris", () => ({
   ownedObjectKey: jest.requireActual("@/lib/tigris").ownedObjectKey,
   ownedPhotoKey: jest.requireActual("@/lib/tigris").ownedPhotoKey,
   withdrawFromPublic: jest.fn().mockResolvedValue(undefined),
+  sealedChatKey: jest.requireActual("@/lib/tigris").sealedChatKey,
+  deleteFile: jest.fn().mockResolvedValue(undefined),
   deletePrefix: jest.fn().mockResolvedValue(0),
   isConfigured: () => mockStorageConfigured(),
 }))
@@ -21,7 +23,9 @@ jest.mock("@/lib/tigris", () => ({
 import { signAccessToken } from "@/lib/mobile-auth"
 import { purgeDeletedAccountRecords, recordDeletedAccount } from "@/lib/deleted-account-records"
 import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
-import { deletePrefix } from "@/lib/tigris"
+import { randomUUID } from "crypto"
+
+import { deleteFile, deletePrefix } from "@/lib/tigris"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const accountRoute = require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route")
@@ -204,6 +208,15 @@ it("erases what is left of the person's chat media with their record, and keeps 
   }
   const erased = await make("purge-media-ok")
   const stuck = await make("purge-media-fails")
+  // A DM image sealed since SCRUM-448: its key names nobody, so only the message finds it.
+  const sealedKey = `chat/sealed/${randomUUID()}`
+  const conversation = await db.private_conversations.create({
+    data: { user1_id: erased, user2_id: stuck, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" },
+  })
+  const privateHost = `https://${process.env.TIGRIS_PRIVATE_BUCKET || `${process.env.TIGRIS_BUCKET || "blendn-media"}-private`}.fly.storage.tigris.dev`
+  await db.private_messages.create({
+    data: { conversation_id: conversation.id, sender_id: erased, media_url: `${privateHost}/${sealedKey}`, media_type: "image" },
+  })
   const mocked = deletePrefix as jest.Mock
   mocked.mockReset()
   mocked.mockImplementation(async (prefix: string) => {
@@ -215,7 +228,9 @@ it("erases what is left of the person's chat media with their record, and keeps 
   // Other cases in this file leave records of their own, so read ours rather than the sweep's count.
   await purgeDeletedAccountRecords(now)
   // Everything under the prefix: the 180 days were the only reason to keep any of it.
-  expect(mocked).toHaveBeenCalledWith(`chat/${erased}/`)
+  // Nothing kept any more, through `eraseChatMedia` (SCRUM-448), which also takes the copies the messages name.
+  expect(mocked).toHaveBeenCalledWith(`chat/${erased}/`, new Set())
+  expect((deleteFile as jest.Mock).mock.calls.map(([k]) => k)).toContain(sealedKey)
   // And profile/, whose erasure at deletion is never retried otherwise.
   expect(mocked).toHaveBeenCalledWith(`profile/${erased}/`)
   const left = await db.deleted_account_records.findMany({ where: { user_id: { in: [erased, stuck] } }, select: { user_id: true } })
@@ -225,6 +240,8 @@ it("erases what is left of the person's chat media with their record, and keeps 
   mocked.mockResolvedValue(0)
   await purgeDeletedAccountRecords(now)
   expect(await db.deleted_account_records.count({ where: { user_id: { in: [erased, stuck] } } })).toBe(0)
+  await db.private_messages.deleteMany({ where: { conversation_id: conversation.id } })
+  await db.private_conversations.delete({ where: { id: conversation.id } })
 })
 
 it("keeps every due record when storage is not configured: the erasure cannot be done, and the record is the pointer", async () => {

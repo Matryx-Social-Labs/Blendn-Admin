@@ -27,7 +27,7 @@ jest.mock("@aws-sdk/s3-request-presigner", () => {
 
 import { CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
-import { getPresignedUploadUrl, sealUpload } from "@/lib/tigris"
+import { getPresignedUploadUrl, sealedChatKey, sealUpload } from "@/lib/tigris"
 
 const USER = "cmuser0000000000000000001"
 const SOURCE = `chat/${USER}/1790641297767-cfg6ta-photo.jpg`
@@ -89,7 +89,15 @@ describe("sealing an upload", () => {
     expect(copy.input.CacheControl).toBe("no-cache")
     const sealedKey = copy.input.Key!
     expect(sealedKey).not.toBe(SOURCE)
-    expect(sealedKey.startsWith(`chat/${USER}/`)).toBe(true)
+    /*
+     * No user id in a chat copy's key (SCRUM-448). The signed URL shows its
+     * path to everyone who sees the message, so `chat/<id>/…` let someone in
+     * two rooms with a person match that person's images across both.
+     */
+    expect(sealedKey).toMatch(/^chat\/sealed\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(sealedKey).not.toContain(USER)
+    // Nor in its metadata: a GET on the signed URL returns x-amz-meta-* to every viewer.
+    expect(copy.input.Metadata).toEqual({})
     // The source first, then the copy: the copy is what is vouched for.
     expect(sentOf(HeadObjectCommand).map((h) => h.input.Key)).toEqual([SOURCE, sealedKey])
     // Nothing the upload URL can still write is left for anything to point at.
@@ -126,6 +134,25 @@ describe("sealing an upload", () => {
   ])("holds a profile photo to the profile folder's rules, not chat's: %s", async (_label, head, refused) => {
     storageHolds(head)
     expect(await sealUpload(`profile/${USER}/1-a-me.jpg`, "profile", USER)).toEqual({ refused })
+  })
+
+  it("names the chat copy so sealedChatKey reads it back, and nothing looser (SCRUM-448)", async () => {
+    storageHolds({ ContentLength: 120_000, ContentType: "image/jpeg" })
+    const sealed = await sealUpload(SOURCE, "chat", USER)
+    if (!("url" in sealed)) throw new Error("expected a sealed copy")
+    expect(sealedChatKey(sealed.url)).toBe(sealed.key)
+    const host = "https://blendn-media-test-private.fly.storage.tigris.dev"
+    for (const key of ["chat/sealed/not-a-uuid", `${sealed.key}/x`, `chat/${USER}/1-a-sealed`, sealed.key.toUpperCase()]) {
+      expect(sealedChatKey(`${host}/${key}`)).toBeNull()
+    }
+    expect(sealedChatKey(`https://example.com/${sealed.key}`)).toBeNull()
+  })
+
+  it("keeps a profile copy under its owner's prefix: a profile is not pseudonymous", async () => {
+    storageHolds({ ContentLength: 120_000, ContentType: "image/jpeg" })
+    await sealUpload(`profile/${USER}/1-a-me.jpg`, "profile", USER)
+    expect(sentOf(CopyObjectCommand)[0].input.Key!.startsWith(`profile/${USER}/`)).toBe(true)
+    expect(sentOf(CopyObjectCommand)[0].input.Metadata).toEqual({ "uploaded-by": USER })
   })
 
   it("applies a caller's floor: a profile photo below it is refused", async () => {

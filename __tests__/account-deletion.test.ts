@@ -72,7 +72,10 @@ jest.mock("@/lib/tigris", () => ({
 }))
 const RETAINED = new Set(["chat/kept-image.jpg"])
 const RETAINED_PHOTOS = new Set(["profile/u1/pulled.jpg"])
+const mockEraseChat = jest.fn().mockResolvedValue(2)
 jest.mock("@/lib/retained-media", () => ({
+  // SCRUM-448: the chat prefix and the sealed copies the messages point at, minus the kept ones.
+  eraseChatMedia: (...a: unknown[]) => mockEraseChat(...a),
   retainedChatMediaKeys: jest.fn(async () => RETAINED),
   retainedProfilePhotoKeys: jest.fn(async () => RETAINED_PHOTOS),
 }))
@@ -438,7 +441,7 @@ describe("the photos leave storage, not only the row", () => {
     expect(res.status).toBe(200)
     // Minus the images of messages moderation removed or somebody reported:
     // removed content is kept 180 days (docs/RETENTION.md, r.3(1)(g)).
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
+    expect(mockEraseChat).toHaveBeenCalledWith(USER, RETAINED)
   })
 
   it("one folder failing does not leave the other behind", async () => {
@@ -446,7 +449,7 @@ describe("the photos leave storage, not only the row", () => {
     mockDeletePrefix.mockRejectedValueOnce(new Error("listing failed"))
     await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`, RETAINED_PHOTOS)
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
+    expect(mockEraseChat).toHaveBeenCalledWith(USER, RETAINED)
   })
 
   it("still erases the uploads when the open check-ins cannot be read (SCRUM-481)", async () => {
@@ -457,7 +460,7 @@ describe("the photos leave storage, not only the row", () => {
     const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(res.status).toBe(200)
     expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`, RETAINED_PHOTOS)
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
+    expect(mockEraseChat).toHaveBeenCalledWith(USER, RETAINED)
   })
 
   it("fails closed: if the retained set cannot be read, chat/ is left alone and profile/ still goes", async () => {
@@ -468,7 +471,7 @@ describe("the photos leave storage, not only the row", () => {
     const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(res.status).toBe(200)
     expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${USER}/`, RETAINED_PHOTOS)
-    expect(mockDeletePrefix).not.toHaveBeenCalledWith(`chat/${USER}/`, expect.anything())
+    expect(mockEraseChat).not.toHaveBeenCalled()
     expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/storage/i), expect.objectContaining({ folder: "chat" }))
   })
 
@@ -489,7 +492,7 @@ describe("the photos leave storage, not only the row", () => {
     const res = await DELETE(new NextRequest("http://x/api/mobile/account", { method: "DELETE" }))
     expect(res.status).toBe(200)
     expect(mockDeletePrefix).not.toHaveBeenCalledWith(`profile/${USER}/`, expect.anything())
-    expect(mockDeletePrefix).toHaveBeenCalledWith(`chat/${USER}/`, RETAINED)
+    expect(mockEraseChat).toHaveBeenCalledWith(USER, RETAINED)
     expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/storage/i), expect.objectContaining({ folder: "profile" }))
   })
 
