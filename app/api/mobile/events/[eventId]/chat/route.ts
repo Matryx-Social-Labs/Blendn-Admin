@@ -740,8 +740,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         if (!raced) throw error
         return answerRoomRetry(raced, chatGroup.id)
       }
-      void flagForReview(message.id, chatGroup.id, authUser.userId, preSave.result)
-      if (preSave.autoMute) void checkAndAutoMute(authUser.userId, chatGroup.id)
+      // The flag before the count, still off the response path: the count reads
+      // flags, and run side by side it missed this message's own (SCRUM-483).
+      void flagForReview(message.id, chatGroup.id, authUser.userId, preSave.result).then(() =>
+        preSave.autoMute ? checkAndAutoMute(authUser.userId, chatGroup.id) : undefined
+      )
       return successResponse({
         message: {
           id: message.id,

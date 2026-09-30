@@ -1394,6 +1394,12 @@
       "mutation": "M285 blur stored unsealed. M286 no blur ceiling. M287 a new primary keeps the old blur. M288 moderation pulling the primary keeps the blur. M289 blur accepted with no photo. M350 a bio-only save clears the blur (touchesBlur guard dropped). M351 blur moderation never clears. M352 sealUpload ignores maxBytes. Review pass: M353 blur sealed after the photos (a refused blur used up their uploads). M354 after() moderates the raw upload URL instead of the sealed copy. M355 a verdict on an old blur clears the newer one. M356 ceiling one byte loose. Security pass: M357 the stored blur not recorded in photo_checks. M358 a pass verdict not recorded.",
       "observed": "Red before the fix: 12 of 12 failing (blur_photo null, refusals 200). Each mutant fails: M285: 12 of 13. M286: 1 of 13. M287: 1 of 13. M288: 1 of 13 + photo-moderation-off-the-request-path 1. M289: 1 of 13. M350: 1 of 13. M351: 1 of 13. M352: upload-seal.test 1. M353: 1 of 17. M354: 1 of 17. M355: 1 of 17. M356: 1 of 17 (re-run at 4 KB). M357: 1 of 17. M358: 1 of 17. All reverted.",
       "date": "2026-09-29"
+    },
+    "automute-third-hidden.itest.ts": {
+      "guards": "SCRUM-483: a sender is auto-muted (muted_by NULL) on their AUTO_MUTE_HIDDEN_COUNT-th keyword-hidden message in a room, on both the group route and the event route, and the next clean message is refused USER_MUTED and not written. The pre-save branch writes the flag before counting (flagForReview(...).then(checkAndAutoMute)).",
+      "mutation": "M359 the group route's flag and count run side by side again (void, void). M360 the same on the event route.",
+      "observed": "Red before the fix: 2 of 2 failing (written 3, status active). M359: 1 of 2 (the group route). M360: 1 of 2 (the event route). All reverted.",
+      "date": "2026-09-30"
     }
   },
   "grandfathered": [
