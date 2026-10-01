@@ -28,7 +28,9 @@ describe("the event page", () => {
     expect(batch).toBeGreaterThan(-1)
     expect(page.slice(batch, load)).toContain("getEventAttendance(event.id)")
     expect(page.slice(batch, load)).not.toMatch(/curated_open/)
-    expect(page).toMatch(/turnedAway=\{turnedAway\}/)
+    // A venue's view passes it only above the floor (PR #601): venues see
+    // aggregates, never people, and "1 turned away" is about a person.
+    expect(page).toMatch(/turnedAway=\{turnedAway && venueMaySee\(turnedAway\.people\) \? turnedAway : null\}/)
   })
 
   it("loads them before the doors too, where a too_early refusal is a wrong start time (SCRUM-494)", () => {
@@ -36,7 +38,8 @@ describe("the event page", () => {
     // refusals happen and the start time can still be corrected. Attendance
     // and connections stay gated on the event having run.
     expect(page).toMatch(/overview\.state !== "draft"\s*\?\s*eventRefusals\(event\.id\)/)
-    expect(page).toMatch(/hasRun \? getEventAttendance\(event\.id\)/)
+    // The venue's view never loads attendance at all (PR #601).
+    expect(page).toMatch(/hasRun && !venueView \? getEventAttendance\(event\.id\)/)
     // Curation keeps its own attempts-ranked read before the doors.
     expect(page).toMatch(/: hasRun && turnedAway\s*\?/)
   })

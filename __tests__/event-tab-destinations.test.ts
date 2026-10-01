@@ -6,8 +6,11 @@ import { join } from "path"
  *
  * `event-tabs.tsx` builds Chat and Attendees from `canOperate`, under a comment
  * saying in as many words: *"a tab list that offers something the server will
- * deny is its own bug."* Both tabs redirect to `/messaging`, and that route
- * gated on **`canEdit`** and redirected to `/dashboard/chatrooms`.
+ * deny is its own bug."* Both tabs used to redirect to `/messaging`, and that
+ * route gated on **`canEdit`** and redirected to `/dashboard/chatrooms`. Chat
+ * still leads there. Attendees renders on the event page itself since
+ * SCRUM-499, and `eventAttendees` answers a venue owner with a count rather
+ * than refusing them; `event-attendees-page.test.tsx` holds that.
  *
  * So a venue owner clicked a tab their own page had just offered and landed on
  * the global chatrooms list **showing a different event**. Not a refusal — a

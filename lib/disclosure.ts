@@ -167,6 +167,19 @@ export function discloseVenueCounts(c: {
 }
 
 /**
+ * Any other count of people a venue is shown -- maybe, saved, inside now,
+ * turned away -- or null under the floor. Who came and who is going go through
+ * `discloseVenueCounts`, the rule every venue surface shares.
+ *
+ * Zero is shown: it identifies nobody, and "held back" over an empty room
+ * would read as a secret where there is none.
+ */
+export function discloseHeadcount(count: number): number | null {
+  if (count === 0) return 0
+  return discloseFigure({ count, contributors: count, population: 0 }).value
+}
+
+/**
  * A night's star rating, its average or its spread, or null below the
  * minimum cell (SCRUM-437).
  *
