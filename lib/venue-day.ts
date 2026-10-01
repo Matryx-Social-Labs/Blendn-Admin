@@ -22,10 +22,11 @@ import { violatedConstraint } from "./prisma-errors"
  *     live first, the day would vanish with their account, taking everybody
  *     else's check-ins and messages. The migration creates the user and a
  *     trigger refuses its deletion.
- *   - **`organizer_org_id`**: the venue's owning organisation once claimed,
- *     null before — the shape of a curated event, so an unclaimed venue's room
- *     is the platform's to moderate. `eventPermissions` never reads it for a
- *     venue day: the owner may moderate and never sees the people (F1, D-1).
+ *   - **`organizer_org_id`: always null** (CHECK `events_venue_day_shape`).
+ *     Nobody runs a venue day, so no reader scoped to an organisation's events
+ *     can reach one. Who may moderate it is the venue's owner today, which
+ *     `eventPermissions` reads from the venue — never the people (F1, D-1).
+ *     Unclaimed, it is the platform's room, like a curated event.
  *   - **Host shown**: the venue's name (`lib/event-host.ts`).
  *   - **Never listed**: `kind = 'venue_day'`, which every events reader filters
  *     on (`lib/event-kind.ts`), and `unlisted`, so a feed that only asks for
@@ -129,8 +130,6 @@ export async function venueDayFor(venueId: string, now: Date = new Date()): Prom
       latitude: true,
       longitude: true,
       geofence: true,
-      owner_org_id: true,
-      claimed_at: true,
       day_reset_hour: true,
       timezone: true,
     },
@@ -178,9 +177,7 @@ export async function venueDayFor(venueId: string, now: Date = new Date()): Prom
           status: "published",
           visibility: "unlisted",
           organizer_id: SYSTEM_USER_ID,
-          // A claim opens the venue's days from then on (ruling 1): a day that
-          // began before the claim stays the platform's.
-          organizer_org_id: venue.owner_org_id && venue.claimed_at && venue.claimed_at <= start ? venue.owner_org_id : null,
+          organizer_org_id: null,
         },
       })
       await tx.event_occurrences.create({

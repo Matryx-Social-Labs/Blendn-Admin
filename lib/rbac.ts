@@ -140,12 +140,12 @@ export function eventPermissions(
   /*
    * A venue day is decided before the organiser branch, on purpose (F1).
    *
-   * Its `organizer_org_id` is the venue's owning org once claimed, and the
-   * branch below would hand that org edit, the room and the roster — the
-   * regulars by label, night after night. Nobody runs a venue day: the owner
-   * may moderate what is said in their building (D-1) and never see who said
-   * it; an organiser, even of an event at the same venue that night, gets
-   * nothing; the person whose Go Live created it is just an attendee.
+   * Nobody runs a venue day (its `organizer_org_id` is null by CHECK), and the
+   * branch below must never be the one that answers: given an org, it hands
+   * edit, the room and the roster — the regulars by label, night after night.
+   * The owner may moderate what is said in their building (D-1) and never see
+   * who said it; an organiser, even of an event at the same venue that night,
+   * gets nothing; the person whose Go Live created it is just an attendee.
    */
   // `!== "event"`, not `=== "venue_day"`: a row that reached here without its
   // kind takes the narrow branch, never the organiser's.

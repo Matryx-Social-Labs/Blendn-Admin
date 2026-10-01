@@ -42,12 +42,15 @@ CREATE UNIQUE INDEX "events_one_venue_day_per_day"
   ON "events" ("venue_id", "start_time")
   WHERE "kind" = 'venue_day';
 
--- A venue day always has its venue, and is never listed. The venue makes a
--- hard delete of a venue with days loud (the FK's SET NULL would otherwise
--- orphan them outside the unique index); `unlisted` keeps every reader that
--- asks only for public events blind to one even if it forgot the kind.
+-- A venue day always has its venue, is never listed, and is run by no
+-- organisation. The venue makes a hard delete of a venue with days loud (the
+-- FK's SET NULL would otherwise orphan them outside the unique index);
+-- `unlisted` keeps every reader that asks only for public events blind to one
+-- even if it forgot the kind; and with no `organizer_org_id`, no reader scoped
+-- to an organisation's events can reach one. Who may moderate it is the
+-- venue's owner today, which eventPermissions reads from the venue.
 ALTER TABLE "events" ADD CONSTRAINT "events_venue_day_shape"
-  CHECK ("kind" = 'event' OR ("venue_id" IS NOT NULL AND "visibility" = 'unlisted'));
+  CHECK ("kind" = 'event' OR ("venue_id" IS NOT NULL AND "visibility" = 'unlisted' AND "organizer_org_id" IS NULL));
 
 ALTER TABLE "venues"
   ADD COLUMN "day_reset_hour" SMALLINT NOT NULL DEFAULT 6,

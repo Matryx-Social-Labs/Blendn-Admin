@@ -149,9 +149,8 @@ beforeAll(async () => {
    */
   control = await realEvent({ start: new Date(Date.now() - HOUR), end: new Date(Date.now() + 3 * HOUR) })
 
-  // The venue day's own row is what most readers would trip on: its owning
-  // org is the venue's, as `venueDayFor` writes it for a claimed venue.
-  expect((await db.events.findUniqueOrThrow({ where: { id: day.id } })).organizer_org_id).toBe(ownerOrg)
+  // No org, even at a claimed venue: what lets the owner in is the venue.
+  expect((await db.events.findUniqueOrThrow({ where: { id: day.id } })).organizer_org_id).toBeNull()
 })
 
 afterAll(async () => {
@@ -240,7 +239,7 @@ describe("a venue day never reaches a host's or the platform's numbers (PL-I16)"
     expect(await ids(asAdmin.all)).toContain(control)
     expect(await ids(asAdmin.all)).not.toContain(day.id)
 
-    // The venue owner's org owns the day's org column: every arm is a door.
+    // The day has no org, so the venue arm (from the claim on) is the door to watch.
     const asOwner = await reportScope("venue_owner", venueOwner)
     expect(await ids(asOwner.all)).toContain(control)
     expect(await ids(asOwner.venueOnly)).toContain(control)
@@ -305,8 +304,9 @@ describe("a venue day never reaches a host's or the platform's numbers (PL-I16)"
 })
 
 /*
- * F1 / D-1 / PL-I13 / RG-I05. The venue day's org IS the venue owner's, so the
- * default resolver would hand them edit and the roster. The control — a real
+ * F1 / D-1 / PL-I13 / RG-I05. The venue owner reaches a venue day through the
+ * venue, the same way it reaches a host's event there and gets the count
+ * view; on the day it must get the room and no roster. The control — a real
  * event at the same venue — is what makes the refusal mean something.
  */
 describe("the venue owner on a venue day", () => {

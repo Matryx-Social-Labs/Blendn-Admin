@@ -1,5 +1,6 @@
 import { SYSTEM_USER_ID, VENUE_DAY_INDEX, venueDayBounds, venueDayFor } from "@/lib/venue-day"
 
+import { haveSharedAnEvent } from "@/lib/conversations"
 import { db as appDb } from "@/lib/db"
 
 import { closeDb, db, makeUser, testId } from "./helpers"
@@ -166,17 +167,18 @@ describe("venueDayFor", () => {
     }
   })
 
-  it("gives a claimed venue's days to its org from the claim on, never the day the claim fell in", async () => {
+  it("gives a claimed venue's days no org — before the claim and after it", async () => {
     const claimedAt = new Date("2026-10-05T08:30:00Z") // 14:00 IST
     const id = await venue({ claimedAt })
-    const owner = (await db.venues.findUniqueOrThrow({ where: { id } })).owner_org_id
-
     const claimDay = await venueDayFor(id, new Date("2026-10-05T10:00:00Z"))
     const nextDay = await venueDayFor(id, new Date("2026-10-06T10:00:00Z"))
-    const rows = await db.events.findMany({ where: { id: { in: [claimDay!.id, nextDay!.id] } }, select: { id: true, organizer_org_id: true } })
-    const orgOf = new Map(rows.map((r) => [r.id, r.organizer_org_id]))
-    expect(orgOf.get(claimDay!.id)).toBeNull()
-    expect(orgOf.get(nextDay!.id)).toBe(owner)
+    const rows = await db.events.findMany({ where: { id: { in: [claimDay!.id, nextDay!.id] } }, select: { organizer_org_id: true } })
+    expect(rows.map((r) => r.organizer_org_id)).toEqual([null, null])
+    // And the database will not take one (events_venue_day_shape).
+    const owner = (await db.venues.findUniqueOrThrow({ where: { id } })).owner_org_id
+    await expect(
+      db.$executeRaw`UPDATE events SET organizer_org_id = ${owner}::uuid WHERE id = ${nextDay!.id}::uuid`
+    ).rejects.toThrow(/events_venue_day_shape/)
   })
 
   it("makes a day with no area for a venue with none, and nothing for an archived venue", async () => {
@@ -218,7 +220,7 @@ describe("venueDayFor", () => {
     expect(() => venueDayBounds("Mars/Olympus_Mons", 6, new Date())).toThrow(RangeError)
   })
 
-  it("keeps a venue day's venue and its unlisting (events_venue_day_shape)", async () => {
+  it("keeps a venue day's venue, its unlisting and its lack of an org (events_venue_day_shape)", async () => {
     const id = await venue()
     const day = await venueDayFor(id, new Date("2026-10-11T12:00:00Z"))
     await expect(db.$executeRaw`UPDATE events SET visibility = 'public' WHERE id = ${day!.id}::uuid`).rejects.toThrow(/events_venue_day_shape/)
@@ -268,6 +270,20 @@ describe("who owns a venue day", () => {
     await expect(db.$executeRaw`DELETE FROM "User" WHERE id = ${SYSTEM_USER_ID}`).rejects.toThrow(/cannot be deleted/)
     expect(await db.user.findUnique({ where: { id: SYSTEM_USER_ID }, select: { id: true } })).not.toBeNull()
     expect(await db.events.findUnique({ where: { id: day!.id }, select: { id: true } })).not.toBeNull()
+  })
+
+  it("counts two people live at the same venue day as having shared an event (message requests)", async () => {
+    // Orchestrator ruling, 2026-10-01: co-present in a venue's room is co-present.
+    const day = await venueDayFor(await venue(), new Date())
+    const [a, b, c] = [await makeUser("vd_a"), await makeUser("vd_b"), await makeUser("vd_c")]
+    users.push(a, b, c)
+    for (const user_id of [a, b]) {
+      await db.event_check_ins.create({
+        data: { event_id: day!.id, occurrence_id: day!.occurrenceId, user_id, status: "checked_in", check_in_time: new Date() },
+      })
+    }
+    expect(await haveSharedAnEvent(a, b)).toBe(true)
+    expect(await haveSharedAnEvent(a, c)).toBe(false)
   })
 
   it("is a user nobody can sign in as", async () => {

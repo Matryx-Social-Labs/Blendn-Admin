@@ -116,8 +116,9 @@ describe("eventPermissions — the matrix", () => {
 })
 
 /*
- * A venue day (F1, D-1). Its `organizer_org_id` is the venue's owning org once
- * claimed, which is exactly the org the default branch would hand everything.
+ * A venue day (F1, D-1). Its `organizer_org_id` is null by CHECK; these rows
+ * also feed it one, because if it ever had one the organiser branch would hand
+ * that org everything, and the venue-day branch must answer first.
  */
 describe("eventPermissions — a venue day", () => {
   const day = (organizerOrgId: string | null, opts: { startsAt?: Date; claimedAt?: Date | null } = {}) =>

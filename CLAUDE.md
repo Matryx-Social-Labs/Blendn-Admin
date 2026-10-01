@@ -162,7 +162,7 @@ migration SQL and therefore in every deployed environment:
 | `venues_owner_needs_claimed_at` | an owned venue has a claim date — the claim window every venue-owner read starts from (SCRUM-500) |
 | `venues_day_reset_hour_range` | `day_reset_hour BETWEEN 0 AND 23` — when a venue's day starts (venue days) |
 | `venues_timezone_known` | `venues.timezone` has the shape of an IANA name (`Area/Location`, or `UTC`) — whether it exists is the app's check |
-| `events_venue_day_shape` | a venue day has its venue and is `unlisted` — a hard delete of a venue with days is refused rather than orphaning them |
+| `events_venue_day_shape` | a venue day has its venue, is `unlisted` and has no `organizer_org_id` — a hard delete of a venue with days is refused rather than orphaning them, and no org-scoped reader can reach one |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per

@@ -59,10 +59,10 @@ export interface EventHost {
 
 export function eventHost(event: HostSource): EventHost {
   /*
-   * A venue day is the venue's room, and nobody hosts it (F2). Its org is the
-   * venue's owning company — "Indiranagar Hospitality Group" is not what
-   * anybody calls The Humming Tree — and its creating user is the system user.
-   * The venue's name, copied onto the row when the day was made.
+   * A venue day is the venue's room, and nobody hosts it (F2): it has no org,
+   * and its creating user is the system user. The venue's name, copied onto
+   * the row when the day was made — not the company that owns the venue
+   * ("Indiranagar Hospitality Group" is not what anybody calls The Humming Tree).
    */
   if (event.kind === "venue_day") {
     return { name: event.venue_name?.trim() || PLATFORM_HOST, isPlatform: true }
