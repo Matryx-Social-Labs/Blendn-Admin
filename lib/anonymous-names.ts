@@ -1,5 +1,6 @@
 import { createHmac, hkdfSync } from "crypto"
 
+import { isUuid } from "./api-input"
 import { db } from "./db"
 import { violatedConstraint } from "./prisma-errors"
 
@@ -86,6 +87,9 @@ export type PseudonymScheme = "keyed" | "legacy"
 export const KEYED_PSEUDONYMS_FROM = new Date("2026-10-02T00:00:00.000Z")
 
 export async function pseudonymSchemeFor(eventId: string): Promise<PseudonymScheme> {
+  // Not a uuid, not an event: the column refuses it, and a refusal here would
+  // fail check-in over a name. The key is the safe side.
+  if (!isUuid(eventId)) return "keyed"
   const event = await db.events.findUnique({ where: { id: eventId }, select: { created_at: true } })
   // An event that cannot be found has no board to keep stable; the key is the safe side.
   return event && event.created_at < KEYED_PSEUDONYMS_FROM ? "legacy" : "keyed"

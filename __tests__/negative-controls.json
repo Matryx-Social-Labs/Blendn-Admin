@@ -1484,6 +1484,12 @@
       "mutation": "M404 the presence_sessions close dropped. M405 the departed_at IS NULL filter dropped (overwrites earlier departures). M406 the event_id scope dropped (closes every open session). M407 GREATEST(arrived_at, now) replaced by now (a later arrival breaks the departure_after_arrival CHECK and fails the whole cascade).",
       "observed": "Red before the fix: 1 of 3 failing (session still open, insideGuests 1). With the review's future-arrival case added, 4 tests: M404: 2 of 4 failing. M405: 1 of 4 failing. M406: 1 of 4 failing. M407: 1 of 4 failing (CHECK violation). All reverted.",
       "date": "2026-10-01"
+    },
+    "dashboard-chat-ids-boundary.test.ts": {
+      "date": "2026-10-01",
+      "guards": "SCRUM-517: the host-facing dashboard chat routes set no response field straight from a row's account id (userId: m.user_id, id: m.user.id); messages and moderation shape every id through idFor() (the room handle, or the real id for app_admin), the members route reads a host's ref back only through roomMemberFromRef, and getAuditLog maps a chat member's resource id through hostResourceId for anybody but the admin.",
+      "mutation": "M447 `userId: idFor(m.user_id)` in app/api/events/[id]/chat/messages/route.ts put back to `userId: m.user_id`.",
+      "observed": "M447: 1 of 15 failing ('sets no response field from a row's account id'), reverted green. The rule's negative controls flag userId: m.user_id, id: m.user.id, userId: f.user_id and authorId: row.user_id, and pass the idFor() forms, a select, a where and the caller's own session.user.id."
     }
   },
   "grandfathered": [
