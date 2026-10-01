@@ -6,8 +6,9 @@ import { db } from "@/lib/db"
  * ```
  *   events.status -> cancelled
  *          │
- *          └─> event_check_ins  pending    ─┐
- *                               checked_in ─┴─> cancelled
+ *          ├─> event_check_ins    pending    ─┐
+ *          │                      checked_in ─┴─> cancelled
+ *          └─> presence_sessions  open ──────────> departed, 'ended'
  * ```
  *
  * Without this, a cancelled event keeps every `pending` and `checked_in` row
@@ -15,21 +16,35 @@ import { db } from "@/lib/db"
  * occupancy and toward attendance. That was Fix #35, applied to the dashboard
  * route.
  *
+ * The sessions are closed here too, because nothing else will: every checkout
+ * path acts on `checked_in` rows only, and occupancy reads "inside" as an open
+ * session. Cancelling the check-ins alone left the room counting its last
+ * headcount for good (SCRUM-490). `ended` because the room closed at a known
+ * instant, by a person's decision, rather than by inference.
+ *
  * It lives here rather than inline because the mobile route cancels events too
  * and did not cascade, so the exact state Fix #35 was written to prevent was
  * reachable through the other door. Two routes, one rule, one implementation.
  *
- * Idempotent: the `status` filter means a second call over an already-cancelled
- * event updates nothing.
+ * Idempotent: the `status` and `departed_at` filters mean a second call over an
+ * already-cancelled event updates nothing, and a departure already recorded
+ * keeps its own time and source.
  */
 export async function cancelEventCheckIns(eventId: string): Promise<number> {
-  const { count } = await db.event_check_ins.updateMany({
-    where: {
-      event_id: eventId,
-      status: { in: ["pending", "checked_in"] },
-    },
-    data: { status: "cancelled", updated_at: new Date() },
-  })
+  const now = new Date()
+  const [{ count }] = await db.$transaction([
+    db.event_check_ins.updateMany({
+      where: {
+        event_id: eventId,
+        status: { in: ["pending", "checked_in"] },
+      },
+      data: { status: "cancelled", updated_at: now },
+    }),
+    db.presence_sessions.updateMany({
+      where: { event_id: eventId, departed_at: null },
+      data: { departed_at: now, departed_source: "ended", updated_at: now },
+    }),
+  ])
   return count
 }
 

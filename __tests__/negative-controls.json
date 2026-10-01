@@ -1442,6 +1442,12 @@
       "mutation": "M394 the DM route forgets to discard. M395 discard removes any chat key, not only a sealed one.",
       "observed": "M394: 1 of 6 failing. M395: 1 of 6. Both reverted.",
       "date": "2026-09-30"
+    },
+    "cancel-closes-presence.itest.ts": {
+      "guards": "SCRUM-490: cancelEventCheckIns closes the open presence sessions of the cancelled event as 'ended', in the same transaction as the check-ins, so the room no longer counts anyone inside; a departure already recorded keeps its time and source, and no other event's session is touched.",
+      "mutation": "M404 the presence_sessions close dropped. M405 the departed_at: null filter dropped (overwrites earlier departures). M406 the event_id scope dropped (closes every open session).",
+      "observed": "Red before the fix: 1 of 3 failing (session still open, insideGuests 1). M404: 1 of 3 failing. M405: 1 of 3 failing. M406: 1 of 3 failing. All reverted.",
+      "date": "2026-10-01"
     }
   },
   "grandfathered": [

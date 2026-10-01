@@ -195,7 +195,7 @@ registry.registerPath({
   path: "/api/events/{id}",
   tags: ["Dashboard Events"],
   summary: "Update event (dashboard)",
-  description: "Full event update including details, categories, and media. Requires organizer/admin role. Cancelling an event auto-cancels active check-ins.",
+  description: "Full event update including details, categories, and media. Requires organizer/admin role. Cancelling an event auto-cancels active check-ins and closes the presence sessions inside it, so nobody counts as inside a cancelled room.",
   security: sessionAuth,
   request: {
     params: z.object({ id: z.string().uuid() }),
