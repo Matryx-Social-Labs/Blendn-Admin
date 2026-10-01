@@ -728,8 +728,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     })
 
     // The blur this write replaced or cleared leaves storage once moderation has passed it (SCRUM-520).
+    // `storedBlur` is set only to a freshly sealed URL or null, so it is never the old one.
     const replacedBlur = existing?.blur_photo
-    if (storedBlur !== undefined && replacedBlur && replacedBlur !== storedBlur) {
+    if (storedBlur !== undefined && replacedBlur) {
       after(() => deleteReplacedBlur(replacedBlur, userId))
     }
 
