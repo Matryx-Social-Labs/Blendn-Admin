@@ -5,7 +5,7 @@ import { touchSession } from "@/lib/presence-sessions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { successResponse, errorResponse, unauthorizedResponse } from "@/lib/api-response"
-import { resolveFence, fenceSelect } from "@/lib/geofence"
+import { evaluateCheckIn, resolveFence, fenceSelect } from "@/lib/geofence"
 import { performCheckout } from "@/lib/checkout"
 import {
   evaluatePresence,
@@ -166,7 +166,13 @@ export async function POST(
    * (`stayExtension`, up to four hours or the reset). The room's cut-off moves
    * with it — it is the same instant (`liveInVenueDay`).
    */
-  const inside = decision.reason === "inside" || decision.reason === "returned"
+  const inside =
+    decision.reason === "inside" ||
+    decision.reason === "returned" ||
+    // Staff skip the fence in `evaluatePresence` (never auto-checked-out), so
+    // their "stay" asks it here.
+    (decision.reason === "staff_exempt" &&
+      evaluateCheckIn({ lat: latitude, lng: longitude }, fence, body.accuracy ?? null).ok)
   const extended =
     inside && checkIn.expires_at
       ? stayExtension({ expiresAt: checkIn.expires_at, stayUntil: checkIn.stay_until }, now)

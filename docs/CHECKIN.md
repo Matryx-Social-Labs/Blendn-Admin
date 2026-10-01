@@ -278,7 +278,7 @@ nobody drew an area for is refused (`no_geofence`), not judged against a guess.
 | Status | When |
 |---|---|
 | 403 `PLUS_REQUIRED` | `stay` while `PLUS_GATING=true` (off: "stay" is everyone's until step 11) |
-| 404 | the venue is unknown, archived or deleted |
+| 404 | the venue is unknown, archived or deleted — or today's venue day was deleted (closed for the day) |
 | 403 `FORBIDDEN` | not onboarded and no adult age (18+, as at every door) |
 | 409 `EVENT_LIVE_HERE` + `eventId` | a real event has the venue (below) — check in to it instead. Before the fence, so somebody at the door is sent to the event rather than told they are outside |
 | 400 `OUT_OF_RANGE` | a fix worse than 150 m, no area at this venue, or outside it — recorded in `check_in_refusals` against the venue day, never against an event at the same venue |

@@ -262,8 +262,14 @@ describe("POST /venues/:id/live", () => {
     const v = await venue({ ownerOrg: org.id })
     const me = await person()
     await db.organisation_members.create({ data: { org_id: org.id, user_id: me.id, role: "owner" } })
-    const { json } = await goLive(me.token, v)
-    expect((await checkInOf(json.data.venueDayId, me.id)).kind).toBe("staff")
+    const { json } = await goLive(me.token, v, { stay: true })
+    const dayId = json.data.venueDayId
+    expect((await checkInOf(dayId, me.id)).kind).toBe("staff")
+
+    // Staff skip the fence in the departure rule; their "stay" still follows an in-fence ping.
+    await db.event_check_ins.updateMany({ where: { event_id: dayId, user_id: me.id }, data: { expires_at: new Date(Date.now() + 2 * 60_000) } })
+    await presenceRoute.POST(req(`/api/mobile/events/${dayId}/presence`, me.token, "POST", { ...INSIDE, accuracy: 10 }), eventParams(dayId))
+    expect((await checkInOf(dayId, me.id)).expires_at!.getTime() - Date.now()).toBeGreaterThan(15 * 60_000)
   })
 
   it("refuses an unfenced venue and records it on the day (PL-I12, PL-I19)", async () => {
@@ -300,6 +306,13 @@ describe("POST /venues/:id/live", () => {
     const me = await person()
     expect((await goLive(me.token, v)).status).toBe(404)
     expect((await goLive(me.token, randomUUID())).status).toBe(404)
+
+    // Today's room deleted by an admin stays closed for the day.
+    const w = await venue()
+    const first = await goLive(me.token, w)
+    await db.events.update({ where: { id: first.json.data.venueDayId }, data: { deleted_at: new Date() } })
+    const other = await person()
+    expect((await goLive(other.token, w)).status).toBe(404)
   })
 
   it("refuses somebody who has not finished onboarding (18+)", async () => {

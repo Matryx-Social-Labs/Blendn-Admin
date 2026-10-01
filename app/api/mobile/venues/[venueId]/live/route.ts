@@ -119,9 +119,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         venue_name: true,
         organizer_org_id: true,
         geofence: true,
+        deleted_at: true,
         venue: { select: { owner_org_id: true } },
       },
     })
+    // `venueDayFor` hands back a day somebody deleted (it still holds the
+    // day's slot); deleting today's room is a decision that lasts the day.
+    if (event.deleted_at) return notFoundResponse("Venue not found")
 
     /*
      * The venue's area as the day copied it, and only that: no fallback to the

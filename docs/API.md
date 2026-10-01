@@ -756,7 +756,7 @@ ping, up to four hours from choosing it. Anything else is `400`.
 | Refusal | When |
 |---|---|
 | 403 `PLUS_REQUIRED` | `stay` while Plus gating is on (off today: "stay" is everyone's) |
-| 404 | Unknown, archived or deleted venue |
+| 404 | Unknown, archived or deleted venue, or today's room there was deleted |
 | 403 `FORBIDDEN` | Not onboarded and no adult age |
 | 409 `EVENT_LIVE_HERE` | A public event linked to this venue is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `OUT_OF_RANGE` | A fix worse than 150 m, a venue with no check-in area, or a position outside it |
