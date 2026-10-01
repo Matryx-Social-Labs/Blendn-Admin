@@ -65,7 +65,7 @@ const QUICK_TEMPLATES: { label: string; text: string }[] = [
 
 // ── Sponsored Messages Panel ──────────────────────────────────────────────────
 
-function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
+function SponsoredMessagesPanel({ eventId, mayAuthor }: { eventId: string; mayAuthor: boolean }) {
   const [messages, setMessages] = useState<SponsoredMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -218,8 +218,14 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
           <p className="mt-0.5 text-[0.75rem] text-faint-foreground">
             Sent to the room on a schedule, under the brand&apos;s name.
           </p>
+          {/* Who writes these, for someone who cannot (SCRUM-308). */}
+          {mayAuthor ? null : (
+            <p className="mt-1 text-[0.75rem] text-muted-foreground">
+              Placed by the brand&apos;s organisation or by Blend&apos;n. You can remove one from your room.
+            </p>
+          )}
         </div>
-        {!showForm && (
+        {mayAuthor && !showForm && (
           <Button size="sm" variant="outline" onClick={openAdd}>
             <IconPlus className="size-4 mr-1" />
             Add
@@ -228,7 +234,7 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
       </div>
 
       {/* Form */}
-      {showForm && (
+      {mayAuthor && showForm && (
         <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
           <p className="text-sm font-medium">{editingId ? "Edit message" : "New sponsored message"}</p>
           <Textarea
@@ -302,96 +308,150 @@ function SponsoredMessagesPanel({ eventId }: { eventId: string }) {
         </p>
       ) : messages.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed p-6 text-center text-sm text-muted-foreground">
-          No sponsored messages yet. Add one to get started.
+          {mayAuthor ? "No sponsored messages yet. Add one to get started." : "No sponsored messages in this room."}
         </div>
       ) : (
         <div className="space-y-2">
           {messages.map((msg) => (
-            <div
+            <SponsoredMessageRow
               key={msg.id}
-              className="rounded-lg border bg-background p-3 flex items-start gap-3"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-sm leading-snug">{msg.content}</p>
-                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                  <Badge variant="outline" className="text-xs gap-1">
-                    <IconClock className="size-3" />
-                    Every {msg.interval_minutes} min
-                  </Badge>
-                  <Badge
-                    variant={
-                      msg.moderation_status === "approved"
-                        ? "outline"
-                        : msg.moderation_status === "rejected"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                    className="text-xs"
-                  >
-                    {msg.moderation_status === "approved"
-                      ? "Reviewed"
-                      : msg.moderation_status === "rejected"
-                        ? "Not approved"
-                        : "In review"}
-                  </Badge>
-                  {msg.last_sent_at && (
-                    <span className="text-xs text-muted-foreground">
-                      Last sent {new Date(msg.last_sent_at).toLocaleTimeString()}
-                    </span>
-                  )}
-                  {/*
-                    Why it stopped, if it did. The scheduler switches a campaign
-                    off for five different reasons — archived room, no creative,
-                    repeated failures — and without this the organiser sees a
-                    switch that turned itself off overnight and no explanation.
-                  */}
-                  {!msg.is_active && msg.deactivated_reason && (
-                    <span className="text-xs text-destructive">{msg.deactivated_reason}</span>
-                  )}
-                </div>
-                {/*
-                  Attached to a SAVED campaign, never to the new-campaign form:
-                  a grant is validated against a campaign id, which does not
-                  exist until the campaign does.
-                */}
-                <div className="mt-2">
-                  <CreativeMedia
-                    eventId={eventId}
-                    campaignId={msg.id}
-                    currentUrl={msg.media_url}
-                    onAttached={fetchMessages}
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Switch
-                  checked={msg.is_active}
-                  onCheckedChange={() => toggleActive(msg)}
-                  title={msg.is_active ? "Stop" : "Start"}
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label="Edit message"
-                  onClick={() => openEdit(msg)}
-                >
-                  <IconPencil className="size-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive hover:text-destructive"
-                  aria-label="Delete message"
-                  onClick={() => remove(msg.id)}
-                >
-                  <IconTrash className="size-4" />
-                </Button>
-              </div>
-            </div>
+              eventId={eventId}
+              msg={msg}
+              mayAuthor={mayAuthor}
+              onToggle={() => toggleActive(msg)}
+              onEdit={() => openEdit(msg)}
+              onDelete={() => remove(msg.id)}
+              onAttached={fetchMessages}
+            />
           ))}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * One campaign. Who may author sponsored copy decides what it offers
+ * (SCRUM-308): editing, switching it on or off and attaching a creative all
+ * need the sponsoring grant, so an organiser without one sees the state as a
+ * word where the switch was, and keeps only Delete, which is theirs.
+ */
+export function SponsoredMessageRow({
+  eventId,
+  msg,
+  mayAuthor,
+  onToggle,
+  onEdit,
+  onDelete,
+  onAttached,
+}: {
+  eventId: string
+  msg: SponsoredMessage
+  mayAuthor: boolean
+  onToggle: () => void
+  onEdit: () => void
+  onDelete: () => void
+  onAttached: () => void
+}) {
+  return (
+      <div
+        className="rounded-lg border bg-background p-3 flex items-start gap-3"
+      >
+        <div className="flex-1 min-w-0">
+          <p className="text-sm leading-snug">{msg.content}</p>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <Badge variant="outline" className="text-xs gap-1">
+              <IconClock className="size-3" />
+              Every {msg.interval_minutes} min
+            </Badge>
+            <Badge
+              variant={
+                msg.moderation_status === "approved"
+                  ? "outline"
+                  : msg.moderation_status === "rejected"
+                    ? "destructive"
+                    : "secondary"
+              }
+              className="text-xs"
+            >
+              {msg.moderation_status === "approved"
+                ? "Reviewed"
+                : msg.moderation_status === "rejected"
+                  ? "Not approved"
+                  : "In review"}
+            </Badge>
+            {msg.last_sent_at && (
+              <span className="text-xs text-muted-foreground">
+                Last sent {new Date(msg.last_sent_at).toLocaleTimeString()}
+              </span>
+            )}
+            {/*
+              Why it stopped, if it did. The scheduler switches a campaign
+              off for five different reasons — archived room, no creative,
+              repeated failures — and without this the organiser sees a
+              switch that turned itself off overnight and no explanation.
+            */}
+            {!msg.is_active && msg.deactivated_reason && (
+              <span className="text-xs text-destructive">{msg.deactivated_reason}</span>
+            )}
+          </div>
+          {/*
+            Attached to a SAVED campaign, never to the new-campaign form:
+            a grant is validated against a campaign id, which does not
+            exist until the campaign does.
+          */}
+          {mayAuthor ? (
+          <div className="mt-2">
+            <CreativeMedia
+              eventId={eventId}
+              campaignId={msg.id}
+              currentUrl={msg.media_url}
+              onAttached={onAttached}
+            />
+          </div>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {mayAuthor ? (
+            <Switch
+            checked={msg.is_active}
+            onCheckedChange={onToggle}
+            title={msg.is_active ? "Stop" : "Start"}
+          />
+          ) : (
+            <SponsoredState active={msg.is_active} />
+          )}
+          {mayAuthor ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label="Edit message"
+            onClick={onEdit}
+          >
+            <IconPencil className="size-4" />
+          </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive hover:text-destructive"
+            aria-label="Delete message"
+            onClick={onDelete}
+          >
+            <IconTrash className="size-4" />
+          </Button>
+        </div>
+      </div>
+  )
+}
+
+/** Running or stopped, said in words, in the switch's slot. */
+function SponsoredState({ active }: { active: boolean }) {
+  return (
+    <span className={`inline-flex w-[4.75rem] items-center gap-1.5 text-xs ${active ? "font-semibold" : "text-muted-foreground"}`}>
+      <span aria-hidden>{active ? "●" : "○"}</span>
+      {active ? "Running" : "Stopped"}
+    </span>
   )
 }
 
@@ -572,9 +632,15 @@ function AnnouncementsPanel({ eventId }: { eventId: string }) {
 
 interface EventMessagingProps {
   eventId: string
+  /**
+   * Whether this person may write sponsored copy here: the same
+   * `canBroadcast(…, "sponsored", grant)` the routes check. Without it the
+   * Sponsored tab offers no composer, edit, switch or creative (SCRUM-308).
+   */
+  mayAuthorSponsored: boolean
 }
 
-export function EventMessaging({ eventId }: EventMessagingProps) {
+export function EventMessaging({ eventId, mayAuthorSponsored }: EventMessagingProps) {
   const [tab, setTab] = useState<MessagingTab>("announcements")
 
   return (
@@ -600,7 +666,7 @@ export function EventMessaging({ eventId }: EventMessagingProps) {
           <PollComposer eventId={eventId} />
         </TabsContent>
         <TabsContent value="sponsored">
-          <SponsoredMessagesPanel eventId={eventId} />
+          <SponsoredMessagesPanel eventId={eventId} mayAuthor={mayAuthorSponsored} />
         </TabsContent>
       </Tabs>
     </div>

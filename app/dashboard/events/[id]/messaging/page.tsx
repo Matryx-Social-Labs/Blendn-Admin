@@ -2,8 +2,8 @@ import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { eventPermissions } from "@/lib/rbac"
-import { actorFor } from "@/lib/org-membership"
+import { canBroadcast, eventPermissions } from "@/lib/rbac"
+import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { EventMessaging } from "@/components/event-messaging"
 import { EventSponsors } from "@/components/event-sponsors"
 import { ChatFeed } from "@/components/chat-feed"
@@ -59,8 +59,12 @@ export default async function EventMessagingPage({ params }: Props) {
    * a broadcast composer and sponsor placements: a venue owner announcing into
    * an event they do not run is K3.12, and R37 removes it deliberately.
    */
-  const permissions = eventPermissions(await actorFor(session.user), event)
+  const actor = await actorFor(session.user)
+  const permissions = eventPermissions(actor, event)
   if (!permissions.canOperate) redirect("/dashboard/chatrooms")
+  // What the sponsored-message routes allow, asked the same way they ask it, so
+  // the tab offers only what will be accepted (SCRUM-308).
+  const mayAuthorSponsored = canBroadcast(actor, event, "sponsored", (await resolveSponsorGrant(actor, event.id)) ?? undefined)
 
   const state = eventStateFor(event)
   // The event's own clock, not the server's (SCRUM-421).
@@ -108,7 +112,7 @@ export default async function EventMessagingPage({ params }: Props) {
         */}
         {permissions.canEdit ? (
           <div className="flex flex-col gap-6 @4xl/main:sticky @4xl/main:top-5">
-            <EventMessaging eventId={event.id} />
+            <EventMessaging eventId={event.id} mayAuthorSponsored={mayAuthorSponsored} />
             {/*
               Sponsors after the composer. A sponsored campaign is refused
               without a placement, and the fix for that refusal lives here.

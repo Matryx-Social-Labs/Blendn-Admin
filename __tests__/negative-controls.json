@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "sponsored-row-offers.test.tsx": {
+      "guards": "SCRUM-308/475: a sponsored campaign row offers the switch, Edit and the creative attach only to someone who may author sponsored copy (canBroadcast \"sponsored\" with the sponsoring grant, computed on the messaging page as the routes compute it); anyone else gets Delete and the state in words. The page-level wiring (no Add, the who-places-these line, admin still offered Add) is driven by e2e/sponsored-tab-offers.spec.ts.",
+      "mutation": "M418: SponsoredMessageRow forced mayAuthor = true.",
+      "observed": "M418: 1 of 2 failing (the non-author case). Reverted; 2 of 2.",
+      "date": "2026-10-01"
+    },
     "multi-day-session.test.ts": {
       "guards": "A multi-day event's `session` (lib/occurrences.ts eventSession) is on every payload the app judges LIVE by -- the list serializer, GET /events/:eventId and GET /me/rsvps -- and the check-in route's clock refusals go through closedDoorMessage. The pure tests in the same file cover pickOccurrence, eventSession and the copy on the staging rows of blr-design-festival.",
       "mutation": "`session: eventSession(event),` removed from app/api/mobile/me/rsvps/route.ts.",
