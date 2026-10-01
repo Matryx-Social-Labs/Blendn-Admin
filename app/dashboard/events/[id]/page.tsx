@@ -192,26 +192,31 @@ export default async function EventDetailPage({
   if (!overview) notFound()
 
   /**
-   * Only once there is something to count. A draft or upcoming event has no
-   * check-ins by definition, and "0 came" against an event that has not
-   * happened reads as a failure rather than as a date in the future.
+   * Attendance and connections only once there is something to count. A draft
+   * or upcoming event has no check-ins by definition, and "0 came" against an
+   * event that has not happened reads as a failure rather than as a date in
+   * the future.
    */
-  const [attendance, connections, turnedAway] =
-    overview.state === "live" || overview.state === "over"
-      ? await Promise.all([
-          getEventAttendance(event.id),
-          getConnectionMetrics(event.id),
-          /*
-           * The organiser's half of the door (SCRUM-196). `refusalSummary`
-           * below is the curation queue's diagnosis and stays gated on
-           * curated events; this one is for whoever operates the event, and
-           * an organiser whose pin is on the wrong building was the person
-           * with no way to find out. One bounded read, only once the event
-           * has run — a future event has refused nobody by definition.
-           */
-          eventRefusals(event.id),
-        ])
-      : [null, null, null]
+  const hasRun = overview.state === "live" || overview.state === "over"
+  const [attendance, connections, turnedAway] = await Promise.all([
+    hasRun ? getEventAttendance(event.id) : null,
+    hasRun ? getConnectionMetrics(event.id) : null,
+    /*
+     * The organiser's half of the door (SCRUM-196). `refusalSummary` below is
+     * the curation queue's diagnosis and stays gated on curated events; this
+     * one is for whoever operates the event, and an organiser whose pin is on
+     * the wrong building was the person with no way to find out.
+     *
+     * Before the doors as well (SCRUM-494). It was gated on the event having
+     * run, on the theory that a future event has refused nobody, and the door
+     * records `too_early` precisely while the event is upcoming: people
+     * arriving for a start time the listing has wrong. That is the one window
+     * in which the organiser can still correct it. The panel renders only when
+     * somebody was refused, so an upcoming event that refused nobody is
+     * unchanged. A draft cannot be checked in to at all.
+     */
+    overview.state !== "draft" ? eventRefusals(event.id) : null,
+  ])
 
   /*
    * The per-event half of curation health.
@@ -227,9 +232,11 @@ export default async function EventDetailPage({
   const curated = state === "curated_open" || state === "curated_claimed"
   const refusals = !curated
     ? null
-    : turnedAway
+    : hasRun && turnedAway
       ? // A claimed listing that has started would otherwise read the same
         // rows twice; the organiser's read already has everything this needs.
+        // Before the doors the curation read stays its own (SCRUM-494): it
+        // ranks the top reason by attempts, and that headline is its job.
         {
           distinctPeopleRefused: turnedAway.people,
           attempts: turnedAway.attempts,

@@ -101,6 +101,21 @@ describe("eventRefusals", () => {
     expect(r.medianShortfallMetres).toBe(20)
   })
 
+  it("counts too_early refusals as people, with no fence verdict (SCRUM-494)", async () => {
+    // What an upcoming event's panel reads: people arriving for a start time
+    // the listing has wrong. No verdict, so no "move the pin" and no link.
+    const { eventId, a } = await world()
+    await db.check_in_refusals.createMany({
+      data: [
+        { event_id: eventId, user_id: a, reason: "too_early" },
+        { event_id: eventId, user_id: a, reason: "too_early" },
+      ],
+    })
+    const r = await eventRefusals(eventId)
+    expect([r.people, r.attempts, r.verdict, r.accuracy]).toEqual([1, 2, null, null])
+    expect(r.byReason).toEqual([{ reason: "too_early", label: "Before doors", people: 1 }])
+  })
+
   it("counts a fix of exactly GOOD_FIX_METRES as good", async () => {
     // The footnote says "50 m or better"; the verdict must agree with it.
     const { eventId, a } = await world()
