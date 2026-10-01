@@ -109,15 +109,16 @@ venue or an earlier row, an area sized for its type, unclaimed. The owner claims
 it later at `/claim/venue/<id>`.
 
 ```bash
-DATABASE_URL=<url> npm run import:venues -- venues.csv                # dry run: rows + duplicates, writes nothing
-DATABASE_URL=<url> npm run import:venues -- venues.csv --apply        # write
-DATABASE_URL=<url> npm run import:venues -- venues.csv --apply --osm  # + the building's OSM outline where named
+DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv                # dry run: rows + duplicates, writes nothing
+DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply        # write
+DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply --osm  # + the building's OSM outline where named
 ```
 
-**Keep the `--` before the file.** npm 11 takes `--apply` given to `npm run` as
-its own option and drops it, which turns a write into a dry run; the first line
-of output says `APPLY` or `DRY RUN`. A file with any refused row is never
-applied. Re-running is safe: rows already imported come back as duplicates.
+**`npx tsx`, not `npm run`.** npm 11 takes `--apply` given to `npm run` as its
+own option and drops it, which turns a write into a dry run; wrapped in an npm
+script it needs `--` before the file. The first line of output says `APPLY` or
+`DRY RUN`. A file with any refused row is never applied. Re-running is safe:
+rows already imported come back as duplicates.
 
 #### `migrate status` reports two missing migration files. That is expected.
 

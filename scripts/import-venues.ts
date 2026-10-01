@@ -47,11 +47,10 @@ import { fenceFromOsm, lookup } from "./enrich-venues-from-osm"
  *   DATABASE_URL=… npx tsx scripts/import-venues.ts venues.csv
  *   DATABASE_URL=… npx tsx scripts/import-venues.ts venues.csv --apply [--osm]
  *
- * Through npm, put `--` before the file. npm 11 takes `--apply` given to
- * `npm run` as its own option and drops it, which quietly turns a write into a
- * dry run (the last line says which one ran):
- *
- *   npm run import:venues -- venues.csv --apply
+ * Through `npx tsx`, not an npm script, on purpose: npm 11 takes `--apply`
+ * given to `npm run` as its own option and drops it, which quietly turns a
+ * write into a dry run. If you wrap it in one anyway, put `--` before the file.
+ * The first line printed says which ran: `APPLY` or `DRY RUN`.
  */
 
 const COLUMNS = ["name", "address", "lat", "lng", "maps_url", "type", "city"] as const
