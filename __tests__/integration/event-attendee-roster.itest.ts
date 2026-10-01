@@ -404,11 +404,16 @@ describe("an event's attendee roster", () => {
       expect(await seen("venue_owner", venueOwner, small.id)).toEqual({ view: "count", started: true, came: null })
     })
 
-    it("has it held back when it would name everyone going, the one who didn't come, or runs past them", async () => {
-      expect(await seen("venue_owner", venueOwner, complete.id)).toEqual({ view: "count", started: true, came: null })
-      expect(await seen("venue_owner", venueOwner, residual.id)).toEqual({ view: "count", started: true, came: null })
-      // Seven came against six going: walk-ins cover the whole population.
-      expect(await seen("venue_owner", venueOwner, past.id)).toEqual({ view: "count", started: true, came: null })
+    it("is told the count when everyone going came, all but one did, or walk-ins ran past them", async () => {
+      /*
+       * The minimum cell only, for a venue (orchestrator's decision,
+       * 2026-10-01): it cannot see who RSVP'd, so none of these names anybody
+       * to it, and the going-population rule hid every walk-in night.
+       */
+      expect(await seen("venue_owner", venueOwner, complete.id)).toEqual({ view: "count", started: true, came: 5 })
+      expect(await seen("venue_owner", venueOwner, residual.id)).toEqual({ view: "count", started: true, came: 5 })
+      // Seven came against six going.
+      expect(await seen("venue_owner", venueOwner, past.id)).toEqual({ view: "count", started: true, came: 7 })
     })
 
     it("is told zero, which names nobody, and that an upcoming event has not started", async () => {
