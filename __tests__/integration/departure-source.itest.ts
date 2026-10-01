@@ -11,6 +11,7 @@
  * guess. `departureQuality` must go on counting that as inference.
  */
 import { checkOutOfOtherEvents, performCheckout, type CheckoutReason } from "@/lib/checkout"
+import { departureQuality } from "@/lib/presence-sessions"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, testId } from "./helpers"
 
@@ -58,4 +59,10 @@ it.each<[CheckoutReason, "user" | "sweeper"]>([
   const a = await inRoom()
   await performCheckout(a.checkInId, reason)
   expect(await sourceOf(a.eventId, a.who)).toBe(source)
+})
+
+it("counts the event's end as inference when judging the headcount", async () => {
+  const a = await inRoom()
+  await performCheckout(a.checkInId, "occurrence_ended")
+  expect(await departureQuality(await occurrenceOf(a.eventId))).toEqual({ closed: 1, bySweeper: 1, degraded: true })
 })
