@@ -48,6 +48,16 @@ const figures = (html: string) =>
     .map((t) => t.trim())
     .filter(Boolean)
 
+/**
+ * Whether `n` appears anywhere in the page's text as a number of its own --
+ * in a tile or inside a sentence ("With 3, a count of connections..."). The
+ * dates and times are fixed so that none of them contains it, and a digit
+ * inside a word -- the fixtures' random ids, in the venue's name -- is not a
+ * number.
+ */
+const mentions = (html: string, n: number) =>
+  new RegExp(`(^|[^\\w.:])${n}(?![\\w:%])`).test(figures(html).join(" | "))
+
 afterAll(async () => {
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
   await cleanup(users, events)
@@ -60,6 +70,7 @@ describe("a venue owner's view of a three-person night", () => {
   let host: string
   let venueOwner: string
   let eventId: string
+  let walkInNight: string
 
   beforeAll(async () => {
     host = await makeUser("host", "organizer")
@@ -86,8 +97,8 @@ describe("a venue owner's view of a three-person night", () => {
     })
     venues.push(venue.id)
 
-    // Over: started two days ago. Three came; four promised.
-    const start = new Date(Date.now() - 48 * HOUR)
+    // Over: 25 Sept 2026, 14:00 to 16:00 UTC. Three came; four promised.
+    const start = new Date("2026-09-25T14:00:00.000Z")
     const event = await db.events.create({
       data: {
         slug: testId("three"),
@@ -122,11 +133,49 @@ describe("a venue owner's view of a three-person night", () => {
         },
       })
     }
+
+    // 26 Sept, 14:00 to 16:00 UTC. Six going, nine came: four walked in. Above
+    // the floor, so the venue is told it (#606: the floor alone for a venue).
+    const night = await db.events.create({
+      data: {
+        slug: testId("walkins"),
+        title: "Walk-in night",
+        description: "integration fixture",
+        start_time: new Date("2026-09-26T14:00:00.000Z"),
+        end_time: new Date("2026-09-26T16:00:00.000Z"),
+        timezone: "UTC",
+        status: "published",
+        organizer_id: host,
+        organizer_org_id: orgA,
+        venue_id: venue.id,
+      },
+    })
+    walkInNight = night.id
+    events.push(night.id)
+    const nightOcc = await db.event_occurrences.create({
+      data: { event_id: night.id, occurs_on: new Date("2026-09-26"), start_time: night.start_time, end_time: night.end_time },
+    })
+    const crowd = await Promise.all(["w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10"].map((l) => makeUser(l)))
+    users.push(...crowd)
+    for (const g of crowd.slice(0, 6)) await db.event_rsvps.create({ data: { event_id: night.id, user_id: g, status: "going" } })
+    for (const g of [...crowd.slice(0, 5), ...crowd.slice(6, 10)]) {
+      await db.event_check_ins.create({
+        data: {
+          event_id: night.id,
+          occurrence_id: nightOcc.id,
+          user_id: g,
+          kind: "attendee",
+          status: "checked_out",
+          check_in_time: new Date(night.start_time.getTime() + HOUR),
+        },
+      })
+    }
   })
 
   it("prints the 3 for the organiser, so the venue's absence of it means something", async () => {
     const html = await render("organizer", host, eventId)
     expect(figures(html)).toContain("3")
+    expect(mentions(html, 3)).toBe(true)
   })
 
   it("prints no attendance figure for the venue on the Overview, and says why", async () => {
@@ -135,7 +184,10 @@ describe("a venue owner's view of a three-person night", () => {
     // The page rendered, as the venue's view of this event.
     expect(text).toContain("Your access to this event")
     for (const leak of ["3", "4", "75%"]) expect(text).not.toContain(leak)
-    expect(html).toMatch(/fewer than 5/)
+    // Not in a sentence either: the Connections panel said "With 3, ...".
+    expect(mentions(html, 3)).toBe(false)
+    expect(mentions(html, 4)).toBe(false)
+    expect(html).toMatch(/held back/)
     // The day-by-day newcomers and returning are not the venue's.
     expect(html).not.toMatch(/newcomers|returning/i)
   })
@@ -146,5 +198,21 @@ describe("a venue owner's view of a three-person night", () => {
     expect(text).toContain("held back")
     expect(text).not.toContain("3")
     expect(html).not.toMatch(/attendee-[0-9a-f]{12}/)
+  })
+
+  it("tells the venue a count above the floor on both tabs alike, and still no Connections panel", async () => {
+    const organiser = await render("organizer", host, walkInNight)
+    expect(mentions(organiser, 9)).toBe(true)
+    // The control for the panel: the organiser's render has it.
+    expect(organiser).toMatch(/Connections/)
+
+    const overview = await render("venue_owner", venueOwner, walkInNight)
+    const attendees = await render("venue_owner", venueOwner, walkInNight, "attendees")
+    // The Events list, the venue page and the export print 9 for this night;
+    // neither tab may print less, or more.
+    expect(mentions(overview, 9)).toBe(true)
+    expect(mentions(attendees, 9)).toBe(true)
+    expect(overview).not.toMatch(/Connections/)
+    expect(overview).not.toMatch(/fewer than 5|held back/)
   })
 })
