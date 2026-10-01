@@ -1442,6 +1442,12 @@
       "mutation": "M394 the DM route forgets to discard. M395 discard removes any chat key, not only a sealed one.",
       "observed": "M394: 1 of 6 failing. M395: 1 of 6. Both reverted.",
       "date": "2026-09-30"
+    },
+    "departure-source.itest.ts": {
+      "guards": "SCRUM-484: performCheckout records how a presence session ended through one table (DEPARTURE_SOURCE): a switch (checkOutOfOtherEvents) is 'switch', a manual checkout 'user', leaving the fence 'sweeper', and the event's end 'sweeper' (inferred, so departureQuality counts it as inference). checkin.itest.ts and presence-sweeper.itest.ts pin the callers: the checkout route passes 'manual', the sweeper's left-area pass 'left_area'.",
+      "mutation": "M400 switched_event mapped back to 'sweeper'. M401 occurrence_ended mapped to 'ended'. M402 the checkout route passes 'left_area' instead of 'manual'. M403 the sweeper's left-area pass passes 'manual'.",
+      "observed": "Red before the fix: 1 of 4 failing (switch recorded as sweeper). M400: 1 of 5 failing. M401: 2 of 5 failing (the event's end recorded as ended, and departureQuality no longer degraded). M402: 1 of 10 failing in checkin.itest.ts ('sweeper' after a manual checkout). M403: 1 of 10 failing in presence-sweeper.itest.ts ('user' after the sweep). Reverted.",
+      "date": "2026-09-30"
     }
   },
   "grandfathered": [
