@@ -17,7 +17,10 @@ and undocumented copy promising a feature is a debt nobody is tracking.
 repos. Items here are the API half of it; the app half is `blendn/ROADMAP.md`.
 Do not restate the journey in either.
 
-Nothing here is scheduled. Pricing is undecided — everything is free.
+Nothing here is dated. Pricing was decided by the owner on 2026-10-01:
+organisers run events free; analytics, venue plans, sponsor placements and
+Blendn+ are paid. See **Pricing** under *Now*. The prices are first bets to
+verify.
 
 ---
 
@@ -34,17 +37,24 @@ here is mechanism for that one problem:
 - **Mutual like opens the conversation** — you never approach someone who has
   not already said yes. Rejection risk is zero.
 - **Pseudonymity by default** — expressing interest costs nothing.
-- **Group check-in** — nobody approaches alone.
+- **Group check-in** — nobody approaches alone. Since 2026-10-01 this is
+  crews: the crew says "We're here" and each member checks in on their own GPS
+  (plan v2 §6).
 - **Contextual room chat** — a reason to speak at all, about a thing you are
   both currently at.
 
-**The organiser dashboard is not a product, it is the distribution channel.**
-Organisers do not need to pay; they need to put a QR code on the screen, because
-that is the only way to get **room-level liquidity**. Dating apps need liquidity
-in a city. This needs it in a room, on a night, and it resets at the next event.
-So build the minimum analytics that closes an organiser, not the best analytics
-in the market. Two numbers nobody else has are enough: live occupancy against
-licensed capacity, and whether anyone actually met anyone.
+**The organiser dashboard is the distribution channel first.** Organisers never
+pay to run an event; they need to put a QR code on the screen, because that is
+the only way to get **room-level liquidity**. Dating apps need liquidity in a
+city. This needs it in a room, on a night, and it resets at the next event. Two
+numbers nobody else has stay free: live occupancy against licensed capacity, and
+whether anyone actually met anyone.
+
+**Changed on 2026-10-01 by the owner.** Until then this paragraph said
+organisers need not pay at all, and to build only the minimum analytics that
+closes one. Running events stays free; analytics beyond what has already
+shipped is now paid (see **Pricing** under *Now*). And the dashboard has no QR
+code yet — step 15 builds the QR & link tab before any copy promises it.
 
 Full reasoning, competitive position and market data:
 `~/.gstack/projects/Matryx-Social-Labs-Blendn-Admin/2026-08-08-design-approach-anxiety-thesis.md`
@@ -52,6 +62,42 @@ Full reasoning, competitive position and market data:
 ---
 
 ## Now
+
+**Product-completion plan v2 (2026-10-01).** Confirmed by the owner on
+2026-10-01. The plan is not in this repo, so it is cited here as "plan §n"
+rather than linked. Eighteen steps: **Track A** (app + API, steps 1–12) ships
+the server to staging before the client; **Track B** (dashboard, steps 13–18)
+runs in parallel from day one; step 0 comes first. Jira is filed as each piece
+is built, not up front. The rest of the steps are under *Next*; the app half is
+in `blendn/ROADMAP.md`; the journey rows are in `USER_JOURNEY.md`.
+
+| Step | What | Plan | State |
+|---|---|---|---|
+| 0 | **Defects the pricing audit found**, fixed before anything is sold: venue owners' event list and CSV ignore `claimed_at` (privacy, first); the venue check-ins CSV is row-level; the alert log is unreachable after an event ends; sponsor reach is hard-coded null. One SCRUM bug and a failing test each | §14 step 0 | In progress |
+| 1 | **Ledger, founder seeding, claim from the app.** This entry; `scripts/import-venues.ts` (dry run by default, 100 m dedupe, then OSM enrichment); a public `/claim/venue/[venueId]` mirroring `/claim/[eventId]`, which files a claim without an account and grants nothing; the app's "Claim it" links to the dashboard host | §3, §14 step 1 | In progress |
+| 13 | **Dashboard rulings, tokens, the Attendees-tab bug.** R1–R7 into `DESIGN_SYSTEM.md`; the missing tokens (`--destructive-foreground` fixes the nav badge); the event Attendees tab becomes a per-event label roster | §10, §14 step 13 | In progress |
+
+**Pricing (plan §9.1b, which supersedes §9.1 where they differ).** First bets
+to verify, not research. The dashboard shows prices including GST.
+
+- **Organisers run events free, forever.** Everything already shipped stays
+  free. **Event Pass** ₹499 per event; **Analytics** ₹1,999/mo or ₹19,990/yr —
+  shown as ₹589 and ₹2,359 with GST. The paywall starts 30 days after the
+  organisation's first event that clears the privacy floors. Founding grant: 6
+  months of Analytics.
+- **Venues pay nothing until venue days are live and a venue has 4 weeks of
+  data.** Listed is free, with 30 days of aggregate insights. **Venue Pro**
+  ₹2,999/mo per venue. Venue Max is deferred. Promoted nights are sold à la
+  carte at ₹699–999 a night; Pro includes 4. Founding grant: 3 months of Pro per
+  claimed Bengaluru venue.
+- **Sponsors** are priced by delivered reach band, which needs sponsor reach
+  computed first (step 0).
+- **Blendn+** (attendees) ₹199/mo · ₹499/quarter · ₹1,499/yr · Night Pass ₹49,
+  through Apple and Google in-app purchase via RevenueCat. **Never Razorpay
+  inside the app.** What it never sells is under *Validated — not doing*.
+- **Razorpay runs in test mode on the dashboard first**; live keys only after
+  KYC.
+
 
 **Leaving a match.** Reviewed twice by `/plan-eng-review` and Codex; the second
 pass found a live exploit path rather than a gap.
@@ -211,6 +257,39 @@ difference.
 
 ## Next
 
+### Product-completion plan v2 — the remaining steps
+
+Steps 0, 1 and 13 are under *Now*. Each step below gets its Jira units when it
+starts. "App" in a row means the work is client-side and tracked in
+`blendn/ROADMAP.md`.
+
+**Track A — app + API**
+
+| Step | What | Plan |
+|---|---|---|
+| 2 | **Home: map, drawer, Events / Places, the hiding rule.** A venue is hidden from 60 min before a linked public event until its end (`lib/venue-visibility.ts`). App: MapLibre with lit buildings, no fence ever drawn | §4 |
+| 3 | **Venue day: model, leak guard, permissions.** `events.kind = venue_day` owned by a system account; a structural guard that every events reader excludes venue days; the venue owner may moderate a venue day, never see its roster | §3, §12.1 |
+| 4 | **Go Live API and sweeper.** `POST /venues/:id/live` (20/45/60/stay); `CheckoutReason "expired"`; venue-day rooms entered only by being live, read-only after the 06:00 reset; expiries never trip the mass-checkout breaker | §14 step 4 |
+| 5 | **Places live on the app.** App | §3 |
+| 6 | **Board on the app.** The server is built; the client is not. App | §14 step 6 |
+| 7 | **Chat rooms of every kind.** `chat_groups.kind` (event / crew / blend / board_post) with one owner each; join rules per kind; a probe matrix proving an outsider cannot join, read or receive | §7 |
+| 8 | **Crews: server.** Crews of 2–12, crew chat, "We're here", presence derived from members' own GPS check-ins, `events.crews_enabled`, crew likes, Blend rooms, crew reveal with "keep me anonymous" | §6 |
+| 9 | **Crews on the app.** App | §6 |
+| 10 | **Matching v2.** IPL teams and cuisine as interest leaves, this-or-that, languages / home state / opt-in sign as display-only chips, the Tier B label budget, badges derived from check-ins, crew-held signals | §8 |
+| 11 | **Blendn+.** User entitlements, `/api/webhooks/revenuecat` (the only writer), gates through `hasEntitlement` on the server, the store setup with the owner | §5, §9.3 |
+| 12 | **Regulars, blind offers, the door pass.** The venue targets a rule and sees sent / opened / redeemed, never people; an audience under 5 is refused; a person is visible to a venue only by their own opt-in; Venue Pro gate | §2 |
+
+**Track B — dashboard**
+
+| Step | What | Plan |
+|---|---|---|
+| 14 | **Shell and components to the design kit.** Sidebar, top bar with breadcrumbs, `PageHeader` owning the h1, Panel / KpiStrip / Locked (sample data only) / QR | §10 |
+| 15 | **Organiser screens to the kit**, including the QR & link tab — QR does not exist in either repo today | §10, §9.1b |
+| 16 | **Analytics, entitlements, Razorpay test mode.** `entitlements`, `payment_events`, `hasEntitlement()`; Analytics and Plan pages; `/api/webhooks/razorpay`, the only writer of an entitlement; a free organisation's payload carries no paid numbers | §9.1b, §9.2 |
+| 17 | **Venue owner and sponsor screens.** Venue plans (Listed / Pro); a Razorpay payment link per `placement_charges` row, settled by webhook | §9.1b, §10 |
+| 18 | **Admin and public screens to the kit**, including the venue claim page from step 1 | §10 |
+
+
 ### Sponsors have no surface at all — backlog, after the app
 
 `organisations.may_sponsor` shipped in #259 and has **one reader and zero
@@ -233,7 +312,9 @@ What is missing, and none of it is designed:
 
 Deliberately not designed yet: the app side comes first, and the shape of this
 depends on whether placement is sold per-event, per-venue or per-city — a
-commercial decision, not an engineering one.
+commercial decision, not an engineering one. **Decided 2026-10-01 by the
+owner:** placements are priced by delivered reach band and paid by Razorpay
+payment link (plan v2 §9.1b, steps 0 and 17).
 
 
 ### The bio is a hole in the pseudonym
@@ -278,6 +359,12 @@ and also on the card.
 
 
 ### 1. Group-to-group matching — the mixing mechanic
+
+**Superseded on 2026-10-01 by the owner: this is crews, steps 7–9 of plan v2.**
+Not a `groups` model scoped per event: a crew persists, holds 2–12 friends, and
+matches crews or people. Nobody checks in for anyone else — each member checks
+in on their own GPS — and there is no voting: any present member likes for the
+crew. The reasoning below still stands.
 
 **The single most important unbuilt thing, and it does not exist in any form.**
 
@@ -352,7 +439,7 @@ they are cheap, not before the three items above.
 | | API today | Work |
 |---|---|---|
 | **Search / Filter** | `/events/search` exists and is **never called**; `/events` filters on category, date, distance | Verify the surface covers the design — then it is app-only |
-| **Map** | Events carry lat/lng; `/events` sorts by distance from a point | A viewport/bounding-box query — a map pans rather than searching a radius |
+| **Map** | Events carry lat/lng; `/events` sorts by distance from a point | **Step 2 of plan v2 (2026-10-01).** No new endpoint: the viewport becomes a centre and radius on the existing `lat`/`lon`/`radius` filter of `/events` and `/venues` |
 | ~~**Notifications centre**~~ | ~~Push tokens exist; no record of what was sent~~ | **Done, API side** (#242) — see 0.74.0. The bell's UI in The Pulse's top bar is the remaining half, and it is app-only |
 
 ### 5. A coarse match band
@@ -475,7 +562,9 @@ this and found nothing"* is a slide on its own.
   behind them at all. Worth understanding before either repo builds anything
 - **Analytics the copy promises** — funnels, cohort retention, revenue
   attribution. There is no ticketing and therefore no revenue. The copy is
-  cheaper to change than the features
+  cheaper to change than the features. Since 2026-10-01, cohort retention and
+  channel attribution are in the paid Analytics plan (step 16); revenue
+  attribution still needs ticketing, which plan v2 does not add
 
 ---
 
@@ -494,6 +583,8 @@ already ships Q&A with AI question generation, live quizzing, session tracking,
 analytics, automated badges and QR check-in — with **WhatsApp confirmation
 messages available only to Indian organisers**. Pricing is **free for free
 events and 1.75% per ticket for paid ones, no subscription, no setup fee**.
+(Since changed: 0% up to 100 registrations, then 2–3.75% + GST — rechecked for
+plan v2 §9.1b, 2026-10-01.)
 
 So this is not "compete with a ten-year-old incumbent". It is "compete with a
 funded, localised incumbent that gives these away". India's event-tech startups
@@ -524,8 +615,10 @@ product from the one we would have built.
 Worth keeping as a **future revenue hypothesis**: if attendee engagement
 features are commoditised to free in India (KonfHub proves they are), then the
 money in Indian events is in operations and exhibitors, not in engagement. That
-is an argument for never charging organisers and using them purely as
-distribution, which is what this roadmap now assumes.
+was read as an argument for never charging organisers and using them purely as
+distribution. **Superseded on 2026-10-01 by the owner:** running events stays
+free, and analytics beyond what has shipped is paid — see **Pricing** under
+*Now*.
 
 **Gamification** — top players, challenges, point totals. An organiser
 engagement toy. Moves no part of the approach-anxiety loop.
@@ -573,7 +666,34 @@ decision about friction, not a metrics gap, and it has not been made. Average
 rating and the star distribution already exist and are honest.
 
 **Financial, sponsorship and pipeline metrics.** Every one assumes ticketing.
-There is none, so there is no revenue to attribute.
+There is none, so there is no revenue to attribute. **Sponsorship left this
+list on 2026-10-01 (owner):** placements are priced by delivered reach, so
+step 0 of plan v2 computes sponsor reach.
+
+**Selling what the product guarantees.** Decided by the owner on 2026-10-01
+(plan v2 §9.3). Blendn+ never sells, at any price: seeing who liked you; more
+asks or board requests than the caps allow; seeing a venue's room without going
+live there; a way round the reveal; boosting yourself in someone's Grid.
+Each sells away a guarantee the free product makes to everyone else — nobody
+learns of interest before it is mutual, everyone has the same limits, presence
+in a room is real, a reveal is the person's own act, and the order of a room is
+not for sale.
+
+**Kundli, caste and their proxies.** Decided by the owner
+on 2026-10-01 (plan v2 §8.4). Never built, as a field, a filter or a signal:
+kundli or guna milan (one of its scores is a varna — caste-class — hierarchy,
+scored groom above bride), caste, community, religion, gotra, surname, skin
+tone, veg/non-veg (a documented caste proxy in India), height, education level,
+income, and college or neighbourhood before reveal. Each encodes caste, class or
+appearance, or identifies a person before they chose to be identified; a room
+that sorts on any of them is the opposite of a room where anyone can approach
+anyone. Step 10 adds a guard test that the kundli, caste and veg fields do not
+exist.
+
+**Zodiac as a ranking signal.** Plan v2 §8.2. A sign is an opt-in display chip
+and an icebreaker, off by default, never used to order a room. Tinder's own
+India data shows "compatible" and "incompatible" signs match at the same rate,
+so ranking on it buys nothing and would cluster rooms by stars.
 
 ---
 
