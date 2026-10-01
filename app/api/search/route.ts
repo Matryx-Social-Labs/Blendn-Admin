@@ -134,7 +134,10 @@ export async function GET(req: NextRequest) {
         type: "venue" as const,
         title: v.name,
         subtitle: v.city,
-        href: `/dashboard/venue-owners`,
+        // The venue itself. This was `/dashboard/venue-owners`, a list of
+        // owner accounts that is admin-only, so every host's venue hit
+        // redirected them to the overview.
+        href: `/dashboard/venues/${v.id}`,
       })),
     ]
 

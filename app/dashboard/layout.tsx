@@ -1,14 +1,14 @@
 import { redirect } from "next/navigation"
 
 import { AppSidebar } from "@/components/app-sidebar"
-import { RoutePageHeader } from "@/components/dashboard/page-header"
+import { RoutePageHeader } from "@/components/dashboard/route-page-header"
 import { OrgSuspendedNotice } from "@/components/org-suspended-notice"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { attentionQueues } from "@/lib/attention-queues-query"
 import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
-import { mayCreateEvents } from "@/lib/event-ownership"
+import { mayCreateEventsWith } from "@/lib/event-ownership"
 import { logger } from "@/lib/logger"
 import { activeOrgsFor, suspendedOrgsFor } from "@/lib/org-membership"
 import { canAccessDashboard } from "@/lib/rbac"
@@ -59,7 +59,7 @@ export default async function DashboardLayout({
    */
   const user = session.user
   const isAdmin = user.role === "app_admin"
-  const [badges, suspended, orgs, canCreate] = await Promise.all([
+  const [badges, suspended, orgs] = await Promise.all([
     isAdmin ? attentionQueuesOrNone().then(queueBadges) : {},
     // A member of a suspended organisation is told on every page, not left to
     // work it out from an empty events list (SCRUM-8).
@@ -67,17 +67,31 @@ export default async function DashboardLayout({
     // The sidebar's identity card and the first breadcrumb: the home
     // organisation first, the one a new event belongs to.
     isAdmin ? [] : activeOrgsFor(user.id),
-    // The top bar's Create event pill asks what every other door to the
-    // event form asks (SCRUM-145).
-    mayCreateEvents(user),
   ])
-  // Who this person acts for, said once for the card and the first crumb. An
-  // organiser in no live organisation is told so, rather than shown Blend'n.
-  const actingFor = isAdmin ? "Blend'n" : (orgs[0]?.display_name ?? "No organisation")
+  // The top bar's Create event pill asks what every other door to the event
+  // form asks (SCRUM-145), from the memberships already loaded: the first live
+  // one is `homeOrgIdFor`'s answer, by the same order.
+  const canCreate = mayCreateEventsWith(user.role, orgs.length > 0)
+  // Who this person acts for, said once for the card and the first crumb. A
+  // member only of a suspended organisation still belongs to it — the notice
+  // below says why the controls are gone — and someone in none is told so.
+  const actingFor = isAdmin
+    ? "Blend'n"
+    : (orgs[0]?.display_name ?? suspended[0]?.display_name ?? "No organisation")
 
   return (
     // 248px, the kit's sidebar. Flush: no inset card, no margin, no shadow.
     <SidebarProvider style={{ "--sidebar-width": "248px" } as React.CSSProperties}>
+      {/*
+        The first stop for a keyboard: past the sidebar and the top bar,
+        straight to the page. Hidden until focused.
+      */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
+      >
+        Skip to content
+      </a>
       <AppSidebar
         role={user.role}
         org={actingFor}
@@ -115,7 +129,12 @@ export default async function DashboardLayout({
           blocks. Narrower padding below 768, where 32px a side would leave a
           375px phone 311px of content.
         */}
-        <main className="@container/main mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-6 px-4 pb-10 pt-5 md:px-8 md:pb-14 md:pt-7">
+        {/* `tabIndex={-1}` so the skip link moves focus here, not just the scroll. */}
+        <main
+          id="main"
+          tabIndex={-1}
+          className="@container/main mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-6 px-4 pb-10 pt-5 outline-none md:px-8 md:pb-14 md:pt-7"
+        >
           <RoutePageHeader role={user.role} />
           <OrgSuspendedNotice orgs={suspended} />
           {children}

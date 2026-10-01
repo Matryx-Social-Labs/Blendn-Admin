@@ -4,6 +4,11 @@ import { getRoleUsers } from "@/lib/admin-role-actions"
 import { neverPublished } from "@/lib/dashboard-format"
 import { RoleUsersTable } from "@/components/role-users-table"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/organisers")
+
 export default async function OrganisersPage() {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") {

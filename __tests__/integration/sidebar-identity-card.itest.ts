@@ -52,3 +52,33 @@ it("lists nothing for an organiser in no live organisation", async () => {
   await join(id, "card-only-suspended", "suspended", new Date("2026-01-01T00:00:00Z"))
   expect(await activeOrgsFor(id)).toEqual([])
 })
+
+it("breaks a tie on created_at by org_id, the same way in both readers", async () => {
+  /*
+   * Two memberships written in one instant — one transaction, or a seed. With
+   * created_at alone Postgres may return either, so the card and the
+   * organisation an event is filed under could name different ones.
+   */
+  const id = await makeUser(testId("card-tie"), "organizer")
+  users.push(id)
+  const at = new Date("2026-03-03T03:03:03Z")
+  const made = await Promise.all(
+    ["card-tie-a", "card-tie-b"].map((label) =>
+      db.organisations.create({ data: { kind: "company", display_name: testId(label), status: "verified" } })
+    )
+  )
+  orgs.push(...made.map((o) => o.id))
+  const [low, high] = made.map((o) => o.id).sort()
+  // The higher id written first, so insertion order is the wrong answer.
+  // Measured: with the org_id tie-break removed this still passes locally —
+  // the unique (user_id, org_id) index feeds the sort in org_id order — so the
+  // order itself is pinned at the query in home-org-order.test.ts. This test
+  // is the behaviour on a real database, not the control.
+  for (const org_id of [high, low]) {
+    await db.organisation_members.create({ data: { org_id, user_id: id, role: "staff", created_at: at } })
+  }
+
+  const listed = await activeOrgsFor(id)
+  expect(listed.map((o) => o.id)).toEqual([low, high])
+  expect(await homeOrgIdFor({ id, role: "organizer" })).toBe(low)
+})

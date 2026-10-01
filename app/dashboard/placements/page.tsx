@@ -11,6 +11,11 @@ import { getSponsorOverview } from "@/lib/sponsor-actions"
 
 import { PlacementDecision } from "./decision"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/placements")
+
 export const dynamic = "force-dynamic"
 
 /** How long until doors, in the coarsest unit that is still useful. */

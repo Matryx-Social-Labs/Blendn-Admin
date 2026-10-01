@@ -2,6 +2,7 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import jsQR from "jsqr"
 
+import { EventTabs } from "@/app/dashboard/events/[id]/event-tabs"
 import { KpiStrip, Locked } from "@/components/dashboard/kit"
 import { QR } from "@/components/dashboard/qr-code"
 
@@ -80,38 +81,46 @@ describe("Locked", () => {
 })
 
 describe("QR", () => {
+  /** The SVG's grid: its side in modules, and the dark runs (`M x y h len v1 …`). */
+  function grid(html: string) {
+    const viewBox = html.match(/viewBox="0 0 (\d+) \d+"/)
+    const dark = html.match(/<path fill="#0d0c0c" d="([^"]+)"/)
+    if (!viewBox || !dark) return null
+    const runs = [...dark[1].matchAll(/M(\d+)[ ,](\d+) ?h(\d+)v1H\d+z/g)].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+      len: Number(m[3]),
+    }))
+    return { side: Number(viewBox[1]), runs }
+  }
+
   /**
    * Decode what was drawn, rather than compare it with what the library would
-   * draw. The SVG's dark modules are runs (`M x y h len v1 …`); they are put
-   * back on a grid with a four-module quiet zone, scaled up, and handed to a
-   * real decoder. A wrong value, a dropped row or a transposed axis all fail.
+   * draw: the SVG rasterised as it is — its own margin, nothing added — and
+   * handed to a real decoder. A wrong value, a dropped row, a transposed axis
+   * or a quiet zone too thin to scan all fail.
    */
   function decode(html: string): string | null {
-    const viewBox = html.match(/viewBox="0 0 (\d+) \d+"/)
-    if (!viewBox) return null
-    const modules = Number(viewBox[1])
-    const quiet = 4
+    const g = grid(html)
+    if (!g) return null
     const scale = 4
-    const side = (modules + quiet * 2) * scale
-    const rgba = new Uint8ClampedArray(side * side * 4).fill(255)
-
-    const dark = html.match(/<path fill="#0d0c0c" d="([^"]+)"/)
-    if (!dark) return null
-    for (const m of dark[1].matchAll(/M(\d+)[ ,](\d+) ?h(\d+)v1H\d+z/g)) {
-      const [x, y, len] = [Number(m[1]), Number(m[2]), Number(m[3])]
+    const px = g.side * scale
+    const rgba = new Uint8ClampedArray(px * px * 4).fill(255)
+    for (const { x, y, len } of g.runs) {
       for (let cx = x; cx < x + len; cx++) {
         for (let py = 0; py < scale; py++) {
-          for (let px = 0; px < scale; px++) {
-            const i = (((y + quiet) * scale + py) * side + (cx + quiet) * scale + px) * 4
+          for (let pxl = 0; pxl < scale; pxl++) {
+            const i = ((y * scale + py) * px + cx * scale + pxl) * 4
             rgba[i] = rgba[i + 1] = rgba[i + 2] = 0
           }
         }
       }
     }
-    return jsQR(rgba, side, side)?.data ?? null
+    return jsQR(rgba, px, px)?.data ?? null
   }
 
-  const render = (value: string) => renderToStaticMarkup(createElement(QR, { value }))
+  const render = (value: string) =>
+    renderToStaticMarkup(createElement(QR, { value, label: "QR code to check in" }))
 
   it("encodes the URL it is given", () => {
     const url = "https://blendn.app/e/sunset-sessions?src=qr"
@@ -124,9 +133,58 @@ describe("QR", () => {
     expect(decode(render(other))).toBe(other)
   })
 
-  it("is SVG elements with a name, never injected markup", () => {
+  it("keeps the standard's four-module quiet zone on every side", () => {
+    const g = grid(render("https://blendn.app/e/sunset-sessions"))!
+    expect(g.runs.length).toBeGreaterThan(50)
+    const left = Math.min(...g.runs.map((r) => r.x))
+    const top = Math.min(...g.runs.map((r) => r.y))
+    const right = g.side - Math.max(...g.runs.map((r) => r.x + r.len))
+    const bottom = g.side - 1 - Math.max(...g.runs.map((r) => r.y))
+    expect({ left, top, right, bottom }).toEqual({ left: 4, top: 4, right: 4, bottom: 4 })
+  })
+
+  it("is SVG elements named by its label, never injected markup", () => {
     const html = render("https://blendn.app/e/x\"><script>alert(1)</script>")
     expect(html).not.toContain("<script>")
-    expect(html).toMatch(/<svg[^>]*role="img"[^>]*aria-label="QR code for /)
+    expect(html).toMatch(/<svg[^>]*role="img"[^>]*aria-label="QR code to check in"/)
+  })
+})
+
+describe("PillTabs, through EventTabs", () => {
+  const html = renderToStaticMarkup(
+    createElement(EventTabs, {
+      eventId: "e1",
+      active: "attendees",
+      tabs: [
+        { key: "overview", label: "Overview" },
+        { key: "live", label: "Live" },
+        { key: "attendees", label: "Attendees" },
+        { key: "chat", label: "Chat" },
+        { key: "feedback", label: "Feedback" },
+      ],
+    })
+  )
+
+  it("is a named nav of links, each to its own URL", () => {
+    expect(html).toMatch(/<nav[^>]*aria-label="Event sections"/)
+    const hrefs = [...html.matchAll(/<a[^>]*href="([^"]+)"/g)].map((m) => m[1])
+    expect(hrefs).toEqual([
+      "/dashboard/events/e1",
+      "/dashboard/events/e1?tab=live",
+      "/dashboard/events/e1?tab=attendees",
+      "/dashboard/events/e1?tab=chat",
+      "/dashboard/events/e1/feedback",
+    ])
+  })
+
+  it("marks only the active tab as the current page", () => {
+    const current = [...html.matchAll(/<a[^>]*aria-current="page"[^>]*>([^<]+)/g)].map((m) => m[1])
+    expect(current).toEqual(["Attendees"])
+  })
+
+  it("puts the live dot on Live and nowhere else, hidden from a screen reader", () => {
+    const live = html.match(/>Live<span aria-hidden="true"[^>]*animate-pulse/)
+    expect(live).not.toBeNull()
+    expect(html.match(/animate-pulse/g)).toHaveLength(1)
   })
 })

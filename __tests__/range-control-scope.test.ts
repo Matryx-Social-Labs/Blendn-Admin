@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "fs"
 import { join, relative, sep } from "path"
 
-import { RANGED, showsRange } from "@/lib/dashboard-route-content"
+import { RANGED, ownsHeader, showsRange } from "@/lib/dashboard-route-content"
 
 /**
  * The date-range control renders exactly where a range is read.
@@ -81,12 +81,22 @@ describe("the range control renders only where a range is read", () => {
     expect(spurious).toEqual([])
   })
 
-  it("and the page header is what asks", () => {
+  it("and the page header is what asks — the layout's, or an owned route's own", () => {
     // The lists above agree with each other; this is what makes them the
     // control's rule rather than a rule nothing reads.
-    const header = stripComments(
-      readFileSync(join(ROOT, "components", "dashboard", "page-header.tsx"), "utf8")
+    const routeHeader = stripComments(
+      readFileSync(join(ROOT, "components", "dashboard", "route-page-header.tsx"), "utf8")
     )
-    expect(header).toMatch(/showsRange\(pathname\) \?\s*\(?\s*<Suspense[\s\S]*?<DateRangeControl/)
+    expect(routeHeader).toMatch(/showsRange\(pathname\) \?\s*\(?\s*(?:\/\/[^\n]*\n\s*)*<Suspense[\s\S]*?<DateRangeControl/)
+    expect(routeHeader).toMatch(/if \(ownsHeader\(pathname\)\) return null/)
+
+    // An owned route gets no header from the layout, so its page carries the
+    // control itself (`/dashboard/venues/[id]`).
+    const ownedRanged = routes.filter((r) => r.readsRange && ownsHeader(r.route.replace(/\[\w+\]/g, "x")))
+    expect(ownedRanged.map((r) => r.route)).toEqual(["/dashboard/venues/[id]"])
+    for (const r of ownedRanged) {
+      const page = readFileSync(join(ROOT, "app", ...r.route.split("/").filter(Boolean), "page.tsx"), "utf8")
+      expect(stripComments(page)).toMatch(/<DateRangeControl/)
+    }
   })
 })

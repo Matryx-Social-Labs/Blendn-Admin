@@ -14,12 +14,18 @@ function Input({
   size = "default",
   icon,
   invalid,
+  wrapperClassName,
   ...props
 }: Omit<React.ComponentProps<"input">, "size"> & {
   size?: "default" | "lg"
   /** Drawn inside the field on the left, e.g. a search or map-pin glyph. */
   icon?: React.ReactNode
   invalid?: boolean
+  /**
+   * With `icon`, the field sits in a wrapper, so `className` reaches the input
+   * and this reaches the box around it — a width or a flex rule belongs here.
+   */
+  wrapperClassName?: string
 }) {
   const input = (
     <input
@@ -40,7 +46,7 @@ function Input({
 
   if (!icon) return input
   return (
-    <div className="relative w-full">
+    <div className={cn("relative w-full", wrapperClassName)}>
       <span
         aria-hidden="true"
         className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-faint-foreground [&_svg]:size-4"

@@ -3,6 +3,11 @@ import { getUsers, getUserStats } from "./actions"
 import { UsersTable } from "./users-table"
 import { getAuth } from "@/lib/auth"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/users")
+
 export default async function UsersPage({
   searchParams,
 }: {

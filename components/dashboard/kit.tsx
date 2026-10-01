@@ -158,7 +158,7 @@ function LockedTile({ tile }: { tile: LockedKpi }) {
  *     static sample data.
  *
  * So there is deliberately no `data`, `value` or `rows` prop to thread real
- * numbers through, and `kit-locked.test.tsx` pins that at the type level.
+ * numbers through, and `__tests__/dashboard-kit.test.tsx` pins that at the type level.
  */
 export function Locked({
   title,

@@ -239,8 +239,8 @@
     },
     "create-event-offered-only-to-publishers.test.ts": {
       "guards": "/events/new redirects a non-publisher to /dashboard/organisation, the Events page and the organiser Overview both take canCreate from mayCreateEvents, and the Overview swaps both of its Create-event buttons (SCRUM-145)",
-      "mutation": "M2: the /events/new redirect replaced by `void 0`. M3: the Overview's first `createAction ??` dropped. Step 14 (the top bar's Create event pill on every screen): M4 `{canCreate ? (` replaced by `{true ? (` in components/site-header.tsx.",
-      "observed": "M2: 1 failing of 3. M3: 1 failing of 3 (one of the two buttons no longer swaps). M4: 1 failing of 4 ('the top bar's Create event pill is offered only when mayCreateEvents says so'); reverted, 4 of 4.",
+      "mutation": "M2: the /events/new redirect replaced by `void 0`. M3: the Overview's first `createAction ??` dropped. Step 14 (the top bar's Create event pill on every screen): M4 `{canCreate ? (` replaced by `{true ? (` in components/site-header.tsx. Since the review the layout asks the pure mayCreateEventsWith with its loaded memberships, and the pill is hidden on /dashboard/events/new; the assertion pins both.",
+      "observed": "M2: 1 failing of 3. M3: 1 failing of 3 (one of the two buttons no longer swaps). M4: 1 failing of 4 ('the top bar's Create event pill is offered only when mayCreateEvents says so'); reverted, 4 of 4. Review round: `mayCreateEventsWith(user.role, true)` in the layout → 1 failing of 5; reverted, 5 of 5.",
       "date": "2026-10-01"
     },
     "may-create-events.itest.ts": {
@@ -389,8 +389,8 @@
     },
     "dashboard-header-title.test.ts": {
       "guards": "every static dashboard route has an exact routeContent entry (lib/dashboard-route-content.ts); the h1 lives in the content area (R5, step 14): the layout renders RoutePageHeader inside <main>, PageHeader renders exactly one h1, the top bar renders none, and no page (dynamic ones included) or component it imports renders an <h1> or a <PageHeader> of its own; the breadcrumbs end on the same heading",
-      "mutation": "Step 14 re-run after the move. A: delete the \"/dashboard/events/curate\" entry from routeContent. B: add an <h1> to app/dashboard/claims/venues/page.tsx. C: move <RoutePageHeader> out of <main> in app/dashboard/layout.tsx, above it. D: add an <h1> to components/site-header.tsx.",
-      "observed": "A, B, C, D: 1 failing of 81 each (the route suite; the ownership suite naming claims/venues/page.tsx; 'the layout puts the route's PageHeader inside main'; 'the top bar renders no heading'). Reverted, 81 of 81. The 2026-08-24 control (KNOWN_DOUBLE_H1 staleness) went with the list, which was empty and is gone.",
+      "mutation": "Step 14 re-run after the move. A: delete the \"/dashboard/events/curate\" entry from routeContent. B: add an <h1> to app/dashboard/claims/venues/page.tsx. C: move <RoutePageHeader> out of <main> in app/dashboard/layout.tsx, above it. D: add an <h1> to components/site-header.tsx. Step 14 review (owned headers, whole tree, tab titles): E the messaging page's <PageHeader turned into a <div. F a `<PageHeader title=\"x\" />` comment line appended to app/dashboard/leads/page.tsx. G `if (ownsHeader(pathname)) return null` removed from RoutePageHeader. H `export const metadata` renamed in app/dashboard/charges/page.tsx. I `// <h1>deep</h1>` appended to components/dashboard/charts.tsx.",
+      "observed": "A, B, C, D: 1 failing of 81 each (the route suite; the ownership suite naming claims/venues/page.tsx; 'the layout puts the route's PageHeader inside main'; 'the top bar renders no heading'). Reverted, 81 of 81. The 2026-08-24 control (KNOWN_DOUBLE_H1 staleness) went with the list, which was empty and is gone. E, F, G, H: 1 failing of 136 each (the owned page's header count; leads' header count; 'RoutePageHeader … stands down on an owned one'; charges' metadata). I: 2 failing (the whole-tree scan, and charts.tsx read one hop from a page). Reverted, 136 of 136.",
       "date": "2026-10-01"
     },
     "event-claims.test.ts": {
@@ -749,8 +749,8 @@
     },
     "range-control-scope.test.ts": {
       "guards": "that the date-range control renders on exactly the dashboard pages whose `page.tsx` calls `resolveRange` — checked in both directions, so a page that gains a range without being listed fails, and a listed page that stops reading one fails too",
-      "mutation": "A: add a `resolveRange` call to app/dashboard/users/page.tsx without listing the route. B: add \"/dashboard/users\" to RANGED without the page reading a range. Step 14 (RANGED moved to lib/dashboard-route-content.ts, the control into the PageHeader): B re-run there.",
-      "observed": "A: 1 failing ('shows it on every page that reads a range'), naming /dashboard/users. B: 1 failing ('shows it on no page that ignores one'), naming the same route. The vacuity guard stayed green in both. Step 14 B: 1 failing of 4, same test",
+      "mutation": "A: add a `resolveRange` call to app/dashboard/users/page.tsx without listing the route. B: add \"/dashboard/users\" to RANGED without the page reading a range. Step 14 (RANGED moved to lib/dashboard-route-content.ts, the control into the PageHeader): B re-run there. Owned headers (step 14 review): the range on /dashboard/venues/[id] moved from the layout's header into the page's own; the new assertion requires both the layout header's rule and the owned page's <DateRangeControl>.",
+      "observed": "A: 1 failing ('shows it on every page that reads a range'), naming /dashboard/users. B: 1 failing ('shows it on no page that ignores one'), naming the same route. The vacuity guard stayed green in both. Step 14 B: 1 failing of 4, same test. Review round: <DateRangeControl /> removed from the venue page's own header → 1 failing of 4 ('and the page header is what asks — the layout's, or an owned route's own'); reverted, 4 of 4.",
       "reverted": true,
       "date": "2026-10-01"
     },

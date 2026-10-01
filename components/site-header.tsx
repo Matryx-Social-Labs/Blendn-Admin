@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"
 import { IconChevronRight, IconPlus } from "@tabler/icons-react"
 
 import { AccountMenu } from "@/components/account-menu"
-import { CommandPalette, CommandPaletteTrigger } from "@/components/command-palette"
+import { CommandPalette } from "@/components/command-palette"
 import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { breadcrumbsFor } from "@/lib/dashboard-route-content"
@@ -65,9 +65,10 @@ export function SiteHeader({
         <ol className="flex min-w-0 items-center gap-2 text-[0.8125rem]">
           {crumbs.map((crumb, i) => {
             const last = i === crumbs.length - 1
-            // In a narrow bar only the page you are on: the trail would push
-            // the search and the account off the edge.
-            const hideOnPhone = !last && "@max-xl/topbar:hidden"
+            // In a narrow bar only the page you are on is drawn: the trail
+            // would push the search and the account off the edge. Visually
+            // hidden, not removed, so a screen reader still hears where it is.
+            const hideOnPhone = !last && "@max-xl/topbar:sr-only"
             return (
               <Fragment key={`${i}-${crumb.label}`}>
                 {i > 0 ? (
@@ -98,9 +99,9 @@ export function SiteHeader({
       </nav>
 
       <CommandPalette placeholder={placeholder} />
-      <CommandPaletteTrigger placeholder={placeholder} />
 
-      {canCreate ? (
+      {/* Not on the form it opens: a button to the page you are on is noise. */}
+      {canCreate && pathname !== "/dashboard/events/new" ? (
         <Button asChild pill icon={<IconPlus aria-hidden />} className="@max-3xl/topbar:px-2.5">
           <Link href="/dashboard/events/new">
             <span className="@max-3xl/topbar:sr-only">Create event</span>

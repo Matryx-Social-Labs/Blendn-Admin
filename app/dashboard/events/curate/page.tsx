@@ -11,6 +11,11 @@ import { CurateForm } from "./curate-form"
 import { CURATION_PAGE } from "@/lib/curation"
 import { getCurationQueue } from "./queue-actions"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/events/curate")
+
 export const dynamic = "force-dynamic"
 
 /**

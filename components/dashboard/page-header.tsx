@@ -1,12 +1,6 @@
-"use client"
-
-import { Suspense, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
 import { IconArrowLeft } from "@tabler/icons-react"
-
-import { DateRangeControl } from "@/components/date-range-control"
-import { routeHeading, showsRange } from "@/lib/dashboard-route-content"
 
 /**
  * The page's name: its only `h1`, in the content area (R5).
@@ -14,6 +8,10 @@ import { routeHeading, showsRange } from "@/lib/dashboard-route-content"
  * 26px title, one sentence under it, the page's actions on the right, and an
  * optional back link above. It used to live in the top bar at 20px, which
  * left the title and the actions it governs on opposite sides of a hairline.
+ *
+ * Rendered by the layout for most routes (`RoutePageHeader`), and by the page
+ * itself, server-side and first, for the routes in `OWNED_HEADERS` — a record
+ * named by its own title, with its own actions.
  *
  * Kept out of `components/dashboard/kit.tsx` because it holds an `h1`:
  * `dashboard-header-title.test.ts` reads every component a page imports for
@@ -30,6 +28,7 @@ export function PageHeader({
   description?: string
   actions?: ReactNode
   back?: { href: string; label: string }
+  /** Under the description: a line of facts, a status, a link. */
   children?: ReactNode
 }) {
   return (
@@ -48,7 +47,7 @@ export function PageHeader({
             20rem, the actions wrap below rather than squeezing the sentence
             into a column three words wide. */}
         <div className="flex min-w-0 flex-1 basis-80 flex-col gap-1.5">
-          <h1 className="text-page-title font-bold leading-[1.15] text-balance">{title}</h1>
+          <h1 className="text-page-title font-bold leading-[1.15] text-balance break-words">{title}</h1>
           {description ? (
             <p className="max-w-[70ch] text-[0.875rem] text-muted-foreground text-pretty">
               {description}
@@ -59,34 +58,5 @@ export function PageHeader({
         {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
       </div>
     </div>
-  )
-}
-
-/**
- * The header every dashboard route gets from the layout, named from
- * `routeContent` by the same rule the breadcrumbs use.
- *
- * The date range is the one page action the shell knows about: it rides here,
- * on the three routes whose numbers read it, rather than in the top bar where
- * it sat beside the search on every screen it could not affect.
- */
-export function RoutePageHeader({ role }: { role: string }) {
-  const pathname = usePathname()
-  const { title, description } = routeHeading(pathname, role)
-
-  return (
-    <PageHeader
-      title={title}
-      description={description}
-      actions={
-        showsRange(pathname) ? (
-          // useSearchParams needs a Suspense boundary or the whole route opts
-          // out of static rendering and the build warns.
-          <Suspense fallback={<div className="h-9 w-[250px]" />}>
-            <DateRangeControl />
-          </Suspense>
-        ) : undefined
-      }
-    />
   )
 }

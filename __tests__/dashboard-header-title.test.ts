@@ -3,8 +3,22 @@ import { join, relative, sep } from "path"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
+const mockPathname = { current: "/dashboard" }
+jest.mock("next/navigation", () => ({
+  usePathname: () => mockPathname.current,
+  useRouter: () => ({ push: jest.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}))
+
 import { PageHeader } from "@/components/dashboard/page-header"
-import { breadcrumbsFor, routeContent, routeHeading } from "@/lib/dashboard-route-content"
+import { RoutePageHeader } from "@/components/dashboard/route-page-header"
+import {
+  OWNED_HEADERS,
+  breadcrumbsFor,
+  ownsHeader,
+  routeContent,
+  routeHeading,
+} from "@/lib/dashboard-route-content"
 
 /**
  * Every dashboard page has exactly one `h1`, it names the page, and it is
@@ -16,6 +30,12 @@ import { breadcrumbsFor, routeContent, routeHeading } from "@/lib/dashboard-rout
  * renders `PageHeader`, which holds the `h1`. The top bar shows breadcrumbs and
  * no heading. Both read `lib/dashboard-route-content.ts`, so the last crumb and
  * the heading are the same word.
+ *
+ * Except the routes in `OWNED_HEADERS` — one record each, named by the record
+ * — where `RoutePageHeader` renders nothing and the page renders its own
+ * `PageHeader`, server-side and first. So the rule has two halves, both held
+ * below: an owned route's page renders exactly one `PageHeader`, and every
+ * other page renders none.
  *
  * It used to be the top bar's `h1`, outside `main`: a screen reader's "jump to
  * main" landed past the page's name, and the title sat a hairline away from the
@@ -128,6 +148,61 @@ describe("the breadcrumbs and the heading are one source", () => {
     ])
   })
 
+  it.each([
+    ["/dashboard", "organizer", ["Org", "Overview"]],
+    ["/dashboard/events/e1/messaging", "organizer", ["Org", "Events", "Event", "Room"]],
+    ["/dashboard/events/e1/edit", "organizer", ["Org", "Events", "Event", "Edit event"]],
+    ["/dashboard/events/e1/feedback", "venue_owner", ["Org", "Events", "Event", "Feedback"]],
+    ["/dashboard/venues/v1/claim", "venue_owner", ["Org", "Venues", "Venue", "Claim a venue"]],
+    ["/dashboard/organisers/o1", "app_admin", ["Org", "Organisers", "Organiser"]],
+    ["/dashboard/venue-owners/o1", "app_admin", ["Org", "Venue owners", "Venue owner"]],
+    ["/dashboard/moderation/reports", "app_admin", ["Org", "Moderation", "Reports"]],
+    ["/dashboard/claims/brands", "app_admin", ["Org", "Claims"]],
+    ["/dashboard/events/new", "organizer", ["Org", "Events", "New event"]],
+  ] as const)("%s reads as its trail", (path, role, trail) => {
+    expect(breadcrumbsFor(path, role, "Org").map((c) => c.label)).toEqual(trail)
+  })
+
+  it("links every crumb but the last to a page that exists", () => {
+    /** `/dashboard/events/e1` -> app/dashboard/events/[id]/page.tsx, if it exists. */
+    const resolves = (href: string) => {
+      let dir = join(ROOT, "app")
+      for (const seg of href.split("/").filter(Boolean)) {
+        const exact = join(dir, seg)
+        if (existsSync(exact) && statSync(exact).isDirectory()) {
+          dir = exact
+          continue
+        }
+        const dynamic = readdirSync(dir).find((e) => e.startsWith("["))
+        if (!dynamic) return false
+        dir = join(dir, dynamic)
+      }
+      return existsSync(join(dir, "page.tsx"))
+    }
+    const paths = [
+      "/dashboard/events/e1/messaging",
+      "/dashboard/events/e1/feedback",
+      "/dashboard/venues/v1/claim",
+      "/dashboard/organisers/o1",
+      "/dashboard/venue-owners/o1",
+      "/dashboard/moderation/reports",
+      "/dashboard/claims/venues",
+    ]
+    for (const path of paths) {
+      const crumbs = breadcrumbsFor(path, "app_admin", "Org")
+      expect(crumbs.at(-1)!.href).toBeUndefined()
+      for (const c of crumbs.slice(0, -1)) expect({ href: c.href, resolves: resolves(c.href!) }).toEqual({ href: c.href, resolves: true })
+    }
+  })
+
+  it("does not let an organisation named like a section swallow it", () => {
+    expect(breadcrumbsFor("/dashboard/events/e1", "organizer", "Events").map((c) => c.label)).toEqual([
+      "Events",
+      "Events",
+      "Event",
+    ])
+  })
+
   it("does not repeat a level that names the same screen", () => {
     expect(breadcrumbsFor("/dashboard/claims/venues", "app_admin", "Blend'n")).toEqual([
       { label: "Blend'n", href: "/dashboard" },
@@ -156,6 +231,15 @@ describe("the content area owns the only h1", () => {
     expect(read("components/site-header.tsx")).not.toMatch(/<h1[\s>]|<PageHeader[\s>]/)
   })
 
+  it("RoutePageHeader names a layout-named route, and stands down on an owned one", () => {
+    mockPathname.current = "/dashboard/users"
+    expect(renderToStaticMarkup(createElement(RoutePageHeader, { role: "app_admin" }))).toMatch(
+      /<h1[^>]*>Users<\/h1>/
+    )
+    mockPathname.current = "/dashboard/events/e1"
+    expect(renderToStaticMarkup(createElement(RoutePageHeader, { role: "organizer" }))).toBe("")
+  })
+
   /**
    * The page file AND the local components it renders, one hop.
    *
@@ -163,15 +247,14 @@ describe("the content area owns the only h1", () => {
    * `h1` reading "Create Event" from `components/event-editor.tsx` — one import
    * away, invisible to the guard. One hop rather than a full graph walk: a
    * page's own header lives in the component the page renders, not four levels
-   * down.
-   *
-   * `<PageHeader` counts as an h1. Until a page can tell the layout to stand
-   * its header down, a page rendering its own would make two.
+   * down. The whole-tree scan below covers the rest.
    */
   function ownAndImported(file: string): string[] {
     const src = readFileSync(file, "utf8")
     const out = [src]
     for (const m of src.matchAll(/from\s+"@\/(components\/[\w./-]+)"/g)) {
+      // The header itself is what an owned page imports to render one.
+      if (m[1] === "components/dashboard/page-header") continue
       for (const ext of [".tsx", ".ts", "/index.tsx"]) {
         const dep = join(ROOT, m[1] + ext)
         if (existsSync(dep)) {
@@ -184,15 +267,72 @@ describe("the content area owns the only h1", () => {
   }
 
   const pages = allPages(DASHBOARD).map((f) => relative(ROOT, f))
+  /** `app/dashboard/events/[id]/page.tsx` -> `/dashboard/events/x`. */
+  const routeOf = (page: string) =>
+    "/" + page.replace(/^app\//, "").replace(/\/page\.tsx$/, "").split(sep).join("/").replace(/\[\w+\]/g, "x")
+  const owned = pages.filter((p) => ownsHeader(routeOf(p)))
+  const count = (src: string, re: RegExp) => (src.match(re) ?? []).length
 
-  it("found the pages, dynamic ones included", () => {
+  it("found the pages, and the owned ones", () => {
     expect(pages).toContain(join("app", "dashboard", "events", "[id]", "page.tsx"))
     expect(pages.length).toBeGreaterThan(30)
+    // Every pattern names at least one page, so none is a stale entry.
+    for (const re of OWNED_HEADERS) {
+      expect({ re: String(re), pages: owned.filter((p) => re.test(routeOf(p))).length > 0 }).toEqual({
+        re: String(re),
+        pages: true,
+      })
+    }
+    expect(owned).toHaveLength(8)
   })
 
-  it.each(pages)("%s renders no h1 of its own", (page) => {
-    for (const src of ownAndImported(join(ROOT, page))) {
-      expect(src).not.toMatch(/<h1[\s>]|<PageHeader[\s>]/)
+  it.each(pages)("%s renders the h1 its route calls for", (page) => {
+    const sources = ownAndImported(join(ROOT, page))
+    const headers = sources.reduce((n, src) => n + count(src, /<PageHeader[\s>]/g), 0)
+    const h1s = sources.reduce((n, src) => n + count(src, /<h1[\s>]/g), 0)
+    expect({ page, h1s, headers }).toEqual({ page, h1s: 0, headers: owned.includes(page) ? 1 : 0 })
+  })
+
+  // That the owned header is the page's FIRST child is measured where it can
+  // be — rendered, in e2e/dashboard-shell.spec.ts.
+})
+
+describe("no h1 anywhere else in the dashboard tree", () => {
+  /**
+   * The one-hop read above misses an h1 two components down. The dashboard has
+   * exactly one component allowed to draw one; everything else in
+   * `app/dashboard` and `components` is checked, however deep.
+   */
+  function files(dir: string, acc: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry)
+      if (statSync(full).isDirectory()) files(full, acc)
+      else if (/\.tsx?$/.test(entry)) acc.push(full)
     }
+    return acc
+  }
+  const tree = [...files(DASHBOARD), ...files(join(ROOT, "components"))].map((f) => relative(ROOT, f))
+
+  it("walked the tree", () => {
+    expect(tree.length).toBeGreaterThan(150)
+  })
+
+  it("finds an h1 only in PageHeader", () => {
+    const withH1 = tree.filter((f) => /<h1[\s>]/.test(readFileSync(join(ROOT, f), "utf8")))
+    expect(withH1).toEqual([join("components", "dashboard", "page-header.tsx")])
+  })
+})
+
+describe("every dashboard page names its tab", () => {
+  /*
+   * WCAG 2.4.2. Without these every tab read "Blend'n Admin", whatever was in
+   * it. Static pages take the h1's word from `routeMetadata`; owned pages
+   * read the record's name through a loader that applies the page's own
+   * access rule (`lib/dashboard-record-titles.ts`).
+   */
+  const pages = allPages(DASHBOARD).map((f) => relative(ROOT, f))
+
+  it.each(pages)("%s exports metadata or generateMetadata", (page) => {
+    expect(read(page)).toMatch(/export const metadata\b|export async function generateMetadata\b/)
   })
 })

@@ -16,6 +16,20 @@ export function PageHeaderSkeleton() {
   return <Skeleton className="h-5 w-64" />
 }
 
+/**
+ * Where an owned header will be (`OWNED_HEADERS`): those routes get no header
+ * from the layout, so while the page loads this holds the 26px title's place
+ * and its sentence — the page does not jump when the record's name arrives.
+ */
+export function OwnedHeaderSkeleton() {
+  return (
+    <div aria-hidden className="flex flex-col gap-2">
+      <Skeleton className="h-[30px] w-72 max-w-full" />
+      <Skeleton className="h-4 w-96 max-w-full" />
+    </div>
+  )
+}
+
 export function StatCardsSkeleton({ count = 4 }: { count?: number }) {
   return (
     <div className="flex flex-wrap gap-1">

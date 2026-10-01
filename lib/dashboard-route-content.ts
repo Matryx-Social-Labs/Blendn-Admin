@@ -237,6 +237,47 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
   }
 }
 
+/**
+ * Routes whose page renders its own `PageHeader`, so the layout's steps aside.
+ *
+ * One record per route, and the layout cannot name it: an event's page is
+ * called by the event's title, with the event's own actions beside it, and
+ * only the page has loaded the event (and checked who may see it). The page
+ * renders `<PageHeader>` server-side as its first child; `RoutePageHeader`
+ * returns nothing here. `dashboard-header-title.test.ts` holds each side to
+ * it: an owned route's page renders exactly one `PageHeader`, every other
+ * route's none.
+ *
+ * The breadcrumbs keep the route's kind ("Events › Event › Room"): the top bar
+ * is in the layout and cannot know the record's name without the page telling
+ * it, and the heading below already says it.
+ */
+export const OWNED_HEADERS: RegExp[] = [
+  /^\/dashboard\/events\/[^/]+$/,
+  /^\/dashboard\/events\/[^/]+\/(edit|messaging|feedback)$/,
+  /^\/dashboard\/venues\/[^/]+$/,
+  /^\/dashboard\/venues\/[^/]+\/claim$/,
+  /^\/dashboard\/organisers\/[^/]+$/,
+  /^\/dashboard\/venue-owners\/[^/]+$/,
+]
+
+/** Static routes that share a dynamic route's shape and are NOT records. */
+const NOT_A_RECORD = new Set(["/dashboard/events/new", "/dashboard/events/curate", "/dashboard/venues/new"])
+
+export function ownsHeader(pathname: string): boolean {
+  if (NOT_A_RECORD.has(pathname)) return false
+  return OWNED_HEADERS.some((re) => re.test(pathname))
+}
+
+/**
+ * The document `<title>` for a page the layout names: the same word as its
+ * `h1` (WCAG 2.4.2), and the root layout's template appends the product.
+ * Owned routes export `generateMetadata` with the record's name instead.
+ */
+export function routeMetadata(pathname: string): { title: string } {
+  return { title: routeHeading(pathname, undefined).title }
+}
+
 export interface Crumb {
   label: string
   /** Absent on the last crumb, which is the page you are on. */
@@ -261,7 +302,9 @@ export function breadcrumbsFor(pathname: string, role: string | undefined, org: 
   for (let i = 1; i <= segments.length; i++) {
     const href = "/dashboard/" + segments.slice(0, i).join("/")
     const { title } = routeHeading(href, role)
-    if (crumbs[crumbs.length - 1].label === title) continue
+    // Compared from the second crumb on: an organisation that happens to be
+    // called "Events" must not swallow the Events crumb after it.
+    if (crumbs.length > 1 && crumbs[crumbs.length - 1].label === title) continue
     crumbs.push({ label: title, href })
   }
   // The page you are on is not a link to itself.

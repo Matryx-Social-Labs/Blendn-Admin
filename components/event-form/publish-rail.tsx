@@ -228,7 +228,9 @@ export function PublishRail(props: PublishRailProps) {
   return (
     <aside
       aria-label="Publish"
-      className="hidden @4xl/main:flex sticky top-5 flex-col gap-5 self-start"
+      // Below the 60px sticky top bar, plus the page's 24px gap: at `top-5`
+      // the rail's first line slid under the bar once the page scrolled.
+      className="hidden @4xl/main:flex sticky top-[84px] flex-col gap-5 self-start"
     >
       <div>
         <p className="mb-2 text-[0.75rem] font-medium uppercase tracking-[0.06em] text-faint-foreground">

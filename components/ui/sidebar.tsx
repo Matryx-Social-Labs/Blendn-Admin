@@ -31,6 +31,8 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+/** What the trigger's `aria-controls` names: the desktop sidebar. */
+const SIDEBAR_ID = "app-sidebar"
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -199,10 +201,17 @@ function Sidebar({
             } as React.CSSProperties
           }
           side={side}
+          // The sheet is opened by the top bar's trigger, not a Radix
+          // Trigger, so Radix has nowhere to send focus on close and dropped
+          // it on <body>. Back to the button that opened it.
+          onCloseAutoFocus={(e) => {
+            e.preventDefault()
+            document.querySelector<HTMLElement>('[data-sidebar="trigger"]')?.focus()
+          }}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            <SheetTitle>Navigation</SheetTitle>
+            <SheetDescription>Every section of the dashboard you can open.</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -228,8 +237,15 @@ function Sidebar({
           "group-data-[collapsible=icon]:w-(--sidebar-width-icon)"
         )}
       />
+      {/*
+        `inert` while collapsed: offcanvas only slides it off screen, so its
+        links stayed in the tab order and the accessibility tree — Tab from the
+        top bar went into a sidebar nobody could see.
+      */}
       <div
         data-slot="sidebar-container"
+        id={SIDEBAR_ID}
+        inert={state === "collapsed"}
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
           side === "left"
@@ -257,7 +273,7 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, isMobile, open, openMobile } = useSidebar()
 
   return (
     <Button
@@ -265,6 +281,10 @@ function SidebarTrigger({
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon"
+      // The sheet below 768 mounts only while open, so there is nothing to
+      // point at until it is; the desktop sidebar is always in the DOM.
+      aria-controls={isMobile ? undefined : SIDEBAR_ID}
+      aria-expanded={isMobile ? openMobile : open}
       className={cn("size-7", className)}
       onClick={(event) => {
         onClick?.(event)
@@ -273,7 +293,7 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">Navigation</span>
     </Button>
   )
 }

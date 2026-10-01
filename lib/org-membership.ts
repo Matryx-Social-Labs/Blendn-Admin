@@ -21,6 +21,15 @@ import type { PermissionActor, SponsorGrant } from "./rbac"
  */
 export const activeMembership = { org: { status: { not: "suspended" as const } } }
 
+/**
+ * Which membership is someone's home: the oldest, and on an identical
+ * `created_at` (two rows written in one transaction, or by a seed) the lower
+ * `org_id`. Without the second key Postgres may return either, so two saves
+ * could file under two organisations and the sidebar could name a third.
+ * `homeOrgIdFor` and `activeOrgsFor` both order by this.
+ */
+export const HOME_ORG_ORDER = [{ created_at: "asc" as const }, { org_id: "asc" as const }]
+
 /** Which of this person's organisations are suspended, for the banner. */
 export async function suspendedOrgsFor(
   userId: string
@@ -49,7 +58,7 @@ export async function activeOrgsFor(
   const rows = await db.organisation_members.findMany({
     where: { user_id: userId, ...activeMembership },
     select: { org: { select: { id: true, display_name: true } } },
-    orderBy: { created_at: "asc" },
+    orderBy: HOME_ORG_ORDER,
   })
   return rows.map((r) => r.org)
 }

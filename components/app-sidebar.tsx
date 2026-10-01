@@ -1,8 +1,11 @@
 "use client"
 
+import { useEffect } from "react"
+import { usePathname } from "next/navigation"
+
 import { BrandLogo } from "@/components/brand-logo"
 import { NavMain } from "@/components/nav-main"
-import { Sidebar, SidebarContent, SidebarHeader } from "@/components/ui/sidebar"
+import { Sidebar, SidebarContent, SidebarHeader, useSidebar } from "@/components/ui/sidebar"
 import { groupedNavFor } from "@/lib/dashboard-nav"
 
 const ROLE_LABELS: Record<string, string> = {
@@ -57,6 +60,17 @@ export function AppSidebar({
   badges?: Record<string, number>
 }) {
   const groups = groupedNavFor(role)
+
+  /*
+   * Below 768 the nav is a modal sheet, and following a link in it used to
+   * leave it open over the page it had just opened. Closed on every change of
+   * route, which also covers a route reached any other way while it is open.
+   */
+  const pathname = usePathname()
+  const { setOpenMobile } = useSidebar()
+  useEffect(() => {
+    setOpenMobile(false)
+  }, [pathname, setOpenMobile])
   const roleLabel = ROLE_LABELS[role] ?? role
 
   return (
@@ -71,7 +85,7 @@ export function AppSidebar({
           <div className="px-1.5">
             <BrandLogo size="sidebar" />
           </div>
-          <div className="flex items-center gap-2.5 rounded-[10px] border border-border bg-card p-2.5">
+          <div data-slot="org-card" className="flex items-center gap-2.5 rounded-[10px] border border-border bg-card p-2.5">
             <span
               aria-hidden="true"
               className="flex size-[30px] shrink-0 items-center justify-center rounded-md bg-surface-raised text-[0.75rem] font-bold"
@@ -79,8 +93,8 @@ export function AppSidebar({
               {initialsOf(org)}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-[0.8125rem] font-bold">{org}</span>
-              <span className="truncate text-[0.65625rem] font-medium uppercase tracking-[0.1em] text-faint-foreground">
+              <span data-slot="org-card-name" className="truncate text-[0.8125rem] font-bold">{org}</span>
+              <span data-slot="org-card-role" className="truncate text-[0.65625rem] font-medium uppercase tracking-[0.1em] text-faint-foreground">
                 {roleLabel}
                 {otherOrgs > 0 ? ` · +${otherOrgs} more` : null}
               </span>

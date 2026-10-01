@@ -50,7 +50,10 @@ export function NavMain({
           louder style here would compete with the destinations themselves,
           which are the thing being scanned.
         */
-        <div className="px-2.5 pb-1.5 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint-foreground">
+        <div
+          data-slot="nav-group-label"
+          className="px-2.5 pb-1.5 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint-foreground"
+        >
           {label}
         </div>
       ) : null}

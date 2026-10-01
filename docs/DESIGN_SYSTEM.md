@@ -156,9 +156,21 @@ every static route to an entry there, and fails on an `h1` or a `<PageHeader>`
 in any page or in the components it imports. `e2e/dashboard-shell.spec.ts`
 counts the h1s in a browser for every role.
 
-A page that needs its own header (an event's name, its QR and Edit actions)
-cannot render one yet: the layout's would make two. Step 15 adds the way for a
-page to stand the layout's header down.
+**Owned headers.** A record's page is named by the record: an event by its
+title, a venue by its name, an account by the person's. The routes in
+`OWNED_HEADERS` (`lib/dashboard-route-content.ts`: the event, its edit, room and
+feedback pages, a venue and its claim page, an organiser, a venue owner) get
+nothing from `RoutePageHeader`; the page renders `<PageHeader title actions
+back>` server-side as its first child, with the record's own actions. The
+breadcrumbs keep the route's kind ("Events › Event › Room"). Each owned route
+has a `loading.tsx` holding the header's place. The guard holds both halves:
+an owned page renders exactly one `PageHeader`, every other page none.
+
+**The tab says the same thing (WCAG 2.4.2).** Every dashboard page exports
+`metadata` (`routeMetadata(path)`, the h1's word) or, on an owned route,
+`generateMetadata` with the record's name — read through
+`lib/dashboard-record-titles.ts`, which applies the page's own access rule so
+a name never reaches the tab of someone the page will refuse.
 
 ### Panels: bordered, and still one priority per screen (R3)
 
@@ -278,7 +290,12 @@ is no current organisation to switch. Then a 60px sticky top bar with
 breadcrumbs, a visible ⌘K field (hosts are offered "Search events…", never
 people), a Create event pill gated on `mayCreateEvents`, and the account menu.
 The content is at most 1200px wide, with 28/32/56 padding and 24px between
-blocks. Below 768 the sidebar is a sheet.
+blocks. Below 768 the sidebar is a sheet, which closes on every route change
+and returns focus to the trigger; collapsed on a desktop, the sidebar is
+`inert`. The first Tab is a "Skip to content" link to `main#main`, and
+`html` has `scroll-pt-16` so the sticky bar never covers a focused element.
+⌘K (Ctrl K off Apple keyboards) is a Radix dialog portalled to `<body>`: a
+combobox over a listbox, with the result count in a live region.
 
 **The nav gate must agree with `lib/rbac.ts`.** It drifted once: the nav hid
 Chatrooms from `venue_owner` while `canModerateChat` granted venue owners

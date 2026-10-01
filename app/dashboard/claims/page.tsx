@@ -8,6 +8,11 @@ import { db } from "@/lib/db"
 import { ClaimSwitch } from "./claim-switch"
 import { EventClaimsTable } from "./event-claims-table"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/claims")
+
 export const dynamic = "force-dynamic"
 
 /**
