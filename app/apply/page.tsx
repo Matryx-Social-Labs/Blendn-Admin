@@ -4,7 +4,6 @@ import Image from "next/image"
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { IconArrowRight, IconBuildingStore, IconCalendarEvent, IconCircleCheck } from "@tabler/icons-react"
-import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -58,6 +57,20 @@ const ROLES: { value: Role; title: string; blurb: string; icon: typeof IconCalen
   },
 ]
 
+/**
+ * What the browser refused, by the fields' own captions; empty when nothing was.
+ *
+ * Runs before the browser's own check on submit, and `checkValidity` fires each
+ * failing control's `invalid` event, which is what puts the error under it.
+ */
+function invalidSummary(form: HTMLFormElement | null): string {
+  if (!form || form.checkValidity()) return ""
+  const names = [...form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:invalid, textarea:invalid")].map(
+    (control) => control.labels?.[0]?.textContent?.replace(/\s*\*\s*$/, "").trim() || control.name
+  )
+  return `${names.length === 1 ? "One field needs" : `${names.length} fields need`} attention: ${names.join(", ")}.`
+}
+
 export default function ApplyPage() {
   const [role, setRole] = useState<Role>("organizer")
   const [form, setForm] = useState({
@@ -72,6 +85,8 @@ export default function ApplyPage() {
     address: "",
   })
   const [loading, setLoading] = useState(false)
+  /** Why the last submit did not go through, read out once (SCRUM-470). */
+  const [problem, setProblem] = useState("")
   const [done, setDone] = useState<{ emailSent: boolean; message: string } | null>(null)
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -89,6 +104,7 @@ export default function ApplyPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    setProblem("")
     setLoading(true)
     try {
       const res = await fetch("/api/onboarding/apply", {
@@ -104,7 +120,7 @@ export default function ApplyPage() {
       if (!res.ok || !body.success) throw new Error(body.error ?? "Could not submit")
       setDone({ emailSent: body.emailSent, message: body.message })
     } catch (err) {
-      toast.error(refusalMessage(err, "Could not submit"))
+      setProblem(refusalMessage(err, "Could not submit"))
     } finally {
       setLoading(false)
     }
@@ -329,8 +345,21 @@ export default function ApplyPage() {
               ) : null}
             </div>
 
+            {/*
+              Always in the tree, so a change to its text is announced. A refusal
+              here used to be a toast that came and went, and a field the browser
+              refused said so only in its bubble (SCRUM-470).
+            */}
+            <div
+              role="alert"
+              className={problem ? "rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm leading-6 text-foreground" : "sr-only"}
+            >
+              {problem}
+            </div>
+
             <Button
               type="submit"
+              onClick={(e) => setProblem(invalidSummary(e.currentTarget.form))}
               disabled={loading || (needsProof && !proofGiven)}
               className="h-12 w-full rounded-2xl"
             >

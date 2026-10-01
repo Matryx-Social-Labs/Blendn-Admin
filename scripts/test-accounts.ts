@@ -151,6 +151,7 @@ export const SEED_PERSONAS: readonly string[] = [
   "sneha.p@blendn.app",
   "vikram.s@blendn.app",
   "teen.tester@blendn.app",
+  "rhea.kapoor@blendn.app",
 ]
 
 export interface TestAccountsWorld {
@@ -363,7 +364,7 @@ async function retire(db: PrismaClient, emails: readonly string[], organiserId: 
  * back to verified here would leave its events in the drafts the suspension
  * parked them in — `setOrganisationStatus` is the path that restores both.
  */
-async function upsertOrg(db: PrismaClient, displayName: string) {
+export async function upsertOrg(db: PrismaClient, displayName: string) {
   const existing = await db.organisations.findFirst({ where: { display_name: displayName } })
   if (existing) return existing
   return db.organisations.create({

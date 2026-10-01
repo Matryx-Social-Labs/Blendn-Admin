@@ -33,7 +33,9 @@ The personas were renamed in place from `priya.menon@`, `arjun.rao@`,
 `fatima.sheikh@` and `meera.iyer@` — same ids, same history. Also seeded by
 `seed-qa.ts`, same password: `sagar.kishore@`, `hemanth.ramesh@`,
 `likhith.gowda@` (named admins), `daniel.weber@` (organiser with no org — the
-negative control), and the attendees `ananya.b@`, `rohan.d@`, `sneha.p@`, ….
+negative control), `rhea.kapoor@` (sponsor whose org, Third Wave Coffee
+Roasters, has no brand: she filed the pending Third Wave claim, SCRUM-465), and
+the attendees `ananya.b@`, `rohan.d@`, `sneha.p@`, ….
 
 Resolve ids against the staging DB rather than hardcoding (staging ids are
 `cmt…`, distinct from local).
