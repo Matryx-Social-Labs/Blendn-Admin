@@ -102,6 +102,20 @@ export function closing(src: string, open: number): number {
   return src.length - 1
 }
 
+/** Where a property's value ends: the comma or bracket that closes it at its own depth. */
+function valueEnd(src: string, start: number): number {
+  let depth = 0
+  for (let i = start; i < src.length; i++) {
+    const c = src[i]
+    if ("{[(".includes(c)) depth++
+    else if ("}])".includes(c)) {
+      if (depth === 0) return i - 1
+      depth--
+    } else if (c === "," && depth === 0) return i - 1
+  }
+  return src.length - 1
+}
+
 /** Keys at the top level of an object literal: `{ id, slug: x, ...y }` → id, slug. */
 function topLevelKeys(obj: string): string[] {
   const keys: string[] = []
@@ -215,9 +229,18 @@ export function scanSource(rel: string, raw: string): Reader[] {
   }
 
   const seen = new Set<number>()
+  const contexts: Array<[number, number]> = []
   for (const ctx of src.matchAll(WHERE_CONTEXT)) {
     const open = ctx.index! + ctx[0].length - 1
-    const end = closing(src, open)
+    contexts.push([open, closing(src, open)])
+  }
+  // `where:` whatever its value is — `cond ? { … } : { … }` included, which an
+  // object-literal match walks straight past (the venue page's ratings did).
+  for (const ctx of src.matchAll(/\bwhere\s*:\s*/g)) {
+    const start = ctx.index! + ctx[0].length
+    contexts.push([start, valueEnd(src, start)])
+  }
+  for (const [open, end] of contexts) {
     const body = src.slice(open, end + 1)
     for (const r of body.matchAll(RELATION)) {
       const at = open + r.index!
@@ -326,6 +349,7 @@ describe("the scanner", () => {
     ["raw SQL", "db.$queryRaw`SELECT e.id FROM events e WHERE e.status = 'published'`"],
     ["a findFirst on something other than the key", `db.events.findFirst({ where: { venue_id: id, status: "published" } })`],
     ["a findFirst on a set of ids", `db.events.findFirst({ where: { id: { in: ids } } })`],
+    ["a relation filter behind a ternary", `db.event_ratings.groupBy({ by: ["event_id"], where: since === null ? { id: { in: [] } } : { event: { venue_id: id } } })`],
     ["an updateMany on a set of ids", `db.events.updateMany({ where: { id: { in: ids } }, data: { status: "draft" } })`],
   ])("flags %s", (_label, snippet) => {
     expect(undecided(snippet)).toBe(1)

@@ -19,6 +19,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { actorFor } from "@/lib/org-membership"
 import { sendEventReminders, sendRatingRequests } from "@/lib/services/event-notifications.service"
 import { venueDayFor } from "@/lib/venue-day"
+import { unlinkEventVenue } from "@/lib/venue-link-actions"
 
 import { closeDb, db, makeUser, onboard, testId } from "./helpers"
 
@@ -289,5 +290,13 @@ describe("the venue owner on a venue day", () => {
 
     as("app_admin", admin)
     expect((await open(day.id)).status).toBe(200)
+  })
+
+  it("cannot unlink the venue from its own day — nobody can, which would split the room", async () => {
+    for (const [role, id] of [["organizer", orgOrganiser], ["app_admin", admin]] as const) {
+      as(role, id)
+      await expect(unlinkEventVenue(day.id, "testing the venue-day refusal")).rejects.toThrow(/not linked/)
+    }
+    expect((await db.events.findUniqueOrThrow({ where: { id: day.id } })).venue_id).toBe(venueId)
   })
 })

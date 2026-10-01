@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs"
 import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
 import { recentlyBlocked } from "./account-blocklist"
+import { SYSTEM_USER_ID } from "./event-kind"
 import { PRODUCT_EVENTS, record } from "./product-events"
 import { Prisma } from "@prisma/client"
 
@@ -105,9 +106,10 @@ const BCRYPT_ROUNDS = 12
  * the same span (SCRUM-119 recorded the bound; this closes it to seconds).
  */
 export function accountBlockReason(
-  user: { deletedAt: Date | null; suspended_at: Date | null; role: string } | null
+  user: { id?: string; deletedAt: Date | null; suspended_at: Date | null; role: string } | null
 ): "deleted" | "suspended" | "staff" | null {
-  if (!user || user.deletedAt) return "deleted"
+  // The owner of every venue day is nobody to be (lib/event-kind.ts).
+  if (!user || user.deletedAt || user.id === SYSTEM_USER_ID) return "deleted"
   if (user.suspended_at) return "suspended"
   /*
    * The app is for attendees (SCRUM-198). Organisers, venue owners, sponsors

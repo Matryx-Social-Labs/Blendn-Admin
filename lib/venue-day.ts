@@ -4,7 +4,7 @@ import { randomUUID } from "crypto"
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
 
 import { db } from "./db"
-import { venueDaysWhere } from "./event-kind"
+import { SYSTEM_USER_ID, venueDaysWhere } from "./event-kind"
 import { validateGeofence } from "./geofence"
 import { violatedConstraint } from "./prisma-errors"
 
@@ -39,7 +39,7 @@ import { violatedConstraint } from "./prisma-errors"
  * the reset is what makes pseudonyms new each day.
  */
 
-export const SYSTEM_USER_ID = "blendn-system"
+export { SYSTEM_USER_ID }
 
 /** The partial unique index that makes one day per venue (migration SQL only). */
 export const VENUE_DAY_INDEX = "events_one_venue_day_per_day"

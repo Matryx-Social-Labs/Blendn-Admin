@@ -188,7 +188,7 @@ export default async function VenueDetailPage({
       where:
         since === null
           ? { id: { in: [] } }
-          : { event: { venue_id: id, deleted_at: null, ...(since ? { start_time: since } : {}) } },
+          : { event: { venue_id: id, deleted_at: null, ...realEventsWhere, ...(since ? { start_time: since } : {}) } },
       _count: { _all: true },
     }),
   ])

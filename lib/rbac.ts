@@ -83,9 +83,11 @@ export interface EventPermissions {
    * for the venue it is held at (`lib/attendee-roster.ts`).
    *
    * Split from `canOperate` for venue days only (F1, D-1). A venue day's
-   * owner moderates its room and never learns who was in it — not as labels,
-   * not as a count — because "who keeps coming to my place" is the regulars
-   * list the venue is never given (plan v2 §2). Everywhere else it equals
+   * owner moderates its room and is never given its attendee list, because
+   * "who keeps coming to my place" is the regulars list the venue is never
+   * given (plan v2 §2). What `canOperate` still opens on a venue day is the
+   * room: its messages and the room's own per-day handles, for moderation,
+   * and the live counts the ops room carries. Everywhere else it equals
    * `canOperate`.
    */
   canViewAttendees: boolean
@@ -145,7 +147,9 @@ export function eventPermissions(
    * it; an organiser, even of an event at the same venue that night, gets
    * nothing; the person whose Go Live created it is just an attendee.
    */
-  if (event.kind === "venue_day") {
+  // `!== "event"`, not `=== "venue_day"`: a row that reached here without its
+  // kind takes the narrow branch, never the organiser's.
+  if (event.kind !== "event") {
     return ownsVenueAt(actor, orgs, event) ? { canEdit: false, canOperate: true, canViewAttendees: false } : DENIED
   }
 

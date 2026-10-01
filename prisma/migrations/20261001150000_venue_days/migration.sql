@@ -64,7 +64,11 @@ ALTER TABLE "event_check_ins" ADD COLUMN "expires_at" TIMESTAMPTZ(6);
 -- host powers. The host shown for a venue day is the venue (lib/event-host.ts).
 INSERT INTO "User" ("id", "name", "email", "role", "updatedAt")
 VALUES ('blendn-system', 'Blendn', 'system@blendn.invalid', 'attendee', CURRENT_TIMESTAMP)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ("id") DO NOTHING;
+-- On the id only. Somebody already holding the address would make this fail
+-- the deploy, loudly, rather than skip the row and fail the first Go Live on
+-- the foreign key.
+
 
 -- And it is never deleted: every venue day would cascade with it.
 CREATE FUNCTION "system_user_is_permanent"() RETURNS trigger

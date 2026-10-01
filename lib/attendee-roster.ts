@@ -274,7 +274,7 @@ export async function eventAttendees(
   })
   if (!event) return null
   // `canViewAttendees`, not `canOperate`: a venue day's owner moderates its
-  // room and is told nothing about who was in it, not even a count (F1, D-1).
+  // room and is never given its attendee list, labels or count (F1, D-1).
   const { canEdit, canViewAttendees } = eventPermissions(actor, event)
   if (!canViewAttendees) return null
 

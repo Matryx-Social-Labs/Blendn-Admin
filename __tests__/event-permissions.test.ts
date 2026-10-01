@@ -161,6 +161,12 @@ describe("eventPermissions — a venue day", () => {
     })
   })
 
+  it("fails closed on a row that reached the resolver without its kind", () => {
+    const noKind = { ...day(ORG_VENUE), kind: undefined } as unknown as PermissionEvent
+    expect(eventPermissions(actor(CARA, "venue_owner", [ORG_VENUE]), noKind).canViewAttendees).toBe(false)
+    expect(eventPermissions(actor(ALICE, "organizer", [ORG_VENUE]), noKind).canEdit).toBe(false)
+  })
+
   it("keeps canViewAttendees equal to canOperate on ordinary events", () => {
     for (const [a, ev] of [
       [actor(CARA, "venue_owner", [ORG_VENUE]), event(ORG_HOST, ORG_VENUE)],

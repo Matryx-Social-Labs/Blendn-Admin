@@ -251,7 +251,7 @@ org and the default branch would hand that org edit and the roster:
 | Actor | edit | operate (room, moderation) | attendees |
 |---|---|---|---|
 | app_admin | yes | yes | yes |
-| venue owner (claimed, day started after the claim) | no | yes | **no** — not labels, not a count |
+| venue owner (claimed, day started after the claim) | no | yes — the room's messages and its per-day handles, the live counts | **no** attendee list, as labels or as a count |
 | anyone else, organisers of the same org included | no | no | no |
 
 **Hidden from every reader that is not about it.** `lib/event-kind.ts` exports
@@ -260,7 +260,8 @@ org and the default branch would hand that org edit and the roster:
 `scripts/` and `server.ts` for every events reader — `db.events.*`, relation
 filters, `_count.events`, raw SQL — and fails on one that neither filters nor
 carries an `any-kind: <reason>` comment. Excluded: the feed, search, cities,
-`/venues` counts, RSVPs, favourites, the claim page, every dashboard list,
+`/venues` counts, the RSVP and favourite lists, the claim page, the venue-link
+confirm/dispute/unlink actions, every dashboard list,
 overview, report and export, organiser counts, demand, reminders, rating
 requests, the issue sweeper, the sponsored scheduler, the loop funnel, an
 organisation's suspension, and the seeds. Included, on purpose: a person's own
@@ -269,6 +270,12 @@ own rooms, room archival, reveals, room entry by check-in, and sentiment
 classification (an escalation is how an unclaimed room reaches the platform).
 Building occupancy excludes them until the owner's screens are redesigned
 (step 17), so the room row and its count arrive through `discloseFigure`.
+
+**Still open for step 4**, which makes venue days reachable: the by-id attendee
+routes (RSVP, favourite, interest, rating, the plain event check-in) take any
+event id that is not private, so they would accept a venue day's; the Go Live
+route is the only door in, and those routes refuse the kind there. The system
+user can sign in on no surface (`accountBlockReason`) and has no public profile.
 
 ---
 
