@@ -166,10 +166,15 @@ describe("accepting opens a conversation that can be told apart from a match", (
      * rather than silently overwriting the first answer.
      */
     const src = codeOnly(read(...DECIDE))
-    const claims = src.match(/db\.board_requests\.updateMany\(\{[\s\S]*?\}\)/g) ?? []
-    // Two claims (the decline/withdraw path and the accept path) plus the revert.
-    expect(claims.length).toBeGreaterThanOrEqual(3)
-    expect(claims.filter((c) => c.includes('status: "pending"')).length).toBeGreaterThanOrEqual(2)
+    // The accept claim runs inside the seat's transaction, so `tx.` as well as `db.`.
+    const claims = src.match(/(?:db|tx)\.board_requests\.updateMany\(\{[\s\S]*?\}\)/g) ?? []
+    // The decline, accept and withdraw claims, plus the revert.
+    expect(claims.length).toBeGreaterThanOrEqual(4)
+    // In the WHERE: the revert's `data: { status: "pending" }` matched the
+    // bare string, so a claim with its predicate deleted still passed.
+    expect(
+      claims.filter((c) => c.includes('where: { id: requestId, status: "pending" }')).length
+    ).toBeGreaterThanOrEqual(2)
   })
 
   it("puts the request back if the conversation cannot be opened", () => {
@@ -220,7 +225,7 @@ describe("accepting opens a conversation that can be told apart from a match", (
     expect(src).toMatch(/action === "accept" && !isLiveRequest\(/)
     // ...and it must read the row, not a value it invented.
     expect(src).toContain("event: { select: { end_time: true } }")
-    expect(src).toContain("post: { select: { deleted_at: true, kind: true, spaces_left: true } }")
+    expect(src).toContain("post: { select: { deleted_at: true, spaces_left: true } }")
   })
 })
 

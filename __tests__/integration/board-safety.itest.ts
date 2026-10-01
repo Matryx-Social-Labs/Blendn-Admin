@@ -24,11 +24,20 @@ import { NextRequest } from "next/server"
  * - `spaces_left: { gt: 0 }` dropped from the seat  → "gives the last seat to exactly one" (500, not 409)
  * - the seat decrement deleted                      → "spends a seat on each accept"
  * - the full-offer refusal on the ask deleted       → "refuses an ask on a full offer"
+ * - the cap counting every declined ask, live or not → "lets a declined ask lapse out of the cap"
+ * - the waiting half ordered by stored status        → "sorts a declined ask among the pending ones by time"
+ * - `asTheAskerSees` applied to incoming too          → "tells the author what they decided"
+ * - the seat taken before the block check            → "spends no seat on an accept that is refused"
+ * - the seat give-back in the open-failure path cut  → "gives the seat back with the ask"
+ * - claim and seat outside one transaction, the claim
+ *   loser's seat never given back                     → "spends one seat on a double-tapped accept"
+ * - the ask route's doors check deleted              → "refuses posting and asking after doors"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 import { ALREADY_ASKED, BOARD_CLOSED } from "@/lib/board"
 import { boardWriteDenial } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
+import * as conversations from "@/lib/conversations"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -146,6 +155,14 @@ async function boardOf(who: Person, at = eventId) {
   })
   return res
 }
+
+const postTo = (who: Person, at: string) =>
+  boardRoute.POST(req("POST", `/api/mobile/events/${at}/board`, who.token, { kind: "chat", body: "anyone else going?" }), {
+    params: Promise.resolve({ eventId: at }),
+  })
+
+/** Ids alone, for comparing two responses that differ only in which row they name. */
+const sansIds = (text: string, ...ids: string[]) => ids.reduce((t, id) => t.split(id).join("<id>"), text)
 
 async function postIdsOn(who: Person): Promise<string[]> {
   const res = await boardOf(who)
@@ -289,6 +306,103 @@ describe("a decline is never delivered to the asker", () => {
   })
 })
 
+describe("a decline is never delivered — the edges", () => {
+  it("sorts a declined ask among the pending ones by time, not after them", async () => {
+    const author = await person("int-author")
+    const asker = await person("int-asker")
+    const at = (mins: number) => new Date(Date.now() - mins * 60_000)
+    const mk = async (status: "pending" | "declined", created: Date) =>
+      (
+        await db.board_requests.create({
+          data: {
+            event_id: eventId,
+            post_id: await offer(author, null, "seeking"),
+            from_user_id: asker.id,
+            to_user_id: author.id,
+            status,
+            created_at: created,
+            decided_at: status === "declined" ? new Date() : null,
+          },
+          select: { id: true },
+        })
+      ).id
+    const oldest = await mk("pending", at(30))
+    const middle = await mk("declined", at(20))
+    const newest = await mk("pending", at(10))
+
+    const ids = (await list(asker)).outgoing.map((r) => r.id).filter((id) => [oldest, middle, newest].includes(id))
+    expect(ids).toEqual([newest, middle, oldest])
+  })
+
+  it("lets a declined ask lapse out of the cap with its event, as a pending one does", async () => {
+    const other = await upcoming()
+    const author = await person("lc-author", other)
+    const asker = await person("lc-asker")
+    for (let n = 0; n < BOARD.MAX_OUTSTANDING_REQUESTS; n++) {
+      await db.board_requests.create({
+        data: {
+          event_id: other,
+          post_id: await offer(author, 2, "offer", other),
+          from_user_id: asker.id,
+          to_user_id: author.id,
+          status: "declined",
+          decided_at: new Date(),
+        },
+      })
+    }
+    expect(await boardWriteDenial(eventId, asker.id)).toBe("too_many_outstanding")
+    await db.events.update({
+      where: { id: other },
+      data: { start_time: new Date(Date.now() - 2 * 3600_000), end_time: new Date(Date.now() - 3600_000) },
+    })
+    expect(await boardWriteDenial(eventId, asker.id)).toBeNull()
+  })
+
+  it("tells the author what they decided, and changes nobody's count", async () => {
+    const author = await person("au-author")
+    const asker = await person("au-asker")
+    const post = await offer(author, 2)
+    const requestId = await askedId(asker, post)
+    const countFor = async (who: Person) =>
+      ((await (await boardOf(who)).json()) as { data: { posts: { id: string; requestCount: number }[] } }).data.posts.find(
+        (p) => p.id === post
+      )?.requestCount
+    const before = await countFor(asker)
+
+    expect((await answer(author, requestId, "decline")).status).toBe(200)
+    const row = (await list(author)).incoming.find((r) => r.id === requestId)
+    expect(row?.status).toBe("declined")
+    expect(row?.decidedAt).not.toBeNull()
+    expect(await countFor(asker)).toBe(before)
+  })
+
+  it("withdraws a declined ask with the very response a pending one gets", async () => {
+    const author = await person("wsame-author")
+    const asker = await person("wsame-asker")
+    const pendingId = await askedId(asker, await offer(author, 2))
+    const declinedId = await askedId(asker, await offer(author, 2))
+    expect((await answer(author, declinedId, "decline")).status).toBe(200)
+
+    const [p, d] = [await answer(asker, pendingId, "withdraw"), await answer(asker, declinedId, "withdraw")]
+    expect(p.status).toBe(d.status)
+    expect(sansIds(await d.text(), declinedId)).toBe(sansIds(await p.text(), pendingId))
+  })
+
+  it("never words a refused re-ask as an answer", async () => {
+    expect(ALREADY_ASKED).not.toMatch(/declin|answered|said no|refus/i)
+  })
+
+  it("answers a double tap with one ask and the same sentence", async () => {
+    const author = await person("dt-author")
+    const asker = await person("dt-asker")
+    const post = await offer(author, 2)
+    const results = await Promise.all([ask(asker, post), ask(asker, post)])
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409])
+    expect((await results.find((r) => r.status === 409)!.json()).error).toBe(ALREADY_ASKED)
+    expect(await db.board_requests.count({ where: { post_id: post } })).toBe(1)
+  })
+})
+
 describe("blocks reach the board, both ways", () => {
   it("hides a post by somebody who blocked you", async () => {
     const author = await person("blk-author")
@@ -344,6 +458,20 @@ describe("doors and kinds", () => {
     const res = await boardOf(viewer, at)
     expect(res.status).toBe(403)
     expect((await res.json()).error).toBe(BOARD_CLOSED)
+  })
+
+  it("refuses posting and asking after doors too, in the same words", async () => {
+    const at = await upcoming()
+    const author = await person("doors2-author", at)
+    const asker = await person("doors2-asker", at)
+    const post = await offer(author, 2, "offer", at)
+    await db.events.update({ where: { id: at }, data: { start_time: new Date(Date.now() - 60_000) } })
+
+    for (const res of [await postTo(author, at), await ask(asker, post, at)]) {
+      expect(res.status).toBe(403)
+      expect((await res.json()).error).toBe(BOARD_CLOSED)
+    }
+    expect(BOARD_CLOSED).toMatch(/doors open/)
   })
 
   it("refuses an ask on a chat post, and stores nothing", async () => {
@@ -407,6 +535,41 @@ describe("an offer's seats are spent by accepting (SCRUM-514)", () => {
     expect(res.status).toBe(409)
     expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("pending")
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(0)
+  })
+
+  it("spends one seat on a double-tapped accept", async () => {
+    const author = await person("dta-author")
+    const asker = await person("dta-asker")
+    const post = await offer(author, 2)
+    const requestId = await askedId(asker, post)
+    const results = await Promise.all([answer(author, requestId, "accept"), answer(author, requestId, "accept")])
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409])
+    expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(1)
+  })
+
+  it("spends no seat on an accept that is refused", async () => {
+    const author = await person("rs-author")
+    const asker = await person("rs-asker")
+    const post = await offer(author, 2)
+    const requestId = await askedId(asker, post)
+    await db.blocked_users.create({ data: { blocker_id: author.id, blocked_id: asker.id } })
+    expect((await answer(author, requestId, "accept")).status).toBe(403)
+    expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
+  })
+
+  it("gives the seat back with the ask when the conversation cannot be opened", async () => {
+    const author = await person("gb-author")
+    const asker = await person("gb-asker")
+    const post = await offer(author, 2)
+    const requestId = await askedId(asker, post)
+    const spy = jest.spyOn(conversations, "openConversation").mockRejectedValueOnce(new Error("db hiccup"))
+    try {
+      expect((await answer(author, requestId, "accept")).status).toBe(500)
+    } finally {
+      spy.mockRestore()
+    }
+    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("pending")
+    expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
   })
 
   it("leaves an offer that never named its seats alone", async () => {

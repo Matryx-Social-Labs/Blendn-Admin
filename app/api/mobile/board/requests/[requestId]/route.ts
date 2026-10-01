@@ -29,6 +29,9 @@ interface RouteParams {
   params: Promise<{ requestId: string }>
 }
 
+/** Thrown inside the accept transaction to roll the claim back. */
+class OfferFull extends Error {}
+
 /**
  * Answering a board request: yes, no, or never mind.
  *
@@ -85,7 +88,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         from_user_id: true,
         to_user_id: true,
         event: { select: { end_time: true } },
-        post: { select: { deleted_at: true, kind: true, spaces_left: true } },
+        post: { select: { deleted_at: true, spaces_left: true } },
       },
     })
     if (!boardRequest) return notFoundResponse("Request not found")
@@ -188,40 +191,42 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
-     * A seat, taken before the claim and in the predicate (SCRUM-514).
+     * The claim and the seat, in one transaction (SCRUM-514).
      *
      * An offer of two seats accepted three times is a car with three people
      * promised two places. The read above is not a lock, so the guard is the
-     * write itself: `spaces_left > 0` in the where clause, so of two accepts
-     * racing for the last seat exactly one decrements and the other is told the
-     * offer is full. The CHECK on the column keeps it from going below zero
-     * even if this predicate were lost. An offer that never named a number of
-     * seats (`spaces_left` null) has none to run out of.
+     * write itself: `spaces_left > 0` in the where clause. Two accepts racing
+     * for the last seat both claim their own ask, then queue on the post's
+     * row; the second finds no seat, and throwing rolls its claim back — so its
+     * ask stays pending and nothing has to be given back by hand. A claim that
+     * loses (a double tap) never reaches the seat at all. The CHECK on the
+     * column keeps it from going below zero even if the predicate were lost.
+     * An offer that never named a number of seats (`spaces_left` null) has
+     * none to run out of; only offers can have one (a CHECK).
      */
-    const takesASeat = boardRequest.post.kind === "offer" && boardRequest.post.spaces_left !== null
-    if (takesASeat) {
-      const seat = await db.board_posts.updateMany({
-        where: { id: boardRequest.post_id, spaces_left: { gt: 0 } },
-        data: { spaces_left: { decrement: 1 } },
+    const takesASeat = boardRequest.post.spaces_left !== null
+    let claimed: boolean
+    try {
+      claimed = await db.$transaction(async (tx) => {
+        const claim = await tx.board_requests.updateMany({
+          where: { id: requestId, status: "pending" },
+          data: { status: "accepted", decided_at: new Date() },
+        })
+        if (claim.count === 0) return false
+        if (takesASeat) {
+          const seat = await tx.board_posts.updateMany({
+            where: { id: boardRequest.post_id, spaces_left: { gt: 0 } },
+            data: { spaces_left: { decrement: 1 } },
+          })
+          if (seat.count === 0) throw new OfferFull()
+        }
+        return true
       })
-      if (seat.count === 0) return conflictResponse("That offer is full")
+    } catch (error) {
+      if (error instanceof OfferFull) return conflictResponse("That offer is full")
+      throw error
     }
-    const giveTheSeatBack = async () => {
-      if (!takesASeat) return
-      await db.board_posts.updateMany({
-        where: { id: boardRequest.post_id },
-        data: { spaces_left: { increment: 1 } },
-      })
-    }
-
-    const claimed = await db.board_requests.updateMany({
-      where: { id: requestId, status: "pending" },
-      data: { status: "accepted", decided_at: new Date() },
-    })
-    if (claimed.count === 0) {
-      await giveTheSeatBack()
-      return conflictResponse("That request has already been answered")
-    }
+    if (!claimed) return conflictResponse("That request has already been answered")
 
     let conversation
     try {
@@ -255,7 +260,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         where: { id: requestId, status: "accepted" },
         data: { status: "pending", decided_at: null },
       })
-      await giveTheSeatBack()
+      // ...and the seat it took, so the offer is not one place short for ever.
+      if (takesASeat) {
+        await db.board_posts.updateMany({
+          where: { id: boardRequest.post_id },
+          data: { spaces_left: { increment: 1 } },
+        })
+      }
       if (error instanceof ConversationClosedError) {
         return conflictResponse("This request can no longer be accepted")
       }
