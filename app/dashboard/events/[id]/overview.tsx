@@ -42,7 +42,7 @@ export function Overview({
   /** Null before the event has run — there is nothing to count yet. */
   attendance: EventAttendance | null
   connections: ConnectionMetrics | null
-  /** Null before the event has run, like attendance. */
+  /** Null only for a draft: an upcoming event can already have turned people away (SCRUM-494). */
   turnedAway: EventRefusals | null
 }) {
   const { state, hero, tiles, blockers, publishable } = overview
