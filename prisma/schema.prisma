@@ -529,7 +529,8 @@ model events {
   // The rooms list asks "published and ended less than 24h ago"; start_time
   // matches every event that has ever started, end_time is the bound.
   @@index([status, end_time])
-  @@index([venue_id])
+  // A venue owner's events are venue + start (the claim window, SCRUM-500).
+  @@index([venue_id, start_time])
   @@index([organizer_org_id])
   @@index([organizer_id])
   @@index([deleted_at])

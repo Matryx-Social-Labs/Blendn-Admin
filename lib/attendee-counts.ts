@@ -59,6 +59,29 @@ export async function distinctAttendeeCounts(
 }
 
 /**
+ * How many people attended each of these days — `event_occurrences` rows.
+ *
+ * `distinctAttendeeCounts`'s question, grouped by the day rather than the
+ * event. The venue owner's check-ins export reads it: guests per event per day,
+ * never who (SCRUM-501).
+ */
+export async function distinctAttendeeCountsByDay(
+  occurrenceIds: readonly string[]
+): Promise<Map<string, number>> {
+  if (occurrenceIds.length === 0) return new Map()
+
+  const rows = await db.$queryRaw<{ occurrence_id: string; people: bigint }[]>`
+    SELECT occurrence_id, COUNT(DISTINCT user_id) AS people
+    FROM event_check_ins
+    WHERE occurrence_id IN (${Prisma.join(occurrenceIds)})
+      AND status::text IN (${Prisma.join(ATTENDED)})
+      AND kind = 'attendee'
+    GROUP BY occurrence_id
+  `
+  return new Map(rows.map((r) => [r.occurrence_id, Number(r.people)]))
+}
+
+/**
  * The Room's headline number: how many people are inside RIGHT NOW.
  *
  * Deliberately NOT `distinctAttendeeCounts`. That is "attended" — it keeps

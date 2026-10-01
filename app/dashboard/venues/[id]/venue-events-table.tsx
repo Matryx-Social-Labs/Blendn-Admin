@@ -4,7 +4,7 @@ import { IconCalendar } from "@tabler/icons-react"
 
 import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState } from "@/components/dashboard/primitives"
-import { formatPct, formatSince } from "@/lib/dashboard-format"
+import { formatNumber, formatPct, formatSince } from "@/lib/dashboard-format"
 
 /**
  * Events at one venue.
@@ -20,8 +20,9 @@ export interface VenueEventRow {
   title: string
   startAt: string
   organiser: string
-  going: number
-  attended: number
+  /** Null when held back: another host's night, seen as the venue (SCRUM-501). */
+  going: number | null
+  attended: number | null
   fillPct: number | null
   status: string
 }
@@ -37,8 +38,14 @@ const columns: Column<VenueEventRow>[] = [
     render: (r) => formatSince(r.startAt),
   },
   { key: "organiser", label: "Organiser", sortType: "string", secondary: true },
-  { key: "going", label: "Going", align: "right", sortType: "number" },
-  { key: "attended", label: "Attended", align: "right", sortType: "number" },
+  { key: "going", label: "Going", align: "right", sortType: "number", render: (r) => formatNumber(r.going) },
+  {
+    key: "attended",
+    label: "Attended",
+    align: "right",
+    sortType: "number",
+    render: (r) => formatNumber(r.attended),
+  },
   {
     key: "fillPct",
     label: "Fill",

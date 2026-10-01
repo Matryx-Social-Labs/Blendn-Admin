@@ -1,10 +1,12 @@
 import { db } from "./db"
-import type { DateRange } from "./date-range"
-import type { user_role } from "@prisma/client"
+import { toISODate, type DateRange } from "./date-range"
+import type { Prisma, user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
-import { distinctAttendeeCounts } from "./attendee-counts"
+import { distinctAttendeeCounts, distinctAttendeeCountsByDay } from "./attendee-counts"
+import { discloseGuests, discloseVenueCounts } from "./disclosure"
 import { hostNotSuspended } from "./event-access"
+import { claimedVenueEventsWhere, hostsEvent } from "./event-visibility"
 import { activeMembership } from "./org-membership"
 
 /**
@@ -29,6 +31,7 @@ export type ReportKey =
   | "events"
   | "attendees"
   | "check-ins"
+  | "venue-check-ins"
   | "ratings"
   | "organisations"
   | "moderation"
@@ -37,6 +40,8 @@ export interface ReportDef {
   key: ReportKey
   label: string
   description: string
+  /** What a venue owner downloads instead, when it is a different shape. */
+  venueDescription?: string
   roles: user_role[]
 }
 
@@ -45,6 +50,8 @@ export const REPORTS: ReportDef[] = [
     key: "events",
     label: "Events",
     description: "Every event in the window with capacity, RSVPs and attendance.",
+    venueDescription:
+      "Your own events, and other hosts' at your venues since your claim — their small counts left blank.",
     roles: ["app_admin", "organizer", "venue_owner"],
   },
   {
@@ -57,7 +64,20 @@ export const REPORTS: ReportDef[] = [
     key: "check-ins",
     label: "Check-ins",
     description: "Individual GPS-validated check-ins, one row each.",
+    venueDescription: "Check-ins at events your organisation runs, one row each.",
     roles: ["app_admin", "organizer", "venue_owner"],
+  },
+  {
+    key: "venue-check-ins",
+    label: "Venue check-ins",
+    description:
+      "Guests per day at other hosts' events at your venues, since your claim. Counts that could single someone out are left blank.",
+    /*
+     * A venue sees aggregates, never people (SCRUM-501). The events it runs
+     * itself are in Check-ins, as for any organiser; this is everybody else's
+     * nights in its building.
+     */
+    roles: ["venue_owner"],
   },
   {
     key: "ratings",
@@ -86,7 +106,9 @@ export const REPORTS: ReportDef[] = [
 ]
 
 export function reportsFor(role: user_role): ReportDef[] {
-  return REPORTS.filter((r) => r.roles.includes(role))
+  return REPORTS.filter((r) => r.roles.includes(role)).map((r) =>
+    role === "venue_owner" && r.venueDescription ? { ...r, description: r.venueDescription } : r
+  )
 }
 
 export function canRunReport(key: string, role: user_role): boolean {
@@ -94,32 +116,73 @@ export function canRunReport(key: string, role: user_role): boolean {
 }
 
 /**
- * Which events this actor may report on.
- *
- * `app_admin` gets everything. A host gets events their organisations run, plus
- * — for a venue owner — events at venues their organisations own, which mirrors
- * `eventPermissions.canOperate` exactly.
- */
 /**
- * The salt for attendee pseudonyms.
+ * The salt for one event's attendee pseudonyms, as `viewer` sees them.
  *
- * Stable for one organisation -- the attendees report counts events per person,
- * so a label that changed between exports would make "returning attendee"
- * meaningless -- and different across organisations, so two hosts cannot
- * compare exports and discover they had the same person.
+ * The event's own organisation. Stable across that organisation's events and
+ * the same for every member of it -- the attendees report counts events per
+ * person, so a label that changed between exports would make "returning
+ * attendee" meaningless -- and different at every other organisation, so two
+ * hosts cannot compare exports and discover they had the same person.
+ *
+ * It used to be the viewer's memberships joined, which broke both halves: a
+ * member of organisations A and B saw one label across both, and everybody's
+ * labels changed when they joined or left an organisation. A viewer outside
+ * the event's organisation (a creator who left it) gets a salt of their own, so
+ * their labels never match the organiser's. The platform keeps one.
  */
-export async function pseudonymScope(role: user_role, userId: string): Promise<string> {
-  if (role === "app_admin") return "platform"
-  const memberships = await db.organisation_members.findMany({
-    where: { user_id: userId, ...activeMembership },
-    select: { org_id: true },
-  })
-  const orgIds = memberships.map((m) => m.org_id).sort()
-  return orgIds.length > 0 ? orgIds.join(",") : `user:${userId}`
+export function labelScopeFor(
+  viewer: { id: string; role: user_role; orgIds: readonly string[] },
+  eventOrgId: string | null
+): string {
+  if (viewer.role === "app_admin") return "platform"
+  return eventOrgId && viewer.orgIds.includes(eventOrgId) ? eventOrgId : `user:${viewer.id}`
 }
 
-export async function eventScopeFor(role: user_role, userId: string) {
-  if (role === "app_admin") return { deleted_at: null }
+/** `labelScopeFor`, with the viewer's memberships loaded once for a whole export. */
+export async function labelScoper(
+  role: user_role,
+  userId: string
+): Promise<(eventOrgId: string | null) => string> {
+  const memberships =
+    role === "app_admin"
+      ? []
+      : await db.organisation_members.findMany({
+          where: { user_id: userId, ...activeMembership },
+          select: { org_id: true },
+        })
+  const viewer = { id: userId, role, orgIds: memberships.map((m) => m.org_id) }
+  return (eventOrgId) => labelScopeFor(viewer, eventOrgId)
+}
+
+/** No rows. Prisma has no literal false; an empty `in` is the idiom. */
+const NOTHING: Prisma.eventsWhereInput = { id: { in: [] } }
+
+/**
+ * Which events an actor reports on, split by how they reach each one.
+ *
+ * - `hosted`: the events their organisations run, plus the creator floor
+ *   (gated like `visibleEventsWhere`'s, SCRUM-8). Exact counts, per-guest rows.
+ * - `venueOnly`: a venue owner's reach through the building — other hosts'
+ *   events at their venues, from the claim on (SCRUM-355, SCRUM-500). Counts
+ *   only, held back under the floor (SCRUM-501).
+ * - `all`: either. What `eventPermissions.canOperate` grants.
+ *
+ * Split by arm rather than by role: a venue owner whose organisation hosts its
+ * own events (SCRUM-320) keeps the organiser's export for those.
+ */
+export interface ReportScope {
+  all: Prisma.eventsWhereInput
+  hosted: Prisma.eventsWhereInput
+  venueOnly: Prisma.eventsWhereInput
+  actor: { id: string; orgIds: string[] }
+}
+
+export async function reportScope(role: user_role, userId: string): Promise<ReportScope> {
+  if (role === "app_admin") {
+    const all = { deleted_at: null }
+    return { all, hosted: all, venueOnly: NOTHING, actor: { id: userId, orgIds: [] } }
+  }
 
   const memberships = await db.organisation_members.findMany({
     where: { user_id: userId, ...activeMembership },
@@ -129,17 +192,38 @@ export async function eventScopeFor(role: user_role, userId: string) {
 
   // No org means no events. Returning an unscoped filter here would export the
   // whole platform to someone with no organisation at all.
-  if (orgIds.length === 0) return { deleted_at: null, id: { in: [] as string[] } }
+  if (orgIds.length === 0) {
+    return { all: NOTHING, hosted: NOTHING, venueOnly: NOTHING, actor: { id: userId, orgIds } }
+  }
+
+  const hostedArms: Prisma.eventsWhereInput[] = [
+    { organizer_org_id: { in: orgIds } },
+    { organizer_id: userId, ...hostNotSuspended },
+  ]
+  const venueArms = role === "venue_owner" ? await claimedVenueEventsWhere(orgIds) : []
 
   return {
-    deleted_at: null,
-    OR: [
-      { organizer_org_id: { in: orgIds } },
-      // The creator floor, gated like `visibleEventsWhere`'s (SCRUM-8).
-      { organizer_id: userId, ...hostNotSuspended },
-      ...(role === "venue_owner" ? [{ venue: { owner_org_id: { in: orgIds } } }] : []),
-    ],
+    all: { deleted_at: null, OR: [...hostedArms, ...venueArms] },
+    hosted: { deleted_at: null, OR: hostedArms },
+    venueOnly: venueArms.length
+      ? {
+          deleted_at: null,
+          AND: [
+            { OR: venueArms },
+            // Not theirs to run. Explicit about NULL: a bare `notIn` on a
+            // nullable column drops every event with no organising org.
+            { OR: [{ organizer_org_id: null }, { organizer_org_id: { notIn: orgIds } }] },
+            { organizer_id: { not: userId } },
+          ],
+        }
+      : NOTHING,
+    actor: { id: userId, orgIds },
   }
+}
+
+/** Every event this actor may report on. */
+export async function eventScopeFor(role: user_role, userId: string): Promise<Prisma.eventsWhereInput> {
+  return (await reportScope(role, userId)).all
 }
 
 /**
@@ -165,8 +249,9 @@ export async function buildReport(
 ): Promise<string> {
   // The route checks first; this holds for any caller that doesn't (SCRUM-437).
   if (!canRunReport(key, role)) throw new Error(`The ${key} report is not open to ${role}`)
-  const scope = await eventScopeFor(role, userId)
-  const labelScope = await pseudonymScope(role, userId)
+  const scopes = await reportScope(role, userId)
+  const scope = scopes.all
+  const labelScope = (eventOrgId: string | null) => labelScopeFor({ ...scopes.actor, role }, eventOrgId)
   const inWindow = { gte: range.from, lt: range.to }
 
   switch (key) {
@@ -184,6 +269,8 @@ export async function buildReport(
           city: true,
           venue_name: true,
           max_capacity: true,
+          organizer_id: true,
+          organizer_org_id: true,
           _count: {
             select: {
               rsvps: { where: { status: "going" } },
@@ -198,6 +285,23 @@ export async function buildReport(
        * conference, in the file that also promises the export is pseudonymous.
        */
       const attended = await distinctAttendeeCounts(rows.map((r) => r.id))
+      /*
+       * A venue owner's row for another host's event is counts held back under
+       * the floor, as on every surface they see it (SCRUM-501). Their own
+       * events, and everybody else's exports, are exact.
+       */
+      const counts = (r: (typeof rows)[number]) => {
+        const exact = {
+          going: r._count.rsvps,
+          attended: attended.get(r.id) ?? 0,
+          // Blank rather than 0 when there is no declared capacity: an event
+          // with no cap is not an event that failed to fill.
+          fillPct: r.max_capacity ? Math.round((r._count.rsvps / r.max_capacity) * 100) : null,
+        }
+        return role === "venue_owner" && !hostsEvent(scopes.actor, r)
+          ? discloseVenueCounts({ ...exact, capacity: r.max_capacity })
+          : exact
+      }
       const columns: CsvColumn<(typeof rows)[number]>[] = [
         { key: "id", label: "Event ID" },
         { key: "title", label: "Title" },
@@ -207,16 +311,9 @@ export async function buildReport(
         { key: "city", label: "City" },
         { key: "venue_name", label: "Venue" },
         { key: "max_capacity", label: "Capacity" },
-        { key: "going", label: "Going", value: (r) => r._count.rsvps },
-        { key: "attended", label: "Attended", value: (r) => attended.get(r.id) ?? 0 },
-        {
-          key: "fill",
-          label: "Fill %",
-          // Blank rather than 0 when there is no declared capacity: an event
-          // with no cap is not an event that failed to fill.
-          value: (r) =>
-            r.max_capacity ? Math.round((r._count.rsvps / r.max_capacity) * 100) : null,
-        },
+        { key: "going", label: "Going", value: (r) => counts(r).going },
+        { key: "attended", label: "Attended", value: (r) => counts(r).attended },
+        { key: "fill", label: "Fill %", value: (r) => counts(r).fillPct },
       ]
       return toCsv(columns, rows)
     }
@@ -228,7 +325,7 @@ export async function buildReport(
           event: scope,
           created_at: inWindow,
         },
-        select: { user_id: true, event_id: true, created_at: true },
+        select: { user_id: true, event_id: true, created_at: true, event: { select: { organizer_org_id: true } } },
         /*
          * Bounded, and ordered so the bound is meaningful.
          *
@@ -240,17 +337,19 @@ export async function buildReport(
         orderBy: { created_at: "desc" },
         take: REPORT_ROW_LIMIT,
       })
-      const byUser = new Map<string, { events: Set<string>; last: Date }>()
+      // By label, not by user: one person at two organisations is two rows.
+      // Pseudonymous by design: attendees are pseudonymous to hosts everywhere
+      // in this product, and an export is not a way around that.
+      const byLabel = new Map<string, { events: Set<string>; last: Date }>()
       for (const ci of checkIns) {
-        const entry = byUser.get(ci.user_id) ?? { events: new Set<string>(), last: ci.created_at }
+        const label = attendeeLabel(ci.user_id, labelScope(ci.event.organizer_org_id))
+        const entry = byLabel.get(label) ?? { events: new Set<string>(), last: ci.created_at }
         entry.events.add(ci.event_id)
         if (ci.created_at > entry.last) entry.last = ci.created_at
-        byUser.set(ci.user_id, entry)
+        byLabel.set(label, entry)
       }
-      const rows = [...byUser.entries()].map(([userId, v]) => ({
-        // Pseudonymous by design: attendees are pseudonymous to hosts
-        // everywhere in this product, and an export is not a way around that.
-        attendee: attendeeLabel(userId, labelScope),
+      const rows = [...byLabel.entries()].map(([attendee, v]) => ({
+        attendee,
         events_attended: v.events.size,
         last_attended: v.last,
         repeat: v.events.size > 1,
@@ -268,27 +367,89 @@ export async function buildReport(
     }
 
     case "check-ins": {
+      /*
+       * One row per check-in, by label: the events this actor RUNS. For a venue
+       * owner that is the organiser's view of their own events (SCRUM-320); the
+       * nights other hosts hold in their building are `venue-check-ins`, counts
+       * only (SCRUM-501). For everyone else `hosted` is their whole scope.
+       */
       const rows = await db.event_check_ins.findMany({
-        where: { event: scope, created_at: inWindow },
+        where: { event: scopes.hosted, created_at: inWindow },
         orderBy: { created_at: "desc" },
         take: REPORT_ROW_LIMIT,
         select: {
           created_at: true,
           status: true,
           user_id: true,
-          event: { select: { id: true, title: true, start_time: true } },
+          event: { select: { id: true, title: true, start_time: true, organizer_org_id: true } },
         },
       })
       return toCsv(
         [
           { key: "created_at", label: "Checked in at" },
           { key: "status", label: "Status" },
-          { key: "attendee", label: "Attendee", value: (r) => attendeeLabel(r.user_id, labelScope) },
+          {
+            key: "attendee",
+            label: "Attendee",
+            value: (r) => attendeeLabel(r.user_id, labelScope(r.event.organizer_org_id)),
+          },
           { key: "event_id", label: "Event ID", value: (r) => r.event.id },
           { key: "event", label: "Event", value: (r) => r.event.title },
           { key: "event_start", label: "Event start", value: (r) => r.event.start_time },
         ],
         rows
+      )
+    }
+
+    case "venue-check-ins": {
+      /*
+       * Other hosts' nights at a venue owner's venues, since the claim: how
+       * many guests, per event per day. Never who (SCRUM-501).
+       *
+       * Every day that was not called off is a row, blank when held back, so a
+       * row's presence cannot tell a day nobody came from a day four did. A
+       * day is in the window by its own calendar date (`occurs_on`, the
+       * event's local day), not by the server's clock.
+       */
+      const day = (d: Date) => new Date(`${toISODate(d)}T00:00:00.000Z`)
+      const days = await db.event_occurrences.findMany({
+        where: {
+          event: scopes.venueOnly,
+          cancelled_at: null,
+          occurs_on: { gte: day(range.from), lte: day(new Date(range.to.getTime() - 1)) },
+        },
+        orderBy: [{ occurs_on: "desc" }, { start_time: "desc" }],
+        take: REPORT_ROW_LIMIT,
+        select: {
+          id: true,
+          occurs_on: true,
+          event: { select: { id: true, title: true, start_time: true } },
+        },
+      })
+      const eventIds = [...new Set(days.map((d) => d.event.id))]
+      const [guests, going] = await Promise.all([
+        distinctAttendeeCountsByDay(days.map((d) => d.id)),
+        db.event_rsvps.groupBy({
+          by: ["event_id"],
+          where: { event_id: { in: eventIds }, status: "going" },
+          _count: { _all: true },
+        }),
+      ])
+      const goingBy = new Map(going.map((g) => [g.event_id, g._count._all]))
+      return toCsv(
+        [
+          { key: "event_id", label: "Event ID", value: (d) => d.event.id },
+          { key: "event", label: "Event", value: (d) => d.event.title },
+          { key: "event_start", label: "Event start", value: (d) => d.event.start_time },
+          // A calendar day, not an instant.
+          { key: "day", label: "Day", value: (d) => d.occurs_on.toISOString().slice(0, 10) },
+          {
+            key: "guests",
+            label: "Guests",
+            value: (d) => discloseGuests(guests.get(d.id) ?? 0, goingBy.get(d.event.id) ?? 0),
+          },
+        ],
+        days
       )
     }
 

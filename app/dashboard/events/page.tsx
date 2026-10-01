@@ -7,7 +7,8 @@ import { curationState } from "@/lib/curation"
 import { whenLabel } from "@/lib/dashboard-format"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { db } from "@/lib/db"
-import { visibleEventsWhere } from "@/lib/event-visibility"
+import { discloseVenueCounts } from "@/lib/disclosure"
+import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { canAccessDashboard } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -24,7 +25,7 @@ export default async function EventsPage() {
    * fires its `organisation_members` lookup twice per render for an answer that
    * cannot have changed in between.
    */
-  const where = await visibleEventsWhere(session.user)
+  const { where, actor } = await visibleEventsScope(session.user)
 
   /*
    * The rows and the total start together; only the attendance counts wait.
@@ -57,6 +58,7 @@ export default async function EventsPage() {
       geofence: true,
       curated_at: true,
       claimed_at: true,
+      organizer_id: true,
       organizer_org_id: true,
       organizer: { select: { name: true, email: true } },
       _count: { select: { rsvps: true } },
@@ -78,6 +80,42 @@ export default async function EventsPage() {
    */
   const arrivals = await distinctAttendeeCounts(events.map((event) => event.id))
 
+  /*
+   * A venue owner sees another host's event as the venue does: counts held
+   * back under the floor, by the rule the venue page and the exports use, so
+   * this list cannot print what they blank (SCRUM-501). Their own events, and
+   * everybody else's lists, are exact. The going RSVPs are the population.
+   */
+  const throughBuilding = new Set(
+    session.user.role === "venue_owner"
+      ? events.filter((e) => !hostsEvent(actor, e)).map((e) => e.id)
+      : []
+  )
+  const going = throughBuilding.size
+    ? new Map(
+        (
+          await db.event_rsvps.groupBy({
+            by: ["event_id"],
+            where: { event_id: { in: [...throughBuilding] }, status: "going" },
+            _count: { _all: true },
+          })
+        ).map((g) => [g.event_id, g._count._all])
+      )
+    : new Map<string, number>()
+  const counts = (event: (typeof events)[number]) => {
+    const exact = { rsvps: event._count.rsvps, arrivals: arrivals.get(event.id) ?? 0 }
+    if (!throughBuilding.has(event.id)) return exact
+    const shown = discloseVenueCounts({
+      going: going.get(event.id) ?? 0,
+      attended: exact.arrivals,
+      capacity: null,
+    })
+    return {
+      rsvps: shown.going === null ? null : exact.rsvps,
+      arrivals: shown.attended,
+    }
+  }
+
   const rows: EventRow[] = events.map((event) => ({
     id: event.id,
     title: event.title,
@@ -87,8 +125,7 @@ export default async function EventsPage() {
     where: event.venue_name ?? event.city ?? null,
     city: event.city,
     host: event.organizer?.name ?? null,
-    rsvps: event._count.rsvps,
-    arrivals: arrivals.get(event.id) ?? 0,
+    ...counts(event),
     curation: curationState(event),
     /*
      * The one thing that decides whether the door works.
