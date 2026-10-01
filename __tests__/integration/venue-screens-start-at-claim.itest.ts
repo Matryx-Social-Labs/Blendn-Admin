@@ -64,8 +64,8 @@ function find<P>(node: ReactNode, type: unknown): P[] {
   return [...(el.type === type ? [el.props as P] : []), ...find<P>(el.props.children, type)]
 }
 
-async function venuePage(range: { range: string; from?: string; to?: string } = { range: "90d" }) {
-  return VenueDetailPage({ params: Promise.resolve({ id: w.v1 }), searchParams: Promise.resolve(range) })
+async function venuePage(range: { range: string; from?: string; to?: string } = { range: "90d" }, venue = w.v1) {
+  return VenueDetailPage({ params: Promise.resolve({ id: venue }), searchParams: Promise.resolve(range) })
 }
 
 describe("the venue page shows the venue from its claim on", () => {
@@ -107,6 +107,20 @@ describe("the venue page shows the venue from its claim on", () => {
     const shownTotal = table.rows.reduce((sum, r) => sum + (r.attended !== null && r.going !== null ? r.attended : 0), 0)
     expect(attendedTile?.value).toBe(String(shownTotal))
     expect(attendedTile?.hint).toMatch(/held-back nights left out/)
+  })
+
+  it("reads — rather than 0 when every night on the page is held back", async () => {
+    // Two small nights of another host's at V2, nothing else: no figure to add.
+    await w.night({ venue: w.v2, start: new Date(Date.now() - 2 * DAY), guests: [2] })
+    await w.night({ venue: w.v2, start: new Date(Date.now() - 3 * DAY), guests: [3] })
+    as(w.owner, "venue_owner")
+    const tiles = find<{ label: string; value: string | null; hint: string }>(
+      await venuePage({ range: "90d" }, w.v2),
+      MetricTile
+    )
+    // "0 attended" says nobody came; these nights had people in them.
+    expect(tiles.find((t) => t.label === "Attended")?.value).toBe("—")
+    expect(tiles.find((t) => t.label === "Turn-up")?.hint).toMatch(/held back/)
   })
 
   it("pools no rating from before the claim", async () => {

@@ -233,6 +233,8 @@ export default async function VenueDetailPage({
     (r): r is VenueEventRow & { going: number; attended: number } => r.going !== null && r.attended !== null
   )
   const heldBack = shown.length < rows.length
+  // Every night held back: no figure to add up, and "0" would say nobody came.
+  const nothingShown = heldBack && shown.length === 0
   const totalAttended = shown.reduce((sum, r) => sum + r.attended, 0)
   const totalGoing = shown.reduce((sum, r) => sum + r.going, 0)
   // Uncapped, now that attendance counts people. The cap was framed as absorbing
@@ -284,13 +286,15 @@ export default async function VenueDetailPage({
         <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />
         <MetricTile
           label="Attended"
-          value={formatNumber(totalAttended)}
+          value={formatNumber(nothingShown ? null : totalAttended)}
           hint={heldBack ? "GPS check-ins · held-back nights left out" : "GPS check-ins"}
         />
         <MetricTile
           label="Turn-up"
           value={turnUp === null ? null : formatPct(turnUp)}
-          hint={turnUp === null ? "needs a past event" : "of committed RSVPs"}
+          hint={
+            nothingShown ? "held back — too few to show" : turnUp === null ? "needs a past event" : "of committed RSVPs"
+          }
         />
         <MetricTile
           label="Returning organisers"
