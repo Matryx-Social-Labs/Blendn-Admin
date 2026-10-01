@@ -24,7 +24,7 @@ describe("no export is unbounded", () => {
      * three that were missing it.
      */
     const cases = src.match(/^\s*case "[a-z-]+": \{/gm) ?? []
-    expect(cases.length).toBe(6)
+    expect(cases.length).toBe(7)
     /*
      * Per case, not a total: check-ins has two shapes, the venue owner's
      * aggregate and everyone else's rows, and each is capped. A total would let

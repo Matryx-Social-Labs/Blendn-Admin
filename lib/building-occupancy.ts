@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { claimedWindow } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
 
 /**
@@ -50,23 +51,37 @@ export interface BuildingOccupancy {
 
 export async function getBuildingOccupancy(
   venueId: string,
-  now: Date = new Date()
+  opts: {
+    now?: Date
+    /**
+     * The venue's owner, not an admin: only rooms that opened at or after the
+     * claim. A night that began before it is not theirs to see, even while it
+     * runs (SCRUM-355, SCRUM-500); with no claim date, no rooms at all.
+     */
+    asOwner?: boolean
+  } = {}
 ): Promise<BuildingOccupancy> {
-  const [venue, live] = await Promise.all([
-    db.venues.findUnique({ where: { id: venueId }, select: { capacity: true } }),
-    db.events.findMany({
-      where: {
-        venue_id: venueId,
-        deleted_at: null,
-        status: "published",
-        // Running right now. An event that ended an hour ago has people in its
-        // check-in table and nobody in the building.
-        start_time: { lte: now },
-        end_time: { gte: now },
-      },
-      select: { id: true, title: true },
-    }),
-  ])
+  const now = opts.now ?? new Date()
+  const venue = await db.venues.findUnique({
+    where: { id: venueId },
+    select: { capacity: true, claimed_at: true },
+  })
+  const window = opts.asOwner && venue ? claimedWindow(venue) : undefined
+  const live =
+    window === null
+      ? []
+      : await db.events.findMany({
+          where: {
+            venue_id: venueId,
+            deleted_at: null,
+            status: "published",
+            // Running right now. An event that ended an hour ago has people in
+            // its check-in table and nobody in the building.
+            start_time: { lte: now, ...(window ? { gte: window.gte } : {}) },
+            end_time: { gte: now },
+          },
+          select: { id: true, title: true },
+        })
 
   const capacity = venue?.capacity ?? null
   if (live.length === 0) {

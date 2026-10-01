@@ -1,6 +1,6 @@
 // Relative imports — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
-import type { user_role } from "@prisma/client"
+import type { Prisma, user_role } from "@prisma/client"
 
 import { db } from "./db"
 import { hostNotSuspended } from "./event-access"
@@ -31,9 +31,21 @@ import { actorFor } from "./org-membership"
 export async function visibleEventsWhere(user: {
   id: string
   role: user_role
-}): Promise<Record<string, unknown>> {
-  const where: Record<string, unknown> = { deleted_at: null }
-  if (user.role === "app_admin") return where
+}): Promise<Prisma.eventsWhereInput> {
+  return (await visibleEventsScope(user)).where
+}
+
+/**
+ * The same `where`, with the actor it was built for — so a screen that has to
+ * tell the events a venue owner runs from the ones they reach through the
+ * building (`hostsEvent`) does not load the memberships a second time.
+ */
+export async function visibleEventsScope(user: {
+  id: string
+  role: user_role
+}): Promise<{ where: Prisma.eventsWhereInput; actor: { id: string; orgIds: string[] } }> {
+  const where: Prisma.eventsWhereInput = { deleted_at: null }
+  if (user.role === "app_admin") return { where, actor: { id: user.id, orgIds: [] } }
 
   const actor = await actorFor(user)
 
@@ -84,7 +96,36 @@ export async function visibleEventsWhere(user: {
      */
     { organizer_id: user.id, ...hostNotSuspended },
   ]
-  return where
+  return { where, actor: { id: user.id, orgIds: actor.orgIds } }
+}
+
+/**
+ * When a venue owner's view of one venue's events starts: its claim (SCRUM-355).
+ *
+ * The `start_time` filter for that venue's events as its owner sees them, cut
+ * to `range` when one is given (the later of the range's start and the claim).
+ * Null when the venue has no claim date: an owned venue without one is bad
+ * data, and it opens no history, as in the resolver.
+ *
+ * Every screen and export that reads one venue's events for its owner goes
+ * through this — the venue page, the building's live count, the linked-events
+ * list and the link actions. `__tests__/authz-scoping-boundary.test.ts` holds
+ * them to it. A multi-day event that began before the claim stays out, as it
+ * does in `eventPermissions`: the rule is the start.
+ */
+export function claimedWindow(
+  venue: { claimed_at: Date | null },
+  range?: { from: Date; to: Date }
+): { gte: Date; lt?: Date } | null {
+  if (!venue.claimed_at) return null
+  if (!range) return { gte: venue.claimed_at }
+  return { gte: range.from > venue.claimed_at ? range.from : venue.claimed_at, lt: range.to }
+}
+
+/** True when this event starts inside the venue's claim window. */
+export function startsAfterClaim(venue: { claimed_at: Date | null }, startTime: Date): boolean {
+  const window = claimedWindow(venue)
+  return window !== null && startTime >= window.gte
 }
 
 /**
@@ -99,19 +140,39 @@ export async function visibleEventsWhere(user: {
  * `__tests__/authz-scoping-boundary.test.ts` refuses one written by hand.
  *
  * One arm per venue because the claim date is per venue and Prisma cannot
- * compare a column to a related row's column. No claim date on an owned venue
- * is bad data and opens nothing, as in the resolver.
+ * compare a column to a related row's column.
  *
  * ponytail: one OR arm per owned venue. Fine for the handful an org owns; a
  * raw-SQL join on `venues.claimed_at` if an org ever owns hundreds.
  */
-export async function claimedVenueEventsWhere(orgIds: string[]): Promise<Record<string, unknown>[]> {
+export async function claimedVenueEventsWhere(
+  orgIds: readonly string[]
+): Promise<Prisma.eventsWhereInput[]> {
   if (orgIds.length === 0) return []
   const venues = await db.venues.findMany({
-    where: { owner_org_id: { in: orgIds } },
+    where: { owner_org_id: { in: [...orgIds] } },
     select: { id: true, claimed_at: true },
   })
-  return venues.flatMap((v) =>
-    v.claimed_at ? [{ venue_id: v.id, start_time: { gte: v.claimed_at } }] : []
+  return venues.flatMap((v) => {
+    const window = claimedWindow(v)
+    return window ? [{ venue_id: v.id, start_time: window }] : []
+  })
+}
+
+/**
+ * Does this actor run the event, rather than reach it through the building?
+ *
+ * The organising org, or — the floor `visibleEventsWhere` keeps — its creator.
+ * A venue owner whose organisation hosts its own events (SCRUM-320) sees those
+ * as their organiser does; everything else they reach as the venue, and gets
+ * counts held back under the floor (SCRUM-501).
+ */
+export function hostsEvent(
+  actor: { id: string; orgIds: readonly string[] },
+  event: { organizer_id: string; organizer_org_id: string | null }
+): boolean {
+  return (
+    event.organizer_id === actor.id ||
+    (event.organizer_org_id !== null && actor.orgIds.includes(event.organizer_org_id))
   )
 }

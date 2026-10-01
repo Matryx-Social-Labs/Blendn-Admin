@@ -134,6 +134,39 @@ export function discloseFigure(input: DiscloseInput): Disclosure {
 }
 
 /**
+ * Guests at one event, or one day of it, as a venue sees them (SCRUM-501).
+ *
+ * The going RSVPs are the population, so the completeness and residual rules
+ * fire as well as the floor: "everybody who said yes came", or all but one, is
+ * a statement about each of them. A cell over the population — walk-ins — is
+ * held back by the same rule, because it covers the whole of it.
+ */
+export function discloseGuests(guests: number, going: number): number | null {
+  return discloseFigure({ count: guests, contributors: guests, population: going }).value
+}
+
+/**
+ * One event's counts for a host who reached it through the building rather
+ * than by running it: a venue owner at another host's event (SCRUM-501).
+ *
+ * The same rule wherever those counts appear — the Events list, the venue
+ * page, the Events export — so no surface prints what another blanks. Fill is
+ * Going over capacity, so it goes when Going does.
+ */
+export function discloseVenueCounts(c: {
+  going: number
+  attended: number
+  capacity: number | null
+}): { going: number | null; attended: number | null; fillPct: number | null } {
+  const going = discloseFigure({ count: c.going, contributors: c.going, population: 0 }).value
+  return {
+    going,
+    attended: discloseGuests(c.attended, c.going),
+    fillPct: going !== null && c.capacity ? Math.round((going / c.capacity) * 100) : null,
+  }
+}
+
+/**
  * A night's star rating, its average or its spread, or null below the
  * minimum cell (SCRUM-437).
  *

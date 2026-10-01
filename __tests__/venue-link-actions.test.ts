@@ -1,6 +1,7 @@
 const mockDb = {
   events: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn() },
   organisation_members: { findMany: jest.fn() },
+  venues: { findMany: jest.fn() },
 }
 const mockAuth = jest.fn()
 
@@ -20,6 +21,10 @@ const EVENT = "event_1"
 const MY_ORG = "org_mine"
 const THEIR_ORG = "org_theirs"
 const REASON = "This event is not at our venue at all."
+// Claimed on the 1st; the fixture events start after it unless a test says not.
+const CLAIMED = new Date("2026-09-01T00:00:00Z")
+const AFTER = new Date("2026-09-10T20:00:00Z")
+const BEFORE = new Date("2026-08-20T20:00:00Z")
 
 function signIn(role: string, orgIds: string[] = [MY_ORG]) {
   mockAuth.mockResolvedValue({ user: { id: "user_1", role } })
@@ -48,8 +53,22 @@ describe("disputeVenueLink — the venue owner's side", () => {
     title: "Someone else's night",
     venue_id: "venue_1",
     venue_link_status: "auto_linked",
-    venue: { owner_org_id: MY_ORG, name: "Toit" },
+    start_time: AFTER,
+    venue: { owner_org_id: MY_ORG, claimed_at: CLAIMED, name: "Toit" },
   }
+
+  it("refuses an event held before the claim — not the owner's to flag (SCRUM-500)", async () => {
+    signIn("venue_owner")
+    mockDb.events.findUnique.mockResolvedValue({ ...linked, start_time: BEFORE })
+    await expect(disputeVenueLink(EVENT, REASON)).rejects.toThrow(/forbidden/i)
+    expect(mockDb.events.update).not.toHaveBeenCalled()
+  })
+
+  it("refuses when the owned venue has no claim date", async () => {
+    signIn("venue_owner")
+    mockDb.events.findUnique.mockResolvedValue({ ...linked, venue: { ...linked.venue, claimed_at: null } })
+    await expect(disputeVenueLink(EVENT, REASON)).rejects.toThrow(/forbidden/i)
+  })
 
   it("lets the owner of that venue flag it", async () => {
     signIn("venue_owner")
@@ -81,7 +100,7 @@ describe("disputeVenueLink — the venue owner's side", () => {
     // owner_org_id null must not match an actor whose orgIds happen to contain
     // undefined-ish values.
     signIn("venue_owner")
-    mockDb.events.findUnique.mockResolvedValue({ ...linked, venue: { owner_org_id: null, name: "Toit" } })
+    mockDb.events.findUnique.mockResolvedValue({ ...linked, venue: { owner_org_id: null, claimed_at: null, name: "Toit" } })
     await expect(disputeVenueLink(EVENT, REASON)).rejects.toThrow(/forbidden/i)
   })
 
@@ -110,8 +129,22 @@ describe("confirmVenueLink", () => {
   const linked = {
     id: EVENT,
     venue_id: "venue_1",
-    venue: { owner_org_id: MY_ORG, name: "Toit" },
+    start_time: AFTER,
+    venue: { owner_org_id: MY_ORG, claimed_at: CLAIMED, name: "Toit" },
   }
+
+  it("refuses an event held before the claim (SCRUM-500)", async () => {
+    signIn("venue_owner")
+    mockDb.events.findUnique.mockResolvedValue({ ...linked, start_time: BEFORE })
+    await expect(confirmVenueLink(EVENT)).rejects.toThrow(/forbidden/i)
+    expect(mockDb.events.update).not.toHaveBeenCalled()
+  })
+
+  it("opens at exactly the claim instant, as eventPermissions does", async () => {
+    signIn("venue_owner")
+    mockDb.events.findUnique.mockResolvedValue({ ...linked, start_time: CLAIMED })
+    await expect(confirmVenueLink(EVENT)).resolves.toBeUndefined()
+  })
 
   it("can only be set by the venue owner, never from a request", async () => {
     // The whole reason lib/venue-link.ts ignores the body's value: a client
@@ -210,15 +243,22 @@ describe("unlinkEventVenue — the organiser's side", () => {
 describe("getLinkedEventsForOwner", () => {
   beforeEach(() => mockDb.events.findMany.mockResolvedValue([]))
 
-  it("scopes to venues the caller's org owns", async () => {
+  it("scopes to venues the caller's org owns, from each one's claim on (SCRUM-500)", async () => {
     signIn("venue_owner")
+    mockDb.venues.findMany.mockResolvedValue([
+      { id: "venue_1", claimed_at: CLAIMED },
+      { id: "venue_2", claimed_at: null },
+    ])
     mockDb.events.count.mockResolvedValue(0)
     await getLinkedEventsForOwner()
+    expect(mockDb.venues.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { owner_org_id: { in: [MY_ORG] } } })
+    )
     expect(mockDb.events.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           venue_id: { not: null },
-          venue: { owner_org_id: { in: [MY_ORG] } },
+          OR: [{ venue_id: "venue_1", start_time: { gte: CLAIMED } }],
         }),
       })
     )
@@ -228,7 +268,8 @@ describe("getLinkedEventsForOwner", () => {
     signIn("app_admin", [])
     mockDb.events.count.mockResolvedValue(0)
     await getLinkedEventsForOwner()
-    expect(mockDb.events.findMany.mock.calls[0][0].where.venue).toBeUndefined()
+    expect(mockDb.events.findMany.mock.calls[0][0].where.OR).toBeUndefined()
+    expect(mockDb.venues.findMany).not.toHaveBeenCalled()
   })
 
   it("returns nothing for an organiser rather than throwing", async () => {

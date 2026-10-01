@@ -151,7 +151,7 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while three exist in
+express a CHECK constraint, so `db push` creates none — while four exist in
 migration SQL and therefore in every deployed environment:
 
 | Constraint | What it enforces |
@@ -159,6 +159,7 @@ migration SQL and therefore in every deployed environment:
 | `event_claims_one_claimant` | `(org_id IS NULL) <> (onboarding_id IS NULL)` |
 | `events_capacity_non_negative` | `current_capacity >= 0` |
 | `sponsored_active_needs_sponsor` | an active placement has a sponsor |
+| `venues_owner_needs_claimed_at` | an owned venue has a claim date — the claim window every venue-owner read starts from (SCRUM-500) |
 
 A `db push` database is therefore **strictly weaker than production**, and code
 tested against one can write rows the real database rejects. That is not
