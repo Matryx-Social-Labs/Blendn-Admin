@@ -3,6 +3,7 @@ import { join } from "path"
 import {
   curationState,
   claimRefusal,
+  offersClaim,
   curatedDescription,
   curatedFence,
   CURATED_RADIUS_METRES,
@@ -260,5 +261,25 @@ describe("the curation write path", () => {
     // Enough to answer "where are we curating from" without putting a query
     // string in the audit trail.
     expect(code).toMatch(/source: sourceDomain\(v\.source_url\)/)
+  })
+})
+
+describe("offersClaim — the app's \"Claim it\" agrees with the page it opens", () => {
+  const curatedOpen = { curated_at: new Date(), claimed_at: null }
+
+  it.each([
+    ["published", "public", true],
+    ["completed", "unlisted", true],
+    ["published", "private", false],
+    ["draft", "public", false],
+    ["cancelled", "public", false],
+  ])("a curated, unclaimed event that is %s and %s → %s", (status, visibility, offered) => {
+    // The same rule as claimPageWhere: the link never opens a "not found".
+    expect(offersClaim({ ...curatedOpen, status, visibility })).toBe(offered)
+  })
+
+  it("never for a claimed or an organiser's event", () => {
+    expect(offersClaim({ curated_at: new Date(), claimed_at: new Date(), status: "published", visibility: "public" })).toBe(false)
+    expect(offersClaim({ curated_at: null, claimed_at: null, status: "published", visibility: "public" })).toBe(false)
   })
 })

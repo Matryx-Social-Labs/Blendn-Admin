@@ -521,6 +521,16 @@ buffer. It used to be the stored column, which only circles kept in step — a
 outside. The field's name and type are unchanged; for an outline it is larger
 than before, which only ever makes the app more lenient than the door.
 
+**`claim` on `GET /events/:eventId` is the app's "Running this event? Claim it"**
+(step 1 of the product-completion plan). `{ url }` when the event was added by
+Blendn (curated) and nobody has claimed it, and it is a page `/claim/[eventId]`
+would show (published or completed, not private); `null` otherwise. The URL is
+built by the server on the **dashboard host** (`DASHBOARD_HOST`, else
+`NEXTAUTH_URL`), so the app hard-codes no environment and never sends a person
+to the API host. It carries the event id and nothing about the viewer. The
+page it opens is public: the claimant needs no account, filing grants nothing,
+and a person reviews every claim. Computed by `offersClaim` in `lib/curation.ts`.
+
 **`session` is the window "live" is judged by** — on `GET /events`,
 `GET /events/:eventId` and `GET /me/rsvps`. `startTime`/`endTime` span the
 whole run, so a three-day festival read as LIVE for three days straight,

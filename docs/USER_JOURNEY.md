@@ -100,7 +100,8 @@ back with no shared interests, for everyone.
 | Served | `/events` with category, date, distance filters; **`/events/search` exists and is never called** |
 
 **Gaps:** map needs a viewport/bounding-box query, since a map pans rather than
-searching a radius. Search is likely app-only work. `Create` implies
+searching a radius (superseded 2026-10-01: the existing `radius` filter serves
+it — see *The home map* below). Search is likely app-only work. `Create` implies
 attendee-authored events, which has no model at all.
 
 ### 4. Event detail and RSVP
@@ -233,6 +234,71 @@ from a 1–5 star and needs a real 0–10 question.
 
 **Gaps:** availability/booking calendar — utilisation is reported after the fact,
 never what is bookable.
+
+---
+
+## Planned — product-completion plan v2 (2026-10-01)
+
+Confirmed by the owner on 2026-10-01. In this section **Designed** means in plan
+v2 or the claude.ai design kit, not the Figma; **Built** and **Served** keep their
+meanings above. The steps are in `docs/ROADMAP.md`. Only the Board's endpoints
+and the public event claim page exist today.
+
+### Places — every venue live
+
+| | |
+|---|---|
+| Designed | Events / Places in the home drawer. Every active venue has a live room from day one, claimed or not: a hidden daily "venue day", pseudonyms reset at 06:00. Go Live for 20 / 45 / 60 min or Stay (plan §3) |
+| Built | Nothing — no venue list or venue detail in the app |
+| Served | `GET /venues` only. No venue day, no Go Live |
+
+### The home map
+
+| | |
+|---|---|
+| Designed | MapLibre + OpenFreeMap in 3D; the buildings under events and open venues lit in brand shades, a glow where there is no building, live counts in buckets. The check-in boundary is never drawn (plan §4) |
+| Built | Nothing on the home screen. Event detail has its own small map |
+| Served | `/events` and `/venues` take `lat`/`lon`/`radius`; no new endpoint is planned |
+
+### Crews
+
+| | |
+|---|---|
+| Designed | Crews of 2–12 friends with a name, bio and persistent crew chat; "We're here", with each member checking in on their own GPS; crew ↔ crew and crew ↔ person matching; a Blend room on a mutual like; one tap reveals the crew, except members who chose "keep me anonymous" (plan §6) |
+| Built | Nothing |
+| Served | Nothing. Needs chat rooms that do not belong to an event first (plan §7) |
+
+### The Board
+
+| | |
+|---|---|
+| Designed | The board off event detail: compose, ask to join, the inbox in Banter, accept opens a conversation without the match opener (plan step 6) |
+| Built | Nothing |
+| Served | `/events/:eventId/board` and `/board/requests` — the server is done |
+
+### Blendn+
+
+| | |
+|---|---|
+| Designed | ₹199/mo · ₹499/quarter · ₹1,499/yr · Night Pass ₹49, through Apple and Google in-app purchase via RevenueCat; never Razorpay in the app. Stay live, partner perks, full night history, crew extras (plan §5, §9.3) |
+| Built | Nothing |
+| Served | Nothing — no entitlements, no RevenueCat webhook |
+
+### Regulars
+
+| | |
+|---|---|
+| Designed | Blind offers: a venue targets regulars, lapsed or first-timers and sees sent / opened / redeemed, never people. A live door pass, one per day, that staff mark redeemed. "Let this venue know I'm a regular", per venue, revocable (plan §2) |
+| Built | Nothing |
+| Served | Nothing |
+
+### Claim from the app
+
+| | |
+|---|---|
+| Designed | "Running this event? Claim it" on a curated event, and "Own this place? Claim it" on a venue, both linking out to the dashboard host, because the app refuses organiser and venue-owner accounts (plan §3) |
+| Built | Nothing — no claim link in the app. Being built in step 1 |
+| Served | The public `/claim/[eventId]` is built and served. The public `/claim/venue/[venueId]` is being built in step 1; today a venue claim needs a dashboard login |
 
 ---
 

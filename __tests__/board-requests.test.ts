@@ -28,14 +28,18 @@ const SEND = [
   "app", "api", "mobile", "events", "[eventId]", "board", "[postId]", "requests", "route.ts",
 ]
 
-describe("a handle that exists before the room does", () => {
+describe.each(["keyed", "legacy"] as const)("a handle that exists before the room does (%s)", (scheme) => {
+  beforeAll(() => {
+    process.env.NEXTAUTH_SECRET ??= "board-requests-test-secret-0123456789abcdef"
+  })
+
   it("is stable for one person at one event", () => {
     /*
      * The board is read over days. A name that changed between two reads would
      * make the person who offered a seat yesterday a stranger today.
      */
-    const a = preferredPseudonymFor("event-1", "user-1")
-    expect(preferredPseudonymFor("event-1", "user-1")).toBe(a)
+    const a = preferredPseudonymFor("event-1", "user-1", scheme)
+    expect(preferredPseudonymFor("event-1", "user-1", scheme)).toBe(a)
   })
 
   it("is different at the next event, which is the whole point", () => {
@@ -44,8 +48,8 @@ describe("a handle that exists before the room does", () => {
      * exist to prevent — `pseudonymAvatar.ts` states it in as many words about
      * seeding on a user id, and the same argument applies to the name.
      */
-    expect(preferredPseudonymFor("event-1", "user-1")).not.toBe(
-      preferredPseudonymFor("event-2", "user-1")
+    expect(preferredPseudonymFor("event-1", "user-1", scheme)).not.toBe(
+      preferredPseudonymFor("event-2", "user-1", scheme)
     )
   })
 
@@ -56,11 +60,52 @@ describe("a handle that exists before the room does", () => {
      * before check-in, so every post fell back to the literal "Attendee".
      */
     const names = new Set(
-      ["u1", "u2", "u3", "u4", "u5", "u6"].map((u) => preferredPseudonymFor("event-1", u))
+      ["u1", "u2", "u3", "u4", "u5", "u6"].map((u) => preferredPseudonymFor("event-1", u, scheme))
     )
     expect(names.size).toBeGreaterThan(1)
     expect(names.has("Attendee")).toBe(false)
   })
+})
+
+describe("the keyed handle (SCRUM-517)", () => {
+  it("cannot be computed from the ids alone: it changes with the server's secret", () => {
+    /*
+     * The legacy hash was FNV-1a of `eventId:userId`, so anybody holding a
+     * friend's account id could compute their board name. The keyed one needs
+     * the secret, and is not the legacy name.
+     */
+    const before = process.env.NEXTAUTH_SECRET
+    const names = new Set<string>()
+    try {
+      for (const secret of ["secret-one-0123456789abcdef0123", "secret-two-0123456789abcdef0123", "secret-3-0123456789abcdef012345"]) {
+        process.env.NEXTAUTH_SECRET = secret
+        names.add(preferredPseudonymFor("event-1", "user-1", "keyed"))
+      }
+    } finally {
+      process.env.NEXTAUTH_SECRET = before
+    }
+    expect(names.size).toBeGreaterThan(1)
+  })
+
+  it("refuses to derive without a secret rather than fall back to an unkeyed hash", () => {
+    const before = process.env.NEXTAUTH_SECRET
+    delete process.env.NEXTAUTH_SECRET
+    try {
+      expect(() => preferredPseudonymFor("event-2", "user-9", "keyed")).toThrow(/NEXTAUTH_SECRET/)
+    } finally {
+      process.env.NEXTAUTH_SECRET = before
+    }
+  })
+
+  it("is chosen per event, so an event already running keeps its board's names", () => {
+    const src = codeOnly(read("lib", "anonymous-names.ts"))
+    expect(src).toMatch(/event && event\.created_at < KEYED_PSEUDONYMS_FROM \? "legacy" : "keyed"/)
+    const board = codeOnly(read("lib", "board-access.ts"))
+    expect(board).toContain("const scheme = await pseudonymSchemeFor(eventId)")
+  })
+})
+
+describe("the board handle at check-in", () => {
 
   it("is a preference at check-in, not an override", () => {
     /*
@@ -71,7 +116,7 @@ describe("a handle that exists before the room does", () => {
      */
     const src = codeOnly(read("lib", "anonymous-names.ts"))
     const fn = src.slice(src.indexOf("export async function generateUniqueAnonymousName"))
-    expect(fn).toContain("const preferred = preferredPseudonymFor(preferFor.eventId, preferFor.userId)")
+    expect(fn).toMatch(/const preferred = preferredPseudonymFor\(\s*preferFor\.eventId,\s*preferFor\.userId,\s*await pseudonymSchemeFor\(preferFor\.eventId\)\s*\)/)
     expect(fn).toContain("if (!existingNames.has(preferred)) return preferred")
   })
 

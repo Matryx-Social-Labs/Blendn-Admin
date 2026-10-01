@@ -13,6 +13,7 @@ import { GET as roomFeed } from "@/app/api/events/[id]/chat/messages/route"
 import { PATCH as moderateMember } from "@/app/api/events/[id]/chat/members/[userId]/route"
 import { getUsers } from "@/app/dashboard/users/actions"
 import { attendeeRoster } from "@/lib/attendee-roster"
+import { roomHandle } from "@/lib/room-handle"
 import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
 
 /**
@@ -226,7 +227,7 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
       expect(message.user).not.toHaveProperty("name")
       expect(message.user).not.toHaveProperty("email")
       const wire = JSON.stringify(body)
-      for (const secret of ["Priya Realname", priyaEmail, "img.invalid"]) expect(wire).not.toContain(secret)
+      for (const secret of ["Priya Realname", priyaEmail, "img.invalid", priya]) expect(wire).not.toContain(secret)
 
       const res = await moderateMember(
         new NextRequest(`http://localhost/api/events/${firstA.id}/chat/members/${message.user.id}`, {
@@ -252,8 +253,10 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
         params: Promise.resolve({ id: firstA.id }),
       })
       const { members } = (await res.json()) as { members: { userId: string; role: string }[] }
+      // The host is themselves; everyone else is this room's handle (SCRUM-517).
       expect(members.find((m) => m.userId === hostA)?.role).toBe("admin")
-      expect(members.find((m) => m.userId === priya)?.role).toBe("member")
+      expect(members.find((m) => m.userId === roomHandle(firstA.id, priya))?.role).toBe("member")
+      expect(members.map((m) => m.userId)).not.toContain(priya)
 
       for (const action of ["ban", "mute"]) {
         const refused = await moderateMember(
