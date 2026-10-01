@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { SponsorOverview } from "@/lib/dashboard-types"
 import { formatNumber } from "@/lib/dashboard-format"
+import { eventClock } from "@/lib/event-phase"
 
 /**
  * The sponsor's landing page.
@@ -59,7 +60,8 @@ export function OverviewSponsor({ data }: { data: SponsorOverview }) {
               </Badge>
             </div>
             <p className="mt-1 text-[0.875rem] text-muted-foreground">
-              {new Date(data.next.startTime).toLocaleString("en-GB", {
+              {/* The event's clock, not the server's or the viewer's (SCRUM-496). */}
+              {eventClock(data.next.timezone).format(new Date(data.next.startTime), {
                 weekday: "short",
                 day: "numeric",
                 month: "short",

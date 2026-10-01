@@ -426,6 +426,8 @@ export interface SponsorPlacementRow {
   eventTitle: string
   startTime: Date
   endTime: Date
+  /** The event's own zone: the page tells its times on that clock (SCRUM-496). */
+  timezone: string
   status: placement_status
   phase: PlacementPhase
   /** Null until at least one send has happened. */
@@ -443,6 +445,7 @@ export interface SponsorOverview {
   next: {
     eventTitle: string
     startTime: Date
+    timezone: string
     ready: boolean
     blocker: string | null
   } | null
@@ -527,6 +530,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
           title: true,
           start_time: true,
           end_time: true,
+          timezone: true,
           chat_group: { select: { id: true } },
           sponsored_messages: {
             where: { sponsor_id: brand.id },
@@ -576,6 +580,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
       eventTitle: r.event.title,
       startTime: r.event.start_time,
       endTime: r.event.end_time,
+      timezone: r.event.timezone,
       status: r.status,
       phase,
       // `null`, not `0`: an ad that has not run yet has no reach, and rendering
@@ -594,6 +599,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
     ? {
         eventTitle: upcoming[0].eventTitle,
         startTime: upcoming[0].startTime,
+        timezone: upcoming[0].timezone,
         ready: upcoming[0].blocker === null,
         blocker: upcoming[0].blocker,
       }

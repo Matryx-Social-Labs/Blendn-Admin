@@ -908,6 +908,7 @@ async function buildSponsorOverview(): Promise<SponsorOverview> {
       ? {
           eventTitle: o.next.eventTitle,
           startTime: o.next.startTime.toISOString(),
+          timezone: o.next.timezone,
           ready: o.next.ready,
           blocker: o.next.blocker,
         }
