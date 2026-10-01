@@ -320,6 +320,7 @@ every table header — under AA on nearly every screen.
 |---|---|
 | `admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app` (from `scripts/test-accounts.ts`), 3 named admins, the no-org organiser, attendees | the 5 × 38 route matrix |
 | `teen.tester@blendn.app`, under 18 | the age gate has something to refuse |
+| `rhea.kapoor@blendn.app`, sponsor, org with no brand | a brand claim the admin can approve: the pending Third Wave claim is hers (sponsor@'s org owns Blue Tokai and may not file one) |
 | 3 curated events — open / dead / claimed, **5 refusals on the dead one** | curation health, and the only refusal data in the product |
 | Multi-day `design-week-bengaluru` | occurrences, and the person-days-vs-people trap |
 | `saarbruecken-language-exchange` | a second country — the switch banner and the resume policy |

@@ -2,7 +2,7 @@ import { readFileSync } from "fs"
 import { join } from "path"
 
 import { normaliseSponsorName } from "@/lib/sponsor-name"
-import { ensureOrgBrand, findBrandByName } from "@/scripts/seed-brand"
+import { ensureOrgBrand, ensurePendingBrandClaim, findBrandByName } from "@/scripts/seed-brand"
 
 import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 
@@ -22,6 +22,7 @@ const orgs: string[] = []
 const brands: string[] = []
 
 afterAll(async () => {
+  await db.sponsor_claims.deleteMany({ where: { sponsor_id: { in: brands } } })
   await db.sponsors.deleteMany({ where: { id: { in: brands } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await cleanup(users, [])
@@ -137,4 +138,63 @@ it("leaves no seed writing a sponsor key of its own", () => {
     const keys = src.match(/name_key:(?!\s*normaliseSponsorName\()[^,}\n]*/g) ?? []
     expect({ file, keys }).toEqual({ file, keys: [] })
   }
+})
+
+/*
+ * The seeded brand claim is one the product would file (SCRUM-465).
+ *
+ * Driven on staging: the only brand claim was "Third Wave", filed by sponsor@'s
+ * organisation, which owns Blue Tokai. The product refuses to file that (one
+ * brand per organisation), the admin could only reject it, and sponsor@'s
+ * /dashboard/brand never showed it — so SCRUM-255's approve-a-claim step could
+ * not be driven.
+ */
+describe("the seeded brand claim", () => {
+  async function world() {
+    const admin = await makeUser(testId("claim-admin"))
+    const filer = await makeUser(testId("claim-filer"))
+    users.push(admin, filer)
+    const owner = await org()
+    const brandless = await org()
+    const ownedName = `Blue Tokai ${testId("o")}`
+    const targetName = `Third Wave ${testId("t")}`
+    const owned = await db.sponsors.create({ data: { name: ownedName, name_key: normaliseSponsorName(ownedName), org_id: owner } })
+    const target = await db.sponsors.create({
+      data: { name: targetName, name_key: normaliseSponsorName(targetName), org_id: null, created_by: admin },
+    })
+    brands.push(owned.id, target.id)
+    return { filer, owner, brandless, target }
+  }
+
+  it("is filed by an organisation with no brand, and an earlier seed's unreachable one goes", async () => {
+    const { filer, owner, brandless, target } = await world()
+    await db.sponsor_claims.create({ data: { sponsor_id: target.id, org_id: owner, filed_by: filer, status: "pending" } })
+
+    const claim = await ensurePendingBrandClaim(db, { brandId: target.id, orgId: brandless, filedBy: filer })
+
+    const pending = await db.sponsor_claims.findMany({ where: { sponsor_id: target.id, status: "pending" } })
+    expect(pending.map((c) => c.org_id)).toEqual([brandless])
+    expect(claim.status).toBe("pending")
+  })
+
+  it("is refused from an organisation that already owns a brand, as the product refuses it", async () => {
+    const { filer, owner, target } = await world()
+
+    await expect(ensurePendingBrandClaim(db, { brandId: target.id, orgId: owner, filedBy: filer })).rejects.toThrow(
+      /already owns a brand/
+    )
+    expect(await db.sponsor_claims.count({ where: { sponsor_id: target.id } })).toBe(0)
+  })
+
+  it("stays decided on the next run, after the admin approved it", async () => {
+    const { filer, brandless, target } = await world()
+    const first = await ensurePendingBrandClaim(db, { brandId: target.id, orgId: brandless, filedBy: filer })
+    // What approving does: the claim is approved and the brand is now the claimant's.
+    await db.sponsor_claims.update({ where: { id: first.id }, data: { status: "approved" } })
+    await db.sponsors.update({ where: { id: target.id }, data: { org_id: brandless } })
+
+    const again = await ensurePendingBrandClaim(db, { brandId: target.id, orgId: brandless, filedBy: filer })
+
+    expect({ id: again.id, status: again.status }).toEqual({ id: first.id, status: "approved" })
+  })
 })

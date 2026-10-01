@@ -6,10 +6,10 @@ import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
 import { normaliseSponsorName } from "../lib/sponsor-name"
-import { ensureOrgBrand, findBrandByName } from "./seed-brand"
+import { ensureOrgBrand, ensurePendingBrandClaim, findBrandByName } from "./seed-brand"
 import { describeLive, describeRefresh, refreshSeededEvent } from "./seed-occurrences"
 import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
-import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS } from "./test-accounts"
+import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS, upsertOrg } from "./test-accounts"
 
 /**
  * A world the QA team can actually test against.
@@ -90,6 +90,9 @@ const CITY = {
   saarbruecken: { name: "Saarbrücken", lat: 49.2402, lng: 6.9969, tz: "Europe/Berlin" },
 } as const
 
+/** The claimant's organisation: a sponsor with no brand yet (SCRUM-465). */
+const CLAIMANT_ORG = "Third Wave Coffee Roasters"
+
 const ACCOUNTS = [
   /*
    * The three product owners, by name — their own admin accounts, so the audit
@@ -130,6 +133,18 @@ const ACCOUNTS = [
      * "some other organiser cannot".
      */
     note: "NEGATIVE CONTROL. Dashboard role, no org — must be denied on every event.",
+  },
+  {
+    key: "claimant",
+    email: "rhea.kapoor@blendn.app",
+    name: "Rhea Kapoor",
+    role: "sponsor" as user_role,
+    /**
+     * A sponsor whose organisation has no brand yet, so its claim on Third
+     * Wave is one the product would file and the admin can approve. sponsor@
+     * cannot be the claimant: its organisation owns Blue Tokai (SCRUM-465).
+     */
+    note: "Sponsor, org with no brand. Filed the pending Third Wave claim.",
   },
 ] as const
 
@@ -449,7 +464,7 @@ async function main() {
 
   if (!APPLY) {
     console.log("Would create:")
-    console.log(`  3 organisations, ${TEST_ACCOUNTS.length + ACCOUNTS.length} dashboard accounts, ${ATTENDEES.length} attendees,`)
+    console.log(`  4 organisations, ${TEST_ACCOUNTS.length + ACCOUNTS.length} dashboard accounts, ${ATTENDEES.length} attendees,`)
     console.log(`  3 venues, ${EVENTS.length} events, plus curated events, claims in every state,`)
     console.log(`  applications in every state, check-ins, chat, sponsors and city demand`)
     for (const a of [...TEST_ACCOUNTS, ...ACCOUNTS]) console.log(`    ${a.role.padEnd(12)} ${a.email}`)
@@ -1194,19 +1209,14 @@ async function main() {
       data: { name: "Third Wave", name_key: normaliseSponsorName("Third Wave"), org_id: null, created_by: users.admin },
     })
   }
-  const existingBrandClaim = await db.sponsor_claims.findFirst({
-    where: { sponsor_id: unclaimedBrand.id, org_id: orgs.brands.id },
+  // Filed by an organisation with no brand, as the product would let it be (SCRUM-465).
+  const claimantOrg = await upsertOrg(db, CLAIMANT_ORG)
+  await db.organisation_members.upsert({
+    where: { org_id_user_id: { org_id: claimantOrg.id, user_id: users.claimant } },
+    update: {},
+    create: { org_id: claimantOrg.id, user_id: users.claimant, role: "owner", is_primary_contact: true },
   })
-  if (!existingBrandClaim) {
-    await db.sponsor_claims.create({
-      data: {
-        sponsor_id: unclaimedBrand.id,
-        org_id: orgs.brands.id,
-        filed_by: users.sponsor,
-        status: "pending",
-      },
-    })
-  }
+  await ensurePendingBrandClaim(db, { brandId: unclaimedBrand.id, orgId: claimantOrg.id, filedBy: users.claimant })
 
   // ── onboarding applications, both paths and every state ──────────────────
   /*
@@ -1395,7 +1405,7 @@ async function main() {
   console.log(`  event claims     ${claimTotal} across pending, approved, declined, superseded`)
   console.log(`  applications     ${appTotal} across pending, email_pending, approved, declined`)
   console.log(`  demand           ${demandTotal} rows — Pune has demand and no events`)
-  console.log(`  brands           Blue Tokai (claimed), Third Wave (unclaimed, claim pending)\n`)
+  console.log(`  brands           Blue Tokai (claimed), Third Wave (claim filed by ${CLAIMANT_ORG})\n`)
   reportHotlinked(hotlinked)
 }
 

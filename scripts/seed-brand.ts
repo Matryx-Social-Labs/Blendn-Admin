@@ -58,3 +58,40 @@ export async function ensureOrgBrand(
     },
   })
 }
+
+/**
+ * A pending claim on a brand, filed as the product would file it (SCRUM-465).
+ *
+ * The product refuses a claim from an organisation that already owns a brand
+ * (`fileSponsorClaim`, one brand per organisation). The QA seed filed its
+ * Third Wave claim from sponsor@'s organisation, which owns Blue Tokai: the
+ * admin could only reject it and sponsor@'s /dashboard/brand never showed it.
+ * So this refuses the same, and clears the pending claims an earlier seed
+ * filed that way. A claim already filed by this organisation is left as it
+ * is, decided or not, so a re-seed does not undo a tester's approval.
+ */
+export async function ensurePendingBrandClaim(
+  db: Pick<PrismaClient, "sponsors" | "sponsor_claims">,
+  claim: { brandId: string; orgId: string; filedBy: string }
+) {
+  const pending = await db.sponsor_claims.findMany({
+    where: { sponsor_id: claim.brandId, status: "pending" },
+    select: { id: true, org_id: true },
+  })
+  const owners = await db.sponsors.findMany({
+    where: { ...LIVE, org_id: { in: pending.map((c) => c.org_id) } },
+    select: { org_id: true },
+  })
+  const unreachable = pending.filter((c) => owners.some((o) => o.org_id === c.org_id)).map((c) => c.id)
+  if (unreachable.length > 0) await db.sponsor_claims.deleteMany({ where: { id: { in: unreachable } } })
+
+  const key = { sponsor_id: claim.brandId, org_id: claim.orgId }
+  const existing = await db.sponsor_claims.findUnique({ where: { sponsor_id_org_id: key } })
+  if (existing) return existing
+
+  const owned = await db.sponsors.findFirst({ where: { ...LIVE, org_id: claim.orgId }, select: { name: true } })
+  if (owned) {
+    throw new Error(`REFUSING: this organisation already owns a brand (${owned.name}); the product would not let it file a claim.`)
+  }
+  return db.sponsor_claims.create({ data: { ...key, filed_by: claim.filedBy, status: "pending" } })
+}
