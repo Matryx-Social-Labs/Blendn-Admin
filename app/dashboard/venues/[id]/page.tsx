@@ -293,7 +293,7 @@ export default async function VenueDetailPage({
           label="Turn-up"
           value={turnUp === null ? null : formatPct(turnUp)}
           hint={
-            nothingShown ? "held back — too few to show" : turnUp === null ? "needs a past event" : "of committed RSVPs"
+            nothingShown ? "held back" : turnUp === null ? "needs a past event" : "of committed RSVPs"
           }
         />
         <MetricTile
