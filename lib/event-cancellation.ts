@@ -40,10 +40,19 @@ export async function cancelEventCheckIns(eventId: string): Promise<number> {
       },
       data: { status: "cancelled", updated_at: now },
     }),
-    db.presence_sessions.updateMany({
-      where: { event_id: eventId, departed_at: null },
-      data: { departed_at: now, departed_source: "ended", updated_at: now },
-    }),
+    /*
+     * GREATEST, not `now`: `departed_at >= arrived_at` is a CHECK, and an
+     * arrival can be later than this clock (another instance's, a check-in
+     * racing the cancel, a seeded world's sessions at a future start). One such
+     * row would fail the whole cascade, and the event, already cancelled by
+     * the caller, would never re-run it. Raw because `updateMany` cannot set a
+     * column from another.
+     */
+    db.$executeRaw`
+      UPDATE presence_sessions
+         SET departed_at = GREATEST(arrived_at, ${now}), departed_source = 'ended', updated_at = ${now}
+       WHERE event_id = ${eventId}::uuid AND departed_at IS NULL
+    `,
   ])
   return count
 }

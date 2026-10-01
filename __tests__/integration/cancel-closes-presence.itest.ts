@@ -48,11 +48,29 @@ it("closes the sessions of everyone inside, as ended, and the room is empty", as
   const r = await room(await host())
   const who = await guest()
   await putInRoom({ ...r, userId: who })
+  expect((await headcount({ occurrenceId: r.occurrenceId })).insideGuests).toBe(1)
+  const before = Date.now()
+
+  expect(await cancelEventCheckIns(r.eventId)).toBe(1)
+
+  const s = await sessionOf(r.eventId, who)
+  expect(s.departed_source).toBe("ended")
+  expect(s.departed_at!.getTime()).toBeGreaterThanOrEqual(before)
+  expect((await headcount({ occurrenceId: r.occurrenceId })).insideGuests).toBe(0)
+})
+
+it("closes a session whose arrival is later than the cancel, at its arrival", async () => {
+  // A seeded world's sessions start in the future, and so can a check-in racing
+  // the cancel. `departed_at >= arrived_at` is a CHECK: one such row must not
+  // fail the cascade for everyone.
+  const r = await room(await host())
+  const who = await guest()
+  const arrives = new Date(Date.now() + 60 * 60_000)
+  await putInRoom({ ...r, userId: who, at: arrives })
 
   await cancelEventCheckIns(r.eventId)
 
-  expect(await sessionOf(r.eventId, who)).toMatchObject({ departed_at: expect.any(Date), departed_source: "ended" })
-  expect((await headcount({ occurrenceId: r.occurrenceId })).insideGuests).toBe(0)
+  expect(await sessionOf(r.eventId, who)).toEqual({ departed_at: arrives, departed_source: "ended" })
 })
 
 it("leaves a departure that already happened as it was", async () => {

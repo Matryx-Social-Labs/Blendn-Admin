@@ -13,7 +13,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import { NextRequest } from "next/server"
 import { signAccessToken } from "@/lib/mobile-auth"
-import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, occurrenceOf, putInRoom, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventRoute = require("@/app/api/events/[id]/route") as typeof import("@/app/api/events/[id]/route")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -153,4 +153,50 @@ it("records a cancel from the admin's status dropdown, the fourth door, by the a
   expect(rows.map((r) => r.action)).toEqual(["event.created", "event.cancelled"])
   expect(rows[1].user_id).toBe(admin)
   expect(rows[1].details).toMatchObject({ via: "admin", from: "published", to: "cancelled" })
+})
+
+/*
+ * Every door that cancels also empties the room (SCRUM-490). Pinned per door:
+ * the cascade is a call each one makes after its own status write, and a door
+ * that drops it leaves its cancelled events counting people inside for good.
+ */
+async function cancelThrough(door: "dashboard" | "mobile" | "admin", id: string) {
+  if (door === "dashboard") return patch(id, { ...payload(), status: "cancelled" })
+  if (door === "mobile") {
+    const { email } = await db.user.findUniqueOrThrow({ where: { id: host }, select: { email: true } })
+    const res = await mobileEventRoute.PATCH(
+      new NextRequest(`http://localhost/api/mobile/events/${id}`, {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${signAccessToken(host, email)}`, "content-type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
+      }),
+      { params: Promise.resolve({ eventId: id }) }
+    )
+    expect(res.status).toBe(200)
+    return
+  }
+  const admin = await makeUser(testId("ela-admin"), "app_admin")
+  users.push(admin)
+  mockGetAuth.mockResolvedValue({ user: { id: admin, role: "app_admin" } })
+  try {
+    await adminActions.updateEventStatus(id, "cancelled")
+  } finally {
+    mockGetAuth.mockResolvedValue({ user: { id: host, role: "organizer" } })
+  }
+}
+
+it.each(["dashboard", "mobile", "admin"] as const)("a cancel through the %s door closes the presence sessions inside", async (door) => {
+  const res = await eventsRoute.POST(
+    new Request("http://localhost/api/events", { method: "POST", body: JSON.stringify(payload({ status: "published" })) }) as never
+  )
+  const { id } = (await res.json()) as { id: string }
+  events.push(id)
+  const guest = await makeUser(testId("ela-guest"))
+  users.push(guest)
+  await putInRoom({ eventId: id, occurrenceId: await occurrenceOf(id), userId: guest })
+
+  await cancelThrough(door, id)
+
+  const session = await db.presence_sessions.findFirstOrThrow({ where: { event_id: id, user_id: guest }, select: { departed_source: true } })
+  expect(session.departed_source).toBe("ended")
 })
