@@ -13,6 +13,11 @@ import { reviewableUrl } from "@/lib/tigris"
 import { claimants, notifyClaimant } from "@/lib/claim-decision-notify"
 import { appUrl } from "@/lib/email"
 import { homeOrgIdFor } from "@/lib/event-ownership"
+import { isUuid } from "@/lib/api-input"
+import { overClaimLimit } from "@/lib/claim-limit"
+import { claimVenueWhere } from "@/lib/curation"
+import { violatedConstraint } from "@/lib/prisma-errors"
+import { logger } from "@/lib/logger"
 
 /**
  * Claiming a venue.
@@ -167,14 +172,135 @@ export async function fileVenueClaim(
   return { id: claim.id, isDispute }
 }
 
+export interface FilePublicVenueClaimInput {
+  venueId: string
+  contactEmail: string
+  /** The venue-owner application the form just filed. It must be this address's. */
+  onboardingId: string
+  gstin?: string
+  note?: string
+}
+
+/**
+ * "This place is mine" — from somebody with no account (`/claim/venue/[venueId]`).
+ *
+ * Every venue is live from day one and the founders seeded most of them, so the
+ * person who runs a place usually meets its listing before they have a host
+ * account. They apply as a venue owner through `/api/onboarding/apply` (the
+ * only writer of applications) and this files the claim against that
+ * application, the way `fileEventClaim` does for a curated event.
+ *
+ * Unauthenticated on purpose, and safe for the same reason: filing grants
+ * nothing. A person reads it, and approving still needs the application
+ * approved first, because that is what creates the organisation the venue is
+ * handed to. The session is never read here: an account holder files from the
+ * dashboard, with documents.
+ */
+export async function filePublicVenueClaim(
+  input: FilePublicVenueClaimInput
+): Promise<{ ok: true; claimId: string } | { ok: false; error: string }> {
+  // venues.id is a UUID column; a malformed id is a missing venue, not a throw.
+  if (!isUuid(input.venueId)) return { ok: false, error: "Venue not found" }
+
+  const email = input.contactEmail.trim().toLowerCase()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return { ok: false, error: "Give an email address we can reply to" }
+  }
+
+  /*
+   * The application has to be this address's own, and a venue owner's.
+   *
+   * Approval resolves the organisation from it, so a uuid that names somebody
+   * else's application would hand the venue to them. And an organiser cannot
+   * claim a venue from the dashboard (`fileVenueClaim`), so an organiser's
+   * application cannot do it from here either.
+   */
+  const request = isUuid(input.onboardingId)
+    ? await db.organiser_onboarding_requests.findUnique({
+        where: { id: input.onboardingId },
+        select: { contact_email: true, requested_role: true },
+      })
+    : null
+  if (!request || request.contact_email.toLowerCase() !== email) {
+    return { ok: false, error: "That application does not match this email address" }
+  }
+  if (request.requested_role !== "venue_owner") {
+    return { ok: false, error: "That application is not for a venue" }
+  }
+
+  const givenGstin = input.gstin?.trim().toUpperCase() || null
+  if (givenGstin) {
+    const result = validateGstin(givenGstin)
+    if (!result.valid) return { ok: false, error: gstinMessage(result) }
+  }
+
+  const limited = await overClaimLimit(email, { kind: "venue", id: input.venueId })
+  if (limited) return { ok: false, error: limited }
+
+  const venue = await db.venues.findUnique({
+    where: claimVenueWhere(input.venueId),
+    select: { id: true, name: true, owner_org_id: true },
+  })
+  if (!venue) return { ok: false, error: "Venue not found" }
+  /*
+   * A dispute needs an account. The dashboard path files one with documents
+   * and an incumbent on record; a stranger's form against an owned venue is
+   * not a claim a reviewer can weigh.
+   */
+  if (venue.owner_org_id) return { ok: false, error: "This place already has an owner on Blend'n" }
+
+  try {
+    const claim = await db.venue_claims.create({
+      data: {
+        venue_id: venue.id,
+        onboarding_id: input.onboardingId,
+        contact_email: email,
+        gstin: givenGstin,
+        note: input.note?.trim() || null,
+      },
+      select: { id: true },
+    })
+    auditLog({
+      action: "venue.claim.filed",
+      resource: "venue",
+      resourceId: venue.id,
+      details: { claimId: claim.id, onboardingId: input.onboardingId, withoutAccount: true },
+    })
+    return { ok: true, claimId: claim.id }
+  } catch (error) {
+    if (violatedConstraint(error, "venue_claims_one_pending_per_email")) {
+      return { ok: false, error: "You already have a claim on this place waiting for review" }
+    }
+    logger.error("File public venue claim failed", {
+      venueId: venue.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { ok: false, error: "Could not file the claim" }
+  }
+}
+
 export interface ClaimQueueRow {
   id: string
   venueId: string
   venueName: string
   venueAddress: string | null
   venueType: string
+  /**
+   * The organisation that would own it. For a no-account claim, the one its
+   * application created once approved, and until then the name the applicant
+   * gave, with `awaitingApplication` set.
+   */
   orgName: string
   filedByName: string | null
+  /** Who to write back to, for a claim filed with no account. */
+  contactEmail: string | null
+  note: string | null
+  /**
+   * Filed with no account, and its application is not approved yet: there is
+   * no organisation to hand the venue to, so approving is refused. Shown before
+   * the buttons rather than learned from a failed submit.
+   */
+  awaitingApplication: boolean
   isDispute: boolean
   gstin: string | null
   gstinCheck: string | null
@@ -213,11 +339,23 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
     },
   })
 
-  const filerIds = [...new Set(claims.map((c) => c.filed_by))]
+  const filerIds = [...new Set(claims.flatMap((c) => (c.filed_by ? [c.filed_by] : [])))]
   const filers = filerIds.length
     ? await db.user.findMany({ where: { id: { in: filerIds } }, select: { id: true, name: true } })
     : []
   const filerName = new Map(filers.map((f) => [f.id, f.name]))
+
+  // A no-account claim's organisation lives on its application once that is
+  // approved -- where the hand-over looks too (SCRUM-454, the event queue). One
+  // query for the page.
+  const requestIds = claims.flatMap((c) => (c.onboarding_id ? [c.onboarding_id] : []))
+  const requests = requestIds.length
+    ? await db.organiser_onboarding_requests.findMany({
+        where: { id: { in: requestIds } },
+        select: { id: true, display_name: true, org: { select: { display_name: true } } },
+      })
+    : []
+  const requestById = new Map(requests.map((r) => [r.id, r]))
 
   return Promise.all(claims.map(async (c) => {
     const stored = (c.evidence ?? {}) as ClaimEvidence
@@ -229,6 +367,10 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
       )
     ) as ClaimEvidence
     const flags: string[] = []
+
+    const request = c.onboarding_id ? requestById.get(c.onboarding_id) : undefined
+    const approvedOrg = c.org?.display_name ?? request?.org?.display_name ?? null
+    const awaitingApplication = approvedOrg === null
 
     if (!evidence.tradeLicence) flags.push("No trade licence attached")
     if (!c.gstin) flags.push("No GSTIN given")
@@ -244,8 +386,11 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
       venueName: c.venue.name,
       venueAddress: [c.venue.address, c.venue.city].filter(Boolean).join(", ") || null,
       venueType: venueTypeLabel(c.venue.venue_type),
-      orgName: c.org.display_name,
-      filedByName: filerName.get(c.filed_by) ?? null,
+      orgName: approvedOrg ?? request?.display_name ?? "Unknown applicant",
+      filedByName: c.filed_by ? (filerName.get(c.filed_by) ?? null) : null,
+      contactEmail: c.contact_email,
+      note: c.note,
+      awaitingApplication,
       isDispute: c.is_dispute,
       gstin: c.gstin,
       // Recomputed rather than stored, so it cannot go stale against the
@@ -284,6 +429,8 @@ export async function decideVenueClaim(
       id: true,
       status: true,
       org_id: true,
+      onboarding_id: true,
+      contact_email: true,
       is_dispute: true,
       filed_by: true,
       venue: { select: { id: true, name: true, owner_org_id: true } },
@@ -299,12 +446,34 @@ export async function decideVenueClaim(
     throw new Refusal("Give a reason — it is sent to the claimant.")
   }
 
+  /*
+   * A claim filed with no account carries its application, not an
+   * organisation. Approving the application creates the organisation and
+   * records it on the request, so it is resolved from there at decision time,
+   * as `decideEventClaim` does. Filing refused an application that was not the
+   * claimant's own; checked again here, because this is the write that hands
+   * the venue over.
+   */
+  const request = claim.onboarding_id
+    ? await db.organiser_onboarding_requests.findUnique({
+        where: { id: claim.onboarding_id },
+        select: { org_id: true, contact_email: true },
+      })
+    : null
+  if (request && request.contact_email.toLowerCase() !== (claim.contact_email ?? "").toLowerCase()) {
+    throw new Refusal("The application on this claim belongs to a different email address.")
+  }
+  const orgId = claim.org_id ?? request?.org_id ?? null
+  if (decision === "approve" && !orgId) {
+    throw new Refusal("Approve their application first — there is no organisation to hand this venue to yet.")
+  }
+
   // Read before the write: after it, nobody is pending any more.
   const losers =
     decision === "approve"
       ? await db.venue_claims.findMany({
           where: { venue_id: claim.venue.id, status: "pending", id: { not: claimId } },
-          select: { filed_by: true },
+          select: { filed_by: true, contact_email: true },
         })
       : []
 
@@ -316,6 +485,10 @@ export async function decideVenueClaim(
         reviewed_by: admin.id,
         reviewed_at: new Date(),
         decision_note: trimmed || null,
+        // The row says who got the venue. `venue_claims_one_claimant` wants
+        // exactly one of the pair, so the application goes as the organisation
+        // arrives.
+        ...(decision === "approve" && !claim.org_id ? { org_id: orgId, onboarding_id: null } : {}),
       },
     })
 
@@ -323,7 +496,7 @@ export async function decideVenueClaim(
 
     await tx.venues.update({
       where: { id: claim.venue.id },
-      data: { owner_org_id: claim.org_id, claimed_at: new Date() },
+      data: { owner_org_id: orgId, claimed_at: new Date() },
     })
 
     // One owner per venue, so every other request for it is now moot.
@@ -347,7 +520,7 @@ export async function decideVenueClaim(
     resourceId: claim.venue.id,
     details: {
       claimId,
-      orgId: claim.org_id,
+      orgId,
       wasDispute: claim.is_dispute,
       previousOwnerOrgId: claim.venue.owner_org_id,
       note: trimmed || null,
@@ -360,16 +533,26 @@ export async function decideVenueClaim(
   return { notified }
 }
 
+interface Claimant {
+  filed_by: string | null
+  contact_email: string | null
+}
+
 /** The decided claimant hears the reason; on an approval so do the ones it displaced. */
 async function tellVenueClaimants(
-  claim: { filed_by: string; venue: { name: string } },
+  claim: Claimant & { venue: { name: string } },
   decision: "approve" | "decline",
   reason: string | null,
-  losers: { filed_by: string }[]
+  losers: Claimant[]
 ): Promise<boolean> {
-  const who = await claimants([claim.filed_by, ...losers.map((l) => l.filed_by)])
+  const who = await claimants([claim, ...losers].flatMap((c) => (c.filed_by ? [c.filed_by] : [])))
+  // An account holder is reached through their user; somebody with no account
+  // through the address they filed with -- there is nobody else to ask.
+  const addressOf = (c: Claimant) =>
+    (c.filed_by ? who.get(c.filed_by) : undefined) ??
+    (c.contact_email ? { email: c.contact_email, name: null } : undefined)
   const what = `the venue ${claim.venue.name}`
-  const filer = who.get(claim.filed_by)
+  const filer = addressOf(claim)
   const notified = filer
     ? await notifyClaimant({
         to: filer.email,
@@ -381,8 +564,8 @@ async function tellVenueClaimants(
       })
     : false
   for (const l of losers) {
-    const u = who.get(l.filed_by)
-    if (u && l.filed_by !== claim.filed_by)
+    const u = addressOf(l)
+    if (u && u.email !== filer?.email)
       await notifyClaimant({ to: u.email, name: u.name, what, outcome: "declined", reason: "Another claim on this venue was approved.", link: null })
   }
   return notified

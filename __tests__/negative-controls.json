@@ -365,9 +365,9 @@
     },
     "event-claims.test.ts": {
       "guards": "fileEventClaim never takes orgId from the caller, never returns flags, is rate-limited before the write; decideEventClaim's catch wraps the transaction; the funnel has a public entry",
-      "mutation": "Re-add orgId to FileClaimInput; return {ok,claimId,flags}; replace the overClaimLimit call with `const limited = null`; unwire fileEventClaim from claim-form.tsx; add \"/claim/:path*\" to the middleware matcher; change the migration predicate from 'approved' to 'pending'; move the catch off $transaction",
-      "observed": "1 failing per mutation, seven mutations, each reverted",
-      "date": "2026-08-25"
+      "mutation": "Re-add orgId to FileClaimInput; return {ok,claimId,flags}; replace the overClaimLimit call with `const limited = null`; unwire fileEventClaim from claim-form.tsx; add \"/claim/:path*\" to the middleware matcher; change the migration predicate from 'approved' to 'pending'; move the catch off $transaction. Step 1 (the limiter moved to lib/claim-limit.ts, shared with the public venue claim): M419 filePublicVenueClaim's overClaimLimit call replaced with `const limited = null as string | null`; M420 lib/claim-limit.ts keying the per-target window `rl:claim:target` instead of `rl:claim:${target.kind}:${target.id}`",
+      "observed": "1 failing per mutation, seven mutations, each reverted. M419, M420: event-claims.test.ts 1 of 31 failing each ('rate-limits an endpoint nothing else bounds'), reverted",
+      "date": "2026-10-01"
     },
     "curation.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous",

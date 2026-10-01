@@ -99,6 +99,26 @@ password to `SEED_PASSWORD`.
   deploy log. Better than an account nobody can sign in to.
 - It prints the addresses, never the password.
 
+#### Seeding venues from a founders' CSV
+
+`scripts/import-venues.ts` lists venues before any owner arrives (every venue is
+live from day one). Columns: `name, address, lat, lng, maps_url, type, city` —
+`name` and `city` required; `lat`+`lng` or a Google Maps link. Each row meets the
+dashboard's own rules (`lib/venue-rules.ts`): refused within 100 m of a listed
+venue or an earlier row, an area sized for its type, unclaimed. The owner claims
+it later at `/claim/venue/<id>`.
+
+```bash
+DATABASE_URL=<url> npm run import:venues -- venues.csv                # dry run: rows + duplicates, writes nothing
+DATABASE_URL=<url> npm run import:venues -- venues.csv --apply        # write
+DATABASE_URL=<url> npm run import:venues -- venues.csv --apply --osm  # + the building's OSM outline where named
+```
+
+**Keep the `--` before the file.** npm 11 takes `--apply` given to `npm run` as
+its own option and drops it, which turns a write into a dry run; the first line
+of output says `APPLY` or `DRY RUN`. A file with any refused row is never
+applied. Re-running is safe: rows already imported come back as duplicates.
+
 #### `migrate status` reports two missing migration files. That is expected.
 
 On production and staging you will see something like:

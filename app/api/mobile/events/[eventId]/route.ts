@@ -4,6 +4,8 @@ import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
+import { offersClaim } from "@/lib/curation"
+import { dashboardUrl } from "@/lib/email"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
@@ -289,6 +291,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ? { id: null, name: host.name, image: null }
           : { id: event.organizer.id, name: host.name, image: event.organizer.image }
       })(),
+      /*
+       * "Running this event? Claim it" — null unless this is a curated event
+       * nobody has claimed (`offersClaim`). The URL is built here, on the
+       * dashboard host, so the app never hard-codes an environment and never
+       * links the API host. It names the event and nothing about the viewer.
+       */
+      claim: offersClaim(event) ? { url: `${dashboardUrl()}/claim/${event.id}` } : null,
       details: event.details
         ? {
             fullDescription: event.details.full_description,

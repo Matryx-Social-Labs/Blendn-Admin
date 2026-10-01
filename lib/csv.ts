@@ -104,3 +104,52 @@ export function reportFilename(kind: string, from: Date, to: Date): string {
   const range = iso(from) === iso(to) ? iso(from) : `${iso(from)}_${iso(to)}`
   return `blendn-${kind}-${range}.csv`
 }
+
+/**
+ * Read a CSV: RFC 4180's one quoting rule, in reverse.
+ *
+ * Quoted cells may hold commas, doubled quotes and newlines — a Google Maps URL
+ * holds commas (`@12.97,77.64,17z`), so a split on "," is not a parser. A
+ * leading BOM (Excel's, see `UTF8_BOM`) is dropped. Blank lines are skipped.
+ * No type coercion: every cell is a string, trimmed by the caller.
+ */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ""
+  let quoted = false
+  const input = text.startsWith(UTF8_BOM) ? text.slice(1) : text
+
+  const endRow = () => {
+    row.push(cell)
+    if (row.some((c) => c.trim() !== "")) rows.push(row)
+    row = []
+    cell = ""
+  }
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]
+    if (quoted) {
+      if (ch === '"' && input[i + 1] === '"') {
+        cell += '"'
+        i++
+      } else if (ch === '"') {
+        quoted = false
+      } else {
+        cell += ch
+      }
+    } else if (ch === '"') {
+      quoted = true
+    } else if (ch === ",") {
+      row.push(cell)
+      cell = ""
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && input[i + 1] === "\n") i++
+      endRow()
+    } else {
+      cell += ch
+    }
+  }
+  if (cell !== "" || row.length > 0) endRow()
+  return rows
+}

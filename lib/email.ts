@@ -74,6 +74,20 @@ export function applyUrl(): string {
   return configured ? configured.replace(/\/$/, "") : appUrl()
 }
 
+/**
+ * The dashboard's own origin, for a link the mobile app hands to a browser.
+ *
+ * Not `appUrl()`: that is `NEXTAUTH_URL`, which has pointed at the API host
+ * before (the lead emails built from it needed `middleware.ts`'s redirect when
+ * the hosts split). `/claim/*` serves on either host, but the session cookie a
+ * signed-in host would bring lives on the dashboard one, and the API host is
+ * not a name to hand a person. Unsplit (local, single host), it is `appUrl()`.
+ */
+export function dashboardUrl(): string {
+  const host = process.env.DASHBOARD_HOST?.trim()
+  return host ? `https://${host}` : appUrl()
+}
+
 /*
  * Outside production, mail goes only to our own and test domains (SCRUM-452).
  *
