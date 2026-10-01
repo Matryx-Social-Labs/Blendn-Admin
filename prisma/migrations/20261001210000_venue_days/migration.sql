@@ -42,11 +42,17 @@ ALTER TABLE "venues"
 ALTER TABLE "venues" ADD CONSTRAINT "venues_day_reset_hour_range"
   CHECK ("day_reset_hour" BETWEEN 0 AND 23);
 
--- A zone Postgres cannot read raises 22023 here rather than at the first Go
--- Live. timezone(text, timestamptz) is IMMUTABLE, so it may sit in a CHECK.
--- lib/venue-day.ts throws a RangeError on any zone it still cannot read.
+-- An IANA name ("Area/Location", or UTC) that Postgres can read. The shape
+-- keeps out the POSIX forms Postgres accepts and Node does not ("UTC+5",
+-- "<+05>-5"), which would pass here and throw at the first Go Live. A name
+-- Postgres cannot read raises 22023 rather than 23514; timezone(text,
+-- timestamptz) is IMMUTABLE, so it may sit in a CHECK. lib/venue-day.ts still
+-- throws a RangeError on anything it cannot read.
 ALTER TABLE "venues" ADD CONSTRAINT "venues_timezone_known"
-  CHECK ((TIMESTAMPTZ '2000-01-01 00:00:00+00' AT TIME ZONE "timezone") IS NOT NULL);
+  CHECK (
+    ("timezone" = 'UTC' OR "timezone" ~ '^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$')
+    AND (TIMESTAMPTZ '2000-01-01 00:00:00+00' AT TIME ZONE "timezone") IS NOT NULL
+  );
 
 -- When a Go Live window ends (step 4). Null for event check-ins.
 ALTER TABLE "event_check_ins" ADD COLUMN "expires_at" TIMESTAMPTZ(6);

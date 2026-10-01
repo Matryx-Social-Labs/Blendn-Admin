@@ -1,5 +1,7 @@
 import { SYSTEM_USER_ID, VENUE_DAY_INDEX, venueDayBounds, venueDayFor } from "@/lib/venue-day"
 
+import { db as appDb } from "@/lib/db"
+
 import { closeDb, db, makeUser, testId } from "./helpers"
 
 /**
@@ -91,6 +93,59 @@ describe("venueDayFor", () => {
     expect(await db.events.count({ where: { venue_id: id, kind: "venue_day" } })).toBe(1)
   })
 
+  it("reads the winner when it loses the race, every time (the lost-race path, forced)", async () => {
+    // Ten at once only sometimes lose a race; this always does. The day
+    // exists, the lookup is made to miss once, so the insert collides on the
+    // index and the recovery has to find the winner by re-reading.
+    const id = await venue()
+    const now = new Date("2026-10-09T12:00:00Z")
+    const winner = await venueDayFor(id, now)
+    const spy = jest.spyOn(appDb.events, "findFirst").mockResolvedValueOnce(null)
+    try {
+      expect((await venueDayFor(id, now))!.id).toBe(winner!.id)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await db.events.count({ where: { venue_id: id, kind: "venue_day" } })).toBe(1)
+  })
+
+  it("gives two venues on the same day two rows, each carrying its own venue", async () => {
+    const [a, b] = [await venue(), await venue()]
+    const now = new Date("2026-10-10T12:00:00Z")
+    const [dayA, dayB] = [await venueDayFor(a, now), await venueDayFor(b, now)]
+    expect(dayA!.id).not.toBe(dayB!.id)
+    const rowA = await db.events.findUniqueOrThrow({ where: { id: dayA!.id } })
+    const venueA = await db.venues.findUniqueOrThrow({ where: { id: a } })
+    expect(rowA).toMatchObject({
+      venue_name: venueA.name,
+      city: "Bengaluru",
+      latitude: venueA.latitude,
+      longitude: venueA.longitude,
+      address: venueA.address,
+    })
+    expect(rowA.title).toBe(`Venue day · ${venueA.name} · 2026-10-10`)
+  })
+
+  it("names the occurrence by the venue's date, not UTC's, and makes a 25-hour day where the clocks go back", async () => {
+    const auckland = await venue()
+    await db.venues.update({ where: { id: auckland }, data: { timezone: "Pacific/Auckland" } })
+    // 07:00 NZDT on 11 Oct is 18:00Z on 10 Oct.
+    const nz = await venueDayFor(auckland, new Date("2026-10-10T18:00:00Z"))
+    const occurrence = await db.event_occurrences.findUniqueOrThrow({ where: { id: nz!.occurrenceId } })
+    expect(occurrence.occurs_on.toISOString().slice(0, 10)).toBe("2026-10-11")
+
+    const berlin = await venue()
+    await db.venues.update({ where: { id: berlin }, data: { timezone: "Europe/Berlin" } })
+    const fallBack = await venueDayFor(berlin, new Date("2026-10-24T22:00:00Z"))
+    expect(fallBack!.end_time.getTime() - fallBack!.start_time.getTime()).toBe(25 * 3_600_000)
+  })
+
+  it("makes nothing for a deleted venue", async () => {
+    const id = await venue()
+    await db.venues.update({ where: { id }, data: { deleted_at: new Date() } })
+    expect(await venueDayFor(id)).toBeNull()
+  })
+
   it("is held to one per day by the database, not only by the code (PL-I02)", async () => {
     const id = await venue()
     const day = await venueDayFor(id, new Date("2026-10-04T12:00:00Z"))
@@ -101,6 +156,14 @@ describe("venueDayFor", () => {
       VALUES (gen_random_uuid(), ${testId("dup")}, 'dup', '', ${row.start_time}, ${row.end_time}, 'UTC', ${SYSTEM_USER_ID}, ${id}, 'venue_day', now())`
     await expect(insert).rejects.toMatchObject({ code: "P2010" })
     await insert.catch((e: unknown) => expect(JSON.stringify(e)).toContain(VENUE_DAY_INDEX))
+
+    // Partial: two events at the same venue and the same minute are nobody's business.
+    for (const label of ["a", "b"]) {
+      const e = await db.events.create({
+        data: { slug: testId(`same_${label}`), title: "x", description: "", start_time: row.start_time, end_time: row.end_time, timezone: "UTC", organizer_id: SYSTEM_USER_ID, venue_id: id },
+      })
+      await db.events.delete({ where: { id: e.id } }).catch(() => undefined)
+    }
   })
 
   it("gives a claimed venue's days to its org from the claim on, never the day the claim fell in", async () => {
@@ -134,11 +197,24 @@ describe("venueDayFor", () => {
     expect(row.timezone).toBe("Europe/Berlin")
   })
 
-  it("refuses a zone Postgres cannot read, and an hour off the clock", async () => {
+  it("refuses a zone either side cannot read, and an hour off the clock", async () => {
     const id = await venue()
-    await expect(db.venues.update({ where: { id }, data: { timezone: "Mars/Olympus_Mons" } })).rejects.toThrow()
-    await expect(db.venues.update({ where: { id }, data: { day_reset_hour: 24 } })).rejects.toThrow()
-    expect(venueDayBounds("Asia/Kolkata", 6, new Date()).end > venueDayBounds("Asia/Kolkata", 6, new Date()).start).toBe(true)
+    const set = (data: { timezone?: string; day_reset_hour?: number }) =>
+      db.$executeRawUnsafe(
+        `UPDATE venues SET ${Object.keys(data)[0]} = $1 WHERE id = $2::uuid`,
+        Object.values(data)[0],
+        id
+      )
+    await expect(set({ timezone: "Mars/Olympus_Mons" })).rejects.toThrow(/not recognized/)
+    // Postgres reads these and Node does not: the shape check refuses them.
+    await expect(set({ timezone: "UTC+5" })).rejects.toThrow(/venues_timezone_known/)
+    await expect(set({ timezone: "<+05>-5" })).rejects.toThrow(/venues_timezone_known/)
+    await expect(set({ day_reset_hour: 24 })).rejects.toThrow(/venues_day_reset_hour_range/)
+    await expect(set({ day_reset_hour: -1 })).rejects.toThrow(/venues_day_reset_hour_range/)
+    await set({ day_reset_hour: 0 })
+    await set({ timezone: "America/Argentina/Buenos_Aires" })
+    await set({ timezone: "UTC" })
+    expect(() => venueDayBounds("UTC+5", 6, new Date())).toThrow(RangeError)
   })
 })
 

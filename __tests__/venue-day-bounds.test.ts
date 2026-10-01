@@ -30,7 +30,36 @@ describe("venueDayBounds", () => {
   })
 
   it("refuses an hour off the clock and a zone it cannot read", () => {
-    expect(() => venueDayBounds("Asia/Kolkata", 24, new Date())).toThrow(RangeError)
+    for (const hour of [24, -1, 1.5, Number.NaN]) {
+      expect(() => venueDayBounds("Asia/Kolkata", hour, new Date())).toThrow(RangeError)
+    }
     expect(() => venueDayBounds("Mars/Olympus_Mons", 6, new Date())).toThrow(RangeError)
+  })
+
+  /*
+   * Every instant is inside its own day, and each day ends where the next
+   * begins — across DST changes, and when the reset hour itself is skipped or
+   * repeated (02:00 in Berlin and New York). The coverage review's failing
+   * seeds are among the sampled days.
+   */
+  it("always contains now, and days meet end to start, through DST changes", () => {
+    const zones = ["Asia/Kolkata", "Europe/Berlin", "America/New_York", "Australia/Lord_Howe", "Africa/Casablanca", "Pacific/Auckland"]
+    const days = ["2026-03-08", "2026-03-29", "2026-04-05", "2026-10-04", "2026-10-25", "2026-11-01", "2026-02-15", "2026-10-03"]
+    const misses: string[] = []
+    for (const zone of zones) {
+      for (const hour of [0, 2, 3, 6]) {
+        for (const day of days) {
+          for (let m = -24 * 60; m <= 48 * 60; m += 20) {
+            const now = new Date(Date.parse(`${day}T00:00:00Z`) + m * 60_000)
+            const b = venueDayBounds(zone, hour, now)
+            const next = venueDayBounds(zone, hour, b.end)
+            if (!(b.start <= now && now < b.end) || next.start.getTime() !== b.end.getTime()) {
+              misses.push(`${zone} ${hour}h ${now.toISOString()}`)
+            }
+          }
+        }
+      }
+    }
+    expect(misses).toEqual([])
   })
 })

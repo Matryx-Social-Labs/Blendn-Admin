@@ -14,7 +14,8 @@ const as = (role: Role, id: string) => {
 }
 
 import { getDashboardOverview } from "@/app/dashboard/actions"
-import { eventAttendees } from "@/lib/attendee-roster"
+import { attendeeRoster, eventAttendees } from "@/lib/attendee-roster"
+import { reportScope } from "@/lib/reports"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { actorFor } from "@/lib/org-membership"
 import { sendEventReminders, sendRatingRequests } from "@/lib/services/event-notifications.service"
@@ -232,6 +233,41 @@ describe("a venue day never reaches an attendee's discovery (PL-I16)", () => {
 })
 
 describe("a venue day never reaches a host's or the platform's numbers (PL-I16)", () => {
+  it("is in no report scope, for any role — each arm against a control in the same place", async () => {
+    const ids = async (where: object) =>
+      (await db.events.findMany({ where: { AND: [where, { venue_id: venueId }] }, select: { id: true } })).map((e) => e.id)
+
+    const asAdmin = await reportScope("app_admin", admin)
+    expect(await ids(asAdmin.all)).toContain(control)
+    expect(await ids(asAdmin.all)).not.toContain(day.id)
+
+    // The venue owner's org owns the day's org column: every arm is a door.
+    const asOwner = await reportScope("venue_owner", venueOwner)
+    expect(await ids(asOwner.all)).toContain(control)
+    expect(await ids(asOwner.venueOnly)).toContain(control)
+    for (const arm of [asOwner.all, asOwner.hosted, asOwner.venueOnly]) expect(await ids(arm)).not.toContain(day.id)
+
+    const asOrganiser = await reportScope("organizer", orgOrganiser)
+    expect(await ids(asOrganiser.hosted)).toContain(control)
+    for (const arm of [asOrganiser.all, asOrganiser.hosted]) expect(await ids(arm)).not.toContain(day.id)
+  })
+
+  it("puts nobody who went live into the owner's audience roster (the regulars list, F1)", async () => {
+    const regulars: string[] = []
+    for (let i = 0; i < 6; i++) {
+      const id = await makeUser(`vdh_reg${i}`)
+      users.push(id)
+      regulars.push(id)
+      await db.event_check_ins.create({
+        data: { event_id: day.id, occurrence_id: day.occurrenceId, user_id: id, status: "checked_in", check_in_time: new Date() },
+      })
+    }
+    for (const [role, id] of [["venue_owner", venueOwner], ["organizer", orgOrganiser]] as const) {
+      const roster = await attendeeRoster(role, id)
+      expect(roster.uniqueAttendees).toBe(0)
+    }
+  })
+
   it("is absent from the dashboard events list and every overview", async () => {
     as("app_admin", admin)
     const listed = (await (await dashboardEvents.GET(new NextRequest("http://localhost/api/events?limit=100"))).json()) as Array<{ id: string }>

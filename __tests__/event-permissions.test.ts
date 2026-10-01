@@ -161,6 +161,13 @@ describe("eventPermissions — a venue day", () => {
     })
   })
 
+  it("answers to the venue's owner today, not the org written on the day", () => {
+    // A venue that changed hands: yesterday's day still names the old org.
+    const transferred = event(ORG_OTHER, ORG_VENUE, { kind: "venue_day" })
+    expect(eventPermissions(actor(CARA, "venue_owner", [ORG_VENUE]), transferred).canOperate).toBe(true)
+    expect(eventPermissions(actor("usr_old", "venue_owner", [ORG_OTHER]), transferred).canOperate).toBe(false)
+  })
+
   it("fails closed on a row that reached the resolver without its kind", () => {
     const noKind = { ...day(ORG_VENUE), kind: undefined } as unknown as PermissionEvent
     expect(eventPermissions(actor(CARA, "venue_owner", [ORG_VENUE]), noKind).canViewAttendees).toBe(false)

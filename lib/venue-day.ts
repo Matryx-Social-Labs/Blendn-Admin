@@ -70,8 +70,16 @@ export function venueDayBounds(
   }
   const today = formatInTimeZone(now, timeZone, "yyyy-MM-dd")
   const hour = Number(formatInTimeZone(now, timeZone, "H"))
-  const localDate = hour < resetHour ? nextDate(today, -1) : today
+  let localDate = hour < resetHour ? nextDate(today, -1) : today
   const at = (date: string) => fromZonedTime(`${date}T${pad(resetHour)}:00:00`, timeZone)
+  /*
+   * A reset hour the clocks skip or repeat (02:00 on a DST change) resolves to
+   * an instant an hour off the wall clock, which can leave `now` just outside
+   * the day the hour pointed at. Step to the neighbouring day until it is
+   * inside; each day still ends exactly where the next begins.
+   */
+  if (at(localDate) > now) localDate = nextDate(localDate, -1)
+  else if (at(nextDate(localDate, 1)) <= now) localDate = nextDate(localDate, 1)
   return { localDate, start: at(localDate), end: at(nextDate(localDate, 1)) }
 }
 
