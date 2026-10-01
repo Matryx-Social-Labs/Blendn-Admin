@@ -24,6 +24,8 @@ const mockDb = {
   event_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   chat_messages: { findMany: jest.fn(), findUnique: jest.fn() },
   private_messages: { findMany: jest.fn(), findUnique: jest.fn() },
+  board_posts: { findMany: jest.fn() },
+  board_requests: { findMany: jest.fn() },
   $transaction: jest.fn(),
 }
 
@@ -55,6 +57,8 @@ beforeEach(() => {
   mockDb.event_reports.groupBy.mockResolvedValue([])
   mockDb.chat_messages.findMany.mockResolvedValue([])
   mockDb.private_messages.findMany.mockResolvedValue([])
+  mockDb.board_posts.findMany.mockResolvedValue([])
+  mockDb.board_requests.findMany.mockResolvedValue([])
   mockDb.$transaction.mockImplementation((fn: (t: typeof tx) => unknown) => fn(tx))
 })
 
@@ -165,6 +169,102 @@ describe("getReportQueue", () => {
     mockDb.user_reports.groupBy.mockResolvedValue([{ status: "pending", _count: { _all: 3 } }])
     mockDb.message_reports.groupBy.mockResolvedValue([{ status: "pending", _count: { _all: 4 } }])
     expect((await getReportQueue()).counts.pending).toBe(7)
+  })
+})
+
+describe("getReportQueue — board rows", () => {
+  const person = (id: string) => ({ id, name: `Name ${id}`, email: `${id}@b.com`, suspended_at: null })
+  const boardReport = (id: string, type: "board_post" | "board_request", messageId: string, over = {}) => ({
+    id,
+    created_at: T0,
+    reason: "harassment",
+    description: null,
+    message_id: messageId,
+    message_type: type,
+    excerpt: null,
+    reviewed_by: null,
+    reporter_id: "rep",
+    reporter: { name: "Reporter", email: "r@b.com" },
+    ...over,
+  })
+  const post = (over = {}) => ({
+    id: "bp1",
+    kind: "offer",
+    body: "two seats, insta first",
+    deleted_at: null,
+    moderation_status: "reported",
+    event_id: "e1",
+    event: { title: "Techno Tuesday" },
+    author: person("author"),
+    ...over,
+  })
+
+  it("names a board post's kind and author, and offers removal while it stands", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([boardReport("r1", "board_post", "bp1")])
+    mockDb.board_posts.findMany.mockResolvedValue([post()])
+    const [row] = (await getReportQueue()).rows
+    expect(row).toMatchObject({
+      messageType: "board_post",
+      boardKind: "offer",
+      subjectId: "author",
+      excerpt: "two seats, insta first",
+      eventId: "e1",
+      gone: false,
+      removable: true,
+      messageDeleted: false,
+    })
+  })
+
+  it("prefers the words as reported over the post as it reads now", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_post", "bp1", { excerpt: "what it said then" }),
+    ])
+    mockDb.board_posts.findMany.mockResolvedValue([post({ body: "edited since" })])
+    expect((await getReportQueue()).rows[0].excerpt).toBe("what it said then")
+  })
+
+  it("still offers removal on a post its author withdrew, and not on one already removed", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_post", "bp1"),
+      boardReport("r2", "board_post", "bp2"),
+    ])
+    mockDb.board_posts.findMany.mockResolvedValue([
+      post({ id: "bp1", deleted_at: new Date() }),
+      post({ id: "bp2", deleted_at: new Date(), moderation_status: "removed" }),
+    ])
+    const rows = (await getReportQueue()).rows
+    expect(rows.find((r) => r.id === "r1")).toMatchObject({ messageDeleted: true, removable: true })
+    expect(rows.find((r) => r.id === "r2")).toMatchObject({ messageDeleted: true, removable: false })
+  })
+
+  it("says an erased post or ask is gone, and offers nothing to remove", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_post", "gone-post"),
+      boardReport("r2", "board_request", "gone-ask"),
+    ])
+    const rows = (await getReportQueue()).rows
+    expect(rows.find((r) => r.id === "r1")).toMatchObject({ gone: true, removable: false, excerpt: null, subjectId: null })
+    expect(rows.find((r) => r.id === "r2")).toMatchObject({ gone: true, excerpt: null, subjectId: null })
+  })
+
+  it("reports an ask about whichever of its two people did not file it", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_request", "ask1", { reporter_id: "author" }),
+    ])
+    mockDb.board_requests.findMany.mockResolvedValue([
+      { id: "ask1", message: null, event_id: "e1", event: { title: "T" }, from: person("asker"), to: person("author") },
+    ])
+    const [row] = (await getReportQueue()).rows
+    expect(row).toMatchObject({ subjectId: "asker", gone: false, excerpt: null, removable: false })
+  })
+
+  it("counts the reports that name the same thing", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([boardReport("r1", "board_post", "bp1")])
+    mockDb.board_posts.findMany.mockResolvedValue([post()])
+    mockDb.message_reports.groupBy.mockImplementation((args: { by: string[] }) =>
+      Promise.resolve(args.by[0] === "message_id" ? [{ message_id: "bp1", _count: { _all: 3 } }] : [])
+    )
+    expect((await getReportQueue()).rows[0].sameSubject).toBe(3)
   })
 })
 

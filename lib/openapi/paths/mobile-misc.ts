@@ -225,6 +225,10 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}/block",
   tags: ["Mobile Users"],
   summary: "Unblock user",
+  description:
+    "`userId` is the `blocked_id` from `GET /users/blocked` (an opaque `bk_…` ref to one of your " +
+    "blocks), a room handle, or — for older clients — a raw id. Only a block you made is removed; " +
+    "anything else is a 200 that changes nothing.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
@@ -678,6 +682,11 @@ registry.registerPath({
   path: "/api/mobile/users/blocked",
   tags: ["Mobile Safety"],
   summary: "List blocked users",
+  description:
+    "`blocked_id` is an opaque ref to the block (`bk_…`), not the person's account id: somebody " +
+    "blocked by their board post or room handle was never shown an id, and this list must not be " +
+    "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
+    "appear only where the identity rules allow.",
   security: bearerAuth,
   responses: {
     200: {
@@ -688,6 +697,7 @@ registry.registerPath({
             z.object({
               users: z.array(
                 z.object({
+                  /** An opaque ref to this block (`bk_…`), never an account id. */
                   blocked_id: z.string(),
                   blocked_user_name: z.string().nullable(),
                   blocked_user_photo: z.string().nullable(),

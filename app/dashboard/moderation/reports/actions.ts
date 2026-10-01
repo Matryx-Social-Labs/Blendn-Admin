@@ -50,6 +50,15 @@ export interface ReportRow {
   boardKind: string | null
   /** Taken down already: a removed room message, or a withdrawn or removed board post. */
   messageDeleted: boolean
+  /** The reported post or ask itself is gone — erased with its author's account. */
+  gone: boolean
+  /** A board post a moderator has not yet removed (withdrawn-but-unmarked included). */
+  removable: boolean
+  /**
+   * Reports in this tab about the same thing, this one included. One account
+   * files one board report (a partial unique); this is how many people did.
+   */
+  sameSubject: number
   eventTitle: string | null
   eventId: string | null
   /**
@@ -125,6 +134,7 @@ export async function getReportQueue(status: report_status = "pending") {
         description: true,
         message_id: true,
         message_type: true,
+        excerpt: true,
         reviewed_by: true,
         reporter_id: true,
         reporter: { select: { name: true, email: true } },
@@ -206,6 +216,7 @@ export async function getReportQueue(status: report_status = "pending") {
             kind: true,
             body: true,
             deleted_at: true,
+            moderation_status: true,
             event_id: true,
             event: { select: { title: true } },
             author: person,
@@ -232,6 +243,32 @@ export async function getReportQueue(status: report_status = "pending") {
   const boardPostById = new Map(boardPosts.map((p) => [p.id, p]))
   const boardRequestById = new Map(boardRequests.map((r) => [r.id, r]))
 
+  /*
+   * How many reports in this tab name the same thing. Grouped by subject so a
+   * pile-on reads as one subject reported by many people, and a flood from one
+   * account (which the board's partial unique now stops) would read as one.
+   */
+  const [userSubjects, messageSubjects, eventSubjects] = await Promise.all([
+    db.user_reports.groupBy({
+      by: ["reported_id"],
+      where: { status, reported_id: { in: userReports.map((r) => r.reported.id) } },
+      _count: { _all: true },
+    }),
+    db.message_reports.groupBy({
+      by: ["message_id"],
+      where: { status, message_id: { in: messageReports.map((r) => r.message_id) } },
+      _count: { _all: true },
+    }),
+    db.event_reports.groupBy({
+      by: ["event_id"],
+      where: { status, event_id: { in: eventReports.map((r) => r.event_id) } },
+      _count: { _all: true },
+    }),
+  ])
+  const sameUser = new Map(userSubjects.map((g) => [g.reported_id, g._count._all]))
+  const sameMessage = new Map(messageSubjects.map((g) => [g.message_id, g._count._all]))
+  const sameEvent = new Map(eventSubjects.map((g) => [g.event_id, g._count._all]))
+
   const rows: ReportRow[] = [
     ...userReports.map(
       (r): ReportRow => ({
@@ -248,6 +285,9 @@ export async function getReportQueue(status: report_status = "pending") {
         messageType: null,
         boardKind: null,
         messageDeleted: false,
+        gone: false,
+        removable: false,
+        sameSubject: sameUser.get(r.reported.id) ?? 1,
         eventTitle: null,
         eventId: null,
         room: false,
@@ -264,6 +304,7 @@ export async function getReportQueue(status: report_status = "pending") {
         reporterName: displayName(r.reporter),
         room: false,
         reviewedBy: r.reviewed_by,
+        sameSubject: sameMessage.get(r.message_id) ?? 1,
       }
       if (r.message_type === "board_post") {
         const post = boardPostById.get(r.message_id)
@@ -272,10 +313,14 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectId: post?.author.id ?? null,
           subjectName: displayName(post?.author ?? null),
           subjectSuspended: post?.author.suspended_at != null,
-          excerpt: post?.body.slice(0, 200) || null,
+          // What was reported, as it was then; the live body if it predates
+          // the snapshot.
+          excerpt: (r.excerpt ?? post?.body ?? "").slice(0, 200) || null,
           messageType: "board_post",
           boardKind: post?.kind ?? null,
           messageDeleted: post?.deleted_at != null,
+          gone: !post,
+          removable: !!post && post.moderation_status !== "removed",
           eventTitle: post?.event.title ?? null,
           eventId: post?.event_id ?? null,
         }
@@ -289,10 +334,12 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectId: about?.id ?? null,
           subjectName: displayName(about),
           subjectSuspended: about?.suspended_at != null,
-          excerpt: ask?.message?.slice(0, 200) || null,
+          excerpt: (r.excerpt ?? ask?.message ?? "").slice(0, 200) || null,
           messageType: "board_request",
           boardKind: null,
           messageDeleted: false,
+          gone: !ask,
+          removable: false,
           eventTitle: ask?.event.title ?? null,
           eventId: ask?.event_id ?? null,
         }
@@ -311,6 +358,8 @@ export async function getReportQueue(status: report_status = "pending") {
         messageType: r.message_type === "private" ? "private" : "group",
         boardKind: null,
         messageDeleted: group?.deleted_at != null,
+        gone: !group && !priv,
+        removable: false,
         eventTitle: group?.chat_group?.event?.title ?? null,
         eventId: group?.chat_group?.event_id ?? null,
       }
@@ -342,6 +391,9 @@ export async function getReportQueue(status: report_status = "pending") {
         messageType: null,
         boardKind: null,
         messageDeleted: false,
+        gone: false,
+        removable: false,
+        sameSubject: sameEvent.get(r.event_id) ?? 1,
         eventTitle: r.event?.title ?? null,
         eventId: r.event_id,
         room: r.chat_group_id !== null,
@@ -435,6 +487,9 @@ export async function resolveReport(
     if (kind !== "message" || (r.message_type !== "group" && r.message_type !== "board_post")) {
       throw new Refusal("Only a room message or a board post can be removed")
     }
+    // Erased with its author's account: there is nothing to take down, and
+    // "removed" would be a record of an action that did not happen.
+    if (subject.boardPost && !subjectId) throw new Refusal("That post no longer exists")
   }
 
   if (decision === "delist" && kind !== "event") {
@@ -450,6 +505,10 @@ export async function resolveReport(
     reviewed_by: session.user.id,
     reviewed_at: new Date(),
   }
+
+  // Whether a removal took anything down — false when the post was already
+  // removed (a second report on it, or a second click), so the audit row says so.
+  let removed: boolean | null = null
 
   await db.$transaction(async (tx) => {
     // A reinstate after the fact leaves the report's own verdict alone: the
@@ -488,10 +547,20 @@ export async function resolveReport(
        * rather than its author's withdrawal. A post its author already
        * withdrew keeps its own timestamp.
        */
-      await tx.board_posts.updateMany({
-        where: { id: (report as { message_id: string }).message_id, deleted_at: null },
-        data: { deleted_at: new Date(), moderation_status: "removed", updated_at: new Date() },
+      const postId = (report as { message_id: string }).message_id
+      const now = new Date()
+      /*
+       * Marked `removed` whether or not it is already down. A reported author
+       * who withdrew the post first left it with a timestamp and no mark, and
+       * a removal that skipped it would leave the record saying "withdrawn".
+       * `not` on a nullable column excludes NULL, hence the explicit OR.
+       */
+      const marked = await tx.board_posts.updateMany({
+        where: { id: postId, OR: [{ moderation_status: null }, { moderation_status: { not: "removed" } }] },
+        data: { moderation_status: "removed", updated_at: now },
       })
+      await tx.board_posts.updateMany({ where: { id: postId, deleted_at: null }, data: { deleted_at: now } })
+      removed = marked.count > 0
     } else if (decision === "remove_message") {
       await tx.chat_messages.update({
         where: { id: (report as { message_id: string }).message_id },
@@ -506,6 +575,24 @@ export async function resolveReport(
      * The reviewer's UI said suspending "blocks the account everywhere and
      * signs it out", and it did neither.
      */
+    /*
+     * A dismissed report releases the post it held — once no other report on
+     * it is waiting. Filing stamped it `reported` so account erasure would keep
+     * the evidence; with nothing left to decide, it is an ordinary post again.
+     */
+    if (decision === "dismiss" && subject.boardPost) {
+      const postId = (report as { message_id: string }).message_id
+      const waiting = await tx.message_reports.count({
+        where: { message_type: "board_post", message_id: postId, status: "pending" },
+      })
+      if (waiting === 0) {
+        await tx.board_posts.updateMany({
+          where: { id: postId, moderation_status: "reported" },
+          data: { moderation_status: null },
+        })
+      }
+    }
+
     if (decision === "suspend" && subjectId) {
       await applySuspension(tx, subjectId, session.user.id)
     }
@@ -543,6 +630,7 @@ export async function resolveReport(
       subjectId,
       // Which board post came down, so the audit row names it without a join.
       ...(subject.boardPost && { boardPostId: (report as { message_id: string }).message_id }),
+      ...(removed !== null && { removed }),
     },
   })
 

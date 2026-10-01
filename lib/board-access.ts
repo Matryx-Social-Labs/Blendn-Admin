@@ -4,7 +4,6 @@ import { ageFrom } from "./age"
 import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
 import {
   mayPostToBoard,
-  mayReadBoard,
   type BoardEntitlement,
   type BoardWriteDenial,
 } from "./board"
@@ -13,6 +12,7 @@ import { db } from "./db"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
+import { violatedConstraint } from "./prisma-errors"
 
 /**
  * The database half of the board's gates.
@@ -255,9 +255,17 @@ export async function hideBoardPostIfFlagged(postId: string, body: string): Prom
  * block — it holds the post or the ask it saw. The person is resolved here, on
  * the server, and never returned. Null — answered as not found — for anything
  * the caller could not have seen, so these cannot be used to probe ids.
+ *
+ * "Could have seen" is deliberately wide, because these are safety actions and
+ * must stay reachable after the thing that made them necessary: anybody who
+ * was ever this event's audience (an RSVP of any answer — including one later
+ * changed to not going — or a save), or who has an ask on the post. Not the
+ * board-read gate: that closes at doors and hides blocked authors, and the
+ * person most in need of a report is the one who was just blocked, or who
+ * found the message after the night began.
  */
 
-/** The author of a post the caller could see: they can read the board, or have an ask on it. */
+/** The author of a post the caller could have seen (see above). */
 export async function boardPostAuthorFor(
   viewerId: string,
   eventId: string,
@@ -270,12 +278,61 @@ export async function boardPostAuthorFor(
   if (!post) return null
   // Withdrawn or removed posts stay reportable: the person most motivated to
   // take a post down is the one about to be reported for it.
-  if (mayReadBoard(await entitlementFor(eventId, viewerId)) === null) return post.author_id
+  const { rsvp, favourited } = await entitlementFor(eventId, viewerId)
+  if (rsvp !== null || favourited) return post.author_id
   const asked = await db.board_requests.findFirst({
     where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId }] },
     select: { id: true },
   })
   return asked ? post.author_id : null
+}
+
+/**
+ * File a report about a board post or ask.
+ *
+ * Idempotent per reporter while it is pending — a partial unique in the
+ * migration — so a second tap, or a script, is the same report rather than a
+ * second row burying everybody else's in a queue that shows the oldest
+ * hundred. `excerpt` is the words as they were when reported: the post can be
+ * withdrawn and an erased account's ask loses its message before anybody
+ * reviews it.
+ *
+ * A reported post is stamped `moderation_status = "reported"` (if moderation
+ * has not already marked it), which is what account erasure reads: it deletes
+ * only posts with no status, so evidence under review is retained. Clearing
+ * the stamp is the reviewer's (`resolveReport`, on dismiss).
+ */
+export async function fileBoardReport(input: {
+  reporterId: string
+  type: "board_post" | "board_request"
+  id: string
+  reason: string
+  description?: string
+  excerpt: string | null
+}): Promise<void> {
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.message_reports.create({
+        data: {
+          reporter_id: input.reporterId,
+          message_id: input.id,
+          message_type: input.type,
+          reason: input.reason,
+          ...(input.description && { description: input.description }),
+          ...(input.excerpt && { excerpt: input.excerpt.slice(0, 500) }),
+        },
+      })
+      if (input.type === "board_post") {
+        await tx.board_posts.updateMany({
+          where: { id: input.id, moderation_status: null },
+          data: { moderation_status: "reported" },
+        })
+      }
+    })
+  } catch (error) {
+    if (violatedConstraint(error, "message_reports_one_pending_board")) return
+    throw error
+  }
 }
 
 /** The other person on an ask, if the caller is one of its two people. */

@@ -99,6 +99,11 @@ export function ReportsTable({
                   : row.messageType === "board_request"
                     ? "Board ask"
                     : "Room message"}
+          {row.sameSubject > 1 ? (
+            // How many people reported the same thing: a pile-on is one
+            // subject, not a column of separate rows to read one by one.
+            <span className="block text-[0.75rem] text-foreground">{row.sameSubject} reports</span>
+          ) : null}
         </span>
       ),
     },
@@ -126,6 +131,8 @@ export function ReportsTable({
               <span className="ml-1 text-faint-foreground">(removed)</span>
             ) : null}
           </span>
+        ) : row.gone ? (
+          <span className="text-faint-foreground">no longer exists</span>
         ) : row.messageType === "board_request" ? (
           // An ask's message is optional; most say nothing beyond the ask.
           <span className="text-faint-foreground">asked without a message</span>
@@ -208,9 +215,12 @@ export function ReportsTable({
             ) : null}
             {/*
               A board post, not a board ask: an ask went to one person, like a
-              DM, so the lever there is the person.
+              DM, so the lever there is the person. Offered on a post its author
+              already withdrew, too: until a moderator marks it, the record says
+              only that the author took it down. Not offered once it is removed,
+              or once it is gone with an erased account.
             */}
-            {row.messageType === "board_post" && !row.messageDeleted ? (
+            {row.messageType === "board_post" && row.removable ? (
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(row, "remove_message")}>
                 Remove post
               </Button>

@@ -10,7 +10,7 @@ import {
   validationErrorResponse,
 } from "@/lib/api-response"
 import { boardReportSchema } from "@/lib/board"
-import { boardRequestCounterpart } from "@/lib/board-access"
+import { boardRequestCounterpart, fileBoardReport } from "@/lib/board-access"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -32,7 +32,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const user = await getAuthenticatedUser(request)
     if (!user) return unauthorizedResponse("Authentication required")
 
-    const limited = await rateLimit(request, userLimit("safety", "report-board", user.userId))
+    const limited =
+      (await rateLimit(request, userLimit("safety", "report-board", user.userId))) ??
+      (await rateLimit(request, userLimit("reportDay", "report-board-day", user.userId)))
     if (limited) return limited
 
     const { requestId } = await params
@@ -46,14 +48,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("Request not found")
     }
 
-    await db.message_reports.create({
-      data: {
-        reporter_id: user.userId,
-        message_id: requestId,
-        message_type: "board_request",
-        reason: input.reason,
-        ...(input.description && { description: input.description }),
-      },
+    const ask = await db.board_requests.findUnique({ where: { id: requestId }, select: { message: true } })
+    await fileBoardReport({
+      reporterId: user.userId,
+      type: "board_request",
+      id: requestId,
+      reason: input.reason,
+      ...(input.description && { description: input.description }),
+      excerpt: ask?.message ?? null,
     })
     return successResponse({ reported: true }, 201)
   } catch (error) {

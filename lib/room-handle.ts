@@ -161,3 +161,22 @@ export function roomMemberFromRef(eventId: string, ref: string, viewerId: string
 export function idForViewer(viewerId: string, eventId: string, userId: string): string {
   return userId === viewerId ? userId : roomHandle(eventId, userId)
 }
+
+/**
+ * The block list's id for somebody you blocked.
+ *
+ * `GET /users/blocked` returned their account id, so blocking a board author
+ * by their post — or a room member by their handle — handed over the stable id
+ * that the pseudonym exists to withhold, one that follows them to every event.
+ * The list now returns the block row's own id, prefixed, in the same field;
+ * `DELETE /users/:userId/block` takes it back, and only for the caller's own
+ * block. It names nothing outside that one row and dies with it.
+ */
+const BLOCK_REF = "bk_"
+
+export const blockRef = (blockId: string): string => `${BLOCK_REF}${blockId}`
+
+/** The block row id inside a ref from the list, or null if it is not one. */
+export function blockIdFromRef(ref: string): string | null {
+  return ref.startsWith(BLOCK_REF) ? ref.slice(BLOCK_REF.length) : null
+}

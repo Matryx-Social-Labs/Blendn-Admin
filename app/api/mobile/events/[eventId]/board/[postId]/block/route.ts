@@ -22,9 +22,14 @@ interface RouteParams {
  *
  * The board never hands the client a user id, so the client cannot call
  * `POST /users/:userId/block`. This resolves the author and then IS that
- * route — the same transaction (block row, requests cancelled both ways,
- * friendship severed, conversation closed and its socket room evicted) and the
- * same response — rather than a second copy of it to drift.
+ * route — the same transaction (block row, message requests cancelled both
+ * ways, friendship severed, conversation closed and its socket room evicted)
+ * and the same response — rather than a second copy of it to drift.
+ *
+ * Board asks between the two are left as they are, deliberately: an ask from
+ * the blocked person drops out of the blocker's list and cannot be accepted,
+ * and to its asker it reads as an ask on a withdrawn post — the same as if the
+ * post had been taken down, which is all a block should tell them.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
