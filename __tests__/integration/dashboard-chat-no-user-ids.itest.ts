@@ -150,9 +150,9 @@ const status = async (userId: string) =>
   ).status
 
 describe.each([
-  ["organiser", "organizer" as const, () => host],
-  ["venue owner", "venue_owner" as const, () => owner],
-])("a %s reading the room", (_label, role, who) => {
+  ["an organiser", "organizer" as const, () => host],
+  ["a venue owner", "venue_owner" as const, () => owner],
+])("%s reading the room", (_label, role, who) => {
   beforeEach(() => as(role, who()))
 
   it("carries no attendee's account id anywhere in the feed", async () => {
