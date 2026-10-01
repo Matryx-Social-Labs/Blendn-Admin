@@ -106,7 +106,7 @@ describe("the venue page shows the venue from its claim on", () => {
     )
     const shownTotal = table.rows.reduce((sum, r) => sum + (r.attended !== null && r.going !== null ? r.attended : 0), 0)
     expect(attendedTile?.value).toBe(String(shownTotal))
-    expect(attendedTile?.hint).toMatch(/small nights left out/)
+    expect(attendedTile?.hint).toMatch(/held-back nights left out/)
   })
 
   it("pools no rating from before the claim", async () => {

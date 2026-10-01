@@ -285,7 +285,7 @@ export default async function VenueDetailPage({
         <MetricTile
           label="Attended"
           value={formatNumber(totalAttended)}
-          hint={heldBack ? "GPS check-ins · small nights left out" : "GPS check-ins"}
+          hint={heldBack ? "GPS check-ins · held-back nights left out" : "GPS check-ins"}
         />
         <MetricTile
           label="Turn-up"
