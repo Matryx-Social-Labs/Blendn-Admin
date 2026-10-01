@@ -27,10 +27,11 @@ import { roomHandle } from "@/lib/room-handle"
 const USER = "user_self"
 const CHAT_ID = "11111111-1111-1111-1111-111111111111"
 const EVENT_ID = "22222222-2222-4222-8222-222222222222"
-const member = (anonymous_name: string | null, status: string) => ({
+const member = (anonymous_name: string | null, status: string, venueDayWindow?: Date | null) => ({
   anonymous_name,
   status,
-  chat_group: { event_id: EVENT_ID },
+  last_allowed_at: venueDayWindow ?? null,
+  chat_group: { event_id: EVENT_ID, event: { kind: venueDayWindow === undefined ? "event" : "venue_day" } },
 })
 // Deliberately shares no substring with USER, so the leak assertion below
 // can only fail on a genuine email leak.
@@ -184,6 +185,18 @@ describe("emitChatTyping", () => {
 
     await expect(emitChatTyping(socket, CHAT_ID, true)).resolves.toBeUndefined()
     expect(roomEmit).not.toHaveBeenCalled()
+  })
+
+  it("types into a venue's room only while the typist's Go Live is open (F6)", async () => {
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Neon Phoenix", "active", new Date(Date.now() - 60_000)))
+    const ended = makeSocket()
+    await emitChatTyping(ended.socket, CHAT_ID, true)
+    expect(ended.roomEmit).not.toHaveBeenCalled()
+
+    mockDb.chat_group_members.findUnique.mockResolvedValue(member("Neon Phoenix", "active", new Date(Date.now() + 60_000)))
+    const live = makeSocket()
+    await emitChatTyping(live.socket, CHAT_ID, true)
+    expect(live.roomEmit).toHaveBeenCalledTimes(1)
   })
 
   it("passes isTyping:false through for stopTyping", async () => {

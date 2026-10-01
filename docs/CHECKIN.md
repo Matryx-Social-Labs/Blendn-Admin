@@ -325,8 +325,8 @@ stepped out (`mayWriteToRoom`). A venue day's room does not (F6, F7, D-5):
 `liveInVenueDay` admits a member only while `last_allowed_at` is in the future,
 compared with the clock, so access ends the second the window does — not when
 the sweeper next runs. Read, write, the socket join, the roster room, the
-counter room, the roster, the grid, likes, waves and preferences (`inRoomWhere`)
-all ask it. Every checkout of a venue day sets the cut and evicts the person's
+counter room, typing, a reply's push, the roster, the grid, likes, waves and
+preferences (`inRoomWhere`) all ask it. Every checkout of a venue day sets the cut and evicts the person's
 sockets from its rooms (`live:ended` to their `user:` room). Go Live is the only
 door: no RSVP, interest or auto-join opens it. After the reset nobody is live in
 yesterday's room, so it takes no posts.

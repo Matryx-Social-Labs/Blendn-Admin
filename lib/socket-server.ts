@@ -7,6 +7,7 @@ import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
 import { blockCounterparties } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
+import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
@@ -454,10 +455,17 @@ export async function emitChatTyping(
           user_id: socket.data.userId,
         },
       },
-      select: { anonymous_name: true, status: true, chat_group: { select: { event_id: true } } },
+      select: {
+        anonymous_name: true,
+        status: true,
+        last_allowed_at: true,
+        chat_group: { select: { event_id: true, event: { select: { kind: true } } } },
+      },
     })
 
     if (!membership || membership.status !== "active") return
+    // A venue day's room is the people live in it: an ended Go Live types into nothing.
+    if (!liveInVenueDay(membership.chat_group.event, membership)) return
 
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
