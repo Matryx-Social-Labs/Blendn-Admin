@@ -158,11 +158,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     } catch (error) {
       /*
-       * The partial unique `board_requests_one_pending_per_post`, doing its job:
-       * at most one pending request per direction per post. A double tap on a
-       * slow connection asks the same person the same question twice, which is
-       * exactly the pestering the caps exist to prevent, and a client retry is
-       * the ordinary way it happens rather than the exceptional one.
+       * The unique `(post_id, from_user_id)`, doing its job: one ask per post,
+       * ever. The read above answers the ordinary re-ask; this answers the one
+       * that raced it — a double tap on a slow connection, which is the
+       * ordinary way a client retry happens rather than the exceptional one.
        */
       if (
         error &&

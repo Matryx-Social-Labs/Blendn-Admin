@@ -32,10 +32,21 @@ import { NextRequest } from "next/server"
  * - claim and seat outside one transaction, the claim
  *   loser's seat never given back                     → "spends one seat on a double-tapped accept"
  * - the ask route's doors check deleted              → "refuses posting and asking after doors"
+ *
+ * Review round (step 6b):
+ * - a declined withdraw rewriting the row to withdrawn → "lets the asker withdraw a declined ask"
+ * - a blocked counterpart's row keeping its post body  → "...as an ask on a withdrawn post" (both)
+ * - `outstandingAsk` ignoring blocks                    → the same, and the agreement pin
+ * - a blocked accept answered 403 (closed pair 409)     → "answers ... identically"
+ * - the accept claim without `liveRequest`              → "post came down mid-accept"
+ * - the block route's bell mark-read removed            → "marks the blocked asker's board-ask lines read"
+ * - lapsed asks paged ahead of settled, either way      → "cannot be filled by history"
+ * - a push to the asker on decline                      → "sends the asker nothing"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 import { ALREADY_ASKED, BOARD_CLOSED } from "@/lib/board"
-import { boardWriteDenial } from "@/lib/board-access"
+import * as boardAccess from "@/lib/board-access"
+import { boardWriteDenial, isLiveToTheAsker, outstandingAsk } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import * as conversations from "@/lib/conversations"
 import { signAccessToken } from "@/lib/mobile-auth"
@@ -45,6 +56,7 @@ const boardRoute = require("@/app/api/mobile/events/[eventId]/board/route") as t
 const requestRoute = require("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route")
 const myRequests = require("@/app/api/mobile/board/requests/route") as typeof import("@/app/api/mobile/board/requests/route")
 const decide = require("@/app/api/mobile/board/requests/[requestId]/route") as typeof import("@/app/api/mobile/board/requests/[requestId]/route")
+const blockRoute = require("@/app/api/mobile/users/[userId]/block/route") as typeof import("@/app/api/mobile/users/[userId]/block/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 type Person = { id: string; token: string }
@@ -53,6 +65,7 @@ interface Row {
   status: string
   decidedAt: string | null
   live: boolean
+  post: { id: string; body: string | null }
 }
 
 const users: string[] = []
@@ -61,6 +74,7 @@ const categories: string[] = []
 let eventId = ""
 
 afterAll(async () => {
+  await db.notifications.deleteMany({ where: { user_id: { in: users } } })
   await db.blocked_users.deleteMany({
     where: { OR: [{ blocker_id: { in: users } }, { blocked_id: { in: users } }] },
   })
@@ -276,9 +290,16 @@ describe("a decline is never delivered to the asker", () => {
     expect(one).not.toMatch(/declined|answered/i)
     expect(two).toBe(one)
 
-    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("withdrawn")
+    // The asker sees it withdrawn; the author's decision stays theirs (D-b).
     const row = (await list(asker)).outgoing.find((r) => r.id === requestId)
-    expect(row?.status).toBe("withdrawn")
+    expect(row).toMatchObject({ status: "withdrawn", live: false })
+    const stored = await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })
+    expect(stored.status).toBe("declined")
+    expect(stored.decided_at).not.toBeNull()
+    expect(stored.asker_withdrawn_at).not.toBeNull()
+    const theirs = (await list(author)).incoming.find((r) => r.id === requestId)
+    expect(theirs).toMatchObject({ status: "declined" })
+    expect(theirs?.decidedAt).toBe(stored.decided_at!.toISOString())
   })
 
   it("still refuses to withdraw an accepted ask — the asker was told about that one", async () => {
@@ -553,11 +574,11 @@ describe("an offer's seats are spent by accepting (SCRUM-514)", () => {
     const post = await offer(author, 2)
     const requestId = await askedId(asker, post)
     await db.blocked_users.create({ data: { blocker_id: author.id, blocked_id: asker.id } })
-    expect((await answer(author, requestId, "accept")).status).toBe(403)
+    expect((await answer(author, requestId, "accept")).status).toBe(409)
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
   })
 
-  it("gives the seat back with the ask when the conversation cannot be opened", async () => {
+  it("rolls the claim and the seat back when the conversation cannot be opened", async () => {
     const author = await person("gb-author")
     const asker = await person("gb-asker")
     const post = await offer(author, 2)
@@ -579,5 +600,312 @@ describe("an offer's seats are spent by accepting (SCRUM-514)", () => {
     const requestId = await askedId(asker, post)
     expect((await answer(author, requestId, "accept")).status).toBe(200)
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBeNull()
+  })
+})
+
+/** Ask through the database, for fixtures the routes' caps would refuse to build. */
+async function rawAsk(
+  from: Person,
+  to: Person,
+  opts: { at?: string; status?: "pending" | "declined" | "accepted" | "withdrawn"; created?: Date; gone?: boolean } = {}
+) {
+  const at = opts.at ?? eventId
+  const status = opts.status ?? "pending"
+  const post = await db.board_posts.create({
+    data: { event_id: at, author_id: to.id, kind: "seeking", body: `p ${testId("r")}`, deleted_at: opts.gone ? new Date() : null },
+    select: { id: true },
+  })
+  return (
+    await db.board_requests.create({
+      data: {
+        event_id: at,
+        post_id: post.id,
+        from_user_id: from.id,
+        to_user_id: to.id,
+        status,
+        decided_at: status === "pending" ? null : new Date(),
+        ...(opts.created && { created_at: opts.created }),
+      },
+      select: { id: true },
+    })
+  ).id
+}
+
+const blockBy = (who: Person, target: Person) =>
+  blockRoute.POST(req("POST", `/api/mobile/users/${target.id}/block`, who.token), {
+    params: Promise.resolve({ userId: target.id }),
+  })
+
+describe("a block reads as a withdrawn post to the asker (review #2)", () => {
+  it.each(["pending", "declined"] as const)(
+    "shows a %s ask to somebody who then blocked them as an ask on a withdrawn post, and frees its slot",
+    async (state) => {
+      const author = await person(`bw-author-${state}`)
+      const asker = await person(`bw-asker-${state}`)
+      const withdrawnPost = await offer(author, 2)
+      const blockedPost = await offer(author, 2)
+      const onWithdrawn = await askedId(asker, withdrawnPost)
+      const onBlocked = await askedId(asker, blockedPost)
+      if (state === "declined") expect((await answer(author, onBlocked, "decline")).status).toBe(200)
+
+      await db.board_posts.update({ where: { id: withdrawnPost }, data: { deleted_at: new Date() } })
+      await db.blocked_users.create({ data: { blocker_id: author.id, blocked_id: asker.id } })
+
+      const out = (await list(asker)).outgoing
+      const a = out.find((r) => r.id === onWithdrawn)!
+      const b = out.find((r) => r.id === onBlocked)!
+      expect(b).toMatchObject({ status: "pending", decidedAt: null, live: false, post: { body: null } })
+      const tell = (r: Row) => ({ status: r.status, decidedAt: r.decidedAt, live: r.live, body: r.post.body })
+      expect(tell(b)).toEqual(tell(a))
+
+      // Neither holds a slot any more.
+      const counted = await db.board_requests.count({
+        where: { from_user_id: asker.id, ...outstandingAsk(new Date(), [author.id]) },
+      })
+      expect(counted).toBe(0)
+    }
+  )
+
+  it("answers an accept on a blocked pair and on a closed pair identically", async () => {
+    const author = await person("bc-author")
+    const blockedAsker = await person("bc-blocked")
+    const closedAsker = await person("bc-closed")
+    const post = await offer(author, 3)
+    const viaBlock = await askedId(blockedAsker, post)
+    const viaClose = await askedId(closedAsker, post)
+
+    await db.blocked_users.create({ data: { blocker_id: blockedAsker.id, blocked_id: author.id } })
+    const [u1, u2] = conversations.conversationPair(author.id, closedAsker.id)
+    await db.private_conversations.create({
+      data: { user1_id: u1, user2_id: u2, closed_at: new Date(), closed_by: author.id, closed_reason: "unmatch" },
+    })
+
+    const [a, b] = [await answer(author, viaBlock, "accept"), await answer(author, viaClose, "accept")]
+    expect(a.status).toBe(409)
+    expect(b.status).toBe(a.status)
+    expect(await b.json()).toEqual(await a.json())
+    const rows = await db.board_requests.findMany({ where: { id: { in: [viaBlock, viaClose] } }, select: { status: true } })
+    expect(rows.map((r) => r.status)).toEqual(["pending", "pending"])
+    expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(3)
+  })
+})
+
+describe("accepting, end to end (BD-I02 through the route)", () => {
+  it("opens the pseudonymous board conversation the response names", async () => {
+    const author = await person("e2e-author")
+    const asker = await person("e2e-asker")
+    const requestId = await askedId(asker, await offer(author, 2))
+
+    const res = await answer(author, requestId, "accept")
+    expect(res.status).toBe(200)
+    const { data } = (await res.json()) as { data: { conversationId: string } }
+
+    const convo = await db.private_conversations.findFirstOrThrow({ where: { origin_board_request_id: requestId } })
+    expect(convo.id).toBe(data.conversationId)
+    expect(convo.origin_event_id).toBe(eventId)
+    expect(convo.user1_revealed).toBe(false)
+    expect(convo.user2_revealed).toBe(false)
+    expect(convo.user1_pseudonym).toBeTruthy()
+    expect(convo.user2_pseudonym).toBeTruthy()
+  })
+
+  it("refuses a closed pair before the claim, leaving the ask and the seat", async () => {
+    const author = await person("cp-author")
+    const asker = await person("cp-asker")
+    const post = await offer(author, 2)
+    const requestId = await askedId(asker, post)
+    const [u1, u2] = conversations.conversationPair(author.id, asker.id)
+    await db.private_conversations.create({
+      data: { user1_id: u1, user2_id: u2, closed_at: new Date(), closed_by: asker.id, closed_reason: "unmatch" },
+    })
+    const res = await answer(author, requestId, "accept")
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe("This request can no longer be accepted")
+    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("pending")
+    expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
+  })
+
+  it("rolls everything back when the pair closes mid-accept", async () => {
+    const author = await person("cm-author")
+    const asker = await person("cm-asker")
+    const post = await offer(author, 2)
+    const requestId = await askedId(asker, post)
+    const spy = jest
+      .spyOn(conversations, "openConversation")
+      .mockRejectedValueOnce(new conversations.ConversationClosedError())
+    try {
+      const res = await answer(author, requestId, "accept")
+      expect(res.status).toBe(409)
+      expect((await res.json()).error).toBe("This request can no longer be accepted")
+    } finally {
+      spy.mockRestore()
+    }
+    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("pending")
+    expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
+  })
+
+  it("refuses an ask whose post came down mid-accept, inside the transaction", async () => {
+    const author = await person("md-author")
+    const asker = await person("md-asker")
+    const post = await offer(author, 2)
+    const requestId = await askedId(asker, post)
+    const real = boardAccess.boardPseudonyms
+    // Called after every pre-check and before the transaction: the post goes
+    // in exactly the window the pre-read cannot see.
+    const spy = jest.spyOn(boardAccess, "boardPseudonyms").mockImplementationOnce(async (...args) => {
+      await db.board_posts.update({ where: { id: post }, data: { deleted_at: new Date() } })
+      return real(...args)
+    })
+    try {
+      const res = await answer(author, requestId, "accept")
+      expect(res.status).toBe(409)
+      expect((await res.json()).error).toBe("That post was taken down")
+    } finally {
+      spy.mockRestore()
+    }
+    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("pending")
+    expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
+  })
+
+  it("refuses an accept on a taken-down post or an ended event, while a decline still lands", async () => {
+    const author = await person("de-author")
+    const asker = await person("de-asker")
+    const other = await person("de-asker2")
+    const gonePost = await offer(author, 2)
+    const onGone = await askedId(asker, gonePost)
+    const onGone2 = await askedId(other, gonePost)
+    await db.board_posts.update({ where: { id: gonePost }, data: { deleted_at: new Date() } })
+
+    const res = await answer(author, onGone, "accept")
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe("That post was taken down")
+    expect((await answer(author, onGone2, "decline")).status).toBe(200)
+    expect((await list(asker)).outgoing.find((r) => r.id === onGone)).toMatchObject({ live: false, post: { body: null } })
+
+    const at = await upcoming()
+    const a2 = await person("de-author2", at)
+    const k2 = await person("de-asker3", at)
+    const k3 = await person("de-asker4", at)
+    const endedPost = await offer(a2, 2, "offer", at)
+    const r1 = ((await (await ask(k2, endedPost, at)).json()) as { data: { id: string } }).data.id
+    const r2 = ((await (await ask(k3, endedPost, at)).json()) as { data: { id: string } }).data.id
+    await db.events.update({
+      where: { id: at },
+      data: { start_time: new Date(Date.now() - 2 * 3600_000), end_time: new Date(Date.now() - 3600_000) },
+    })
+    const ended = await answer(a2, r1, "accept")
+    expect(ended.status).toBe(409)
+    expect((await ended.json()).error).toBe("That event has ended")
+    expect((await answer(a2, r2, "decline")).status).toBe(200)
+  })
+
+  it("sends the asker nothing when they are declined", async () => {
+    const author = await person("np-author")
+    const asker = await person("np-asker")
+    const requestId = await askedId(asker, await offer(author, 2))
+    const before = await db.notifications.count({ where: { user_id: asker.id } })
+    expect((await answer(author, requestId, "decline")).status).toBe(200)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(await db.notifications.count({ where: { user_id: asker.id } })).toBe(before)
+  })
+})
+
+describe("the bell after a block", () => {
+  it("marks the blocked asker's board-ask lines read in the blocker's bell", async () => {
+    const author = await person("bell-author")
+    const asker = await person("bell-asker")
+    const requestId = await askedId(asker, await offer(author, 2))
+    const line = async () => {
+      for (let i = 0; i < 40; i++) {
+        const row = await db.notifications.findFirst({
+          where: { user_id: author.id, kind: "board_request", data: { path: ["requestId"], equals: requestId } },
+        })
+        if (row) return row
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      return null
+    }
+    expect((await line())?.read_at).toBeNull()
+    expect((await blockBy(author, asker)).status).toBe(200)
+    expect((await line())?.read_at).not.toBeNull()
+  })
+})
+
+describe("the asker's rule, as a query and as a predicate (the agreement pin)", () => {
+  it("picks the same rows both ways, over every state that reaches the list", async () => {
+    const at = await upcoming()
+    const author = await person("pin-author", at)
+    const blockedAuthor = await person("pin-blocked", at)
+    const asker = await person("pin-asker", at)
+    const ended = await upcoming()
+    await db.events.update({
+      where: { id: ended },
+      data: { start_time: new Date(Date.now() - 2 * 3600_000), end_time: new Date(Date.now() - 3600_000) },
+    })
+    await rawAsk(asker, author, { at })
+    await rawAsk(asker, author, { at, status: "declined" })
+    await rawAsk(asker, author, { at, status: "declined", gone: true })
+    await rawAsk(asker, author, { at, gone: true })
+    await rawAsk(asker, author, { at: ended })
+    await rawAsk(asker, author, { at: ended, status: "declined" })
+    await rawAsk(asker, author, { at, status: "accepted" })
+    await rawAsk(asker, author, { at, status: "withdrawn" })
+    const takenBack = await rawAsk(asker, author, { at, status: "declined" })
+    await db.board_requests.update({ where: { id: takenBack }, data: { asker_withdrawn_at: new Date() } })
+    await rawAsk(asker, blockedAuthor, { at })
+    await rawAsk(asker, blockedAuthor, { at, status: "declined" })
+
+    const now = new Date()
+    const blocked = [blockedAuthor.id]
+    const byQuery = await db.board_requests.findMany({
+      where: { from_user_id: asker.id, ...outstandingAsk(now, blocked) },
+      select: { id: true },
+    })
+    const rows = await db.board_requests.findMany({
+      where: { from_user_id: asker.id },
+      select: {
+        id: true,
+        status: true,
+        decided_at: true,
+        asker_withdrawn_at: true,
+        to_user_id: true,
+        event: { select: { end_time: true } },
+        post: { select: { deleted_at: true } },
+      },
+    })
+    const byPredicate = rows.filter((r) => isLiveToTheAsker(r, new Set(blocked), now))
+
+    expect(rows).toHaveLength(11)
+    expect(byQuery.map((r) => r.id).sort()).toEqual(byPredicate.map((r) => r.id).sort())
+    // Pending and declined, live, to somebody not blocked — and nothing else.
+    expect(byQuery).toHaveLength(2)
+  })
+})
+
+describe("the requests page cannot be filled by history (review #6)", () => {
+  it("keeps the live ask first and the accepted one on the page past 50 lapsed asks", async () => {
+    const at = await upcoming()
+    const ended = await upcoming()
+    const author = await person("pg-author", at)
+    const asker = await person("pg-asker", at)
+    const old = new Date(Date.now() - 7 * 24 * 3600_000)
+    const live = await rawAsk(asker, author, { at, status: "declined", created: old })
+    const accepted = await rawAsk(asker, author, { at, status: "accepted", created: old })
+    for (let n = 0; n < 52; n++) await rawAsk(asker, author, { at: ended })
+    await db.events.update({
+      where: { id: ended },
+      data: { start_time: new Date(Date.now() - 2 * 3600_000), end_time: new Date(Date.now() - 3600_000) },
+    })
+
+    const out = (await list(asker)).outgoing
+    expect(out).toHaveLength(50)
+    expect(out[0]).toMatchObject({ id: live, status: "pending", live: true })
+    expect(out.map((r) => r.id)).toContain(accepted)
+
+    // The author's view of the same rows: the decline and the accept are
+    // settled, and both stay ahead of the 52 lapsed asks.
+    const inc = (await list(author)).incoming
+    expect(inc).toHaveLength(50)
+    expect(inc.slice(0, 2).map((r) => r.id).sort()).toEqual([live, accepted].sort())
   })
 })

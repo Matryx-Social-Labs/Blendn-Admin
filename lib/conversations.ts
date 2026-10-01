@@ -67,11 +67,18 @@ export async function openConversation(
      * `private_conversations.origin_friendship`.
      */
     friendship?: boolean
-  }
+  },
+  /*
+   * Optional transaction client, as `closeConversation` takes one. The board's
+   * accept opens the conversation inside the transaction that claims the ask
+   * and spends the seat, so a failure here rolls all three back rather than
+   * leaving an accepted ask and a spent seat with no conversation behind them.
+   */
+  client: Pick<typeof db, "private_conversations"> = db
 ) {
   const [user1_id, user2_id] = conversationPair(a, b)
 
-  const existing = await db.private_conversations.findUnique({
+  const existing = await client.private_conversations.findUnique({
     where: { user1_id_user2_id: { user1_id, user2_id } },
     select: { id: true, closed_at: true },
   })
@@ -84,13 +91,13 @@ export async function openConversation(
      * an event keep the row they have: real names, no gating. They already know
      * each other, and retro-anonymising a live conversation would be absurd.
      */
-    return db.private_conversations.findUniqueOrThrow({
+    return client.private_conversations.findUniqueOrThrow({
       where: { user1_id_user2_id: { user1_id, user2_id } },
     })
   }
 
   const revealed = new Set(ctx?.revealed ?? [])
-  return db.private_conversations.upsert({
+  return client.private_conversations.upsert({
     where: { user1_id_user2_id: { user1_id, user2_id } },
     create: {
       user1_id,

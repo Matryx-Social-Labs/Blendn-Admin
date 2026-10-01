@@ -1,7 +1,14 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 
-import { asTheAskerSees, boardPseudonyms, isLiveRequest } from "@/lib/board-access"
+import {
+  asTheAskerSees,
+  boardPseudonyms,
+  isLiveRequest,
+  isLiveToTheAsker,
+  liveRequest,
+  outstandingAsk,
+} from "@/lib/board-access"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -41,6 +48,7 @@ export async function GET(request: NextRequest) {
       message: true,
       created_at: true,
       decided_at: true,
+      asker_withdrawn_at: true,
       from_user_id: true,
       to_user_id: true,
       event_id: true,
@@ -49,44 +57,101 @@ export async function GET(request: NextRequest) {
     } as const
 
     /*
-     * Pending first, then newest. A decided request is history and an
-     * undecided one is a person waiting for an answer, so ordering by time
-     * alone buries the only rows that need an action behind the ones that
-     * do not.
+     * One clock for the page. Calling `new Date()` per row would let the top of
+     * a list and the bottom of it answer differently about an event ending
+     * mid-render — rare, and the kind of rare that is impossible to reproduce.
      */
-    const pendingFirst = [{ status: "asc" as const }, { created_at: "desc" as const }]
-    const blocked = await blockCounterparties(user.userId)
+    const now = new Date()
+    const blockedIds = await blockCounterparties(user.userId)
+    const blocked = new Set(blockedIds)
+    const newest = { created_at: "desc" as const }
 
-    const [incoming, waiting, settled] = await Promise.all([
+    /*
+     * Each direction in three slices, so the page cannot be filled by history.
+     *
+     * One page ordered "pending first" put every lapsed ask — pending for ever,
+     * because nothing closes one when its night ends — ahead of the accepted
+     * ones, and fifty of those pushed the asks with conversations behind them
+     * off the page. So: what still needs somebody (live), then what was
+     * settled, then what lapsed. The live slice is small by construction — the
+     * cap bounds an asker's, and an author answers theirs.
+     */
+    const [liveIn, settledIn, lapsedIn, liveOut, settledOut, lapsedOut] = await Promise.all([
+      // An ask from somebody blocked either way is not shown: the block is the
+      // answer, and accepting is refused on it anyway.
       db.board_requests.findMany({
-        // An ask from somebody blocked either way is not shown: the block is
-        // the answer, and accepting is refused on it anyway.
-        where: { to_user_id: user.userId, from_user_id: { notIn: blocked } },
-        orderBy: pendingFirst,
+        where: { to_user_id: user.userId, from_user_id: { notIn: blockedIds }, ...liveRequest(now) },
+        orderBy: newest,
+        take: PAGE,
+        select,
+      }),
+      db.board_requests.findMany({
+        where: { to_user_id: user.userId, from_user_id: { notIn: blockedIds }, status: { not: "pending" } },
+        orderBy: [{ status: "asc" }, newest],
+        take: PAGE,
+        select,
+      }),
+      db.board_requests.findMany({
+        where: {
+          to_user_id: user.userId,
+          from_user_id: { notIn: blockedIds },
+          status: "pending",
+          OR: [{ event: { end_time: { lte: now } } }, { post: { deleted_at: { not: null } } }],
+        },
+        orderBy: newest,
         take: PAGE,
         select,
       }),
       /*
-       * The asker's own, in two halves, because a declined ask is shown to
-       * them as pending (`asTheAskerSees`) and has to sort as one. Ordered on
-       * the stored status, the enum would put it after the accepted ones — a
-       * "pending" row sorted among the answered is the decline, delivered by
-       * position instead of by word.
+       * The asker's own. A declined ask is shown to them as pending
+       * (`asTheAskerSees`) and has to sort as one: ordered on the stored enum
+       * it would sit after the accepted ones — a "pending" row sorted among the
+       * answered is the decline, delivered by position instead of by word.
        */
       db.board_requests.findMany({
-        where: { from_user_id: user.userId, status: { in: ["pending", "declined"] } },
-        orderBy: { created_at: "desc" },
+        where: { from_user_id: user.userId, ...outstandingAsk(now, blockedIds) },
+        orderBy: newest,
         take: PAGE,
         select,
       }),
       db.board_requests.findMany({
-        where: { from_user_id: user.userId, status: { in: ["accepted", "withdrawn"] } },
-        orderBy: pendingFirst,
+        where: {
+          from_user_id: user.userId,
+          OR: [
+            { status: { in: ["accepted", "withdrawn"] } },
+            { status: "declined", asker_withdrawn_at: { not: null } },
+          ],
+        },
+        orderBy: newest,
+        take: PAGE,
+        select,
+      }),
+      db.board_requests.findMany({
+        where: {
+          from_user_id: user.userId,
+          status: { in: ["pending", "declined"] },
+          asker_withdrawn_at: null,
+          OR: [
+            { event: { end_time: { lte: now } } },
+            { post: { deleted_at: { not: null } } },
+            { to_user_id: { in: blockedIds } },
+          ],
+        },
+        orderBy: newest,
         take: PAGE,
         select,
       }),
     ])
-    const outgoing = [...waiting, ...settled].slice(0, PAGE).map(asTheAskerSees)
+    const incoming = [...liveIn, ...settledIn, ...lapsedIn].slice(0, PAGE)
+    // Settled: accepted first (those have a conversation), then withdrawn —
+    // stably, so each stays newest first.
+    const settledOutSeen = settledOut
+      .map(asTheAskerSees)
+      .sort((a, b) => Number(a.status !== "accepted") - Number(b.status !== "accepted"))
+    const outgoing = [...liveOut.map(asTheAskerSees), ...settledOutSeen, ...lapsedOut.map(asTheAskerSees)].slice(
+      0,
+      PAGE
+    )
 
     /*
      * One pseudonym resolution for the whole page, grouped by event.
@@ -112,15 +177,12 @@ export async function GET(request: NextRequest) {
       )
     )
 
-    /*
-     * One clock for the page. Calling `new Date()` per row would let the top of
-     * a list and the bottom of it answer differently about an event ending
-     * mid-render — rare, and the kind of rare that is impossible to reproduce.
-     */
-    const now = new Date()
-
     const shape = (r: (typeof rows)[number]) => {
-      const counterpart = r.from_user_id === user.userId ? r.to_user_id : r.from_user_id
+      const mine = r.from_user_id === user.userId
+      const counterpart = mine ? r.to_user_id : r.from_user_id
+      // To the asker, an ask to somebody blocked either way reads as an ask on a
+      // withdrawn post: no words, not live (see `outstandingAsk`).
+      const postGone = r.post.deleted_at !== null || (mine && blocked.has(r.to_user_id))
       return {
         id: r.id,
         status: r.status,
@@ -135,12 +197,12 @@ export async function GET(request: NextRequest) {
          * here like any other, which is the same answer the reveal flow
          * gives: no verdict is delivered, because both mean move on.
          */
-        live: isLiveRequest(r, now),
+        live: mine ? isLiveToTheAsker(r, blocked, now) : isLiveRequest(r, now),
         /** The pseudonym, never the name. Accepting is what exchanges those. */
         counterpart: resolved.get(r.event_id)?.get(counterpart) ?? "Attendee",
         event: { id: r.event.id, title: r.event.title, startTime: r.event.start_time },
         // A withdrawn or removed post's words leave with it (SCRUM-301).
-        post: { id: r.post.id, kind: r.post.kind, body: r.post.deleted_at ? null : r.post.body },
+        post: { id: r.post.id, kind: r.post.kind, body: postGone ? null : r.post.body },
       }
     }
 

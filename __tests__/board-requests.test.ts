@@ -206,33 +206,34 @@ describe("accepting opens a conversation that can be told apart from a match", (
   it("claims the request with the status in the predicate", () => {
     /*
      * The read above the claim is not a lock, so two taps — or a decline racing
-     * a withdraw — both pass it. `updateMany` with `status: "pending"` in the
-     * where clause means exactly one writes and the loser is told the truth
-     * rather than silently overwriting the first answer.
+     * an accept — both pass it. `updateMany` with the status in the where
+     * clause means exactly one writes and the loser is told the truth rather
+     * than silently overwriting the first answer.
      */
     const src = codeOnly(read(...DECIDE))
-    // The accept claim runs inside the seat's transaction, so `tx.` as well as `db.`.
     const claims = src.match(/(?:db|tx)\.board_requests\.updateMany\(\{[\s\S]*?\}\)/g) ?? []
-    // The decline, accept and withdraw claims, plus the revert.
-    expect(claims.length).toBeGreaterThanOrEqual(4)
-    // In the WHERE: the revert's `data: { status: "pending" }` matched the
-    // bare string, so a claim with its predicate deleted still passed.
-    expect(
-      claims.filter((c) => c.includes('where: { id: requestId, status: "pending" }')).length
-    ).toBeGreaterThanOrEqual(2)
+    // In the WHERE, not anywhere in the call: a revert's `data: { status:
+    // "pending" }` once satisfied a bare-string count with the predicate gone.
+    // The decline claims a pending row; the accept claims a LIVE one, which is
+    // pending plus its event and post still up (`liveRequest`).
+    expect(claims.filter((c) => c.includes('where: { id: requestId, status: "pending" }')).length).toBeGreaterThanOrEqual(1)
+    expect(claims.some((c) => /tx\.board_requests\.updateMany\(\{\s*where: \{ id: requestId, \.\.\.liveRequest\(now\) \}/.test(c))).toBe(true)
   })
 
-  it("puts the request back if the conversation cannot be opened", () => {
+  it("opens the conversation inside the claim's transaction", () => {
     /*
      * Unmatching is permanent, so `openConversation` throws on a closed pair.
-     * Claiming first and discovering it second would leave the request marked
-     * accepted with no conversation behind it — a state nothing retries and no
-     * screen can explain, and the asker's cap consumed for ever.
+     * Claimed and seated in one transaction and opened in another, a failure
+     * between them left an accepted ask and a spent seat with no conversation
+     * behind them — and the hand-written give-back was two more writes that
+     * could fail on their own. Opened with the transaction's client, a
+     * failure undoes all three.
      */
     const src = codeOnly(read(...DECIDE))
-    const handler = src.slice(src.indexOf("} catch (error) {", src.indexOf("openConversation(")))
-    expect(handler).toContain('status: "pending"')
-    expect(handler).toContain("decided_at: null")
+    const txn = src.slice(src.indexOf("db.$transaction(async (tx) => {"))
+    expect(txn.length).toBeLessThan(src.length)
+    const call = txn.slice(txn.indexOf("openConversation("))
+    expect(call.slice(0, call.indexOf("\n        )"))).toMatch(/,\s*tx\s*$/)
   })
 
   it("lets a decision happen after doors", () => {

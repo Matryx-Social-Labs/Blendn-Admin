@@ -1965,18 +1965,50 @@ asker reads changes. In their `GET /board/requests` a declined ask is
 it lapses with them like any unanswered ask; it sorts with the pending ones. It
 still counts toward their five outstanding until it lapses — a decline that
 freed a slot would tell somebody at the cap that one of their asks was refused.
-Withdrawing a declined ask succeeds as withdrawing a pending one does (the row
-becomes `withdrawn`), and withdrawing twice succeeds again. Only an accepted ask
-cannot be withdrawn, and the asker was told about that one.
+Withdrawing a declined ask succeeds exactly as withdrawing a pending one does,
+and withdrawing twice succeeds again. Only an accepted ask cannot be withdrawn,
+and the asker was told about that one. A withdrawn pending ask becomes
+`withdrawn`; a withdrawn **declined** ask keeps the author's `declined` and
+`decided_at` — their decision is not the asker's to rewrite — and records
+`asker_withdrawn_at`, so the asker sees it `withdrawn` and it frees their slot.
+
+**A block reads as a withdrawn post.** To the asker, an ask to somebody blocked
+either way — pending or declined alike — shows exactly as an ask on a post its
+author took down: `post.body: null`, `live: false`, and it no longer counts
+toward their five. A live ask with the post's words, beside a board that no
+longer lists the post, would tell them which of the two had happened.
+
+**`GET /board/requests` pages by what still matters.** Each direction is the live
+asks first (newest first), then the settled ones (accepted before withdrawn, or
+answered, for the author), then the lapsed ones, up to 50. A lapsed ask stays
+`pending` for ever, because nothing closes one when its night ends, so ordering
+"pending first" let fifty of them push the accepted asks — the ones with a
+conversation behind them — off the page.
 
 **Accepting an offer spends a seat** (SCRUM-514). On an `offer` with a number of
-seats, `spacesLeft` drops by one, atomically: of two accepts racing for the last
-seat exactly one gets it, and the other is **409** *"That offer is full"* — said
-to the author, and the ask stays pending. A CHECK keeps it from going below zero.
-An offer that never named its seats (`spacesLeft: null`) has none to run out of.
-If the conversation then cannot be opened, the seat is given back with the ask.
-Asking on an offer already at `spacesLeft: 0` is the same **409** — the board
-already shows it full.
+seats, `spacesLeft` drops by one, in the same transaction as the claim and the
+conversation: of two accepts racing for the last seat exactly one gets it, and
+the other is **409** *"That offer is full"* — said to the author, and the ask
+stays pending. A CHECK keeps it from going below zero. An offer that never named
+its seats (`spacesLeft: null`) has none to run out of. Asking on an offer
+already at `spacesLeft: 0` is the same **409** — the board already shows it
+full.
+
+**Every refusal of an accept** (`PATCH /board/requests/:id` with
+`action: "accept"`):
+
+| Status | Sentence | When |
+|---|---|---|
+| 404 | Request not found | No such ask, or not yours to answer or withdraw |
+| 403 | Only the person who was asked can answer | The asker tried to accept or decline |
+| 409 | That request has already been answered | It is not pending any more (a double tap included) |
+| 409 | That post was taken down | Its post was withdrawn or removed, before or during the accept |
+| 409 | That event has ended | Its event is over |
+| 409 | This request can no longer be accepted | A block either way, **or** a pair whose conversation was closed — one status and one sentence for both, so the answer does not say which |
+| 409 | That offer is full | No seat left on the offer |
+
+The claim, the seat and the conversation are one transaction, so any of the
+last five leaves the ask pending and the seat where it was.
 
 **A decision is still possible after the doors open**, unlike everything else on
 this surface. A pending request holds a slot in the asker's outstanding cap, so
