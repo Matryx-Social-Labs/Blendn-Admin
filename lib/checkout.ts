@@ -6,7 +6,7 @@
 import { db } from "./db"
 import { closeSession } from "./presence-sessions"
 import { logger } from "./logger"
-import { emitEventCheckOut } from "./socket-server"
+import { emitEventCheckOut, evictFromVenueDay } from "./socket-server"
 
 /**
  * The one way someone stops being in the room.
@@ -30,12 +30,23 @@ export type CheckoutReason =
   | "left_area"
   /** Still checked in when the day ended. */
   | "occurrence_ended"
+  /**
+   * A Go Live window ran out, the venue's day reset under it (D-4), or both.
+   * Stamped at `expires_at`, not when the sweeper got there (PL-U04).
+   */
+  | "expired"
+  /** A real event started at the venue, and the venue's room is the event's now. */
+  | "event_started"
 
-const DEPARTURE_SOURCE: Record<CheckoutReason, "user" | "switch" | "sweeper"> = {
+const DEPARTURE_SOURCE: Record<CheckoutReason, "user" | "switch" | "sweeper" | "expired" | "ended"> = {
   manual: "user",
   switched_event: "switch",
   left_area: "sweeper",
   occurrence_ended: "sweeper",
+  // Observed, not inferred: the window had a known end (F6).
+  expired: "expired",
+  // Known too: the event's start, which closed the venue's room.
+  event_started: "ended",
 }
 
 export interface CheckoutResult {
@@ -47,13 +58,19 @@ export interface CheckoutResult {
 /**
  * Whether this kind of checkout also closes chat access.
  *
- * An automatic checkout does not. Someone whose GPS wandered while they were
- * mid-conversation should not be thrown out of the room as well — the feedback
- * window already governs when chat closes, and the cost of being wrong here is
- * much higher than a slightly stale attendee count.
+ * At an event, an automatic checkout does not. Someone whose GPS wandered while
+ * they were mid-conversation should not be thrown out of the room as well — the
+ * feedback window already governs when chat closes, and the cost of being wrong
+ * here is much higher than a slightly stale attendee count. (The cut it writes,
+ * `last_allowed_at`, is not read for an event's room any more: see
+ * `mayWriteToRoom`.)
+ *
+ * At a venue day, every checkout does, and the cut is read: the room is for the
+ * people live in it (`liveInVenueDay`), and leaving it however you leave ends
+ * your window (F6).
  */
-function cutsChatAccess(reason: CheckoutReason): boolean {
-  return reason === "manual" || reason === "switched_event"
+function cutsChatAccess(reason: CheckoutReason, venueDay: boolean): boolean {
+  return venueDay || reason === "manual" || reason === "switched_event"
 }
 
 export async function performCheckout(
@@ -69,9 +86,11 @@ export async function performCheckout(
       user_id: true,
       status: true,
       occurrence_id: true,
+      event: { select: { kind: true } },
     },
   })
   if (!checkIn) return null
+  const venueDay = checkIn.event.kind === "venue_day"
 
   // Idempotent by design: the sweeper re-reads the same rows every pass.
   if (checkIn.status !== "checked_in") {
@@ -81,7 +100,13 @@ export async function performCheckout(
   // Guarded in the statement rather than after the read above, so two callers
   // racing (a sweeper pass and a live manual checkout) cannot both act.
   const { count } = await db.event_check_ins.updateMany({
-    where: { id: checkInId, status: "checked_in" },
+    where: {
+      id: checkInId,
+      status: "checked_in",
+      // An expiry acts only on the window it read: going live again in between
+      // moved `expires_at` past it, and that window is not over.
+      ...(reason === "expired" && { expires_at: { lte: now } }),
+    },
     data: { status: "checked_out", check_out_time: now, updated_at: now },
   })
   if (count === 0) {
@@ -106,7 +131,7 @@ export async function performCheckout(
    */
   await closeSession(checkIn.occurrence_id, checkIn.user_id, DEPARTURE_SOURCE[reason], now)
 
-  if (cutsChatAccess(reason)) {
+  if (cutsChatAccess(reason, venueDay)) {
     const chatGroup = await db.chat_groups.findUnique({
       where: { event_id: checkIn.event_id },
       select: { id: true },
@@ -117,6 +142,7 @@ export async function performCheckout(
         data: { last_allowed_at: now, updated_at: now },
       })
     }
+    if (venueDay) evictFromVenueDay(checkIn.event_id, chatGroup?.id ?? null, checkIn.user_id, reason)
   }
 
   // Emitted here rather than by each caller, so the sweeper cannot forget it
@@ -127,7 +153,7 @@ export async function performCheckout(
     checkInId,
     eventId: checkIn.event_id,
     reason,
-    chatClosed: cutsChatAccess(reason),
+    chatClosed: cutsChatAccess(reason, venueDay),
   })
 
   return { changed: true, eventId: checkIn.event_id, userId: checkIn.user_id }
@@ -145,12 +171,17 @@ export async function checkOutOfOtherEvents(
 ): Promise<CheckoutResult[]> {
   const others = await db.event_check_ins.findMany({
     where: { user_id: userId, status: "checked_in", event_id: { not: exceptEventId } },
-    select: { id: true },
+    select: { id: true, expires_at: true },
   })
 
   const results: CheckoutResult[] = []
   for (const row of others) {
-    const result = await performCheckout(row.id, "switched_event", now)
+    // A Go Live that already ran out ended then, not now, and not by a switch:
+    // the sweeper had not got to it yet (D-4).
+    const result =
+      row.expires_at && row.expires_at <= now
+        ? await performCheckout(row.id, "expired", row.expires_at)
+        : await performCheckout(row.id, "switched_event", now)
     if (result) results.push(result)
   }
   return results

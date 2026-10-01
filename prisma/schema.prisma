@@ -712,6 +712,10 @@ model event_check_ins {
   /// When a Go Live window at a venue ends (step 4). Null for an event
   /// check-in, which ends with the event or a checkout.
   expires_at            DateTime? @db.Timestamptz(6)
+  /// Set when the Go Live is "stay": the furthest an in-fence ping may push
+  /// `expires_at` — four hours from choosing it, or the venue's reset if that
+  /// is sooner (lib/go-live.ts). Null for a fixed window and for events.
+  stay_until            DateTime? @db.Timestamptz(6)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)

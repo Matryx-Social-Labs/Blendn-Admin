@@ -1,6 +1,7 @@
 import { db } from "./db"
 import { roomReadDenial } from "./chat-window"
 import { actorFor } from "./org-membership"
+import { inRoomWhere } from "./event-kind"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 
 /**
@@ -27,7 +28,14 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
     },
     // A hidden event has no room (SCRUM-8): its organiser's suspension flips
     // it to `draft`, and a draft never legitimately has a joinable chat.
-    select: { status: true, left_at: true, chat_group: { select: { event: { select: { status: true, deleted_at: true } } } } },
+    // `kind` and `last_allowed_at`: a venue day's room takes only the people
+    // live in it now (`liveInVenueDay`), so an ended Go Live cannot rejoin.
+    select: {
+      status: true,
+      left_at: true,
+      last_allowed_at: true,
+      chat_group: { select: { event: { select: { status: true, deleted_at: true, kind: true } } } },
+    },
   })
   if (!membership) return false
   return roomReadDenial(membership, membership.chat_group.event) === null
@@ -84,6 +92,14 @@ export async function canJoinEvent(userId: string, eventId: string): Promise<boo
   if (!event) return false
   // A hidden event has no counter either (SCRUM-8) — see `canJoinChat`.
   if (event.status === "draft") return false
+  /*
+   * A venue day is `unlisted`, which would open its counter to anybody — and
+   * the counter carries an exact `hereCount`. Watching it change is how one
+   * arrival is read off a number (F14); the public face of a venue is the
+   * bucketed count on `GET /venues/:id` (D-19). Its counter is for the people
+   * live in it, who see the room anyway.
+   */
+  if (event.kind === "venue_day") return canJoinEventRoom(userId, eventId)
   if (event.visibility !== "private") return true
 
   /*
@@ -134,7 +150,8 @@ export async function canJoinEventRoom(userId: string, eventId: string): Promise
     // `status` on the event, not the check-in: a hidden event's roster
     // closes with the rest of it (SCRUM-8).
     // any-kind: one room by id, and being checked in is how anybody enters a venue day's.
-    where: { event_id: eventId, user_id: userId, check_in_time: { not: null }, event: { status: { not: "draft" } } },
+    // `inRoomWhere`: a venue day's roster is for the people live in it now.
+    where: { event_id: eventId, user_id: userId, check_in_time: { not: null }, event: { status: { not: "draft" } }, ...inRoomWhere() },
     select: { id: true },
   })
   return checkIn !== null

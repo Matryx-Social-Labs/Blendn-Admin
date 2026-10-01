@@ -1,14 +1,10 @@
-import { closedDoorMessage, outOfRangeMessage } from "@/lib/checkin-messages"
+import { closedDoorMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { openSession } from "@/lib/presence-sessions"
-import { emitEventCheckIn } from "@/lib/socket-server"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { evaluateCheckIn, resolveFence } from "@/lib/geofence"
+import { resolveFence } from "@/lib/geofence"
 import {
   ErrorCode,
   successResponse,
@@ -18,15 +14,12 @@ import {
   errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { checkinSchema, MAX_GPS_ACCURACY_METERS } from "@/lib/validations/event"
-import { claimAnonymousName } from "@/lib/anonymous-names"
+import { checkinSchema } from "@/lib/validations/event"
 import { recordRefusal } from "@/lib/check-in-refusals"
 import { resolveOccurrence } from "@/lib/occurrences"
-import { checkInKindFor } from "@/lib/checkin-kind"
-import { checkOutOfOtherEvents } from "@/lib/checkout"
-import { activeMembership } from "@/lib/org-membership"
 import { canJoinEvent } from "@/lib/socket-auth"
 import { readJson, isUuid } from "@/lib/api-input"
+import { fenceRefusal, personAtTheDoor, seatAtTheDoor, vagueFixRefusal } from "@/lib/check-in-core"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -66,17 +59,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { latitude, longitude, deviceInfo } = parsed.data
 
-    // A fix this vague tells us nothing at all — it is not evidence of being
-    // anywhere. Below the ceiling, accuracy is no longer a pass/fail gate: it
-    // is folded into the distance test below, which is where it belongs.
+    // The door's rules about the person and the place live in
+    // lib/check-in-core.ts, shared with Go Live (PL-G03).
     const gpsAccuracy = deviceInfo?.gpsAccuracy
-    if (gpsAccuracy !== undefined && gpsAccuracy > MAX_GPS_ACCURACY_METERS) {
-      return errorResponse(
-        `GPS signal is too weak (accuracy: ${Math.round(gpsAccuracy)}m). Move to an area with better signal and try again.`,
-        400,
-        ErrorCode.OUT_OF_RANGE
-      )
-    }
+    const vague = vagueFixRefusal(gpsAccuracy)
+    if (vague) return vague
 
     // Fetch event
     const event = await db.events.findUnique({
@@ -90,7 +77,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       include: { venue: { select: { owner_org_id: true } } },
     })
 
-    if (!event) {
+    /*
+     * A venue day is entered by going live at its venue (`POST
+     * /venues/:id/live`), which sets the window this door does not. Found by
+     * id here, it does not exist: it is `unlisted`, not `private`, and would
+     * otherwise pass every check below.
+     */
+    if (!event || event.kind === "venue_day") {
       return notFoundResponse("Event not found")
     }
 
@@ -112,44 +105,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("Event not found")
     }
 
-    /*
-     * The age gate, at the door.
-     *
-     * Check-in is where this belongs: the events list hides restricted events
-     * from anyone whose stated age is below the minimum, but a list is
-     * discovery and can be bypassed by a link, a share or a stale cache. This
-     * is the one place a person actually enters a room.
-     *
-     * An unknown age is refused here even though the listing tolerates it —
-     * hiding every restricted event from every OAuth account, none of which has
-     * an age yet, would empty their feed to punish a missing field, whereas
-     * refusing at the door costs them one clear message naming the fix. The
-     * same profile row is read once and reused for the intent seeding below.
-     */
-    const profile = await db.profiles.findUnique({
-      where: { id: authUser.userId },
-      select: {
-        onboarded: true,
-        age: true,
-        date_of_birth: true,
-        intent_default: true,
-        reveal_by_default: true,
-      },
-    })
-
-    // The door is the gate, so this is the read that matters most. Derived, not
-    // taken off the row: a stored age was true on signup day, and someone who
-    // signed up at 17 would otherwise be refused an 18+ event a year later.
-    const profileAge = ageFrom(profile)
-
-    // Not onboarded and no adult age on file: held here as at every door (SCRUM-331).
-    if (!mayParticipate(profile)) return errorResponse(FINISH_ONBOARDING, 403, ErrorCode.FORBIDDEN)
-
-    const ageRefusal = minAgeRefusal(profileAge, event.min_age)
-    if (ageRefusal) {
-      recordRefusal({ eventId, userId: authUser.userId, reason: "under_age" })
-      return errorResponse(ageRefusal, 403, ErrorCode.AGE_RESTRICTED)
-    }
+    const person = await personAtTheDoor(authUser.userId, { eventId, minAge: event.min_age })
+    if ("refusal" in person) return person.refusal
 
     /*
      * Which day are they checking in to?
@@ -197,374 +154,34 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const occurrence = slot.occurrence
 
     /*
-     * The geofence.
-     *
-     * Three things changed here, all of which were letting people in who should
-     * not have been:
-     *
-     *  1. `if (event.latitude && event.longitude)` was truthiness, so an event
-     *     at longitude 0 skipped the check entirely.
-     *  2. An event with NO coordinates skipped it too — and nothing required
-     *     coordinates to publish, so such an event accepted check-ins from
-     *     anywhere on earth. It is now refused outright.
-     *  3. The device's reported accuracy was a separate pass/fail gate rather
-     *     than part of the distance test, so a 140m-accuracy fix 25m away
-     *     passed while a good fix 35m away failed.
-     *
-     * `evaluateCheckIn` folds buffer and accuracy into one comparison. Legacy
-     * events with no `geofence` column go through `legacyGeofence`, which maps
-     * the old radius to pure extent with a zero buffer — strictly more
-     * permissive than before, so nobody who could check in yesterday is
-     * refused today.
+     * The fence: the event's own, else the legacy point and radius
+     * (`resolveFence`). Same behaviour as before: a stored geofence that fails
+     * validation falls back rather than locking everyone out, because bad data
+     * in one column must not take the venue offline. The venue's `geofence` is
+     * not read at the door: an event copies it when saved (owner's ruling 3),
+     * so nothing can move it live.
      */
-    /*
-     * One resolver -- `resolveFence` in lib/geofence.ts.
-     *
-     * Same behaviour as before for the two cases this path already handled: a
-     * stored geofence that fails validation falls back rather than locking
-     * everyone out, because bad data in one column must not take the venue
-     * offline. What is new here is the **venue's** fence, between the two --
-     * `schema.prisma` has always promised events inherit it and nothing on the
-     * server honoured that; the sweeper consulted it and the door did not.
-     */
-    const fence = resolveFence(event)
-
-    if (!fence) {
-      logger.error("Check-in attempted on an event with no geofence", { eventId })
-      recordRefusal({ eventId, userId: authUser.userId, reason: "no_geofence" })
-      return errorResponse(
-        "This event has no location set, so check-in is unavailable. Contact the organiser.",
-        400,
-        ErrorCode.OUT_OF_RANGE
-      )
-    }
-
-    const verdict = evaluateCheckIn({ lat: latitude, lng: longitude }, fence, gpsAccuracy)
-    if (!verdict.ok) {
-      /*
-       * The refusal that matters. Everybody twenty metres out is a pin on the
-       * wrong side of the street; a wide spread is a fence too tight for the
-       * venue. Neither is visible without recording the shortfall.
-       *
-       * The shortfall and the reported accuracy, never the coordinates -- see
-       * lib/check-in-refusals.ts.
-       */
-      recordRefusal({
-        eventId,
-        userId: authUser.userId,
-        reason: "out_of_range",
-        occurrenceId: occurrence.id,
-        shortfallMetres: verdict.shortfall,
-        accuracyMetres: gpsAccuracy,
-      })
-      return errorResponse(
-        outOfRangeMessage(verdict.shortfall),
-        400,
-        ErrorCode.OUT_OF_RANGE
-      )
-    }
-
-    // You cannot be in two rooms. Goes through the shared checkout path so the
-    // socket event and the chat cutoff cannot be forgotten here and remembered
-    // in the manual route.
-    await checkOutOfOtherEvents(authUser.userId, eventId, now)
-
-    /*
-     * Capacity does not gate check-in.
-     *
-     * The geofence deliberately covers the pavement and the door, so a
-     * 100-capacity venue with 100 inside and 20 queuing has 120 people
-     * legitimately within the boundary. Refusing the hundred-and-first denied
-     * them the chatroom — the actual product — and erased them from attendance,
-     * leaving the organiser believing 100 came when 120 did.
-     *
-     * Check-in is a presence proof, not a ticket. Nothing here sells admission;
-     * the door does. Occupancy is now counted from these rows (lib/occupancy.ts)
-     * rather than kept in a column, so a room over its stated size becomes a
-     * signal the organiser can see instead of an error the attendee hits.
-     */
-    // Memberships read directly rather than through `actorFor`, which wants a
-    // dashboard role the mobile JWT does not carry. Passing a fabricated role
-    // to get at the membership lookup would break the day `actorFor` starts
-    // branching on it.
-    const memberships = await db.organisation_members.findMany({
-      where: { user_id: authUser.userId, ...activeMembership },
-      select: { org_id: true },
-    })
-    const kind = checkInKindFor({ orgIds: memberships.map((m) => m.org_id) }, event)
-
-    /*
-     * Seed matching preferences from the profile.
-     *
-     * Only on create. Someone who set "just here" for tonight and then stepped
-     * out for a cigarette must not have that silently reset to their default
-     * when they check back in — the per-event answer is the one they gave most
-     * recently, and re-checking in is not a decision to change it.
-     */
-    /*
-     * A profile written before the 18+ rule existed can still carry `dating`.
-     *
-     * Stripped rather than refused: the person is not making a choice at this
-     * moment, and keeping someone out of the room over a stale profile field
-     * would be a strange thing to do at a door they are standing at. The write
-     * paths refuse; this one, which only copies, filters.
-     */
-    const seededIntents = stripDating(profile?.intent_default ?? [], profileAge)
-
-    // Create or update check-in record
-    const checkIn = await db.event_check_ins.upsert({
-      where: {
-        occurrence_id_user_id: { occurrence_id: occurrence.id, user_id: authUser.userId },
-      },
-      create: {
-        event_id: eventId,
-        occurrence_id: occurrence.id,
-        user_id: authUser.userId,
-        kind,
-        status: "checked_in",
-        check_in_time: now,
-        latitude,
-        longitude,
-        /*
-         * `deviceInfo` is optional in the request schema, so it is `undefined`
-         * whenever a client omits it — and no static scan can see that. The
-         * source reads `device_info: deviceInfo`, which is indistinguishable
-         * from every other field; only `strictUndefinedChecks` at runtime
-         * catches it. That is the argument for the flag over the ratchet.
-         */
-        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
-      },
-      update: {
-        status: "checked_in",
-        check_in_time: now,
-        /*
-         * Coming back after a check-out reuses the row (one per person per
-         * occurrence), and the old check-out timestamp stayed on it beside
-         * `checked_in`. The Banter tab's live section wants both `checked_in`
-         * and no `check_out_time`, so the room somebody had just walked back
-         * into was not listed as live. Found by leaving and returning.
-         */
-        check_out_time: null,
-        latitude,
-        longitude,
-        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
-        updated_at: now,
-      },
-    })
-
-    /*
-     * And open a presence session.
-     *
-     * Written beside the check-in rather than instead of it: `event_check_ins`
-     * is still the source of truth for every reader, and will be until they
-     * move. What this buys immediately is the thing the old shape cannot hold —
-     * somebody stepping outside and coming back produces a *second* session
-     * rather than overwriting their arrival.
-     *
-     * `openSession` is idempotent, so checking in twice without leaving
-     * refreshes the heartbeat instead of opening a second session. The partial
-     * unique in the migration enforces that against a race the check cannot
-     * see.
-     *
-     * Deliberately not awaited inside the check-in transaction: a failure here
-     * must not refuse somebody standing at the door. The door is the product;
-     * this is bookkeeping that runs beside it.
-     */
-    openSession({
+    const refused = fenceRefusal({
+      fence: resolveFence(event),
+      point: { lat: latitude, lng: longitude },
+      gpsAccuracy,
       eventId,
+      userId: authUser.userId,
+      occurrenceId: occurrence.id,
+      noFenceMessage: "This event has no location set, so check-in is unavailable. Contact the organiser.",
+    })
+    if (refused) return refused
+
+    const seat = await seatAtTheDoor({
+      event,
       occurrenceId: occurrence.id,
       userId: authUser.userId,
-      kind,
-      at: now,
-      lat: latitude,
-      lng: longitude,
-      accuracy: gpsAccuracy,
-    }).catch((err) =>
-      logger.error("Opening presence session failed", {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    )
-
-    /*
-     * Seed the event preferences, once per event rather than once per day.
-     *
-     * `create`-only on purpose. Someone who set "just here" for tonight and
-     * stepped out for a cigarette must not have it reset to their default when
-     * they check back in — and on a multi-day event, day three must not
-     * overwrite what they chose on day one. Re-checking in is not a decision to
-     * change your answer.
-     *
-     * That guarantee used to be "only on create" of a *check-in* row, which
-     * stopped being the same thing the day check-ins became per-occurrence: on
-     * a five-day event, every new day was a create.
-     */
-    const prefs = await db.event_match_preferences.upsert({
-      where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
-      create: {
-        event_id: eventId,
-        user_id: authUser.userId,
-        intent: seededIntents,
-        /*
-         * Always false. Never seeded from `reveal_by_default`.
-         *
-         * This used to read the profile default, which meant walking into a
-         * room could name you — `matches/preferences` says two files away that
-         * reveal is "never flipped on implicitly", and this was the implicit
-         * flip. Someone who chose to be visible at a work meetup in March was
-         * visible at a club in August without touching anything.
-         *
-         * The default is not discarded: it comes back as `revealSuggestion`
-         * below, and the app offers it as a tap. Suggesting rather than undoing
-         * is the whole point — there is no window in which somebody is named
-         * before they have answered.
-         */
-        revealed: false,
-      },
-      update: {},
-      select: { intent: true },
+      profile: person.profile,
+      point: { lat: latitude, lng: longitude },
+      deviceInfo,
+      now,
     })
-
-    // Ensure chat group exists and add user
-    let chatGroup = await db.chat_groups.findUnique({
-      where: { event_id: eventId },
-    })
-
-    if (!chatGroup) {
-      chatGroup = await db.chat_groups.create({
-        data: {
-          event_id: eventId,
-          name: `${event.title} Chat`,
-          description: `Chat for ${event.title}`,
-          status: "active",
-          member_count: 0,
-        },
-      })
-    }
-
-    const existingMembership = await db.chat_group_members.findUnique({
-      where: {
-        chat_group_id_user_id: {
-          chat_group_id: chatGroup.id,
-          user_id: authUser.userId,
-        },
-      },
-    })
-
-    /*
-     * A ban a human applied survives a check-in.
-     *
-     * Rejoining set `status: "active"` on any non-active membership, so an
-     * organiser's ban lasted exactly until the banned person walked out and
-     * back in — the ban evaporated on the next check-in, the same shape as the
-     * mute that cleared itself (G5). `banned_by` is the discriminator, as it
-     * is for mutes: a human's ban has one, a suspension's does not, and the
-     * suspension docstring promises re-entry through this door once lifted.
-     * The check-in itself still stands — presence is a fact — the room stays
-     * closed to them.
-     */
-    const humanBanned = existingMembership?.status === "banned" && Boolean(existingMembership.banned_by)
-    if (existingMembership && humanBanned) {
-      logger.info("Check-in kept a room ban", { userId: authUser.userId, chatGroupId: chatGroup.id })
-    } else if (existingMembership) {
-      if (existingMembership.status !== "active" || existingMembership.last_allowed_at || !existingMembership.anonymous_name) {
-        const rejoin = (anonymous_name: string) =>
-          db.chat_group_members.update({
-            where: {
-              chat_group_id_user_id: {
-                chat_group_id: chatGroup.id,
-                user_id: authUser.userId,
-              },
-            },
-            data: {
-              status: "active",
-              last_allowed_at: null,
-              // Checking in again is the way back into a room you left
-              // yourself (`POST /chat/groups/:id/leave`).
-              left_at: null,
-              anonymous_name,
-              updated_at: now,
-            },
-          })
-
-        if (existingMembership.anonymous_name) {
-          // They already have a handle; keep it. Re-minting would rename
-          // somebody rejoining a room where people know them by that name.
-          await rejoin(existingMembership.anonymous_name)
-        } else {
-          await claimAnonymousName(chatGroup.id, rejoin, {
-            eventId,
-            userId: authUser.userId,
-          })
-        }
-      }
-    } else {
-      await claimAnonymousName(
-        chatGroup.id,
-        (anonymous_name) =>
-          db.chat_group_members.create({
-            data: {
-              chat_group_id: chatGroup.id,
-              user_id: authUser.userId,
-              role: "member",
-              status: "active",
-              last_allowed_at: null,
-              anonymous_name,
-            },
-          }),
-        { eventId, userId: authUser.userId }
-      )
-
-      await db.chat_groups.update({
-        where: { id: chatGroup.id },
-        data: {
-          member_count: {
-            increment: 1,
-          },
-        },
-      })
-    }
-
-    // Get the anonymous name for socket emit and push notification, and who
-    // they are for the recipients whose roster would name them.
-    const [updatedMembership, arriver] = await Promise.all([
-      db.chat_group_members.findUnique({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroup.id,
-            user_id: authUser.userId,
-          },
-        },
-        select: { anonymous_name: true },
-      }),
-      db.user.findUnique({
-        where: { id: authUser.userId },
-        select: { name: true, profile: { select: { photos: true } } },
-      }),
-    ])
-    const displayName = updatedMembership?.anonymous_name || "Someone"
-
-    /*
-     * Whoever is in a block relationship with the arriver hears nothing of the
-     * arrival: not the live roster event, which reached them while the REST
-     * roster did not (SCRUM-338).
-     */
-    const blockedIds = await blockCounterparties(authUser.userId)
-
-    // Emit real-time check-in event: the pseudonym, except to whoever the
-    // roster lets recognise them (the emitter decides, per recipient).
-    emitEventCheckIn(
-      eventId,
-      authUser.userId,
-      displayName,
-      { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
-      blockedIds
-    )
-
-    /*
-     * No push. Every arrival used to push "X just checked in!" to everybody
-     * already inside, so the first person through the door heard about the
-     * next two hundred. The live roster above is how the room sees arrivals.
-     */
+    const { checkIn } = seat
 
     return successResponse({
       checkIn: {
@@ -573,31 +190,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         checkInTime: checkIn.check_in_time,
         eventId: checkIn.event_id,
       },
-      /*
-       * The suggestion, not the state.
-       *
-       * True when this person has `reveal_by_default` set — which used to mean
-       * they were silently revealed here. Now it means the app should ask:
-       * "you usually join as Sagar, do that here?" A tap turns it on.
-       *
-       * Sent on the check-in response rather than fetched separately so the
-       * prompt can be shown immediately, and because a second round trip is a
-       * window in which the room renders with no prompt at all.
-       *
-       * `revealed` is deliberately absent: it is always false at this point,
-       * and returning it would invite a client to treat it as the answer.
-       */
-      revealSuggestion: profile?.reveal_by_default === true,
-      /*
-       * "Why do you go out?" — asked at the door of the first room, not at
-       * sign-up (SCRUM-77). Onboarding never wrote `intent_default`, so every
-       * account that came through it was refused the board for a field the
-       * flow never asked for. True while there is no default and nothing was
-       * chosen for this event; the app asks once and saves the answer as the
-       * default, after which this is false at every later door. Re-checking
-       * in to a room you already answered for does not ask again.
-       */
-      intentNeeded: (profile?.intent_default ?? []).length === 0 && prefs.intent.length === 0,
+      // Why each: see `seatAtTheDoor` in lib/check-in-core.ts.
+      revealSuggestion: seat.revealSuggestion,
+      intentNeeded: seat.intentNeeded,
       message: "Successfully checked in",
     })
   } catch (error) {

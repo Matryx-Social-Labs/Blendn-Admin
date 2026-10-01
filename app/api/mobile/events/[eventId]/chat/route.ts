@@ -25,6 +25,7 @@ import {
   LEFT_ROOM_MESSAGE,
   leftByChoice,
   mayWriteToRoom,
+  NOT_LIVE_MESSAGE,
   roomEntitlement,
   roomReadDenial,
   type RoomEntitlement,
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // rejected after the user has typed.
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
-      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
     })
 
     if (!chatGroup) {
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           status: "active",
           member_count: 0,
         },
-        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } } },
+        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
       })
     }
 
@@ -163,6 +164,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (readDenial === "hidden") return notFoundResponse("Chat not available for this event")
     if (readDenial === "banned" && membership) {
       return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+    }
+    /*
+     * A venue day's room has one door, Go Live, which writes the membership
+     * and its window; there is no auto-join below for it (F7). Not live — never
+     * joined, or the window ended — is refused, never re-joined.
+     */
+    if (readDenial === "not_live" || (!membership && chatGroup.event.kind === "venue_day")) {
+      return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
     }
     /*
      * Somebody who left the room themselves stays out of it. Without this the
@@ -403,7 +412,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Null only when the auto-join above just created the row, which creates
       // it `active`. A banned or muted row is never replaced, so it arrives here
       // intact and `mayWriteToRoom` sees the truth.
-      membership ?? { status: "active" },
+      membership ?? { status: "active", last_allowed_at: null },
       chatGroup.event,
       chatGroup
     )
@@ -505,7 +514,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // undefined here, so the pre-event floor added in #262 silently did not
       // apply on this path while it did on the GET twin above: one room, two
       // endpoints, opposite answers about whether chat is open.
-      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
     })
 
     if (!chatGroup) {
@@ -542,7 +551,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           status: "active",
           member_count: 0,
         },
-        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
+        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
       })
     }
 
@@ -597,6 +606,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * is on the read: the user was told they could write. One resolver, both
      * handlers, is the only version of this that stays fixed.
      */
+    // Go Live is a venue day's only door (see the GET).
+    if (!membership && chatGroup.event.kind === "venue_day") {
+      return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
+    }
     if (!membership) {
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
       const window = chatWindowState(chatGroup.event, chatGroup)
@@ -681,7 +694,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return errorResponse(
           chatClosedMessage(denial.reason),
           403,
-          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
         )
       }
     }

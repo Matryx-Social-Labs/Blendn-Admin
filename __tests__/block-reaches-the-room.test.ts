@@ -101,7 +101,8 @@ describe("every group-chat surface consults blocked_users", () => {
   })
 
   it("the live check-in roster does not announce someone you blocked", () => {
-    const src = read("app/api/mobile/events/[eventId]/checkin/route.ts")
+    // Both doors (an event's check-in, Go Live) seat people through lib/check-in-core.ts.
+    const src = read("lib/check-in-core.ts")
     expect(src).toContain("blockCounterparties")
   })
 })

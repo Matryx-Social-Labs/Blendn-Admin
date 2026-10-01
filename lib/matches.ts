@@ -2,6 +2,7 @@ import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib
 import { friendIdsOf } from "@/lib/friends"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { notifyMatch } from "@/lib/push-notifications"
 import {
   effectiveIntents,
@@ -119,7 +120,8 @@ export async function matchesForEvent(
     // you in the room with everyone else who came, on any day. Existence only —
     // what they *chose* now lives in `event_match_preferences`, because this
     // query returns an arbitrary one of their check-in rows.
-    where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null } },
+    // At a venue day, only while live (`inRoomWhere`): the grid is reciprocal.
+    where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null }, ...inRoomWhere() },
     select: { id: true },
   })
   if (!viewerCheckIn) return null
@@ -135,6 +137,8 @@ export async function matchesForEvent(
       where: {
         event_id: eventId,
         check_in_time: { not: null },
+        // A venue day's grid is the people live there now.
+        ...inRoomWhere(),
         // Staff are working, not mingling. They are excluded from attendance for
         // the same reason and it would be strange to offer the bar manager as a
         // match.

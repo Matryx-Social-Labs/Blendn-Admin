@@ -20,6 +20,24 @@ export const realEventsWhere = { kind: "event" } as const
 export const venueDaysWhere = { kind: "venue_day" } as const
 
 /**
+ * "In this room", for a check-in lookup on one event.
+ *
+ * At a real event, any check-in: attendance outlives presence, and the roster,
+ * the grid and the room stay open to somebody who stepped out (`mayWriteToRoom`).
+ * At a venue day, only a Go Live window still open. The venue's room, roster
+ * and grid are reciprocal — you see the people live there only while you are
+ * live there yourself (docs/HOTSPOTS.md) — so an ended window is no seat at
+ * all. Compared with the clock, not left to the sweeper.
+ *
+ * Wrapped in `AND`, so spreading it beside another `OR` replaces nothing.
+ */
+export function inRoomWhere(now: Date = new Date()) {
+  return {
+    AND: [{ OR: [{ event: realEventsWhere }, { status: "checked_in" as const, expires_at: { gt: now } }] }],
+  }
+}
+
+/**
  * The owner of every venue day (`lib/venue-day.ts`), created by the migration
  * `20261001220000_venue_days`. Never a person, never signed into: here rather
  * than in `lib/venue-day.ts` so the auth code can refuse it without importing

@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
 import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { normalizeLocationToCity } from "@/lib/location"
@@ -90,8 +91,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * `userId` next to the pseudonym. It carries room handles now (SCRUM-371),
      * and the gate stays: a guest list is still a guest list.
      */
+    // At a venue day, only while live: you see who is here while you can be seen (`inRoomWhere`).
     const attended = await db.event_check_ins.findFirst({
-      where: { event_id: eventId, user_id: authUser.userId },
+      where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere() },
       select: { id: true },
     })
 
@@ -141,6 +143,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const visibleCheckIns = {
       event_id: eventId,
       status: "checked_in" as const,
+      // A venue day lists the people whose window is open now, not whoever the sweeper has yet to reach.
+      ...inRoomWhere(),
       ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
       user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] },
     }

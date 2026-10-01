@@ -98,7 +98,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["contactInfoWarning", "CLIENT-BLOCKED: it is a *pre-send* confirm — \"everyone here sees it. Send anyway?\" — so it needs the API to return a warning and the client to offer a second step. Both server paths flag silently today, which is correct until that exists"],
   ["canSendSystemMessages", "named in CLAUDE.md as caller-less; kept as the written rule until something needs it"],
   ["canSendPushNotifications", "same — the rule exists, the caller does not"],
-  ["venueDayFor", "step 3 builds the venue day; its caller is the Go Live route of step 4 (plan v2 §14). Delete this line with that route"],
 
 
   // --- Half-wired flows ------------------------------------------------------

@@ -23,7 +23,7 @@ import {
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
-import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
+import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, NOT_LIVE_MESSAGE, roomReadDenial } from "@/lib/chat-window"
 import { clientMessageMetadata, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -66,7 +66,7 @@ export async function GET(
         members: {
           where: { user_id: user.userId },
         },
-        event: { select: { status: true, deleted_at: true, ...broadcastAuthorSelect } },
+        event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
       },
     })
 
@@ -80,6 +80,7 @@ export async function GET(
     if (denial === "hidden") return notFoundResponse("Chat group not found")
     if (denial === "not_member") return forbiddenResponse("You are not a member of this chat group")
     if (denial === "banned") return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+    if (denial === "not_live") return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
 
     // Build query for messages — include moderation-hidden messages
     // so the sender can see "This message was removed" placeholders
@@ -319,7 +320,7 @@ export async function POST(
         // only `end_time` would leave this path silently un-floored --
         // `chatWindowState` treats a missing start as "no lower bound", which
         // is the right default for old callers and the wrong one here.
-        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } },
+        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
       },
     })
 
@@ -359,7 +360,7 @@ export async function POST(
      * behind.
      */
     const denial = mayWriteToRoom(
-      { status: effectiveStatus },
+      { status: effectiveStatus, last_allowed_at: membership.last_allowed_at },
       chatGroup.event,
       chatGroup
     )
@@ -376,7 +377,7 @@ export async function POST(
       return errorResponse(
         chatClosedMessage(denial.reason),
         403,
-        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
       )
     }
 

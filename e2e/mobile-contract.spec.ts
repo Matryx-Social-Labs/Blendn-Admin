@@ -150,11 +150,12 @@ test.describe("mobile API contract", () => {
     // The QA seed's live event, whose room it fills with one line per attendee.
     const live = await db.events.findUnique({
       where: { slug: "founders-filter-coffee" },
-      select: { id: true, chat_group: { select: { id: true } } },
+      select: { id: true, venue_id: true, chat_group: { select: { id: true } } },
     })
     await db.$disconnect()
     expect(user, "the QA seed must have run — this is a seeded attendee").toBeTruthy()
     expect(live?.chat_group, "the QA seed's live event must have its room").toBeTruthy()
+    expect(live?.venue_id, "the QA seed's live event must be at a venue").toBeTruthy()
 
     const eventId = live!.id
     const PARAM_ROUTES: Record<string, ParamRoute> = {
@@ -169,6 +170,8 @@ test.describe("mobile API contract", () => {
         pin: ["messages[]", "pagination"],
       },
       "/api/mobile/profiles/:userId (own)": { url: `/api/mobile/profiles/${user!.id}`, pin: ["profile"] },
+      // Go Live's venue (PL-C02): `venue` must never grow a `geofence`.
+      "/api/mobile/venues/:venueId": { url: `/api/mobile/venues/${live!.venue_id}`, pin: ["venue", "live"] },
     }
 
     const token = signAccessToken(user!.id, user!.email)

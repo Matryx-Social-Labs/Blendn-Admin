@@ -79,6 +79,12 @@ const envSchema = z.object({
   FOOTPRINT_UPSTREAM: z.string().url().optional(),
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
+  /**
+   * Whether Go Live's "stay" needs Blendn+ (`plusGating`). Off until step 11
+   * ships entitlements: "stay" is built as available to everyone until that
+   * changes (docs/HOTSPOTS.md).
+   */
+  PLUS_GATING: z.enum(["true", "false"]).optional(),
 
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -144,6 +150,16 @@ export function googleSignInConfigWarning(
     return "GOOGLE_WEB_CLIENT_ID unset while a native client id is set — the mobile SDK audiences its id token to the *web* client, so every Google sign-in will fail on `aud`"
   }
   return null
+}
+
+/**
+ * Go Live "stay" is Blendn+ only when this is on (`PLUS_GATING=true`).
+ *
+ * Off by default, and nothing grants Plus yet (step 11), so turning it on
+ * today refuses "stay" to everyone with `PLUS_REQUIRED`.
+ */
+export function plusGating(): boolean {
+  return process.env.PLUS_GATING === "true"
 }
 
 /**

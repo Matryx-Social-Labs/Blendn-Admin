@@ -1,5 +1,5 @@
 import { Refusal } from "./refusal"
-import { bannedRefusal, chatWindowState, roomReadDenial } from "@/lib/chat-window"
+import { bannedRefusal, chatWindowState, liveInVenueDay, NOT_LIVE_MESSAGE, roomReadDenial } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { discloseBreakdown, suppressedLabel, type Disclosed } from "@/lib/disclosure"
 
@@ -66,8 +66,8 @@ export async function getPollResults(
           chat_group: {
             select: {
               event_id: true,
-              event: { select: { status: true, deleted_at: true } },
-              members: { where: { user_id: reader.userId }, select: { status: true, banned_by: true, left_at: true } },
+              event: { select: { status: true, deleted_at: true, kind: true } },
+              members: { where: { user_id: reader.userId }, select: { status: true, banned_by: true, left_at: true, last_allowed_at: true } },
             },
           },
         },
@@ -92,6 +92,7 @@ export async function getPollResults(
   if (denial === "hidden") throw new Refusal("Poll not found")
   if (denial === "not_member") throw new Refusal("You are not in this chatroom")
   if (denial === "banned") throw new Refusal(bannedRefusal(membership))
+  if (denial === "not_live") throw new Refusal(NOT_LIVE_MESSAGE)
 
   const closed = poll.closes_at !== null && poll.closes_at <= new Date()
 
@@ -178,7 +179,7 @@ export async function castVote(
               id: true,
               event_id: true,
               status: true,
-              event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
+              event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
             },
           },
         },
@@ -216,9 +217,10 @@ export async function castVote(
       user_id: userId,
       status: { in: ["active", "muted"] },
     },
-    select: { id: true },
+    select: { id: true, last_allowed_at: true },
   })
   if (!member) throw new Refusal("You are not in this chatroom")
+  if (!liveInVenueDay(poll.message.chat_group.event, member)) throw new Refusal(NOT_LIVE_MESSAGE)
 
   await db.chat_poll_votes.upsert({
     where: { poll_id_user_id: { poll_id: pollId, user_id: userId } },

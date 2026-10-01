@@ -63,6 +63,14 @@ export interface ServerToClientEvents {
    * to `user:{id}`.
    */
   "notification:new": (data: { kind: string }) => void
+  /**
+   * Your Go Live at a venue ended, and your sockets have left its rooms (the
+   * chat, the roster, the counter). `reason` is the checkout's: `expired` when
+   * the window ran out (or the day reset), `event_started` when a real event
+   * took the venue over (the push says which), otherwise how you left. To
+   * `user:{id}` only.
+   */
+  "live:ended": (data: { eventId: string; reason: string }) => void
   // Event-related
   /**
    * A check-in happened. Deliberately carries no name.
@@ -1309,6 +1317,21 @@ export function evictUserSockets(userId: string): void {
   const io = currentIo()
   if (!io) return
   io.in(`user:${userId}`).disconnectSockets(true)
+}
+
+/**
+ * Out of a venue day's rooms, on every instance (`liveInVenueDay`).
+ *
+ * The joins are refused once a Go Live ends, but a socket already in
+ * `chat:<room>` keeps receiving until it disconnects — the SCRUM-205 shape.
+ * Told first, on their own `user:` room, so the app can say why.
+ */
+export function evictFromVenueDay(eventId: string, chatGroupId: string | null, userId: string, reason: string): void {
+  const io = currentIo()
+  if (!io) return
+  io.to(`user:${userId}`).emit("live:ended", { eventId, reason })
+  const rooms = [`event:${eventId}`, `event:room:${eventId}`, ...(chatGroupId ? [`chat:${chatGroupId}`] : [])]
+  io.in(`user:${userId}`).socketsLeave(rooms)
 }
 
 /**
