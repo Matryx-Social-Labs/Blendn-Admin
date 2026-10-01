@@ -9,6 +9,7 @@ import {
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { realEventsWhere } from "@/lib/event-kind"
 
 /**
  * The cities you can browse, with how many events are in each.
@@ -69,6 +70,7 @@ export async function GET(request: NextRequest) {
     const rows = await db.events.findMany({
       where: {
         deleted_at: null,
+        ...realEventsWhere,
         status: "published",
         visibility: "public",
         end_time: { gte: new Date() },

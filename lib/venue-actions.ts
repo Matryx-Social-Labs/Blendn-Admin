@@ -39,6 +39,7 @@ import { type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
 import { overUserLimit } from "@/lib/rate-limit"
+import { realEventsWhere } from "@/lib/event-kind"
 
 /**
  * Creating and claiming venues — the first write path this table has ever had.
@@ -452,7 +453,9 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
    * hides no row.
    */
   const upcoming = await db.events.count({
-    where: { venue_id: id, deleted_at: null, end_time: { gte: new Date() }, status: { not: "cancelled" } },
+    // Hosts' bookings. The venue's own live room for today is not one, and
+    // would make every venue anybody went live at today impossible to retire.
+    where: { venue_id: id, deleted_at: null, ...realEventsWhere, end_time: { gte: new Date() }, status: { not: "cancelled" } },
   })
   if (upcoming > 0) {
     throw new Refusal(

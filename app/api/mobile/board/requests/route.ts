@@ -96,6 +96,7 @@ export async function GET(request: NextRequest) {
           to_user_id: user.userId,
           from_user_id: { notIn: blockedIds },
           status: "pending",
+          // any-kind: this person's own asks, sorted by whether their night is over; any room's ends the same way.
           OR: [{ event: { end_time: { lte: now } } }, { post: { deleted_at: { not: null } } }],
         },
         orderBy: newest,
@@ -131,6 +132,7 @@ export async function GET(request: NextRequest) {
           from_user_id: user.userId,
           status: { in: ["pending", "declined"] },
           asker_withdrawn_at: null,
+          // any-kind: as above — the asker's own, closed when the night is over.
           OR: [
             { event: { end_time: { lte: now } } },
             { post: { deleted_at: { not: null } } },

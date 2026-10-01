@@ -81,6 +81,7 @@ export default async function EventDetailPage({
       venue_name: true,
       city: true,
       organizer_id: true,
+      kind: true,
       organizer_org_id: true,
       venue: { select: { name: true, owner_org_id: true, claimed_at: true } },
     },
@@ -105,6 +106,7 @@ export default async function EventDetailPage({
 
   const tabs = eventTabsFor(event.start_time.toISOString(), event.end_time.toISOString(), {
     canOperate: permissions.canOperate,
+    canViewAttendees: permissions.canViewAttendees,
     feedbackWindowOpen,
   })
   const activeTab = (tabs.find((t) => t.key === requestedTab)?.key ?? "overview") as EventTabKey

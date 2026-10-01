@@ -68,6 +68,8 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
    * Bounded by the same limit as the fetch below, so this cannot become an
    * unbounded id list on a busy night.
    */
+  // Every open room, a venue day's included: an escalation here is how an
+  // unclaimed venue's room, with no host watching, reaches the platform's queue.
   const eligible = await db.$queryRaw<{ id: string }[]>`
     SELECT m.id
       FROM chat_messages m

@@ -31,6 +31,7 @@ export default async function EventMessagingPage({ params }: Props) {
       timezone: true,
       status: true,
       venue_name: true,
+      kind: true,
       organizer_org_id: true,
       venue: { select: { owner_org_id: true, claimed_at: true } },
     },

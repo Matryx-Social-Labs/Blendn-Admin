@@ -33,6 +33,7 @@ jest.mock("@/lib/db", () => ({
           venue_name: null,
           city: "Bengaluru",
           organizer_id: "u1",
+          kind: "event",
           organizer_org_id: mockOrg,
           venue: { name: "The Humming Tree", owner_org_id: "org-a", claimed_at: new Date("2026-01-01T00:00:00Z") },
           curated_by: null,

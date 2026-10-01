@@ -23,6 +23,7 @@ import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
 import { buildEventsCacheKey } from "@/lib/events-cache-key"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
+import { realEventsWhere } from "@/lib/event-kind"
 
 /**
  * The most events a distance sort will pull into memory at once.
@@ -128,6 +129,9 @@ export async function GET(request: NextRequest) {
      */
     const where: Record<string, unknown> = {
       deleted_at: null,
+      // A venue's daily live room is an events row too, and never a night out
+      // to browse (step 3, lib/event-kind.ts).
+      ...realEventsWhere,
       status: "published",
       visibility: "public",
     }
@@ -501,7 +505,8 @@ export async function GET(request: NextRequest) {
 
       // Fetch full data only for the current page's events
       const pageEvents = await db.events.findMany({
-        where: { id: { in: pageIds } },
+        // Hydrating ids `where` (with the fragment) already chose.
+        where: { id: { in: pageIds }, ...realEventsWhere },
         select: eventListSelect,
       })
       // Restore distance order (findMany with `in` doesn't preserve order)

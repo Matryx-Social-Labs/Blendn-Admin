@@ -1,6 +1,7 @@
 import { db } from "@/lib/db"
 import { claimedWindow } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
+import { realEventsWhere } from "./event-kind"
 
 /**
  * How many people are in the building.
@@ -74,6 +75,13 @@ export async function getBuildingOccupancy(
           where: {
             venue_id: venueId,
             deleted_at: null,
+            /*
+             * Hosts' rooms only, for now. People live at the venue are in the
+             * building too, but this panel lists each room with an exact count
+             * and a title; a venue day joins it when the owner's screens are
+             * redesigned (step 17), with its count through `discloseFigure`.
+             */
+            ...realEventsWhere,
             status: "published",
             // Running right now. An event that ended an hour ago has people in
             // its check-in table and nobody in the building.

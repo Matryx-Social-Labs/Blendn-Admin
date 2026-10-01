@@ -9,6 +9,7 @@ import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { ageFrom } from "@/lib/age"
 import type { user_role } from "@prisma/client"
+import { SYSTEM_USER_ID } from "@/lib/event-kind"
 
 export interface UserWithProfile {
   id: string
@@ -109,6 +110,8 @@ export async function getUsers(
     } else {
       clauses.push({ deletedAt: null })
     }
+    // The owner of every venue day is not somebody on the platform.
+    clauses.push({ id: { not: SYSTEM_USER_ID } })
 
     if (status === "onboarded") {
       clauses.push({ profile: { onboarded: true } })
@@ -223,7 +226,8 @@ export async function updateUser(
         profile: { select: { phone: true, age: true, date_of_birth: true, location: true, onboarded: true } },
       },
     })
-    if (!before) throw new Refusal("User not found")
+    // Its address is the one thing that keeps anybody from signing in as it.
+    if (!before || id === SYSTEM_USER_ID) throw new Refusal("User not found")
 
     /*
      * Age is typed at sign-up and superseded by the birth date the moment one
@@ -330,7 +334,7 @@ export async function updateUserRole(id: string, role: user_role) {
   if (!session?.user || session.user.role !== "app_admin") {
     throw new Refusal("Forbidden")
   }
-  const before = await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } })
+  const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } })
   if (!before) throw new Refusal("User not found")
   await db.user.update({ where: { id, deletedAt: null }, data: { role } })
   // A role change is the canonical audited admin action (CLAUDE.md), and it
@@ -403,7 +407,7 @@ export async function getUserStats() {
     }
 
     // "Accounts" means people on the platform; an erased row is not one.
-    const live = { deletedAt: null }
+    const live = { deletedAt: null, id: { not: SYSTEM_USER_ID } }
     const [total, onboarded, verified, suspended, deleted] = await Promise.all([
       db.user.count({ where: live }),
       db.profiles.count({ where: { onboarded: true, user: live } }),

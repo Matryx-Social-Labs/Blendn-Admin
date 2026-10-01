@@ -141,6 +141,7 @@ export async function maySeeIdentityFor(
         where: {
           user_id: { in: others },
           revealed: true,
+          // any-kind: a reveal is seen by whoever shared that room, a venue day's included.
           event: { check_ins: { some: { user_id: viewerId } } },
         },
         select: { user_id: true },

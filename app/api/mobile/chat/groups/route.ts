@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
           status: { in: ["active", "locked"] },
           // A draft or deleted event has no room (SCRUM-8, SCRUM-303) — the
           // same rule as `eventHidesRoom`, so the list agrees with the room.
+          // any-kind: a member's own rooms, and a venue day's room is one they went live in (D-6).
           event: { deleted_at: null, status: { not: "draft" } },
         },
       },
@@ -69,6 +70,7 @@ export async function GET(request: NextRequest) {
           status: { in: ["active", "locked"] },
           // A draft or deleted event has no room (SCRUM-8, SCRUM-303) — the
           // same rule as `eventHidesRoom`, so the list agrees with the room.
+          // any-kind: a member's own rooms, and a venue day's room is one they went live in (D-6).
           event: { deleted_at: null, status: { not: "draft" } },
         },
       },

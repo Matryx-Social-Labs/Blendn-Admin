@@ -220,6 +220,7 @@ export async function token(email: string): Promise<string> {
 
 async function world() {
   console.log("── live now, and starting within 48 h")
+  // any-kind: testers need to find the live venue days too; their titles say "Venue day ·".
   printRows(
     await sq(`
       SELECT to_char(e.start_time AT TIME ZONE 'UTC', 'DD Mon HH24:MI') || 'Z' AS starts,

@@ -16,6 +16,7 @@ import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
+import { realEventsWhere } from "@/lib/event-kind"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -91,6 +92,9 @@ export async function GET(request: NextRequest) {
      */
     const upcomingEventFilter = {
       deleted_at: null,
+      // A venue's own live room is not an event at it: counted, it would make
+      // every venue anyone went live at read "1 upcoming" (F3).
+      ...realEventsWhere,
       status: "published" as const,
       visibility: "public" as const,
       end_time: { gte: new Date() },

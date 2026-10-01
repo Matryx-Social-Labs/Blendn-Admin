@@ -17,6 +17,7 @@ import { emailDomain, isFreeProvider } from "@/lib/org-invites"
 import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/email"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { notifyEventUpdate } from "@/lib/push-notifications"
+import { realEventsWhere } from "./event-kind"
 
 /**
  * Reviewing host applications.
@@ -454,7 +455,7 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
       _count: {
         select: {
           members: true,
-          events: { where: { deleted_at: null } },
+          events: { where: { deleted_at: null, ...realEventsWhere } },
           venues: { where: { deleted_at: null } },
         },
       },
@@ -528,19 +529,24 @@ export async function setOrganisationStatus(
     })
 
     if (status === "suspended") {
+      /*
+       * The org's own nights, not its venues' daily live rooms: a venue day is
+       * the venue's, the platform moderates it, and suspending the company that
+       * claimed a bar does not shut the bar's room on everybody standing in it.
+       */
       const events = await tx.events.findMany({
-        where: { organizer_org_id: orgId, status: "published", deleted_at: null },
+        where: { organizer_org_id: orgId, ...realEventsWhere, status: "published", deleted_at: null },
         select: { id: true, title: true, end_time: true },
       })
       await tx.events.updateMany({
-        where: { id: { in: events.map((e) => e.id) } },
+        where: { id: { in: events.map((e) => e.id) }, ...realEventsWhere },
         data: { status: "draft", pre_suspension_status: "published" },
       })
       return events
     }
 
     await tx.events.updateMany({
-      where: { organizer_org_id: orgId, status: "draft", pre_suspension_status: "published", deleted_at: null },
+      where: { organizer_org_id: orgId, ...realEventsWhere, status: "draft", pre_suspension_status: "published", deleted_at: null },
       data: { status: "published", pre_suspension_status: null },
     })
     return []

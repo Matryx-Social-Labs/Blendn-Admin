@@ -37,6 +37,11 @@ import { POST as signin } from "@/app/api/mobile/auth/signin/route"
 describe("accountBlockReason", () => {
   const live = { deletedAt: null, suspended_at: null, role: "attendee" }
 
+  it("refuses the system user that owns every venue day, live and attendee though it is", () => {
+    expect(accountBlockReason({ ...live, id: "blendn-system" })).toBe("deleted")
+    expect(accountBlockReason({ ...live, id: "someone-else" })).toBeNull()
+  })
+
   it("lets a live account through", () => {
     expect(accountBlockReason(live)).toBeNull()
   })
