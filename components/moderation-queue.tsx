@@ -16,7 +16,8 @@ interface ModerationFlag {
   categories: Record<string, number>
   confidence: number
   autoAction: string | null
-  reviewedBy: string | null
+  /** Admin only: a staff account id. */
+  reviewedBy?: string | null
   reviewedAt: string | null
   reviewNotes: string | null
   createdAt: string

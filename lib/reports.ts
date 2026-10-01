@@ -51,7 +51,7 @@ export const REPORTS: ReportDef[] = [
     label: "Events",
     description: "Every event in the window with capacity, RSVPs and attendance.",
     venueDescription:
-      "Your own events, and other hosts' at your venues since your claim — their small counts left blank.",
+      "Your own events, and other hosts' at your venues since your claim, with their counts under 5 held back.",
     roles: ["app_admin", "organizer", "venue_owner"],
   },
   {
@@ -71,7 +71,7 @@ export const REPORTS: ReportDef[] = [
     key: "venue-check-ins",
     label: "Venue check-ins",
     description:
-      "Guests per day at other hosts' events at your venues, since your claim. Counts that could single someone out are left blank.",
+      "Guests per day at other hosts' events at your venues, since your claim. Under 5 is held back, and left blank.",
     /*
      * A venue sees aggregates, never people (SCRUM-501). The events it runs
      * itself are in Check-ins, as for any organiser; this is everybody else's
@@ -426,16 +426,7 @@ export async function buildReport(
           event: { select: { id: true, title: true, start_time: true } },
         },
       })
-      const eventIds = [...new Set(days.map((d) => d.event.id))]
-      const [guests, going] = await Promise.all([
-        distinctAttendeeCountsByDay(days.map((d) => d.id)),
-        db.event_rsvps.groupBy({
-          by: ["event_id"],
-          where: { event_id: { in: eventIds }, status: "going" },
-          _count: { _all: true },
-        }),
-      ])
-      const goingBy = new Map(going.map((g) => [g.event_id, g._count._all]))
+      const guests = await distinctAttendeeCountsByDay(days.map((d) => d.id))
       return toCsv(
         [
           { key: "event_id", label: "Event ID", value: (d) => d.event.id },
@@ -446,7 +437,7 @@ export async function buildReport(
           {
             key: "guests",
             label: "Guests",
-            value: (d) => discloseGuests(guests.get(d.id) ?? 0, goingBy.get(d.event.id) ?? 0),
+            value: (d) => discloseGuests(guests.get(d.id) ?? 0),
           },
         ],
         days

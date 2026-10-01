@@ -134,15 +134,19 @@ export function discloseFigure(input: DiscloseInput): Disclosure {
 }
 
 /**
- * Guests at one event, or one day of it, as a venue sees them (SCRUM-501).
+ * Guests at one event, or one day of it, as a venue sees them (SCRUM-501):
+ * the minimum cell, and nothing else.
  *
- * The going RSVPs are the population, so the completeness and residual rules
- * fire as well as the floor: "everybody who said yes came", or all but one, is
- * a statement about each of them. A cell over the population — walk-ins — is
- * held back by the same rule, because it covers the whole of it.
+ * Not the completeness and residual rules against the going RSVPs. Those
+ * identify somebody only to a reader who knows who RSVP'd, and the venue does
+ * not — "everyone who said yes came" names nobody it can see. Applied anyway,
+ * they held back every night walk-ins outnumbered RSVPs, which is the venue's
+ * busiest kind (orchestrator's decision, 2026-10-01; the owner may reverse it).
+ * An organiser reading their own event is a different reader and keeps exact
+ * counts.
  */
-export function discloseGuests(guests: number, going: number): number | null {
-  return discloseFigure({ count: guests, contributors: guests, population: going }).value
+export function discloseGuests(guests: number): number | null {
+  return discloseFigure({ count: guests, contributors: guests, population: 0 }).value
 }
 
 /**
@@ -161,7 +165,7 @@ export function discloseVenueCounts(c: {
   const going = discloseFigure({ count: c.going, contributors: c.going, population: 0 }).value
   return {
     going,
-    attended: discloseGuests(c.attended, c.going),
+    attended: discloseGuests(c.attended),
     fillPct: going !== null && c.capacity ? Math.round((going / c.capacity) * 100) : null,
   }
 }

@@ -1,7 +1,7 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
 import { ageFrom } from "./age"
-import { preferredPseudonymFor } from "./anonymous-names"
+import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
 import {
   mayPostToBoard,
   type BoardEntitlement,
@@ -180,7 +180,8 @@ export async function boardPseudonyms(
       .map((m) => [m.user_id, m.anonymous_name as string])
   )
 
-  return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id)]))
+  const scheme = await pseudonymSchemeFor(eventId)
+  return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id, scheme)]))
 }
 
 /** What refused board text is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
