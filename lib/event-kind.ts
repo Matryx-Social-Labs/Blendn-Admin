@@ -21,7 +21,7 @@ export const venueDaysWhere = { kind: "venue_day" } as const
 
 /**
  * The owner of every venue day (`lib/venue-day.ts`), created by the migration
- * `20261001210000_venue_days`. Never a person, never signed into: here rather
+ * `20261001220000_venue_days`. Never a person, never signed into: here rather
  * than in `lib/venue-day.ts` so the auth code can refuse it without importing
  * the database.
  */
