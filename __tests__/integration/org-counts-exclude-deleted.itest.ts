@@ -35,7 +35,8 @@ beforeAll(async () => {
     const eventId = await makeEvent(host, { deleted_at })
     events.push(eventId)
     await db.events.update({ where: { id: eventId }, data: { organizer_org_id: orgId } })
-    const venue = await db.venues.create({ data: { name: testId("occ-venue"), city: "Bangalore", owner_org_id: orgId, deleted_at } })
+    // An owned venue has a claim date (venues_owner_needs_claimed_at).
+    const venue = await db.venues.create({ data: { name: testId("occ-venue"), city: "Bangalore", owner_org_id: orgId, claimed_at: new Date(), deleted_at } })
     venues.push(venue.id)
   }
 })

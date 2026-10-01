@@ -1,10 +1,13 @@
 import { visibleEventsWhere } from "@/lib/event-visibility"
 import { hostNotSuspended } from "@/lib/event-access"
 import { actorFor } from "@/lib/org-membership"
+import { db } from "@/lib/db"
 
 jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
+jest.mock("@/lib/db", () => ({ db: { venues: { findMany: jest.fn() } } }))
 
 const mockActorFor = actorFor as jest.MockedFunction<typeof actorFor>
+const mockVenues = db.venues.findMany as unknown as jest.Mock
 
 /**
  * Which events a person may see listed.
@@ -25,7 +28,10 @@ const mockActorFor = actorFor as jest.MockedFunction<typeof actorFor>
  * dashboard screen kept asking a different way; the module is the fix, and
  * these are the four branches it has to get right.
  */
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  mockVenues.mockResolvedValue([])
+})
 
 describe("visibleEventsWhere", () => {
   it("shows an admin everything that is not deleted, with no scoping at all", async () => {
@@ -52,7 +58,7 @@ describe("visibleEventsWhere", () => {
     })
   })
 
-  it("gives a venue owner the events in their building, whoever created them", async () => {
+  it("gives a venue owner the events in their building from its claim on, whoever created them", async () => {
     /*
      * The clause `eventPermissions.canOperate` grants and this list used not to
      * show. A venue owner who has run nothing personally still operates every
@@ -61,12 +67,21 @@ describe("visibleEventsWhere", () => {
      * merely being thin.
      */
     mockActorFor.mockResolvedValue({ id: "owner-1", role: "venue_owner", orgIds: ["org-9"] })
+    const claimedAt = new Date("2026-09-01T00:00:00Z")
+    // The second has no claim date: bad data, and it opens nothing (SCRUM-500).
+    mockVenues.mockResolvedValue([
+      { id: "venue-1", claimed_at: claimedAt },
+      { id: "venue-2", claimed_at: null },
+    ])
 
     const where = await visibleEventsWhere({ id: "owner-1", role: "venue_owner" })
 
+    expect(mockVenues).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { owner_org_id: { in: ["org-9"] } } })
+    )
     expect(where.OR).toEqual([
       { organizer_org_id: { in: ["org-9"] } },
-      { venue: { owner_org_id: { in: ["org-9"] } } },
+      { venue_id: "venue-1", start_time: { gte: claimedAt } },
       { organizer_id: "owner-1", ...hostNotSuspended },
     ])
   })
@@ -75,10 +90,11 @@ describe("visibleEventsWhere", () => {
     // The mirror of the case above, and the one that would silently widen
     // access rather than narrow it.
     mockActorFor.mockResolvedValue({ id: "user-1", role: "organizer", orgIds: ["org-9"] })
-
+    mockVenues.mockResolvedValue([{ id: "venue-1", claimed_at: new Date() }])
     const where = await visibleEventsWhere({ id: "user-1", role: "organizer" })
 
-    expect(JSON.stringify(where.OR)).not.toContain("owner_org_id")
+    expect(JSON.stringify(where.OR)).not.toContain("venue")
+    expect(mockVenues).not.toHaveBeenCalled()
   })
 
   it("falls back to authorship when somebody belongs to no organisation", async () => {

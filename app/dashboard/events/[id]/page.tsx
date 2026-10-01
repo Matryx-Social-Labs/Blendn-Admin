@@ -213,7 +213,7 @@ export default async function EventDetailPage({
    * holds back.
    */
   const venueView = !permissions.canEdit
-  const venueMaySee = (people: number) => !venueView || discloseHeadcount(people).value !== null
+  const venueMaySee = (people: number) => !venueView || discloseHeadcount(people) !== null
 
   const overview = await getEventOverview(event.id, venueView ? "venue" : "host")
   if (!overview) notFound()

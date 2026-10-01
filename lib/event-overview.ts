@@ -1,4 +1,4 @@
-import { venueCame } from "@/lib/attendee-roster"
+import { venueCounts } from "@/lib/attendee-roster"
 import { db } from "@/lib/db"
 import { discloseHeadcount, discloseRating, MIN_CELL } from "@/lib/disclosure"
 import { phoneCheckInRadius } from "@/lib/geofence"
@@ -36,9 +36,10 @@ const say = (n: number | null) => (n === null ? `fewer than ${MIN_CELL}` : Strin
 /**
  * `host` is whoever runs the event. `venue` is the owner of the building it is
  * held at, operating somebody else's event: venues see aggregates, never
- * people, so every count of people here goes through `discloseHeadcount`, and
- * "came" is the very figure the venue's Attendees tab shows (`venueCame`) --
- * a tab that held a count back would mean nothing if this one printed it.
+ * people. Going, came and fill are `venueCounts` -- the figures the venue's
+ * Attendees tab, Events list and exports show -- and every other count of
+ * people goes through `discloseHeadcount`. A tab that held a count back would
+ * mean nothing if this one printed it.
  */
 export type OverviewView = "host" | "venue"
 
@@ -92,14 +93,16 @@ export async function getEventOverview(
   ])
 
   const capacity = event.max_capacity
-  const shown = (count: number) => (view === "venue" ? discloseHeadcount(count).value : count)
-  const goingN = shown(going)
+  const venue = view === "venue" ? await venueCounts(eventId, capacity) : null
+  const shown = (count: number) => (venue ? discloseHeadcount(count) : count)
+  const goingN = venue ? venue.going : going
+  const fillPct = venue ? venue.fillPct : capacity ? pct(going, capacity) : null
   const maybeN = shown(maybe)
   const savedN = shown(event._count.favorites)
   const insideN = shown(checkedIn)
   // Turn-up is against people who said they were coming, not against capacity —
   // an event that half-filled and had everyone turn up did the hard part right.
-  const attendedPeople = view === "venue" ? (await venueCame(eventId)).value : distinctAttendees(everCheckedIn)
+  const attendedPeople = venue ? venue.came : distinctAttendees(everCheckedIn)
   /*
    * No `Math.min` clamp any more. It existed to stop no-show going negative
    * when row-counting inflated attendance past the RSVP count; counting people
@@ -149,7 +152,7 @@ export async function getEventOverview(
                 : capacity === 0
                   ? "capacity 0"
                   : // A fill percentage and the capacity give the count back.
-                    `of ${capacity}${goingN === null ? "" : ` · ${pct(goingN, capacity)}% full`}`,
+                    `of ${capacity}${fillPct === null ? "" : ` · ${fillPct}% full`}`,
               `${say(maybeN)} maybe`,
               `${say(savedN)} saved`,
             ].join(" · "),

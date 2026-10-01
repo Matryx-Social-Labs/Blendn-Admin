@@ -130,3 +130,127 @@ describe("authorization is not hand-rolled outside lib/rbac.ts", () => {
     expect(offenders).toEqual([])
   })
 })
+
+/*
+ * A venue owner sees a venue from its claim on (SCRUM-355, SCRUM-500).
+ *
+ * The resolver held that row by row, while the list, every CSV, the venue page,
+ * the building's live count and the linked-events list each read the venue's
+ * events their own way — `venue: { owner_org_id }`, or `venue_id: id` — and
+ * none of them asked the claim date. So a new owner downloaded per-guest
+ * check-in rows for nights before they owned the place.
+ *
+ * The claim window has two doors: `claimedVenueEventsWhere()` for a scope over
+ * an actor's venues, `claimedWindow()` for one venue. These rules refuse the
+ * other ways in, and the positive checks below pin the known readers to the
+ * doors. Scans every file, including the ones `ALLOWED` exempts above.
+ */
+const VENUE_RULES: Array<{ name: string; pattern: RegExp; why: string }> = [
+  {
+    name: "relation filter on the venue's owner",
+    // Any key order, `is:`, shorthand, `venues: { some: … }`. Not a `select`
+    // or `include`, and not a type annotation (`owner_org_id: string`).
+    pattern: /\bvenues?\s*:\s*\{(?!\s*(?:select|include)\b)[^}]*\bowner_org_id\b(?!\s*:\s*string\b)/,
+    why: "scopes events through the venue's owner with no claim date; use claimedVenueEventsWhere()",
+  },
+  {
+    name: "owned venue ids, then events by `venue_id: { in }`",
+    pattern: /\bvenue_id\s*:\s*\{\s*in\s*:/,
+    why: "the two-step version of the same scope; use claimedVenueEventsWhere()",
+  },
+  {
+    name: "raw SQL joining events to a venue's owner",
+    pattern: /`[^`]*\b(?:FROM|JOIN)\s+"?events"?\b[^`]*\bowner_org_id\b[^`]*`|`[^`]*\bowner_org_id\b[^`]*\b(?:FROM|JOIN)\s+"?events"?\b[^`]*`/i,
+    why: "raw SQL scoping events by a venue's owner; the claim date must be in it — use the helpers",
+  },
+]
+
+/** Reads of one venue's rows by id: `where: { venue_id: x }` or `event: { venue_id: x }`. */
+const VENUE_ID_READ = /\b(?:where|event|events)\s*:\s*\{[^{}]*\bvenue_id\s*:(?!\s*\{\s*not\s*:\s*null)(?!\s*string\b)/
+
+/**
+ * Files that read by `venue_id` and are not a venue owner's view of events.
+ * Anything else that does must go through `claimedWindow()`.
+ */
+const VENUE_ID_READS_ALLOWED = new Map([
+  ["lib/venue-actions.ts", "counts future bookings to refuse a retire; nothing is shown"],
+  ["lib/venue-claim-actions.ts", "venue_claims rows, not events"],
+])
+
+describe("a venue owner's view starts at the claim", () => {
+  const files = SEARCH_DIRS.flatMap((d) => sourceFiles(join(ROOT, d))).map(
+    (abs) => [abs.replace(`${ROOT}/`, ""), stripComments(readFileSync(abs, "utf8"))] as const
+  )
+
+  it.each(VENUE_RULES)("no file has a $name", ({ pattern, why }) => {
+    const offenders = files.filter(([, src]) => pattern.test(src)).map(([rel]) => `${rel} — ${why}`)
+    expect(offenders).toEqual([])
+  })
+
+  it("every read of one venue's events by id goes through claimedWindow()", () => {
+    const offenders = files
+      .filter(([rel, src]) => VENUE_ID_READ.test(src) && !VENUE_ID_READS_ALLOWED.has(rel))
+      .filter(([, src]) => !/\bclaimedWindow\(/.test(src))
+      .map(([rel]) => rel)
+    expect(offenders).toEqual([])
+  })
+
+  it("keeps the allowlist honest: each entry still reads by venue_id", () => {
+    for (const rel of VENUE_ID_READS_ALLOWED.keys()) {
+      const src = files.find(([f]) => f === rel)?.[1] ?? ""
+      expect(VENUE_ID_READ.test(src)).toBe(true)
+    }
+  })
+
+  /*
+   * The readers, pinned to the doors. A grep that bans shapes cannot see a
+   * reader that quietly stops calling the helper and returns the same rows;
+   * these can.
+   */
+  it.each([
+    ["lib/event-visibility.ts", /\.\.\.\(user\.role === "venue_owner" \? await claimedVenueEventsWhere\(actor\.orgIds\)/],
+    ["lib/reports.ts", /role === "venue_owner" \? await claimedVenueEventsWhere\(orgIds\)/],
+    ["lib/venue-link-actions.ts", /OR: await claimedVenueEventsWhere\(actor\.orgIds\)/],
+    ["lib/venue-link-actions.ts", /startsAfterClaim\(event\.venue, event\.start_time\)/],
+    ["lib/building-occupancy.ts", /opts\.asOwner && venue \? claimedWindow\(venue\)/],
+    ["app/dashboard/venues/[id]/page.tsx", /isAdmin \? undefined : claimedWindow\(venue\)/],
+    ["app/dashboard/venues/[id]/page.tsx", /: claimedWindow\(venue, \{ from: range\.from, to: range\.to \}\)/],
+    ["app/dashboard/venues/[id]/page.tsx", /getBuildingOccupancy\(id, \{ asOwner: !isAdmin \}\)/],
+  ])("%s goes through the claim window", (rel, shape) => {
+    const src = files.find(([f]) => f === rel)?.[1]
+    expect(src).toBeDefined()
+    expect(src).toMatch(shape)
+  })
+
+  /*
+   * Each rule against the shape it exists to catch, and the shapes it must
+   * not — so a rule edited into uselessness fails here rather than passing
+   * against a codebase that happens to be clean.
+   */
+  it.each([
+    ["key order", 0, `where: { venue: { deleted_at: null, owner_org_id: { in: orgIds } } }`],
+    ["`is:`", 0, `where: { venue: { is: { owner_org_id: { in: orgIds } } } }`],
+    ["shorthand", 0, `const w = { venue: { owner_org_id } }`],
+    ["to-many", 0, `where: { venues: { some: { owner_org_id: orgId } } }`],
+    ["two-step", 1, `db.events.findMany({ where: { venue_id: { in: ownedIds } } })`],
+    ["raw SQL", 2, "db.$queryRaw`SELECT e.id FROM events e JOIN venues v ON v.id = e.venue_id WHERE v.owner_org_id = ${o}`"],
+  ])("rule catches the %s shape", (_label, rule, snippet) => {
+    expect(VENUE_RULES[rule as number].pattern.test(snippet)).toBe(true)
+  })
+
+  it.each([
+    `venue: { select: { owner_org_id: true, claimed_at: true } }`,
+    `venue: { owner_org_id: string | null; claimed_at: Date | null } | null`,
+    "db.$queryRaw`SELECT v.id, v.owner_org_id FROM venues v LEFT JOIN organisations o ON o.id = v.owner_org_id`",
+    `where: { deleted_at: null, venue_id: { not: null } }`,
+    `function f(event: { venue_name: string | null; venue_id: string | null }) {}`,
+  ])("no rule fires on %s", (snippet) => {
+    for (const { pattern } of VENUE_RULES) expect(pattern.test(snippet)).toBe(false)
+    expect(VENUE_ID_READ.test(snippet)).toBe(false)
+  })
+
+  it("the venue_id read rule sees both forms", () => {
+    expect(VENUE_ID_READ.test(`where: { venue_id: id, deleted_at: null }`)).toBe(true)
+    expect(VENUE_ID_READ.test(`where: { event: { venue_id: id, deleted_at: null } }`)).toBe(true)
+  })
+})

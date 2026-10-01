@@ -14,8 +14,8 @@ import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
  * Whoever runs the event gets labels: salted with the event's organisation,
  * in label order, arrivals to the quarter hour, and nothing about who came
  * while fewer than five did. The venue it is held at gets a count and no
- * person, through `discloseHeadcount`, and nothing for an event before its
- * claim (SCRUM-355).
+ * person, by the rule every venue surface shares (`venueCounts`, SCRUM-501),
+ * and nothing for an event before its claim (SCRUM-355).
  *
  * Real Postgres, because what matters is what the queries select and scope on.
  * A mocked `db` returns whatever the test thought to give it.
@@ -232,9 +232,12 @@ describe("an event's attendee roster", () => {
     await rsvp(small, rahul)
     await rsvp(small, mia)
 
-    // Five guests, two who promised and stayed away, one crew, one pending.
+    // Seven going, five came; one crew, one pending.
     busy = await event(orgA, hostA, -10 * 24, atV)
-    for (const g of guests.slice(0, 5)) await checkIn(busy, g, 15)
+    for (const g of guests.slice(0, 5)) {
+      await rsvp(busy, g)
+      await checkIn(busy, g, 15)
+    }
     await rsvp(busy, rahul)
     await rsvp(busy, mia)
     await checkIn(busy, stan, 5, { kind: "staff" })
@@ -391,7 +394,7 @@ describe("an event's attendee roster", () => {
 
   describe("the venue the event is held at", () => {
     it("gets how many came, never a label, counted in people", async () => {
-      // Five guests, two stayed away, a crew member and a pending check-in.
+      // Five of seven going came; a crew member and a pending check-in don't count.
       const out = await seen("venue_owner", venueOwner, busy.id)
       expect(out).toEqual({ view: "count", started: true, came: 5 })
       expect(JSON.stringify(out)).not.toMatch(/attendee-/)
@@ -401,9 +404,11 @@ describe("an event's attendee roster", () => {
       expect(await seen("venue_owner", venueOwner, small.id)).toEqual({ view: "count", started: true, came: null })
     })
 
-    it("has it held back when it would name everyone who promised, or the one who didn't", async () => {
+    it("has it held back when it would name everyone going, the one who didn't come, or runs past them", async () => {
       expect(await seen("venue_owner", venueOwner, complete.id)).toEqual({ view: "count", started: true, came: null })
       expect(await seen("venue_owner", venueOwner, residual.id)).toEqual({ view: "count", started: true, came: null })
+      // Seven came against six going: walk-ins cover the whole population.
+      expect(await seen("venue_owner", venueOwner, past.id)).toEqual({ view: "count", started: true, came: null })
     })
 
     it("is told zero, which names nobody, and that an upcoming event has not started", async () => {

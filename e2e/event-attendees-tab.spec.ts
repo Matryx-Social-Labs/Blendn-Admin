@@ -59,8 +59,11 @@ test("the venue owner sees a count and no table", async ({ browser }) => {
   const page = await context.newPage()
   await page.goto(`/dashboard/events/${event!.id}?tab=attendees`, { waitUntil: "domcontentloaded" })
 
-  await expect(page.getByText("Came", { exact: true })).toBeVisible()
-  await expect(page.getByText("A venue sees how many came, never who", { exact: false })).toBeVisible()
+  // Visible ones only: the streamed page holds a hidden copy until it swaps in.
+  await expect(page.getByText("Came", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(
+    page.getByText("A venue sees how many came, never who", { exact: false }).filter({ visible: true })
+  ).toBeVisible()
   await expect(page.getByRole("table")).toHaveCount(0)
   expect(await page.locator("main").first().innerText()).not.toMatch(/attendee-[0-9a-f]{12}/)
   await context.close()

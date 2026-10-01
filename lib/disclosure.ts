@@ -134,16 +134,49 @@ export function discloseFigure(input: DiscloseInput): Disclosure {
 }
 
 /**
- * A count of people, as a venue may see it, or null when it must be held back.
+ * Guests at one event, or one day of it, as a venue sees them (SCRUM-501).
+ *
+ * The going RSVPs are the population, so the completeness and residual rules
+ * fire as well as the floor: "everybody who said yes came", or all but one, is
+ * a statement about each of them. A cell over the population — walk-ins — is
+ * held back by the same rule, because it covers the whole of it.
+ */
+export function discloseGuests(guests: number, going: number): number | null {
+  return discloseFigure({ count: guests, contributors: guests, population: going }).value
+}
+
+/**
+ * One event's counts for a host who reached it through the building rather
+ * than by running it: a venue owner at another host's event (SCRUM-501).
+ *
+ * The same rule wherever those counts appear — the Events list, the venue
+ * page, the Events export — so no surface prints what another blanks. Fill is
+ * Going over capacity, so it goes when Going does.
+ */
+export function discloseVenueCounts(c: {
+  going: number
+  attended: number
+  capacity: number | null
+}): { going: number | null; attended: number | null; fillPct: number | null } {
+  const going = discloseFigure({ count: c.going, contributors: c.going, population: 0 }).value
+  return {
+    going,
+    attended: discloseGuests(c.attended, c.going),
+    fillPct: going !== null && c.capacity ? Math.round((going / c.capacity) * 100) : null,
+  }
+}
+
+/**
+ * Any other count of people a venue is shown -- maybe, saved, inside now,
+ * turned away -- or null under the floor. Who came and who is going go through
+ * `discloseVenueCounts`, the rule every venue surface shares.
  *
  * Zero is shown: it identifies nobody, and "held back" over an empty room
- * would read as a secret where there is none. Anything else goes through the
- * four-part rule. `population` is everyone the count could have included; with
- * the default 0 only the minimum cell applies.
+ * would read as a secret where there is none.
  */
-export function discloseHeadcount(count: number, population = 0): Disclosure {
-  if (count === 0) return { value: 0, suppressed: false, reason: null }
-  return discloseFigure({ count, contributors: count, population })
+export function discloseHeadcount(count: number): number | null {
+  if (count === 0) return 0
+  return discloseFigure({ count, contributors: count, population: 0 }).value
 }
 
 /**

@@ -1,8 +1,9 @@
 import { ATTENDED, noShows } from "./counting"
 import type { rsvp_status, user_role } from "@prisma/client"
 
+import { distinctAttendeeCounts } from "./attendee-counts"
 import { db } from "./db"
-import { discloseHeadcount, MIN_CELL, type Disclosure } from "./disclosure"
+import { discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { eventScopeFor, labelScopeFor, labelScoper } from "./reports"
@@ -186,9 +187,8 @@ export interface EventAttendeeRow {
  * - `labels`: whoever runs the event (`canEdit`: any member of its
  *   organisation, staff included, or an admin) gets a row per person, by label.
  * - `count`: a venue owner operating an event in their building gets how many
- *   came, and nothing per person -- venues see aggregates, never people (the
- *   owner's venue rulings; SCRUM-501 brings their check-ins export to the same
- *   rule). Held back as null when `discloseHeadcount` says so.
+ *   came, and nothing per person -- venues see aggregates, never people
+ *   (SCRUM-501). Held back as null by `venueCounts`.
  */
 export type EventAttendees =
   | {
@@ -231,23 +231,28 @@ async function eventPeople(eventId: string) {
 }
 
 /**
- * How many came, as a venue may be told it: `discloseHeadcount` over everybody
- * on the list.
+ * An event's Going, Came and fill as the venue it is held at is told them.
  *
- * The population is the union of who came and who promised to, not the RSVP
- * count alone: walk-ins make "came" larger than "going", and a cell bigger
- * than its population would read as complete every time. With the union,
- * completeness fires when nobody who promised stayed away, and the residual
- * rule when exactly one did.
+ * `discloseVenueCounts`, with the inputs every other venue surface gives it --
+ * the going RSVPs and the distinct guests who came -- so the Events list, the
+ * venue page, the exports, this Overview and this Attendees tab cannot print
+ * what another holds back (SCRUM-501). Zero is shown: it names nobody.
  */
-function cameForVenue(people: Awaited<ReturnType<typeof eventPeople>>): Disclosure {
-  const everyone = new Set([...people.arrived.keys(), ...people.committed.keys()])
-  return discloseHeadcount(people.arrived.size, everyone.size)
-}
-
-/** The same figure for the venue's Overview, so the two tabs cannot disagree. */
-export async function venueCame(eventId: string): Promise<Disclosure> {
-  return cameForVenue(await eventPeople(eventId))
+export async function venueCounts(
+  eventId: string,
+  capacity: number | null = null
+): Promise<{ going: number | null; came: number | null; fillPct: number | null }> {
+  const [going, arrivals] = await Promise.all([
+    db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
+    distinctAttendeeCounts([eventId]),
+  ])
+  const came = arrivals.get(eventId) ?? 0
+  const shown = discloseVenueCounts({ going, attended: came, capacity })
+  return {
+    going: going === 0 ? 0 : shown.going,
+    came: came === 0 ? 0 : shown.attended,
+    fillPct: shown.fillPct,
+  }
 }
 
 /**
@@ -271,11 +276,10 @@ export async function eventAttendees(
   const { canEdit, canOperate } = eventPermissions(actor, event)
   if (!canOperate) return null
 
-  // Ids and times only. Nothing here may select a name, email, image or phone.
-  const people = await eventPeople(eventId)
-  const { arrived, committed } = people
+  if (!canEdit) return { view: "count", started: event.start_time <= now, came: (await venueCounts(eventId)).came }
 
-  if (!canEdit) return { view: "count", started: event.start_time <= now, came: cameForVenue(people).value }
+  // Ids and times only. Nothing here may select a name, email, image or phone.
+  const { arrived, committed } = await eventPeople(eventId)
 
   const scope = labelScopeFor(actor, event.organizer_org_id)
   const came = arrived.size

@@ -1427,7 +1427,16 @@ async function upsertVenue(input: {
     longitude: input.lng,
     owner_org_id: input.ownerOrgId,
     owner_id: input.ownerId,
-    claimed_at: input.ownerOrgId ? new Date() : null,
+    /*
+     * Kept across re-seeds while the same org owns it. A claim date that moved
+     * to "now" on every run pushed every earlier event at the venue before the
+     * claim, and the venue owner's screens emptied (SCRUM-500).
+     */
+    claimed_at: input.ownerOrgId
+      ? existing?.owner_org_id === input.ownerOrgId && existing.claimed_at
+        ? existing.claimed_at
+        : new Date()
+      : null,
     /*
      * Same reason, and one the static guard could not see: this object is built
      * outside the `db.venues.create()` call, so a scanner looking inside Prisma
