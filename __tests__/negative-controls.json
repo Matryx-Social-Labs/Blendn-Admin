@@ -262,9 +262,9 @@
       "date": "2026-09-25"
     },
     "event-lifecycle-audited.itest.ts": {
-      "guards": "POST /api/events writes event.created; the dashboard PATCH, the mobile PATCH and the admin status dropdown (updateEventStatus) write event.published / event.updated / event.cancelled via eventWriteAction, and the mobile DELETE writes delete, each with the acting user, straight after the write (SCRUM-89 item 1)",
-      "mutation": "M1: delete the auditLog call in POST /api/events. M2: PATCH records every save as `event.updated`. M3: delete the auditLog call in the mobile PATCH. M4: delete the auditLog call in the mobile DELETE. M5: delete the auditLog call in updateEventStatus (the admin status dropdown).",
-      "observed": "M1: both failing (no event.created row). M2: 1 failing of 2 (the sequence reads created, updated, updated, updated). M3 and M4: 1 failing each (the phone case misses published, then delete). M5: 1 failing of 3 (the admin cancel leaves only event.created).",
+      "guards": "POST /api/events writes event.created; the dashboard PATCH, the mobile PATCH and the admin status dropdown (updateEventStatus) write event.published / event.updated / event.cancelled via eventWriteAction, and the mobile DELETE writes delete, each with the acting user, straight after the write (SCRUM-89 item 1). Since 2026-10-01 (SCRUM-490), each of the three cancel doors also closes the presence sessions inside, as 'ended'.",
+      "mutation": "M1: delete the auditLog call in POST /api/events. M2: PATCH records every save as `event.updated`. M3: delete the auditLog call in the mobile PATCH. M4: delete the auditLog call in the mobile DELETE. M5: delete the auditLog call in updateEventStatus (the admin status dropdown). M408: the dashboard PATCH drops cancelEventCheckIns. M409: the mobile PATCH drops it. M410: updateEventStatus drops it.",
+      "observed": "M1: both failing (no event.created row). M2: 1 failing of 2 (the sequence reads created, updated, updated, updated). M3 and M4: 1 failing each (the phone case misses published, then delete). M5: 1 failing of 3 (the admin cancel leaves only event.created). M408, M409, M410: 1 of 6 failing each (that door's session left open). All reverted.",
       "date": "2026-09-25"
     },
     "event-save-refusal-words.itest.ts": {
@@ -1448,6 +1448,12 @@
       "mutation": "M400 switched_event mapped back to 'sweeper'. M401 occurrence_ended mapped to 'ended'. M402 the checkout route passes 'left_area' instead of 'manual'. M403 the sweeper's left-area pass passes 'manual'.",
       "observed": "Red before the fix: 1 of 4 failing (switch recorded as sweeper). M400: 1 of 5 failing. M401: 2 of 5 failing (the event's end recorded as ended, and departureQuality no longer degraded). M402: 1 of 10 failing in checkin.itest.ts ('sweeper' after a manual checkout). M403: 1 of 10 failing in presence-sweeper.itest.ts ('user' after the sweep). Reverted.",
       "date": "2026-09-30"
+    },
+    "cancel-closes-presence.itest.ts": {
+      "guards": "SCRUM-490: cancelEventCheckIns closes the open presence sessions of the cancelled event as 'ended', in the same transaction as the check-ins, so the room no longer counts anyone inside; a departure already recorded keeps its time and source, and no other event's session is touched.",
+      "mutation": "M404 the presence_sessions close dropped. M405 the departed_at IS NULL filter dropped (overwrites earlier departures). M406 the event_id scope dropped (closes every open session). M407 GREATEST(arrived_at, now) replaced by now (a later arrival breaks the departure_after_arrival CHECK and fails the whole cascade).",
+      "observed": "Red before the fix: 1 of 3 failing (session still open, insideGuests 1). With the review's future-arrival case added, 4 tests: M404: 2 of 4 failing. M405: 1 of 4 failing. M406: 1 of 4 failing. M407: 1 of 4 failing (CHECK violation). All reverted.",
+      "date": "2026-10-01"
     }
   },
   "grandfathered": [
