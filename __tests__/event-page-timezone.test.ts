@@ -50,3 +50,29 @@ describe("the event's pages format in the event's timezone", () => {
     expect(read("components/dashboard/live-tab.tsx")).toMatch(/eventClock\(timezone\)/)
   })
 })
+
+/*
+ * Two screens SCRUM-421 did not reach (SCRUM-496). Placements told a sponsor
+ * "Oct 1, 10:00 AM" for an event at 15:30 IST, and Chatrooms told an operator
+ * a live room "ends" 5½ hours early: both are server components, and a bare
+ * formatter on Railway is UTC.
+ */
+describe("the sponsor's Placements and the Chatrooms list use the event's clock (SCRUM-496)", () => {
+  it("neither formats a time in the server's or the viewer's zone", () => {
+    const files = ["app/dashboard/placements/page.tsx", "app/dashboard/chatrooms/page.tsx"]
+    const offenders = files.filter((f) => /Intl\.DateTimeFormat\(|toLocale(Date|Time)?String\(/.test(read(f)))
+    expect(offenders).toEqual([])
+  })
+
+  it("the overview carries each event's timezone, and both pages format through eventClock", () => {
+    const actions = read("lib/sponsor-actions.ts")
+    const overview = actions.slice(actions.indexOf("export async function getSponsorOverview"))
+    expect(overview).toMatch(/timezone: true/)
+    expect(read("app/dashboard/placements/page.tsx")).toMatch(/eventClock\(p\.timezone\)/)
+    expect(read("app/dashboard/placements/page.tsx")).toMatch(/eventClock\(overview\.next\.timezone\)/)
+    const rooms = read("app/dashboard/chatrooms/page.tsx")
+    expect(rooms).toMatch(/timezone: true/)
+    expect(rooms).toMatch(/eventClock\(room\.timezone\)\.time\(room\.end_time\)/)
+  })
+})
+
