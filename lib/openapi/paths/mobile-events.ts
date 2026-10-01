@@ -948,6 +948,87 @@ registry.registerPath({
   },
 })
 
+// === Reporting and blocking from the board (SCRUM-322) ===
+
+const boardReportBody = {
+  body: {
+    content: {
+      "application/json": {
+        schema: z.object({
+          reason: z.enum(["harassment", "hate_speech", "inappropriate_content", "spam", "other"]),
+          description: z.string().max(500).optional(),
+        }),
+      },
+    },
+  },
+}
+const reported = {
+  description: "Report filed",
+  content: { "application/json": { schema: wrap(z.object({ reported: z.literal(true) })) } },
+}
+const blocked = {
+  description: "Blocked — the same transaction and response as POST /users/{userId}/block",
+  content: { "application/json": { schema: wrap(z.object({ blocked: z.literal(true) })) } },
+}
+const BY_POST =
+  "The board never gives the client a user id, so the author is resolved on the server " +
+  "and never returned. Allowed for anyone who can read this event's board (RSVP'd or " +
+  "favourited) or has an ask on the post — a withdrawn or removed post included. " +
+  "Anything else, including no such post, is 404. Your own post is 400."
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/board/{postId}/report",
+  tags: ["Mobile Events"],
+  summary: "Report a board post",
+  description:
+    BY_POST +
+    " Lands in the admin reports queue as \"Board · offer|seeking|chat\" (stored in " +
+    "`message_reports` as `message_type: \"board_post\"`). Rate limited per user.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string(), postId: z.string() }), ...boardReportBody },
+  responses: { 201: reported, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/board/{postId}/block",
+  tags: ["Mobile Events"],
+  summary: "Block a board post's author",
+  description: BY_POST + " Then exactly POST /users/{userId}/block for that author.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string(), postId: z.string() }) },
+  responses: { 200: blocked, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/board/requests/{requestId}/report",
+  tags: ["Mobile Events"],
+  summary: "Report a board ask",
+  description:
+    "Either of the ask's two people may report it; the report is about the other one, " +
+    "resolved on the server and never returned. Anyone else, or no such ask, is 404. Lands " +
+    "in the admin reports queue as \"Board ask\" (`message_type: \"board_request\"`). " +
+    "Rate limited per user.",
+  security: bearerAuth,
+  request: { params: z.object({ requestId: z.string() }), ...boardReportBody },
+  responses: { 201: reported, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/board/requests/{requestId}/block",
+  tags: ["Mobile Events"],
+  summary: "Block the other person on a board ask",
+  description:
+    "Either of the ask's two people may block the other, by the ask. Anyone else, or no " +
+    "such ask, is 404. Then exactly POST /users/{userId}/block for that person.",
+  security: bearerAuth,
+  request: { params: z.object({ requestId: z.string() }) },
+  responses: { 200: blocked, ...standardErrors },
+})
+
 registry.registerPath({
   method: "patch",
   path: "/api/mobile/board/requests/{requestId}",

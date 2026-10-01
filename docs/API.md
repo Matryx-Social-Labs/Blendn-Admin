@@ -1770,7 +1770,8 @@ be seen.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
-| POST | `/users/:userId/block` | Block/unblock user |
+| POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
+| GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their board post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow |
 | GET | `/users/:userId/favorites` | Get your saved events — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
 | GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
@@ -1856,6 +1857,8 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
 | POST | `/events/:eventId/report` | `event_reports` |
 | POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
+| POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Board · offer\|seeking\|chat" |
+| POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Board ask" |
 
 ### The pre-event board
 
@@ -1927,8 +1930,61 @@ It has no second look, because a request has nowhere to be hidden later.
 **An author can withdraw their own post** with `DELETE /events/:eventId/board/:postId`.
 It is soft (`deleted_at`): the post leaves every board read, requests filed against
 it stop counting toward their senders' caps, and `GET /board/requests` returns its
-`body` as `null`. Removal by a moderator, and reporting a post, come with the
-board's dashboard surface (SCRUM-322).
+`body` as `null`.
+
+#### Reporting, blocking and removal (SCRUM-322)
+
+| Method | Endpoint | Who |
+|--------|----------|-----|
+| POST | `/events/:eventId/board/:postId/report` | Anyone who was ever this event's audience — an RSVP of any answer (one later changed to not going included) or a save — or who has an ask on the post |
+| POST | `/events/:eventId/board/:postId/block` | The same |
+| POST | `/board/requests/:requestId/report` | Either of the ask's two people |
+| POST | `/board/requests/:requestId/block` | The same |
+
+The board never gives the client a user id, so a person is reported and blocked
+**by the post or the ask they wrote**. The server resolves who and never returns
+it — not in these responses, and not later in `GET /users/blocked`, which lists
+an opaque ref (below). Anything the caller could not have seen, including no
+such post or ask, is the same **404** body as a missing one, so the routes cannot
+be used to probe ids. Your own post is **400**.
+
+**These stay reachable when the board does not.** They are safety actions, so
+neither the doors nor a block closes them: somebody reading a message after the
+night began, or who has just been blocked by its author, can still report it and
+block back. A withdrawn or removed post can be reported too — the person most
+motivated to take a post down is the one about to be reported for it.
+
+- **Reports** take `{ reason, description? }`, with `reason` one of `harassment`,
+  `hate_speech`, `inappropriate_content`, `spam` or `other` (the app's message
+  reasons), and `description` up to 500 characters. They return
+  `201 { reported: true }`. They land in `message_reports` (`message_type`
+  `board_post` / `board_request`), so they show in the admin reports queue beside
+  room messages and DMs, as "Board · offer", "Board · seeking", "Board · chat" or
+  "Board ask", with how many reports name the same thing. An ask is reported
+  about whichever of its two people did not file it.
+- **One report per person per post or ask while it is pending.** A second tap is
+  the same `201` and no new row (a partial unique). Reports are limited to 20 a
+  minute and **30 a day** per person — a queue showing the oldest hundred is
+  otherwise one script away from burying everybody else's.
+- **The evidence is kept.** A report stores the words as they were when it was
+  filed (`excerpt`), and stamps the post `moderation_status = "reported"`.
+  Account erasure deletes only posts with no status, so a reported post is kept
+  (and taken off the board) until it is reviewed, and an ask somebody reported
+  keeps its message until then. Dismissing the last pending report on a post
+  clears the stamp.
+- **Blocking** is exactly `POST /users/:userId/block` once the person is known:
+  the same transaction and the same `{ blocked: true }`. Board asks between the
+  two are left as they are — hidden from the blocker, not acceptable, and read by
+  the asker as an ask on a withdrawn post.
+- **Removal** is the queue's *Remove post* on a board-post report. It marks the
+  post `moderation_status = "removed"` — whether or not its author had already
+  withdrawn it — and sets `deleted_at` if it was still up, which takes it off
+  every board read and lapses the asks filed against it. It records
+  `report.remove_message` in `audit_logs` with the post's id and `removed: true`,
+  or `removed: false` when the post was already removed. A post erased with its
+  author's account cannot be removed (the button is not offered; the action is
+  refused). Asks are not removable: an ask went to one person, like a DM, so the
+  lever there is the person.
 
 #### Asking somebody
 

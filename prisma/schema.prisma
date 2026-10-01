@@ -973,9 +973,14 @@ model message_reports {
   id           String        @id @default(uuid()) @db.Uuid
   reporter_id  String
   message_id   String        @db.Uuid
-  message_type String // 'group' | 'private'
+  message_type String // 'group' | 'private' | 'board_post' | 'board_request'
   reason       String
   description  String?
+  /// What the reported words said when the report was filed — board reports
+  /// only, for now. The words can change or go (an author withdraws a post,
+  /// an erased account's ask loses its message) between the report and the
+  /// review; the evidence should not.
+  excerpt      String?
   status       report_status @default(pending)
   created_at   DateTime      @default(now()) @db.Timestamptz(6)
   updated_at   DateTime      @default(now()) @db.Timestamptz(6)
@@ -989,6 +994,9 @@ model message_reports {
   @@index([status])
   @@index([reporter_id])
   @@index([status, created_at])
+  /// NOT here, because `schema.prisma` cannot express it: one PENDING report
+  /// per reporter per board post or ask (a partial unique in the migration
+  /// `20261001210000_board_reports_evidence`). A second tap is the same report.
 }
 
 /// One day (or session) of an event.

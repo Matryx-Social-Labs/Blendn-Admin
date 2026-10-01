@@ -55,6 +55,29 @@ export async function DELETE(request: NextRequest) {
     })
     const openEventIds = [...new Set(openRsvps.map((r) => r.event_id))]
 
+    /*
+     * Their board asks somebody reported and nobody has reviewed: the words
+     * are the evidence, so the scrub below leaves them until a reviewer has
+     * looked (SCRUM-322 review). Read before the transaction, as above.
+     */
+    const reportedAsks = (
+      await db.message_reports.findMany({
+        where: {
+          message_type: "board_request",
+          status: "pending",
+          message_id: {
+            in: (
+              await db.board_requests.findMany({
+                where: { from_user_id: authUser.userId },
+                select: { id: true },
+              })
+            ).map((r) => r.id),
+          },
+        },
+        select: { message_id: true },
+      })
+    ).map((r) => r.message_id)
+
     const deletedAt = new Date()
     await db.$transaction([
       /*
@@ -280,13 +303,27 @@ export async function DELETE(request: NextRequest) {
       db.board_posts.deleteMany({ where: { author_id: authUser.userId, moderation_status: null } }),
 
       /*
+       * And a post somebody REPORTED, still waiting for a reviewer. Filing the
+       * report stamps it `moderation_status = "reported"` (lib/board-access.ts,
+       * `fileBoardReport`), so the delete above leaves it — the post is the
+       * evidence, and an author deleting their account must not be how a
+       * report loses it. It comes off the board here, as the author does.
+       */
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, moderation_status: "reported", deleted_at: null },
+        data: { deleted_at: new Date() },
+      }),
+
+      /*
        * Requests they SENT to other people's posts: the row survives — the
        * recipient's board should not develop holes — and only their words go.
        * The same rule as `message_requests`, for the same reason: a request
        * they received is somebody else's sentence.
        */
       db.board_requests.updateMany({
-        where: { from_user_id: authUser.userId },
+        // Except an ask somebody reported that nobody has reviewed yet: its
+        // words are the evidence. The report also keeps a copy (`excerpt`).
+        where: { from_user_id: authUser.userId, id: { notIn: reportedAsks } },
         data: { message: null },
       }),
 

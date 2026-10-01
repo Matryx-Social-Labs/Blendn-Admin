@@ -44,8 +44,10 @@ const mockDb = {
   notifications: { deleteMany: jest.fn() },
   password_reset_tokens: { deleteMany: jest.fn() },
   message_requests: { updateMany: jest.fn() },
-  board_posts: { deleteMany: jest.fn() },
-  board_requests: { updateMany: jest.fn() },
+  board_posts: { deleteMany: jest.fn(), updateMany: jest.fn() },
+  // Their asks, read before the transaction to keep any with an open report.
+  board_requests: { updateMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+  message_reports: { findMany: jest.fn().mockResolvedValue([]) },
   private_conversations: { updateMany: jest.fn() },
   // Returns what it was given, so a test can find a statement in the batch.
   $executeRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ sql: strings.join("?"), values })),
