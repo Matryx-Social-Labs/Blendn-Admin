@@ -3,6 +3,8 @@
  * tested without rendering.
  */
 
+import { eventClock } from "./event-phase"
+
 const numberFormat = new Intl.NumberFormat("en-US")
 const compactFormat = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -83,7 +85,18 @@ export function statusTone(status: string): "default" | "secondary" | "destructi
  * reproduce. Same fix as `generatedAt` on the overview — compute it once, on
  * the server, and send the string.
  */
-export function whenLabel(start: Date, end: Date, now: Date): string {
+export function whenLabel(
+  start: Date,
+  end: Date,
+  now: Date,
+  /**
+   * The event's zone (SCRUM-496). Omitted means the runtime's: right in the
+   * browser, and UTC on the server, which is the bug this parameter exists for.
+   */
+  timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone
+): string {
+  const clock = eventClock(timezone)
+  const year = (date: Date) => clock.format(date, { year: "numeric" })
   /*
    * The year only when it is not this one. A list of 2026 events read on a 2026
    * afternoon does not need telling — but an event that CROSSES new year does,
@@ -98,20 +111,21 @@ export function whenLabel(start: Date, end: Date, now: Date): string {
    * shown it.
    */
   const day = (date: Date, showYear: boolean) =>
-    date.toLocaleDateString("en-GB", {
+    clock.format(date, {
       day: "numeric",
       month: "short",
       ...(showYear ? { year: "numeric" } : {}),
     })
 
-  const crossesYears = start.getFullYear() !== end.getFullYear()
-  const showStartYear = start.getFullYear() !== now.getFullYear() || crossesYears
-  const showEndYear = end.getFullYear() !== now.getFullYear() || crossesYears
+  const crossesYears = year(start) !== year(end)
+  const showStartYear = year(start) !== year(now) || crossesYears
+  const showEndYear = year(end) !== year(now) || crossesYears
 
-  if (start.toDateString() !== end.toDateString()) {
+  // Same day on the event's calendar, not the server's.
+  if (clock.daysUntil(end, start) !== 0) {
     return `${day(start, showStartYear)} → ${day(end, showEndYear)}`
   }
-  const from = start.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" })
+  const from = clock.format(start, { hour: "numeric", minute: "2-digit" })
   return `${day(start, showStartYear)}, ${from}`
 }
 

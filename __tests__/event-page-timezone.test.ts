@@ -80,6 +80,10 @@ describe("the sponsor's Placements and the Chatrooms list use the event's clock 
     expect(rooms).toMatch(/eventClock\(room\.timezone\)\.time\(room\.end_time\)/)
     expect(read("app/dashboard/actions.ts")).toMatch(/timezone: o\.next\.timezone/)
     expect(read("components/dashboard/overview-sponsor.tsx")).toMatch(/eventClock\(data\.next\.timezone\)/)
+    // The Events list labels every row on its own event's clock.
+    const list = read("app/dashboard/events/page.tsx")
+    expect(list).toMatch(/timezone: true/)
+    expect(list).toMatch(/whenLabel\(event\.start_time, event\.end_time, now, event\.timezone\)/)
   })
 })
 

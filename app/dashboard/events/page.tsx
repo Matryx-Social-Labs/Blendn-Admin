@@ -49,6 +49,8 @@ export default async function EventsPage() {
       status: true,
       start_time: true,
       end_time: true,
+      // Each row's "when" on its own event's clock, not the server's (SCRUM-496).
+      timezone: true,
       city: true,
       venue_name: true,
       latitude: true,
@@ -81,7 +83,7 @@ export default async function EventsPage() {
     title: event.title,
     status: event.status,
     startTime: event.start_time.toISOString(),
-    when: whenLabel(event.start_time, event.end_time, now),
+    when: whenLabel(event.start_time, event.end_time, now, event.timezone),
     where: event.venue_name ?? event.city ?? null,
     city: event.city,
     host: event.organizer?.name ?? null,
