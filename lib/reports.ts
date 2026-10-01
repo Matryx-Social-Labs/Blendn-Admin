@@ -3,8 +3,10 @@ import type { DateRange } from "./date-range"
 import type { user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
-import { distinctAttendeeCounts } from "./attendee-counts"
+import { distinctAttendeeCounts, distinctAttendeeCountsByDay } from "./attendee-counts"
+import { MIN_CELL } from "./disclosure"
 import { hostNotSuspended } from "./event-access"
+import { claimedVenueEventsWhere } from "./event-visibility"
 import { activeMembership } from "./org-membership"
 
 /**
@@ -37,6 +39,8 @@ export interface ReportDef {
   key: ReportKey
   label: string
   description: string
+  /** What a venue owner downloads instead, when it is a different shape. */
+  venueDescription?: string
   roles: user_role[]
 }
 
@@ -57,6 +61,7 @@ export const REPORTS: ReportDef[] = [
     key: "check-ins",
     label: "Check-ins",
     description: "Individual GPS-validated check-ins, one row each.",
+    venueDescription: `Guests per event, per day, from your claim on. Under ${MIN_CELL} is left blank.`,
     roles: ["app_admin", "organizer", "venue_owner"],
   },
   {
@@ -86,7 +91,9 @@ export const REPORTS: ReportDef[] = [
 ]
 
 export function reportsFor(role: user_role): ReportDef[] {
-  return REPORTS.filter((r) => r.roles.includes(role))
+  return REPORTS.filter((r) => r.roles.includes(role)).map((r) =>
+    role === "venue_owner" && r.venueDescription ? { ...r, description: r.venueDescription } : r
+  )
 }
 
 export function canRunReport(key: string, role: user_role): boolean {
@@ -137,7 +144,8 @@ export async function eventScopeFor(role: user_role, userId: string) {
       { organizer_org_id: { in: orgIds } },
       // The creator floor, gated like `visibleEventsWhere`'s (SCRUM-8).
       { organizer_id: userId, ...hostNotSuspended },
-      ...(role === "venue_owner" ? [{ venue: { owner_org_id: { in: orgIds } } }] : []),
+      // From the claim on, never the venue's past (SCRUM-355, SCRUM-500).
+      ...(role === "venue_owner" ? await claimedVenueEventsWhere(orgIds) : []),
     ],
   }
 }
@@ -268,6 +276,54 @@ export async function buildReport(
     }
 
     case "check-ins": {
+      /*
+       * A venue owner's check-ins: how many guests came, per event per day.
+       * Never who (SCRUM-501).
+       *
+       * Venues see aggregates, never people. The row-per-check-in version
+       * below carries the guest's label to the second, and that label is
+       * stable across every event the org's venues hold — for a venue it was a
+       * per-person attendance history of the building.
+       *
+       * A day is in the window by its start. Staff are not guests. Under
+       * `MIN_CELL` guests the count prints blank, as the description says.
+       *
+       * Skipped: arrivals by hour. It needs event-local hours and breakdown
+       * suppression (`discloseBreakdown`); add it with paid venue analytics.
+       */
+      if (role === "venue_owner") {
+        const days = await db.event_occurrences.findMany({
+          where: { event: scope, start_time: inWindow },
+          orderBy: { start_time: "desc" },
+          take: REPORT_ROW_LIMIT,
+          select: {
+            id: true,
+            occurs_on: true,
+            event: { select: { id: true, title: true, start_time: true } },
+          },
+        })
+        const guests = await distinctAttendeeCountsByDay(days.map((d) => d.id))
+        return toCsv(
+          [
+            { key: "event_id", label: "Event ID", value: (d) => d.event.id },
+            { key: "event", label: "Event", value: (d) => d.event.title },
+            { key: "event_start", label: "Event start", value: (d) => d.event.start_time },
+            // A calendar day, not an instant.
+            { key: "day", label: "Day", value: (d) => d.occurs_on.toISOString().slice(0, 10) },
+            {
+              key: "guests",
+              label: "Guests",
+              value: (d) => {
+                const n = guests.get(d.id) ?? 0
+                return n < MIN_CELL ? null : n
+              },
+            },
+          ],
+          // A check-ins report: days nobody checked in to are not rows.
+          days.filter((d) => guests.has(d.id))
+        )
+      }
+
       const rows = await db.event_check_ins.findMany({
         where: { event: scope, created_at: inWindow },
         orderBy: { created_at: "desc" },

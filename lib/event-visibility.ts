@@ -2,6 +2,7 @@
 // __tests__/server-import-boundary.test.ts.
 import type { user_role } from "@prisma/client"
 
+import { db } from "./db"
 import { hostNotSuspended } from "./event-access"
 import { actorFor } from "./org-membership"
 
@@ -62,10 +63,9 @@ export async function visibleEventsWhere(user: {
       ? [
           { organizer_org_id: { in: actor.orgIds } },
           // A venue owner operates every event in their building, whoever
-          // created it — `eventPermissions` grants it, so the list must show it.
-          ...(user.role === "venue_owner"
-            ? [{ venue: { owner_org_id: { in: actor.orgIds } } }]
-            : []),
+          // created it, from the claim on — `eventPermissions` grants exactly
+          // that, so the list shows exactly that.
+          ...(user.role === "venue_owner" ? await claimedVenueEventsWhere(actor.orgIds) : []),
         ]
       : []),
     /*
@@ -85,4 +85,33 @@ export async function visibleEventsWhere(user: {
     { organizer_id: user.id, ...hostNotSuspended },
   ]
   return where
+}
+
+/**
+ * The events a venue owner reaches through the building: at a venue their
+ * organisation owns, starting at or after that venue's claim.
+ *
+ * Owner's ruling (SCRUM-355): a claim opens what happens at the venue from then
+ * on, never its past. `eventPermissions` held that row by row while the list
+ * and every CSV scoped on `owner_org_id` alone, so a new owner downloaded one
+ * check-in row per guest, by label, for nights before they owned the place
+ * (SCRUM-500). Every venue-owner scope builds its venue arm here, and
+ * `__tests__/authz-scoping-boundary.test.ts` refuses one written by hand.
+ *
+ * One arm per venue because the claim date is per venue and Prisma cannot
+ * compare a column to a related row's column. No claim date on an owned venue
+ * is bad data and opens nothing, as in the resolver.
+ *
+ * ponytail: one OR arm per owned venue. Fine for the handful an org owns; a
+ * raw-SQL join on `venues.claimed_at` if an org ever owns hundreds.
+ */
+export async function claimedVenueEventsWhere(orgIds: string[]): Promise<Record<string, unknown>[]> {
+  if (orgIds.length === 0) return []
+  const venues = await db.venues.findMany({
+    where: { owner_org_id: { in: orgIds } },
+    select: { id: true, claimed_at: true },
+  })
+  return venues.flatMap((v) =>
+    v.claimed_at ? [{ venue_id: v.id, start_time: { gte: v.claimed_at } }] : []
+  )
 }

@@ -24,9 +24,19 @@ describe("no export is unbounded", () => {
      * three that were missing it.
      */
     const cases = src.match(/^\s*case "[a-z-]+": \{/gm) ?? []
-    const caps = src.match(/take: REPORT_ROW_LIMIT/g) ?? []
     expect(cases.length).toBe(6)
-    expect(caps.length).toBe(cases.length)
+    /*
+     * Per case, not a total: check-ins has two shapes, the venue owner's
+     * aggregate and everyone else's rows, and each is capped. A total would let
+     * one case's second cap stand in for another case's missing one.
+     */
+    const blocks = src.split(/^\s*case "/m).slice(1)
+    const uncapped = blocks.filter((b) => {
+      const shapes = b.match(/findMany\(/g) ?? []
+      const caps = b.match(/take: REPORT_ROW_LIMIT/g) ?? []
+      return caps.length === 0 || caps.length < shapes.length
+    })
+    expect(uncapped.map((b) => b.slice(0, b.indexOf('"')))).toEqual([])
   })
 
   it("uses one shared constant, not six literals", () => {

@@ -130,3 +130,42 @@ describe("authorization is not hand-rolled outside lib/rbac.ts", () => {
     expect(offenders).toEqual([])
   })
 })
+
+/*
+ * A venue owner's scope starts at the claim (SCRUM-355, SCRUM-500).
+ *
+ * The resolver held that row by row, and the list and every CSV scoped on
+ * `venue: { owner_org_id }` alone -- so a new owner downloaded per-guest
+ * check-in rows for nights before they owned the place. Both scopes now build
+ * their venue arm with `claimedVenueEventsWhere()`; this refuses a new one
+ * written by hand. Scans every file, including the ones `ALLOWED` exempts from
+ * the creator rules above.
+ */
+describe("a venue-owner scope goes through claimedVenueEventsWhere()", () => {
+  const VENUE_SCOPE = /venue\s*:\s*\{\s*owner_org_id\s*:/
+  const EXEMPT = new Map([
+    // The type the resolver reads, not a filter.
+    ["lib/rbac.ts", "PermissionEvent's shape"],
+    /*
+     * The linked-events list exists so an owner can dispute an event wrongly
+     * linked to their building, and that includes one from before the claim.
+     * It selects title, time, organiser and link status: no people, and the
+     * event page behind each row still refuses a pre-claim event.
+     */
+    ["lib/venue-link-actions.ts", "dispute list; no people"],
+  ])
+
+  it("no file scopes events on the venue's owner without the claim date", () => {
+    const offenders = SEARCH_DIRS.flatMap((d) => sourceFiles(join(ROOT, d)))
+      .map((abs) => [abs.replace(`${ROOT}/`, ""), abs] as const)
+      .filter(([rel]) => !EXEMPT.has(rel))
+      .filter(([, abs]) => VENUE_SCOPE.test(stripComments(readFileSync(abs, "utf8"))))
+      .map(([rel]) => rel)
+    expect(offenders).toEqual([])
+  })
+
+  it("still sees the shape, so a moved file cannot empty this test", () => {
+    const src = stripComments(readFileSync(join(ROOT, "lib/venue-link-actions.ts"), "utf8"))
+    expect(VENUE_SCOPE.test(src)).toBe(true)
+  })
+})
