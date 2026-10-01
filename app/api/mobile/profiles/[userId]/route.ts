@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
-import { checkBlurPhoto, checkProfilePhoto, moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
+import { checkBlurPhoto, checkProfilePhoto, deleteReplacedBlur, moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
 import { pulledPhotos, recordPhotoCheck } from "@/lib/photo-checks"
 import {
   ADULTS_ONLY,
@@ -726,6 +726,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         updated_at: new Date(),
       },
     })
+
+    // The blur this write replaced or cleared leaves storage once moderation has passed it (SCRUM-520).
+    const replacedBlur = existing?.blur_photo
+    if (storedBlur !== undefined && replacedBlur && replacedBlur !== storedBlur) {
+      after(() => deleteReplacedBlur(replacedBlur, userId))
+    }
 
     // Fetch updated user with profile
     const user = await db.user.findUnique({

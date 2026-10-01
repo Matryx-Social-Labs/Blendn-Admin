@@ -1,5 +1,5 @@
 import { checkImageContent } from "./moderation/openai-moderation"
-import { ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
+import { deleteFile, ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
 import { recordPhotoCheck, recordPhotoPulled } from "./photo-checks"
@@ -235,6 +235,38 @@ async function withdraw(url: string, userId: string): Promise<void> {
     await withdrawFromPublic(key)
   } catch (error) {
     logger.error("Pulled photo is still in the public bucket; withdrawal failed", {
+      userId,
+      key,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
+ * A blur the profile no longer points at, out of storage (SCRUM-520).
+ *
+ * The column moved on and the object stayed: one test profile held seven stale
+ * blurs, each still served to anyone holding its URL, and every viewer of the
+ * card had been handed one. Called after the response of the write that
+ * replaced or cleared it.
+ *
+ * Only once moderation has judged it and let it stand. One it pulled is already
+ * withdrawn and held (SCRUM-479); one not yet judged -- moderation still running,
+ * or an outage left it unchecked -- stays for the verdict, because deleting it
+ * first would lose exactly what that hold keeps.
+ *
+ * ponytail: an unjudged blur replaced in that window is left behind; a sweep of
+ * unreferenced keys under `profile/<uid>/` is the upgrade if it shows up.
+ */
+export async function deleteReplacedBlur(url: string, userId: string): Promise<void> {
+  const key = ownedPhotoKey(url, userId)
+  if (!key) return
+  try {
+    const check = await db.photo_checks.findUnique({ where: { url }, select: { checked: true, hidden: true } })
+    if (!check?.checked || check.hidden) return
+    await deleteFile(key)
+  } catch (error) {
+    logger.warn("Replaced blur photo not deleted", {
       userId,
       key,
       error: error instanceof Error ? error.message : String(error),

@@ -21,6 +21,8 @@ jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
   // A pulled blur leaves the public bucket (SCRUM-479); not against real storage here.
   withdrawFromPublic: jest.fn().mockResolvedValue(undefined),
+  // A replaced or cleared blur leaves storage (SCRUM-520); not against real storage here.
+  deleteFile: jest.fn().mockResolvedValue(undefined),
   sealUpload: jest.fn(async (key: string, _folder: string, userId: string, minBytes = 1, maxBytes = Infinity) => {
     const name = key.split("/").pop()!
     const bytes = name.includes("blur-edge") ? 4_000 : name.includes("blur-over") ? 4_001 : name.includes("blur") ? 2_000 : 120_000
@@ -39,7 +41,7 @@ import { after } from "next/server"
 import { checkImageContent } from "@/lib/moderation/openai-moderation"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
-import { sealUpload } from "@/lib/tigris"
+import { deleteFile, sealUpload } from "@/lib/tigris"
 import { db, closeDb, makeUser, onboard } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -240,9 +242,9 @@ describe("a blur outlives nothing it was made from", () => {
   it("clears it when moderation flags the blur the PUT stored", async () => {
     const p = await withBlur()
     ;(after as jest.Mock).mockClear()
-    // A new blur for the same photo: the only thing handed to after() is its moderation.
+    // A new blur for the same photo: after() gets its moderation, and the old blur's deletion (SCRUM-520).
     expect((await p.put({ blur_photo: upload(p.id, "a2-blur.jpg") })).status).toBe(200)
-    expect(after).toHaveBeenCalledTimes(1)
+    expect(after).toHaveBeenCalledTimes(2)
 
     ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "allow" } })
     await runAfter()
@@ -260,5 +262,75 @@ describe("a blur outlives nothing it was made from", () => {
     ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "hide" } })
     await moderateBlurPhoto(sealedOf(p.id, "a-blur.jpg"), p.id)
     expect(await blurOf(p.id)).toBe(sealedOf(p.id, "a2-blur.jpg"))
+  })
+})
+
+/*
+ * The blur this write replaced or cleared leaves storage (SCRUM-520).
+ *
+ * The column moved on and the object stayed: one test profile on staging held
+ * seven stale blurs, each still served to anyone holding its URL -- and every
+ * viewer of the card had been handed that URL.
+ */
+describe("a replaced or cleared blur leaves storage", () => {
+  const sealedKey = (id: string, name: string) => `profile/${id}/sealed-1790641297767-cfg6ta-${name}`
+
+  /** `withBlur`, with moderation having judged the blur and let it stand. */
+  async function withJudgedBlur() {
+    const p = await withBlur()
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "allow" } })
+    await runAfter()
+    jest.clearAllMocks()
+    return p
+  }
+
+  it("deletes the old blur when a new one replaces it", async () => {
+    const p = await withJudgedBlur()
+    expect((await p.put({ blur_photo: upload(p.id, "a-blur-edge.jpg") })).status).toBe(200)
+    expect(await blurOf(p.id)).toBe(sealedOf(p.id, "a-blur-edge.jpg"))
+    // After the response, as moderation is.
+    expect(deleteFile).not.toHaveBeenCalled()
+    await runAfter()
+    expect(deleteFile).toHaveBeenCalledTimes(1)
+    expect(deleteFile).toHaveBeenCalledWith(sealedKey(p.id, "a-blur.jpg"))
+  })
+
+  it("deletes it when the blur is cleared, on an explicit null or a new primary without one", async () => {
+    const cleared = await withJudgedBlur()
+    expect((await cleared.put({ blur_photo: null })).status).toBe(200)
+    await runAfter()
+    expect(deleteFile).toHaveBeenCalledWith(sealedKey(cleared.id, "a-blur.jpg"))
+
+    const moved = await withJudgedBlur()
+    expect((await moved.put({ photos: [upload(moved.id, "b.jpg"), sealedOf(moved.id, "a.jpg")] })).status).toBe(200)
+    expect(await blurOf(moved.id)).toBeNull()
+    await runAfter()
+    expect(deleteFile).toHaveBeenCalledWith(sealedKey(moved.id, "a-blur.jpg"))
+  })
+
+  it("keeps an old blur moderation has not judged yet, so a pull can still hold it", async () => {
+    const p = await withBlur()
+    jest.clearAllMocks()
+    expect((await p.put({ blur_photo: null })).status).toBe(200)
+    await runAfter()
+    expect(deleteFile).not.toHaveBeenCalled()
+  })
+
+  it("deletes nothing when the blur stays", async () => {
+    const p = await withJudgedBlur()
+    expect((await p.put({ bio: "only the bio" })).status).toBe(200)
+    expect((await p.put({ blur_photo: sealedOf(p.id, "a-blur.jpg") })).status).toBe(200)
+    expect((await p.put({ photos: [sealedOf(p.id, "a.jpg"), upload(p.id, "b.jpg")] })).status).toBe(200)
+    await runAfter()
+    expect(deleteFile).not.toHaveBeenCalled()
+  })
+
+  it("never fails the save, or the work after it, because storage would not delete", async () => {
+    const p = await withJudgedBlur()
+    ;(deleteFile as jest.Mock).mockRejectedValueOnce(new Error("tigris down"))
+    expect((await p.put({ blur_photo: null })).status).toBe(200)
+    await expect(runAfter()).resolves.toBeDefined()
+    expect(deleteFile).toHaveBeenCalled()
+    expect(await blurOf(p.id)).toBeNull()
   })
 })
