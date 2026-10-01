@@ -30,11 +30,17 @@ const ROOT = join(__dirname, "..")
 
 const code = (rel: string) => stripComments(readFileSync(join(ROOT, rel), "utf8"))
 
-/** Everything that builds the organiser's attendee roster. */
+/**
+ * Everything that builds a host's attendee roster: the organisation's, and one
+ * event's Attendees tab (SCRUM-499). The event page itself is not listed. It
+ * reads `venue.name`, a place and not a person, and the roster reaches it only
+ * through `eventAttendees`.
+ */
 const ROSTER_SOURCES = [
   "lib/attendee-roster.ts",
   "app/dashboard/attendees/page.tsx",
   "app/dashboard/attendees/attendees-table.tsx",
+  "app/dashboard/events/[id]/attendees-table.tsx",
 ]
 
 const IDENTITY = "name|email|image|phone|photos"
@@ -48,19 +54,31 @@ describe("the organiser's attendee roster selects no identity", () => {
     expect(src).not.toMatch(new RegExp(`\\.(${IDENTITY})\\b`))
   })
 
-  it("serialises a row with no field that could carry one", () => {
+  it.each(["AttendeeRow", "EventAttendeeRow"])("%s serialises with no field that could carry one", (type) => {
     // The row type is the serialiser's contract: what is not on it cannot
     // reach the client payload.
-    const row = code("lib/attendee-roster.ts").match(/export interface AttendeeRow \{[^}]*\}/)
+    const row = code("lib/attendee-roster.ts").match(new RegExp(`export interface ${type} \\{[^}]*\\}`))
     expect(row).not.toBeNull()
     expect(row![0]).not.toMatch(new RegExp(`\\b(${IDENTITY})\\??\\s*:`))
   })
 
-  it("labels the row with the export's function, not a second one", () => {
+  it("labels both rosters' rows with the export's function, not a second one", () => {
     const src = code("lib/attendee-roster.ts")
     expect(src).toMatch(/import \{ attendeeLabel \} from "\.\/pseudonym"/)
     expect(src).toMatch(/import \{ eventScopeFor, pseudonymScope \} from "\.\/reports"/)
-    expect(src).toMatch(/id: attendeeLabel\(userId, labelScope\),/)
+    const [org, event] = src.split("export async function eventAttendees(")
+    expect(event).toBeDefined()
+    expect(org).toMatch(/id: attendeeLabel\(userId, labelScope\),/)
+    expect(event).toMatch(/id: attendeeLabel\(person, labelScope\),/)
+  })
+
+  it("renders the event's Attendees tab from the label roster, not a redirect (SCRUM-499)", () => {
+    // The tab used to redirect to `/messaging?view=attendees`, which nothing
+    // read, so it landed on the room chat.
+    const page = code("app/dashboard/events/[id]/page.tsx")
+    expect(page).toMatch(/await eventAttendees\(actor, event\.id, now\)/)
+    expect(page).toMatch(/<EventAttendeesTable\b/)
+    expect(page).not.toMatch(/messaging\?view=/)
   })
 })
 

@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "theme-tokens.test.ts": {
+      "guards": "The admin nav badge's `text-destructive-foreground` named no token, so Tailwind emitted nothing and the count inherited the row's muted grey on red. Every *-foreground colour utility under app/ and components/ must have a --color-* entry in @theme, pointing at a variable :root declares; the dark theme declares its own --destructive-foreground; --gradient-brand and --gradient-ember are declared once in app/globals.css and quoted verbatim in docs/DESIGN_SYSTEM.md.",
+      "mutation": "M419: app/globals.css lost `--color-destructive-foreground: var(--destructive-foreground);`. M420: a second `--gradient-brand` (the old two-stop value) added to .dark. Also run against origin/dev's app/globals.css as a whole.",
+      "observed": "M419: 1 of 17 failing (destructive-foreground has a --color-* entry). M420: 1 of 17 failing (--gradient-brand is declared once). origin/dev's globals.css: 6 of 17 failing (the token, the dark foreground, both gradients declared once, both quoted). Reverted; 17 of 17.",
+      "date": "2026-10-01"
+    },
     "sponsored-row-offers.test.tsx": {
       "guards": "SCRUM-308/475: a sponsored campaign row offers the switch, Edit and the creative attach only to someone who may author sponsored copy (canBroadcast \"sponsored\" with the sponsoring grant, computed on the messaging page as the routes compute it); anyone else gets Delete and the state in words. The page-level wiring (no Add, the who-places-these line, admin still offered Add) is driven by e2e/sponsored-tab-offers.spec.ts.",
       "mutation": "M418: SponsoredMessageRow forced mayAuthor = true.",
@@ -1156,9 +1162,9 @@
       "date": "2026-09-28"
     },
     "attendee-identity-boundary.test.ts": {
-      "guards": "SCRUM-383 (b): the organiser's attendee roster selects no name, email, image or phone (lib/attendee-roster.ts, the page, the table; the row type has no field for one), and no host-facing file under app/ (mobile excepted) reads a person's identity without an admin gate or an allowlisted reason. With integration/organiser-sees-labels.itest.ts, which asserts the serialised roster and room feed.",
-      "mutation": "M1: lib/attendee-roster.ts given back the pre-fix shape -- `user: { select: { name: true } }` on the check-ins, the second `db.user.findMany` for RSVP-only people, and `name` on AttendeeRow and the row. M2: app/dashboard/attendees/page.tsx replaced with its dev version (git show HEAD:...).",
-      "observed": "M1: this suite 2 of 8 failing (roster source; row type), organiser-sees-labels.itest.ts 1 of 6 failing (the serialised roster carried the name). M2: this suite 2 of 8 failing (page source; the whole-surface scan listed app/dashboard/attendees/page.tsx as an ungated identity read).",
+      "guards": "SCRUM-383 (b): the organiser's attendee roster selects no name, email, image or phone (lib/attendee-roster.ts, the page, the table; the row type has no field for one), and no host-facing file under app/ (mobile excepted) reads a person's identity without an admin gate or an allowlisted reason. With integration/organiser-sees-labels.itest.ts, which asserts the serialised roster and room feed. Since SCRUM-499 also the event's Attendees tab: app/dashboard/events/[id]/attendees-table.tsx is a roster source, EventAttendeeRow has no identity field, eventAttendees labels with attendeeLabel(person, labelScope), and the event page renders the roster rather than redirecting to /messaging?view=. With integration/event-attendee-roster.itest.ts, which holds the per-event scoping and the venue's count-only view (SCRUM-501).",
+      "mutation": "M1: lib/attendee-roster.ts given back the pre-fix shape -- `user: { select: { name: true } }` on the check-ins, the second `db.user.findMany` for RSVP-only people, and `name` on AttendeeRow and the row. M2: app/dashboard/attendees/page.tsx replaced with its dev version (git show HEAD:...). M421: the event page's Attendees branch replaced with the old `redirect(.../messaging?view=${activeTab})`. M422: `name: string | null` added to EventAttendeeRow. M423: eventAttendees' row labelled `id: person` (the raw user id).",
+      "observed": "M1: this suite 2 of 8 failing (roster source; row type), organiser-sees-labels.itest.ts 1 of 6 failing (the serialised roster carried the name). M2: this suite 2 of 8 failing (page source; the whole-surface scan listed app/dashboard/attendees/page.tsx as an ungated identity read). M421: 1 of 11 failing (renders the event's Attendees tab from the label roster). M422: 1 of 11 failing (EventAttendeeRow serialises with no field). M423: 1 of 11 failing (labels both rosters' rows). Each reverted; 11 of 11 (2026-10-01).",
       "date": "2026-09-28"
     },
     "../e2e/where-map-stacking.spec.ts": {

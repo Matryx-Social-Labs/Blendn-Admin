@@ -1,8 +1,10 @@
-import { noShows } from "./counting"
+import { ATTENDED, noShows } from "./counting"
 import type { user_role } from "@prisma/client"
 
 import { db } from "./db"
+import { MIN_CELL } from "./disclosure"
 import { attendeeLabel } from "./pseudonym"
+import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { eventScopeFor, pseudonymScope } from "./reports"
 
 /**
@@ -125,5 +127,125 @@ export async function attendeeRoster(role: user_role, userId: string): Promise<A
     uniqueAttendees: attendedByUser.size,
     repeatCount: rows.filter((r) => r.repeat).length,
     noShowPct: totalCommitted === 0 ? null : (missed.total / totalCommitted) * 100,
+  }
+}
+
+/**
+ * One person at one event, as whoever runs it sees them: the same label as the
+ * organisation's roster and the export, and what they did about this event.
+ *
+ * No cross-event history. The organiser has that on `/dashboard/attendees`,
+ * under this same label.
+ */
+export interface EventAttendeeRow {
+  /** `attendeeLabel`, never the user id. See `AttendeeRow.id`. */
+  id: string
+  /** A committed RSVP. Null for somebody who walked in without one. */
+  rsvp: "going" | "maybe" | null
+  /** Their first arrival, across every day of the event. */
+  arrivedAt: string | null
+  /**
+   * `no_show` only once the event is over and only if it ran. Before then a
+   * committed RSVP who has not arrived might still come, and nobody fails to
+   * turn up to an event that was cancelled.
+   */
+  status: "came" | "no_show" | "expected"
+}
+
+/**
+ * What the event's Attendees tab may show this caller (SCRUM-499).
+ *
+ * - `labels`: whoever runs the event (`canEdit`: its organisation, or an
+ *   admin) gets one row per person, by label.
+ * - `count`: a venue owner operating an event in their building gets how many
+ *   came, and nothing per person. Venues see aggregates, never people (the
+ *   owner's venue rulings; SCRUM-501 made their check-ins export the same).
+ *   Under `MIN_CELL` the count is held back as null, as that export's is.
+ */
+export type EventAttendees =
+  | { view: "labels"; rows: EventAttendeeRow[]; came: number; walkIns: number; noShows: number }
+  | { view: "count"; came: number | null }
+
+const RSVP_RANK = { going: 0, maybe: 1 } as const
+
+/** Door order: arrivals first, earliest first; then going, maybe, and the rest. */
+function doorOrder(a: EventAttendeeRow, b: EventAttendeeRow): number {
+  if (a.arrivedAt !== b.arrivedAt) {
+    if (a.arrivedAt === null) return 1
+    if (b.arrivedAt === null) return -1
+    return a.arrivedAt < b.arrivedAt ? -1 : 1
+  }
+  const rank = (r: EventAttendeeRow) => (r.rsvp ? RSVP_RANK[r.rsvp] : 2)
+  return rank(a) - rank(b) || a.id.localeCompare(b.id)
+}
+
+/**
+ * The event's attendees, as `actor` may see them, or null if they may not.
+ *
+ * Authorised here with `eventPermissions`, the same resolver the page gates on,
+ * so a caller that forgets the gate gets nothing rather than another
+ * organisation's attendees.
+ */
+export async function eventAttendees(
+  actor: PermissionActor,
+  eventId: string,
+  now = new Date()
+): Promise<EventAttendees | null> {
+  const event = await db.events.findFirst({
+    where: { id: eventId, deleted_at: null },
+    select: { ...eventPermissionSelect, status: true, end_time: true },
+  })
+  if (!event) return null
+  const { canEdit, canOperate } = eventPermissions(actor, event)
+  if (!canOperate) return null
+
+  // Ids and times only. Nothing here may select a name, email, image or phone.
+  const checkIns = await db.event_check_ins.findMany({
+    where: { event_id: eventId, kind: "attendee", status: { in: ATTENDED } },
+    select: { user_id: true, event_id: true, check_in_time: true },
+  })
+
+  // One row per person per day, so the first arrival is the earliest of them.
+  const arrived = new Map<string, Date | null>()
+  for (const row of checkIns) {
+    const earlier = arrived.get(row.user_id)
+    if (!arrived.has(row.user_id) || (row.check_in_time && (!earlier || row.check_in_time < earlier))) {
+      arrived.set(row.user_id, row.check_in_time)
+    }
+  }
+
+  if (!canEdit) return { view: "count", came: arrived.size < MIN_CELL ? null : arrived.size }
+
+  const [rsvps, labelScope] = await Promise.all([
+    db.event_rsvps.findMany({
+      where: { event_id: eventId, status: { in: ["going", "maybe"] } },
+      select: { user_id: true, event_id: true, status: true },
+    }),
+    pseudonymScope(actor.role, actor.id),
+  ])
+  const rsvpOf = new Map(rsvps.map((r) => [r.user_id, r.status as "going" | "maybe"]))
+
+  const over = event.status !== "cancelled" && event.end_time <= now
+  // The same per-(person, event) rule as the organisation's roster (SCRUM-467).
+  const missed = over ? noShows(rsvps, checkIns).byUser : new Map<string, number>()
+
+  const rows: EventAttendeeRow[] = Array.from(new Set([...arrived.keys(), ...rsvpOf.keys()]))
+    .map((person) => {
+      const at = arrived.get(person)
+      return {
+        id: attendeeLabel(person, labelScope),
+        rsvp: rsvpOf.get(person) ?? null,
+        arrivedAt: at?.toISOString() ?? null,
+        status: arrived.has(person) ? "came" : missed.has(person) ? "no_show" : "expected",
+      } satisfies EventAttendeeRow
+    })
+    .sort(doorOrder)
+
+  return {
+    view: "labels",
+    rows,
+    came: arrived.size,
+    walkIns: rows.filter((r) => r.status === "came" && r.rsvp === null).length,
+    noShows: missed.size,
   }
 }

@@ -9,7 +9,9 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { getEventOverview } from "@/lib/event-overview"
+import { eventAttendees } from "@/lib/attendee-roster"
 
+import { EventAttendeesCount, EventAttendeesTable } from "./attendees-table"
 import { EventTabs, eventTabsFor, type EventTabKey } from "./event-tabs"
 import { Overview } from "./overview"
 import { curationSelect, curationState } from "@/lib/curation"
@@ -37,9 +39,11 @@ const FEEDBACK_WINDOW_HOURS = 24
  * and bookmarks, the command palette and the notification deep links all use
  * it. Changing the URL shape would strand every one of them for nothing.
  *
- * The panels below Overview are **not** reimplemented here. Attendees, chat and
- * feedback each have one implementation already, and this routes to them rather
- * than growing a second.
+ * Chat and feedback are **not** reimplemented here: each has one
+ * implementation already, and this routes to it rather than growing a second.
+ * Attendees renders here. It used to be routed to `/messaging?view=attendees`
+ * on the same theory, but nothing read `view` and no per-event attendee list
+ * existed, so the tab landed on the room chat (SCRUM-499).
  */
 export default async function EventDetailPage({
   params,
@@ -90,7 +94,8 @@ export default async function EventDetailPage({
    * page on canEdit locked them out of the event entirely, which is the bug the
    * operational bucket exists to prevent.
    */
-  const permissions = eventPermissions(await actorFor(session.user), event)
+  const actor = await actorFor(session.user)
+  const permissions = eventPermissions(actor, event)
   if (!permissions.canOperate) redirect("/dashboard/events")
 
   const now = new Date()
@@ -177,14 +182,26 @@ export default async function EventDetailPage({
   }
 
   if (activeTab === "feedback") redirect(`/dashboard/events/${event.id}/feedback`)
+  if (activeTab === "chat") redirect(`/dashboard/events/${event.id}/messaging`)
 
-  if (activeTab === "chat" || activeTab === "attendees") {
-    // One implementation of each, on the messaging route. Routed to rather than
-    // duplicated here.
-    redirect(
-      activeTab === "chat"
-        ? `/dashboard/events/${event.id}/messaging`
-        : `/dashboard/events/${event.id}/messaging?view=${activeTab}`
+  if (activeTab === "attendees") {
+    // Labels, never names (R1, SCRUM-383 b), for whoever runs the event; a
+    // count, never people, for the venue it is held at (SCRUM-501).
+    const attendees = await eventAttendees(actor, event.id, now)
+    if (!attendees) notFound()
+    return (
+      <div className="flex flex-col gap-5">
+        {header}
+        {attendees.view === "labels" ? (
+          <EventAttendeesTable
+            roster={attendees}
+            timezone={event.timezone}
+            startAt={event.start_time.toISOString()}
+          />
+        ) : (
+          <EventAttendeesCount came={attendees.came} />
+        )}
+      </div>
     )
   }
 

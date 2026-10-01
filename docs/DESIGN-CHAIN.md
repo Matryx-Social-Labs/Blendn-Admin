@@ -46,8 +46,9 @@ the current layout; treat it as evidence of what the data supports.
 
 **This is where it goes wrong, so it is written out rather than left to
 judgement.** The dashboard's direction *is* settled — dense, quiet, scannable,
-hierarchy from type, no card-in-card, one `HeroMetric`, one gradient element
-(`DESIGN_SYSTEM.md`).
+bordered panels with no card-in-card, one `HeroMetric`, one gradient element
+plus the plan-card stripe, labels never names (the owner rulings R1–R7 in
+`DESIGN_SYSTEM.md`).
 
 That is not permission to skip step 2. **Restate the five, for this screen, in
 one line each, and name the one memorable detail — which is per-screen and
