@@ -14,13 +14,7 @@
  * which is why the route carries a comment pointing here.
  */
 
-import { resolveUserRef, roomHandle } from "@/lib/room-handle"
-
 type Role = "app_admin" | "organizer" | "venue_owner"
-
-process.env.NEXTAUTH_SECRET ??= "chat-identity-test-secret-0123456789abcdef"
-const EVENT = "11111111-2222-3333-4444-555555555555"
-const HOST = "usr_host"
 
 const ATTENDEE = {
   id: "usr_abc",
@@ -32,9 +26,9 @@ const ATTENDEE = {
 /** Mirrors app/api/events/[id]/chat/messages/route.ts message shaping. */
 function shapeUser(role: Role, anonymousName: string | null) {
   const isPlatformAdmin = role === "app_admin"
-  // idForViewer(viewer, event, user): the viewer is the host, never the attendee.
+  // The id itself is a room handle for hosts (SCRUM-517), pinned on the wire by
+  // __tests__/integration/dashboard-chat-no-user-ids.itest.ts, not mirrored here.
   return {
-    id: isPlatformAdmin ? ATTENDEE.id : HOST === ATTENDEE.id ? ATTENDEE.id : roomHandle(EVENT, ATTENDEE.id),
     anonymousName,
     ...(isPlatformAdmin
       ? { name: ATTENDEE.name, email: ATTENDEE.email, image: ATTENDEE.image }
@@ -63,24 +57,8 @@ describe("chat message identity shaping", () => {
     }
   })
 
-  it("gives hosts this room's handle, not the account id (SCRUM-517)", () => {
-    /*
-     * This used to keep the account id for hosts, on the reasoning that a cuid
-     * names nobody. It names the same person in every room, so a host across
-     * several nights joined them into one history. Ban and mute take the handle
-     * back through /api/events/[id]/chat/members/[userId].
-     */
-    for (const role of ["organizer", "venue_owner"] as const) {
-      const shaped = shapeUser(role, "Quiet Otter")
-      expect(shaped.id).not.toBe(ATTENDEE.id)
-      expect(JSON.stringify(shaped)).not.toContain(ATTENDEE.id)
-      expect(resolveUserRef(shaped.id)).toEqual({ userId: ATTENDEE.id, eventId: EVENT })
-    }
-  })
-
   it("still gives app_admin the real identity", () => {
     const shaped = shapeUser("app_admin", "Quiet Otter")
-    expect(shaped.id).toBe(ATTENDEE.id)
     expect(shaped.name).toBe(ATTENDEE.name)
     expect(shaped.email).toBe(ATTENDEE.email)
     expect(shaped.anonymousName).toBe("Quiet Otter")

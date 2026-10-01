@@ -1,3 +1,5 @@
+import { createHmac, hkdfSync } from "crypto"
+
 import { db } from "./db"
 import { violatedConstraint } from "./prisma-errors"
 
@@ -56,20 +58,61 @@ const NOUNS = [
  * collide. `generateUniqueAnonymousName` treats it as a *preference* and falls
  * back where it is taken, which is where uniqueness is actually enforced.
  */
-export function preferredPseudonymFor(eventId: string, userId: string): string {
-  // FNV-1a. Not a security boundary — it needs to be stable and spread, and it
-  // must never be a user id, which is the property `pseudonymAvatar.ts` states
-  // in as many words: a user id is stable forever and rebuilds the cross-event
-  // identity the pseudonyms exist to prevent.
-  let h = 0x811c9dc5
+export function preferredPseudonymFor(eventId: string, userId: string, scheme: PseudonymScheme): string {
   const seed = `${eventId}:${userId}`
+  const h = scheme === "keyed" ? keyedHash(seed) : fnv1a(seed)
+  // Two independent draws from one hash: the low half picks the adjective, the
+  // high half the noun, so a shared prefix does not collapse both.
+  return `${ADJECTIVES[(h & 0xffff) % ADJECTIVES.length]} ${NOUNS[(h >>> 16) % NOUNS.length]}`
+}
+
+/**
+ * Which derivation an event's handles use.
+ *
+ * `legacy` was FNV-1a of `eventId:userId`, unkeyed: anybody holding a
+ * candidate's account id — a friend, from the friends list — could compute
+ * their handle at an event and find them on its board (SCRUM-517). `keyed` is
+ * an HMAC under a key derived from `NEXTAUTH_SECRET`, as `lib/room-handle.ts`
+ * derives its own, so only the server can.
+ *
+ * By the event's creation, not switched for everyone at once: a board name is
+ * derived live until check-in stores one, so changing the hash under an event
+ * already running would rename everybody who has posted on its board — and
+ * the person they arranged to travel with could no longer find them. Events
+ * created before `KEYED_PSEUDONYMS_FROM` keep the old names until they end.
+ */
+export type PseudonymScheme = "keyed" | "legacy"
+
+export const KEYED_PSEUDONYMS_FROM = new Date("2026-10-02T00:00:00.000Z")
+
+export async function pseudonymSchemeFor(eventId: string): Promise<PseudonymScheme> {
+  const event = await db.events.findUnique({ where: { id: eventId }, select: { created_at: true } })
+  // An event that cannot be found has no board to keep stable; the key is the safe side.
+  return event && event.created_at < KEYED_PSEUDONYMS_FROM ? "legacy" : "keyed"
+}
+
+function fnv1a(seed: string): number {
+  let h = 0x811c9dc5
   for (let i = 0; i < seed.length; i++) {
     h ^= seed.charCodeAt(i)
     h = Math.imul(h, 0x01000193) >>> 0
   }
-  // Two independent draws from one hash: the low half picks the adjective, the
-  // high half the noun, so a shared prefix does not collapse both.
-  return `${ADJECTIVES[(h & 0xffff) % ADJECTIVES.length]} ${NOUNS[(h >>> 16) % NOUNS.length]}`
+  return h
+}
+
+let pseudonymKey: { secret: string; key: Buffer } | null = null
+
+function keyedHash(seed: string): number {
+  const secret = process.env.NEXTAUTH_SECRET
+  // Loudly, like the room handles: an empty key is the unkeyed hash again.
+  if (!secret) throw new Error("NEXTAUTH_SECRET is required to derive pseudonyms")
+  if (pseudonymKey?.secret !== secret) {
+    pseudonymKey = {
+      secret,
+      key: Buffer.from(hkdfSync("sha256", secret, Buffer.alloc(0), "blendn preferred-pseudonym v1", 32)),
+    }
+  }
+  return createHmac("sha256", pseudonymKey.key).update(seed).digest().readUInt32BE(0)
 }
 
 /**
@@ -106,7 +149,11 @@ export async function generateUniqueAnonymousName(
   )
 
   if (preferFor) {
-    const preferred = preferredPseudonymFor(preferFor.eventId, preferFor.userId)
+    const preferred = preferredPseudonymFor(
+      preferFor.eventId,
+      preferFor.userId,
+      await pseudonymSchemeFor(preferFor.eventId)
+    )
     if (!existingNames.has(preferred)) return preferred
   }
 

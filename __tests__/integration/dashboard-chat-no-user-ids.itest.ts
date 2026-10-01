@@ -12,6 +12,7 @@ import { NextRequest } from "next/server"
 import { GET as roomFeed } from "@/app/api/events/[id]/chat/messages/route"
 import { GET as flagQueue } from "@/app/api/events/[id]/chat/moderation/route"
 import { PATCH as moderateMember } from "@/app/api/events/[id]/chat/members/[userId]/route"
+import { getAuditLog } from "@/lib/audit-actions"
 import { resolveUserRef, roomHandle } from "@/lib/room-handle"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -38,6 +39,8 @@ let owner = ""
 let admin = ""
 let ana = ""
 let ben = ""
+let colleague = ""
+let stranger = ""
 let eventA = ""
 let eventB = ""
 let groupA = ""
@@ -74,10 +77,13 @@ beforeAll(async () => {
   admin = await makeUser(testId("dcni-admin"), "app_admin")
   ana = await makeUser(testId("dcni-ana"))
   ben = await makeUser(testId("dcni-ben"))
-  users.push(host, owner, admin, ana, ben)
+  colleague = await makeUser(testId("dcni-colleague"), "organizer")
+  stranger = await makeUser(testId("dcni-stranger"))
+  users.push(host, owner, admin, ana, ben, colleague, stranger)
   await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
 
   const hostOrg = await org("dcni-host-org", host)
+  await db.organisation_members.create({ data: { org_id: hostOrg, user_id: colleague, role: "staff" } })
   const venueOrg = await org("dcni-venue-org", owner)
   const venue = await db.venues.create({
     data: {
@@ -96,9 +102,12 @@ beforeAll(async () => {
   events.push(eventA, eventB)
   groupA = await room(eventA, hostOrg, venue.id)
   await room(eventB, hostOrg, venue.id)
+  // A colleague holding the room with the host: not moderated here (SCRUM-466).
+  await db.chat_group_members.create({ data: { chat_group_id: groupA, user_id: colleague, role: "admin" } })
 })
 
 afterAll(async () => {
+  await db.audit_logs.deleteMany({ where: { user_id: { in: users } } })
   await db.moderation_flags.deleteMany({ where: { user_id: { in: users } } })
   await db.events.updateMany({ where: { id: { in: events } }, data: { venue_id: null } })
   await db.venues.deleteMany({ where: { id: { in: venues } } })
@@ -149,6 +158,30 @@ const status = async (userId: string) =>
     })
   ).status
 
+const memberRow = (userId: string) =>
+  db.chat_group_members.findUniqueOrThrow({
+    where: { chat_group_id_user_id: { chat_group_id: groupA, user_id: userId } },
+    select: { status: true, banned_at: true, banned_by: true, muted_by: true },
+  })
+
+/** A handle with one character changed in the middle: GCM refuses it. */
+function tampered(handle: string): string {
+  const i = Math.floor(handle.length / 2)
+  return handle.slice(0, i) + (handle[i] === "A" ? "B" : "A") + handle.slice(i + 1)
+}
+
+/** The audit write is fire-and-forget; wait for the row the route promised. */
+async function audited(action: string, resourceId: string, eventId: string) {
+  for (let i = 0; i < 50; i++) {
+    const row = await db.audit_logs.findFirst({
+      where: { action, resource_id: resourceId, details: { path: ["eventId"], equals: eventId } },
+    })
+    if (row) return row
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  throw new Error(`no ${action} audit row for ${eventId}`)
+}
+
 describe.each([
   ["an organiser", "organizer" as const, () => host],
   ["a venue owner", "venue_owner" as const, () => owner],
@@ -183,6 +216,8 @@ describe.each([
     const { wire, body } = await flags(eventA)
     expect(wire).not.toContain(ana)
     expect(body.data.flags[0].userId).toBe(roomHandle(eventA, ana))
+    // The reviewer is a staff account id: not the host's to have.
+    expect(body.data.flags[0]).not.toHaveProperty("reviewedBy")
   })
 })
 
@@ -210,8 +245,88 @@ describe("moderating by handle", () => {
   })
 })
 
+describe("the ban and mute route, by handle (SCRUM-517)", () => {
+  it("bans and unbans the person behind the handle, and records who did it", async () => {
+    as("organizer", host)
+    expect((await patch(eventA, roomHandle(eventA, ben), "ban")).status).toBe(200)
+    const banned = await memberRow(ben)
+    expect(banned.status).toBe("banned")
+    expect(banned.banned_at).toBeInstanceOf(Date)
+    expect(banned.banned_by).toBe(host)
+
+    expect((await patch(eventA, roomHandle(eventA, ben), "unban")).status).toBe(200)
+    expect(await memberRow(ben)).toMatchObject({ status: "active", banned_at: null, banned_by: null })
+  })
+
+  it("lets a venue owner mute by handle", async () => {
+    as("venue_owner", owner)
+    expect((await patch(eventA, roomHandle(eventA, ben), "mute")).status).toBe(200)
+    expect(await memberRow(ben)).toMatchObject({ status: "muted", muted_by: owner })
+    expect((await patch(eventA, roomHandle(eventA, ben), "unmute")).status).toBe(200)
+  })
+
+  it.each([
+    ["a tampered handle", () => tampered(roomHandle(eventA, ana))],
+    ["a truncated handle", () => roomHandle(eventA, ana).slice(0, -6)],
+    ["a handle for somebody who is not in this room", () => roomHandle(eventA, stranger)],
+  ])("answers %s with 404 and writes nothing", async (_label, ref) => {
+    as("organizer", host)
+    const before = await memberRow(ana)
+    const res = await patch(eventA, ref(), "ban")
+    expect(res.status).toBe(404)
+    expect(await memberRow(ana)).toEqual(before)
+  })
+
+  it("still refuses a colleague who holds the room, named by handle (SCRUM-466)", async () => {
+    as("organizer", host)
+    const res = await patch(eventA, roomHandle(eventA, colleague), "ban")
+    expect(res.status).toBe(409)
+    expect(await status(colleague)).toBe("active")
+  })
+})
+
+describe("the audit log a host's organisation reads", () => {
+  it("names the person a host moderated by each room's handle, never the account id", async () => {
+    as("organizer", host)
+    for (const eventId of [eventA, eventB]) {
+      expect((await patch(eventId, roomHandle(eventId, ana), "mute")).status).toBe(200)
+      expect((await patch(eventId, roomHandle(eventId, ana), "unmute")).status).toBe(200)
+      await audited("chat.member_mute", ana, eventId)
+    }
+
+    const log = await getAuditLog({ action: "chat.member_mute" })
+    const mine = log.entries.filter((e) => e.resource === "chat_group_member")
+    const ids = mine.map((e) => e.resourceId)
+    expect(ids).toEqual(expect.arrayContaining([roomHandle(eventA, ana), roomHandle(eventB, ana)]))
+    expect(new Set(ids).size).toBeGreaterThanOrEqual(2)
+    expect(JSON.stringify(log)).not.toContain(ana)
+  })
+
+  it("keeps the account id for the admin", async () => {
+    as("app_admin", admin)
+    const log = await getAuditLog({ action: "chat.member_mute" })
+    expect(log.entries.map((e) => e.resourceId)).toContain(ana)
+  })
+})
+
 describe("an admin", () => {
   beforeEach(() => as("app_admin", admin))
+
+  it("moderates by handle too, and a forged one is nobody", async () => {
+    expect((await patch(eventA, roomHandle(eventA, ben), "mute")).status).toBe(200)
+    expect(await status(ben)).toBe("muted")
+    expect((await patch(eventA, roomHandle(eventA, ben), "unmute")).status).toBe(200)
+
+    const before = await memberRow(ana)
+    expect((await patch(eventA, tampered(roomHandle(eventA, ana)), "ban")).status).toBe(404)
+    expect(await memberRow(ana)).toEqual(before)
+  })
+
+  it("reads the real account id in the flag queue", async () => {
+    const { body } = await flags(eventA)
+    expect(body.data.flags[0].userId).toBe(ana)
+    expect(body.data.flags[0]).toHaveProperty("reviewedBy")
+  })
 
   it("still reads real ids, and moderates by one", async () => {
     const { body } = await feed(eventA)

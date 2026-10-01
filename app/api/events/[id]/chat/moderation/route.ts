@@ -146,7 +146,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           categories: f.categories,
           confidence: f.confidence,
           autoAction: f.auto_action,
-          reviewedBy: f.reviewed_by,
+          // A staff account id, and nothing on the host's screen reads it.
+          ...(isPlatformAdmin ? { reviewedBy: f.reviewed_by } : {}),
           reviewedAt: f.reviewed_at,
           reviewNotes: f.review_notes,
           createdAt: f.created_at,
