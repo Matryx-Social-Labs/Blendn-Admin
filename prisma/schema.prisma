@@ -1667,6 +1667,8 @@ model organiser_onboarding_requests {
   updated_at        DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
 
   org organisations? @relation(fields: [org_id], references: [id], onDelete: SetNull)
+  /// Venue claims filed with no account against this application.
+  venue_claims venue_claims[]
 
   @@index([status])
   @@index([contact_email])
@@ -1795,8 +1797,9 @@ model venue_claims {
   created_at    DateTime  @default(now()) @db.Timestamptz(6)
   updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  venue venues         @relation(fields: [venue_id], references: [id], onDelete: Cascade)
-  org   organisations? @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  venue      venues                         @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  org        organisations?                 @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  onboarding organiser_onboarding_requests? @relation(fields: [onboarding_id], references: [id], onDelete: Cascade)
 
   /// One live claim per org per venue. Re-filing after a decline updates the
   /// row rather than stacking duplicates in the queue. The no-account route
@@ -1806,6 +1809,7 @@ model venue_claims {
   @@index([status])
   @@index([venue_id])
   @@index([org_id])
+  @@index([onboarding_id])
 }
 
 /// A brand that appears at an event.

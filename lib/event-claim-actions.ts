@@ -7,6 +7,7 @@ import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
 import { CLAIM_PAGE, claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
 import { overClaimLimit } from "@/lib/claim-limit"
+import { claimEmail, claimEventInput, claimInputRefusal } from "@/lib/claim-input"
 import { isUuid } from "@/lib/api-input"
 import { db } from "@/lib/db"
 import { violatedConstraint } from "@/lib/prisma-errors"
@@ -46,8 +47,14 @@ export interface FileClaimInput {
 }
 
 export async function fileEventClaim(
-  input: FileClaimInput
+  raw: FileClaimInput
 ): Promise<{ ok: true; claimId: string } | { ok: false; error: string }> {
+  // Unauthenticated: the argument is whatever a client sent, so it is parsed
+  // and every string capped before anything reads it (lib/claim-input.ts).
+  const parsed = claimEventInput.safeParse(raw)
+  if (!parsed.success) return { ok: false, error: claimInputRefusal(parsed.error) }
+  const input = parsed.data
+
   // events.id is a UUID column; a malformed id is a missing event, not a throw (SCRUM-464).
   if (!isUuid(input.eventId)) return { ok: false, error: "Event not found" }
 
@@ -61,10 +68,8 @@ export async function fileEventClaim(
    * missing — a rate limit, and refusing to let the caller name the
    * organisation the claim is filed for.
    */
-  const email = input.contactEmail.trim().toLowerCase()
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    return { ok: false, error: "Give an email address we can reply to" }
-  }
+  const email = claimEmail(input.contactEmail)
+  if (!email) return { ok: false, error: "Give an email address we can reply to" }
 
   /*
    * The organisation comes from the session or from an onboarding request.
@@ -94,10 +99,13 @@ export async function fileEventClaim(
    * organisation. The request's contact address must be the claim's.
    */
   if (input.onboardingId) {
-    const request = await db.organiser_onboarding_requests.findUnique({
-      where: { id: input.onboardingId },
-      select: { contact_email: true },
-    })
+    // A uuid column: anything else is no application, not a query error.
+    const request = isUuid(input.onboardingId)
+      ? await db.organiser_onboarding_requests.findUnique({
+          where: { id: input.onboardingId },
+          select: { contact_email: true },
+        })
+      : null
     if (!request || request.contact_email.toLowerCase() !== email) {
       return { ok: false, error: "That application does not match this email address" }
     }

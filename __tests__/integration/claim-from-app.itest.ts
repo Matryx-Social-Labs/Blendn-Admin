@@ -32,7 +32,9 @@ import type { ReactNode } from "react"
 
 import { VenueClaimForm } from "@/app/claim/venue/[venueId]/claim-form"
 
+import { db as appDb } from "@/lib/db"
 import { signAccessToken } from "@/lib/mobile-auth"
+import { fileEventClaim } from "@/lib/event-claim-actions"
 import { decideVenueClaim, filePublicVenueClaim, getVenueClaimQueue } from "@/lib/venue-claim-actions"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -204,7 +206,7 @@ describe("filing a venue claim with no account", () => {
     ).resolves.toEqual({ ok: false, error: "Keep the note under 1,000 characters" })
     await expect(
       filePublicVenueClaim({ venueId, contactEmail: 42 as unknown as string, onboardingId: app.id })
-    ).resolves.toEqual({ ok: false, error: "Give an email address we can reply to" })
+    ).resolves.toEqual({ ok: false, error: "Check what you entered and try again" })
     expect(await db.venue_claims.count({ where: { venue_id: venueId } })).toBe(0)
   })
 
@@ -255,71 +257,223 @@ describe("filing a venue claim with no account", () => {
 describe("deciding a no-account venue claim", () => {
   const asAdmin = () => mockGetAuth.mockResolvedValue({ user: { id: "itest-admin", role: "app_admin" } })
 
-  it("shows it in the queue as waiting on its application, and refuses to approve until it is approved", async () => {
+  /** The applicant clicked the link we sent. */
+  const confirm = (requestId: string) =>
+    db.organiser_onboarding_requests.update({ where: { id: requestId }, data: { email_verified_at: new Date() } })
+  /** A reviewer approved the application, which created this organisation. */
+  const approve = (requestId: string, orgId: string) =>
+    db.organiser_onboarding_requests.update({ where: { id: requestId }, data: { status: "approved", org_id: orgId } })
+
+  async function filed() {
     const venueId = await venue()
     const app = await application()
-    const filed = await filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
-    if (!filed.ok) throw new Error(filed.error)
+    const result = await filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
+    if (!result.ok) throw new Error(result.error)
+    return { venueId, app, claimId: result.claimId }
+  }
 
+  const ownerOf = async (venueId: string) =>
+    (await db.venues.findUniqueOrThrow({ where: { id: venueId }, select: { owner_org_id: true } })).owner_org_id
+
+  it("waits on the address, then the application, in the queue and at approval", async () => {
+    const { venueId, app, claimId } = await filed()
     asAdmin()
-    const row = (await getVenueClaimQueue()).find((r) => r.id === filed.claimId)
-    expect(row).toMatchObject({ awaitingApplication: true, contactEmail: app.contact_email, filedByName: null })
+    const rowNow = async () => (await getVenueClaimQueue()).find((r) => r.id === claimId)
 
-    await expect(decideVenueClaim(filed.claimId, "approve")).rejects.toThrow(/Approve their application first/)
-    const venueRow = await db.venues.findUniqueOrThrow({ where: { id: venueId }, select: { owner_org_id: true } })
-    expect(venueRow.owner_org_id).toBeNull()
+    expect(await rowNow()).toMatchObject({ waitingOn: "email", contactEmail: app.contact_email, filedByName: null })
+    await expect(decideVenueClaim(claimId, "approve")).rejects.toThrow(/not confirmed yet/)
+
+    // An application approved before its link was clicked is still an address nobody proved.
+    await approve(app.id, await org())
+    expect(await rowNow()).toMatchObject({ waitingOn: "email" })
+    await expect(decideVenueClaim(claimId, "approve")).rejects.toThrow(/not confirmed yet/)
+    expect(await ownerOf(venueId)).toBeNull()
   })
 
-  it("hands the venue to the organisation the approved application created", async () => {
-    const venueId = await venue()
-    const app = await application()
-    const filed = await filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
-    if (!filed.ok) throw new Error(filed.error)
+  it("refuses to approve a confirmed claim whose application is not approved", async () => {
+    const { venueId, app, claimId } = await filed()
+    await confirm(app.id)
+    asAdmin()
+    expect((await getVenueClaimQueue()).find((r) => r.id === claimId)).toMatchObject({ waitingOn: "application" })
+    await expect(decideVenueClaim(claimId, "approve")).rejects.toThrow(/Approve their application first/)
+    expect(await ownerOf(venueId)).toBeNull()
+  })
+
+  it("hands the venue to the organisation the confirmed, approved application created", async () => {
+    const { venueId, app, claimId } = await filed()
     const orgId = await org()
-    await db.organiser_onboarding_requests.update({ where: { id: app.id }, data: { status: "approved", org_id: orgId } })
+    await confirm(app.id)
+    await approve(app.id, orgId)
 
     asAdmin()
-    const row = (await getVenueClaimQueue()).find((r) => r.id === filed.claimId)
-    expect(row).toMatchObject({ awaitingApplication: false })
-
-    await decideVenueClaim(filed.claimId, "approve")
+    expect((await getVenueClaimQueue()).find((r) => r.id === claimId)).toMatchObject({ waitingOn: null })
+    await decideVenueClaim(claimId, "approve")
 
     const venueRow = await db.venues.findUniqueOrThrow({ where: { id: venueId }, select: { owner_org_id: true, claimed_at: true } })
     expect(venueRow.owner_org_id).toBe(orgId)
     expect(venueRow.claimed_at).not.toBeNull()
-    const claim = await db.venue_claims.findUniqueOrThrow({ where: { id: filed.claimId } })
-    expect(claim).toMatchObject({ status: "approved", org_id: orgId, onboarding_id: null })
-    // There is no user to look up: the address they filed with is who hears.
+    expect(await db.venue_claims.findUniqueOrThrow({ where: { id: claimId } })).toMatchObject({
+      status: "approved",
+      org_id: orgId,
+      onboarding_id: null,
+    })
+    // There is no user to look up: the confirmed address they filed with is who hears.
     expect(mockNotify).toHaveBeenCalledWith(expect.objectContaining({ to: app.contact_email, outcome: "approved" }))
   })
 
-  it("writes a decline to the address the claim was filed with", async () => {
-    const venueId = await venue()
-    const app = await application()
-    const filed = await filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
-    if (!filed.ok) throw new Error(filed.error)
+  it("writes a decline to a confirmed address, and to an unconfirmed one not at all", async () => {
+    const confirmed = await filed()
+    await confirm(confirmed.app.id)
+    const unconfirmed = await filed()
 
     asAdmin()
-    await decideVenueClaim(filed.claimId, "decline", "We could not match the legal name to the venue.")
+    await decideVenueClaim(confirmed.claimId, "decline", "We could not match the legal name to the venue.")
     expect(mockNotify).toHaveBeenCalledWith(
-      expect.objectContaining({ to: app.contact_email, outcome: "declined", reason: "We could not match the legal name to the venue." })
+      expect.objectContaining({ to: confirmed.app.contact_email, outcome: "declined", reason: "We could not match the legal name to the venue." })
     )
+    mockNotify.mockClear()
+    // Whatever a stranger typed is not an address to send our mail to.
+    await expect(decideVenueClaim(unconfirmed.claimId, "decline", "We could not match the legal name to the venue.")).resolves.toEqual({
+      notified: false,
+    })
+    expect(mockNotify).not.toHaveBeenCalled()
   })
 
   it("refuses to approve over an owner given since the claim was filed", async () => {
-    const venueId = await venue()
-    const app = await application()
-    const filed = await filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
-    if (!filed.ok) throw new Error(filed.error)
-    const claimant = await org()
-    await db.organiser_onboarding_requests.update({ where: { id: app.id }, data: { status: "approved", org_id: claimant } })
+    const { venueId, app, claimId } = await filed()
+    await confirm(app.id)
+    await approve(app.id, await org())
     const incumbent = await org()
     await db.venues.update({ where: { id: venueId }, data: { owner_org_id: incumbent, claimed_at: new Date() } })
 
     asAdmin()
-    await expect(decideVenueClaim(filed.claimId, "approve")).rejects.toThrow(/given an owner since the claim was filed/)
-    const after = await db.venues.findUniqueOrThrow({ where: { id: venueId }, select: { owner_org_id: true } })
-    expect(after.owner_org_id).toBe(incumbent)
+    await expect(decideVenueClaim(claimId, "approve")).rejects.toThrow(/given an owner since the claim was filed/)
+    expect(await ownerOf(venueId)).toBe(incumbent)
+  })
+
+  it("refuses, rather than failing on the unique index, when the organisation already has its own claim on the venue", async () => {
+    const { venueId, app, claimId } = await filed()
+    const orgId = await org()
+    await confirm(app.id)
+    await approve(app.id, orgId)
+    // Once the account existed, the same organisation also claimed from its dashboard.
+    await db.venue_claims.create({ data: { venue_id: venueId, org_id: orgId, filed_by: "itest-filer", status: "declined" } })
+
+    asAdmin()
+    await expect(decideVenueClaim(claimId, "approve")).rejects.toThrow(/already has its own claim on this venue/)
+    expect(await ownerOf(venueId)).toBeNull()
+    expect(await db.venue_claims.findUniqueOrThrow({ where: { id: claimId } })).toMatchObject({ status: "pending" })
+  })
+
+  /*
+   * Two reviewers deciding at once both pass the checks before the write. A
+   * real race does not reproduce reliably in a test, so the other reviewer's
+   * write is injected at the one point between the checks and the
+   * transaction: the read of the other pending claims.
+   */
+  async function decidedWhileReading(claimId: string, meanwhile: () => Promise<unknown>) {
+    const read = appDb.venue_claims.findMany.bind(appDb.venue_claims)
+    const spy = jest.spyOn(appDb.venue_claims, "findMany").mockImplementationOnce((async (args: never) => {
+      await meanwhile()
+      return read(args)
+    }) as never)
+    try {
+      return await decideVenueClaim(claimId, "approve")
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  it("re-checks the owner inside the transaction: an owner given mid-decision is not overwritten", async () => {
+    const { venueId, app, claimId } = await filed()
+    await confirm(app.id)
+    await approve(app.id, await org())
+    const incumbent = await org()
+
+    asAdmin()
+    await expect(
+      decidedWhileReading(claimId, () =>
+        db.venues.update({ where: { id: venueId }, data: { owner_org_id: incumbent, claimed_at: new Date() } })
+      )
+    ).rejects.toThrow(/given an owner since the claim was filed/)
+    expect(await ownerOf(venueId)).toBe(incumbent)
+    expect(await db.venue_claims.findUniqueOrThrow({ where: { id: claimId } })).toMatchObject({ status: "pending" })
+  })
+
+  it("re-checks the claim inside the transaction: one decided mid-decision is not decided twice", async () => {
+    const { venueId, app, claimId } = await filed()
+    await confirm(app.id)
+    await approve(app.id, await org())
+
+    asAdmin()
+    await expect(
+      decidedWhileReading(claimId, () => db.venue_claims.update({ where: { id: claimId }, data: { status: "declined" } }))
+    ).rejects.toThrow(/already been decided/)
+    expect(await ownerOf(venueId)).toBeNull()
+  })
+
+  it("flags what a reviewer has to weigh on a claim from a stranger", async () => {
+    const venueId = await venue()
+    const r = await db.organiser_onboarding_requests.create({
+      data: {
+        kind: "company",
+        display_name: testId("Applicant"),
+        legal_name: "Applicant Hospitality Pvt Ltd",
+        contact_name: "Claimant",
+        contact_email: `${testId("owner")}@gmail.com`,
+        website: "https://thevenue.in",
+        tier: "needs_proof",
+        status: "pending",
+        requested_role: "venue_owner",
+      },
+      select: { id: true, contact_email: true },
+    })
+    requests.push(r.id)
+    const result = await filePublicVenueClaim({
+      venueId,
+      contactEmail: r.contact_email,
+      onboardingId: r.id,
+      gstin: "29AABCU9603R1ZJ",
+    })
+    if (!result.ok) throw new Error(result.error)
+
+    asAdmin()
+    const row = (await getVenueClaimQueue()).find((q) => q.id === result.claimId)!
+    expect(row.flags).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/free email address \(gmail\.com\)/),
+        expect.stringMatching(/GSTIN passes its checksum only/),
+      ])
+    )
+  })
+})
+
+describe("the public claim actions take any input without a 500", () => {
+  it("refuses a null input, non-string fields and an oversized address — quickly", async () => {
+    const venueId = await venue()
+    const app = await application()
+    await expect(filePublicVenueClaim(null as never)).resolves.toMatchObject({ ok: false })
+    await expect(
+      filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id, gstin: 7 as never })
+    ).resolves.toMatchObject({ ok: false })
+
+    // The old pattern backtracked: this held the event loop for ~450 ms.
+    const hostile = `${"a.".repeat(8000)}@`
+    const started = performance.now()
+    await expect(fileEventClaim({ eventId: randomUUID(), contactEmail: hostile })).resolves.toMatchObject({ ok: false })
+    await expect(filePublicVenueClaim({ venueId, contactEmail: hostile, onboardingId: app.id })).resolves.toMatchObject({ ok: false })
+    expect(performance.now() - started).toBeLessThan(200)
+    expect(await db.venue_claims.count({ where: { venue_id: venueId } })).toBe(0)
+  })
+
+  it("refuses a claim against a declined application", async () => {
+    const venueId = await venue()
+    const app = await application()
+    await db.organiser_onboarding_requests.update({ where: { id: app.id }, data: { status: "declined" } })
+    await expect(filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })).resolves.toEqual({
+      ok: false,
+      error: "That application was declined, so there is nothing to file this claim against",
+    })
   })
 })
 

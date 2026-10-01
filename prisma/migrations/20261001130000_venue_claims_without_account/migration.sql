@@ -10,9 +10,19 @@
 -- needs the application approved first, which is what creates the
 -- organisation the venue is handed to.
 --
--- Rolling back is two steps, not one: decide or delete every claim with
--- org_id IS NULL first, then restore NOT NULL on org_id and filed_by. A plain
--- reversal fails on those rows.
+-- Rolling back is not a plain reversal, and code alone is not a rollback.
+--
+--   1. Delete (or backfill with a real org and filer) every row WHERE
+--      org_id IS NULL OR filed_by IS NULL. An APPROVED no-account claim has
+--      org_id set and filed_by still NULL, so both columns need it.
+--   2. DROP CONSTRAINT venue_claims_one_claimant, venue_claims_public_has_contact
+--      and venue_claims_onboarding_id_fkey; DROP INDEX
+--      venue_claims_one_pending_per_email and venue_claims_onboarding_id_idx.
+--   3. DROP COLUMN onboarding_id, contact_email, note.
+--   4. SET NOT NULL on org_id and filed_by.
+--
+-- Rolling back the code without step 1 breaks the old admin queue: it reads
+-- the claim's organisation's name and finds none on these rows.
 
 ALTER TABLE "venue_claims"
   ALTER COLUMN "org_id" DROP NOT NULL,
@@ -28,7 +38,14 @@ ALTER TABLE "venue_claims" ADD CONSTRAINT "venue_claims_one_claimant"
 
 -- A claim with no account has nobody to write back to but this address.
 ALTER TABLE "venue_claims" ADD CONSTRAINT "venue_claims_public_has_contact"
-  CHECK ("onboarding_id" IS NULL OR "contact_email" IS NOT NULL);
+  CHECK ("onboarding_id" IS NULL OR ("contact_email" IS NOT NULL AND btrim("contact_email") <> ''));
+
+-- The application a claim waits on. Deleting the application deletes the
+-- claim: a claim against nothing has nothing to approve into. Indexed, as
+-- every foreign key here is, so a delete on the parent is not a scan.
+ALTER TABLE "venue_claims" ADD CONSTRAINT "venue_claims_onboarding_id_fkey"
+  FOREIGN KEY ("onboarding_id") REFERENCES "organiser_onboarding_requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "venue_claims_onboarding_id_idx" ON "venue_claims"("onboarding_id");
 
 -- One pending claim per address per venue for the no-account route. The
 -- account route keeps venue_claims_venue_id_org_id_key, which Postgres does not

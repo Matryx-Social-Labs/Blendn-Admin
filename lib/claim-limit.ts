@@ -1,6 +1,6 @@
 import { headers } from "next/headers"
 
-import { clientIpFrom } from "@/lib/client-ip"
+import { clientNetworkFrom } from "@/lib/client-ip"
 import { CLAIM_LIMITS } from "@/lib/curation"
 import { hit } from "@/lib/rate-limit-store"
 
@@ -29,12 +29,15 @@ export interface ClaimTarget {
 export async function overClaimLimit(email: string, target: ClaimTarget): Promise<string | null> {
   /*
    * The network is the weakest of the three windows and never the only one.
-   * `clientIpFrom` reads it the way every limiter does (`x-real-ip`, which
-   * Railway's edge sets and overwrites — see that file for the measurement).
-   * With no header at all every anonymous caller shares one bucket, which
-   * fails toward refusing.
+   * `clientNetworkFrom` reads `x-real-ip` (Railway's edge sets and overwrites
+   * it — see that file for the measurement) and keys IPv6 on its /64, the
+   * unit a client actually holds. With no header at all every anonymous caller
+   * shares one bucket, which fails toward refusing.
+   *
+   * The email has been checked and capped by the caller before it gets here:
+   * it becomes part of a Redis key.
    */
-  const ip = clientIpFrom(await headers())
+  const ip = clientNetworkFrom(await headers())
 
   const [byEmail, byTarget, byIp] = await Promise.all([
     hit(`rl:claim:email:${email}`, HOUR_MS),

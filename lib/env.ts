@@ -145,3 +145,13 @@ export function googleSignInConfigWarning(
   }
   return null
 }
+
+/**
+ * The dashboard's own host when the host split is on (`DASHBOARD_HOST`, bare:
+ * no scheme), else null. `middleware.ts` reads the variable itself because it
+ * runs on the Edge; everything else reads it here.
+ */
+export function dashboardHost(): string | null {
+  const host = process.env.DASHBOARD_HOST?.trim()
+  return host ? host : null
+}

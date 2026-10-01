@@ -117,8 +117,11 @@ DATABASE_URL=<url> npx tsx scripts/import-venues.ts venues.csv --apply --osm  # 
 **`npx tsx`, not `npm run`.** npm 11 takes `--apply` given to `npm run` as its
 own option and drops it, which turns a write into a dry run; wrapped in an npm
 script it needs `--` before the file. The first line of output says `APPLY` or
-`DRY RUN`. A file with any refused row is never applied. Re-running is safe:
-rows already imported come back as duplicates.
+`DRY RUN`. `--apply` is all-or-nothing: a file with any refused row writes
+nothing, and the rows are written in one transaction after every footprint is
+worked out. Rows are reported by their line in the file, with where each row's
+coordinates came from (lat/lng, the place pin, a typed pair, or only the map's
+centre). Re-running is safe: rows already imported come back as duplicates.
 
 #### `migrate status` reports two missing migration files. That is expected.
 

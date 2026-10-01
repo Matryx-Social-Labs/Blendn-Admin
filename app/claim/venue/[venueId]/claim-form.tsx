@@ -67,6 +67,13 @@ async function applyAsVenueOwner(values: Values): Promise<{ requestId: string } 
     }),
   })
   const body = await res.json().catch(() => ({}))
+  if (res.status === 409) {
+    // An application from this address already exists, so this form cannot
+    // make another. Say what to do next rather than leaving a dead end.
+    return {
+      error: `${body?.error ?? "We already have an application from this address."} Once it is approved, sign in and claim this place from your dashboard.`,
+    }
+  }
   if (!res.ok || !body?.requestId) {
     return { error: body?.error ?? "Could not start your application. Try again in a moment." }
   }
@@ -94,31 +101,44 @@ export function VenueClaimForm({ venueId, venueName }: { venueId: string; venueN
   const submit = (values: Values) => {
     setError(null)
     startTransition(async () => {
-      const email = values.contactEmail.trim().toLowerCase()
-      let requestId = applied?.email === email ? applied.requestId : null
-      if (!requestId) {
-        const outcome = await applyAsVenueOwner(values)
-        if ("error" in outcome) {
-          setError(outcome.error)
-          return
-        }
-        requestId = outcome.requestId
-        setApplied({ email, requestId })
+      /*
+       * Caught here, not left to the error boundary: a thrown action or a
+       * dropped connection would unmount the form and lose `applied`, and the
+       * retry would apply again into a 409.
+       */
+      try {
+        await fileClaim(values)
+      } catch {
+        setError("That did not go through. Nothing was lost — try again.")
       }
+    })
+  }
 
-      const result = await filePublicVenueClaim({
-        venueId,
-        contactEmail: values.contactEmail,
-        onboardingId: requestId,
-        gstin: values.gstin,
-        note: values.note,
-      })
-      if (!result.ok) {
-        setError(result.error)
+  const fileClaim = async (values: Values) => {
+    const email = values.contactEmail.trim().toLowerCase()
+    let requestId = applied?.email === email ? applied.requestId : null
+    if (!requestId) {
+      const outcome = await applyAsVenueOwner(values)
+      if ("error" in outcome) {
+        setError(outcome.error)
         return
       }
-      setFiled(true)
+      requestId = outcome.requestId
+      setApplied({ email, requestId })
+    }
+
+    const result = await filePublicVenueClaim({
+      venueId,
+      contactEmail: values.contactEmail,
+      onboardingId: requestId,
+      gstin: values.gstin,
+      note: values.note,
     })
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    setFiled(true)
   }
 
   if (filed) {

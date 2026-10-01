@@ -1,4 +1,5 @@
 import { logger } from "./logger"
+import { dashboardHost } from "@/lib/env"
 import {
   approvedHtml,
   claimDecisionHtml,
@@ -84,8 +85,10 @@ export function applyUrl(): string {
  * not a name to hand a person. Unsplit (local, single host), it is `appUrl()`.
  */
 export function dashboardUrl(): string {
-  const host = process.env.DASHBOARD_HOST?.trim()
-  return host ? `https://${host}` : appUrl()
+  const host = dashboardHost()
+  if (!host) return appUrl()
+  // A local split (DASHBOARD_HOST=localhost:3100) has no certificate.
+  return `${/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? "http" : "https"}://${host}`
 }
 
 /*

@@ -1,4 +1,6 @@
-import { toCsv, reportFilename, csvResponse, parseCsv, UTF8_BOM } from "@/lib/csv"
+import { toCsv, reportFilename, csvResponse, parseCsvRows, UTF8_BOM } from "@/lib/csv"
+
+const parseCsv = (text: string) => parseCsvRows(text).map((r) => r.cells)
 
 /**
  * CSV export.
@@ -179,6 +181,18 @@ describe("parseCsv — reading what founders paste", () => {
       ['12" Pizza', "Pune"],
       ["Bar", "Mumbai"],
     ])
+  })
+
+  it("throws on a quote that never closes, rather than swallowing the rest of the file", () => {
+    expect(() => parseCsv('name,city\n"Toit,Bengaluru\nBar,Mumbai')).toThrow(/line 2 never closes/)
+  })
+
+  it("allows a space before an opening quote, as spreadsheets write it", () => {
+    expect(parseCsv('a, "b, c"')).toEqual([["a", "b, c"]])
+  })
+
+  it("reports the physical line each record starts on, past blank lines and quoted newlines", () => {
+    expect(parseCsvRows('name\r\n"two\nlines"\n\nthird').map((r) => r.line)).toEqual([1, 2, 5])
   })
 
   it("reads back what toCsv writes", () => {

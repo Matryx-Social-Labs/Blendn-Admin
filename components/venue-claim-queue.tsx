@@ -70,7 +70,7 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
             ? `${claim.orgName} now owns ${claim.venueName}.`
             : notified
               ? "Claim declined — the reason has been emailed to the claimant."
-              : "Claim declined — email is not configured, so nothing was sent. Tell them yourself."
+              : "Claim declined — no email went out (email is off here, or their address is unconfirmed). Tell them yourself if you can."
         )
         router.refresh()
       } catch (e) {
@@ -109,7 +109,7 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
           <dt className="text-faint-foreground">Claimed by</dt>
           <dd className="font-medium">
             {claim.orgName}
-            {claim.awaitingApplication ? (
+            {!claim.filedByName && claim.contactEmail ? (
               <span className="font-normal text-muted-foreground"> · no account yet</span>
             ) : claim.filedByName ? (
               <span className="font-normal text-muted-foreground"> · {claim.filedByName}</span>
@@ -189,18 +189,24 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
         </ul>
       ) : null}
 
-      {claim.awaitingApplication ? (
+      {claim.waitingOn ? (
         /*
          * Shown before the buttons, not learned from a failed submit: filed
-         * from the public page with no account, so there is no organisation to
-         * hand the venue to until the application is approved.
+         * from the public page with no account, so the venue cannot be handed
+         * over until the address is proved and the application approved.
          */
         <p className="rounded border border-border bg-surface-raised px-3 py-2 text-[0.75rem] text-muted-foreground">
-          Their application is still waiting. Approve it on{" "}
-          <Link href="/dashboard/onboarding" className="underline underline-offset-4 hover:text-foreground">
-            Applications
-          </Link>{" "}
-          first; approving this claim then hands the venue to the organisation it creates.
+          {claim.waitingOn === "email" ? (
+            "Their email address is not confirmed yet. Approving waits until they click the link we sent."
+          ) : (
+            <>
+              Their application is still waiting. Approve it on{" "}
+              <Link href="/dashboard/onboarding" className="underline underline-offset-4 hover:text-foreground">
+                Applications
+              </Link>{" "}
+              first; approving this claim then hands the venue to the organisation it creates.
+            </>
+          )}
         </p>
       ) : null}
 
@@ -244,7 +250,7 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
             </Button>
             <Button
               type="button"
-              disabled={pending || claim.awaitingApplication}
+              disabled={pending || claim.waitingOn !== null}
               onClick={() => decide("approve")}
             >
               {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}

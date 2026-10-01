@@ -13,8 +13,10 @@ import { reviewableUrl } from "@/lib/tigris"
 import { claimants, notifyClaimant } from "@/lib/claim-decision-notify"
 import { appUrl } from "@/lib/email"
 import { homeOrgIdFor } from "@/lib/event-ownership"
+import { emailDomain, isFreeProvider, normaliseDomain } from "@/lib/org-invites"
 import { isUuid } from "@/lib/api-input"
 import { overClaimLimit } from "@/lib/claim-limit"
+import { claimEmail, claimInputRefusal, claimVenueInput } from "@/lib/claim-input"
 import { claimVenueWhere } from "@/lib/curation"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { logger } from "@/lib/logger"
@@ -196,25 +198,27 @@ export interface FilePublicVenueClaimInput {
  * handed to. The session is never read here: an account holder files from the
  * dashboard, with documents.
  */
-const PUBLIC_NOTE_MAX = 1000
-
 export async function filePublicVenueClaim(
-  input: FilePublicVenueClaimInput
+  raw: FilePublicVenueClaimInput
 ): Promise<{ ok: true; claimId: string } | { ok: false; error: string }> {
+  // Unauthenticated: the argument is whatever a client sent, so it is parsed
+  // and every string capped before anything reads it (lib/claim-input.ts).
+  const parsed = claimVenueInput.safeParse(raw)
+  if (!parsed.success) return { ok: false, error: claimInputRefusal(parsed.error) }
+  const input = parsed.data
+
   // venues.id is a UUID column; a malformed id is a missing venue, not a throw.
   if (!isUuid(input.venueId)) return { ok: false, error: "Venue not found" }
-  // A server action's argument is whatever the caller sent; the form's zod
-  // schema is not a validator here.
-  if (typeof input.contactEmail !== "string") return { ok: false, error: "Give an email address we can reply to" }
-  if ((input.note?.length ?? 0) > PUBLIC_NOTE_MAX) return { ok: false, error: "Keep the note under 1,000 characters" }
+  const email = claimEmail(input.contactEmail)
+  if (!email) return { ok: false, error: "Give an email address we can reply to" }
 
-  const email = input.contactEmail.trim().toLowerCase()
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    return { ok: false, error: "Give an email address we can reply to" }
-  }
+  // Before any lookup, so a failed attempt is metered as much as a filed one.
+  const limited = await overClaimLimit(email, { kind: "venue", id: input.venueId })
+  if (limited) return { ok: false, error: limited }
 
   /*
-   * The application has to be this address's own, and a venue owner's.
+   * The application has to be this address's own, a venue owner's, and not
+   * already declined.
    *
    * Approval resolves the organisation from it, so a uuid that names somebody
    * else's application would hand the venue to them. And an organiser cannot
@@ -224,7 +228,7 @@ export async function filePublicVenueClaim(
   const request = isUuid(input.onboardingId)
     ? await db.organiser_onboarding_requests.findUnique({
         where: { id: input.onboardingId },
-        select: { contact_email: true, requested_role: true },
+        select: { contact_email: true, requested_role: true, status: true },
       })
     : null
   if (!request || request.contact_email.toLowerCase() !== email) {
@@ -233,15 +237,15 @@ export async function filePublicVenueClaim(
   if (request.requested_role !== "venue_owner") {
     return { ok: false, error: "That application is not for a venue" }
   }
+  if (request.status === "declined") {
+    return { ok: false, error: "That application was declined, so there is nothing to file this claim against" }
+  }
 
   const givenGstin = input.gstin?.trim().toUpperCase() || null
   if (givenGstin) {
     const result = validateGstin(givenGstin)
     if (!result.valid) return { ok: false, error: gstinMessage(result) }
   }
-
-  const limited = await overClaimLimit(email, { kind: "venue", id: input.venueId })
-  if (limited) return { ok: false, error: limited }
 
   const venue = await db.venues.findUnique({
     where: claimVenueWhere(input.venueId),
@@ -294,7 +298,7 @@ export interface ClaimQueueRow {
   /**
    * The organisation that would own it. For a no-account claim, the one its
    * application created once approved, and until then the name the applicant
-   * gave, with `awaitingApplication` set.
+   * gave, with `waitingOn` set.
    */
   orgName: string
   filedByName: string | null
@@ -302,11 +306,13 @@ export interface ClaimQueueRow {
   contactEmail: string | null
   note: string | null
   /**
-   * Filed with no account, and its application is not approved yet: there is
-   * no organisation to hand the venue to, so approving is refused. Shown before
-   * the buttons rather than learned from a failed submit.
+   * Why a claim filed with no account cannot be approved yet, if so: its
+   * address is unconfirmed (`email`), or its application is not approved, so
+   * there is no organisation to hand the venue to (`application`).
+   * `decideVenueClaim` refuses both; the card says so before the buttons
+   * rather than after a failed submit.
    */
-  awaitingApplication: boolean
+  waitingOn: "email" | "application" | null
   isDispute: boolean
   gstin: string | null
   gstinCheck: string | null
@@ -317,6 +323,24 @@ export interface ClaimQueueRow {
   createdAt: Date
   /** Derived, never stored: what looks off, for the reviewer to weigh. */
   flags: string[]
+}
+
+/**
+ * What to weigh about a claim filed with no account, where all the reviewer has
+ * is what a stranger typed.
+ */
+function noAccountFlags(contactEmail: string | null, website: string | null, gstin: string | null): string[] {
+  const flags: string[] = []
+  const domain = contactEmail ? emailDomain(contactEmail) : null
+  if (domain && isFreeProvider(domain)) {
+    flags.push(`Filed from a free email address (${domain}), not one at the venue's own domain`)
+  }
+  const site = website ? normaliseDomain(website) : null
+  if (domain && site && !isFreeProvider(domain) && domain !== site) {
+    flags.push(`Email domain ${domain} does not match the website they gave (${site})`)
+  }
+  if (gstin) flags.push("GSTIN passes its checksum only — check the registered address is this venue's")
+  return flags
 }
 
 export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
@@ -358,7 +382,13 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
   const requests = requestIds.length
     ? await db.organiser_onboarding_requests.findMany({
         where: { id: { in: requestIds } },
-        select: { id: true, display_name: true, org: { select: { display_name: true } } },
+        select: {
+          id: true,
+          display_name: true,
+          website: true,
+          email_verified_at: true,
+          org: { select: { display_name: true } },
+        },
       })
     : []
   const requestById = new Map(requests.map((r) => [r.id, r]))
@@ -376,9 +406,11 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
 
     const request = c.onboarding_id ? requestById.get(c.onboarding_id) : undefined
     const approvedOrg = c.org?.display_name ?? request?.org?.display_name ?? null
-    const awaitingApplication = approvedOrg === null
+    const waitingOn =
+      c.onboarding_id && !request?.email_verified_at ? "email" : approvedOrg === null ? "application" : null
 
     if (!evidence.tradeLicence) flags.push("No trade licence attached")
+    if (!c.filed_by) flags.push(...noAccountFlags(c.contact_email, request?.website ?? null, c.gstin))
     if (!c.gstin) flags.push("No GSTIN given")
     if (c.is_dispute && c.venue.owner_org) {
       flags.push(
@@ -396,7 +428,7 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
       filedByName: c.filed_by ? (filerName.get(c.filed_by) ?? null) : null,
       contactEmail: c.contact_email,
       note: c.note,
-      awaitingApplication,
+      waitingOn,
       isDispute: c.is_dispute,
       gstin: c.gstin,
       // Recomputed rather than stored, so it cannot go stale against the
@@ -443,7 +475,7 @@ export async function decideVenueClaim(
     },
   })
   if (!claim) throw new Refusal("Claim not found")
-  if (claim.status !== "pending") throw new Refusal("This claim has already been decided.")
+  if (claim.status !== "pending") throw new Refusal(ALREADY_DECIDED)
 
   // A decline that reaches the claimant with no reason produces an identical
   // re-file, and the queue gets the same row again.
@@ -463,30 +495,22 @@ export async function decideVenueClaim(
   const request = claim.onboarding_id
     ? await db.organiser_onboarding_requests.findUnique({
         where: { id: claim.onboarding_id },
-        select: { org_id: true, contact_email: true },
+        select: { org_id: true, contact_email: true, email_verified_at: true },
       })
     : null
   if (request && request.contact_email.toLowerCase() !== (claim.contact_email ?? "").toLowerCase()) {
     throw new Refusal("The application on this claim belongs to a different email address.")
   }
   const orgId = claim.org_id ?? request?.org_id ?? null
-  if (decision === "approve" && !orgId) {
-    throw new Refusal("Approve their application first — there is no organisation to hand this venue to yet.")
-  }
-  /*
-   * An owner given since filing (`assignVenueOwner`, or a claim decided
-   * elsewhere) would be overwritten by an approval the reviewer reads as a
-   * plain claim: `is_dispute` was fixed at filing, so the card shows neither
-   * the incumbent nor "Transfer venue". Refused here so a transfer is always a
-   * decision someone saw.
-   */
-  if (
-    decision === "approve" &&
-    !claim.is_dispute &&
-    claim.venue.owner_org_id !== null &&
-    claim.venue.owner_org_id !== orgId
-  ) {
-    throw new Refusal("This venue has been given an owner since the claim was filed. Decline it, or have them dispute it from the dashboard.")
+  if (decision === "approve") refuseUnsafeApproval(claim, request, orgId)
+  if (decision === "approve" && !claim.org_id && orgId) {
+    // The organisation may already have a claim of its own on this venue (filed
+    // from its dashboard once the account existed); one row per pair.
+    const own = await db.venue_claims.findFirst({
+      where: { venue_id: claim.venue.id, org_id: orgId, id: { not: claimId } },
+      select: { id: true },
+    })
+    if (own) throw new Refusal(ORG_ALREADY_CLAIMED)
   }
 
   // Read before the write: after it, nobody is pending any more.
@@ -494,45 +518,67 @@ export async function decideVenueClaim(
     decision === "approve"
       ? await db.venue_claims.findMany({
           where: { venue_id: claim.venue.id, status: "pending", id: { not: claimId } },
-          select: { filed_by: true, contact_email: true },
+          select: { filed_by: true, contact_email: true, onboarding_id: true },
         })
       : []
 
-  await db.$transaction(async (tx) => {
-    await tx.venue_claims.update({
-      where: { id: claimId },
-      data: {
-        status: decision === "approve" ? "approved" : "declined",
-        reviewed_by: admin.id,
-        reviewed_at: new Date(),
-        decision_note: trimmed || null,
-        // The row says who got the venue. `venue_claims_one_claimant` wants
-        // exactly one of the pair, so the application goes as the organisation
-        // arrives.
-        ...(decision === "approve" && !claim.org_id ? { org_id: orgId, onboarding_id: null } : {}),
-      },
+  try {
+    await db.$transaction(async (tx) => {
+      /*
+       * Guarded writes, not reads then writes: two reviewers deciding at once
+       * both pass the checks above, so the transaction is what decides. Only a
+       * still-pending claim is decided, and only an unowned venue (or one the
+       * same organisation owns) is handed over unless this is a dispute.
+       */
+      const decided = await tx.venue_claims.updateMany({
+        where: { id: claimId, status: "pending" },
+        data: {
+          status: decision === "approve" ? "approved" : "declined",
+          reviewed_by: admin.id,
+          reviewed_at: new Date(),
+          decision_note: trimmed || null,
+          // The row says who got the venue. `venue_claims_one_claimant` wants
+          // exactly one of the pair, so the application goes as the
+          // organisation arrives.
+          ...(decision === "approve" && !claim.org_id ? { org_id: orgId, onboarding_id: null } : {}),
+        },
+      })
+      if (decided.count !== 1) throw new Refusal(ALREADY_DECIDED)
+
+      if (decision !== "approve" || !orgId) return
+
+      const handed = await tx.venues.updateMany({
+        where: {
+          id: claim.venue.id,
+          ...(claim.is_dispute ? {} : { OR: [{ owner_org_id: null }, { owner_org_id: orgId }] }),
+        },
+        data: { owner_org_id: orgId, claimed_at: new Date() },
+      })
+      if (handed.count !== 1) throw new Refusal(OWNER_SINCE_FILING)
+
+      // One owner per venue, so every other request for it is now moot.
+      await tx.venue_claims.updateMany({
+        where: { venue_id: claim.venue.id, status: "pending", id: { not: claimId } },
+        data: {
+          status: "declined",
+          reviewed_by: admin.id,
+          reviewed_at: new Date(),
+          decision_note: "Another claim on this venue was approved.",
+        },
+      })
     })
+  } catch (error) {
+    // The pre-check above, lost to a concurrent filing.
+    if (violatedConstraint(error, "venue_claims_venue_id_org_id_key")) throw new Refusal(ORG_ALREADY_CLAIMED)
+    throw error
+  }
 
-    if (decision !== "approve") return
-
-    await tx.venues.update({
-      where: { id: claim.venue.id },
-      data: { owner_org_id: orgId, claimed_at: new Date() },
-    })
-
-    // One owner per venue, so every other request for it is now moot.
-    await tx.venue_claims.updateMany({
-      where: { venue_id: claim.venue.id, status: "pending", id: { not: claimId } },
-      data: {
-        status: "declined",
-        reviewed_by: admin.id,
-        reviewed_at: new Date(),
-        decision_note: "Another claim on this venue was approved.",
-      },
-    })
-  })
-
-  const notified = await tellVenueClaimants(claim, decision, trimmed || null, losers)
+  const notified = await tellVenueClaimants(
+    { ...claim, verified: Boolean(request?.email_verified_at) },
+    decision,
+    trimmed || null,
+    await withVerification(losers)
+  )
 
   auditLog({
     userId: admin.id,
@@ -554,9 +600,67 @@ export async function decideVenueClaim(
   return { notified }
 }
 
+const ALREADY_DECIDED = "This claim has already been decided."
+const OWNER_SINCE_FILING =
+  "This venue has been given an owner since the claim was filed. Decline it, or have them dispute it from the dashboard."
+const ORG_ALREADY_CLAIMED =
+  "That organisation already has its own claim on this venue. Decide that one instead — if it was declined, they can re-file it from their dashboard."
+
+/**
+ * The approvals refused before anything is written, each a fact the queue
+ * also shows before the buttons.
+ */
+function refuseUnsafeApproval(
+  claim: { onboarding_id: string | null; is_dispute: boolean; venue: { owner_org_id: string | null } },
+  request: { email_verified_at: Date | null } | null,
+  orgId: string | null
+): void {
+  /*
+   * A no-account claim stands on an application whose address nobody has
+   * proved yet: the apply route sends a link and does not wait for it, and an
+   * application can be approved before it is clicked. Handing a venue to an
+   * address a stranger typed is the false claim this queue exists to stop.
+   */
+  if (claim.onboarding_id && !request?.email_verified_at) {
+    throw new Refusal("Their email address is not confirmed yet. Approve once they have clicked the link we sent.")
+  }
+  if (!orgId) {
+    throw new Refusal("Approve their application first — there is no organisation to hand this venue to yet.")
+  }
+  /*
+   * An owner given since filing (`assignVenueOwner`, or a claim decided
+   * elsewhere) would be overwritten by an approval the reviewer reads as a
+   * plain claim: `is_dispute` was fixed at filing, so the card shows neither
+   * the incumbent nor "Transfer venue". The transaction re-checks this.
+   */
+  if (!claim.is_dispute && claim.venue.owner_org_id !== null && claim.venue.owner_org_id !== orgId) {
+    throw new Refusal(OWNER_SINCE_FILING)
+  }
+}
+
 interface Claimant {
   filed_by: string | null
   contact_email: string | null
+  /** For a no-account claimant: whether their application's address is confirmed. */
+  verified?: boolean
+}
+
+/** Losers filed without an account, marked with whether their address is confirmed. */
+async function withVerification(
+  losers: { filed_by: string | null; contact_email: string | null; onboarding_id: string | null }[]
+): Promise<Claimant[]> {
+  const ids = losers.flatMap((l) => (l.onboarding_id ? [l.onboarding_id] : []))
+  const confirmed = ids.length
+    ? new Set(
+        (
+          await db.organiser_onboarding_requests.findMany({
+            where: { id: { in: ids }, email_verified_at: { not: null } },
+            select: { id: true },
+          })
+        ).map((r) => r.id)
+      )
+    : new Set<string>()
+  return losers.map((l) => ({ ...l, verified: l.onboarding_id ? confirmed.has(l.onboarding_id) : false }))
 }
 
 /** The decided claimant hears the reason; on an approval so do the ones it displaced. */
@@ -567,11 +671,15 @@ async function tellVenueClaimants(
   losers: Claimant[]
 ): Promise<boolean> {
   const who = await claimants([claim, ...losers].flatMap((c) => (c.filed_by ? [c.filed_by] : [])))
-  // An account holder is reached through their user; somebody with no account
-  // through the address they filed with -- there is nobody else to ask.
+  /*
+   * An account holder is reached through their user. Somebody with no account
+   * only through the address they filed with, and only once they have proved
+   * it is theirs: an unconfirmed address is whatever a stranger typed, and a
+   * decision mail to it would be ours, sent to somebody else.
+   */
   const addressOf = (c: Claimant) =>
     (c.filed_by ? who.get(c.filed_by) : undefined) ??
-    (c.contact_email ? { email: c.contact_email, name: null } : undefined)
+    (c.contact_email && c.verified ? { email: c.contact_email, name: null } : undefined)
   const what = `the venue ${claim.venue.name}`
   const filer = addressOf(claim)
   const notified = filer
