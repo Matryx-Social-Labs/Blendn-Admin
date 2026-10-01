@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { boardPseudonyms, isLiveRequest } from "@/lib/board-access"
+import { boardPseudonyms, isLiveRequest, liveRequest } from "@/lib/board-access"
 import {
   blockCounterparties,
   conversationPair,
@@ -28,6 +28,18 @@ import { readJson, isUuid } from "@/lib/api-input"
 interface RouteParams {
   params: Promise<{ requestId: string }>
 }
+
+/**
+ * Thrown inside the accept transaction to roll everything in it back; the
+ * message is the sentence the author is answered with.
+ */
+class AcceptRefused extends Error {}
+
+/*
+ * One sentence, one status, for a block and a closed pair alike. A 403 for one
+ * and a 409 for the other, around the same words, told the author which.
+ */
+const CANNOT_ACCEPT = "This request can no longer be accepted"
 
 /**
  * Answering a board request: yes, no, or never mind.
@@ -81,10 +93,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         id: true,
         status: true,
         event_id: true,
+        post_id: true,
         from_user_id: true,
         to_user_id: true,
         event: { select: { end_time: true } },
-        post: { select: { deleted_at: true } },
+        post: { select: { deleted_at: true, spaces_left: true } },
       },
     })
     if (!boardRequest) return notFoundResponse("Request not found")
@@ -100,10 +113,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const isRecipient = boardRequest.to_user_id === user.userId
     const isAsker = boardRequest.from_user_id === user.userId
     if (!isRecipient && !isAsker) return notFoundResponse("Request not found")
-    if (action === "withdraw" && !isAsker) {
-      return forbiddenResponse("Only the person who asked can withdraw it")
+    if (action === "withdraw") {
+      if (!isAsker) return forbiddenResponse("Only the person who asked can withdraw it")
+      return withdraw(requestId)
     }
-    if (action !== "withdraw" && !isRecipient) {
+    if (!isRecipient) {
       return forbiddenResponse("Only the person who was asked can answer")
     }
     if (boardRequest.status !== "pending") {
@@ -119,9 +133,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * `isLiveRequest`, so the screen and the server cannot give two answers to
      * one question, which is the failure this codebase is mostly made of.
      *
-     * Declining and withdrawing stay open. They are record-keeping, they cost
-     * nothing, and the cap no longer depends on them: it counts live requests,
-     * so a lapsed ask has already stopped occupying a slot.
+     * Declining stays open. It is record-keeping, it costs nothing, and the
+     * cap no longer depends on it: it counts live requests, so a lapsed ask has
+     * already stopped occupying a slot.
      */
     if (action === "accept" && !isLiveRequest(boardRequest)) {
       return conflictResponse(
@@ -129,25 +143,26 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const nextStatus = action === "accept" ? "accepted" : action === "decline" ? "declined" : "withdrawn"
-
-    if (action !== "accept") {
+    if (action === "decline") {
       /*
        * `updateMany` with the status in the where clause, not `update`.
        *
-       * The read above is not a lock, so two taps — or a decline racing a
-       * withdraw — both pass it. Making `pending` part of the predicate means
+       * The read above is not a lock, so two taps — or a decline racing an
+       * accept — both pass it. Making `pending` part of the predicate means
        * exactly one of them writes, and the loser is told the truth rather than
        * silently overwriting the first answer.
+       *
+       * Nothing is sent to the asker, and nothing they read changes: to them a
+       * declined ask stays pending until it lapses (`asTheAskerSees`).
        */
       const claimed = await db.board_requests.updateMany({
         where: { id: requestId, status: "pending" },
-        data: { status: nextStatus, decided_at: new Date() },
+        data: { status: "declined", decided_at: new Date() },
       })
       if (claimed.count === 0) {
         return conflictResponse("That request has already been answered")
       }
-      return successResponse({ id: requestId, status: nextStatus })
+      return successResponse({ id: requestId, status: "declined" })
     }
 
     /*
@@ -160,9 +175,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * at the one moment it is being tested.
      */
     const blocked = await blockCounterparties(user.userId)
-    if (blocked.includes(boardRequest.from_user_id)) {
-      return forbiddenResponse("This request can no longer be accepted")
-    }
+    if (blocked.includes(boardRequest.from_user_id)) return conflictResponse(CANNOT_ACCEPT)
 
     /*
      * A closed pair, checked before the claim rather than after.
@@ -180,53 +193,85 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       where: { user1_id_user2_id: { user1_id, user2_id } },
       select: { closed_at: true },
     })
-    if (existing?.closed_at) {
-      return conflictResponse("This request can no longer be accepted")
-    }
+    if (existing?.closed_at) return conflictResponse(CANNOT_ACCEPT)
 
-    const claimed = await db.board_requests.updateMany({
-      where: { id: requestId, status: "pending" },
-      data: { status: "accepted", decided_at: new Date() },
-    })
-    if (claimed.count === 0) {
-      return conflictResponse("That request has already been answered")
-    }
-
-    let conversation
-    try {
-      /*
-       * Pseudonymous, and that is not decoration.
-       *
-       * `displayNameInConversation` falls back to the real name when there is
-       * no pseudonym, so a board conversation opened without one would hand
-       * over both real names at the moment of acceptance — the leak this
-       * product exists to prevent, arriving through its newest surface.
-       *
-       * `boardRequestId` is what stops the same conversation being read as a
-       * match. Both are pseudonymous, so provenance cannot be inferred from
-       * the pseudonyms; without the marker the client draws the match opener
-       * on two people who agreed to share a car.
-       */
-      const pseudonyms = Object.fromEntries(
-        await boardPseudonyms(boardRequest.event_id, [
-          boardRequest.from_user_id,
-          boardRequest.to_user_id,
-        ])
-      )
-      conversation = await openConversation(
+    /*
+     * Pseudonymous, and that is not decoration.
+     *
+     * `displayNameInConversation` falls back to the real name when there is
+     * no pseudonym, so a board conversation opened without one would hand
+     * over both real names at the moment of acceptance — the leak this
+     * product exists to prevent, arriving through its newest surface.
+     *
+     * `boardRequestId` is what stops the same conversation being read as a
+     * match. Both are pseudonymous, so provenance cannot be inferred from
+     * the pseudonyms; without the marker the client draws the match opener
+     * on two people who agreed to share a car.
+     */
+    const pseudonyms = Object.fromEntries(
+      await boardPseudonyms(boardRequest.event_id, [
         boardRequest.from_user_id,
         boardRequest.to_user_id,
-        { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId }
-      )
-    } catch (error) {
-      // Put it back, so the ask is answerable rather than accepted-into-nothing.
-      await db.board_requests.updateMany({
-        where: { id: requestId, status: "accepted" },
-        data: { status: "pending", decided_at: null },
+      ])
+    )
+
+    /*
+     * The claim, the seat and the conversation, in one transaction (SCRUM-514).
+     *
+     * An offer of two seats accepted three times is a car with three people
+     * promised two places. The reads above are not a lock, so every guard is
+     * in a write's predicate:
+     *
+     * - the claim takes only a request still live (`liveRequest`: pending, its
+     *   event not over, its post not taken down) — a post removed mid-accept
+     *   is caught here, not missed;
+     * - the seat is taken only while `spaces_left > 0` on a post still up. Two
+     *   accepts racing for the last seat queue on the post's row; the second
+     *   finds none and is refused. The CHECK on the column keeps it from going
+     *   below zero even if the predicate were lost;
+     * - the conversation is opened with the same client, so a closed pair
+     *   (`ConversationClosedError`) or any failure undoes the claim and the
+     *   seat with it. There is nothing to give back by hand, and no crash
+     *   between two writes leaves an accepted ask with a spent seat and no
+     *   conversation behind it.
+     *
+     * An offer that never named a number of seats (`spaces_left` null) has
+     * none to run out of; only offers can have one (a CHECK).
+     */
+    const takesASeat = boardRequest.post.spaces_left !== null
+    let conversation
+    try {
+      conversation = await db.$transaction(async (tx) => {
+        const now = new Date()
+        const claim = await tx.board_requests.updateMany({
+          where: { id: requestId, ...liveRequest(now) },
+          data: { status: "accepted", decided_at: now },
+        })
+        if (claim.count === 0) {
+          const current = await tx.board_requests.findUnique({
+            where: { id: requestId },
+            select: { status: true, post: { select: { deleted_at: true } } },
+          })
+          if (current?.status !== "pending") throw new AcceptRefused("That request has already been answered")
+          throw new AcceptRefused(current.post.deleted_at ? "That post was taken down" : "That event has ended")
+        }
+        if (takesASeat) {
+          const seat = await tx.board_posts.updateMany({
+            where: { id: boardRequest.post_id, deleted_at: null, spaces_left: { gt: 0 } },
+            data: { spaces_left: { decrement: 1 } },
+          })
+          if (seat.count === 0) throw new AcceptRefused("That offer is full")
+        }
+        return openConversation(
+          boardRequest.from_user_id,
+          boardRequest.to_user_id,
+          { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId },
+          tx
+        )
       })
-      if (error instanceof ConversationClosedError) {
-        return conflictResponse("This request can no longer be accepted")
-      }
+    } catch (error) {
+      if (error instanceof AcceptRefused) return conflictResponse(error.message)
+      if (error instanceof ConversationClosedError) return conflictResponse(CANNOT_ACCEPT)
       throw error
     }
 
@@ -248,4 +293,44 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     })
     return serverErrorResponse("Failed to answer the request")
   }
+}
+
+/**
+ * The asker takes their ask back — which must not be where a decline lands.
+ *
+ * To the asker a declined ask is pending (`asTheAskerSees`), so withdrawing it
+ * has to succeed exactly as withdrawing a pending one does. A 409 here was the
+ * decline delivered as an error. Withdrawing twice is not news either, so it
+ * succeeds again. Only an accepted ask is refused, and the asker was told about
+ * that one.
+ *
+ * A pending ask becomes `withdrawn`. A declined one keeps `declined` and its
+ * `decided_at` — the author's decision, which is theirs and not the asker's to
+ * rewrite — and gets `asker_withdrawn_at`, the asker's half: they now see it
+ * withdrawn, and it stops holding a slot in their cap. The re-ask is refused on
+ * any earlier row (one ask per post, a unique index), so neither reopens the
+ * post to them.
+ */
+async function withdraw(requestId: string) {
+  const now = new Date()
+  const [pending, declined] = await db.$transaction([
+    db.board_requests.updateMany({
+      where: { id: requestId, status: "pending" },
+      data: { status: "withdrawn", decided_at: now },
+    }),
+    db.board_requests.updateMany({
+      where: { id: requestId, status: "declined", asker_withdrawn_at: null },
+      data: { asker_withdrawn_at: now },
+    }),
+  ])
+  if (pending.count + declined.count === 0) {
+    const current = await db.board_requests.findUnique({
+      where: { id: requestId },
+      select: { status: true, asker_withdrawn_at: true },
+    })
+    const alreadyWithdrawn =
+      current?.status === "withdrawn" || (current?.status === "declined" && current.asker_withdrawn_at)
+    if (!alreadyWithdrawn) return conflictResponse("That request has already been answered")
+  }
+  return successResponse({ id: requestId, status: "withdrawn" })
 }
