@@ -2,6 +2,7 @@
 // plain tsc, which emits the @/ alias verbatim into the require().
 import type { Prisma } from "@prisma/client"
 
+import { ageFrom, minAgeRefusal } from "./age"
 import { db } from "./db"
 import { logger } from "./logger"
 import { performCheckout } from "./checkout"
@@ -341,7 +342,8 @@ async function expireWindows(now: Date): Promise<number> {
  * and the venue, never a person; the bell row is written for everybody and
  * the push goes only to devices whose owner allows it (`sendBulkPushNotifications`).
  * A private event takes nothing over (it is not `public`), so it closes
- * nothing and names itself to nobody.
+ * nothing and names itself to nobody. Somebody too young for the event's own
+ * `min_age` keeps their session: Go Live was not refused to them either (D-3).
  *
  * One push per person because only the checkout that changed the row counts:
  * a second pass, or a second instance, finds them already out.
@@ -352,7 +354,7 @@ async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: num
     where: { venue_id: { not: null }, ...venueTakeoverWhere(now, { leadMinutes: 0 }) },
     orderBy: { start_time: "asc" },
     take: MAX_VENUE_DAYS_PER_SWEEP,
-    select: { id: true, title: true, venue_id: true, venue: { select: { name: true } } },
+    select: { id: true, title: true, min_age: true, venue_id: true, venue: { select: { name: true } } },
   })
   if (starting.length === MAX_VENUE_DAYS_PER_SWEEP) {
     logger.warn("Venue-day sweep hit its event-start cap", { cap: MAX_VENUE_DAYS_PER_SWEEP })
@@ -367,10 +369,13 @@ async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: num
 
     const live = await db.event_check_ins.findMany({
       where: { status: "checked_in", event: { ...venueDaysWhere, venue_id: event.venue_id } },
-      select: { id: true },
+      select: { id: true, user: { select: { profile: { select: { age: true, date_of_birth: true } } } } },
     })
     const told: string[] = []
     for (const row of live) {
+      // Not somebody the event's own age rule would turn away at its door
+      // (D-3): their Go Live was allowed, and stays theirs.
+      if (minAgeRefusal(ageFrom(row.user.profile), event.min_age)) continue
       const done = await performCheckout(row.id, "event_started", now)
       if (done?.changed) told.push(done.userId)
     }

@@ -441,7 +441,7 @@ async function createRoom(input: SeatInput, eventId: string): Promise<{ id: stri
  * (`liveInVenueDay`) — so it is rewritten on every Go Live, extending it.
  */
 async function seatInRoom(input: SeatInput, eventId: string, now: Date): Promise<string> {
-  const { event, userId, live } = input
+  const { userId, live } = input
   const cutOff = live?.expiresAt ?? null
 
   /*

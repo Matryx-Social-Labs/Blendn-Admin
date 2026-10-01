@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PAGINATION } from "@/lib/constants"
 import { idForViewer } from "@/lib/room-handle"
@@ -219,6 +220,8 @@ export async function GET(request: NextRequest) {
             event_id: { in: eventIds },
             status: "checked_in",
             check_out_time: null,
+            // A venue's room is live for you only while your Go Live is.
+            ...inRoomWhere(),
           },
           select: { event_id: true },
         })

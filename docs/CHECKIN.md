@@ -229,9 +229,12 @@ knowing what the last pass did. The status is guarded **inside** the `UPDATE`
 rather than after a read, so a sweeper pass and a live manual checkout cannot
 both act.
 
-**An automatic checkout does not cut chat access.** Someone whose GPS wandered
-mid-conversation should not be thrown out of the room as well. Manual and
-event-switch still do.
+**An automatic checkout does not cut chat access** at an event. Someone whose
+GPS wandered mid-conversation should not be thrown out of the room as well.
+Manual and event-switch still do. At a venue day every checkout cuts it — see
+Go Live. Reasons: `manual` → `user`, `switched_event` → `switch`, `left_area`
+and `occurrence_ended` → `sweeper`, `expired` → `expired`, `event_started` →
+`ended`.
 
 Relative imports throughout — reachable from `server.ts`, and `build:server`
 compiles with plain `tsc`, which emits the `@/` alias verbatim into the
@@ -241,19 +244,115 @@ compiles with plain `tsc`, which emits the `@/` alias verbatim into the
 
 ## Venue days — going live at a venue
 
-Going live at a venue (step 4) is a check-in to that venue's **venue day**: an
-`events` row with `kind = 'venue_day'`, one per venue per local day, from
+Going live at a venue is a check-in to that venue's **venue day**: an `events`
+row with `kind = 'venue_day'`, one per venue per local day, from
 `venues.day_reset_hour` (06:00) in `venues.timezone`. `lib/venue-day.ts` finds
 or creates it; the model, who owns it and who may see it are in
-`docs/VENUES.md` § Venue days. For check-in the differences are:
+`docs/VENUES.md` § Venue days. The occurrence is the day (`occurs_on` = the
+venue-local date), so the per-occurrence uniqueness keeps one check-in per
+person per venue per day.
 
-- `event_check_ins.expires_at` — when the Go Live window ends (20/45/60 min, or
-  "stay"). Null on an event check-in. Step 4 writes it and sweeps it.
-- The occurrence is the day (`occurs_on` = the venue-local date), so the
-  per-occurrence uniqueness keeps one check-in per person per venue per day.
-- Every checkout, presence and sweeper rule above applies unchanged, except
-  where step 4 adds the venue-day pass (its own bound, F5) and the `expired`
-  departure (F6).
+## Go Live
+
+`POST /api/mobile/venues/:venueId/live` with where you are and
+`{ "minutes": 20 | 45 | 60 }` or `{ "stay": true }` (docs/API.md).
+
+### One door, two ways in
+
+The event check-in and Go Live share `lib/check-in-core.ts`: the accuracy
+ceiling (`vagueFixRefusal`), who may take part and the age gate
+(`personAtTheDoor`), the fence and the refusal it records (`fenceRefusal`), and
+everything a check-in writes (`seatAtTheDoor`: out of any other room, the row,
+the session, the preferences, the room and its pseudonym, the arrival on the
+roster). The routes keep only what differs — an event resolves its occurrence;
+Go Live finds the venue's day, refuses when an event has the venue, and passes
+a window. `__tests__/one-check-in-door.test.ts` fails if either route judges a
+fence, an age or a fix, or writes a check-in, itself (PL-G03).
+
+Go Live judges the venue day's **copied area alone** (`validateGeofence`), with
+no fallback to the venue's point and the events' default 30 m radius: a venue
+nobody drew an area for is refused (`no_geofence`), not judged against a guess.
+
+### Refusals, in order
+
+| Status | When |
+|---|---|
+| 403 `PLUS_REQUIRED` | `stay` while `PLUS_GATING=true` (off: "stay" is everyone's until step 11) |
+| 404 | the venue is unknown, archived or deleted |
+| 403 `FORBIDDEN` | not onboarded and no adult age (18+, as at every door) |
+| 409 `EVENT_LIVE_HERE` + `eventId` | a real event has the venue (below) — check in to it instead. Before the fence, so somebody at the door is sent to the event rather than told they are outside |
+| 400 `OUT_OF_RANGE` | a fix worse than 150 m, no area at this venue, or outside it — recorded in `check_in_refusals` against the venue day, never against an event at the same venue |
+
+A 409 or a 403 makes no venue day: the day is found or made only once the
+refusals that need none have passed.
+
+### When an event has the venue
+
+`lib/venue-visibility.ts` `venueTakeoverWhere` — written once for Go Live, the
+sweeper and (step 2) the Places list. A real event takes its venue over from
+**an hour before it starts until it ends** if it is published, **public**, not
+deleted, linked with a link nobody disputed (a NULL link status counts as
+linked, spelled out because Prisma's `not` drops NULL), on a day that was not
+called off (per occurrence, D-2), and one the person may attend (an event's
+own `min_age`, D-3). A private event takes nothing over and names itself to
+nobody.
+
+### The window
+
+`event_check_ins.expires_at`, and the same instant on the room membership
+(`chat_group_members.last_allowed_at`). `lib/go-live.ts`:
+
+- **20 / 45 / 60** minutes from now. Any other number is a 400.
+- **Stay**: 60 minutes, then each presence ping **inside** the fence carries it
+  on to now + `STAY_EXTEND_MINUTES` (20 = the ping interval + the presence
+  cutoff + 5, so a late ping still finds it open), up to `stay_until` — four
+  hours from choosing it. Silence ends it.
+- **Never past the reset** (D-4): a window asked for at 05:30 ends at 06:00,
+  and is checked out `expired` there.
+- **Going live again while live extends, never shortens.** A window that ended
+  but has not been swept is checked out `expired` at its own time first, so
+  going again is a new session, not one stretched over the gap.
+- **Going live elsewhere, or checking in to an event, ends it** as a switch.
+
+Staff: somebody whose organisation owns the venue going live at it is `staff`,
+as at an event there (`checkInKindFor`). Expiry applies to staff too; the
+left-the-area checkout does not.
+
+### The room is for the people live in it
+
+At an event, attendance outlives presence: the room stays open to somebody who
+stepped out (`mayWriteToRoom`). A venue day's room does not (F6, F7, D-5):
+`liveInVenueDay` admits a member only while `last_allowed_at` is in the future,
+compared with the clock, so access ends the second the window does — not when
+the sweeper next runs. Read, write, the socket join, the roster room, the
+counter room, the roster, the grid, likes, waves and preferences (`inRoomWhere`)
+all ask it. Every checkout of a venue day sets the cut and evicts the person's
+sockets from its rooms (`live:ended` to their `user:` room). Go Live is the only
+door: no RSVP, interest or auto-join opens it. After the reset nobody is live in
+yesterday's room, so it takes no posts.
+
+### The venue-day sweeper
+
+`sweepVenueDays`, after `sweepPresence` on the same five-minute loop, each in
+its own `try`. Its own bounds, so venue days never crowd real events out of the
+200-room pass (F5):
+
+1. **Expiries** (`MAX_EXPIRIES_PER_SWEEP` = 500, oldest end first, on the
+   partial `expires_at` index): checked out `expired`, `departed_at` =
+   `expires_at` (PL-U04). **Never through the mass-checkout guard** (D-20):
+   fifty 20-minute windows ending together are a schedule, not a signal.
+2. **An event starts at the venue** (at its start, not an hour before — from
+   an hour before, Go Live there is already refused): the venue's open sessions
+   are checked out with `departed_source = ended`, and each person is told once,
+   by push, "‹Event› just started here. Tap to check in." The push names the
+   event and the venue, never a person; the bell row is written for everybody,
+   the push only where the person allows it.
+3. **The fence**, the same per-room pass and guard events get
+   (`MAX_VENUE_DAYS_PER_SWEEP` = 200): an out-of-fence burst at a venue day
+   still trips the guard.
+
+The presence ping also checks out a window that has ended, so a phone pinging
+past its expiry is told at once.
 
 ## Files
 
@@ -265,13 +364,17 @@ or creates it; the model, who owns it and who may see it are in
 | `lib/presence.ts` | The decision, pure |
 | `lib/presence-sweeper.ts` | Applying it, with the guard |
 | `lib/checkout.ts` | The one way out |
+| `lib/check-in-core.ts` | The one door: gates and seat, shared by check-in and Go Live |
+| `lib/go-live.ts` | Go Live windows and "stay", pure |
+| `lib/venue-visibility.ts` | When an event takes its venue over |
+| `app/api/mobile/venues/[venueId]/live/route.ts` | Go Live |
 | `lib/occurrences.ts` | Days of an event |
 | `lib/event-phase.ts` | Lifecycle state and publish blockers |
 | `app/api/mobile/events/[eventId]/presence/route.ts` | The ping |
 
-Tests: `presence`, `checkin-kind`, `occurrences`, `event-phase` (unit);
-`checkin`, `occupancy`, `attendance`, `presence-sweeper` (integration, real
-Postgres).
+Tests: `presence`, `checkin-kind`, `occurrences`, `event-phase`, `go-live`,
+`one-check-in-door` (unit); `checkin`, `occupancy`, `attendance`,
+`presence-sweeper`, `go-live` (integration, real Postgres).
 
 ---
 

@@ -36,6 +36,15 @@ the database before the socket is added to the room (`lib/socket-auth.ts`):
 Public events stay open so a client can subscribe to live check-in counts from
 an event detail screen without checking in first.
 
+**A venue's live room (a venue day) is for the people live in it.**
+`chat:{chatGroupId}`, `event:room:{venueDayId}` and `event:{venueDayId}` admit
+only somebody whose Go Live window is open now (`liveInVenueDay`,
+`inRoomWhere`). The counter room is closed too: its exact `hereCount` would let
+a watcher read each arrival off the number, and the venue's public count is the
+bucket on `GET /venues/:venueId`. When a window ends — expiry, a switch, a
+checkout, an event starting there — the person's sockets get `live:ended` and
+are taken out of all three rooms; a rejoin is refused.
+
 On refusal the server emits `error` and the socket is **not** added to the room:
 
 ```js
@@ -153,3 +162,4 @@ already know each other's ids.
 |-------|---------|-------------|
 | `private:message` | Same as above | Notification when not in conversation room |
 | `notification:new` | `{ kind }` | A row landed in the notifications bell; the app refreshes its badge. Never sent for messages, which write no row |
+| `live:ended` | `{ eventId, reason }` | Your Go Live at a venue ended and your sockets left its rooms. `eventId` is the venue day; `reason` is `expired` (the window ran out, or the venue's day reset), `event_started` (a real event took the venue over; the push names it), `switched_event`, `manual`, or `left_area` |

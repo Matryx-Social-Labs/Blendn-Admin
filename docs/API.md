@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`
+Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED` (the last three: Go Live, below)
 
 A refusal that names no specific code carries the one its status stands for:
 401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
@@ -281,7 +281,7 @@ GET /api/mobile/me/attendance?page=1&limit=20
 ```json
 { "success": true, "data": {
   "events": [
-    { "id": "…", "slug": "…", "title": "Design Week",
+    { "id": "…", "kind": "event", "slug": "…", "title": "Design Week",
       "cover_image_url": null, "start_time": "…", "end_time": "…",
       "venue_name": "The Humming Tree", "city": "Bengaluru",
       "attendedAt": "2026-08-14T18:04:00.000Z" }
@@ -310,6 +310,10 @@ disagree. Working an event as staff is not attending it, and appears in neither.
 An event the platform has since deleted is in neither the list nor the count,
 so every page is full and `totalCount` is the number of events listed
 (SCRUM-432).
+
+**Places you went live at are in it too** (D-6), with `kind: "venue_day"`:
+show them labelled as a place, by `venue_name`. A venue day's `title` is
+bookkeeping ("Venue day · … · date") and is not for display.
 
 ### GET /me/rsvps
 
@@ -349,7 +353,7 @@ GET /api/mobile/me/rsvps?page=1&limit=20
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
 | GET | `/events/:eventId` | Get event details. Also carries `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case, the row as selected — or null. `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform |
-| POST | `/events/:eventId/checkin` | Check in to event |
+| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`) |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
@@ -602,6 +606,16 @@ feature is worth. Rows cascade on account deletion.
 { "pagination": { "page": 1, "limit": 20, "totalCount": 100, "totalPages": 5, "hasMore": true } }
 ```
 
+### A venue day's id is not an event's
+
+A venue's live room hangs off a hidden `events` row (`kind = venue_day`,
+docs/VENUES.md). Its id is **not an event** to `GET /events/:eventId`, RSVP,
+favourite, interest, the board, the room preview, rating or the plain
+check-in: each answers `404` as for an unknown id. Go Live is its one door. The
+room's own routes — `GET /events/:venueDayId/checkins`, `/matches`,
+`/matches/likes`, `/matches/preferences`, `/waves`, `/presence`,
+`/checkout`, `/chat` — work with it, for somebody live there now.
+
 ---
 
 ## Venues — the Hotspots feed
@@ -664,6 +678,94 @@ counts *every* related row, so it would rank by an all-time total including
 cancelled drafts — a different number from the one on the card. Ranking the page
 you were handed is not ranking the set, and the difference shows the moment
 there is a second page. Needs raw SQL.
+
+### GET /venues/:venueId
+
+One venue, as the Go Live screen needs it. 404 for an unknown, archived or
+deleted venue; 403 `FORBIDDEN` for a profile neither onboarded nor of a known
+adult age (as at every door).
+
+```json
+{ "success": true, "data": {
+  "venue": { "id": "…", "name": "The Humming Tree", "address": "…", "city": "Bengaluru",
+             "latitude": 12.97, "longitude": 77.64,
+             "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
+             "claimed": false },
+  "live": { "open": true, "closedReason": null, "eventId": null,
+            "liveNow": "a_few",
+            "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false,
+            "venueDayId": "…", "chatGroupId": "…" },
+  "tonight": { "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
+               "startTime": "…", "endTime": "…" }
+} }
+```
+
+| Field | Meaning |
+|---|---|
+| `live.open` | Whether going live here would be accepted now, the fence aside |
+| `live.closedReason` | `event_live_here` (a real event has the venue: check in to `live.eventId`) or `no_check_in_area` (nobody drew this venue's area) |
+| `live.liveNow` | `none`, `a_few` (1–4), `5-9`, `10-19` or `20+`. **Never a number** (D-19): a count that moved from 4 to 5 as you watched would tell you somebody just walked in |
+| `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
+| `venue.claimed` | False: the app may offer "Own this place? Claim it" |
+| `tonight` | The next public event here before the venue's day resets (06:00 local by default), age-filtered for you, or null |
+
+**Not on it:** the check-in area (no payload draws the boundary), and who is
+live. People are the venue day's roster and grid
+(`GET /events/:venueDayId/checkins`, `/matches`), which only somebody live
+there may read — you see people only while you can be seen.
+
+### POST /venues/:venueId/live
+
+Go Live: be visible at this venue for a window you choose.
+
+```json
+{ "latitude": 12.9784, "longitude": 77.6408, "deviceInfo": { "gpsAccuracy": 12 },
+  "minutes": 20 }
+```
+
+`minutes` is `20`, `45` or `60`; or send `"stay": true` instead — 60 minutes,
+then each presence ping **inside** the area carries it on 20 minutes past the
+ping, up to four hours from choosing it. Anything else is `400`.
+
+```json
+{ "success": true, "data": {
+  "venueDayId": "…", "chatGroupId": "…",
+  "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false, "stayUntil": null,
+  "checkIn": { "id": "…", "status": "checked_in", "checkInTime": "…" },
+  "revealSuggestion": false, "intentNeeded": false
+} }
+```
+
+- **No window runs past the venue's reset** (06:00 local by default): a session
+  open then ends `expired` there, and tomorrow is a new room with new
+  pseudonyms.
+- **Going live again while live extends**, never shortens. Going live somewhere
+  else, or checking in to an event, ends it as a switch.
+- **When it ends** you are checked out (`departed_source = expired`), and the
+  venue's room is closed to you at that second — reading, posting, the socket,
+  the roster and the grid answer `403 NOT_LIVE` ("You're not live here any
+  more. Go live at the venue to join today's room."). Your sockets get
+  `live:ended` (docs/SOCKET_EVENTS.md) and leave its rooms. Leave early with
+  `POST /events/:venueDayId/checkout`.
+- **When a public event at the venue starts**, everyone live there is checked
+  out (`ended`) and pushed once: "‹Event› just started here. Tap to check in."
+  (`kind: event_update`, `data.eventId`).
+- `POST /events/:venueDayId/presence` answers `expiresAt` too, and a ping past
+  the end answers `{ status: "checked_out", reason: "expired" }`.
+
+| Refusal | When |
+|---|---|
+| 403 `PLUS_REQUIRED` | `stay` while Plus gating is on (off today: "stay" is everyone's) |
+| 404 | Unknown, archived or deleted venue |
+| 403 `FORBIDDEN` | Not onboarded and no adult age |
+| 409 `EVENT_LIVE_HERE` | A public event linked to this venue is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
+| 400 `OUT_OF_RANGE` | A fix worse than 150 m, a venue with no check-in area, or a position outside it |
+| 429 `RATE_LIMITED` | 20 a minute per person |
+
+```json
+{ "success": false, "error": "Friday session is on here. Check in to it instead.",
+  "errorCode": "EVENT_LIVE_HERE", "eventId": "…" }
+```
 
 ---
 
@@ -748,7 +850,7 @@ The response carries a **`write`** block:
 ```
 
 `reason` is one of `locked | archived | window_closed | not_open_yet | hidden |
-muted | banned | left`, or `null` when writing is allowed; `message` is null
+not_live | muted | banned | left`, or `null` when writing is allowed; `message` is null
 when allowed and for `muted`, `banned` and `left`. The composer used to guess: every refusal came
 back as a single `NOT_CHECKED_IN` covering several unrelated situations, so the
 app either showed the wrong reason or let someone type a paragraph and then threw
@@ -757,6 +859,11 @@ it away. `closesAt` lets the room show an honest countdown.
 **Write access is attendance, not presence.** A `chat_group_members` row means
 you were physically at the event; checking out does not revoke it. See
 `mayWriteToRoom` in `lib/chat-window.ts`.
+
+**Except in a venue's room.** A venue day's room is for the people live in it:
+read, write and the socket join answer `403 NOT_LIVE` once your Go Live has
+ended, and there is no auto-join — going live is the only way in. It closes at
+the venue's reset (`closesAt` is the reset, not a day later).
 
 ### GET /chat/groups
 Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
@@ -791,7 +898,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
 If OpenAI times out (>1s), message is broadcast and moderation falls back to async (socket delete event).
 
-**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `SPAM_BLOCKED` (429)
+**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `NOT_LIVE` (403, a venue's room after your Go Live ended), `SPAM_BLOCKED` (429)
 
 **Rate limit:** 30 sends a minute per person, across this route and `POST /events/:eventId/chat` together, whichever token or device they send from → `429 RATE_LIMITED` (SCRUM-439).
 

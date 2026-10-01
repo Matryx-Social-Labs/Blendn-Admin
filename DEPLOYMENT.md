@@ -316,6 +316,7 @@ so it is never related to session or login state.
 | `EMAIL_FOOTER_ADDRESS` | No | Registered office, shown in the email footer. Omitted entirely when unset — a made-up address in a compliance footer is worse than none. Set it before any bulk sending |
 | `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
 | `SEED_PASSWORD` | Staging only | Password for the dashboard test accounts, set on every deploy by `scripts/test-accounts.ts`. Never on production — the step refuses there anyway |
+| `PLUS_GATING` | No | `true` makes Go Live's "stay" Blendn+ only (`403 PLUS_REQUIRED`). Unset or `false`: "stay" is everyone's. Leave it off until Blendn+ entitlements ship — nothing grants Plus yet, so on would refuse "stay" to everyone |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |
 | `PORT` | No | Server port (Railway sets this) |

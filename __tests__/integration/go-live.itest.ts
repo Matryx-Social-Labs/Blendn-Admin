@@ -7,8 +7,10 @@ process.env.MOBILE_JWT_SECRET =
 // `jose` is ESM-only; see checkin.itest.ts.
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
+import { db as appDb } from "@/lib/db"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { canJoinChat, canJoinEvent, canJoinEventRoom } from "@/lib/socket-auth"
+import { refusalsByReason, refusalSummary } from "@/lib/check-in-refusals"
 import { sweepPresence, sweepVenueDays } from "@/lib/presence-sweeper"
 import { SYSTEM_USER_ID } from "@/lib/venue-day"
 
@@ -96,6 +98,7 @@ async function realEvent(venueId: string, opts: {
   startsInMin: number
   visibility?: "public" | "private"
   link?: "confirmed" | "disputed" | null
+  minAge?: number
 }) {
   const host = await makeUser(testId("gl_host"), "organizer")
   users.push(host)
@@ -114,6 +117,7 @@ async function realEvent(venueId: string, opts: {
       organizer_id: host,
       venue_id: venueId,
       venue_link_status: opts.link === undefined ? null : opts.link,
+      min_age: opts.minAge ?? null,
       latitude: LAT,
       longitude: LNG,
       geofence: FENCE,
@@ -208,6 +212,23 @@ describe("POST /venues/:id/live", () => {
     expect(await db.event_check_ins.count({ where: { event_id: results[0].json.data.venueDayId, status: "checked_in" } })).toBe(10)
   })
 
+  it("reads the room back when it loses the race to make it (forced)", async () => {
+    // Ten at once lose that race only sometimes; this always does. The room
+    // exists, the lookup is made to miss once, so the create collides on
+    // `chat_groups_event_id_key` and the door must read the winner's room.
+    const v = await venue()
+    const [a, b] = [await person(), await person()]
+    const first = await goLive(a.token, v)
+    const spy = jest.spyOn(appDb.chat_groups, "findUnique").mockResolvedValueOnce(null)
+    try {
+      const second = await goLive(b.token, v)
+      expect(second.status).toBe(200)
+      expect(second.json.data.chatGroupId).toBe(first.json.data.chatGroupId)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it("refuses any other window (PL-U02)", async () => {
     const v = await venue()
     const me = await person()
@@ -256,14 +277,21 @@ describe("POST /venues/:id/live", () => {
     expect(await db.check_in_refusals.count({ where: { event_id: day.id, user_id: me.id, reason: "no_geofence" } })).toBe(1)
   })
 
-  it("refuses outside the fence, recorded against the venue day", async () => {
+  it("refuses outside the fence, recorded against the venue day and nowhere else (PL-I19)", async () => {
     const v = await venue()
+    const eventHere = await realEvent(v, { startsInMin: 6 * 60 })
     const me = await person()
+    const since = new Date(Date.now() - 1_000)
+    const platformBefore = await refusalsByReason({ from: since, to: new Date(Date.now() + 60_000) })
     const { status } = await goLive(me.token, v, { minutes: 20 }, OUTSIDE)
     expect(status).toBe(400)
     const day = await db.events.findFirstOrThrow({ where: { venue_id: v, kind: "venue_day" } })
     await new Promise((r) => setTimeout(r, 300))
     expect(await db.check_in_refusals.count({ where: { event_id: day.id, reason: "out_of_range" } })).toBe(1)
+    // Not the organiser's Turned-away panel for the event at the same venue,
+    // and not the platform's turned-away-at-events figure.
+    expect((await refusalSummary(eventHere)).attempts).toBe(0)
+    expect((await refusalsByReason({ from: since, to: new Date(Date.now() + 60_000) })).total).toBe(platformBefore.total)
   })
 
   it("refuses a venue that is archived or unknown with 404", async () => {
@@ -368,6 +396,14 @@ describe("the venue's room is for the people live in it (F6, F7, D-5)", () => {
 
     // The window ends (20 minutes ago it started 25 minutes ago).
     await rewind(venueDayId, me.id, 25)
+
+    // Closed at the end itself, before any sweeper has run: the doors compare
+    // the window with the clock (`liveInVenueDay`, `inRoomWhere`).
+    expect((await checkInOf(venueDayId, me.id)).status).toBe("checked_in")
+    expect(await canJoinChat(me.id, chatGroupId)).toBe(false)
+    expect(await canJoinEventRoom(me.id, venueDayId)).toBe(false)
+    expect((await rosterRoute.GET(req(`/api/mobile/events/${venueDayId}/checkins`, me.token), eventParams(venueDayId))).status).toBe(403)
+
     const swept = await sweepVenueDays()
     expect(swept.expired).toBeGreaterThanOrEqual(1)
 
@@ -399,6 +435,8 @@ describe("the venue's room is for the people live in it (F6, F7, D-5)", () => {
     const stranger = await person()
     const res = await eventChatRoute.GET(req(`/api/mobile/events/${json.data.venueDayId}/chat`, stranger.token), eventParams(json.data.venueDayId))
     expect(res.status).toBe(403)
+    // "Go live", not "RSVP": an RSVP is no way into a venue's room (F7).
+    expect((await res.json()).errorCode).toBe("NOT_LIVE")
     expect(await db.chat_group_members.count({ where: { chat_group_id: json.data.chatGroupId, user_id: stranger.id } })).toBe(0)
     expect(await canJoinEvent(stranger.id, json.data.venueDayId)).toBe(false)
   })
@@ -480,6 +518,8 @@ describe("the venue-day sweeper (TQ-B05)", () => {
     for (const p of people) {
       expect((await checkInOf(dayId, p.id)).status).toBe("checked_out")
       expect((await sessionOf(dayId, p.id)).departed_source).toBe("ended")
+      // And out of the room now, though their window had time left (PL-K04).
+      expect(await canJoinChat(p.id, live[0].json.data.chatGroupId)).toBe(false)
     }
     const notes = await db.notifications.findMany({ where: { user_id: { in: people.map((p) => p.id) } } })
     expect(notes).toHaveLength(3)
@@ -498,6 +538,33 @@ describe("the venue-day sweeper (TQ-B05)", () => {
     // Once each: a second pass finds them already out.
     await sweepVenueDays()
     expect(await db.notifications.count({ where: { user_id: { in: people.map((p) => p.id) } } })).toBe(3)
+  })
+
+  it("leaves somebody too young for the event live, and closes the rest (D-3)", async () => {
+    const [young, older] = [await person("gly"), await person("glo")]
+    const born = (years: number) => new Date(Date.now() - (years * 365.25 + 30) * 86_400_000)
+    await db.profiles.update({ where: { id: young.id }, data: { date_of_birth: born(19) } })
+    await db.profiles.update({ where: { id: older.id }, data: { date_of_birth: born(25) } })
+
+    // Go Live is not refused in favour of a 21+ event they could not enter.
+    const soon = await venue()
+    await realEvent(soon, { startsInMin: 30, minAge: 21 })
+    expect((await goLive(young.token, soon)).status).toBe(200)
+    expect((await goLive(older.token, soon)).status).toBe(409)
+
+    // Both live somewhere quiet; then a 21+ event starts there.
+    const v = await venue()
+    const [y, o] = [await goLive(young.token, v, { minutes: 60 }), await goLive(older.token, v, { minutes: 60 })]
+    expect([y.status, o.status]).toEqual([200, 200])
+    const eventId = await realEvent(v, { startsInMin: -1, minAge: 21 })
+    await sweepVenueDays()
+    const dayId = y.json.data.venueDayId
+    expect((await checkInOf(dayId, young.id)).status).toBe("checked_in")
+    expect((await checkInOf(dayId, older.id)).status).toBe("checked_out")
+    const told = async (id: string) =>
+      db.notifications.count({ where: { user_id: id, data: { path: ["eventId"], equals: eventId } } })
+    expect(await told(young.id)).toBe(0)
+    expect(await told(older.id)).toBe(1)
   })
 
   it("does not let 300 venue days starve a real event (PL-I06, F5)", async () => {
@@ -614,9 +681,9 @@ describe("GET /venues/:id (PL-I18, D-19)", () => {
   it("counts in buckets, says whether you are live, and never carries the area", async () => {
     const v = await venue()
     const viewer = await person()
-    let { status, text } = await detail(viewer.token, v)
-    expect(status).toBe(200)
-    let data = JSON.parse(text).data
+    const first = await detail(viewer.token, v)
+    expect(first.status).toBe(200)
+    let data = JSON.parse(first.text).data
     expect(data.live).toMatchObject({ open: true, closedReason: null, liveNow: "none", youAreLive: false, expiresAt: null })
 
     const three = [await person(), await person(), await person()]
@@ -625,7 +692,7 @@ describe("GET /venues/:id (PL-I18, D-19)", () => {
     expect(data.live.liveNow).toBe("a_few")
 
     const mine = await goLive(viewer.token, v, { minutes: 45 })
-    ;({ text } = await detail(viewer.token, v))
+    const { text } = await detail(viewer.token, v)
     data = JSON.parse(text).data
     expect(data.live).toMatchObject({
       youAreLive: true,

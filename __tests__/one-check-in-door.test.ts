@@ -26,14 +26,17 @@ const DOORS = [
   "app/api/mobile/venues/[venueId]/live/route.ts",
 ]
 
-/** What only the core may do. Each is a rule a door could otherwise re-implement. */
+/**
+ * What only the core may do. Each is a rule a door could otherwise re-implement.
+ * Names, not calls: a door that so much as imports one has started a copy.
+ */
 const CORE_ONLY: Array<[string, RegExp]> = [
-  ["judge a position against a fence", /\bevaluateCheckIn\(|\bdistanceToGeofence\(|\bpointInFence\(/],
+  ["judge a position against a fence", /\b(?:evaluateCheckIn|distanceToGeofence|pointInFence)\b/],
   ["apply the accuracy ceiling", /\bMAX_GPS_ACCURACY_METERS\b/],
-  ["apply the age gate", /\bminAgeRefusal\(|\bmayParticipate\(/],
+  ["apply the age gate", /\b(?:minAgeRefusal|mayParticipate)\b/],
   ["write a check-in", /event_check_ins\.(?:upsert|create|update)\(/],
-  ["open a presence session", /\bopenSession\(/],
-  ["put somebody in a room", /chat_group_members\.(?:create|upsert)\(|\bclaimAnonymousName\(/],
+  ["open a presence session", /\bopenSession\b/],
+  ["put somebody in a room", /chat_group_members\.(?:create|upsert)\(|\bclaimAnonymousName\b/],
 ]
 
 describe("both doors go through the one check-in core", () => {
