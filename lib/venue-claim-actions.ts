@@ -20,6 +20,7 @@ import { claimEmail, claimInputRefusal, claimVenueInput } from "@/lib/claim-inpu
 import { claimVenueWhere } from "@/lib/curation"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { logger } from "@/lib/logger"
+import { realEventsWhere } from "@/lib/event-kind"
 
 /**
  * Claiming a venue.
@@ -363,7 +364,7 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
           owner_org_id: true,
           owner_org: { select: { display_name: true } },
           // Live events only, as on the claim form (SCRUM-312).
-          _count: { select: { events: { where: { deleted_at: null } } } },
+          _count: { select: { events: { where: { deleted_at: null, ...realEventsWhere } } } },
         },
       },
     },

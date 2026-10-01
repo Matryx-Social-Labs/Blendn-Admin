@@ -25,8 +25,8 @@ const at = (iso: string) => new Date(iso)
 const keys = (
   start: string,
   end: string,
-  opts: { canOperate: boolean; feedbackWindowOpen: boolean }
-) => eventTabsFor(start, end, opts).map((t) => t.key)
+  opts: { canOperate: boolean; canViewAttendees?: boolean; feedbackWindowOpen: boolean }
+) => eventTabsFor(start, end, { canViewAttendees: opts.canOperate, ...opts }).map((t) => t.key)
 
 describe("livePhaseFor", () => {
   it("reads the phase from the event's own schedule", () => {
@@ -105,5 +105,13 @@ describe("tab visibility follows permissions", () => {
     for (const canOperate of [true, false]) {
       expect(keys(START, END, { canOperate, feedbackWindowOpen: true })[0]).toBe("overview")
     }
+  })
+})
+
+describe("a venue day, for its venue's owner (F1)", () => {
+  it("offers the room and no Attendees tab", () => {
+    const tabs = keys(START, END, { canOperate: true, canViewAttendees: false, feedbackWindowOpen: false })
+    expect(tabs).toContain("chat")
+    expect(tabs).not.toContain("attendees")
   })
 })

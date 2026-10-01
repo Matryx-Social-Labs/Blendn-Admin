@@ -175,6 +175,7 @@ const VENUE_ID_READ = /\b(?:where|event|events)\s*:\s*\{[^{}]*\bvenue_id\s*:(?!\
 const VENUE_ID_READS_ALLOWED = new Map([
   ["lib/venue-actions.ts", "counts future bookings to refuse a retire; nothing is shown"],
   ["lib/venue-claim-actions.ts", "venue_claims rows, not events"],
+  ["lib/venue-day.ts", "finds the venue's own day to go live in; nothing is shown to an owner"],
 ])
 
 describe("a venue owner's view starts at the claim", () => {

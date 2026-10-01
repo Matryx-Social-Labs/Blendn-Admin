@@ -18,7 +18,7 @@ export type EventTabKey = "overview" | "live" | "attendees" | "chat" | "feedback
 export function eventTabsFor(
   startAt: string,
   endAt: string,
-  opts: { canOperate: boolean; feedbackWindowOpen: boolean }
+  opts: { canOperate: boolean; canViewAttendees: boolean; feedbackWindowOpen: boolean }
 ): Array<{ key: EventTabKey; label: string }> {
   const phase = livePhaseFor(startAt, endAt)
   const tabs: Array<{ key: EventTabKey; label: string }> = [
@@ -32,7 +32,9 @@ export function eventTabsFor(
   // tab list that offers something the server will deny is its own bug.
   if (opts.canOperate) {
     if (phase === "live") tabs.push({ key: "live", label: "Live" })
-    tabs.push({ key: "attendees", label: "Attendees" })
+    // Not on a venue day for its venue's owner, who moderates the room and
+    // never sees who was in it (F1).
+    if (opts.canViewAttendees) tabs.push({ key: "attendees", label: "Attendees" })
     tabs.push({ key: "chat", label: "Chat" })
     if (phase === "post" && opts.feedbackWindowOpen) {
       tabs.push({ key: "feedback", label: "Feedback" })

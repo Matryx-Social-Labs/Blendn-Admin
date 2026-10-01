@@ -230,6 +230,17 @@ describe("who to show as the host", () => {
     expect(eventHost({ curated_at: new Date(), organizer_org: null, organizer: null }).isPlatform)
       .toBe(true)
   })
+
+  it("names a venue day by its venue, never its org or the system user (F2)", () => {
+    const host = eventHost({
+      kind: "venue_day",
+      venue_name: "The Humming Tree",
+      organizer_org: { display_name: "Indiranagar Hospitality Group" },
+      organizer: { name: "Blendn" },
+    })
+    expect(host).toEqual({ name: "The Humming Tree", isPlatform: true })
+    expect(eventHost({ kind: "venue_day", venue_name: null, organizer: { name: "A Founder" } }).name).toBe(PLATFORM_HOST)
+  })
 })
 
 /**

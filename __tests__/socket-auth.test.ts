@@ -146,6 +146,7 @@ describe("canJoinEvent", () => {
     mockDb.events.findFirst.mockResolvedValue({
       visibility: "private",
       organizer_id: OTHER,
+      kind: "event",
       organizer_org_id: "org_nightshift",
       venue: null,
     })
@@ -159,6 +160,7 @@ describe("canJoinEvent", () => {
     mockDb.events.findFirst.mockResolvedValue({
       visibility: "private",
       organizer_id: OTHER,
+      kind: "event",
       organizer_org_id: "org_nightshift",
       venue: null,
     })

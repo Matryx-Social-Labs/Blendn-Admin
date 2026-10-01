@@ -6,6 +6,7 @@ import type { rsvp_status } from "@prisma/client"
 import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
+import { realEventsWhere } from "@/lib/event-kind"
 import { visibleEventsWhere } from "@/lib/event-visibility"
 import { buildPacing, pacingWindowDays } from "@/lib/pacing"
 import { attentionQueues } from "@/lib/attention-queues-query"
@@ -50,8 +51,12 @@ const COMMITTED: rsvp_status[] = ["going", "maybe"]
 /** Trailing window for venue utilisation and per-venue rates. */
 const WINDOW_WEEKS = 8
 
+/**
+ * The events every platform number is about: live ones, never a venue day — a
+ * venue's daily live room is not a night anybody published (step 3).
+ */
 function eventScope(userId?: string) {
-  return { deleted_at: null, ...(userId ? { organizer_id: userId } : {}) }
+  return { deleted_at: null, ...realEventsWhere, ...(userId ? { organizer_id: userId } : {}) }
 }
 
 /**
@@ -1008,7 +1013,7 @@ export async function getVenueRecords(
         owner_org: { select: { display_name: true } },
         _count: {
           select: {
-            events: { where: { deleted_at: null } },
+            events: { where: { deleted_at: null, ...realEventsWhere } },
             claims: { where: { status: "pending" } },
           },
         },

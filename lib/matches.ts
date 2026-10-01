@@ -376,6 +376,7 @@ export async function matchesForEvent(
             JOIN events e ON e.id = t.event_id
            WHERE t.event_id IN (SELECT event_id FROM mine)
              AND t.event_id <> ${eventId}::uuid
+             AND e.kind = 'event'
              AND e.start_time > now()
              AND e.deleted_at IS NULL
         GROUP BY t.user_id

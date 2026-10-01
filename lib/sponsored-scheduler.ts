@@ -113,6 +113,7 @@ async function claimDue(now: Date, token: string): Promise<ClaimedCampaign[]> {
          AND (m."claim_token" IS NULL OR m."claimed_at" IS NULL OR m."claimed_at" < ${leaseCutoff})
          AND p."status" = 'approved'::"placement_status"
          AND e."deleted_at" IS NULL
+         AND e."kind" = 'event'
        ORDER BY m."next_send_at" ASC
        LIMIT ${BATCH}
        FOR UPDATE OF m SKIP LOCKED

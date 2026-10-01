@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 import { BOARD } from "./constants"
 import { MIN_INTERESTS_TO_RANK } from "./interest-coverage"
 
@@ -148,3 +150,15 @@ export function boardDenialMessage(d: BoardReadDenial | BoardWriteDenial): strin
       return "You have sent a lot of requests this week. Try again in a few days."
   }
 }
+
+/**
+ * A report about a board post or a board ask (SCRUM-322).
+ *
+ * The reasons are the app's message-report reasons: a post and an ask are
+ * both words somebody wrote, and one list means the client's sheet and the
+ * admin queue's reason filter do not grow a second vocabulary.
+ */
+export const boardReportSchema = z.object({
+  reason: z.enum(["harassment", "hate_speech", "inappropriate_content", "spam", "other"]),
+  description: z.string().trim().max(500).optional(),
+})

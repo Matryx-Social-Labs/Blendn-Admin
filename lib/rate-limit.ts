@@ -182,6 +182,12 @@ const USER_POLICIES = {
   upload: { windowMs: 60 * 1000, maxRequests: 20 },
   /** Safety actions. Loose on purpose — see above. */
   safety: { windowMs: 60 * 1000, maxRequests: 20 },
+  /**
+   * Reports, per day. The minute limit stops a burst and not a patient script:
+   * twenty a minute is over twenty-eight thousand a day into a queue that shows
+   * the oldest hundred. Thirty is more than a person in real trouble files.
+   */
+  reportDay: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 30 },
   /** Ordinary writes: RSVP, favourite, rating, interest, profile edits. */
   write: { windowMs: 60 * 1000, maxRequests: 30 },
   /** Creating or destroying whole objects. */

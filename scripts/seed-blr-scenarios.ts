@@ -8,6 +8,7 @@ import { mirrorToTigris, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { environmentRefusal, TEST_ORG_NAMES } from "./test-accounts"
 import { CROWD_CHAT, CROWD_REVIEWS, CROWD_SIZE, ensureCrowd } from "./seed-blr-crowd"
 import PHOTOS from "./seed-blr-photos.json"
+import { realEventsWhere } from "../lib/event-kind"
 
 /**
  * Bengaluru, rebuilt so every state an event can be in is on the phone at once.
@@ -1317,8 +1318,13 @@ async function main() {
     return
   }
 
+  /*
+   * Never a venue day (F10). They are made by people going live, not by this
+   * seed, and soft-deleting one takes a room and everybody's check-ins in it
+   * out from under them on staging.
+   */
   const doomed = await db.events.findMany({
-    where: { ...cityMatch, deleted_at: null, ...notOurs },
+    where: { ...cityMatch, deleted_at: null, ...notOurs, ...realEventsWhere },
     select: { slug: true, title: true, status: true },
     orderBy: { start_time: "asc" },
   })
@@ -1371,7 +1377,7 @@ async function main() {
 
   /* ── remove ───────────────────────────────────────────────────────────── */
   const removed = await db.events.updateMany({
-    where: { ...cityMatch, deleted_at: null, ...notOurs },
+    where: { ...cityMatch, deleted_at: null, ...notOurs, ...realEventsWhere },
     data: { deleted_at: new Date(), updated_at: new Date() },
   })
   console.log(`\nsoft-deleted ${removed.count} event(s)`)
