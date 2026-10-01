@@ -5,6 +5,8 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import type { Prisma } from "@prisma/client"
 import { activeMembership } from "@/lib/org-membership"
+import { isUuid } from "@/lib/api-input"
+import { idForViewer } from "@/lib/room-handle"
 
 /**
  * Reading the audit log.
@@ -139,7 +141,7 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
       id: r.id,
       action: r.action,
       resource: r.resource,
-      resourceId: r.resource_id,
+      resourceId: isAdmin ? r.resource_id : hostResourceId(session.user.id, r),
       createdAt: r.created_at,
       actor: r.user_id ? (actorMap.get(r.user_id) ?? null) : null,
       details: r.details,
@@ -151,4 +153,24 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
     total,
     scopedToOrg: !isAdmin,
   }
+}
+
+/**
+ * A row's resource id as an organisation's owner or admin may see it.
+ *
+ * A chat member's row is keyed on the attendee's ACCOUNT id — the ban, mute
+ * and their reversals write it as `resource_id`. That id is the same in every
+ * room, so a host reading the log across several nights joined the people they
+ * had moderated into one history (SCRUM-517). They see this room's handle
+ * instead, the one the Chat tab showed them; the admin keeps the account id,
+ * and the stored row is unchanged, so this covers rows written before it too.
+ * Without the event to scope a handle, nothing.
+ */
+function hostResourceId(
+  viewerId: string,
+  row: { resource: string; resource_id: string | null; details: unknown }
+): string | null {
+  if (row.resource !== "chat_group_member" || !row.resource_id) return row.resource_id
+  const eventId = (row.details as { eventId?: unknown } | null)?.eventId
+  return typeof eventId === "string" && isUuid(eventId) ? idForViewer(viewerId, eventId, row.resource_id) : null
 }

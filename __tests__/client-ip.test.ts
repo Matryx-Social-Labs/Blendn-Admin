@@ -1,4 +1,4 @@
-import { clientIpFrom } from "@/lib/client-ip"
+import { clientIpFrom, clientNetworkFrom } from "@/lib/client-ip"
 
 /*
  * What Railway's edge actually sends, measured (SCRUM-195): `x-real-ip` is the
@@ -32,4 +32,22 @@ it("ignores headers the edge passes through untouched", () => {
 it("shares one bucket when nothing identifies the client", () => {
   expect(clientIpFrom(h({}))).toBe("unknown")
   expect(clientIpFrom(h({ "x-forwarded-for": " , " }))).toBe("unknown")
+})
+
+describe("clientNetworkFrom — the bucket for an unauthenticated write", () => {
+  it("keys an IPv6 client on its /64, so a fresh address is not a fresh bucket", () => {
+    expect(clientNetworkFrom(h({ "x-real-ip": "2001:db8:85a3:12:8a2e:370:7334:1" }))).toBe("2001:db8:85a3:12::/64")
+    expect(clientNetworkFrom(h({ "x-real-ip": "2001:db8:85a3:12::9" }))).toBe("2001:db8:85a3:12::/64")
+    expect(clientNetworkFrom(h({ "x-real-ip": "2001:db8::1" }))).toBe("2001:db8:0:0::/64")
+  })
+
+  it("keys IPv4, and IPv4 written as IPv6, on the address", () => {
+    expect(clientNetworkFrom(h({ "x-real-ip": "91.9.218.44" }))).toBe("91.9.218.44")
+    expect(clientNetworkFrom(h({ "x-real-ip": "::ffff:91.9.218.44" }))).toBe("91.9.218.44")
+  })
+
+  it("leaves anything it cannot read as it was", () => {
+    expect(clientNetworkFrom(h({}))).toBe("unknown")
+    expect(clientNetworkFrom(h({ "x-real-ip": "not:an:address" }))).toBe("not:an:address")
+  })
 })

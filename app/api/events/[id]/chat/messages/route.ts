@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { isUuid } from "@/lib/api-input"
+import { idForViewer } from "@/lib/room-handle"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -58,11 +59,16 @@ export async function GET(_: Request, { params }: RouteContext) {
      * the real identity of every "anonymous" attendee out of the network tab.
      * The anonymity was cosmetic.
      *
-     * Real identity is now admin-only. Hosts get the user id (needed to ban or
-     * mute through /chat/members/[userId]) and nothing that names a person.
+     * Real identity is now admin-only. Hosts get nothing that names a person —
+     * and not the account id either (SCRUM-517). It is the same in every room,
+     * so a host across several nights joined them into one person's history;
+     * they get this room's handle instead (SCRUM-371), which bans and mutes
+     * through /chat/members/[userId] and means nothing in the next room.
      */
     // Shaping pinned by __tests__/chat-identity.test.ts — keep them in step.
     const isPlatformAdmin = session.user.role === "app_admin"
+    const idFor = (userId: string) =>
+      isPlatformAdmin ? userId : idForViewer(session.user.id, eventId, userId)
 
     // One wave. These four depend only on the chat group id; they ran one
     // after another, and this route is polled every 5 seconds per open room.
@@ -160,7 +166,7 @@ export async function GET(_: Request, { params }: RouteContext) {
         kind: feedKind(m),
         createdAt: m.created_at.toISOString(),
         user: {
-          id: m.user.id,
+          id: idFor(m.user.id),
           anonymousName: memberMap.get(m.user.id)?.anonymous_name ?? null,
           // Admin-only. Absent, not null, for hosts — so a client that reads
           // `user.name` gets undefined rather than a convincing blank.
@@ -170,7 +176,7 @@ export async function GET(_: Request, { params }: RouteContext) {
         },
       })),
       members: members.map((m) => ({
-        userId: m.user_id,
+        userId: idFor(m.user_id),
         anonymousName: m.anonymous_name,
         // `admin` is the host (or a colleague) holding the room: not moderated here (SCRUM-466).
         role: m.role,

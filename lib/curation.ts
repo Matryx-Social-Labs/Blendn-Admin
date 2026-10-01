@@ -40,8 +40,44 @@ import type { Geofence } from "./geofence"
  * was told it "already has an organiser" (SCRUM-455). Those are answered like
  * a missing id instead.
  */
+const CLAIM_PAGE_STATUSES = ["published", "completed"] as const
+
 export function claimPageWhere(id: string): Prisma.eventsWhereUniqueInput {
-  return { id, deleted_at: null, status: { in: ["published", "completed"] }, visibility: { not: "private" } }
+  return { id, deleted_at: null, status: { in: [...CLAIM_PAGE_STATUSES] }, visibility: { not: "private" } }
+}
+
+/**
+ * Whether the app offers "Running this event? Claim it": a curated event nobody
+ * has claimed, that `/claim/[eventId]` would show. The same status and
+ * visibility rule as `claimPageWhere`, so the app never links to a page that
+ * answers "not found".
+ *
+ * Not `claimRefusal`: a room that is open now still offers the link, and the
+ * page says to come back after the night. An organiser standing in their own
+ * event is the person most likely to notice the listing.
+ */
+export function offersClaim(event: {
+  curated_at: Date | null
+  claimed_at: Date | null
+  status: string
+  visibility: string
+}): boolean {
+  return (
+    // curated_open in `curationState`'s terms.
+    event.curated_at !== null &&
+    event.claimed_at === null &&
+    (CLAIM_PAGE_STATUSES as readonly string[]).includes(event.status) &&
+    event.visibility !== "private"
+  )
+}
+
+/**
+ * The venues a stranger may see on `/claim/venue/[venueId]`, or file a claim on:
+ * live and not archived. Anything else is answered like an id that does not
+ * exist, as `claimPageWhere` does for events.
+ */
+export function claimVenueWhere(id: string): Prisma.venuesWhereUniqueInput {
+  return { id, deleted_at: null, status: "active" }
 }
 
 /** The columns every function here needs. Spread it; do not hand-pick. */
@@ -208,12 +244,13 @@ export const CURATION_PAGE = 100
 export const CLAIM_PAGE = 200
 
 /**
- * How many claims one address, one event, and one IP may file per hour.
+ * How many claims one address, one claimed thing, and one IP may file per hour.
  *
  * Filing is unauthenticated by design, so these are the only bound on it. The
- * per-event limit is the one that matters least often and most: a curated
- * event has exactly one real organiser, so twenty attempts in an hour is not a
- * queue, it is somebody wasting a reviewer's day.
+ * per-target limit is the one that matters least often and most: a curated
+ * event or a venue has exactly one real owner, so twenty attempts in an hour is
+ * not a queue, it is somebody wasting a reviewer's day. The address and IP
+ * windows are shared by event and venue claims (`lib/claim-limit.ts`).
  *
  * Here rather than beside `fileEventClaim`, for the same reason `CLAIM_PAGE`
  * is: that file is `"use server"`, and every export in one becomes a callable
@@ -223,6 +260,6 @@ export const CLAIM_PAGE = 200
  */
 export const CLAIM_LIMITS = {
   perEmailPerHour: 5,
-  perEventPerHour: 20,
+  perTargetPerHour: 20,
   perIpPerHour: 10,
 } as const

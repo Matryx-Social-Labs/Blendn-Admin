@@ -25,11 +25,11 @@ import { defaultExtentMetres, venueTypeFromOsm, venueTypeLabel } from "../lib/ve
  * Run:
  *   DATABASE_URL=... npx tsx scripts/enrich-venues-from-osm.ts            # dry run
  *   DATABASE_URL=... npx tsx scripts/enrich-venues-from-osm.ts --apply
+ *
+ * `lookup` and `fenceFromOsm` are also what `scripts/import-venues.ts --osm`
+ * uses for a seeded venue's footprint, so the two cannot disagree about what
+ * counts as a venue's own building.
  */
-
-const db = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
-})
 
 const OVERPASS = "https://overpass-api.de/api/interpreter"
 /**
@@ -45,7 +45,7 @@ const UA = "blendn-admin/venue-enrichment (https://blendn.app; ops@blendn.app)"
 const PAUSE_MS = 5000
 const RETRIES = 3
 
-interface OsmHit {
+export interface OsmHit {
   tags: Record<string, string>
   ring: [number, number][] | null
   distance: number
@@ -86,7 +86,7 @@ function centroid(ring: [number, number][]): [number, number] {
  * usually the largest thing at its coordinates — a kiosk inside a stadium is
  * not the stadium — so ties break on span, then on distance from the pin.
  */
-async function lookup(lat: number, lng: number, name: string): Promise<OsmHit | null> {
+export async function lookup(lat: number, lng: number, name: string): Promise<OsmHit | null> {
   const query =
     `[out:json][timeout:25];(` +
     `way["building"](around:80,${lat},${lng});` +
@@ -251,8 +251,37 @@ function typeFromName(name: string): venue_type | null {
   return null
 }
 
+/**
+ * The venue's own outline as a check-in area, or null when OSM has no usable
+ * one for it.
+ *
+ * Only a *named* match speaks for the venue; anything else nearby is a
+ * different business that happens to share a postcode. The ring must pass the
+ * same validator the API uses, so nothing is stored that the runtime would
+ * reject. A guessed polygon would look authoritative and be wrong, so the
+ * caller falls back to a circle sized by type.
+ */
+export function fenceFromOsm(hit: OsmHit | null): Geofence | null {
+  if (!hit?.nameMatched || !hit.ring) return null
+  const ring = hit.ring.slice(0, -1).slice(0, GEOFENCE_LIMITS.MAX_RING)
+  if (ring.length < GEOFENCE_LIMITS.MIN_RING || ringSelfIntersects(ring)) return null
+  const fence: Geofence = { type: "polygon", ring, buffer: 25 }
+  return validateGeofence(fence).ok ? fence : null
+}
+
 async function main() {
-    const apply = process.argv.includes("--apply")
+  const db = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  })
+  try {
+    await enrichAll(db)
+  } finally {
+    await db.$disconnect()
+  }
+}
+
+async function enrichAll(db: PrismaClient) {
+  const apply = process.argv.includes("--apply")
   // Overpass throttles anonymous callers hard, and most of these venues are
   // demo records it has never heard of, so the lookup is opt-in rather than
   // the default. Name rules and the checked table do the work.
@@ -318,32 +347,12 @@ async function main() {
     // A guessed polygon would look authoritative and be wrong.
     let geofence: Geofence | null = null
     if (needsFence) {
-      const ring = trusted?.ring
-        ? trusted.ring.slice(0, -1).slice(0, GEOFENCE_LIMITS.MAX_RING)
-        : null
-      if (ring && ring.length >= GEOFENCE_LIMITS.MIN_RING && !ringSelfIntersects(ring)) {
-        geofence = { type: "polygon", ring, buffer: 25 }
-      } else {
-        geofence = {
-          type: "circle",
-          lat: venue.latitude,
-          lng: venue.longitude,
-          radius: defaultExtentMetres(venueType),
-          buffer: 20,
-        }
-      }
-      // The same validator the API uses — never store something the runtime
-      // would reject.
-      const parsed = validateGeofence(geofence)
-      if (!parsed.ok) {
-        console.log(`  WARN  ${label} generated fence invalid (${parsed.error}), using circle`)
-        geofence = {
-          type: "circle",
-          lat: venue.latitude,
-          lng: venue.longitude,
-          radius: defaultExtentMetres(venueType),
-          buffer: 20,
-        }
+      geofence = fenceFromOsm(trusted) ?? {
+        type: "circle",
+        lat: venue.latitude,
+        lng: venue.longitude,
+        radius: defaultExtentMetres(venueType),
+        buffer: 20,
       }
     }
 
@@ -386,9 +395,10 @@ async function main() {
   console.log(apply ? "Applied." : "Dry run. Re-run with --apply to write.")
 }
 
-main()
-  .catch((e) => {
+// Imported by scripts/import-venues.ts for `lookup`; only run when invoked.
+if (require.main === module) {
+  main().catch((e) => {
     console.error(e)
     process.exitCode = 1
   })
-  .finally(() => db.$disconnect())
+}

@@ -72,9 +72,10 @@ belongs with the category work, not invented per event as free text.
 
 ### 4. A price
 
-"$45". There is no ticketing, no payment, and the roadmap says pricing is
-undecided and everything is free. The CTA has to read as joining, not buying,
-until that changes — and if it never changes, the price is simply not drawn.
+"$45". There is no ticketing, and plan v2 (2026-10-01) adds none: attendees pay
+only for Blendn+, through the app stores (`ROADMAP.md`, *Pricing*). The CTA has
+to read as joining, not buying, until that changes — and if it never changes, the
+price is simply not drawn.
 
 ---
 

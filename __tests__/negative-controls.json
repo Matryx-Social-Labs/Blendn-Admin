@@ -33,6 +33,12 @@
     "automatically non-vacuous, only that it usually fails on its own terms."
   ],
   "verified": {
+    "integration/claim-from-app.itest.ts": {
+      "guards": "Step 1 (claim from the app): the public venue claim files with no session and changes no ownership; 404 for unknown, malformed, archived, deleted ids; refuses another address's, an organiser's or a declined application; one pending per address; the per-address limit; decideVenueClaim refuses approval until the application's address is confirmed and the application approved, refuses to overwrite an owner given since filing (pre-check and inside the transaction), refuses a claim decided mid-decision, refuses the (venue, org) unique collision as a Refusal; decision mail only to a confirmed address; claim.url on GET /events/:id on the dashboard host for curated, unclaimed events only. Behavioural, registered because the first race test passed vacuously and was replaced.",
+      "mutation": "M449: refuseUnsafeApproval without the email_verified_at refusal. M450: the in-transaction venue guard (OR owner null / same org) and its count check removed. M451: `if (decided.count !== 1)` removed. M452: the (venue, org) pre-check and the violatedConstraint catch removed. M453: tellVenueClaimants mails an unconfirmed contact address. M454: filing accepts a declined application. M455: the venue_owner role check removed. M456: claim.url built from appUrl() instead of dashboardUrl(). M457: offersClaim ignoring claimed_at. M458: claimVenueWhere without status: active. M459: the per-email window removed from overClaimLimit. Also the replaced race test (two approvals via Promise.allSettled): it passed with M450 and M451 applied together, so it was vacuous and was removed.",
+      "observed": "M449: 1 of 23 failing. M450: 1 of 24 failing ('re-checks the owner inside the transaction'). M451: 1 of 24 failing ('re-checks the claim inside the transaction'). M452, M453, M454: 1 of 23 each. M455, M456, M457: 1 of 13 each. M458: 2 of 13. M459: 1 of 17. Each reverted; 24 of 24.",
+      "date": "2026-10-01"
+    },
     "integration/event-attendee-roster.itest.ts": {
       "guards": "SCRUM-499 and the PR #601 review: an event's Attendees tab gives whoever runs it (any member of its organisation, staff included, or an admin) labels salted with the event's organisation, in label order, arrivals floored to the quarter hour, per-row arrival/walk-in/no-show held back while 0 < came < 5 (counted in people, not rows); no-shows only once an event is over and ran, never for a staff member's RSVP, agreeing with the organisation's roster; a venue owner a count by #600's venue rule, venueCounts / discloseVenueCounts with the going RSVPs as the population (min cell, completeness, residual, walk-ins past going; zero shown; started flag); null before the claim, for an outsider and for a member who left. Behavioural; registered because its fixtures were built to make each rule falsifiable.",
       "mutation": "M426 check-ins not filtered by event. M427 no canOperate gate. M428 the event tab calls no-shows at any time. M429 the org roster back on start_time < now including cancelled. M430 the event tab keeps staff RSVPs. M431 the venue gets labels. M432 hold-back at < MIN_CELL - 1. M433 the venue's came through the floor only, without the going population. M446 a zero held back. M434 arrival not rounded. M435 door order. M436 labels from the viewer's memberships joined. M437 the org roster keeps staff RSVPs. M438 the venue floor removed.",
@@ -389,9 +395,9 @@
     },
     "event-claims.test.ts": {
       "guards": "fileEventClaim never takes orgId from the caller, never returns flags, is rate-limited before the write; decideEventClaim's catch wraps the transaction; the funnel has a public entry",
-      "mutation": "Re-add orgId to FileClaimInput; return {ok,claimId,flags}; replace the overClaimLimit call with `const limited = null`; unwire fileEventClaim from claim-form.tsx; add \"/claim/:path*\" to the middleware matcher; change the migration predicate from 'approved' to 'pending'; move the catch off $transaction",
-      "observed": "1 failing per mutation, seven mutations, each reverted",
-      "date": "2026-08-25"
+      "mutation": "Re-add orgId to FileClaimInput; return {ok,claimId,flags}; replace the overClaimLimit call with `const limited = null`; unwire fileEventClaim from claim-form.tsx; add \"/claim/:path*\" to the middleware matcher; change the migration predicate from 'approved' to 'pending'; move the catch off $transaction. Step 1 (the limiter moved to lib/claim-limit.ts, shared with the public venue claim): M447 filePublicVenueClaim's overClaimLimit call replaced with `const limited = null as string | null`; M448 lib/claim-limit.ts keying the per-target window `rl:claim:target` instead of `rl:claim:${target.kind}:${target.id}`",
+      "observed": "1 failing per mutation, seven mutations, each reverted. M447, M448: event-claims.test.ts 1 of 31 failing each ('rate-limits an endpoint nothing else bounds'), reverted",
+      "date": "2026-10-01"
     },
     "curation.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
@@ -1484,6 +1490,12 @@
       "mutation": "M404 the presence_sessions close dropped. M405 the departed_at IS NULL filter dropped (overwrites earlier departures). M406 the event_id scope dropped (closes every open session). M407 GREATEST(arrived_at, now) replaced by now (a later arrival breaks the departure_after_arrival CHECK and fails the whole cascade).",
       "observed": "Red before the fix: 1 of 3 failing (session still open, insideGuests 1). With the review's future-arrival case added, 4 tests: M404: 2 of 4 failing. M405: 1 of 4 failing. M406: 1 of 4 failing. M407: 1 of 4 failing (CHECK violation). All reverted.",
       "date": "2026-10-01"
+    },
+    "dashboard-chat-ids-boundary.test.ts": {
+      "date": "2026-10-01",
+      "guards": "SCRUM-517: the host-facing dashboard chat routes set no response field straight from a row's account id (userId: m.user_id, id: m.user.id); messages and moderation shape every id through idFor() (the room handle, or the real id for app_admin), the members route reads a host's ref back only through roomMemberFromRef, and getAuditLog maps a chat member's resource id through hostResourceId for anybody but the admin.",
+      "mutation": "M447 `userId: idFor(m.user_id)` in app/api/events/[id]/chat/messages/route.ts put back to `userId: m.user_id`.",
+      "observed": "M447: 1 of 15 failing ('sets no response field from a row's account id'), reverted green. The rule's negative controls flag userId: m.user_id, id: m.user.id, userId: f.user_id and authorId: row.user_id, and pass the idFor() forms, a select, a where and the caller's own session.user.id."
     }
   },
   "grandfathered": [

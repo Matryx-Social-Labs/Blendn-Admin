@@ -1667,6 +1667,8 @@ model organiser_onboarding_requests {
   updated_at        DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
 
   org organisations? @relation(fields: [org_id], references: [id], onDelete: SetNull)
+  /// Venue claims filed with no account against this application.
+  venue_claims venue_claims[]
 
   @@index([status])
   @@index([contact_email])
@@ -1763,9 +1765,20 @@ enum org_role {
 model venue_claims {
   id       String @id @default(uuid()) @db.Uuid
   venue_id String @db.Uuid
-  /// The organisation that would own the venue, not the person filing.
-  org_id   String @db.Uuid
-  filed_by String
+  /// The organisation that would own the venue, not the person filing. Null
+  /// when the claimant has no account yet; `onboarding_id` carries the
+  /// application that will create one (the public /claim/venue page).
+  org_id   String? @db.Uuid
+  /// The onboarding application this claim waits on. Null once `org_id` is set.
+  /// Exactly one of the two: `venue_claims_one_claimant`, in SQL.
+  onboarding_id String? @db.Uuid
+  /// Null when filed by somebody with no account.
+  filed_by String?
+  /// Who to write back to. Required on the no-account route
+  /// (`venue_claims_public_has_contact`), where there is no user to look up.
+  contact_email String?
+  /// Free text from a no-account claimant. Read by a person, never parsed.
+  note          String?
 
   status     venue_claim_status @default(pending)
   /// True when the venue already had an owner at filing time.
@@ -1784,15 +1797,19 @@ model venue_claims {
   created_at    DateTime  @default(now()) @db.Timestamptz(6)
   updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  venue venues        @relation(fields: [venue_id], references: [id], onDelete: Cascade)
-  org   organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  venue      venues                         @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  org        organisations?                 @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  onboarding organiser_onboarding_requests? @relation(fields: [onboarding_id], references: [id], onDelete: Cascade)
 
   /// One live claim per org per venue. Re-filing after a decline updates the
-  /// row rather than stacking duplicates in the queue.
+  /// row rather than stacking duplicates in the queue. The no-account route
+  /// (NULL org_id) is held to one pending claim per address instead, by the
+  /// partial unique `venue_claims_one_pending_per_email` in SQL.
   @@unique([venue_id, org_id])
   @@index([status])
   @@index([venue_id])
   @@index([org_id])
+  @@index([onboarding_id])
 }
 
 /// A brand that appears at an event.
