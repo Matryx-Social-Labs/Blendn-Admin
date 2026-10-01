@@ -59,7 +59,12 @@ describe("the event's pages format in the event's timezone", () => {
  */
 describe("the sponsor's Placements and the Chatrooms list use the event's clock (SCRUM-496)", () => {
   it("neither formats a time in the server's or the viewer's zone", () => {
-    const files = ["app/dashboard/placements/page.tsx", "app/dashboard/chatrooms/page.tsx"]
+    // The sponsor's landing page shows the same "next placement" (review pass).
+    const files = [
+      "app/dashboard/placements/page.tsx",
+      "app/dashboard/chatrooms/page.tsx",
+      "components/dashboard/overview-sponsor.tsx",
+    ]
     const offenders = files.filter((f) => /Intl\.DateTimeFormat\(|toLocale(Date|Time)?String\(/.test(read(f)))
     expect(offenders).toEqual([])
   })
@@ -73,6 +78,8 @@ describe("the sponsor's Placements and the Chatrooms list use the event's clock 
     const rooms = read("app/dashboard/chatrooms/page.tsx")
     expect(rooms).toMatch(/timezone: true/)
     expect(rooms).toMatch(/eventClock\(room\.timezone\)\.time\(room\.end_time\)/)
+    expect(read("app/dashboard/actions.ts")).toMatch(/timezone: o\.next\.timezone/)
+    expect(read("components/dashboard/overview-sponsor.tsx")).toMatch(/eventClock\(data\.next\.timezone\)/)
   })
 })
 

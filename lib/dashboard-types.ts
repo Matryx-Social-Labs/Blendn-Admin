@@ -267,6 +267,8 @@ export interface SponsorOverview {
   next: {
     eventTitle: string
     startTime: string
+    /** The event's own zone, so the time reads on its clock (SCRUM-496). */
+    timezone: string
     ready: boolean
     blocker: string | null
   } | null
