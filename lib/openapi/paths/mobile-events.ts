@@ -53,7 +53,9 @@ registry.registerPath({
     "for. Authors are pseudonyms, the same handle the room uses; the request " +
     "count is a number and never a list of who asked. An age-restricted event's " +
     "board answers 403 `AGE_RESTRICTED` for an under-age or unknown age, before " +
-    "the RSVP/favourite gate.",
+    "the RSVP/favourite gate. Closed once the doors open (`start_time`): 403 " +
+    "\"The board closes when the doors open — the room is open instead\". Posts " +
+    "by anybody blocked either way are left out.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string() }) },
   responses: {
@@ -837,9 +839,13 @@ registry.registerPath({
     "A request is always filed against a post, and the recipient is read off " +
     "that post — so somebody who has not put themselves forward cannot be " +
     "asked at all. Same gates as posting: RSVP 'going', a complete profile, " +
-    "and room under both caps. Refused if they have already declined you on " +
-    "this post, if one of you has blocked the other, or if the doors have " +
-    "opened. A second pending request to the same post is a 409. A `message` " +
+    "and room under both caps. One ask per post, ever: any earlier ask — " +
+    "waiting, declined, withdrawn or accepted — is a 409 \"You have already " +
+    "asked — give them a moment\", the same sentence whatever became of it, so " +
+    "the refusal never tells the asker they were declined. A post by somebody " +
+    "blocked either way is the same 404 as a post that is gone. A `chat` post " +
+    "takes no requests (422); an offer at `spacesLeft: 0` is 409 \"That offer " +
+    "is full\". Closed once the doors open (403). A `message` " +
     "gets the post's moderation checks; a hit is a 422 and nothing is sent.",
   security: bearerAuth,
   request: {
@@ -870,8 +876,14 @@ registry.registerPath({
       },
     },
     ...standardErrors,
+    409: {
+      description:
+        "\"You have already asked — give them a moment\" (any earlier ask on this post, " +
+        "whatever became of it), or \"That offer is full\"",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
     422: {
-      description: "The message was refused by moderation; nothing sent",
+      description: "The message was refused by moderation, or the post is a `chat` post; nothing sent",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },
@@ -883,6 +895,12 @@ const boardRequest = z.object({
   message: z.string().nullable(),
   createdAt: z.string(),
   decidedAt: z.string().nullable(),
+  /**
+   * Still answerable: pending, its event not ended, its post not taken down.
+   * To the asker, also false once either of the two has blocked the other —
+   * their row then reads as an ask on a withdrawn post (`post.body` null).
+   */
+  live: z.boolean(),
   /** The pseudonym at that event, never the name. Accepting exchanges those. */
   counterpart: z.string(),
   event: z.object({ id: z.string(), title: z.string(), startTime: z.string() }),
@@ -902,7 +920,15 @@ registry.registerPath({
   description:
     "Not scoped to an event: a request is answered from a notification days " +
     "after the board was last opened. Pending first, then newest — a decided " +
-    "request is history and an undecided one is a person waiting.",
+    "request is history and an undecided one is a person waiting. A decline is " +
+    "never delivered: in `outgoing` a declined ask reads `status: \"pending\"`, " +
+    "`decidedAt: null`, live until it lapses with its event or post, and sorts " +
+    "with the pending ones — `declined` only ever appears in `incoming`. A " +
+    "declined ask the asker withdrew reads `withdrawn` to them and `declined` to " +
+    "the author. Asks from somebody blocked either way are left out of " +
+    "`incoming`; in `outgoing` an ask to them reads as an ask on a withdrawn " +
+    "post. Each direction lists live asks first, then settled, then lapsed, up " +
+    "to 50.",
   security: bearerAuth,
   responses: {
     200: {
@@ -1015,7 +1041,12 @@ registry.registerPath({
     "opens a pseudonymous conversation scoped to the event, marked with its " +
     "board request so the client can tell it from a match. Still possible " +
     "after the doors open: a pending request holds a slot in the asker's cap, " +
-    "so an unanswerable one would consume it for ever.",
+    "so an unanswerable one would consume it for ever. Accepting an `offer` " +
+    "with a number of seats spends one atomically; the last seat goes to " +
+    "exactly one accept and the other is 409 \"That offer is full\" (the ask " +
+    "stays pending). Withdrawing succeeds on a pending or declined ask and " +
+    "again on a withdrawn one — a decline is never delivered to the asker, " +
+    "so withdrawing one cannot be the place it lands; only an accepted ask is 409.",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string() }),
@@ -1043,5 +1074,13 @@ registry.registerPath({
       },
     },
     ...standardErrors,
+    409: {
+      description:
+        "Accept refused, the ask left pending: \"That request has already been answered\", " +
+        "\"That post was taken down\", \"That event has ended\", \"That offer is full\", or " +
+        "\"This request can no longer be accepted\" (a block either way or a closed pair — " +
+        "one answer for both). Withdraw: only an accepted ask is refused.",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
   },
 })

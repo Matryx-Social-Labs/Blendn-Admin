@@ -126,11 +126,12 @@ describe("a request cannot be sent twice", () => {
     ).rejects.toThrow()
   })
 
-  it("allows a fresh ask once the first was decided", async () => {
+  it("refuses a second ask once the first was decided — one ask per post, ever", async () => {
     /*
-     * Scoped to pending on purpose. Whether a declined request may be re-sent
-     * is the cap's decision to make, not the database's — the index only stops
-     * two live asks existing at once.
+     * It used to allow this: the index was scoped to pending, and a re-ask
+     * after a decline was the route's to refuse. That refusal was the decline
+     * delivered, so every re-ask is refused now, and the database holds it
+     * (step 6b, D-a) rather than a read the route could race.
      */
     const { eventId, author, asker, postId } = await board()
 
@@ -143,11 +144,28 @@ describe("a request cannot be sent twice", () => {
       data: { status: "declined", decided_at: new Date() },
     })
 
-    const second = await db.board_requests.create({
+    await expect(
+      db.board_requests.create({
+        data: { event_id: eventId, post_id: postId, from_user_id: asker, to_user_id: author },
+      })
+    ).rejects.toThrow()
+  })
+
+  it("keeps the asker's withdrawal of a decline on declined rows only", async () => {
+    // `asker_withdrawn_at` is the asker's half of a DECLINED ask; on any other
+    // status it would be a second, contradictory answer to "who ended it".
+    const { eventId, author, asker, postId } = await board()
+    const r = await db.board_requests.create({
       data: { event_id: eventId, post_id: postId, from_user_id: asker, to_user_id: author },
-      select: { status: true },
+      select: { id: true },
     })
-    expect(second.status).toBe("pending")
+    await expect(
+      db.board_requests.update({ where: { id: r.id }, data: { asker_withdrawn_at: new Date() } })
+    ).rejects.toThrow()
+    await db.board_requests.update({
+      where: { id: r.id },
+      data: { status: "declined", decided_at: new Date(), asker_withdrawn_at: new Date() },
+    })
   })
 
   it("refuses answering your own post", async () => {

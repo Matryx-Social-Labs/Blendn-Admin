@@ -112,6 +112,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       await severFriendship(authUser.userId, targetId, tx)
 
       /*
+       * And the bell. Their board asks leave the blocker's list at once (hidden
+       * either way), but the "Someone answered your post" line for each stayed
+       * unread, pointing at an ask that no longer shows — a ghost, and a count
+       * that would not clear. Marked read, not deleted: the row is the record
+       * that it was sent.
+       */
+      await tx.$executeRaw`
+        UPDATE "notifications" SET "read_at" = now()
+        WHERE "user_id" = ${authUser.userId}
+          AND "kind" = 'board_request'
+          AND "read_at" IS NULL
+          AND "data"->>'requestId' IN (
+            SELECT "id"::text FROM "board_requests"
+            WHERE "from_user_id" = ${targetId} AND "to_user_id" = ${authUser.userId}
+          )`
+
+      /*
        * Close the conversation, if there is one.
        *
        * Blocking left the thread sitting in both inboxes with its history fully
