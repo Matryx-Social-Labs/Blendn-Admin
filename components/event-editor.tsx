@@ -263,7 +263,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
 
   return (
     /*
-     * No `h1` and no strapline. `site-header.tsx` owns the page's only `h1` and
+     * No `h1` and no strapline. The layout's `PageHeader` owns the page's only `h1` and
      * already renders "New event" with "Publish an event. Save a draft at any
      * point." — so this rendered a SECOND `h1` saying almost the same thing,
      * and a second sentence saying exactly the same thing.

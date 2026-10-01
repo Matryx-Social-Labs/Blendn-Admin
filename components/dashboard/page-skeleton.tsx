@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
  * loading.tsx the route just shows nothing until the query returns. The shapes
  * mirror the real layout: tiles, divided rows, sections with a rule — and no
  * gutter, because `app/dashboard/layout.tsx` owns it. The old skeletons drew
- * cards, a boxed page header and a second `px-4 lg:px-6`, so every route
+ * cards, a boxed page header and a second gutter of their own, so every route
  * loaded into chrome the page then replaced.
  */
 

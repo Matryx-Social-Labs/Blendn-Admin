@@ -27,8 +27,8 @@ gates, the specialists, and a drive, before the next one starts.
 
 | Screen | Chain | Driven | Notes |
 |---|---|---|---|
-| Nav, tokens, sidebar groups | ✅ 1482a7a, 7b512ac | ✅ every drive since | `lib/dashboard-nav.ts` groups; colours back on tokens |
-| Site header (one `h1`) | ✅ f8a0ded, E17 | ✅ | `KNOWN_DOUBLE_H1` is empty |
+| Nav, tokens, sidebar groups | ✅ 1482a7a, 7b512ac; step 14 shell (mockup: the kit's `organiser/shell.jsx`) | ✅ every drive since; step 14: `e2e/dashboard-shell.spec.ts`, four roles + daniel.weber@ at 375/768/1440, axe clean on the shell | flush 248px sidebar, identity card (home org, no switcher), hosts in the kit's three blocks, admins keep six headings |
+| Top bar + PageHeader (one `h1`) | ✅ f8a0ded, E17; step 14 moved the `h1` into the content `PageHeader` (R5) | ✅ step 14: one `h1` inside `main` on every role's every destination, at three widths | 60px bar: breadcrumbs from `routeContent`, ⌘K field, Create event on `mayCreateEvents` |
 | DataTable primitive | ◐ c1ff7fb (server search), 26fe6a4 | ✅ venues | not itself a screen |
 
 ## app_admin

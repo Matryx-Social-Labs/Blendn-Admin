@@ -1,338 +1,119 @@
 "use client"
 
-import { Suspense, useMemo } from "react"
+import { Fragment } from "react"
+import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useSession } from "next-auth/react"
+import { IconChevronRight, IconPlus } from "@tabler/icons-react"
 
 import { AccountMenu } from "@/components/account-menu"
 import { CommandPalette, CommandPaletteTrigger } from "@/components/command-palette"
-import { DateRangeControl } from "@/components/date-range-control"
+import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { breadcrumbsFor } from "@/lib/dashboard-route-content"
+import { cn } from "@/lib/utils"
 
 /**
- * The top bar.
- *
- * Left: the sidebar toggle, then the page's single `h1` and a one-line
- * description. Right: the global date range, then a compact account menu.
- *
- * Three things were removed rather than restyled:
- *
- *   - a **role pill**, because the role already appears in the sidebar. Between
- *     the sidebar, that pill, the account trigger and the account menu, the
- *     role was on screen four times.
- *   - a **date chip** showing today's date. It was not a control, not a filter,
- *     and computed with `new Date()` during client render — a hydration
- *     mismatch waiting to happen. A real date-range control occupies that space
- *     now, and every chart and table on the page reads it.
- *   - `NavUser`, a `SidebarMenu` component built for the 288px sidebar footer,
- *     which rendered a three-line block inside a horizontal header.
+ * What ⌘K can find, said in the field. A host's search returns their events
+ * (and a venue owner's venues) and never people — `/api/search` is admin-only
+ * for accounts — so promising people to a host would be a field that lies.
  */
-
-/** Pages whose content has no time dimension hide the range control. */
-/**
- * The routes whose numbers actually change when the range does.
- *
- * An allow-list, because the deny-list it replaces defaulted the wrong way.
- * `TIMELESS` named twenty screens with nothing to filter and showed the control
- * everywhere else — so a five-button control rendered on **19 routes that read
- * no range at all**, including `/dashboard/users`, `/dashboard/events`,
- * `/dashboard/moderation` and every `[id]` page, none of which could be in an
- * exact-match Set anyway.
- *
- * Measured by driving it: `/dashboard/users` at `?range=today` and
- * `?range=90d` renders four byte-identical tiles, each already labelled with
- * its own fixed window — "26 new this month", "vs last month". Clicking 90d
- * there does nothing and says nothing, which leaves an admin to conclude either
- * that the numbers are wrong or that the click missed.
- *
- * Three pages call `resolveRange`. Inverting the default means a new screen
- * starts without the control rather than with a broken one, and
- * `__tests__/range-control-scope.test.ts` fails the build when this list and
- * the pages that read a range stop agreeing.
- */
-const RANGED = new Set(["/dashboard", "/dashboard/reports"])
-
-/** `/dashboard/venues/<id>`, which scopes its event list to the range. */
-const RANGED_VENUE_DETAIL = /^\/dashboard\/venues\/[^/]+$/
-
-const routeContent: Record<string, { title: string; description: string }> = {
-  "/dashboard/moderation": {
-    title: "Moderation",
-    description: "Flags and reports across the platform, oldest first.",
-  },
-  "/dashboard/events": {
-    title: "Events",
-    description: "Every event on the platform — search, filter, and drill in.",
-  },
-  "/dashboard/events/new": {
-    title: "New event",
-    description: "Publish an event. Save a draft at any point.",
-  },
-  /*
-   * Both of these need an exact entry, and the reason is the fallback below.
-   *
-   * `/dashboard/events/curate` matches `startsWith("/dashboard/events/")`, so
-   * without this it inherited the event *detail* header — the curation screen
-   * announced itself as "Event · Setup, performance, and what happened on the
-   * night." `/dashboard/claims` matched nothing and fell to the generic
-   * "Overview · Live reporting across growth, attendance, and event activity."
-   *
-   * Both pages carry an `h2` and a comment saying this file owns their only
-   * `h1`, which is what made it invisible: the screens looked right, and the
-   * one element a screen reader announces first named a different screen.
-   */
-  "/dashboard/events/curate": {
-    title: "Curation",
-    description: "Events we added from public listings — and which of them nobody could get into.",
-  },
-  "/dashboard/claims": {
-    title: "Claims",
-    description: "Somebody wants ownership of an event or a venue. Decide, oldest first.",
-  },
-  /*
-   * Four more the guard found once it existed, three of them older than this
-   * screen. `/dashboard/leads` and `/dashboard/venues/new` were the worst of
-   * them: both render their own `h1`, so the page had *two* — a correct one in
-   * the body and "Overview" above it.
-   */
-  "/dashboard/claims/venues": {
-    title: "Claims",
-    description: "Somebody wants ownership of an event, a venue or a brand. Decide, oldest first.",
-  },
-  "/dashboard/claims/brands": {
-    title: "Claims",
-    description: "Somebody wants ownership of an event, a venue or a brand. Decide, oldest first.",
-  },
-  "/dashboard/moderation/reports": {
-    title: "Reports",
-    description: "What people reported about each other, and what was decided.",
-  },
-  "/dashboard/venues/new": {
-    title: "Add a venue",
-    description: "A permanent place. Events attach to it; its pin is the one they inherit.",
-  },
-  "/dashboard/attendees": {
-    title: "Attendees",
-    description: "Who comes back, who doesn't show. Labels only, never names.",
-  },
-  /*
-   * "Venues", not "My venues": this route now serves two roles. An owner sees
-   * their utilisation view and an admin sees the record index, and the h1
-   * cannot say "my" to the one who owns none of them.
-   *
-   * The role-specific wording lives in `dashboard-nav.ts` instead, which is
-   * already filtered per role — so an owner still reads "My venues" in the
-   * sidebar, where saying it is both true and useful.
-   */
-  "/dashboard/venues": {
-    title: "Venues",
-    description: "Who owns each, and what runs there.",
-  },
-  // Pre-existing gaps, found by __tests__/nav-routes-exist.test.ts: both had
-  // nav entries and no title, so both rendered with the document's only h1
-  // reading "Overview". Copy taken verbatim from lib/dashboard-nav.ts so the
-  // sidebar and the heading cannot describe the same screen differently.
-  "/dashboard/leads": {
-    title: "Leads",
-    description: "Demo requests from the organiser landing page. Oldest untouched first.",
-  },
-  "/dashboard/venue-claims": {
-    title: "Venue claims",
-    description:
-      "Ownership requests. Approving one hands over the events other organisers hold there.",
-  },
-  "/dashboard/charges": {
-    title: "Charges",
-    description: "What each placement costs, what has been agreed, and what has been paid.",
-  },
-  "/dashboard/creative-review": {
-    title: "Creative review",
-    description: "Sponsored copy waiting to be read by a person. Oldest first.",
-  },
-  "/dashboard/sponsors": {
-    title: "Brands",
-    description: "Every brand — who owns each, which are unclaimed, and possible duplicates.",
-  },
-  "/dashboard/sponsor-claims": {
-    title: "Brand claims",
-    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
-  },
-  "/dashboard/placements": {
-    title: "Placements",
-    description: "Where your brand appears, and what is waiting on you.",
-  },
-  "/dashboard/brand": {
-    title: "Brand",
-    description: "Your name, logo and website, as attendees see them.",
-  },
-  "/dashboard/chatrooms": {
-    title: "Chatrooms",
-    description: "Every room whose chat is open — live events and post-event feedback windows.",
-  },
-  "/dashboard/users": {
-    title: "Users",
-    description: "Accounts, onboarding, and reachability.",
-  },
-  "/dashboard/organisers": {
-    title: "Organisers",
-    description: "The supply side: who publishes, and how concentrated it is.",
-  },
-  /*
-   * "Venue owners", not "Venues" — accounts, not records.
-   *
-   * This route rendered an h1 reading "Venues" over a list of *people*, and
-   * described itself as "every venue record", which is the screen that did not
-   * exist until `/dashboard/venues` grew an admin index. Two routes then shared
-   * one heading and neither matched its contents.
-   */
-  "/dashboard/venue-owners": {
-    title: "Venue owners",
-    description: "The people who run venues — accounts, not the venue records.",
-  },
-  "/dashboard/onboarding": {
-    title: "Applications",
-    description: "Host applications awaiting review. Every one is read by a person.",
-  },
-  "/dashboard/organisations": {
-    title: "Organisations",
-    description: "Every host on the platform — members, domains, and suspension.",
-  },
-  "/dashboard/organisation": {
-    title: "Your organisation",
-    description: "Colleagues, invites, and domain verification.",
-  },
-  "/dashboard/categories": {
-    title: "Categories",
-    description: "The two-level taxonomy events are filtered by on the app.",
-  },
-  "/dashboard/amenities": {
-    title: "Amenities",
-    description:
-      "What an event offers. Retiring one stops it being offered for new events without rewriting the ones that already list it.",
-  },
-  "/dashboard/reports": {
-    title: "Reports",
-    description: "Download events, attendance, ratings and moderation as CSV.",
-  },
-  "/dashboard/audit": {
-    title: "Audit log",
-    description: "Who did what, when. Written automatically and never editable.",
-  },
-  "/dashboard/settings": {
-    title: "Settings",
-    description: "Your account, password, and where you are signed in.",
-  },
+function searchPlaceholder(role: string): string {
+  if (role === "app_admin") return "Search events, people…"
+  if (role === "venue_owner") return "Search events, venues…"
+  return "Search events…"
 }
 
-export function SiteHeader() {
+/**
+ * The top bar: 60px, sticky, on every dashboard route (the kit's `Topbar`).
+ *
+ * Breadcrumbs on the left, then search, then Create event, then the account.
+ * The page's name is not here any more: it is the `h1` in the content area's
+ * `PageHeader` (R5), and the last crumb is the same word from the same map.
+ *
+ * The sidebar toggle stays at every width. Below 768 it is the only way to the
+ * nav (a sheet); above, it is how a 768px screen gets its 248px back, and
+ * without it ⌘B would hide the sidebar with nothing on screen to bring it back.
+ *
+ * Everything is passed in from the server layout rather than read from
+ * `useSession`, whose first render has no session — the role-dependent copy
+ * and the Create pill would otherwise arrive after paint.
+ */
+export function SiteHeader({
+  role,
+  user,
+  org,
+  canCreate,
+}: {
+  role: string
+  user: { name: string; email: string; image?: string | null }
+  /** The first breadcrumb: the organisation acted for, or Blend'n for admins. */
+  org: string
+  /** `mayCreateEvents` (SCRUM-145): the pill only for an account that could save one. */
+  canCreate: boolean
+}) {
   const pathname = usePathname()
-  const { data: session } = useSession()
-  const role = session?.user?.role
-
-  const content = useMemo(() => {
-    // The overview asks a different question per role, as the design does — the
-    // three dashboards are genuinely different screens and a shared subtitle
-    // would describe none of them.
-    if (pathname === "/dashboard") {
-      return {
-        title: "Overview",
-        description:
-          role === "app_admin"
-            ? "What is waiting on you, whether the loop closes, and who is supplying it."
-            : role === "organizer"
-              ? "Your next event first — pacing, then what your past events say."
-              : role === "sponsor"
-                ? // Driven as the sponsor: the venue owner's line rendered here.
-                  "What is running, what is waiting on you, and who your sends reached."
-                : "Each venue on its own terms — utilisation, ratings, bookings.",
-      }
-    }
-
-    // The events list is scoped by role — every event for an admin, an
-    // organiser's own, a venue owner's venues — and "every event on the
-    // platform" was read by a venue owner above a list of fourteen at theirs.
-    if (pathname === "/dashboard/events" && role !== "app_admin") {
-      return {
-        title: "Events",
-        description:
-          role === "venue_owner"
-            ? "Every event at your venues — search, filter, and drill in."
-            : "Every event your organisation runs — search, filter, and drill in.",
-      }
-    }
-
-    const exact = routeContent[pathname]
-    if (exact) return exact
-
-    if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/messaging")) {
-      return {
-        title: "Room",
-        description: "What is being said, and what needs you.",
-      }
-    }
-    if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/edit")) {
-      return { title: "Edit event", description: "Changes go live as soon as you save." }
-    }
-    if (pathname.startsWith("/dashboard/events/")) {
-      return { title: "Event", description: "Setup, performance, and what happened on the night." }
-    }
-    if (pathname.startsWith("/dashboard/organisers/")) {
-      return { title: "Organiser", description: "One host account and the events it created." }
-    }
-    if (pathname.startsWith("/dashboard/venue-owners/")) {
-      return { title: "Venue owner", description: "One owner account and the events it created." }
-    }
-    if (pathname.startsWith("/dashboard/venues/") && pathname.endsWith("/claim")) {
-      return { title: "Claim a venue", description: "Reviewed by an admin. Approval links every event held there to you." }
-    }
-    if (pathname.startsWith("/dashboard/venues/") && pathname !== "/dashboard/venues/new") {
-      return { title: "Venue", description: "One building — who is in it now, who books it, and its record." }
-    }
-
-    return {
-      title: "Overview",
-      description: "Live reporting across growth, attendance, and event activity.",
-    }
-  }, [pathname, role])
-
-  const showRange =
-    RANGED.has(pathname) ||
-    // `/dashboard/venues/new` matches the shape and is a form, not a report.
-    (RANGED_VENUE_DETAIL.test(pathname) && pathname !== "/dashboard/venues/new")
+  const crumbs = breadcrumbsFor(pathname, role, org)
+  const placeholder = searchPlaceholder(role)
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-xl transition-[width,height] ease-linear">
-      <div className="flex min-h-14 w-full items-center gap-3.5 px-4 py-2 lg:px-6">
-        <SidebarTrigger className="-ml-1 size-[34px] shrink-0 rounded-lg border border-border" />
+    // A container, because what fits is the bar's width, not the window's: at
+    // 768 the sidebar leaves it 520px, the same as a 520px phone would have.
+    <header className="@container/topbar sticky top-0 z-20 flex h-[60px] shrink-0 items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur-xl md:px-8">
+      <SidebarTrigger className="-ml-1.5 size-8 shrink-0" />
 
-        {/*
-          The single `h1` on the page, holding the page *name*. It used to be
-          the description sentence, which put the wrong string in the document's
-          only landmark heading.
-        */}
-        <div className="flex min-w-0 flex-1 flex-col gap-px">
-          <h1 className="truncate text-[1.25rem] font-bold leading-[1.25]">{content.title}</h1>
-          <p className="truncate text-[0.78125rem] text-muted-foreground">{content.description}</p>
-        </div>
+      <nav aria-label="Breadcrumb" className="min-w-0 flex-1 overflow-hidden">
+        <ol className="flex min-w-0 items-center gap-2 text-[0.8125rem]">
+          {crumbs.map((crumb, i) => {
+            const last = i === crumbs.length - 1
+            // In a narrow bar only the page you are on: the trail would push
+            // the search and the account off the edge.
+            const hideOnPhone = !last && "@max-xl/topbar:hidden"
+            return (
+              <Fragment key={`${i}-${crumb.label}`}>
+                {i > 0 ? (
+                  // Hidden with the trail: in a narrow bar there is one crumb
+                  // and nothing to separate.
+                  <li aria-hidden="true" className="shrink-0 text-faint-foreground @max-xl/topbar:hidden">
+                    <IconChevronRight className="size-3.5" />
+                  </li>
+                ) : null}
+                <li className={cn("min-w-0 truncate", !last && "max-w-48", hideOnPhone)}>
+                  {crumb.href ? (
+                    <Link
+                      href={crumb.href}
+                      className="whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {crumb.label}
+                    </Link>
+                  ) : (
+                    <span aria-current="page" className="truncate whitespace-nowrap text-foreground">
+                      {crumb.label}
+                    </span>
+                  )}
+                </li>
+              </Fragment>
+            )
+          })}
+        </ol>
+      </nav>
 
-        <CommandPalette />
-        <CommandPaletteTrigger className="hidden @2xl/main:inline-flex" />
+      <CommandPalette placeholder={placeholder} />
+      <CommandPaletteTrigger placeholder={placeholder} />
 
-        {showRange ? (
-          // useSearchParams needs a Suspense boundary or the whole route opts
-          // out of static rendering and the build warns.
-          <Suspense fallback={<div className="hidden h-9 w-[250px] @3xl/main:block" />}>
-            <DateRangeControl className="hidden @3xl/main:inline-flex" />
-          </Suspense>
-        ) : null}
+      {canCreate ? (
+        <Button asChild pill icon={<IconPlus aria-hidden />} className="@max-3xl/topbar:px-2.5">
+          <Link href="/dashboard/events/new">
+            <span className="@max-3xl/topbar:sr-only">Create event</span>
+          </Link>
+        </Button>
+      ) : null}
 
-        <AccountMenu
-          name={session?.user?.name ?? "Blend'n"}
-          email={session?.user?.email ?? ""}
-          image={session?.user?.image}
-          showOrganisation={role === "organizer" || role === "venue_owner"}
-        />
-      </div>
+      <AccountMenu
+        name={user.name}
+        email={user.email}
+        image={user.image}
+        showOrganisation={role === "organizer" || role === "venue_owner"}
+      />
     </header>
   )
 }

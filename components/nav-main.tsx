@@ -43,15 +43,14 @@ export function NavMain({
   const pathname = usePathname()
 
   return (
-    <SidebarGroup className="px-2 py-1">
+    <SidebarGroup className="p-0">
       {label ? (
         /*
-          Same type treatment as the role label in the header — 0.6875rem,
-          uppercase, wide tracking, faint. A second, louder style here would
-          compete with the destinations themselves, which are the thing being
-          scanned.
+          The kit's nav label: 0.6875rem, uppercase, wide tracking, faint. A
+          louder style here would compete with the destinations themselves,
+          which are the thing being scanned.
         */
-        <div className="px-2.5 pb-1 pt-2 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint-foreground">
+        <div className="px-2.5 pb-1.5 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint-foreground">
           {label}
         </div>
       ) : null}
@@ -71,7 +70,7 @@ export function NavMain({
                   isActive={isActive}
                   tooltip={item.description}
                   className={cn(
-                    "h-9 rounded-md px-2.5 transition-colors",
+                    "h-9 gap-2.5 rounded-md px-2.5 transition-colors",
                     isActive
                       ? "bg-accent font-medium text-foreground"
                       : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -83,7 +82,7 @@ export function NavMain({
                         className={cn("size-[18px] shrink-0", isActive && "text-primary")}
                       />
                     ) : null}
-                    <span className="flex-1 truncate text-[0.8125rem]">{item.title}</span>
+                    <span className="flex-1 truncate text-[0.84375rem]">{item.title}</span>
                     {badge ? (
                       <span className="shrink-0 rounded-full bg-destructive px-1.5 py-0.5 text-[0.6875rem] font-bold leading-none text-destructive-foreground tabular-nums">
                         {badge > 99 ? "99+" : badge}

@@ -50,7 +50,7 @@ const GROUP_LABEL = {
   venue: "Venues",
 } as const
 
-export function CommandPalette() {
+export function CommandPalette({ placeholder }: { placeholder: string }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -167,7 +167,7 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKey}
-            placeholder="Search events, organisations, venues…"
+            placeholder={placeholder}
             aria-label="Search"
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-faint-foreground"
           />
@@ -233,24 +233,42 @@ export function CommandPalette() {
   )
 }
 
-/** The visible affordance — nobody discovers ⌘K from nothing. */
-export function CommandPaletteTrigger({ className }: { className?: string }) {
+/**
+ * The visible affordance — nobody discovers ⌘K from nothing.
+ *
+ * Shaped like the field it opens (the kit's 240px search box), and on screen at
+ * every width: in a narrow top bar it is the glyph alone, with the words kept
+ * for a screen reader so the button is named by what it says. Sized by the top
+ * bar's container (`@container/topbar` in `site-header.tsx`), not the window.
+ */
+export function CommandPaletteTrigger({
+  placeholder,
+  className,
+}: {
+  placeholder: string
+  className?: string
+}) {
   return (
     <button
+      type="button"
       onClick={() =>
         document.dispatchEvent(
           new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
         )
       }
-      aria-label="Search"
       className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-lg border border-border-strong bg-card px-2.5 text-[0.78125rem] text-muted-foreground transition-colors hover:text-foreground",
+        "inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-input bg-input/30 px-2.5 text-[0.8125rem] text-faint-foreground transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @3xl/topbar:w-60",
         className
       )}
     >
-      <IconSearch className="size-3.5" />
-      <span>Search</span>
-      <kbd className="rounded border border-border px-1 py-px text-[0.625rem]">⌘K</kbd>
+      <IconSearch aria-hidden className="size-3.5 shrink-0" />
+      <span className="flex-1 truncate text-left @max-3xl/topbar:sr-only">{placeholder}</span>
+      <kbd
+        aria-hidden
+        className="rounded border border-border px-1.5 py-px text-[0.6875rem] @max-3xl/topbar:hidden"
+      >
+        ⌘K
+      </kbd>
     </button>
   )
 }

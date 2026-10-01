@@ -1,46 +1,57 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs"
 import { join, relative, sep } from "path"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+
+import { PageHeader } from "@/components/dashboard/page-header"
+import { breadcrumbsFor, routeContent, routeHeading } from "@/lib/dashboard-route-content"
 
 /**
- * Every dashboard route names itself.
+ * Every dashboard page has exactly one `h1`, it names the page, and it is
+ * inside `main`.
  *
- * `components/site-header.tsx` owns the only `h1` on every dashboard page —
- * both curation screens carry a comment saying so, and two other pages used to
- * render a second one. That makes the header's title the first thing a screen
- * reader announces, and the last thing anyone thinks to check, because the body
- * of the page looks correct either way.
+ * ## Where the h1 lives (R5)
  *
- * It resolves that title from an exact `routeContent` lookup, then falls
- * through to two prefix rules and finally to a generic "Overview". Both of the
- * fallbacks are wrong for a route that simply forgot an entry:
+ * The layout renders `RoutePageHeader` as the first thing in `<main>`, and it
+ * renders `PageHeader`, which holds the `h1`. The top bar shows breadcrumbs and
+ * no heading. Both read `lib/dashboard-route-content.ts`, so the last crumb and
+ * the heading are the same word.
+ *
+ * It used to be the top bar's `h1`, outside `main`: a screen reader's "jump to
+ * main" landed past the page's name, and the title sat a hairline away from the
+ * actions it governs.
+ *
+ * ## Every static route names itself
+ *
+ * The title is an exact `routeContent` lookup, then two prefix rules, then a
+ * generic "Overview". Both fallbacks are wrong for a route that simply forgot
+ * an entry:
  *
  *   - `/dashboard/events/curate` matched `startsWith("/dashboard/events/")`,
  *     so the curation screen announced itself as **"Event — Setup, performance,
- *     and what happened on the night."** — the event *detail* header, on a
- *     screen that is not about one event.
+ *     and what happened on the night."**
  *   - `/dashboard/claims`, `/dashboard/claims/venues`,
  *     `/dashboard/moderation/reports`, `/dashboard/leads` and
- *     `/dashboard/venues/new` matched nothing and fell to **"Overview — Live
- *     reporting across growth, attendance, and event activity."**
+ *     `/dashboard/venues/new` matched nothing and fell to **"Overview"**.
  *
- * None of that is visible to `tsc`, to a unit test, or to `next build`. It was
- * found by opening the page in a browser, which is the one thing the loop this
- * project runs does not do — so this test is what stops the next route from
- * repeating it.
+ * None of that is visible to `tsc`, to a unit test, or to `next build`. So the
+ * rule is blunt: **a static dashboard route must have an exact entry.** Dynamic
+ * routes (`[id]`) are what the prefix rules exist for and are exempt. There is
+ * no allowlist, because an allowlist here would be a record of pages that
+ * announce themselves incorrectly on purpose.
  *
- * The rule is deliberately blunt: **a static dashboard route must have an exact
- * entry.** Dynamic routes (`[id]`) are what the prefix fallbacks exist for and
- * are exempt. There is no allowlist, because an allowlist here would be a
- * record of pages that announce themselves incorrectly on purpose.
+ * The browser half — one `h1` on the rendered page, inside `main`, for every
+ * role — is `e2e/dashboard-shell.spec.ts`.
  */
 
 const ROOT = join(__dirname, "..")
 const DASHBOARD = join(ROOT, "app", "dashboard")
+const read = (p: string) => readFileSync(join(ROOT, p), "utf8")
 
 /** Routes that redirect before rendering, so no header is ever shown. */
 const REDIRECT_ONLY = new Set(["/dashboard/venue-claims"])
 
-/** The overview branches on role inside the component, above the lookup. */
+/** The overview branches on role inside `routeHeading`, above the lookup. */
 const RESOLVED_IN_CODE = new Set(["/dashboard"])
 
 function staticRoutes(dir: string, acc: string[] = []): string[] {
@@ -58,18 +69,19 @@ function staticRoutes(dir: string, acc: string[] = []): string[] {
   return acc
 }
 
-const header = readFileSync(join(ROOT, "components", "site-header.tsx"), "utf8")
+/** Every page, dynamic ones included: they get the layout's h1 too. */
+function allPages(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) allPages(full, acc)
+    else if (entry === "page.tsx") acc.push(full)
+  }
+  return acc
+}
 
-/**
- * Keys of the `routeContent` map, read from source rather than imported — the
- * module is a client component and pulls in `next-auth/react`.
- */
-const entries = new Set(
-  Array.from(header.matchAll(/"(\/dashboard[^"]*)":\s*\{/g), (m) => m[1])
-)
-
-describe("every static dashboard route has a header title", () => {
+describe("every static dashboard route has a heading", () => {
   const routes = staticRoutes(DASHBOARD).sort()
+  const entries = new Set(Object.keys(routeContent))
 
   it("finds the routes at all", () => {
     // Guards the walker itself: a broken walk would make the suite below
@@ -77,9 +89,6 @@ describe("every static dashboard route has a header title", () => {
     expect(routes).toContain("/dashboard/events/curate")
     expect(routes).toContain("/dashboard/claims")
     expect(routes.length).toBeGreaterThan(15)
-  })
-
-  it("parsed the route map at all", () => {
     expect(entries.size).toBeGreaterThan(15)
   })
 
@@ -94,50 +103,72 @@ describe("the fallbacks stay generic, so a missing entry stays wrong", () => {
     // If the fallback ever gets clever -- deriving a title from the path, say --
     // the suite above stops meaning anything, because every route would get a
     // plausible title and none would be reviewed.
-    expect(header).toContain('title: "Overview"')
+    expect(routeHeading("/dashboard/not-a-route", "organizer").title).toBe("Overview")
   })
 })
 
-describe("site-header owns the only h1", () => {
-  /**
-   * A ratchet, not a pass: these five render their own `h1` *as well as* the
-   * header's, so a screen reader announces two. That predates the curation work
-   * and fixing nine files (five static, four dynamic) does not belong in it —
-   * but the list may only shrink, which is why the second assertion below
-   * fails on a stale entry.
-   *
-   * Two pages left this list already: `/dashboard/leads` and
-   * `/dashboard/venues/new` were demoted to `h2` in the same change that gave
-   * them a header entry, because a page with a wrong `h1` *and* a right one is
-   * the confusing case, not merely the untidy one.
-   */
-  /*
-   * Empty, and the staleness assertion below is what keeps it that way.
-   *
-   * All four were the same shape: a header card rendering the title
-   * `site-header.tsx` already renders, so a screen reader announced the page
-   * twice. Removing them also took a line of prose off the events screen
-   * describing what the screen is for, which is the density this dashboard was
-   * asked to stop adding.
-   */
-  const KNOWN_DOUBLE_H1: string[] = []
+describe("the breadcrumbs and the heading are one source", () => {
+  it("ends the trail on the page's own heading, unlinked", () => {
+    for (const [path, role] of [
+      ["/dashboard/events/curate", "app_admin"],
+      ["/dashboard/events/e1/messaging", "organizer"],
+      ["/dashboard/venues/v1/claim", "venue_owner"],
+      ["/dashboard/organisation", "sponsor"],
+    ] as const) {
+      const crumbs = breadcrumbsFor(path, role, "Org")
+      expect(crumbs.at(-1)).toEqual({ label: routeHeading(path, role).title })
+    }
+  })
 
-  const pages = staticRoutes(DASHBOARD)
+  it("starts with the organisation, linking to the overview", () => {
+    expect(breadcrumbsFor("/dashboard/events/e1", "organizer", "Indie Collective")).toEqual([
+      { label: "Indie Collective", href: "/dashboard" },
+      { label: "Events", href: "/dashboard/events" },
+      { label: "Event" },
+    ])
+  })
+
+  it("does not repeat a level that names the same screen", () => {
+    expect(breadcrumbsFor("/dashboard/claims/venues", "app_admin", "Blend'n")).toEqual([
+      { label: "Blend'n", href: "/dashboard" },
+      { label: "Claims" },
+    ])
+  })
+})
+
+describe("the content area owns the only h1", () => {
+  it("PageHeader renders exactly one h1, holding the title", () => {
+    const html = renderToStaticMarkup(
+      createElement(PageHeader, { title: "Chatrooms", description: "Every open room." })
+    )
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1)
+    expect(html).toMatch(/<h1[^>]*>Chatrooms<\/h1>/)
+  })
+
+  it("the layout puts the route's PageHeader inside main", () => {
+    const layout = read("app/dashboard/layout.tsx")
+    const main = layout.match(/<main[\s>][\s\S]*?<\/main>/)
+    expect(main).not.toBeNull()
+    expect(main![0]).toContain("<RoutePageHeader")
+  })
+
+  it("the top bar renders no heading", () => {
+    expect(read("components/site-header.tsx")).not.toMatch(/<h1[\s>]|<PageHeader[\s>]/)
+  })
 
   /**
    * The page file AND the local components it renders, one hop.
    *
    * This read `page.tsx` alone, and `/dashboard/events/new` rendered a second
    * `h1` reading "Create Event" from `components/event-editor.tsx` — one import
-   * away, invisible to the guard, beside a header already saying "New event".
+   * away, invisible to the guard. One hop rather than a full graph walk: a
+   * page's own header lives in the component the page renders, not four levels
+   * down.
    *
-   * One hop rather than a full graph walk: a page's own header lives in the
-   * component the page renders, not four levels down, and an unbounded walk
-   * would start reading shared primitives whose `h1` (if any) is not this
-   * page's problem.
+   * `<PageHeader` counts as an h1. Until a page can tell the layout to stand
+   * its header down, a page rendering its own would make two.
    */
-  function ownAndImported(route: string): string[] {
-    const file = join(ROOT, "app", route.slice(1), "page.tsx")
+  function ownAndImported(file: string): string[] {
     const src = readFileSync(file, "utf8")
     const out = [src]
     for (const m of src.matchAll(/from\s+"@\/(components\/[\w./-]+)"/g)) {
@@ -152,28 +183,16 @@ describe("site-header owns the only h1", () => {
     return out
   }
 
-  it.each(pages.filter((r) => !KNOWN_DOUBLE_H1.includes(r)))(
-    "%s renders no h1 of its own",
-    (route) => {
-      for (const src of ownAndImported(route)) {
-        expect(src).not.toMatch(/<h1[\s>]/)
-      }
-    }
-  )
+  const pages = allPages(DASHBOARD).map((f) => relative(ROOT, f))
 
-  it("lists no route that has since been fixed", () => {
-    /*
-     * Delete the entry when you fix the page. A ratchet nobody prunes becomes
-     * an allowlist, and this repo has already paid for one of those in a merge.
-     *
-     * Written as one assertion over the list rather than `it.each`, which
-     * throws on an empty array — so the moment the list was finally emptied,
-     * the test that guards it became the only failure. A ratchet should not
-     * break when it reaches zero; that is the state it exists to reach.
-     */
-    const stale = KNOWN_DOUBLE_H1.filter(
-      (route) => !/<h1[\s>]/.test(readFileSync(join(ROOT, "app", route.slice(1), "page.tsx"), "utf8"))
-    )
-    expect(stale).toEqual([])
+  it("found the pages, dynamic ones included", () => {
+    expect(pages).toContain(join("app", "dashboard", "events", "[id]", "page.tsx"))
+    expect(pages.length).toBeGreaterThan(30)
+  })
+
+  it.each(pages)("%s renders no h1 of its own", (page) => {
+    for (const src of ownAndImported(join(ROOT, page))) {
+      expect(src).not.toMatch(/<h1[\s>]|<PageHeader[\s>]/)
+    }
   })
 })

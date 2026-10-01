@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from "fs"
 import { join, relative, sep } from "path"
 
+import { RANGED, showsRange } from "@/lib/dashboard-route-content"
+
 /**
  * The date-range control renders exactly where a range is read.
  *
@@ -48,21 +50,11 @@ function dashboardRoutes(): { route: string; readsRange: boolean }[] {
   return out
 }
 
-const HEADER = stripComments(
-  readFileSync(join(ROOT, "components", "site-header.tsx"), "utf8")
-)
-
-/** The literal routes in `RANGED`, plus the one pattern beside it. */
-function declaredRanged(): { exact: string[]; pattern: RegExp | null } {
-  const set = HEADER.match(/const RANGED = new Set\(\[([\s\S]*?)\]\)/)
-  const exact = set ? [...set[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : []
-  const pat = HEADER.match(/const RANGED_VENUE_DETAIL = (\/.+\/)\s*$/m)
-  return { exact, pattern: pat ? new RegExp(pat[1].slice(1, -1)) : null }
-}
-
 describe("the range control renders only where a range is read", () => {
   const routes = dashboardRoutes()
-  const { exact, pattern } = declaredRanged()
+  // A dynamic segment stands in for any id, so `/dashboard/venues/[id]` asks
+  // what `/dashboard/venues/<id>` gets.
+  const shown = (route: string) => showsRange(route.replace(/\[\w+\]/g, "x"))
 
   it("found both lists, so the assertions below are not vacuous", () => {
     /*
@@ -71,16 +63,11 @@ describe("the range control renders only where a range is read", () => {
      * exists to prevent in the product.
      */
     expect(routes.length).toBeGreaterThan(20)
-    expect(exact.length).toBeGreaterThan(0)
-    expect(pattern).not.toBeNull()
+    expect(RANGED.size).toBeGreaterThan(0)
     expect(routes.some((r) => r.readsRange)).toBe(true)
   })
 
   it("shows it on every page that reads a range", () => {
-    const shown = (route: string) =>
-      exact.includes(route) ||
-      (pattern!.test(route.replace(/\[\w+\]/g, "x")) && route !== "/dashboard/venues/new")
-
     const missing = routes.filter((r) => r.readsRange && !shown(r.route)).map((r) => r.route)
     expect(missing).toEqual([])
   })
@@ -90,11 +77,16 @@ describe("the range control renders only where a range is read", () => {
      * The direction that was broken. Nineteen routes rendered a control that
      * changed nothing on them.
      */
-    const shown = (route: string) =>
-      exact.includes(route) ||
-      (pattern!.test(route.replace(/\[\w+\]/g, "x")) && route !== "/dashboard/venues/new")
-
     const spurious = routes.filter((r) => !r.readsRange && shown(r.route)).map((r) => r.route)
     expect(spurious).toEqual([])
+  })
+
+  it("and the page header is what asks", () => {
+    // The lists above agree with each other; this is what makes them the
+    // control's rule rather than a rule nothing reads.
+    const header = stripComments(
+      readFileSync(join(ROOT, "components", "dashboard", "page-header.tsx"), "utf8")
+    )
+    expect(header).toMatch(/showsRange\(pathname\) \?\s*\(?\s*<Suspense[\s\S]*?<DateRangeControl/)
   })
 })

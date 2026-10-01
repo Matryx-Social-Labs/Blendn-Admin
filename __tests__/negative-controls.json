@@ -239,9 +239,9 @@
     },
     "create-event-offered-only-to-publishers.test.ts": {
       "guards": "/events/new redirects a non-publisher to /dashboard/organisation, the Events page and the organiser Overview both take canCreate from mayCreateEvents, and the Overview swaps both of its Create-event buttons (SCRUM-145)",
-      "mutation": "M2: the /events/new redirect replaced by `void 0`. M3: the Overview's first `createAction ??` dropped.",
-      "observed": "M2: 1 failing of 3. M3: 1 failing of 3 (one of the two buttons no longer swaps).",
-      "date": "2026-09-25"
+      "mutation": "M2: the /events/new redirect replaced by `void 0`. M3: the Overview's first `createAction ??` dropped. Step 14 (the top bar's Create event pill on every screen): M4 `{canCreate ? (` replaced by `{true ? (` in components/site-header.tsx.",
+      "observed": "M2: 1 failing of 3. M3: 1 failing of 3 (one of the two buttons no longer swaps). M4: 1 failing of 4 ('the top bar's Create event pill is offered only when mayCreateEvents says so'); reverted, 4 of 4.",
+      "date": "2026-10-01"
     },
     "may-create-events.itest.ts": {
       "guards": "mayCreateEvents: yes for an admin and an organiser in a live organisation; no for an organiser in no organisation, a member of a suspended one, or an attendee (SCRUM-145)",
@@ -388,10 +388,10 @@
       "date": "2026-09-05"
     },
     "dashboard-header-title.test.ts": {
-      "guards": "every static dashboard route has an exact routeContent entry; site-header owns the only h1",
-      "mutation": "Delete the \"/dashboard/events/curate\" entry from routeContent; separately, add an <h1> to app/dashboard/claims/venues/page.tsx; separately, demote chatrooms' h1 without pruning KNOWN_DOUBLE_H1",
-      "observed": "1 failing each of the three: the route suite, the ownership suite, and the staleness suite",
-      "date": "2026-08-24"
+      "guards": "every static dashboard route has an exact routeContent entry (lib/dashboard-route-content.ts); the h1 lives in the content area (R5, step 14): the layout renders RoutePageHeader inside <main>, PageHeader renders exactly one h1, the top bar renders none, and no page (dynamic ones included) or component it imports renders an <h1> or a <PageHeader> of its own; the breadcrumbs end on the same heading",
+      "mutation": "Step 14 re-run after the move. A: delete the \"/dashboard/events/curate\" entry from routeContent. B: add an <h1> to app/dashboard/claims/venues/page.tsx. C: move <RoutePageHeader> out of <main> in app/dashboard/layout.tsx, above it. D: add an <h1> to components/site-header.tsx.",
+      "observed": "A, B, C, D: 1 failing of 81 each (the route suite; the ownership suite naming claims/venues/page.tsx; 'the layout puts the route's PageHeader inside main'; 'the top bar renders no heading'). Reverted, 81 of 81. The 2026-08-24 control (KNOWN_DOUBLE_H1 staleness) went with the list, which was empty and is gone.",
+      "date": "2026-10-01"
     },
     "event-claims.test.ts": {
       "guards": "fileEventClaim never takes orgId from the caller, never returns flags, is rate-limited before the write; decideEventClaim's catch wraps the transaction; the funnel has a public entry",
@@ -499,10 +499,9 @@
     },
     "nav-routes-exist.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous",
-      "mutation": "Replace components/site-header.tsx with an empty stub (`export {}`), run this suite, revert",
-      "observed": "23 failing",
-      "date": "2026-08-25",
-      "source": "run-at-integration-merge"
+      "mutation": "Step 14 (routeContent moved to lib/dashboard-route-content.ts and imported rather than read): delete the \"/dashboard/leads\" entry from routeContent, run this suite, revert",
+      "observed": "1 failing of 49 ('/dashboard/leads is named in routeContent'); 49 of 49 after the revert",
+      "date": "2026-10-01"
     },
     "no-async-setinterval.test.ts": {
       "guards": "no setInterval in lib/ drives an async callback; the three sweepers reschedule from a path a throw cannot skip",
@@ -590,7 +589,7 @@
       "source": "run-at-e3-admin-surface"
     },
     "dashboard-prose-budget.test.ts": {
-      "guards": "No dashboard page leads with more than 180 characters of literal explanatory prose — site-header already says what the screen is",
+      "guards": "No dashboard page leads with more than 180 characters of literal explanatory prose — the PageHeader already says what the screen is",
       "mutation": "Prepend the header's own description back onto the paragraph in app/dashboard/leads/page.tsx, run this suite, revert",
       "observed": "1 failing of 2 — reported leads/page.tsx at 229 chars; 2 passing after the revert",
       "date": "2026-08-25",
@@ -750,10 +749,10 @@
     },
     "range-control-scope.test.ts": {
       "guards": "that the date-range control renders on exactly the dashboard pages whose `page.tsx` calls `resolveRange` — checked in both directions, so a page that gains a range without being listed fails, and a listed page that stops reading one fails too",
-      "mutation": "A: add a `resolveRange` call to app/dashboard/users/page.tsx without listing the route. B: add \"/dashboard/users\" to RANGED without the page reading a range",
-      "observed": "A: 1 failing ('shows it on every page that reads a range'), naming /dashboard/users. B: 1 failing ('shows it on no page that ignores one'), naming the same route. The vacuity guard stayed green in both",
+      "mutation": "A: add a `resolveRange` call to app/dashboard/users/page.tsx without listing the route. B: add \"/dashboard/users\" to RANGED without the page reading a range. Step 14 (RANGED moved to lib/dashboard-route-content.ts, the control into the PageHeader): B re-run there.",
+      "observed": "A: 1 failing ('shows it on every page that reads a range'), naming /dashboard/users. B: 1 failing ('shows it on no page that ignores one'), naming the same route. The vacuity guard stayed green in both. Step 14 B: 1 failing of 4, same test",
       "reverted": true,
-      "date": "2026-09-10"
+      "date": "2026-10-01"
     },
     "event-tab-destinations.test.ts": {
       "guards": "that the Chat and Attendees tabs, which `eventTabsFor` offers on `canOperate`, lead to a page that admits `canOperate` — and that the broadcast composer and sponsor panel on that page stay behind `canEdit`, so widening the gate does not hand a venue owner a broadcast into an event they do not run",
@@ -842,9 +841,9 @@
       "date": "2026-09-11"
     },
     "event-authoring-rail.test.ts": {
-      "guards": "that the event form renders the publish rail (and the bar below @4xl/main) and no submit of its own, that the buttons set the status and no Status select exists, that Publish is disabled while anything blocks, that every readiness item links to a field id that exists, that the sidebar inset clips rather than scrolls (sticky), that the long description is optional and lives under More, that categories are chips + a Popover picker, that Featured is admin-only on the screen and in both API routes, and that cancelling is a confirmed action",
-      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset. X: rename `id=\"field-start_time\"` to `field-start` in the When section",
-      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'). X: 1 failing ('every readiness item links to its field'). Nine green each time",
+      "guards": "that the event form renders the publish rail (and the bar below @4xl/main) and no submit of its own, that the buttons set the status and no Status select exists, that Publish is disabled while anything blocks, that every readiness item links to a field id that exists, that the content column beside the sidebar clips rather than scrolls (sticky; the inset until step 14), that the long description is optional and lives under More, that categories are chips + a Popover picker, that Featured is admin-only on the screen and in both API routes, and that cancelling is a confirmed action",
+      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset (step 14: on the content column, in place of `overflow-x-clip`). X: rename `id=\"field-start_time\"` to `field-start` in the When section",
+      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'); step 14 re-run: 1 failing of 11. X: 1 failing ('every readiness item links to its field'). Nine green each time",
       "reverted": true,
       "date": "2026-09-11",
       "note": "Control X was reverted with `git checkout` on a file that also carried the section's redesign, which threw the redesign away; the registry's own warning about exactly this was re-earned and the edits re-applied."

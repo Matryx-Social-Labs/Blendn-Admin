@@ -17,7 +17,7 @@ import { statePathFor } from "./global-setup"
  * timeout.
  *
  * **"Does the body contain words the shell does not?"** was worse, and its
- * failure is the interesting one: `components/site-header.tsx` renders the
+ * failure is the interesting one: the layout's `PageHeader` renders the
  * route's own title from `routeContent`, so the word "Users" is in the response
  * for `/dashboard/users` **even when the page refuses**. Auto-derived markers
  * therefore flagged every page as leaking. A page's title is part of the shell;

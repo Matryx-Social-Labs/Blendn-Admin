@@ -38,7 +38,7 @@ export default async function ClaimsPage() {
         venueCount={venueCount}
         brandCount={brandCount}
       />
-      {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
+      {/* h2, not h1: the layout's `PageHeader` owns the page's only h1. */}
       <div className="flex flex-col gap-1">
         <h2 className="text-[length:var(--text-h2)] font-bold">Event claims</h2>
         <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
