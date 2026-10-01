@@ -41,17 +41,25 @@ const DASHBOARD_ROLES: RoleKey[] = ["admin", "organizer", "venue", "sponsor"]
  *
  * Taken from the seeded world, so it is data rather than markup — markup is
  * shared, and a shared marker is what made the previous version useless.
+ *
+ * **Never the requesting account's own identity.** Since step 14 the shell
+ * itself carries who you are and who you act for: the sidebar's identity card
+ * and the first breadcrumb name your organisation, and the account menu's
+ * props carry your name and email. So "Nightshift Collective" was in every
+ * page organizer@ opened, "Blue Tokai" in every page sponsor@ opened, and both
+ * read as leaks. The markers below name OTHER accounts — Third Wave, Daniel
+ * Weber — which no signed-in role's shell contains.
  * Pages without an entry are covered by the reachability check below but not by
  * the leak check, and `uncovered` reports them rather than passing silently.
  */
 const ROW_MARKER: Record<string, string> = {
   "/dashboard/users": "hemanth.ramesh@blendn.app",
-  "/dashboard/organisers": "organizer@blendn.app",
+  "/dashboard/organisers": "daniel.weber@blendn.app",
   "/dashboard/venue-owners": "venue.owner@blendn.app",
-  "/dashboard/organisations": "Nightshift Collective",
+  "/dashboard/organisations": "Third Wave Coffee Roasters",
   "/dashboard/onboarding": "founder@thehummingtree.com",
   "/dashboard/claims": "events@toit.in",
-  "/dashboard/sponsors": "Blue Tokai",
+  "/dashboard/sponsors": "Third Wave",
   /*
    * The unclaimed venue, deliberately — it is the row the admin index exists
    * to surface, and the one a venue-owner-scoped page can never show.
@@ -135,6 +143,13 @@ test.describe("a role receives only the rows it is entitled to", () => {
       for (const [url, marker] of Object.entries(ROW_MARKER)) {
         if (allowed.has(url)) continue
         if (UNLISTED_ENTITLEMENT[url]?.includes(ROLE_ACCOUNTS[role].role)) continue
+        /*
+         * The seed has one venue owner, so the venue-owners marker is
+         * venue.owner@'s own email — which venue.owner@'s own account menu
+         * carries on every page. Your own address is not a leak; the other
+         * two roles are still checked against it.
+         */
+        if (marker === ROLE_ACCOUNTS[role].email) continue
         const body = await (await ctx.get(url)).text()
         if (body.includes(marker)) leaked.push(`${role} sees "${marker}" on ${url}`)
       }
