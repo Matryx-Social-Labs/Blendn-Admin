@@ -330,7 +330,11 @@ registry.registerPath({
   path: "/api/events/{id}/chat/members/{userId}",
   tags: ["Dashboard Chat Moderation"],
   summary: "Ban or unban a chat member",
-  description: "Ban removes user from chat and emits a socket event. Requires moderator/organizer/admin role.",
+  description:
+    "Ban removes user from chat and emits a socket event. Requires moderator/organizer/admin role. " +
+    "`userId` is the room handle the chat and moderation routes returned for this event (SCRUM-517); " +
+    "an organiser or venue owner never receives an account id, and one sent by them answers 404. " +
+    "An app_admin may send either.",
   security: sessionAuth,
   request: {
     params: z.object({ id: z.string().uuid(), userId: z.string() }),

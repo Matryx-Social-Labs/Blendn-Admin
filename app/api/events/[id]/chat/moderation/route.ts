@@ -7,6 +7,7 @@ import { actorFor } from "@/lib/org-membership"
 import { isUuid } from "@/lib/api-input"
 import { errorResponse } from "@/lib/api-response"
 import { boundedInt } from "@/lib/pagination"
+import { idForViewer } from "@/lib/room-handle"
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -51,6 +52,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Hosts get the pseudonym the room shows; only platform admins get the
     // person behind it. Same rule as `chat/messages`.
     const isPlatformAdmin = session.user.role === "app_admin"
+    // This room's handle for a host, never the account id (SCRUM-517); the
+    // admin keeps the id.
+    const idFor = (userId: string) =>
+      isPlatformAdmin ? userId : idForViewer(session.user.id, eventId, userId)
     const anonByUser = new Map(
       (
         await db.chat_group_members.findMany({
@@ -120,7 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         flags: flags.map((f) => ({
           id: f.id,
           messageId: f.message_id,
-          userId: f.user_id,
+          userId: idFor(f.user_id),
           anonymousName: anonByUser.get(f.user_id) ?? null,
           /*
            * Admin-only, and absent rather than null for hosts so a client
