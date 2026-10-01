@@ -1,5 +1,5 @@
 const mockDb = {
-  venues: { findUnique: jest.fn(), update: jest.fn() },
+  venues: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   venue_claims: { upsert: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   organisation_members: { findFirst: jest.fn() },
   user: { findMany: jest.fn() },
@@ -42,6 +42,9 @@ beforeEach(() => {
   mockDb.organisation_members.findFirst.mockResolvedValue({ org_id: MY_ORG })
   mockDb.venue_claims.upsert.mockResolvedValue({ id: "claim_1" })
   mockDb.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(mockDb))
+  // The decision's guarded writes: one row each, as when nobody raced it.
+  mockDb.venue_claims.updateMany.mockResolvedValue({ count: 1 })
+  mockDb.venues.updateMany.mockResolvedValue({ count: 1 })
 })
 
 /**
@@ -217,12 +220,12 @@ describe("deciding a claim", () => {
     )
   })
 
-  it("transfers ownership and stamps claimed_at on approval", async () => {
+  it("transfers ownership and stamps claimed_at on approval, only while the venue is unowned or already theirs", async () => {
     await decideVenueClaim("claim_1", "approve")
-    expect(mockDb.venues.update).toHaveBeenCalledWith(
+    expect(mockDb.venues.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: VENUE },
-        data: expect.objectContaining({ owner_org_id: MY_ORG }),
+        where: { id: VENUE, OR: [{ owner_org_id: null }, { owner_org_id: MY_ORG }] },
+        data: expect.objectContaining({ owner_org_id: MY_ORG, claimed_at: expect.any(Date) }),
       })
     )
   })
@@ -247,13 +250,17 @@ describe("deciding a claim", () => {
     // A decline that reaches the claimant with no reason produces an identical
     // re-file, and the queue gets the same row again.
     await expect(decideVenueClaim("claim_1", "decline", "no")).rejects.toThrow(/give a reason/i)
-    expect(mockDb.venue_claims.update).not.toHaveBeenCalled()
+    expect(mockDb.venue_claims.updateMany).not.toHaveBeenCalled()
   })
 
   it("does not touch the venue when declining", async () => {
     await decideVenueClaim("claim_1", "decline", "The licence names a different address.")
-    expect(mockDb.venues.update).not.toHaveBeenCalled()
-    expect(mockDb.venue_claims.updateMany).not.toHaveBeenCalled()
+    expect(mockDb.venues.updateMany).not.toHaveBeenCalled()
+    // Only this claim is decided; nobody else's is touched.
+    expect(mockDb.venue_claims.updateMany).toHaveBeenCalledTimes(1)
+    expect(mockDb.venue_claims.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "claim_1", status: "pending" } })
+    )
   })
 
   // The forms say the reason "is sent to the claimant"; for a year nothing sent

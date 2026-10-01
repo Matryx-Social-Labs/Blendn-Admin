@@ -1,19 +1,18 @@
 "use server"
 
 import { Refusal } from "./refusal"
-import { headers } from "next/headers"
 
 import { auditLog } from "@/lib/audit-log"
-import { clientIpFrom } from "@/lib/client-ip"
 import { getAuth } from "@/lib/auth"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
-import { CLAIM_LIMITS, CLAIM_PAGE, claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
+import { CLAIM_PAGE, claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
+import { overClaimLimit } from "@/lib/claim-limit"
+import { claimEmail, claimEventInput, claimInputRefusal } from "@/lib/claim-input"
 import { isUuid } from "@/lib/api-input"
 import { db } from "@/lib/db"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { owningOrgFor } from "@/lib/event-ownership"
 import { logger } from "@/lib/logger"
-import { hit } from "@/lib/rate-limit-store"
 import { notifyClaimant } from "@/lib/claim-decision-notify"
 import { appUrl } from "@/lib/email"
 
@@ -47,48 +46,15 @@ export interface FileClaimInput {
   onboardingId?: string
 }
 
-const HOUR_MS = 60 * 60 * 1000
-
-/**
- * Three windows, checked together, Redis-backed.
- *
- * `lib/rate-limit.ts` wraps this for route handlers and needs a `NextRequest`;
- * a server action has no request object, so it calls `hit()` directly rather
- * than growing a second limiter — the counter, the store and the Redis
- * fallback are all the same ones every rate-limited route already uses.
- *
- * Returns the message to refuse with, or null to proceed.
- */
-async function overClaimLimit(email: string, eventId: string): Promise<string | null> {
-  /*
-   * `x-forwarded-for` is spoofable, which is why it is the weakest of the three
-   * and never the only one. The LAST hop is the one the platform's edge added
-   * — the left-most is whatever the client sent, which is why this goes
-   * through `clientIpFrom` like every other limiter. With no header at all
-   * every anonymous caller shares one bucket, which fails toward refusing.
-   */
-  const ip = clientIpFrom(await headers())
-
-  const [byEmail, byEvent, byIp] = await Promise.all([
-    hit(`rl:claim:email:${email}`, HOUR_MS),
-    hit(`rl:claim:event:${eventId}`, HOUR_MS),
-    hit(`rl:claim:ip:${ip}`, HOUR_MS),
-  ])
-
-  if (byEmail.count > CLAIM_LIMITS.perEmailPerHour || byIp.count > CLAIM_LIMITS.perIpPerHour) {
-    return "You have filed several claims recently. Give us a little time to read them."
-  }
-  if (byEvent.count > CLAIM_LIMITS.perEventPerHour) {
-    // Deliberately the same sentence. Telling a flooder which bucket they hit
-    // tells them which one to vary.
-    return "You have filed several claims recently. Give us a little time to read them."
-  }
-  return null
-}
-
 export async function fileEventClaim(
-  input: FileClaimInput
+  raw: FileClaimInput
 ): Promise<{ ok: true; claimId: string } | { ok: false; error: string }> {
+  // Unauthenticated: the argument is whatever a client sent, so it is parsed
+  // and every string capped before anything reads it (lib/claim-input.ts).
+  const parsed = claimEventInput.safeParse(raw)
+  if (!parsed.success) return { ok: false, error: claimInputRefusal(parsed.error) }
+  const input = parsed.data
+
   // events.id is a UUID column; a malformed id is a missing event, not a throw (SCRUM-464).
   if (!isUuid(input.eventId)) return { ok: false, error: "Event not found" }
 
@@ -102,10 +68,8 @@ export async function fileEventClaim(
    * missing — a rate limit, and refusing to let the caller name the
    * organisation the claim is filed for.
    */
-  const email = input.contactEmail.trim().toLowerCase()
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    return { ok: false, error: "Give an email address we can reply to" }
-  }
+  const email = claimEmail(input.contactEmail)
+  if (!email) return { ok: false, error: "Give an email address we can reply to" }
 
   /*
    * The organisation comes from the session or from an onboarding request.
@@ -135,10 +99,13 @@ export async function fileEventClaim(
    * organisation. The request's contact address must be the claim's.
    */
   if (input.onboardingId) {
-    const request = await db.organiser_onboarding_requests.findUnique({
-      where: { id: input.onboardingId },
-      select: { contact_email: true },
-    })
+    // A uuid column: anything else is no application, not a query error.
+    const request = isUuid(input.onboardingId)
+      ? await db.organiser_onboarding_requests.findUnique({
+          where: { id: input.onboardingId },
+          select: { contact_email: true },
+        })
+      : null
     if (!request || request.contact_email.toLowerCase() !== email) {
       return { ok: false, error: "That application does not match this email address" }
     }
@@ -153,7 +120,7 @@ export async function fileEventClaim(
     }
   }
 
-  const limited = await overClaimLimit(email, input.eventId)
+  const limited = await overClaimLimit(email, { kind: "event", id: input.eventId })
   if (limited) return { ok: false, error: limited }
 
   const event = await db.events.findUnique({
