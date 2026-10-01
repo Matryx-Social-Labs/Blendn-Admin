@@ -156,6 +156,12 @@ describe("the sweeper acts on time passing", () => {
     expect(row.status).toBe("checked_out")
     expect(row.check_out_time).not.toBeNull()
     expect((await getOccupancy(eventId)).inside).toBe(4)
+    // Out and stayed out: inferred, so the sweeper's (SCRUM-484).
+    const session = await db.presence_sessions.findFirstOrThrow({
+      where: { event_id: eventId, user_id: gone.user_id },
+      select: { departed_source: true },
+    })
+    expect(session.departed_source).toBe("sweeper")
   })
 
   it("is idempotent — a second pass changes nothing", async () => {
