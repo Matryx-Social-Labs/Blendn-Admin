@@ -64,8 +64,8 @@ function find<P>(node: ReactNode, type: unknown): P[] {
   return [...(el.type === type ? [el.props as P] : []), ...find<P>(el.props.children, type)]
 }
 
-async function venuePage(range: { range: string; from?: string; to?: string } = { range: "90d" }) {
-  return VenueDetailPage({ params: Promise.resolve({ id: w.v1 }), searchParams: Promise.resolve(range) })
+async function venuePage(range: { range: string; from?: string; to?: string } = { range: "90d" }, venue = w.v1) {
+  return VenueDetailPage({ params: Promise.resolve({ id: venue }), searchParams: Promise.resolve(range) })
 }
 
 describe("the venue page shows the venue from its claim on", () => {
@@ -119,6 +119,58 @@ describe("the venue page shows the venue from its claim on", () => {
 
     as(await w.user("vss-admin2", "organizer"), "app_admin")
     expect(find<{ counts: number[] }>(await venuePage(), RatingBars)[0]?.counts[0]).toBe(6)
+  })
+})
+
+describe("the venue page's tiles add up only what its rows show", () => {
+  type Tile = { label: string; value: string | null; hint: string }
+  const tiles = async (venue: string) => find<Tile>(await venuePage({ range: "90d" }, venue), MetricTile)
+  const tile = (all: Tile[], label: string) => all.find((t) => t.label === label)
+  const daysAgo = (d: number) => new Date(Date.now() - d * DAY)
+
+  // Each case on its own venue, claimed a month ago, so none depends on another.
+  let quiet = ""
+  let flips = ""
+  let empty = ""
+  beforeAll(async () => {
+    quiet = await w.venue("vss-quiet", w.venueOrg, daysAgo(30))
+    flips = await w.venue("vss-flips", w.venueOrg, daysAgo(30))
+    empty = await w.venue("vss-empty", w.venueOrg, daysAgo(30))
+    await w.night({ venue: quiet, start: daysAgo(2), guests: [2] })
+    await w.night({ venue: quiet, start: daysAgo(3), guests: [3] })
+    await w.night({ venue: flips, start: daysAgo(2), guests: [2] })
+    await w.night({ venue: flips, start: daysAgo(3), guests: [5] })
+  })
+
+  it("reads — when every night is held back, and says why", async () => {
+    as(w.owner, "venue_owner")
+    const all = await tiles(quiet)
+    // "0 attended" would say nobody came; these nights had people in them.
+    expect(tile(all, "Attended")).toMatchObject({ value: "—", hint: "GPS check-ins · held-back nights left out" })
+    expect(tile(all, "Turn-up")).toMatchObject({ value: null, hint: "held back" })
+  })
+
+  it("gives the admin the real totals for the same nights", async () => {
+    as(await w.user("vss-admin3", "organizer"), "app_admin")
+    const all = await tiles(quiet)
+    expect(tile(all, "Attended")).toMatchObject({ value: "5", hint: "GPS check-ins" })
+    // 5 of 20 going.
+    expect(tile(all, "Turn-up")).toMatchObject({ value: "25%", hint: "of committed RSVPs" })
+  })
+
+  it("prints a total once one night reaches the floor, and only that night's", async () => {
+    as(w.owner, "venue_owner")
+    const all = await tiles(flips)
+    expect(tile(all, "Attended")).toMatchObject({ value: "5", hint: "GPS check-ins · held-back nights left out" })
+    // 5 of that night's 10 going; the held-back night is out of both sides.
+    expect(tile(all, "Turn-up")).toMatchObject({ value: "50%", hint: "of committed RSVPs" })
+  })
+
+  it("reads 0 for a venue with no nights in the window: there is nothing to hold back", async () => {
+    as(w.owner, "venue_owner")
+    const all = await tiles(empty)
+    expect(tile(all, "Attended")).toMatchObject({ value: "0", hint: "GPS check-ins" })
+    expect(tile(all, "Turn-up")).toMatchObject({ value: null, hint: "needs a past event" })
   })
 })
 
