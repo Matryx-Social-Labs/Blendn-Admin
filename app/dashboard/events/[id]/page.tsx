@@ -228,7 +228,9 @@ export default async function EventDetailPage({
   const [attendance, connections, turnedAway] = await Promise.all([
     // Day by day, newcomers and returning: cells of a few people. Not a venue's.
     hasRun && !venueView ? getEventAttendance(event.id) : null,
-    hasRun ? getConnectionMetrics(event.id) : null,
+    // Not the venue's either: its suppressed state names the attendee count
+    // ("With 3, ..."), and its figures are about who met whom.
+    hasRun && !venueView ? getConnectionMetrics(event.id) : null,
     /*
      * The organiser's half of the door (SCRUM-196). `refusalSummary` below is
      * the curation queue's diagnosis and stays gated on curated events; this

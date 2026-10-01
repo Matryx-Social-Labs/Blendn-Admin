@@ -30,7 +30,11 @@ export interface EventOverview {
 
 const pct = (n: number, d: number) => (d === 0 ? null : Math.round((n / d) * 100))
 const fmt = (n: number | null, suffix = "") => (n === null ? null : `${n}${suffix}`)
-/** A held-back count, in a sentence. */
+/**
+ * A count held back by the floor alone, in a sentence. Not for "came": that is
+ * also held back when it is complete, residual or past the going count, and
+ * "fewer than 5" would then be false.
+ */
 const say = (n: number | null) => (n === null ? `fewer than ${MIN_CELL}` : String(n))
 
 /**
@@ -173,7 +177,10 @@ export async function getEventOverview(
             : {
                 label: "Turned up",
                 value: fmt(turnUpPct, "%"),
-                hint: `${say(attendedPeople)} of ${say(goingN)} who said they would`,
+                hint:
+                  attendedPeople === null || goingN === null
+                    ? "held back, so it cannot point at anybody"
+                    : `${attendedPeople} of ${goingN} who said they would`,
               }
 
   const tiles: EventOverview["tiles"] =
