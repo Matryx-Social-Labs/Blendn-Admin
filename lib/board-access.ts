@@ -4,6 +4,7 @@ import { ageFrom } from "./age"
 import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
 import {
   mayPostToBoard,
+  mayReadBoard,
   type BoardEntitlement,
   type BoardWriteDenial,
 } from "./board"
@@ -245,4 +246,48 @@ export async function hideBoardPostIfFlagged(postId: string, body: string): Prom
     where: { id: postId, deleted_at: null },
     data: { deleted_at: new Date(), moderation_status: "hidden", updated_at: new Date() },
   })
+}
+
+/*
+ * Who a board report or block is about (SCRUM-322).
+ *
+ * The board is pseudonymous, so the client never holds a user id to report or
+ * block — it holds the post or the ask it saw. The person is resolved here, on
+ * the server, and never returned. Null — answered as not found — for anything
+ * the caller could not have seen, so these cannot be used to probe ids.
+ */
+
+/** The author of a post the caller could see: they can read the board, or have an ask on it. */
+export async function boardPostAuthorFor(
+  viewerId: string,
+  eventId: string,
+  postId: string
+): Promise<string | null> {
+  const post = await db.board_posts.findFirst({
+    where: { id: postId, event_id: eventId },
+    select: { author_id: true },
+  })
+  if (!post) return null
+  // Withdrawn or removed posts stay reportable: the person most motivated to
+  // take a post down is the one about to be reported for it.
+  if (mayReadBoard(await entitlementFor(eventId, viewerId)) === null) return post.author_id
+  const asked = await db.board_requests.findFirst({
+    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId }] },
+    select: { id: true },
+  })
+  return asked ? post.author_id : null
+}
+
+/** The other person on an ask, if the caller is one of its two people. */
+export async function boardRequestCounterpart(
+  viewerId: string,
+  requestId: string
+): Promise<string | null> {
+  const r = await db.board_requests.findUnique({
+    where: { id: requestId },
+    select: { from_user_id: true, to_user_id: true },
+  })
+  if (r?.from_user_id === viewerId) return r.to_user_id
+  if (r?.to_user_id === viewerId) return r.from_user_id
+  return null
 }

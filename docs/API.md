@@ -1856,6 +1856,8 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
 | POST | `/events/:eventId/report` | `event_reports` |
 | POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
+| POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Board · offer\|seeking\|chat" |
+| POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Board ask" |
 
 ### The pre-event board
 
@@ -1919,8 +1921,38 @@ It has no second look, because a request has nowhere to be hidden later.
 **An author can withdraw their own post** with `DELETE /events/:eventId/board/:postId`.
 It is soft (`deleted_at`): the post leaves every board read, requests filed against
 it stop counting toward their senders' caps, and `GET /board/requests` returns its
-`body` as `null`. Removal by a moderator, and reporting a post, come with the
-board's dashboard surface (SCRUM-322).
+`body` as `null`.
+
+#### Reporting, blocking and removal (SCRUM-322)
+
+| Method | Endpoint | Who |
+|--------|----------|-----|
+| POST | `/events/:eventId/board/:postId/report` | Anyone who can read the board, or has an ask on the post |
+| POST | `/events/:eventId/board/:postId/block` | The same |
+| POST | `/board/requests/:requestId/report` | Either of the ask's two people |
+| POST | `/board/requests/:requestId/block` | The same |
+
+The board never gives the client a user id, so a person is reported and blocked
+**by the post or the ask they wrote**. The server resolves who and never returns
+it. Anything the caller could not have seen, including no such post or ask, is
+**404**, so the routes cannot be used to probe ids. Your own post is **400**.
+
+- **Reports** take `{ reason, description? }`, with `reason` one of `harassment`,
+  `hate_speech`, `inappropriate_content`, `spam` or `other` (the app's message
+  reasons), and `description` up to 500 characters. They return
+  `201 { reported: true }` and are rate limited per user. They land in
+  `message_reports` (`message_type` `board_post` / `board_request`), so they
+  show in the admin reports queue beside room messages and DMs, as
+  "Board · offer", "Board · seeking", "Board · chat" or "Board ask". An ask is
+  reported about whichever of its two people did not file it.
+- **Blocking** is exactly `POST /users/:userId/block` once the person is known:
+  the same transaction and the same `{ blocked: true }`.
+- **Removal** is the queue's *Remove post* on a board-post report. It soft-deletes
+  the post (`deleted_at`, `moderation_status = "removed"`), which takes it off
+  every board read and lapses the asks filed against it, and records
+  `report.remove_message` in `audit_logs` with the post's id. A withdrawn post
+  keeps its own timestamp. Asks are not removable: an ask went to one person,
+  like a DM, so the lever there is the person.
 
 #### Asking somebody
 
