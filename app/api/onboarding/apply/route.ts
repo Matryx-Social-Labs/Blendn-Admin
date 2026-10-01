@@ -1,4 +1,4 @@
-import { clientIpFrom } from "@/lib/client-ip"
+import { clientNetworkFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     windowMs: 60 * 60 * 1000,
     maxRequests: 3,
     keyGenerator: (r) =>
-      `onboarding:apply:${clientIpFrom(r.headers)}`,
+      `onboarding:apply:${clientNetworkFrom(r.headers)}`,
   })
   if (limited) return limited
 

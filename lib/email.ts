@@ -1,4 +1,5 @@
 import { logger } from "./logger"
+import { dashboardHost } from "@/lib/env"
 import {
   approvedHtml,
   claimDecisionHtml,
@@ -72,6 +73,22 @@ export function appUrl(): string {
 export function applyUrl(): string {
   const configured = process.env.PUBLIC_APPLY_URL?.trim()
   return configured ? configured.replace(/\/$/, "") : appUrl()
+}
+
+/**
+ * The dashboard's own origin, for a link the mobile app hands to a browser.
+ *
+ * Not `appUrl()`: that is `NEXTAUTH_URL`, which has pointed at the API host
+ * before (the lead emails built from it needed `middleware.ts`'s redirect when
+ * the hosts split). `/claim/*` serves on either host, but the session cookie a
+ * signed-in host would bring lives on the dashboard one, and the API host is
+ * not a name to hand a person. Unsplit (local, single host), it is `appUrl()`.
+ */
+export function dashboardUrl(): string {
+  const host = dashboardHost()
+  if (!host) return appUrl()
+  // A local split (DASHBOARD_HOST=localhost:3100) has no certificate.
+  return `${/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? "http" : "https"}://${host}`
 }
 
 /*

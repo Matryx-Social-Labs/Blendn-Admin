@@ -8,6 +8,7 @@ import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
 import { emitChatMemberBanned, emitChatMemberMuted } from "@/lib/socket-server"
 import { readJson, isUuid } from "@/lib/api-input"
+import { roomMemberFromRef, userIdFromRef } from "@/lib/room-handle"
 
 interface RouteContext {
   params: Promise<{ id: string; userId: string }>
@@ -18,8 +19,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     const session = await getAuth()
     if (!session?.user) return errorResponse("Unauthorized", 401)
 
-    const { id: eventId, userId: targetUserId } = await params
+    const { id: eventId, userId: ref } = await params
     if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    /*
+     * A host names a person by the handle this room showed them, never by an
+     * account id (SCRUM-517): a raw id, another room's handle or a forged one
+     * is nobody here, and answers as an unknown member. The admin, who reads
+     * real ids, may send either.
+     */
+    const targetUserId =
+      session.user.role === "app_admin" ? userIdFromRef(ref) : roomMemberFromRef(eventId, ref, session.user.id)
     const { action } = ((await readJson(request)) ?? {}) as { action: "ban" | "unban" | "mute" | "unmute" }
 
     if (!["ban", "unban", "mute", "unmute"].includes(action)) {
@@ -42,11 +51,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
      * row, and this updated any member once `canOperate` passed, so a host
      * could lock themselves or a colleague out of their own room (SCRUM-466).
      */
-    const target = await db.chat_group_members.findUnique({
-      where: { chat_group_id_user_id: { chat_group_id: event.chat_group.id, user_id: targetUserId } },
-      select: { role: true },
-    })
-    if (target?.role === "admin") return errorResponse("The host can't be muted or banned in their own room", 409)
+    const target = targetUserId
+      ? await db.chat_group_members.findUnique({
+          where: { chat_group_id_user_id: { chat_group_id: event.chat_group.id, user_id: targetUserId } },
+          select: { role: true },
+        })
+      : null
+    if (!targetUserId || !target) return errorResponse("Not a member of this room", 404)
+    if (target.role === "admin") return errorResponse("The host can't be muted or banned in their own room", 409)
 
     const statusMap = {
       ban: "banned" as const,

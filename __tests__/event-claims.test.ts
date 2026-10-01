@@ -73,12 +73,23 @@ describe("filing a claim", () => {
      * address, and the IP catches it; use a proxy pool, and the per-event
      * bucket catches a flood aimed at one reviewer.
      */
-    expect(src).toMatch(/overClaimLimit\(email, input\.eventId\)/)
-    expect(src).toMatch(/rl:claim:email:/)
-    expect(src).toMatch(/rl:claim:event:/)
-    expect(src).toMatch(/rl:claim:ip:/)
+    expect(src).toMatch(/overClaimLimit\(email, \{ kind: "event", id: input\.eventId \}\)/)
     // Before the write, not after it.
     expect(src.indexOf("overClaimLimit(email")).toBeLessThan(src.indexOf("event_claims.create"))
+
+    // The three windows live in lib/claim-limit.ts, shared with the public
+    // venue claim (step 1), which is unauthenticated for the same reason.
+    const limiter = code("lib/claim-limit.ts")
+    expect(limiter).toMatch(/rl:claim:email:/)
+    expect(limiter).toMatch(/rl:claim:\$\{target\.kind\}:\$\{target\.id\}/)
+    expect(limiter).toMatch(/rl:claim:ip:/)
+    const venue = code("lib/venue-claim-actions.ts")
+    const fileVenue = /export async function filePublicVenueClaim[\s\S]*?\n\}/.exec(venue)![0]
+    expect(fileVenue).toMatch(/overClaimLimit\(email, \{ kind: "venue", id: input\.venueId \}\)/)
+    expect(fileVenue.indexOf("overClaimLimit(email")).toBeLessThan(fileVenue.indexOf("venue_claims.create"))
+    // Never the session: the organisation comes from the application, and an
+    // account holder files from the dashboard with documents.
+    expect(fileVenue).not.toMatch(/getAuth\(/)
   })
 
   it("insists on exactly one route in", () => {

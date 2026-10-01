@@ -104,3 +104,71 @@ export function reportFilename(kind: string, from: Date, to: Date): string {
   const range = iso(from) === iso(to) ? iso(from) : `${iso(from)}_${iso(to)}`
   return `blendn-${kind}-${range}.csv`
 }
+
+/** One record of a CSV, with the physical line it starts on (1-based), for messages a person acts on. */
+export interface CsvRow {
+  line: number
+  cells: string[]
+}
+
+/**
+ * Read a CSV: RFC 4180's one quoting rule, in reverse.
+ *
+ * Quoted cells may hold commas, doubled quotes and newlines — a Google Maps URL
+ * holds commas (`@12.97,77.64,17z`), so a split on "," is not a parser. A quote
+ * opens a quoted cell only at the start of one (spaces before it allowed, as
+ * spreadsheets write `a, "b"`); mid-cell (`12" Pizza`) it is a character. An
+ * unterminated quote throws rather than swallowing the rest of the file. A
+ * leading BOM (Excel's, see `UTF8_BOM`) is dropped; blank lines are skipped.
+ * No type coercion: every cell is a string, trimmed by the caller.
+ */
+export function parseCsvRows(text: string): CsvRow[] {
+  const rows: CsvRow[] = []
+  let row: string[] = []
+  let cell = ""
+  let quoted = false
+  let line = 1
+  let rowStart = 1
+  let quoteOpenedOn = 0
+  const input = text.startsWith(UTF8_BOM) ? text.slice(1) : text
+
+  const endRow = () => {
+    row.push(cell)
+    if (row.some((c) => c.trim() !== "")) rows.push({ line: rowStart, cells: row })
+    row = []
+    cell = ""
+  }
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]
+    const newline = ch === "\n" || (ch === "\r" && input[i + 1] !== "\n")
+    if (quoted) {
+      if (ch === '"' && input[i + 1] === '"') {
+        cell += '"'
+        i++
+      } else if (ch === '"') {
+        quoted = false
+      } else {
+        cell += ch
+      }
+    } else if (ch === '"' && cell.trim() === "") {
+      quoted = true
+      quoteOpenedOn = line
+      cell = ""
+    } else if (ch === ",") {
+      row.push(cell)
+      cell = ""
+    } else if (ch === "\n" || ch === "\r") {
+      if (newline) {
+        endRow()
+        rowStart = line + 1
+      }
+    } else {
+      cell += ch
+    }
+    if (newline) line++
+  }
+  if (quoted) throw new Error(`Unterminated quote: the cell opened on line ${quoteOpenedOn} never closes`)
+  if (cell !== "" || row.length > 0) endRow()
+  return rows
+}
