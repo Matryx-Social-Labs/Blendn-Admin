@@ -5,14 +5,13 @@ import { IconMessage2 } from "@tabler/icons-react"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { eventClock } from "@/lib/event-phase"
 import { visibleEventsWhere } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
 import { canAccessDashboard } from "@/lib/rbac"
 
 /** Matches the chat auto-archive window and the event Feedback tab. */
 const FEEDBACK_WINDOW_HOURS = 24
-
-const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" })
 
 function hoursUntil(d: Date, now: Date) {
   return Math.max(0, Math.round((d.getTime() - now.getTime()) / 3_600_000))
@@ -60,6 +59,8 @@ export default async function ChatroomsPage() {
       city: true,
       start_time: true,
       end_time: true,
+      // "ends 18:30" on the event's clock, not the server's (SCRUM-496).
+      timezone: true,
       organizer: { select: { name: true } },
       chat_group: { select: { id: true, _count: { select: { messages: true } } } },
     },
@@ -137,7 +138,7 @@ export default async function ChatroomsPage() {
                 <span className="text-[0.8125rem]">
                   {isLive ? (
                     <>
-                      <b className="font-bold text-success">Live</b> · ends {time.format(room.end_time)}
+                      <b className="font-bold text-success">Live</b> · ends {eventClock(room.timezone).time(room.end_time)}
                     </>
                   ) : (
                     <>

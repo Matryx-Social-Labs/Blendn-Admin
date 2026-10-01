@@ -6,18 +6,12 @@ import { Button } from "@/components/ui/button"
 import { EmptyState, HeroMetric, MetricTile } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
 import { mayReachRoute } from "@/lib/dashboard-nav"
+import { eventClock } from "@/lib/event-phase"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 
 import { PlacementDecision } from "./decision"
 
 export const dynamic = "force-dynamic"
-
-const dateTime = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-})
 
 /** How long until doors, in the coarsest unit that is still useful. */
 function until(when: Date, now: Date): string {
@@ -99,7 +93,7 @@ export default async function PlacementsPage() {
             value={overview.next.ready ? until(overview.next.startTime, now) : "Blocked"}
             description={
               overview.next.ready
-                ? `${overview.next.eventTitle} · ${dateTime.format(overview.next.startTime)}`
+                ? `${overview.next.eventTitle} · ${eventClock(overview.next.timezone).dateTime(overview.next.startTime)}`
                 : `${overview.next.eventTitle} — ${overview.next.blocker}`
             }
             tone={overview.next.ready ? "brand" : "muted"}
@@ -159,7 +153,8 @@ export default async function PlacementsPage() {
                 <div className="flex flex-col gap-1">
                   <span className="font-medium">{p.eventTitle}</span>
                   <span className="text-[0.8125rem] text-muted-foreground">
-                    {dateTime.format(p.startTime)}
+                    {/* The event's clock, not the server's (SCRUM-496). */}
+                    {eventClock(p.timezone).dateTime(p.startTime)}
                     {p.blocker ? ` · ${p.blocker}` : ""}
                   </span>
                 </div>

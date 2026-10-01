@@ -19,6 +19,18 @@ describe("whenLabel", () => {
     )
   })
 
+  it("reads on the event's clock when given its zone (SCRUM-496)", () => {
+    // 23:00Z on the 15th is 04:30 on the 16th in Bengaluru. On the server's
+    // clock (UTC on Railway) the list said "15 Sept, 23:00".
+    expect(whenLabel(at("2026-09-15T23:00:00Z"), at("2026-09-16T01:00:00Z"), NOW, "Asia/Kolkata")).toBe(
+      "16 Sept, 4:30"
+    )
+    // A run that is one day in Bengaluru but straddles midnight in UTC.
+    expect(whenLabel(at("2026-09-15T20:00:00Z"), at("2026-09-16T17:00:00Z"), NOW, "Asia/Kolkata")).toBe(
+      "16 Sept, 1:30"
+    )
+  })
+
   it("keeps the year for an event in another year", () => {
     expect(whenLabel(at("2025-03-02T19:00:00Z"), at("2025-03-02T22:00:00Z"), NOW)).toContain("2025")
   })
