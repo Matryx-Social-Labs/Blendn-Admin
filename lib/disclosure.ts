@@ -134,6 +134,19 @@ export function discloseFigure(input: DiscloseInput): Disclosure {
 }
 
 /**
+ * A count of people, as a venue may see it, or null when it must be held back.
+ *
+ * Zero is shown: it identifies nobody, and "held back" over an empty room
+ * would read as a secret where there is none. Anything else goes through the
+ * four-part rule. `population` is everyone the count could have included; with
+ * the default 0 only the minimum cell applies.
+ */
+export function discloseHeadcount(count: number, population = 0): Disclosure {
+  if (count === 0) return { value: 0, suppressed: false, reason: null }
+  return discloseFigure({ count, contributors: count, population })
+}
+
+/**
  * A night's star rating, its average or its spread, or null below the
  * minimum cell (SCRUM-437).
  *

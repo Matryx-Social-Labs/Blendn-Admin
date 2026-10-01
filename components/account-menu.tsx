@@ -62,7 +62,7 @@ export function AccountMenu({
             {/* The brand gradient is reserved for the one hero metric per
                 screen, but an avatar fallback is an identity mark rather than a
                 competing priority. */}
-            <AvatarFallback className="bg-[image:var(--gradient-brand)] text-[0.75rem] font-bold text-brand-ink">
+            <AvatarFallback className="bg-[image:var(--gradient-ember)] text-[0.75rem] font-bold text-brand-ink">
               {initials}
             </AvatarFallback>
           </Avatar>

@@ -9,6 +9,7 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { getEventOverview } from "@/lib/event-overview"
+import { discloseHeadcount } from "@/lib/disclosure"
 import { eventAttendees } from "@/lib/attendee-roster"
 
 import { EventAttendeesCount, EventAttendeesTable } from "./attendees-table"
@@ -186,7 +187,7 @@ export default async function EventDetailPage({
 
   if (activeTab === "attendees") {
     // Labels, never names (R1, SCRUM-383 b), for whoever runs the event; a
-    // count, never people, for the venue it is held at (SCRUM-501).
+    // count, never people, for the venue it is held at.
     const attendees = await eventAttendees(actor, event.id, now)
     if (!attendees) notFound()
     return (
@@ -199,13 +200,22 @@ export default async function EventDetailPage({
             startAt={event.start_time.toISOString()}
           />
         ) : (
-          <EventAttendeesCount came={attendees.came} />
+          <EventAttendeesCount started={attendees.started} came={attendees.came} />
         )}
       </div>
     )
   }
 
-  const overview = await getEventOverview(event.id)
+  /*
+   * The venue's view of somebody else's event: aggregates, never people, every
+   * count of people held back under the floor -- the same rule as its
+   * Attendees tab, which would mean nothing if this tab printed what that one
+   * holds back.
+   */
+  const venueView = !permissions.canEdit
+  const venueMaySee = (people: number) => !venueView || discloseHeadcount(people).value !== null
+
+  const overview = await getEventOverview(event.id, venueView ? "venue" : "host")
   if (!overview) notFound()
 
   /**
@@ -216,7 +226,8 @@ export default async function EventDetailPage({
    */
   const hasRun = overview.state === "live" || overview.state === "over"
   const [attendance, connections, turnedAway] = await Promise.all([
-    hasRun ? getEventAttendance(event.id) : null,
+    // Day by day, newcomers and returning: cells of a few people. Not a venue's.
+    hasRun && !venueView ? getEventAttendance(event.id) : null,
     hasRun ? getConnectionMetrics(event.id) : null,
     /*
      * The organiser's half of the door (SCRUM-196). `refusalSummary` below is
@@ -265,7 +276,7 @@ export default async function EventDetailPage({
   return (
     <div className="flex flex-col gap-5">
       {header}
-      {refusals && refusals.attempts > 0 ? (
+      {refusals && refusals.attempts > 0 && venueMaySee(refusals.distinctPeopleRefused) ? (
         <CurationHealth state={state} refusals={refusals} />
       ) : null}
       <Overview
@@ -275,7 +286,7 @@ export default async function EventDetailPage({
         venueName={venueName}
         attendance={attendance}
         connections={connections}
-        turnedAway={turnedAway}
+        turnedAway={turnedAway && venueMaySee(turnedAway.people) ? turnedAway : null}
       />
     </div>
   )

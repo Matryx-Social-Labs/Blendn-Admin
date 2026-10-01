@@ -1,5 +1,6 @@
+import { venueCame } from "@/lib/attendee-roster"
 import { db } from "@/lib/db"
-import { discloseRating } from "@/lib/disclosure"
+import { discloseHeadcount, discloseRating, MIN_CELL } from "@/lib/disclosure"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
@@ -29,8 +30,22 @@ export interface EventOverview {
 
 const pct = (n: number, d: number) => (d === 0 ? null : Math.round((n / d) * 100))
 const fmt = (n: number | null, suffix = "") => (n === null ? null : `${n}${suffix}`)
+/** A held-back count, in a sentence. */
+const say = (n: number | null) => (n === null ? `fewer than ${MIN_CELL}` : String(n))
 
-export async function getEventOverview(eventId: string): Promise<EventOverview | null> {
+/**
+ * `host` is whoever runs the event. `venue` is the owner of the building it is
+ * held at, operating somebody else's event: venues see aggregates, never
+ * people, so every count of people here goes through `discloseHeadcount`, and
+ * "came" is the very figure the venue's Attendees tab shows (`venueCame`) --
+ * a tab that held a count back would mean nothing if this one printed it.
+ */
+export type OverviewView = "host" | "venue"
+
+export async function getEventOverview(
+  eventId: string,
+  view: OverviewView = "host"
+): Promise<EventOverview | null> {
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
     select: {
@@ -77,17 +92,23 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
   ])
 
   const capacity = event.max_capacity
-  const saved = event._count.favorites
+  const shown = (count: number) => (view === "venue" ? discloseHeadcount(count).value : count)
+  const goingN = shown(going)
+  const maybeN = shown(maybe)
+  const savedN = shown(event._count.favorites)
+  const insideN = shown(checkedIn)
   // Turn-up is against people who said they were coming, not against capacity —
   // an event that half-filled and had everyone turn up did the hard part right.
-  const attendedPeople = distinctAttendees(everCheckedIn)
+  const attendedPeople = view === "venue" ? (await venueCame(eventId)).value : distinctAttendees(everCheckedIn)
   /*
    * No `Math.min` clamp any more. It existed to stop no-show going negative
    * when row-counting inflated attendance past the RSVP count; counting people
    * removes the cause, and clamping now would hide walk-ins — the one signal
    * that says an event outperformed what it was promised.
+   *
+   * Held back with either side: a percentage and one count give the other.
    */
-  const turnUpPct = turnUp(attendedPeople, going)
+  const turnUpPct = attendedPeople === null || goingN === null ? null : turnUp(attendedPeople, goingN)
   const avgRating = discloseRating(
     Math.round((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) * 10) / 10,
     ratings.length
@@ -118,7 +139,7 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
              * when set, is the context.
              */
             label: "Going",
-            value: String(going),
+            value: fmt(goingN),
             // `=== null`, not truthy: max_capacity has no floor in the schema
             // or the form, so 0 is a reachable value, and the tile below says
             // "Capacity 0" — the hint must not say "no capacity set" beside it.
@@ -127,28 +148,29 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
                 ? "no capacity set"
                 : capacity === 0
                   ? "capacity 0"
-                  : `of ${capacity} · ${pct(going, capacity)}% full`,
-              `${maybe} maybe`,
-              `${saved} saved`,
+                  : // A fill percentage and the capacity give the count back.
+                    `of ${capacity}${goingN === null ? "" : ` · ${pct(goingN, capacity)}% full`}`,
+              `${say(maybeN)} maybe`,
+              `${say(savedN)} saved`,
             ].join(" · "),
           }
         : state === "live"
           ? {
               label: "Checked in now",
-              value: String(checkedIn),
-              hint: going === 0 ? "Nobody RSVP'd" : `${going} said they were coming`,
+              value: fmt(insideN),
+              hint: going === 0 ? "Nobody RSVP'd" : `${say(goingN)} said they were coming`,
             }
           : going === 0
             ? {
                 // A percentage of nothing is a dash. The count is still real.
                 label: "Came",
-                value: String(attendedPeople),
+                value: fmt(attendedPeople),
                 hint: "nobody RSVP'd — walk-ins only",
               }
             : {
                 label: "Turned up",
                 value: fmt(turnUpPct, "%"),
-                hint: `${attendedPeople} of ${going} who said they would`,
+                hint: `${say(attendedPeople)} of ${say(goingN)} who said they would`,
               }
 
   const tiles: EventOverview["tiles"] =
@@ -162,7 +184,7 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
             { label: "Capacity", value: capacity === null ? null : String(capacity) },
             {
               label: "Checked in",
-              value: String(attendedPeople),
+              value: fmt(attendedPeople),
               hint: "before the doors, usually zero",
             },
             {
@@ -181,13 +203,13 @@ export async function getEventOverview(eventId: string): Promise<EventOverview |
           ]
         : state === "live"
           ? [
-              { label: "Ever checked in", value: String(attendedPeople) },
-              { label: "Going", value: String(going) },
+              { label: "Ever checked in", value: fmt(attendedPeople) },
+              { label: "Going", value: fmt(goingN) },
               { label: "Capacity", value: capacity === null ? null : String(capacity) },
             ]
           : [
-              { label: "Checked in", value: String(attendedPeople) },
-              { label: "Going", value: String(going) },
+              { label: "Checked in", value: fmt(attendedPeople) },
+              { label: "Going", value: fmt(goingN) },
               {
                 label: "Rating",
                 value: avgRating === null ? null : `${avgRating}`,

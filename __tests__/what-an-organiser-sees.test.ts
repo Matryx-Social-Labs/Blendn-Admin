@@ -166,8 +166,9 @@ describe("W18 — the organiser roster", () => {
      * participants list hands out, which is what turns a pseudonymous room back
      * into named people.
      */
-    expect(src).toMatch(/id: attendeeLabel\(userId, labelScope\),/)
+    expect(src).toMatch(/attendeeLabel\(row\.user_id, labelScope\(row\.event\.organizer_org_id\)\)/)
     expect(src).not.toMatch(/id: userId,/)
+    expect(src).not.toMatch(/id: (row\.)?user_id,/)
   })
 
   it("scopes on the organisation, not on who created the row", () => {

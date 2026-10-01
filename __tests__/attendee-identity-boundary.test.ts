@@ -62,14 +62,19 @@ describe("the organiser's attendee roster selects no identity", () => {
     expect(row![0]).not.toMatch(new RegExp(`\\b(${IDENTITY})\\??\\s*:`))
   })
 
-  it("labels both rosters' rows with the export's function, not a second one", () => {
+  it("labels both rosters' rows with the export's function and salt, not a second one", () => {
     const src = code("lib/attendee-roster.ts")
     expect(src).toMatch(/import \{ attendeeLabel \} from "\.\/pseudonym"/)
-    expect(src).toMatch(/import \{ eventScopeFor, pseudonymScope \} from "\.\/reports"/)
+    expect(src).toMatch(/import \{ eventScopeFor, labelScopeFor, labelScoper \} from "\.\/reports"/)
     const [org, event] = src.split("export async function eventAttendees(")
     expect(event).toBeDefined()
-    expect(org).toMatch(/id: attendeeLabel\(userId, labelScope\),/)
-    expect(event).toMatch(/id: attendeeLabel\(person, labelScope\),/)
+    // The organisation's roster: each row salted with its event's organisation.
+    expect(org).toMatch(/attendeeLabel\(row\.user_id, labelScope\(row\.event\.organizer_org_id\)\)/)
+    // The event's: salted with that event's, both while held back and not.
+    expect(event).toMatch(/const scope = labelScopeFor\(actor, event\.organizer_org_id\)/)
+    expect(event.match(/id: attendeeLabel\(person, scope\),/g)).toHaveLength(2)
+    // And never a label built any other way.
+    expect(src.match(/attendeeLabel\(/g)).toHaveLength(3)
   })
 
   it("renders the event's Attendees tab from the label roster, not a redirect (SCRUM-499)", () => {

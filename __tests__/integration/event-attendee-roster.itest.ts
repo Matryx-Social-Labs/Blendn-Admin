@@ -2,6 +2,7 @@ import type { user_role } from "@prisma/client"
 
 import { attendeeRoster, eventAttendees } from "@/lib/attendee-roster"
 import { actorFor } from "@/lib/org-membership"
+import { attendeeLabel } from "@/lib/pseudonym"
 import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
 
 /**
@@ -10,13 +11,14 @@ import { db, cleanup, closeDb, makeUser, testId } from "./helpers"
  * The tab used to redirect to `/messaging?view=attendees`, which nothing read,
  * so it landed on the room chat and no per-event list existed (SCRUM-499).
  *
- * Whoever runs the event gets labels. The venue it is held at gets a count and
- * no person (SCRUM-501), held back under `MIN_CELL`, and nothing at all for an
- * event before its claim (SCRUM-355).
+ * Whoever runs the event gets labels: salted with the event's organisation,
+ * in label order, arrivals to the quarter hour, and nothing about who came
+ * while fewer than five did. The venue it is held at gets a count and no
+ * person, through `discloseHeadcount`, and nothing for an event before its
+ * claim (SCRUM-355).
  *
- * Real Postgres, because the two things that matter are what the queries
- * select and what they scope on. A mocked `db` returns whatever the test
- * thought to give it, so it could prove neither.
+ * Real Postgres, because what matters is what the queries select and scope on.
+ * A mocked `db` returns whatever the test thought to give it.
  */
 
 const users: string[] = []
@@ -24,8 +26,10 @@ const events: string[] = []
 const orgs: string[] = []
 const venues: string[] = []
 
-const HOUR = 60 * 60 * 1000
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
+const QUARTER = 15 * MINUTE
 
 async function makeOrg(label: string) {
   const org = await db.organisations.create({
@@ -35,9 +39,15 @@ async function makeOrg(label: string) {
   return org.id
 }
 
+async function person(label: string) {
+  const id = await makeUser(label)
+  users.push(id)
+  return id
+}
+
 type Fixture = { id: string; occurrences: string[]; start: Date }
 
-/** An event of `orgId` starting `startsInHours` from now, with one occurrence per day. */
+/** An event of `orgId` starting `startsInHours` from now, one occurrence per day, three hours a day. */
 async function event(
   orgId: string,
   creator: string,
@@ -80,7 +90,7 @@ async function event(
 async function checkIn(
   e: Fixture,
   userId: string,
-  minutesAfterStart: number,
+  minutesAfterStart: number | null,
   opts: { day?: number; kind?: "attendee" | "staff"; status?: "checked_in" | "checked_out" | "pending" } = {}
 ) {
   const day = opts.day ?? 0
@@ -91,7 +101,8 @@ async function checkIn(
       user_id: userId,
       kind: opts.kind ?? "attendee",
       status: opts.status ?? "checked_out",
-      check_in_time: new Date(e.start.getTime() + day * DAY + minutesAfterStart * 60_000),
+      check_in_time:
+        minutesAfterStart === null ? null : new Date(e.start.getTime() + day * DAY + minutesAfterStart * MINUTE),
     },
   })
 }
@@ -108,7 +119,7 @@ afterAll(async () => {
   await closeDb()
 })
 
-/** What `userId` acting as `role` is given for the event. */
+/** What `userId` acting as `role` is given for the event, through the real `actorFor`. */
 async function seen(role: user_role, userId: string, eventId: string) {
   return eventAttendees(await actorFor({ id: userId, role }), eventId)
 }
@@ -120,51 +131,52 @@ async function roster(role: user_role, userId: string, eventId: string) {
   return out
 }
 
-describe("an event's attendee roster", () => {
-  let hostA: string
-  let hostB: string
-  let admin: string
-  let priya: string // RSVP'd, came on both days of the conference
-  let rahul: string // RSVP'd going, never came
-  let mia: string // RSVP'd maybe, never came
-  let wally: string // walked in, no RSVP
-  let olga: string // came to the OTHER event only
-  let nina: string // said not_going
-  let stan: string // staff, checked in
-  let pat: string // check-in still pending
-  let venueOwner: string
-  let past: Fixture
-  let other: Fixture
-  let live: Fixture
-  let cancelled: Fixture
-  let busy: Fixture // at the venue, five guests
-  let beforeClaim: Fixture // at the venue, before it was claimed
+const statusOf = (out: Awaited<ReturnType<typeof roster>>) =>
+  Object.fromEntries(out.rows.map((r) => [r.id, [r.rsvp, r.status]]))
 
-  const identityOf = () =>
-    [priya, rahul, mia, wally, olga, "Priya Realname", `${priya}@itest.invalid`, "img.invalid"]
+describe("an event's attendee roster", () => {
+  let hostA: string, colleague: string, dual: string, leaver: string, hostB: string, admin: string, venueOwner: string
+  // At `past`: came with an RSVP (priya, gina, gus, nora), walked in (wally;
+  // wanda waitlisted; nina said no), promised and stayed away (rahul going,
+  // mia maybe), worked it with an RSVP (stan), a pending check-in (pat).
+  let priya: string, gina: string, gus: string, nora: string, wally: string, wanda: string, nina: string
+  let rahul: string, mia: string, stan: string, pat: string, olga: string
+  let guests: string[]
+  let past: Fixture, other: Fixture, live: Fixture, cancelled: Fixture
+  let small: Fixture, busy: Fixture, complete: Fixture, residual: Fixture, quiet: Fixture
+  let beforeClaim: Fixture, upcoming: Fixture
+  let orgA: string
+  /** The label org A's members see for `who`. */
+  const atA = (who: string) => attendeeLabel(who, orgA)
+
+  const identityOf = () => [priya, rahul, mia, wally, olga, stan, pat, "Priya Realname", `${priya}@itest.invalid`, "img.invalid"]
 
   beforeAll(async () => {
     hostA = await makeUser("hostA", "organizer")
+    colleague = await makeUser("colleague", "organizer")
+    dual = await makeUser("dual", "organizer")
+    leaver = await makeUser("leaver", "organizer")
     hostB = await makeUser("hostB", "organizer")
     admin = await makeUser("admin", "app_admin")
-    priya = await makeUser("priya")
-    rahul = await makeUser("rahul")
-    mia = await makeUser("mia")
-    wally = await makeUser("wally")
-    olga = await makeUser("olga")
-    nina = await makeUser("nina")
-    stan = await makeUser("stan")
-    pat = await makeUser("pat")
     venueOwner = await makeUser("venueOwner")
-    users.push(hostA, hostB, admin, priya, rahul, mia, wally, olga, nina, stan, pat, venueOwner)
+    users.push(hostA, colleague, dual, leaver, hostB, admin, venueOwner)
+    ;[priya, gina, gus, nora, wally, wanda, nina, rahul, mia, stan, pat, olga] = await Promise.all(
+      ["priya", "gina", "gus", "nora", "wally", "wanda", "nina", "rahul", "mia", "stan", "pat", "olga"].map(person)
+    )
+    guests = await Promise.all(["g1", "g2", "g3", "g4", "g5", "g6"].map(person))
     await db.user.update({ where: { id: priya }, data: { name: "Priya Realname", image: "https://img.invalid/p.jpg" } })
 
-    const orgA = await makeOrg("a")
+    orgA = await makeOrg("a")
     const orgB = await makeOrg("b")
     const orgV = await makeOrg("venue")
     await db.organisation_members.createMany({
       data: [
         { org_id: orgA, user_id: hostA, role: "owner" },
+        // Staff work the door and the room; they see the roster too (R1).
+        { org_id: orgA, user_id: colleague, role: "staff" },
+        { org_id: orgA, user_id: dual, role: "admin" },
+        { org_id: orgB, user_id: dual, role: "owner" },
+        { org_id: orgA, user_id: leaver, role: "staff" },
         { org_id: orgB, user_id: hostB, role: "owner" },
         { org_id: orgV, user_id: venueOwner, role: "owner" },
       ],
@@ -174,117 +186,239 @@ describe("an event's attendee roster", () => {
       data: { name: testId("roster-venue"), city: "Bengaluru", owner_org_id: orgV, claimed_at: new Date(Date.now() - 30 * DAY) },
     })
     venues.push(venue.id)
+    const atV = { venueId: venue.id }
 
-    // A two-day conference that ended yesterday, and another event of the same
-    // organisation the week before.
-    past = await event(orgA, hostA, -3 * DAY / HOUR, { days: 2, venueId: venue.id })
-    other = await event(orgA, hostA, -7 * DAY / HOUR)
-
+    // A two-day conference that ended two days ago.
+    past = await event(orgA, hostA, -3 * 24, { days: 2, ...atV })
     await rsvp(past, priya)
     await checkIn(past, priya, 95, { day: 1 })
     await checkIn(past, priya, 20, { day: 0 })
+    for (const [who, at] of [[gina, 31], [gus, 47]] as const) {
+      await rsvp(past, who)
+      await checkIn(past, who, at)
+    }
+    await rsvp(past, nora)
+    await checkIn(past, nora, null) // an older row with no check-in time
+    await checkIn(past, wally, 40)
+    await rsvp(past, wanda, "waitlisted")
+    await checkIn(past, wanda, 50)
+    await rsvp(past, nina, "not_going")
+    await checkIn(past, nina, 55)
     await rsvp(past, rahul)
     await rsvp(past, mia, "maybe")
-    await checkIn(past, wally, 40)
-    await rsvp(past, nina, "not_going")
+    await rsvp(past, stan)
     await checkIn(past, stan, 5, { kind: "staff" })
     await checkIn(past, pat, 10, { status: "pending" })
 
+    other = await event(orgA, hostA, -7 * 24)
     await rsvp(other, olga)
     await checkIn(other, olga, 30)
     await checkIn(other, priya, 30)
 
-    // Started an hour ago and still running.
+    // Started an hour ago, five in, Rahul still to come.
     live = await event(orgA, hostA, -1)
     await rsvp(live, rahul)
-    await rsvp(live, priya)
-    await checkIn(live, priya, 10)
+    for (const g of guests.slice(0, 5)) await checkIn(live, g, 10)
 
     cancelled = await event(orgA, hostA, -30, { status: "cancelled" })
     await rsvp(cancelled, rahul)
 
-    busy = await event(orgA, hostA, -10 * DAY / HOUR, { venueId: venue.id })
-    beforeClaim = await event(orgA, hostA, -40 * DAY / HOUR, { venueId: venue.id })
-    for (const label of ["g1", "g2", "g3", "g4", "g5"]) {
-      const guest = await makeUser(label)
-      users.push(guest)
-      await checkIn(busy, guest, 15)
-      await checkIn(beforeClaim, guest, 15)
+    // Four people over two days: eight rows, four people. Under the floor.
+    small = await event(orgA, hostA, -5 * 24, { days: 2, ...atV })
+    for (const g of guests.slice(0, 4)) {
+      await checkIn(small, g, 10, { day: 0 })
+      await checkIn(small, g, 10, { day: 1 })
     }
-  })
+    await rsvp(small, rahul)
+    await rsvp(small, mia)
 
-  it("lists that event's people by label, in the order they came through the door", async () => {
-    const out = await roster("organizer", hostA, past.id)
+    // Five guests, two who promised and stayed away, one crew, one pending.
+    busy = await event(orgA, hostA, -10 * 24, atV)
+    for (const g of guests.slice(0, 5)) await checkIn(busy, g, 15)
+    await rsvp(busy, rahul)
+    await rsvp(busy, mia)
+    await checkIn(busy, stan, 5, { kind: "staff" })
+    await checkIn(busy, pat, 10, { status: "pending" })
 
-    expect(out.rows.map((r) => [r.rsvp, r.status])).toEqual([
-      ["going", "came"],
-      [null, "came"],
-      // Committed and never came, after the event: no-shows, at the bottom.
-      ["going", "no_show"],
-      ["maybe", "no_show"],
-    ])
-    for (const row of out.rows) {
-      expect(row.id).toMatch(/^attendee-[0-9a-f]{12}$/)
-      expect(Object.keys(row).sort()).toEqual(["arrivedAt", "id", "rsvp", "status"])
+    // Everybody who promised came: the count names them all.
+    complete = await event(orgA, hostA, -11 * 24, atV)
+    for (const g of guests.slice(0, 5)) {
+      await rsvp(complete, g)
+      await checkIn(complete, g, 15)
     }
-    // The first arrival of a multi-day stay, not the last.
-    expect(out.rows[0].arrivedAt).toBe(new Date(past.start.getTime() + 20 * 60_000).toISOString())
-    expect(out).toMatchObject({ came: 2, walkIns: 1, noShows: 2 })
+
+    // All but one who promised came: the count names the one who didn't.
+    residual = await event(orgA, hostA, -12 * 24, atV)
+    for (const g of guests.slice(0, 6)) await rsvp(residual, g)
+    for (const g of guests.slice(0, 5)) await checkIn(residual, g, 15)
+
+    quiet = await event(orgA, hostA, -13 * 24, atV)
+    await rsvp(quiet, rahul)
+
+    beforeClaim = await event(orgA, hostA, -40 * 24, atV)
+    for (const g of guests.slice(0, 5)) await checkIn(beforeClaim, g, 15)
+
+    upcoming = await event(orgA, hostA, 2 * 24, atV)
+    await rsvp(upcoming, rahul)
   })
 
-  it("never shows another event's attendees, staff, a pending check-in or a no", async () => {
-    const out = await roster("organizer", hostA, past.id)
-    const org = await attendeeRoster("organizer", hostA)
+  describe("for whoever runs it", () => {
+    it("lists that event's people by label, in label order, with what each did", async () => {
+      const out = await roster("organizer", hostA, past.id)
 
-    // Olga came to the other event only; she is on the org roster and not here.
-    const olgaLabel = org.rows.find((r) => r.attended === 1 && r.noShows === 0 && r.rsvps === 1)!.id
-    expect(out.rows.map((r) => r.id)).not.toContain(olgaLabel)
-    expect(out.rows).toHaveLength(4)
-    // Every label here is the one the org roster and the export use.
-    const orgLabels = new Set(org.rows.map((r) => r.id))
-    for (const row of out.rows) expect(orgLabels.has(row.id)).toBe(true)
+      expect(out.rows.map((r) => r.id)).toEqual([...out.rows.map((r) => r.id)].sort())
+      for (const row of out.rows) {
+        expect(row.id).toMatch(/^attendee-[0-9a-f]{12}$/)
+        expect(Object.keys(row).sort()).toEqual(["arrivedAt", "id", "rsvp", "status"])
+      }
+      const statuses = out.rows.map((r) => `${r.rsvp}:${r.status}`).sort()
+      expect(statuses).toEqual(
+        [
+          "going:came", // priya
+          "going:came", // gina
+          "going:came", // gus
+          "going:came", // nora
+          "null:came", // wally
+          "null:came", // wanda, waitlisted: not a promise
+          "null:came", // nina, said no and came anyway
+          "going:no_show", // rahul
+          "maybe:no_show", // mia
+        ].sort()
+      )
+      expect(out).toMatchObject({ came: 7, walkIns: 3, noShows: 2 })
+    })
 
-    const wire = JSON.stringify(out)
-    for (const secret of [...identityOf(), nina, stan, pat]) expect(wire).not.toContain(secret)
+    it("gives the first arrival of a multi-day stay, to the quarter hour, and none for a row without a time", async () => {
+      const mine = await roster("organizer", hostA, past.id)
+      const priyaRow = mine.rows.find((r) => r.id === atA(priya))!
+      const first = past.start.getTime() + 20 * MINUTE
+      expect(priyaRow.arrivedAt).toBe(new Date(Math.floor(first / QUARTER) * QUARTER).toISOString())
+      for (const row of mine.rows) if (row.arrivedAt) expect(Date.parse(row.arrivedAt) % QUARTER).toBe(0)
+      // Nora's check-in has no time: she came, and there is nothing to round.
+      expect(mine.rows.filter((r) => r.status === "came" && r.arrivedAt === null)).toHaveLength(1)
+    })
+
+    it("never shows another event's attendees, staff, a pending check-in, or any identity", async () => {
+      const out = await roster("organizer", hostA, past.id)
+      const org = await attendeeRoster("organizer", hostA)
+
+      // Olga came to the other event only; she is on the org roster and not here.
+      expect(org.rows.map((r) => r.id)).toContain(atA(olga))
+      const here = out.rows.map((r) => r.id)
+      for (const absent of [olga, stan, pat]) expect(here).not.toContain(atA(absent))
+      expect(here).toContain(atA(priya))
+      expect(out.rows).toHaveLength(9)
+      // Every label here is the one the org roster and the export use.
+      const orgLabels = new Set(org.rows.map((r) => r.id))
+      for (const row of out.rows) expect(orgLabels.has(row.id)).toBe(true)
+
+      const wire = JSON.stringify(out)
+      for (const secret of identityOf()) expect(wire).not.toContain(secret)
+    })
+
+    it("holds back who came, and when, while fewer than five did -- counted in people, not rows", async () => {
+      // Four people over two days is eight check-in rows.
+      const out = await roster("organizer", hostA, small.id)
+      expect(out).toMatchObject({ came: 4, walkIns: null, noShows: null })
+      // Only who promised, and nothing about whether they came.
+      expect(out.rows).toHaveLength(2)
+      for (const row of out.rows) expect(row).toMatchObject({ arrivedAt: null, status: "held_back" })
+      expect(out.rows.map((r) => r.rsvp).sort()).toEqual(["going", "going"])
+    })
+
+    it("does not call anybody a no-show before the event is over", async () => {
+      const out = await roster("organizer", hostA, live.id)
+      expect(out.rows.filter((r) => r.status === "expected")).toHaveLength(1)
+      expect(out.noShows).toBe(0)
+    })
+
+    it("does not call anybody a no-show at a cancelled event", async () => {
+      const out = await roster("organizer", hostA, cancelled.id)
+      expect(out.rows.map((r) => r.status)).toEqual(["expected"])
+      expect(out.noShows).toBe(0)
+    })
   })
 
-  it("gives nothing for an event outside the caller's organisation", async () => {
-    // The page refuses first, on the same resolver; this is the floor under it.
-    expect(await seen("organizer", hostB, past.id)).toBeNull()
+  describe("labels", () => {
+    it("are the same for every member of the organisation, staff included", async () => {
+      const mine = statusOf(await roster("organizer", hostA, past.id))
+      expect(statusOf(await roster("organizer", colleague, past.id))).toEqual(mine)
+    })
+
+    it("follow the event's organisation, not the viewer's other memberships", async () => {
+      // A member of A and B sees A's event exactly as A's owner does.
+      const mine = statusOf(await roster("organizer", hostA, past.id))
+      expect(statusOf(await roster("organizer", dual, past.id))).toEqual(mine)
+    })
+
+    it("are gone for somebody who has left the organisation", async () => {
+      expect(await seen("organizer", leaver, past.id)).not.toBeNull()
+      await db.organisation_members.deleteMany({ where: { user_id: leaver } })
+      expect(await seen("organizer", leaver, past.id)).toBeNull()
+    })
+
+    it("are the platform's own for an admin, never the person", async () => {
+      const out = await roster("app_admin", admin, past.id)
+      const host = await roster("organizer", hostA, past.id)
+      const platform = new Set((await attendeeRoster("app_admin", admin)).rows.map((r) => r.id))
+      expect(out.rows).toHaveLength(9)
+      for (const row of out.rows) expect(platform.has(row.id)).toBe(true)
+      expect(out.rows.map((r) => r.id).sort()).not.toEqual(host.rows.map((r) => r.id).sort())
+      const wire = JSON.stringify(out)
+      for (const secret of identityOf()) expect(wire).not.toContain(secret)
+    })
   })
 
-  it("does not call anybody a no-show before the event is over", async () => {
-    const out = await roster("organizer", hostA, live.id)
-    expect(out.rows.map((r) => r.status)).toEqual(["came", "expected"])
-    expect(out.noShows).toBe(0)
-  })
-
-  it("does not call anybody a no-show at a cancelled event", async () => {
-    const out = await roster("organizer", hostA, cancelled.id)
-    expect(out.rows.map((r) => r.status)).toEqual(["expected"])
-    expect(out.noShows).toBe(0)
-  })
-
-  it("gives a platform admin the same labels, never the person", async () => {
-    const out = await roster("app_admin", admin, past.id)
-    expect(out.rows).toHaveLength(4)
-    const wire = JSON.stringify(out)
-    for (const secret of identityOf()) expect(wire).not.toContain(secret)
+  describe("no-shows agree between the event and the organisation's roster", () => {
+    it("counts a no-show only at an event that is over and ran, and never for somebody who worked it", async () => {
+      const org = await attendeeRoster("organizer", hostA)
+      const tabs = await Promise.all([past, other, live, cancelled, busy, complete, residual, quiet, beforeClaim, upcoming].map((e) => roster("organizer", hostA, e.id)))
+      const fromTabs = new Map<string, number>()
+      for (const tab of tabs) for (const row of tab.rows) if (row.status === "no_show") fromTabs.set(row.id, (fromTabs.get(row.id) ?? 0) + 1)
+      // `small` is the one event whose tab holds no-shows back; the org roster
+      // still counts its two.
+      const heldBack = new Set((await roster("organizer", hostA, small.id)).rows.map((r) => r.id))
+      for (const row of org.rows) {
+        expect([row.id, row.noShows]).toEqual([row.id, (fromTabs.get(row.id) ?? 0) + (heldBack.has(row.id) ? 1 : 0)])
+      }
+      // Stan RSVP'd to an event he worked: not on the roster at all.
+      expect(org.rows.map((r) => r.id)).not.toContain(atA(stan))
+      // Rahul: past, small and quiet. Not the live one, not the cancelled one.
+      expect(org.rows.find((r) => r.id === atA(rahul))).toMatchObject({ noShows: 4, rsvps: 4 })
+      expect(fromTabs.size).toBeGreaterThan(0)
+    })
   })
 
   describe("the venue the event is held at", () => {
-    it("gets how many came, and no person", async () => {
+    it("gets how many came, never a label, counted in people", async () => {
+      // Five guests, two stayed away, a crew member and a pending check-in.
       const out = await seen("venue_owner", venueOwner, busy.id)
-      expect(out).toEqual({ view: "count", came: 5 })
+      expect(out).toEqual({ view: "count", started: true, came: 5 })
+      expect(JSON.stringify(out)).not.toMatch(/attendee-/)
     })
 
-    it("has the count held back under the floor", async () => {
-      // Two came to the conference; a count that small can point at somebody.
-      expect(await seen("venue_owner", venueOwner, past.id)).toEqual({ view: "count", came: null })
+    it("has the count held back under the floor, in people not rows", async () => {
+      expect(await seen("venue_owner", venueOwner, small.id)).toEqual({ view: "count", started: true, came: null })
     })
 
-    it("gets nothing for an event before its claim", async () => {
+    it("has it held back when it would name everyone who promised, or the one who didn't", async () => {
+      expect(await seen("venue_owner", venueOwner, complete.id)).toEqual({ view: "count", started: true, came: null })
+      expect(await seen("venue_owner", venueOwner, residual.id)).toEqual({ view: "count", started: true, came: null })
+    })
+
+    it("is told zero, which names nobody, and that an upcoming event has not started", async () => {
+      expect(await seen("venue_owner", venueOwner, quiet.id)).toEqual({ view: "count", started: true, came: 0 })
+      expect(await seen("venue_owner", venueOwner, upcoming.id)).toEqual({ view: "count", started: false, came: 0 })
+    })
+
+    it("gets nothing for an event before its claim, or one held elsewhere", async () => {
       expect(await seen("venue_owner", venueOwner, beforeClaim.id)).toBeNull()
+      expect(await seen("venue_owner", venueOwner, other.id)).toBeNull()
     })
+  })
+
+  it("gives nothing to an organisation that does not run the event", async () => {
+    // The page refuses first, on the same resolver; this is the floor under it.
+    expect(await seen("organizer", hostB, past.id)).toBeNull()
   })
 })

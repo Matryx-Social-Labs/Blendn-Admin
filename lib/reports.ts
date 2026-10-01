@@ -101,21 +101,42 @@ export function canRunReport(key: string, role: user_role): boolean {
  * `eventPermissions.canOperate` exactly.
  */
 /**
- * The salt for attendee pseudonyms.
+ * The salt for one event's attendee pseudonyms, as `viewer` sees them.
  *
- * Stable for one organisation -- the attendees report counts events per person,
- * so a label that changed between exports would make "returning attendee"
- * meaningless -- and different across organisations, so two hosts cannot
- * compare exports and discover they had the same person.
+ * The event's own organisation. Stable across that organisation's events and
+ * the same for every member of it -- the attendees report counts events per
+ * person, so a label that changed between exports would make "returning
+ * attendee" meaningless -- and different at every other organisation, so two
+ * hosts cannot compare exports and discover they had the same person.
+ *
+ * It used to be the viewer's memberships joined, which broke both halves: a
+ * member of organisations A and B saw one label across both, and everybody's
+ * labels changed when they joined or left an organisation. A viewer outside
+ * the event's organisation (a creator who left it) gets a salt of their own, so
+ * their labels never match the organiser's. The platform keeps one.
  */
-export async function pseudonymScope(role: user_role, userId: string): Promise<string> {
-  if (role === "app_admin") return "platform"
-  const memberships = await db.organisation_members.findMany({
-    where: { user_id: userId, ...activeMembership },
-    select: { org_id: true },
-  })
-  const orgIds = memberships.map((m) => m.org_id).sort()
-  return orgIds.length > 0 ? orgIds.join(",") : `user:${userId}`
+export function labelScopeFor(
+  viewer: { id: string; role: user_role; orgIds: readonly string[] },
+  eventOrgId: string | null
+): string {
+  if (viewer.role === "app_admin") return "platform"
+  return eventOrgId && viewer.orgIds.includes(eventOrgId) ? eventOrgId : `user:${viewer.id}`
+}
+
+/** `labelScopeFor`, with the viewer's memberships loaded once for a whole export. */
+export async function labelScoper(
+  role: user_role,
+  userId: string
+): Promise<(eventOrgId: string | null) => string> {
+  const memberships =
+    role === "app_admin"
+      ? []
+      : await db.organisation_members.findMany({
+          where: { user_id: userId, ...activeMembership },
+          select: { org_id: true },
+        })
+  const viewer = { id: userId, role, orgIds: memberships.map((m) => m.org_id) }
+  return (eventOrgId) => labelScopeFor(viewer, eventOrgId)
 }
 
 export async function eventScopeFor(role: user_role, userId: string) {
@@ -166,7 +187,7 @@ export async function buildReport(
   // The route checks first; this holds for any caller that doesn't (SCRUM-437).
   if (!canRunReport(key, role)) throw new Error(`The ${key} report is not open to ${role}`)
   const scope = await eventScopeFor(role, userId)
-  const labelScope = await pseudonymScope(role, userId)
+  const labelScope = await labelScoper(role, userId)
   const inWindow = { gte: range.from, lt: range.to }
 
   switch (key) {
@@ -228,7 +249,7 @@ export async function buildReport(
           event: scope,
           created_at: inWindow,
         },
-        select: { user_id: true, event_id: true, created_at: true },
+        select: { user_id: true, event_id: true, created_at: true, event: { select: { organizer_org_id: true } } },
         /*
          * Bounded, and ordered so the bound is meaningful.
          *
@@ -240,17 +261,19 @@ export async function buildReport(
         orderBy: { created_at: "desc" },
         take: REPORT_ROW_LIMIT,
       })
-      const byUser = new Map<string, { events: Set<string>; last: Date }>()
+      // By label, not by user: one person at two organisations is two rows.
+      // Pseudonymous by design: attendees are pseudonymous to hosts everywhere
+      // in this product, and an export is not a way around that.
+      const byLabel = new Map<string, { events: Set<string>; last: Date }>()
       for (const ci of checkIns) {
-        const entry = byUser.get(ci.user_id) ?? { events: new Set<string>(), last: ci.created_at }
+        const label = attendeeLabel(ci.user_id, labelScope(ci.event.organizer_org_id))
+        const entry = byLabel.get(label) ?? { events: new Set<string>(), last: ci.created_at }
         entry.events.add(ci.event_id)
         if (ci.created_at > entry.last) entry.last = ci.created_at
-        byUser.set(ci.user_id, entry)
+        byLabel.set(label, entry)
       }
-      const rows = [...byUser.entries()].map(([userId, v]) => ({
-        // Pseudonymous by design: attendees are pseudonymous to hosts
-        // everywhere in this product, and an export is not a way around that.
-        attendee: attendeeLabel(userId, labelScope),
+      const rows = [...byLabel.entries()].map(([attendee, v]) => ({
+        attendee,
         events_attended: v.events.size,
         last_attended: v.last,
         repeat: v.events.size > 1,
@@ -276,14 +299,18 @@ export async function buildReport(
           created_at: true,
           status: true,
           user_id: true,
-          event: { select: { id: true, title: true, start_time: true } },
+          event: { select: { id: true, title: true, start_time: true, organizer_org_id: true } },
         },
       })
       return toCsv(
         [
           { key: "created_at", label: "Checked in at" },
           { key: "status", label: "Status" },
-          { key: "attendee", label: "Attendee", value: (r) => attendeeLabel(r.user_id, labelScope) },
+          {
+            key: "attendee",
+            label: "Attendee",
+            value: (r) => attendeeLabel(r.user_id, labelScope(r.event.organizer_org_id)),
+          },
           { key: "event_id", label: "Event ID", value: (r) => r.event.id },
           { key: "event", label: "Event", value: (r) => r.event.title },
           { key: "event_start", label: "Event start", value: (r) => r.event.start_time },
