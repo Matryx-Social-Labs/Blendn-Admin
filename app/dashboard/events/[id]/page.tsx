@@ -232,9 +232,11 @@ export default async function EventDetailPage({
   const curated = state === "curated_open" || state === "curated_claimed"
   const refusals = !curated
     ? null
-    : turnedAway
+    : hasRun && turnedAway
       ? // A claimed listing that has started would otherwise read the same
         // rows twice; the organiser's read already has everything this needs.
+        // Before the doors the curation read stays its own (SCRUM-494): it
+        // ranks the top reason by attempts, and that headline is its job.
         {
           distinctPeopleRefused: turnedAway.people,
           attempts: turnedAway.attempts,

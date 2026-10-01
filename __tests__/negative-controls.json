@@ -1043,8 +1043,8 @@
     },
     "turned-away-on-every-event.test.ts": {
       "guards": "the event page loads eventRefusals beside attendance (not the curated gate) for every non-draft event, upcoming included so 'Before doors' refusals show while the start time can still be fixed (SCRUM-494), the Overview renders TurnedAwayPanel between Attendance and Connections only when people > 0, and the panel links to the editor only when the fence is at fault and canEdit (SCRUM-196)",
-      "mutation": "In app/dashboard/events/[id]/page.tsx replace `eventRefusals(event.id)` in the Promise.all with `Promise.resolve(null)`. M411 (2026-10-01, SCRUM-494): gate eventRefusals on hasRun again instead of overview.state !== \"draft\".",
-      "observed": "1 failing: loads the organiser's refusals — `eventRefusals(event.id)` not found. M411: 1 of 5 failing (loads them before the doors too). Reverted.",
+      "mutation": "In app/dashboard/events/[id]/page.tsx replace `eventRefusals(event.id)` in the Promise.all with `Promise.resolve(null)`. M411 (2026-10-01, SCRUM-494): gate eventRefusals on hasRun again instead of overview.state !== \"draft\". M412: drop hasRun from the curated reuse of turnedAway.",
+      "observed": "1 failing: loads the organiser's refusals — `eventRefusals(event.id)` not found. M411: 1 of 5 failing (loads them before the doors too). M412 (curated upcoming events reuse turnedAway instead of refusalSummary): 1 of 5 failing. Both reverted.",
       "date": "2026-09-21"
     },
     "integration/muted-still-listed.itest.ts": {

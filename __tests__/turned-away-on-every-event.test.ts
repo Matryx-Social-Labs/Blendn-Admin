@@ -10,8 +10,9 @@ import { shortfall } from "@/components/dashboard/turned-away-panel"
  * platform overview counted them, and the event page said nothing — because
  * the only per-event reader was gated on curated events "so an organiser's
  * own event pays nothing". This pins the new reader to the event page for any
- * event that has run, and the panel to the Overview between Attendance and
- * Connections, with the link to the editor only when the fence is at fault.
+ * published event (upcoming too since SCRUM-494, for "Before doors"), and the
+ * panel to the Overview between Attendance and Connections, with the link to
+ * the editor only when the fence is at fault.
  */
 const root = join(__dirname, "..")
 const page = readFileSync(join(root, "app", "dashboard", "events", "[id]", "page.tsx"), "utf8")
@@ -36,6 +37,8 @@ describe("the event page", () => {
     // and connections stay gated on the event having run.
     expect(page).toMatch(/overview\.state !== "draft"\s*\?\s*eventRefusals\(event\.id\)/)
     expect(page).toMatch(/hasRun \? getEventAttendance\(event\.id\)/)
+    // Curation keeps its own attempts-ranked read before the doors.
+    expect(page).toMatch(/: hasRun && turnedAway\s*\?/)
   })
 })
 
