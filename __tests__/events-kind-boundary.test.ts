@@ -147,7 +147,13 @@ interface Scan {
   undecided: Reader[]
 }
 
-/** The initializer of every `const|let|var` in the file, by name. */
+/**
+ * The initializer of every `const|let|var` in the file, by name.
+ *
+ * ponytail: by name, per file, so a same-named variable in another function of
+ * the same file counts as the decision. A type-aware trace (ts-morph) if that
+ * ever lets an unfiltered reader through.
+ */
 function declarations(src: string): Map<string, string> {
   const out = new Map<string, string>()
   for (const m of src.matchAll(/\b(?:const|let|var)\s+(\{[^}]*\}|[A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*/g)) {
