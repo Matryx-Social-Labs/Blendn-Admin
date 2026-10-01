@@ -7,9 +7,11 @@ const mockDb = {
     update: jest.fn(),
   },
   user: { findUnique: jest.fn() },
-  // Cancelling cascades to live check-ins (Fix #35), which is the one other
-  // table these routes touch.
+  // Cancelling cascades to live check-ins (Fix #35) and their presence sessions
+  // (SCRUM-490), in one transaction: the other tables these routes touch.
   event_check_ins: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+  $executeRaw: jest.fn().mockResolvedValue(0),
+  $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
