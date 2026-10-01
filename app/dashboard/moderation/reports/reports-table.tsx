@@ -42,7 +42,11 @@ export function ReportsTable({
     startTransition(async () => {
       try {
         await resolveReport(row.kind, row.id, decision)
-        toast.success(TOAST[decision])
+        toast.success(
+          decision === "remove_message" && row.messageType === "board_post"
+            ? "Post removed from the board"
+            : TOAST[decision]
+        )
         router.refresh()
       } catch (error) {
         // Surfaced rather than swallowed: the likeliest cause is another admin
@@ -88,7 +92,18 @@ export function ReportsTable({
                 : "Event"
               : row.messageType === "private"
                 ? "DM"
-                : "Room message"}
+                : row.messageType === "board_post"
+                  ? // The kind is the point: an offer of a seat is two strangers
+                    // arranging to meet away from a venue.
+                    `Board · ${row.boardKind ?? "post"}`
+                  : row.messageType === "board_request"
+                    ? "Board ask"
+                    : "Room message"}
+          {row.sameSubject > 1 ? (
+            // How many people reported the same thing: a pile-on is one
+            // subject, not a column of separate rows to read one by one.
+            <span className="block text-[0.75rem] text-foreground">{row.sameSubject} reports</span>
+          ) : null}
         </span>
       ),
     },
@@ -116,6 +131,11 @@ export function ReportsTable({
               <span className="ml-1 text-faint-foreground">(removed)</span>
             ) : null}
           </span>
+        ) : row.gone ? (
+          <span className="text-faint-foreground">no longer exists</span>
+        ) : row.messageType === "board_request" ? (
+          // An ask's message is optional; most say nothing beyond the ask.
+          <span className="text-faint-foreground">asked without a message</span>
         ) : row.kind === "message" ? (
           // The message was hard-deleted between the report and the review;
           // showing an empty quote would read as an empty message.
@@ -194,6 +214,18 @@ export function ReportsTable({
               </Button>
             ) : null}
             {/*
+              A board post, not a board ask: an ask went to one person, like a
+              DM, so the lever there is the person. Offered on a post its author
+              already withdrew, too: until a moderator marks it, the record says
+              only that the author took it down. Not offered once it is removed,
+              or once it is gone with an erased account.
+            */}
+            {row.messageType === "board_post" && row.removable ? (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(row, "remove_message")}>
+                Remove post
+              </Button>
+            ) : null}
+            {/*
               Delist, not cancel, and not suspend.
               `unlisted` takes it out of the feed, search and city counts and
               leaves check-ins, the room and RSVPs alone — so an admin who
@@ -241,7 +273,7 @@ export function ReportsTable({
           title={status === "pending" ? "No reports waiting" : `Nothing ${status}`}
           description={
             status === "pending"
-              ? "Reports arrive when someone uses Report on a person, a message, or an event in the app. Dismissing records that a human looked; delisting takes an event out of the feed, search and city counts while leaving its room and check-ins alone; suspending blocks sign-in, ends the current session, revokes app tokens, stops notifications, and removes them from every room."
+              ? "Reports arrive when someone uses Report on a person, a message, a board post or ask, or an event in the app. Dismissing records that a human looked; delisting takes an event out of the feed, search and city counts while leaving its room and check-ins alone; suspending blocks sign-in, ends the current session, revokes app tokens, stops notifications, and removes them from every room."
               : "Reports land here once an admin has ruled on them. Reviewed means looked at, resolved means acted on."
           }
         />

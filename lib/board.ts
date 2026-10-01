@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 import { BOARD } from "./constants"
 import { MIN_INTERESTS_TO_RANK } from "./interest-coverage"
 
@@ -117,6 +119,22 @@ export function mayPostToBoard(
 }
 
 /**
+ * The board closes at doors — for reading as well as writing. After that the
+ * room is the place, gated on presence rather than intent.
+ */
+export const BOARD_CLOSED = "The board closes when the doors open — the room is open instead"
+
+/**
+ * Every refused re-ask reads this, whatever the row underneath says.
+ *
+ * A decline is never delivered to the asker. "They have already answered this
+ * one" was a delivery: the only answer a person can be refused a second ask
+ * after is a no. So a pending ask, a declined one and a withdrawn one all
+ * answer with the same sentence.
+ */
+export const ALREADY_ASKED = "You have already asked — give them a moment"
+
+/**
  * The sentence a person reads. One per denial, because each has a different
  * fix and a shared "you cannot do that" names none of them.
  */
@@ -132,3 +150,15 @@ export function boardDenialMessage(d: BoardReadDenial | BoardWriteDenial): strin
       return "You have sent a lot of requests this week. Try again in a few days."
   }
 }
+
+/**
+ * A report about a board post or a board ask (SCRUM-322).
+ *
+ * The reasons are the app's message-report reasons: a post and an ask are
+ * both words somebody wrote, and one list means the client's sheet and the
+ * admin queue's reason filter do not grow a second vocabulary.
+ */
+export const boardReportSchema = z.object({
+  reason: z.enum(["harassment", "hate_speech", "inappropriate_content", "spam", "other"]),
+  description: z.string().trim().max(500).optional(),
+})

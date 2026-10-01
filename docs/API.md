@@ -1770,7 +1770,8 @@ be seen.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
-| POST | `/users/:userId/block` | Block/unblock user |
+| POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
+| GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their board post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow |
 | GET | `/users/:userId/favorites` | Get your saved events — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
 | GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
@@ -1856,15 +1857,17 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | POST | `/messages/:messageId/report` | `message_reports` (`messageType: "group" \| "private"`) |
 | POST | `/events/:eventId/report` | `event_reports` |
 | POST | `/chat/groups/:chatGroupId/report` | `event_reports` with `chat_group_id` — shown as "Room" |
+| POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Board · offer\|seeking\|chat" |
+| POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Board ask" |
 
 ### The pre-event board
 
 | Method | Endpoint | Gate |
 |--------|----------|------|
-| GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited |
+| GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited; before doors. Posts by anybody blocked either way are left out |
 | POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps; the text passes moderation |
 | DELETE | `/events/:eventId/board/:postId` | Your own post (anyone else's is a 404) |
-| POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked and not already declined |
+| POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked, not a `chat` post, not a full offer, and not asked before |
 | GET | `/board/requests` | Yours, both directions |
 | PATCH | `/board/requests/:requestId` | `{ action: accept \| decline \| withdraw }` |
 
@@ -1898,9 +1901,17 @@ nowhere else. `requestCount` is a number and never a list: how many have asked
 is useful, naming them would disclose who is looking for company to everyone
 browsing.
 
-**The board closes at doors.** After that the room is the place, and it is gated
-on presence rather than intent — a board that stayed open would be a second room
-with a weaker gate running beside the real one.
+**The board closes at doors** — for reading as well as posting and asking, all
+three **403** *"The board closes when the doors open — the room is open
+instead"*, judged on the event's `start_time`. After that the room is the place,
+and it is gated on presence rather than intent — a board that stayed open would
+be a second room with a weaker gate running beside the real one, and a readable
+one would be a list of who came alone, open during the night.
+
+**Blocks apply both ways.** A post by somebody who blocked you, or whom you
+blocked, is not on your board; asking on one is refused exactly as asking on a
+post that is gone; and an ask from somebody blocked either way is left out of
+your incoming list.
 
 **A post is checked before it is stored** (SCRUM-301). The text gets the room's
 checks: the keyword filter, contact details, then OpenAI within one second. A
@@ -1919,8 +1930,61 @@ It has no second look, because a request has nowhere to be hidden later.
 **An author can withdraw their own post** with `DELETE /events/:eventId/board/:postId`.
 It is soft (`deleted_at`): the post leaves every board read, requests filed against
 it stop counting toward their senders' caps, and `GET /board/requests` returns its
-`body` as `null`. Removal by a moderator, and reporting a post, come with the
-board's dashboard surface (SCRUM-322).
+`body` as `null`.
+
+#### Reporting, blocking and removal (SCRUM-322)
+
+| Method | Endpoint | Who |
+|--------|----------|-----|
+| POST | `/events/:eventId/board/:postId/report` | Anyone who was ever this event's audience — an RSVP of any answer (one later changed to not going included) or a save — or who has an ask on the post |
+| POST | `/events/:eventId/board/:postId/block` | The same |
+| POST | `/board/requests/:requestId/report` | Either of the ask's two people |
+| POST | `/board/requests/:requestId/block` | The same |
+
+The board never gives the client a user id, so a person is reported and blocked
+**by the post or the ask they wrote**. The server resolves who and never returns
+it — not in these responses, and not later in `GET /users/blocked`, which lists
+an opaque ref (below). Anything the caller could not have seen, including no
+such post or ask, is the same **404** body as a missing one, so the routes cannot
+be used to probe ids. Your own post is **400**.
+
+**These stay reachable when the board does not.** They are safety actions, so
+neither the doors nor a block closes them: somebody reading a message after the
+night began, or who has just been blocked by its author, can still report it and
+block back. A withdrawn or removed post can be reported too — the person most
+motivated to take a post down is the one about to be reported for it.
+
+- **Reports** take `{ reason, description? }`, with `reason` one of `harassment`,
+  `hate_speech`, `inappropriate_content`, `spam` or `other` (the app's message
+  reasons), and `description` up to 500 characters. They return
+  `201 { reported: true }`. They land in `message_reports` (`message_type`
+  `board_post` / `board_request`), so they show in the admin reports queue beside
+  room messages and DMs, as "Board · offer", "Board · seeking", "Board · chat" or
+  "Board ask", with how many reports name the same thing. An ask is reported
+  about whichever of its two people did not file it.
+- **One report per person per post or ask while it is pending.** A second tap is
+  the same `201` and no new row (a partial unique). Reports are limited to 20 a
+  minute and **30 a day** per person — a queue showing the oldest hundred is
+  otherwise one script away from burying everybody else's.
+- **The evidence is kept.** A report stores the words as they were when it was
+  filed (`excerpt`), and stamps the post `moderation_status = "reported"`.
+  Account erasure deletes only posts with no status, so a reported post is kept
+  (and taken off the board) until it is reviewed, and an ask somebody reported
+  keeps its message until then. Dismissing the last pending report on a post
+  clears the stamp.
+- **Blocking** is exactly `POST /users/:userId/block` once the person is known:
+  the same transaction and the same `{ blocked: true }`. Board asks between the
+  two are left as they are — hidden from the blocker, not acceptable, and read by
+  the asker as an ask on a withdrawn post.
+- **Removal** is the queue's *Remove post* on a board-post report. It marks the
+  post `moderation_status = "removed"` — whether or not its author had already
+  withdrawn it — and sets `deleted_at` if it was still up, which takes it off
+  every board read and lapses the asks filed against it. It records
+  `report.remove_message` in `audit_logs` with the post's id and `removed: true`,
+  or `removed: false` when the post was already removed. A post erased with its
+  author's account cannot be removed (the button is not offered; the action is
+  refused). Asks are not removable: an ask went to one person, like a DM, so the
+  lever there is the person.
 
 #### Asking somebody
 
@@ -1929,11 +1993,17 @@ rather than a check: a request is filed against a post, `board_requests.post_id`
 is required, and the recipient is read off the post. There is no field in which
 to name somebody, so there is no path that forgets the rule.
 
-Refused if they have already **declined** you on that post — the partial unique
-index only stops a second *pending* request, so without it a decline is followed
-by an identical ask a second later, for ever. `withdrawn` is deliberately not
-treated the same way: withdrawing is the asker changing their own mind, and it
-has told the other person nothing.
+**One ask per post, ever.** A second ask on a post you have asked before is
+**409** *"You have already asked — give them a moment"*, whatever became of the
+first — waiting, declined, withdrawn or accepted. It used to be refused only
+after a decline, with *"They have already answered this one"*, and that sentence
+was the decline delivered: the only answer a re-ask can be refused after is a no.
+Refusing after a decline but not after a withdrawal fails the same way one step
+later, since a declined ask can be withdrawn and re-asked. So every re-ask gets
+the sentence a double tap gets.
+
+A request on a **`chat`** post is **422** — it asks nothing of anybody, so there is
+nothing to ask to join.
 
 Blocks are consulted **in both directions**, and the refusal is the same sentence
 as a deleted post. Telling the asker they have been blocked tells them a fact
@@ -1944,6 +2014,57 @@ about somebody else's decision, which is the one thing a block should not leak.
 `accept`, `decline` and `withdraw`. The last is the asker's alone, and
 `withdrawn` is a separate status from `declined` because afterwards, which of the
 two people ended it is the thing worth knowing.
+
+**A decline is never delivered to the asker.** Nothing is pushed, and nothing the
+asker reads changes. In their `GET /board/requests` a declined ask is
+`status: "pending"`, `decidedAt: null`, `live` while its event and post are, and
+it lapses with them like any unanswered ask; it sorts with the pending ones. It
+still counts toward their five outstanding until it lapses — a decline that
+freed a slot would tell somebody at the cap that one of their asks was refused.
+Withdrawing a declined ask succeeds exactly as withdrawing a pending one does,
+and withdrawing twice succeeds again. Only an accepted ask cannot be withdrawn,
+and the asker was told about that one. A withdrawn pending ask becomes
+`withdrawn`; a withdrawn **declined** ask keeps the author's `declined` and
+`decided_at` — their decision is not the asker's to rewrite — and records
+`asker_withdrawn_at`, so the asker sees it `withdrawn` and it frees their slot.
+
+**A block reads as a withdrawn post.** To the asker, an ask to somebody blocked
+either way — pending or declined alike — shows exactly as an ask on a post its
+author took down: `post.body: null`, `live: false`, and it no longer counts
+toward their five. A live ask with the post's words, beside a board that no
+longer lists the post, would tell them which of the two had happened.
+
+**`GET /board/requests` pages by what still matters.** Each direction is the live
+asks first (newest first), then the settled ones (accepted before withdrawn, or
+answered, for the author), then the lapsed ones, up to 50. A lapsed ask stays
+`pending` for ever, because nothing closes one when its night ends, so ordering
+"pending first" let fifty of them push the accepted asks — the ones with a
+conversation behind them — off the page.
+
+**Accepting an offer spends a seat** (SCRUM-514). On an `offer` with a number of
+seats, `spacesLeft` drops by one, in the same transaction as the claim and the
+conversation: of two accepts racing for the last seat exactly one gets it, and
+the other is **409** *"That offer is full"* — said to the author, and the ask
+stays pending. A CHECK keeps it from going below zero. An offer that never named
+its seats (`spacesLeft: null`) has none to run out of. Asking on an offer
+already at `spacesLeft: 0` is the same **409** — the board already shows it
+full.
+
+**Every refusal of an accept** (`PATCH /board/requests/:id` with
+`action: "accept"`):
+
+| Status | Sentence | When |
+|---|---|---|
+| 404 | Request not found | No such ask, or not yours to answer or withdraw |
+| 403 | Only the person who was asked can answer | The asker tried to accept or decline |
+| 409 | That request has already been answered | It is not pending any more (a double tap included) |
+| 409 | That post was taken down | Its post was withdrawn or removed, before or during the accept |
+| 409 | That event has ended | Its event is over |
+| 409 | This request can no longer be accepted | A block either way, **or** a pair whose conversation was closed — one status and one sentence for both, so the answer does not say which |
+| 409 | That offer is full | No seat left on the offer |
+
+The claim, the seat and the conversation are one transaction, so any of the
+last five leaves the ask pending and the seat where it was.
 
 **A decision is still possible after the doors open**, unlike everything else on
 this surface. A pending request holds a slot in the asker's outstanding cap, so

@@ -2,9 +2,10 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { boardDenialMessage, mayReadBoard } from "@/lib/board"
+import { BOARD_CLOSED, boardDenialMessage, mayReadBoard } from "@/lib/board"
 import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
+import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -52,9 +53,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       select: { id: true, start_time: true },
     })
     if (!event) return notFoundResponse("Event not found")
+    // Closed for reading too, on the same clock the writes use. A board still
+    // readable after doors is a list of who came alone, open during the night.
+    if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
 
     const denial = mayReadBoard(await entitlementFor(eventId, user.userId))
     if (denial) return forbiddenResponse(boardDenialMessage(denial))
+
+    // Both directions, as the ask already is: somebody who blocked you, or whom
+    // you blocked, is not on your board.
+    const blocked = await blockCounterparties(user.userId)
 
     /*
      * Live posts only, newest first, and the author as a pseudonym.
@@ -66,7 +74,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * create a handle that follows them between events.
      */
     const posts = await db.board_posts.findMany({
-      where: { event_id: eventId, deleted_at: null },
+      where: { event_id: eventId, deleted_at: null, author_id: { notIn: blocked } },
       orderBy: { created_at: "desc" },
       take: 100,
       select: {
@@ -153,9 +161,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       select: { id: true, start_time: true },
     })
     if (!event) return notFoundResponse("Event not found")
-    if (event.start_time <= new Date()) {
-      return errorResponse("The board closes when the doors open — the room is open instead", 403)
-    }
+    if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
 
     const denial = await boardWriteDenial(eventId, user.userId)
     if (denial) return forbiddenResponse(boardDenialMessage(denial))

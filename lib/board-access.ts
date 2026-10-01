@@ -1,5 +1,7 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
+import type { board_request_status } from "@prisma/client"
+
 import { ageFrom } from "./age"
 import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
 import {
@@ -8,10 +10,12 @@ import {
   type BoardWriteDenial,
 } from "./board"
 import { BOARD } from "./constants"
+import { blockCounterparties } from "./conversations"
 import { db } from "./db"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
+import { violatedConstraint } from "./prisma-errors"
 
 /**
  * The database half of the board's gates.
@@ -81,6 +85,65 @@ export function isLiveRequest(
   )
 }
 
+/**
+ * A decline is never delivered to the asker (product rule).
+ *
+ * To the person who asked, a declined ask is an unanswered one: `pending`, no
+ * decision time, live until it lapses with its event or its post like any
+ * other. Three things carry that rule, and they are pinned against each other
+ * over real rows in `board-safety.itest.ts`:
+ *
+ * - `asTheAskerSees` — the row the asker is shown;
+ * - `isLiveToTheAsker` — whether that row is still waiting, for a row read;
+ * - `outstandingAsk` — the same question as a where clause, for the cap.
+ *
+ * The cap is the one that gets missed: if a decline freed a slot, somebody at
+ * five outstanding who could suddenly ask a sixth has been told one of the five
+ * said no.
+ *
+ * And a block reads as a withdrawn post. Somebody blocked either way vanishes
+ * from the asker's board, and their post with it; an ask on it that stayed
+ * live, with the post's words, while the post itself was gone, would tell the
+ * asker the difference between "they took it down" and "they shut me out". So
+ * to the asker it lapses exactly as an ask on a withdrawn post does — no body,
+ * not live, and no longer holding a slot.
+ */
+export function outstandingAsk(now: Date = new Date(), blocked: readonly string[] = []) {
+  return {
+    ...liveRequest(now),
+    status: { in: ["pending", "declined"] as board_request_status[] },
+    // A declined ask the asker took back is withdrawn, to them.
+    asker_withdrawn_at: null,
+    to_user_id: { notIn: [...blocked] },
+  }
+}
+
+/** The row as its asker may see it. Only ever applied to the asker's own rows. */
+export function asTheAskerSees<
+  T extends { status: board_request_status; decided_at: Date | null; asker_withdrawn_at: Date | null },
+>(request: T): T {
+  if (request.status !== "declined") return request
+  return request.asker_withdrawn_at
+    ? { ...request, status: "withdrawn", decided_at: request.asker_withdrawn_at }
+    : { ...request, status: "pending", decided_at: null }
+}
+
+/** `outstandingAsk`, for a row already read. */
+export function isLiveToTheAsker(
+  request: {
+    status: board_request_status
+    decided_at: Date | null
+    asker_withdrawn_at: Date | null
+    to_user_id: string
+    event: { end_time: Date }
+    post: { deleted_at: Date | null }
+  },
+  blocked: ReadonlySet<string>,
+  now: Date = new Date()
+): boolean {
+  return isLiveRequest(asTheAskerSees(request), now) && !blocked.has(request.to_user_id)
+}
+
 /** What the viewer has done about this event. Both gates read it. */
 export async function entitlementFor(
   eventId: string,
@@ -122,7 +185,9 @@ export async function boardWriteDenial(
       select: { name: true, age: true, date_of_birth: true, intent_default: true },
     }),
     db.user_interests.count({ where: { user_id: userId } }),
-    db.board_requests.count({ where: { from_user_id: userId, ...liveRequest() } }),
+    blockCounterparties(userId).then((blocked) =>
+      db.board_requests.count({ where: { from_user_id: userId, ...outstandingAsk(new Date(), blocked) } })
+    ),
     db.board_requests.count({
       where: {
         from_user_id: userId,
@@ -245,4 +310,105 @@ export async function hideBoardPostIfFlagged(postId: string, body: string): Prom
     where: { id: postId, deleted_at: null },
     data: { deleted_at: new Date(), moderation_status: "hidden", updated_at: new Date() },
   })
+}
+
+/*
+ * Who a board report or block is about (SCRUM-322).
+ *
+ * The board is pseudonymous, so the client never holds a user id to report or
+ * block — it holds the post or the ask it saw. The person is resolved here, on
+ * the server, and never returned. Null — answered as not found — for anything
+ * the caller could not have seen, so these cannot be used to probe ids.
+ *
+ * "Could have seen" is deliberately wide, because these are safety actions and
+ * must stay reachable after the thing that made them necessary: anybody who
+ * was ever this event's audience (an RSVP of any answer — including one later
+ * changed to not going — or a save), or who has an ask on the post. Not the
+ * board-read gate: that closes at doors and hides blocked authors, and the
+ * person most in need of a report is the one who was just blocked, or who
+ * found the message after the night began.
+ */
+
+/** The author of a post the caller could have seen (see above). */
+export async function boardPostAuthorFor(
+  viewerId: string,
+  eventId: string,
+  postId: string
+): Promise<string | null> {
+  const post = await db.board_posts.findFirst({
+    where: { id: postId, event_id: eventId },
+    select: { author_id: true },
+  })
+  if (!post) return null
+  // Withdrawn or removed posts stay reportable: the person most motivated to
+  // take a post down is the one about to be reported for it.
+  const { rsvp, favourited } = await entitlementFor(eventId, viewerId)
+  if (rsvp !== null || favourited) return post.author_id
+  const asked = await db.board_requests.findFirst({
+    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId }] },
+    select: { id: true },
+  })
+  return asked ? post.author_id : null
+}
+
+/**
+ * File a report about a board post or ask.
+ *
+ * Idempotent per reporter while it is pending — a partial unique in the
+ * migration — so a second tap, or a script, is the same report rather than a
+ * second row burying everybody else's in a queue that shows the oldest
+ * hundred. `excerpt` is the words as they were when reported: the post can be
+ * withdrawn and an erased account's ask loses its message before anybody
+ * reviews it.
+ *
+ * A reported post is stamped `moderation_status = "reported"` (if moderation
+ * has not already marked it), which is what account erasure reads: it deletes
+ * only posts with no status, so evidence under review is retained. Clearing
+ * the stamp is the reviewer's (`resolveReport`, on dismiss).
+ */
+export async function fileBoardReport(input: {
+  reporterId: string
+  type: "board_post" | "board_request"
+  id: string
+  reason: string
+  description?: string
+  excerpt: string | null
+}): Promise<void> {
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.message_reports.create({
+        data: {
+          reporter_id: input.reporterId,
+          message_id: input.id,
+          message_type: input.type,
+          reason: input.reason,
+          ...(input.description && { description: input.description }),
+          ...(input.excerpt && { excerpt: input.excerpt.slice(0, 500) }),
+        },
+      })
+      if (input.type === "board_post") {
+        await tx.board_posts.updateMany({
+          where: { id: input.id, moderation_status: null },
+          data: { moderation_status: "reported" },
+        })
+      }
+    })
+  } catch (error) {
+    if (violatedConstraint(error, "message_reports_one_pending_board")) return
+    throw error
+  }
+}
+
+/** The other person on an ask, if the caller is one of its two people. */
+export async function boardRequestCounterpart(
+  viewerId: string,
+  requestId: string
+): Promise<string | null> {
+  const r = await db.board_requests.findUnique({
+    where: { id: requestId },
+    select: { from_user_id: true, to_user_id: true },
+  })
+  if (r?.from_user_id === viewerId) return r.to_user_id
+  if (r?.to_user_id === viewerId) return r.from_user_id
+  return null
 }

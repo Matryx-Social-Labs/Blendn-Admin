@@ -5,7 +5,8 @@ import { lockPair, severFriendship } from "@/lib/friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { userIdFromRef } from "@/lib/room-handle"
+import { blockIdFromRef, userIdFromRef } from "@/lib/room-handle"
+import { isUuid } from "@/lib/api-input"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -111,6 +112,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       await severFriendship(authUser.userId, targetId, tx)
 
       /*
+       * And the bell. Their board asks leave the blocker's list at once (hidden
+       * either way), but the "Someone answered your post" line for each stayed
+       * unread, pointing at an ask that no longer shows — a ghost, and a count
+       * that would not clear. Marked read, not deleted: the row is the record
+       * that it was sent.
+       */
+      await tx.$executeRaw`
+        UPDATE "notifications" SET "read_at" = now()
+        WHERE "user_id" = ${authUser.userId}
+          AND "kind" = 'board_request'
+          AND "read_at" IS NULL
+          AND "data"->>'requestId' IN (
+            SELECT "id"::text FROM "board_requests"
+            WHERE "from_user_id" = ${targetId} AND "to_user_id" = ${authUser.userId}
+          )`
+
+      /*
        * Close the conversation, if there is one.
        *
        * Blocking left the thread sitting in both inboxes with its history fully
@@ -160,8 +178,24 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("safety", "block-user", authUser.userId))
     if (limited) return limited
 
+    const ref = (await params).userId
+
+    /*
+     * The block list's own ref (`blockRef`), which is what the list hands out
+     * now. Ownership is the predicate: only a block the caller made goes.
+     * A ref that names nobody's block answers as a raw id nobody has would.
+     */
+    const blockId = blockIdFromRef(ref)
+    if (blockId !== null) {
+      if (isUuid(blockId)) {
+        await db.blocked_users.deleteMany({ where: { id: blockId, blocker_id: authUser.userId } })
+      }
+      return successResponse({ blocked: false })
+    }
+
     // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.
-    const targetId = userIdFromRef((await params).userId)
+    // A raw id still works, for old clients, and only on the caller's own block.
+    const targetId = userIdFromRef(ref)
 
     await db.blocked_users.deleteMany({
       where: {
