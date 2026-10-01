@@ -7,9 +7,15 @@ import EventsPage from "@/app/dashboard/events/page"
 import { actorFor } from "@/lib/org-membership"
 import { attendeeLabel } from "@/lib/pseudonym"
 import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
-import { canRunReport, pseudonymScope, reportsFor } from "@/lib/reports"
+import { canRunReport, labelScoper, reportsFor } from "@/lib/reports"
 import { closeDb, db } from "./helpers"
 import { DAY, HOUR, VenueClaimWorld, type Night } from "./venue-claim-world"
+
+/** The salt `userId` sees for `eventId`'s labels: its organisation's, if theirs (PR #601). */
+async function labelsFor(role: "organizer" | "venue_owner", userId: string, eventId: string) {
+  const { organizer_org_id } = await db.events.findUniqueOrThrow({ where: { id: eventId }, select: { organizer_org_id: true } })
+  return (await labelScoper(role, userId))(organizer_org_id)
+}
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventsRoute = require("@/app/api/events/route") as typeof import("@/app/api/events/route")
@@ -160,7 +166,7 @@ describe("the venue owner's own events stay theirs to run (SCRUM-320)", () => {
   it("exports its check-ins per guest, by label, as any organiser's", async () => {
     const out = await csv("check-ins")
     expect(lines(out)[0]).toBe("Checked in at,Status,Attendee,Event ID,Event,Event start")
-    const labels = await pseudonymScope("venue_owner", w.owner)
+    const labels = await labelsFor("venue_owner", w.owner, n.ownBefore.id)
     for (const g of n.ownBefore.guests[0]) expect(out).toContain(attendeeLabel(g, labels))
     expect(rowsFor(out, n.ownBefore.id)).toHaveLength(2)
     // And only their own: no other host's night is in the per-guest file.
@@ -186,10 +192,12 @@ describe("the venue check-ins export is counts, never people (F5)", () => {
 
   it("has exactly the aggregate header, and no label or user id anywhere", async () => {
     expect(lines(out)[0]).toBe("Event ID,Event,Event start,Day,Guests")
-    const labels = await pseudonymScope("venue_owner", w.owner)
-    for (const g of Object.values(n).flatMap((x) => x.guests.flat())) {
-      expect(out).not.toContain(g)
-      expect(out).not.toContain(attendeeLabel(g, labels))
+    for (const night of Object.values(n)) {
+      const labels = await labelsFor("venue_owner", w.owner, night.id)
+      for (const g of night.guests.flat()) {
+        expect(out).not.toContain(g)
+        expect(out).not.toContain(attendeeLabel(g, labels))
+      }
     }
   })
 
@@ -270,7 +278,7 @@ describe("other hosts' counts are held back wherever a venue owner sees them", (
     const out = await csv("events")
     expect(rowsFor(out, n.small.id)[0].split(",").slice(-2)[0]).toBe("2")
     const checkIns = await csv("check-ins")
-    const labels = await pseudonymScope("organizer", w.host)
+    const labels = await labelsFor("organizer", w.host, n.before.id)
     expect(lines(checkIns)[0]).toBe("Checked in at,Status,Attendee,Event ID,Event,Event start")
     for (const g of n.before.guests[0]) expect(checkIns).toContain(attendeeLabel(g, labels))
     expect(rowsFor(checkIns, n.before.id)).toHaveLength(6)

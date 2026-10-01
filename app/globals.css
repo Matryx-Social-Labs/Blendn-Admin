@@ -14,7 +14,7 @@
  * designer; it is one value to change if they say otherwise.
  *
  *   orange  #F05423   primary
- *   purple  #8F49AA   primary (gradient end)
+ *   purple  #8F49AA   primary
  *   rose    #BE5C71   secondary
  *   ink     #0D0C0C   secondary
  *   white   #FFFFFF   secondary
@@ -27,7 +27,9 @@
   --color-brand-orange: oklch(0.652 0.2 36.7);
   --color-brand-purple: oklch(0.532 0.16 315.6);
   --color-brand-rose: oklch(0.599 0.127 8.2);
-  --color-brand-ink: oklch(0.156 0.002 17.3);
+  /* Read from `--brand-ink` below, so the kit's `var(--brand-ink)` and the
+     `text-brand-ink` utility are one value. */
+  --color-brand-ink: var(--brand-ink);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
@@ -54,6 +56,17 @@
   --text-body: 0.9375rem;
   --text-small: 0.8125rem;
   --text-caption: 0.75rem;
+  /*
+   * The design kit's in-content PageHeader title and Panel title (owner rulings
+   * R3 and R5, 2026-10-01). Step 14 moves the h1 out of the site header and onto
+   * `text-page-title`; until then nothing uses either, and the header keeps its
+   * 20px.
+   */
+  --text-page-title: 1.625rem;
+  --text-panel-title: 0.9375rem;
+
+  /* The kit's Panel: card background, 1px border, this radius (R3). */
+  --radius-panel: 0.75rem;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -74,6 +87,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -123,6 +137,8 @@
   --accent: oklch(0.958 0.012 40);
   --accent-foreground: oklch(0.24 0.01 330);
   --destructive: oklch(0.55 0.215 15);
+  /* White on the light red is 5.45:1. See `.dark` for why it is not white there. */
+  --destructive-foreground: #ffffff;
   --success: oklch(0.62 0.145 157);
   --warning: oklch(0.66 0.14 75);
   --info: oklch(0.532 0.16 315.6);
@@ -131,7 +147,14 @@
   --border: oklch(0.905 0.006 40);
   --border-strong: oklch(0.85 0.008 40);
   --chart-grid: oklch(0 0 0 / 8%);
-  --gradient-brand: linear-gradient(135deg, #f05423 0%, #8f49aa 100%);
+  /*
+   * The two gradients, one value each, theme-independent (DESIGN_SYSTEM.md).
+   * `--gradient-brand` is the mark's: hero washes, stripes, never under text.
+   * `--gradient-ember` is the interface's: it carries dark text the whole way.
+   */
+  --gradient-brand: linear-gradient(135deg, #f05423 0%, #bf5a6d 50%, #915da7 100%);
+  --gradient-ember: linear-gradient(135deg, #ff906d 0%, #ff6d8d 100%);
+  --brand-ink: oklch(0.156 0.002 17.3);
   --input: oklch(0.905 0.006 40);
   --ring: oklch(0.652 0.2 36.7);
   --chart-1: oklch(0.652 0.2 36.7);
@@ -174,6 +197,15 @@
   --accent: oklch(0.285 0.018 320);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.635 0.215 12.5);
+  /*
+   * Ink, not the kit's white. Measured through a canvas, white on this red is
+   * 3.83:1 and the nav badge it labels is 11px bold, under the 4.5:1 floor;
+   * ink is 5.1:1. Same
+   * reasoning as `--primary-foreground`. Before this token existed the badge's
+   * `text-destructive-foreground` was a no-op, and an inactive row's muted grey
+   * sat on the red at 1.53:1.
+   */
+  --destructive-foreground: oklch(0.156 0.002 17.3);
   --success: oklch(0.719 0.146 157.3);
   --warning: oklch(0.8 0.14 80);
   /* Brand purple, lifted for contrast on ink. */
@@ -197,7 +229,6 @@
   --border: oklch(1 0 0 / 10%);
   --border-strong: oklch(1 0 0 / 18%);
   --chart-grid: oklch(1 0 0 / 8%);
-  --gradient-brand: linear-gradient(135deg, #f05423 0%, #8f49aa 100%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.652 0.2 36.7);
   --chart-1: oklch(0.68 0.195 38);
@@ -258,6 +289,7 @@
   --accent: oklch(0.958 0.012 40);
   --accent-foreground: oklch(0.24 0.01 330);
   --destructive: oklch(0.55 0.215 15);
+  --destructive-foreground: #ffffff;
   --faint-foreground: oklch(0.62 0.012 330);
   --surface-raised: oklch(0.968 0.006 40);
   --border: oklch(0.905 0.006 40);
