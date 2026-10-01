@@ -173,6 +173,14 @@ describe("parseCsv — reading what founders paste", () => {
     expect(parseCsv(`${UTF8_BOM}name,city\nToit,Bengaluru`)[0]).toEqual(["name", "city"])
   })
 
+  it("keeps a quote in the middle of a bare cell as a character, so one stray quote does not swallow the file", () => {
+    expect(parseCsv('name,city\n12" Pizza,Pune\nBar,Mumbai')).toEqual([
+      ["name", "city"],
+      ['12" Pizza', "Pune"],
+      ["Bar", "Mumbai"],
+    ])
+  })
+
   it("reads back what toCsv writes", () => {
     const rows = [{ a: "Bengaluru, India", b: 'The "Loft"' }]
     const written = toCsv([{ key: "a", label: "A" }, { key: "b", label: "B" }], rows)

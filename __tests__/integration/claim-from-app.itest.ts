@@ -16,9 +16,21 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 const mockGetAuth = jest.fn()
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
-jest.mock("next/headers", () => ({ headers: jest.fn().mockResolvedValue({ get: () => "203.0.113.46" }) }))
+// One network per test, so the limiter's IP window (10 an hour) never trips a
+// test that is not about it, and the one that is starts from zero.
+let mockIp = "203.0.113.46"
+jest.mock("next/headers", () => ({ headers: jest.fn(async () => ({ get: () => mockIp })) }))
+const mockNotify = jest.fn()
+jest.mock("@/lib/claim-decision-notify", () => ({
+  ...jest.requireActual("@/lib/claim-decision-notify"),
+  notifyClaimant: (...a: unknown[]) => mockNotify(...a),
+}))
 
+import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
+import type { ReactNode } from "react"
+
+import { VenueClaimForm } from "@/app/claim/venue/[venueId]/claim-form"
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { decideVenueClaim, filePublicVenueClaim, getVenueClaimQueue } from "@/lib/venue-claim-actions"
@@ -45,7 +57,19 @@ afterAll(async () => {
   await closeDb()
 })
 
-beforeEach(() => mockGetAuth.mockResolvedValue(null))
+beforeEach(() => {
+  mockGetAuth.mockResolvedValue(null)
+  mockNotify.mockReset().mockResolvedValue(true)
+  mockIp = `198.51.100.${Math.floor(Math.random() * 250)}-${randomUUID()}`
+})
+
+/** Whether a rendered tree holds an element of this component — the form, not just "something". */
+function contains(node: ReactNode, type: unknown): boolean {
+  if (!node || typeof node !== "object") return false
+  if (Array.isArray(node)) return node.some((n) => contains(n, type))
+  const el = node as { type?: unknown; props?: { children?: ReactNode } }
+  return el.type === type || contains(el.props?.children, type)
+}
 
 async function venue(data: { status?: "active" | "archived"; deleted?: boolean; ownerOrgId?: string } = {}) {
   const v = await db.venues.create({
@@ -97,8 +121,9 @@ const render = (venueId: string) => page.default({ params: Promise.resolve({ ven
 const notFound = { digest: expect.stringContaining("404") }
 
 describe("the public venue claim page", () => {
-  it("renders an unclaimed venue with no session", async () => {
-    await expect(render(await venue())).resolves.toBeTruthy()
+  it("renders the form for an unclaimed venue with no session, and no form for an owned one", async () => {
+    expect(contains(await render(await venue()), VenueClaimForm)).toBe(true)
+    expect(contains(await render(await venue({ ownerOrgId: await org() })), VenueClaimForm)).toBe(false)
   })
 
   it.each([
@@ -171,6 +196,29 @@ describe("filing a venue claim with no account", () => {
     expect(await db.venue_claims.count({ where: { venue_id: { in: [owned, archived] } } })).toBe(0)
   })
 
+  it("refuses a note past 1,000 characters and an email that is not a string, writing nothing", async () => {
+    const venueId = await venue()
+    const app = await application()
+    await expect(
+      filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id, note: "x".repeat(1001) })
+    ).resolves.toEqual({ ok: false, error: "Keep the note under 1,000 characters" })
+    await expect(
+      filePublicVenueClaim({ venueId, contactEmail: 42 as unknown as string, onboardingId: app.id })
+    ).resolves.toEqual({ ok: false, error: "Give an email address we can reply to" })
+    expect(await db.venue_claims.count({ where: { venue_id: venueId } })).toBe(0)
+  })
+
+  it("is rate-limited: the sixth filing from one address in an hour is refused", async () => {
+    const venueId = await venue()
+    const app = await application()
+    const file = () => filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
+    for (let i = 0; i < 5; i++) await file()
+    await expect(file()).resolves.toEqual({
+      ok: false,
+      error: "You have filed several claims recently. Give us a little time to read them.",
+    })
+  })
+
   it("holds one pending claim per address per venue", async () => {
     const venueId = await venue()
     const app = await application()
@@ -241,6 +289,37 @@ describe("deciding a no-account venue claim", () => {
     expect(venueRow.claimed_at).not.toBeNull()
     const claim = await db.venue_claims.findUniqueOrThrow({ where: { id: filed.claimId } })
     expect(claim).toMatchObject({ status: "approved", org_id: orgId, onboarding_id: null })
+    // There is no user to look up: the address they filed with is who hears.
+    expect(mockNotify).toHaveBeenCalledWith(expect.objectContaining({ to: app.contact_email, outcome: "approved" }))
+  })
+
+  it("writes a decline to the address the claim was filed with", async () => {
+    const venueId = await venue()
+    const app = await application()
+    const filed = await filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
+    if (!filed.ok) throw new Error(filed.error)
+
+    asAdmin()
+    await decideVenueClaim(filed.claimId, "decline", "We could not match the legal name to the venue.")
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.objectContaining({ to: app.contact_email, outcome: "declined", reason: "We could not match the legal name to the venue." })
+    )
+  })
+
+  it("refuses to approve over an owner given since the claim was filed", async () => {
+    const venueId = await venue()
+    const app = await application()
+    const filed = await filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
+    if (!filed.ok) throw new Error(filed.error)
+    const claimant = await org()
+    await db.organiser_onboarding_requests.update({ where: { id: app.id }, data: { status: "approved", org_id: claimant } })
+    const incumbent = await org()
+    await db.venues.update({ where: { id: venueId }, data: { owner_org_id: incumbent, claimed_at: new Date() } })
+
+    asAdmin()
+    await expect(decideVenueClaim(filed.claimId, "approve")).rejects.toThrow(/given an owner since the claim was filed/)
+    const after = await db.venues.findUniqueOrThrow({ where: { id: venueId }, select: { owner_org_id: true } })
+    expect(after.owner_org_id).toBe(incumbent)
   })
 })
 

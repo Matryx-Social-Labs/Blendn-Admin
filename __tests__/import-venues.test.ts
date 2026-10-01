@@ -30,11 +30,17 @@ describe("coordinatesFromMapsUrl", () => {
     expect(coordinatesFromMapsUrl("https://maps.google.com/?q=12.97,77.64")).toEqual({ lat: 12.97, lng: 77.64 })
     expect(coordinatesFromMapsUrl("https://www.google.com/maps/search/?api=1&query=12.9,%2077.6")).toEqual({ lat: 12.9, lng: 77.6 })
     expect(coordinatesFromMapsUrl("https://www.google.co.in/maps/@12.95,77.61,15z")).toEqual({ lat: 12.95, lng: 77.61 })
+    expect(coordinatesFromMapsUrl("https://maps.google.com/maps?ll=12.91,77.58&z=15")).toEqual({ lat: 12.91, lng: 77.58 })
+  })
+
+  it("reads a link whose place name holds a bare %, instead of aborting the run", () => {
+    expect(coordinatesFromMapsUrl("https://www.google.com/maps/place/50%25%Off/@12.97,77.64,17z")).toEqual({ lat: 12.97, lng: 77.64 })
   })
 
   it("refuses a search by name, a non-Google host and an impossible coordinate", () => {
     expect(coordinatesFromMapsUrl("https://www.google.com/maps/search/toit+indiranagar")).toBeNull()
     expect(coordinatesFromMapsUrl("https://evil.example/maps/@12.97,77.64,17z")).toBeNull()
+    expect(coordinatesFromMapsUrl("https://google.evil.com/maps/@12.97,77.64,17z")).toBeNull()
     expect(coordinatesFromMapsUrl("https://maps.google.com/?q=120.0,77.6")).toBeNull()
     expect(coordinatesFromMapsUrl("not a url")).toBeNull()
   })

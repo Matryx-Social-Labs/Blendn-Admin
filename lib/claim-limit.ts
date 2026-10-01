@@ -28,11 +28,11 @@ export interface ClaimTarget {
  */
 export async function overClaimLimit(email: string, target: ClaimTarget): Promise<string | null> {
   /*
-   * `x-forwarded-for` is spoofable, which is why it is the weakest of the three
-   * and never the only one. The LAST hop is the one the platform's edge added
-   * — the left-most is whatever the client sent, which is why this goes
-   * through `clientIpFrom` like every other limiter. With no header at all
-   * every anonymous caller shares one bucket, which fails toward refusing.
+   * The network is the weakest of the three windows and never the only one.
+   * `clientIpFrom` reads it the way every limiter does (`x-real-ip`, which
+   * Railway's edge sets and overwrites — see that file for the measurement).
+   * With no header at all every anonymous caller shares one bucket, which
+   * fails toward refusing.
    */
   const ip = clientIpFrom(await headers())
 

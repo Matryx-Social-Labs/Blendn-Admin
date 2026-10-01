@@ -138,7 +138,9 @@ export function parseCsv(text: string): string[][] {
       } else {
         cell += ch
       }
-    } else if (ch === '"') {
+    } else if (ch === '"' && cell === "") {
+      // Only at the start of a cell. Mid-cell (`12" Pizza`) it is a character,
+      // or one stray quote would swallow the rest of the file into one cell.
       quoted = true
     } else if (ch === ",") {
       row.push(cell)

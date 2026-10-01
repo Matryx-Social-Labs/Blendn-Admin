@@ -58,6 +58,8 @@ const FLAGS = new Set(["--apply", "--osm"])
 /** Overpass's anonymous rate, the same pause the enrichment script keeps. */
 const OSM_PAUSE_MS = 5000
 const SHORT_LINK_HOSTS = new Set(["maps.app.goo.gl", "goo.gl"])
+/** google.com, google.co.in, maps.google.com and the like — not google.evil.com. */
+const GOOGLE_MAPS_HOST = /^(www\.|maps\.)?google\.(com|co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2})$/
 
 export interface VenueRow {
   /** The line in the file, header included, for the operator to find it. */
@@ -106,9 +108,14 @@ export function coordinatesFromMapsUrl(raw: string): { lat: number; lng: number 
   } catch {
     return null
   }
-  if (!/(^|\.)google\.[a-z.]+$/.test(url.hostname) && !SHORT_LINK_HOSTS.has(url.hostname)) return null
+  if (!GOOGLE_MAPS_HOST.test(url.hostname) && !SHORT_LINK_HOSTS.has(url.hostname)) return null
 
-  const text = decodeURIComponent(url.href)
+  let text = url.href
+  try {
+    text = decodeURIComponent(url.href)
+  } catch {
+    // A bare "%" in a place name: read the link undecoded rather than abort the run.
+  }
   const pin = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/.exec(text)
   const fromParam = ["q", "query", "ll", "destination"]
     .map((k) => PAIR.exec(url.searchParams.get(k) ?? ""))

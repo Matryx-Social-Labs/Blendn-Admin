@@ -46,10 +46,45 @@ const schema = z.object({
 
 type Values = z.infer<typeof schema>
 
+/**
+ * The venue-owner application, through the one route that writes them. Its
+ * refusals are written for a person ("we already have an application from
+ * this address"), so they are shown as-is.
+ */
+async function applyAsVenueOwner(values: Values): Promise<{ requestId: string } | { error: string }> {
+  const res = await fetch("/api/onboarding/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requested_role: "venue_owner",
+      kind: "company",
+      display_name: values.organisationName,
+      legal_name: values.legalName,
+      gstin: values.gstin,
+      website: values.website,
+      contact_name: values.contactName,
+      contact_email: values.contactEmail,
+    }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok || !body?.requestId) {
+    return { error: body?.error ?? "Could not start your application. Try again in a moment." }
+  }
+  return { requestId: body.requestId as string }
+}
+
 export function VenueClaimForm({ venueId, venueName }: { venueId: string; venueName: string }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [filed, setFiled] = useState(false)
+  /*
+   * The application this form already filed. A claim refused after the apply
+   * succeeded (the limiter, the venue claimed meanwhile, a network blip) must
+   * be retryable: applying again answers 409 "we already have an application
+   * from this address", and the claimant would be stuck with an application
+   * and no claim. So a retry files the claim against the one already made.
+   */
+  const [applied, setApplied] = useState<{ email: string; requestId: string } | null>(null)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -59,32 +94,22 @@ export function VenueClaimForm({ venueId, venueName }: { venueId: string; venueN
   const submit = (values: Values) => {
     setError(null)
     startTransition(async () => {
-      const res = await fetch("/api/onboarding/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requested_role: "venue_owner",
-          kind: "company",
-          display_name: values.organisationName,
-          legal_name: values.legalName,
-          gstin: values.gstin,
-          website: values.website,
-          contact_name: values.contactName,
-          contact_email: values.contactEmail,
-        }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok || !body?.requestId) {
-        // The apply route's refusals are written for a person ("we already
-        // have an application from this address"), so they are shown as-is.
-        setError(body?.error ?? "Could not start your application. Try again in a moment.")
-        return
+      const email = values.contactEmail.trim().toLowerCase()
+      let requestId = applied?.email === email ? applied.requestId : null
+      if (!requestId) {
+        const outcome = await applyAsVenueOwner(values)
+        if ("error" in outcome) {
+          setError(outcome.error)
+          return
+        }
+        requestId = outcome.requestId
+        setApplied({ email, requestId })
       }
 
       const result = await filePublicVenueClaim({
         venueId,
         contactEmail: values.contactEmail,
-        onboardingId: body.requestId as string,
+        onboardingId: requestId,
         gstin: values.gstin,
         note: values.note,
       })

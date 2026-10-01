@@ -196,11 +196,17 @@ export interface FilePublicVenueClaimInput {
  * handed to. The session is never read here: an account holder files from the
  * dashboard, with documents.
  */
+const PUBLIC_NOTE_MAX = 1000
+
 export async function filePublicVenueClaim(
   input: FilePublicVenueClaimInput
 ): Promise<{ ok: true; claimId: string } | { ok: false; error: string }> {
   // venues.id is a UUID column; a malformed id is a missing venue, not a throw.
   if (!isUuid(input.venueId)) return { ok: false, error: "Venue not found" }
+  // A server action's argument is whatever the caller sent; the form's zod
+  // schema is not a validator here.
+  if (typeof input.contactEmail !== "string") return { ok: false, error: "Give an email address we can reply to" }
+  if ((input.note?.length ?? 0) > PUBLIC_NOTE_MAX) return { ok: false, error: "Keep the note under 1,000 characters" }
 
   const email = input.contactEmail.trim().toLowerCase()
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
@@ -466,6 +472,21 @@ export async function decideVenueClaim(
   const orgId = claim.org_id ?? request?.org_id ?? null
   if (decision === "approve" && !orgId) {
     throw new Refusal("Approve their application first — there is no organisation to hand this venue to yet.")
+  }
+  /*
+   * An owner given since filing (`assignVenueOwner`, or a claim decided
+   * elsewhere) would be overwritten by an approval the reviewer reads as a
+   * plain claim: `is_dispute` was fixed at filing, so the card shows neither
+   * the incumbent nor "Transfer venue". Refused here so a transfer is always a
+   * decision someone saw.
+   */
+  if (
+    decision === "approve" &&
+    !claim.is_dispute &&
+    claim.venue.owner_org_id !== null &&
+    claim.venue.owner_org_id !== orgId
+  ) {
+    throw new Refusal("This venue has been given an owner since the claim was filed. Decline it, or have them dispute it from the dashboard.")
   }
 
   // Read before the write: after it, nobody is pending any more.
