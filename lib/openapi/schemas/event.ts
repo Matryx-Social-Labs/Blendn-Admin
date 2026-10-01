@@ -250,6 +250,17 @@ export const EventDetailSchema = z
     externalLink: z.string().nullable(),
     createdAt: z.string().datetime(),
     organizer: OrganizerSchema,
+    claim: z
+      .object({
+        url: z.string().url().openapi({
+          example: "https://dashboard.blendn.app/claim/3f0b6d1e-8a52-4c1f-9e1a-2b7c4d5e6f70",
+        }),
+      })
+      .nullable()
+      .openapi({
+        description:
+          "\"Running this event? Claim it\". Null unless the event was added by Blendn (curated) and nobody has claimed it. `url` is the public claim page on the dashboard host, built by the server; open it in a browser. It carries the event id and nothing about the viewer.",
+      }),
     details: z
       .object({
         fullDescription: z.string(),
