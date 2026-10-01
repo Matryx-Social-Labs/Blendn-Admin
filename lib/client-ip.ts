@@ -32,3 +32,26 @@ export function clientIpFrom(headers: { get(name: string): string | null }): str
   }
   return "unknown"
 }
+
+/**
+ * The network a client controls, for limiters on unauthenticated writes.
+ *
+ * An IPv6 client is handed a whole /64 by its provider and can use a fresh
+ * address for every request, so keying a limit on the full address gives it a
+ * fresh bucket each time. The /64 is the unit it actually holds. IPv4, and an
+ * IPv4-mapped IPv6 address, key on the address. Not for the audit log, which
+ * records the address itself (`clientIpFrom`).
+ */
+export function clientNetworkFrom(headers: { get(name: string): string | null }): string {
+  const ip = clientIpFrom(headers)
+  if (!ip.includes(":")) return ip
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip)
+  if (mapped) return mapped[1]!
+  const [head, tail] = ip.toLowerCase().split("%")[0]!.split("::")
+  const left = head ? head.split(":") : []
+  const right = tail !== undefined && tail !== "" ? tail.split(":") : []
+  const missing = tail === undefined ? 0 : 8 - left.length - right.length
+  const groups = [...left, ...Array(Math.max(missing, 0)).fill("0"), ...right]
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return ip
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`
+}

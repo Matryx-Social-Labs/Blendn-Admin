@@ -93,9 +93,11 @@ behind a drawn element is a question, not a guess.
 ### 1. The crown on "60+ mins"
 
 `1107:3657` marks the longest window with a crown — the visual language of a
-paid tier. The roadmap says pricing is undecided and everything is free. Built
+paid tier. The roadmap said pricing was undecided and everything was free. Built
 as available to everyone until that changes; the crown is drawn but not
 enforced, and this line is the reminder that it is a stub and not a decision.
+Pricing was decided on 2026-10-01 (`ROADMAP.md`, *Pricing*): the 20/45/60-minute
+windows stay free and "Stay" is Blendn+, built in step 5 of plan v2.
 
 ### 2. Real names in the locked view
 

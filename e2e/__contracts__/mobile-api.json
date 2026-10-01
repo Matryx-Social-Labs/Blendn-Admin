@@ -162,6 +162,7 @@
       "chatGroup",
       "checkInRadius",
       "city",
+      "claim",
       "country",
       "coverImageUrl",
       "createdAt",

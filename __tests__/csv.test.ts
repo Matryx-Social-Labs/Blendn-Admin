@@ -1,4 +1,6 @@
-import { toCsv, reportFilename, csvResponse, UTF8_BOM } from "@/lib/csv"
+import { toCsv, reportFilename, csvResponse, parseCsvRows, UTF8_BOM } from "@/lib/csv"
+
+const parseCsv = (text: string) => parseCsvRows(text).map((r) => r.cells)
 
 /**
  * CSV export.
@@ -149,5 +151,53 @@ describe("reportFilename", () => {
   it("collapses a single-day range", () => {
     const name = reportFilename("events", new Date("2026-08-05"), new Date("2026-08-05"))
     expect(name).toBe("blendn-events-2026-08-05.csv")
+  })
+})
+
+describe("parseCsv — reading what founders paste", () => {
+  it("keeps a quoted cell with commas whole", () => {
+    // A Google Maps link carries "@12.97,77.64,17z"; split on "," it is three cells.
+    expect(parseCsv('name,maps_url\nToit,"https://maps.google.com/@12.97,77.64,17z"')).toEqual([
+      ["name", "maps_url"],
+      ["Toit", "https://maps.google.com/@12.97,77.64,17z"],
+    ])
+  })
+
+  it("reads doubled quotes, CRLF, a newline inside quotes, and drops blank lines", () => {
+    expect(parseCsv('a,b\r\n"say ""hi""","two\nlines"\r\n\r\n,\r\nx,y')).toEqual([
+      ["a", "b"],
+      ['say "hi"', "two\nlines"],
+      ["x", "y"],
+    ])
+  })
+
+  it("drops Excel's BOM, so the first header is not \\uFEFFname", () => {
+    expect(parseCsv(`${UTF8_BOM}name,city\nToit,Bengaluru`)[0]).toEqual(["name", "city"])
+  })
+
+  it("keeps a quote in the middle of a bare cell as a character, so one stray quote does not swallow the file", () => {
+    expect(parseCsv('name,city\n12" Pizza,Pune\nBar,Mumbai')).toEqual([
+      ["name", "city"],
+      ['12" Pizza', "Pune"],
+      ["Bar", "Mumbai"],
+    ])
+  })
+
+  it("throws on a quote that never closes, rather than swallowing the rest of the file", () => {
+    expect(() => parseCsv('name,city\n"Toit,Bengaluru\nBar,Mumbai')).toThrow(/line 2 never closes/)
+  })
+
+  it("allows a space before an opening quote, as spreadsheets write it", () => {
+    expect(parseCsv('a, "b, c"')).toEqual([["a", "b, c"]])
+  })
+
+  it("reports the physical line each record starts on, past blank lines and quoted newlines", () => {
+    expect(parseCsvRows('name\r\n"two\nlines"\n\nthird').map((r) => r.line)).toEqual([1, 2, 5])
+  })
+
+  it("reads back what toCsv writes", () => {
+    const rows = [{ a: "Bengaluru, India", b: 'The "Loft"' }]
+    const written = toCsv([{ key: "a", label: "A" }, { key: "b", label: "B" }], rows)
+    expect(parseCsv(written)).toEqual([["A", "B"], ["Bengaluru, India", 'The "Loft"']])
   })
 })
