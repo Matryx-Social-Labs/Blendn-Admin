@@ -31,6 +31,13 @@ export type CheckoutReason =
   /** Still checked in when the day ended. */
   | "occurrence_ended"
 
+const DEPARTURE_SOURCE: Record<CheckoutReason, "user" | "switch" | "sweeper"> = {
+  manual: "user",
+  switched_event: "switch",
+  left_area: "sweeper",
+  occurrence_ended: "sweeper",
+}
+
 export interface CheckoutResult {
   changed: boolean
   eventId: string
@@ -89,16 +96,15 @@ export async function performCheckout(
    * session left open by a checkout is somebody who counts as present forever,
    * which is the bug the sessions model exists to make unrepresentable.
    *
-   * `manual` is the person; everything else reached this function from the
-   * sweeper, on silence. Recording which lets the occupancy figure say how
-   * confident it is instead of presenting inference as observation.
+   * Recording how lets the occupancy figure say how confident it is instead of
+   * presenting inference as observation. Observed: `manual` (they checked out)
+   * and a switch (they checked in somewhere else, at a known instant). Inferred:
+   * leaving the fence and staying out, and the event's end. The sweeper closes
+   * someone who never checked out an hour after the end, and when they really
+   * left is a guess, so `occurrence_ended` is `sweeper`, not `ended`, and
+   * `departureQuality` counts it as inference (SCRUM-484).
    */
-  await closeSession(
-    checkIn.occurrence_id,
-    checkIn.user_id,
-    reason === "manual" ? "user" : "sweeper",
-    now
-  )
+  await closeSession(checkIn.occurrence_id, checkIn.user_id, DEPARTURE_SOURCE[reason], now)
 
   if (cutsChatAccess(reason)) {
     const chatGroup = await db.chat_groups.findUnique({

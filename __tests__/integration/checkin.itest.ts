@@ -191,6 +191,12 @@ describe("re-entry", () => {
 
     expect((await doCheckOut(eventId, smoker.token)).status).toBe(200)
     expect((await getOccupancy(eventId)).inside).toBe(0)
+    // Their own checkout: observed, not inferred (SCRUM-484).
+    const left = await db.presence_sessions.findFirstOrThrow({
+      where: { event_id: eventId, user_id: smoker.id, departed_at: { not: null } },
+      select: { departed_source: true },
+    })
+    expect(left.departed_source).toBe("user")
 
     await doCheckIn(eventId, smoker.token)
     expect((await getOccupancy(eventId)).inside).toBe(1)
