@@ -209,6 +209,14 @@ export async function moderateBlurPhoto(url: string, userId: string): Promise<vo
     }
     // Recorded like a photo, so one that could not be checked is on the same list.
     await recordPhotoCheck(url, userId, check.checked)
+    // Replaced while it waited for this verdict: the write that replaced it left it
+    // for us to judge, and it is clean, so it goes now (SCRUM-520). Clean is no
+    // result (the image check) or an "allow"; a borderline "flag" is recorded like
+    // a pass and is not one.
+    if (check.checked && (!check.result || check.result.action === "allow")) {
+      const current = await db.profiles.findUnique({ where: { id: userId }, select: { blur_photo: true } })
+      if (current?.blur_photo !== url) await deleteReplacedBlur(url, userId)
+    }
   } catch (error) {
     logger.error("Blurred photo moderation failed; left in place", {
       userId,
@@ -255,8 +263,10 @@ async function withdraw(url: string, userId: string): Promise<void> {
  * or an outage left it unchecked -- stays for the verdict, because deleting it
  * first would lose exactly what that hold keeps.
  *
- * ponytail: an unjudged blur replaced in that window is left behind; a sweep of
- * unreferenced keys under `profile/<uid>/` is the upgrade if it shows up.
+ * One replaced while its verdict was pending is deleted by `moderateBlurPhoto`
+ * when the verdict passes. An outage that never judges it leaves it until the
+ * account's prefix sweep. ponytail: a sweep of unreferenced keys under
+ * `profile/<uid>/` is the upgrade if those show up.
  */
 export async function deleteReplacedBlur(url: string, userId: string): Promise<void> {
   const key = ownedPhotoKey(url, userId)

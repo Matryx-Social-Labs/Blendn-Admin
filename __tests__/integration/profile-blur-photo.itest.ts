@@ -242,7 +242,8 @@ describe("a blur outlives nothing it was made from", () => {
   it("clears it when moderation flags the blur the PUT stored", async () => {
     const p = await withBlur()
     ;(after as jest.Mock).mockClear()
-    // A new blur for the same photo: after() gets its moderation, and the old blur's deletion (SCRUM-520).
+    // A new blur for the same photo: after() gets its moderation, and the old blur's deletion (SCRUM-520) --
+    // which deletes nothing here, because the old blur was never judged.
     expect((await p.put({ blur_photo: upload(p.id, "a2-blur.jpg") })).status).toBe(200)
     expect(after).toHaveBeenCalledTimes(2)
 
@@ -295,17 +296,59 @@ describe("a replaced or cleared blur leaves storage", () => {
     expect(deleteFile).toHaveBeenCalledWith(sealedKey(p.id, "a-blur.jpg"))
   })
 
-  it("deletes it when the blur is cleared, on an explicit null or a new primary without one", async () => {
-    const cleared = await withJudgedBlur()
-    expect((await cleared.put({ blur_photo: null })).status).toBe(200)
-    await runAfter()
-    expect(deleteFile).toHaveBeenCalledWith(sealedKey(cleared.id, "a-blur.jpg"))
+  it("deletes it when the blur is cleared: an explicit null, a new primary without one, or no photos left", async () => {
+    for (const body of [
+      { blur_photo: null },
+      (id: string) => ({ photos: [upload(id, "b.jpg"), sealedOf(id, "a.jpg")] }),
+      { photos: [] },
+    ]) {
+      const p = await withJudgedBlur()
+      expect((await p.put(typeof body === "function" ? body(p.id) : body)).status).toBe(200)
+      expect(await blurOf(p.id)).toBeNull()
+      await runAfter()
+      expect(deleteFile).toHaveBeenCalledTimes(1)
+      expect(deleteFile).toHaveBeenCalledWith(sealedKey(p.id, "a-blur.jpg"))
+      jest.clearAllMocks()
+    }
+  })
 
-    const moved = await withJudgedBlur()
-    expect((await moved.put({ photos: [upload(moved.id, "b.jpg"), sealedOf(moved.id, "a.jpg")] })).status).toBe(200)
-    expect(await blurOf(moved.id)).toBeNull()
+  it("deletes one replaced before its verdict once the verdict passes", async () => {
+    const p = await withBlur()
+    jest.clearAllMocks()
+    expect((await p.put({ blur_photo: upload(p.id, "a-blur-edge.jpg") })).status).toBe(200)
     await runAfter()
-    expect(deleteFile).toHaveBeenCalledWith(sealedKey(moved.id, "a-blur.jpg"))
+    expect(deleteFile).not.toHaveBeenCalled()
+    // The old blur's own moderation, landing late -- clean, which is no result at all
+    // (`openai-moderation` returns null for a clean image; there is no "allow").
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: null })
+    await moderateBlurPhoto(sealedOf(p.id, "a-blur.jpg"), p.id)
+    expect(deleteFile).toHaveBeenCalledTimes(1)
+    expect(deleteFile).toHaveBeenCalledWith(sealedKey(p.id, "a-blur.jpg"))
+    // And the current blur passing deletes nothing.
+    await moderateBlurPhoto(sealedOf(p.id, "a-blur-edge.jpg"), p.id)
+    expect(deleteFile).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps one replaced before its verdict when the verdict is a borderline flag", async () => {
+    const p = await withBlur()
+    jest.clearAllMocks()
+    expect((await p.put({ blur_photo: upload(p.id, "a-blur-edge.jpg") })).status).toBe(200)
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "flag" } })
+    await moderateBlurPhoto(sealedOf(p.id, "a-blur.jpg"), p.id)
+    expect(deleteFile).not.toHaveBeenCalled()
+  })
+
+  it("never deletes a blur that is not the caller's own object", async () => {
+    for (const foreign of ["https://example.com/anyone-blur.jpg", sealedOf("someone-else", "x-blur.jpg")]) {
+      const p = await withJudgedBlur()
+      // A legacy row, written before blurs were sealed; judged, so only ownership stands in the way.
+      await db.profiles.update({ where: { id: p.id }, data: { blur_photo: foreign } })
+      await db.photo_checks.create({ data: { url: foreign, user_id: p.id, checked: true } })
+      expect((await p.put({ blur_photo: null })).status).toBe(200)
+      await runAfter()
+      expect(deleteFile).not.toHaveBeenCalled()
+      await db.photo_checks.delete({ where: { url: foreign } })
+    }
   })
 
   it("keeps an old blur moderation has not judged yet, so a pull can still hold it", async () => {
