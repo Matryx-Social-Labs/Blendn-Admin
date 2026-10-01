@@ -236,8 +236,9 @@ a published night out.
 
 | Question | Answer | Why |
 |---|---|---|
-| When does a day start? | `venues.day_reset_hour` (default 6) in `venues.timezone` (default `Asia/Kolkata`) | 02:00 is still last night's room; the reset is what makes pseudonyms new each day. CHECKs: hour 0–23, a zone Postgres can read |
-| One per day? | Partial unique `events_one_venue_day_per_day` on `(venue_id, start_time) WHERE kind = 'venue_day'` | Migration SQL only — a `db push` database has none. A lost race is matched on that name (`lib/prisma-errors.ts`), never `meta.target` |
+| When does a day start? | `venues.day_reset_hour` (default 6) in `venues.timezone` (default `Asia/Kolkata`) | 02:00 is still last night's room; the reset is what makes pseudonyms new each day. CHECKs: hour 0–23, an IANA-shaped name. The default puts every venue in India — true today; a venue abroad must be given its zone, and a venue editor must validate it with Intl |
+| One per day? | Partial unique `events_one_venue_day_per_day` on `(venue_id, start_time) WHERE kind = 'venue_day'`; the day is found by the one that contains now | Migration SQL only — a `db push` database has none. A lost race is matched on that name (`lib/prisma-errors.ts`), never `meta.target`. Found by containment, so changing a venue's zone or reset hour mid-day keeps today's room |
+| Shape | CHECK `events_venue_day_shape`: a venue, and `unlisted` | A hard delete of a venue with days is refused rather than orphaning them |
 | Who owns it? | `organizer_id` = the system user `blendn-system`; never a person (F2) | `organizer_id` cascades on a hard delete. The migration creates the user (no password, `.invalid` address, no profile) and a trigger refuses its deletion |
 | Which org? | The venue's owning org if claimed on or before the day's start, else null | The curated-event shape: an unclaimed venue's room is the platform's to moderate |
 | Who is shown as host? | The venue's name (`lib/event-host.ts`) | Not the owning company, not the system user, never a founder |
@@ -270,6 +271,11 @@ own rooms, room archival, reveals, room entry by check-in, and sentiment
 classification (an escalation is how an unclaimed room reaches the platform).
 Building occupancy excludes them until the owner's screens are redesigned
 (step 17), so the room row and its count arrive through `discloseFigure`.
+
+**Retention.** One row per active venue per day, every day anybody goes
+live: venue days will soon outnumber events many times over. Nothing archives
+them yet; a retention plan (roll old days' counts into the venue's aggregates,
+then delete or archive the rows) is a follow-up: SCRUM-528.
 
 **Still open for step 4**, which makes venue days reachable: the by-id attendee
 routes (RSVP, favourite, interest, rating, the plain event check-in) take any

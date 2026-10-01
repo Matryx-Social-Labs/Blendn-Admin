@@ -14,6 +14,7 @@ const as = (role: Role, id: string) => {
 }
 
 import { getDashboardOverview } from "@/app/dashboard/actions"
+import { getUsers } from "@/app/dashboard/users/actions"
 import { attendeeRoster, eventAttendees } from "@/lib/attendee-roster"
 import { reportScope } from "@/lib/reports"
 import { signAccessToken } from "@/lib/mobile-auth"
@@ -142,12 +143,10 @@ beforeAll(async () => {
   day = { id: d!.id, occurrenceId: d!.occurrenceId }
   events.push(d!.id)
   /*
-   * Public, here only. `venueDayFor` makes it unlisted, and every attendee
-   * reader below also asks for public — so as written the kind filter would be
-   * untested, with the visibility hiding it twice. Public leaves the kind as
-   * the one thing between this row and each reader.
+   * Unlisted, as every venue day must be (events_venue_day_shape). So for the
+   * readers that ask only for public events this proves both layers hold; the
+   * kind filter alone in those is the structural guard's to pin.
    */
-  await db.events.update({ where: { id: day.id }, data: { visibility: "public" } })
   control = await realEvent({ start: new Date(Date.now() - HOUR), end: new Date(Date.now() + 3 * HOUR) })
 
   // The venue day's own row is what most readers would trip on: its owning
@@ -167,7 +166,7 @@ afterAll(async () => {
   await db.profiles.deleteMany({ where: { id: { in: users } } })
   await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
-})
+}, 60_000)
 
 const get = (route: { GET: (r: NextRequest) => Promise<Response> }, path: string) =>
   route.GET(new NextRequest(`http://localhost${path}`, { headers: { authorization: `Bearer ${viewer.token}` } }))
@@ -279,6 +278,12 @@ describe("a venue day never reaches a host's or the platform's numbers (PL-I16)"
       expect(text).not.toContain(day.id)
       expect(text).not.toContain("Venue day ·")
     }
+  })
+
+  it("is owned by nobody an admin can find, count or edit", async () => {
+    as("app_admin", admin)
+    expect((await getUsers("system@blendn.invalid")).users).toEqual([])
+    expect((await getUsers("Blendn")).users.map((u) => u.id)).not.toContain("blendn-system")
   })
 
   it("is never reminded about, nor asked to be rated", async () => {

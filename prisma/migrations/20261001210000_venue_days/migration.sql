@@ -8,18 +8,25 @@
 -- Nothing here creates a venue day. Every existing row becomes kind 'event'
 -- through the default, so no reader sees a difference until step 4 ships.
 --
--- Rolling back:
---   1. DELETE FROM events WHERE kind = 'venue_day' (cascades their check-ins,
---      sessions and rooms -- export first if anybody has gone live).
---   2. DROP INDEX events_one_venue_day_per_day; ALTER TABLE events DROP COLUMN
---      kind; DROP TYPE event_kind.
---   3. ALTER TABLE venues DROP CONSTRAINT venues_day_reset_hour_range,
+-- Rolling back: as a NEW forward migration that reverts this one, deployed
+-- like any other -- never SQL run by hand against staging or production (the
+-- next boot's `migrate deploy` dies on a schema it did not write). In order:
+--   1. DELETE FROM message_reports WHERE message_type = 'group' AND message_id
+--      IN (the chat_messages of venue-day rooms). No foreign key: they would
+--      be left pointing at nothing.
+--   2. DELETE FROM events WHERE kind = 'venue_day' (cascades their check-ins,
+--      sessions, occurrences and rooms -- export first if anybody went live).
+--   3. DROP INDEX events_one_venue_day_per_day and
+--      event_check_ins_expires_at_idx; ALTER TABLE events DROP CONSTRAINT
+--      events_venue_day_shape, DROP COLUMN kind; DROP TYPE event_kind.
+--   4. ALTER TABLE venues DROP CONSTRAINT venues_day_reset_hour_range,
 --      DROP CONSTRAINT venues_timezone_known, DROP COLUMN day_reset_hour,
 --      DROP COLUMN timezone; ALTER TABLE event_check_ins DROP COLUMN expires_at.
---   4. DROP TRIGGER system_user_is_permanent ON "User"; DROP FUNCTION
+--   5. DROP TRIGGER system_user_is_permanent ON "User"; DROP FUNCTION
 --      system_user_is_permanent(); then the system user may be deleted.
--- Code rolled back without step 1 shows the venue days as ordinary events
--- everywhere, which is the leak the kind column exists to stop.
+-- A rollback of the CODE alone is safe only while no venue day exists, which
+-- is until step 4's Go Live ships: after that, old code shows every venue day
+-- as an ordinary published event, which is the leak `kind` exists to stop.
 
 CREATE TYPE "event_kind" AS ENUM ('event', 'venue_day');
 
@@ -35,6 +42,13 @@ CREATE UNIQUE INDEX "events_one_venue_day_per_day"
   ON "events" ("venue_id", "start_time")
   WHERE "kind" = 'venue_day';
 
+-- A venue day always has its venue, and is never listed. The venue makes a
+-- hard delete of a venue with days loud (the FK's SET NULL would otherwise
+-- orphan them outside the unique index); `unlisted` keeps every reader that
+-- asks only for public events blind to one even if it forgot the kind.
+ALTER TABLE "events" ADD CONSTRAINT "events_venue_day_shape"
+  CHECK ("kind" = 'event' OR ("venue_id" IS NOT NULL AND "visibility" = 'unlisted'));
+
 ALTER TABLE "venues"
   ADD COLUMN "day_reset_hour" SMALLINT NOT NULL DEFAULT 6,
   ADD COLUMN "timezone" TEXT NOT NULL DEFAULT 'Asia/Kolkata';
@@ -42,20 +56,22 @@ ALTER TABLE "venues"
 ALTER TABLE "venues" ADD CONSTRAINT "venues_day_reset_hour_range"
   CHECK ("day_reset_hour" BETWEEN 0 AND 23);
 
--- An IANA name ("Area/Location", or UTC) that Postgres can read. The shape
--- keeps out the POSIX forms Postgres accepts and Node does not ("UTC+5",
--- "<+05>-5"), which would pass here and throw at the first Go Live. A name
--- Postgres cannot read raises 22023 rather than 23514; timezone(text,
--- timestamptz) is IMMUTABLE, so it may sit in a CHECK. lib/venue-day.ts still
--- throws a RangeError on anything it cannot read.
+-- The shape of an IANA name ("Area/Location", or UTC). It keeps out what
+-- Postgres reads and Node does not ("UTC+5", "<+05>-5", "IST"), which would
+-- pass a stricter check here and throw at the first Go Live. Whether the name
+-- exists is the app's to decide, not the database image's tzdata:
+-- lib/venue-day.ts throws a RangeError on a zone it cannot read, and a venue
+-- editor must validate with Intl before it writes one.
+-- The default puts every existing venue in India, which they all are; a venue
+-- abroad must be given its zone.
 ALTER TABLE "venues" ADD CONSTRAINT "venues_timezone_known"
-  CHECK (
-    ("timezone" = 'UTC' OR "timezone" ~ '^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$')
-    AND (TIMESTAMPTZ '2000-01-01 00:00:00+00' AT TIME ZONE "timezone") IS NOT NULL
-  );
+  CHECK ("timezone" = 'UTC' OR "timezone" ~ '^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$');
 
--- When a Go Live window ends (step 4). Null for event check-ins.
+-- When a Go Live window ends (step 4). Null for event check-ins, so the index
+-- the expiry sweep will read holds only the Go Live rows.
 ALTER TABLE "event_check_ins" ADD COLUMN "expires_at" TIMESTAMPTZ(6);
+CREATE INDEX "event_check_ins_expires_at_idx" ON "event_check_ins" ("expires_at")
+  WHERE "expires_at" IS NOT NULL;
 
 -- The owner of every venue day (F2). Not a person: events.organizer_id is NOT
 -- NULL and cascades on a hard delete, so if whoever went live first owned the

@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client"
 
 import { ATTENDED } from "./counting"
 import { db } from "./db"
+import { SYSTEM_USER_ID } from "./event-kind"
 
 /**
  * The loop, closed or not: signed up → onboarded → RSVP'd → checked in →
@@ -104,6 +105,8 @@ export async function loopClosure(): Promise<LoopStage[]> {
       FROM "User" u
       LEFT JOIN profiles p ON p.id = u.id
       WHERE u."deletedAt" IS NULL
+        -- The owner of every venue day signed up for nothing.
+        AND u.id <> ${SYSTEM_USER_ID}
     )
     SELECT
       COUNT(*)                                                     AS signed_up,

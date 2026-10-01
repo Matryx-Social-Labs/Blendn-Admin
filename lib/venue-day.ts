@@ -138,9 +138,15 @@ export async function venueDayFor(venueId: string, now: Date = new Date()): Prom
   if (!venue) return null
 
   const { start, end, localDate } = venueDayBounds(venue.timezone, venue.day_reset_hour, now)
+  /*
+   * The day that contains `now`, not the day starting at the computed start:
+   * a venue whose zone or reset hour is changed mid-day keeps today's room
+   * until it ends, rather than opening a second one beside it.
+   */
   const find = () =>
     db.events.findFirst({
-      where: { ...venueDaysWhere, venue_id: venue.id, start_time: start },
+      where: { ...venueDaysWhere, venue_id: venue.id, start_time: { lte: now }, end_time: { gt: now } },
+      orderBy: { start_time: "desc" },
       select: venueDaySelect,
     })
 
@@ -184,6 +190,10 @@ export async function venueDayFor(venueId: string, now: Date = new Date()): Prom
     })
     return toVenueDay(created)
   } catch (error) {
+    // A `db push` database has no system user (the migration writes it).
+    if (violatedConstraint(error, "events_organizer_id_fkey")) {
+      throw new Error(`venue days need the ${SYSTEM_USER_ID} user: build this database with db:migrate, not db:push`)
+    }
     if (!violatedConstraint(error, VENUE_DAY_INDEX)) throw error
     const winner = await find()
     if (!winner) throw error

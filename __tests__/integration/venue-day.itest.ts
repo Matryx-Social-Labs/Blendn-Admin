@@ -27,7 +27,7 @@ afterAll(async () => {
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
-})
+}, 60_000)
 
 async function venue(data: { claimedAt?: Date; geofence?: object | null; status?: "active" | "archived" } = {}) {
   let owner_org_id: string | null = null
@@ -152,8 +152,8 @@ describe("venueDayFor", () => {
     const row = await db.events.findUniqueOrThrow({ where: { id: day!.id } })
 
     const insert = db.$executeRaw`
-      INSERT INTO events (id, slug, title, description, start_time, end_time, timezone, organizer_id, venue_id, kind, updated_at)
-      VALUES (gen_random_uuid(), ${testId("dup")}, 'dup', '', ${row.start_time}, ${row.end_time}, 'UTC', ${SYSTEM_USER_ID}, ${id}, 'venue_day', now())`
+      INSERT INTO events (id, slug, title, description, start_time, end_time, timezone, organizer_id, venue_id, kind, visibility, updated_at)
+      VALUES (gen_random_uuid(), ${testId("dup")}, 'dup', '', ${row.start_time}, ${row.end_time}, 'UTC', ${SYSTEM_USER_ID}, ${id}, 'venue_day', 'unlisted', now())`
     await expect(insert).rejects.toMatchObject({ code: "P2010" })
     await insert.catch((e: unknown) => expect(JSON.stringify(e)).toContain(VENUE_DAY_INDEX))
 
@@ -205,16 +205,34 @@ describe("venueDayFor", () => {
         Object.values(data)[0],
         id
       )
-    await expect(set({ timezone: "Mars/Olympus_Mons" })).rejects.toThrow(/not recognized/)
     // Postgres reads these and Node does not: the shape check refuses them.
-    await expect(set({ timezone: "UTC+5" })).rejects.toThrow(/venues_timezone_known/)
-    await expect(set({ timezone: "<+05>-5" })).rejects.toThrow(/venues_timezone_known/)
+    for (const zone of ["UTC+5", "<+05>-5", "IST"]) {
+      await expect(set({ timezone: zone })).rejects.toThrow(/venues_timezone_known/)
+    }
     await expect(set({ day_reset_hour: 24 })).rejects.toThrow(/venues_day_reset_hour_range/)
     await expect(set({ day_reset_hour: -1 })).rejects.toThrow(/venues_day_reset_hour_range/)
     await set({ day_reset_hour: 0 })
     await set({ timezone: "America/Argentina/Buenos_Aires" })
     await set({ timezone: "UTC" })
-    expect(() => venueDayBounds("UTC+5", 6, new Date())).toThrow(RangeError)
+    // A well-shaped name nobody's tzdata has is the app's to refuse.
+    expect(() => venueDayBounds("Mars/Olympus_Mons", 6, new Date())).toThrow(RangeError)
+  })
+
+  it("keeps a venue day's venue and its unlisting (events_venue_day_shape)", async () => {
+    const id = await venue()
+    const day = await venueDayFor(id, new Date("2026-10-11T12:00:00Z"))
+    await expect(db.$executeRaw`UPDATE events SET visibility = 'public' WHERE id = ${day!.id}::uuid`).rejects.toThrow(/events_venue_day_shape/)
+    // A hard delete of the venue would orphan the day; it is refused instead.
+    await expect(db.$executeRaw`DELETE FROM venues WHERE id = ${id}::uuid`).rejects.toThrow(/events_venue_day_shape/)
+  })
+
+  it("keeps today's room when the venue's reset hour changes mid-day", async () => {
+    const id = await venue()
+    const noon = new Date("2026-10-12T06:30:00Z") // 12:00 IST
+    const before = await venueDayFor(id, noon)
+    await db.venues.update({ where: { id }, data: { day_reset_hour: 5 } })
+    expect((await venueDayFor(id, noon))!.id).toBe(before!.id)
+    expect(await db.events.count({ where: { venue_id: id, kind: "venue_day" } })).toBe(1)
   })
 })
 
