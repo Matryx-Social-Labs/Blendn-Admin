@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { actorFor } from "@/lib/org-membership"
+import { claimedVenueEventsWhere, startsAfterClaim } from "@/lib/event-visibility"
 
 /**
  * Disputing and unlinking an event's venue.
@@ -32,6 +33,21 @@ import { actorFor } from "@/lib/org-membership"
  */
 
 const MIN_REASON = 10
+
+/**
+ * The actor's organisation owns this event's venue, and the event starts at or
+ * after the claim — the line `eventPermissions` draws for operating it.
+ */
+function ownsFromClaim(
+  orgIds: readonly string[],
+  event: { start_time: Date; venue: { owner_org_id: string | null; claimed_at: Date | null } | null }
+): boolean {
+  return (
+    event.venue?.owner_org_id != null &&
+    orgIds.includes(event.venue.owner_org_id) &&
+    startsAfterClaim(event.venue, event.start_time)
+  )
+}
 
 export interface VenueLinkedEvent {
   id: string
@@ -63,12 +79,16 @@ export async function getLinkedEventsForOwner(): Promise<{
   const actor = await actorFor(session.user)
   if (actor.role !== "venue_owner" && actor.role !== "app_admin") return { rows: [], total: 0 }
 
+  /*
+   * From the claim on (SCRUM-355, SCRUM-500). A claim gives no view of the
+   * venue's past — not its chat, not its attendee list, and not a list of what
+   * was held there and by whom either. An empty `OR` matches nothing, which is
+   * the answer for an owner whose venues have no claim date.
+   */
   const where = {
     deleted_at: null,
     venue_id: { not: null },
-    ...(actor.role === "app_admin"
-      ? {}
-      : { venue: { owner_org_id: { in: actor.orgIds } } }),
+    ...(actor.role === "app_admin" ? {} : { OR: await claimedVenueEventsWhere(actor.orgIds) }),
   }
 
   /*
@@ -135,19 +155,17 @@ export async function disputeVenueLink(eventId: string, reason: string): Promise
       title: true,
       venue_id: true,
       venue_link_status: true,
-      venue: { select: { owner_org_id: true, name: true } },
+      start_time: true,
+      venue: { select: { owner_org_id: true, claimed_at: true, name: true } },
     },
   })
   if (!event?.venue_id) throw new Refusal("This event is not linked to a venue.")
 
   // Only the owner of the venue in question, or an admin. An organiser
   // disputing their own link would be unlinking, which is a different action
-  // with different consequences.
-  const ownsVenue =
-    event.venue?.owner_org_id !== null &&
-    event.venue?.owner_org_id !== undefined &&
-    actor.orgIds.includes(event.venue.owner_org_id)
-  if (actor.role !== "app_admin" && !ownsVenue) throw new Refusal("Forbidden")
+  // with different consequences. And only from the claim on: an event held
+  // before it is not the owner's to flag (SCRUM-500).
+  if (actor.role !== "app_admin" && !ownsFromClaim(actor.orgIds, event)) throw new Refusal("Forbidden")
 
   if (event.venue_link_status === "disputed") return
 
@@ -183,15 +201,16 @@ export async function confirmVenueLink(eventId: string): Promise<void> {
 
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { id: true, venue_id: true, venue: { select: { owner_org_id: true, name: true } } },
+    select: {
+      id: true,
+      venue_id: true,
+      start_time: true,
+      venue: { select: { owner_org_id: true, claimed_at: true, name: true } },
+    },
   })
   if (!event?.venue_id) throw new Refusal("This event is not linked to a venue.")
 
-  const ownsVenue =
-    event.venue?.owner_org_id !== null &&
-    event.venue?.owner_org_id !== undefined &&
-    actor.orgIds.includes(event.venue.owner_org_id)
-  if (actor.role !== "app_admin" && !ownsVenue) throw new Refusal("Forbidden")
+  if (actor.role !== "app_admin" && !ownsFromClaim(actor.orgIds, event)) throw new Refusal("Forbidden")
 
   await db.events.update({
     where: { id: eventId },

@@ -23,8 +23,9 @@ export interface EventRow {
   where: string | null
   city: string | null
   host: string | null
-  rsvps: number
-  arrivals: number
+  /** Null when held back: a venue owner's view of another host's event (SCRUM-501). */
+  rsvps: number | null
+  arrivals: number | null
   curation: CurationState
   checkInReady: boolean
 }
@@ -158,6 +159,12 @@ export function EventsTable({
       align: "right",
       sortType: "number",
       secondary: true,
+      render: (row) =>
+        row.rsvps === null ? (
+          <span className="text-faint-foreground">—</span>
+        ) : (
+          <span className="tabular-nums">{row.rsvps}</span>
+        ),
     },
     {
       key: "arrivals",
@@ -170,8 +177,10 @@ export function EventsTable({
        * every event ever created. A column of zeroes is not a neutral omission:
        * it asserts that nobody came.
        */
+      // Held back reads the same as nobody, deliberately: the mark must not tell
+      // a night of none from a night of four (SCRUM-501).
       render: (row) =>
-        row.arrivals === 0 ? (
+        !row.arrivals ? (
           <span className="text-faint-foreground">—</span>
         ) : (
           <span className="tabular-nums">{row.arrivals}</span>
