@@ -134,9 +134,8 @@ describe("a venue owner's view of a three-person night", () => {
       })
     }
 
-    // 26 Sept, 14:00 to 16:00 UTC. Six going, nine came: four walked in, so
-    // the count runs past the going list and is held back -- not because it
-    // is small, and the page must not say it is.
+    // 26 Sept, 14:00 to 16:00 UTC. Six going, nine came: four walked in. Above
+    // the floor, so the venue is told it (#606: the floor alone for a venue).
     const night = await db.events.create({
       data: {
         slug: testId("walkins"),
@@ -201,15 +200,19 @@ describe("a venue owner's view of a three-person night", () => {
     expect(html).not.toMatch(/attendee-[0-9a-f]{12}/)
   })
 
-  it("holds back a count that runs past the going list, without calling it small", async () => {
+  it("tells the venue a count above the floor on both tabs alike, and still no Connections panel", async () => {
     const organiser = await render("organizer", host, walkInNight)
     expect(mentions(organiser, 9)).toBe(true)
+    // The control for the panel: the organiser's render has it.
+    expect(organiser).toMatch(/Connections/)
 
-    const venueHtml = await render("venue_owner", venueOwner, walkInNight)
-    expect(mentions(venueHtml, 9)).toBe(false)
-    // Going is shown: six is above the floor and names nobody.
-    expect(figures(venueHtml)).toContain("6")
-    expect(venueHtml).toMatch(/held back/)
-    expect(venueHtml).not.toMatch(/fewer than 5/)
+    const overview = await render("venue_owner", venueOwner, walkInNight)
+    const attendees = await render("venue_owner", venueOwner, walkInNight, "attendees")
+    // The Events list, the venue page and the export print 9 for this night;
+    // neither tab may print less, or more.
+    expect(mentions(overview, 9)).toBe(true)
+    expect(mentions(attendees, 9)).toBe(true)
+    expect(overview).not.toMatch(/Connections/)
+    expect(overview).not.toMatch(/fewer than 5|held back/)
   })
 })
