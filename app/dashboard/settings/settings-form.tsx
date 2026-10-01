@@ -97,7 +97,7 @@ function ProfileSection({ account }: { account: Account }) {
       <div className="flex items-center gap-3.5">
         <Avatar className="size-13">
           <AvatarImage src={account.image ?? undefined} alt="" />
-          <AvatarFallback className="bg-[image:var(--gradient-brand)] text-lg font-bold text-brand-ink">
+          <AvatarFallback className="bg-[image:var(--gradient-ember)] text-lg font-bold text-brand-ink">
             {initials}
           </AvatarFallback>
         </Avatar>

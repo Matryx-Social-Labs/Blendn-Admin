@@ -111,6 +111,7 @@ export function DataTable<T extends { id: string | number }>({
   columns,
   rows,
   emptyState,
+  label,
   toolbar,
   footer,
   rowHref,
@@ -133,6 +134,8 @@ export function DataTable<T extends { id: string | number }>({
   columns: Column<T>[]
   rows: T[]
   emptyState: ReactNode
+  /** The table's accessible name, for a screen with no heading right above it. */
+  label?: string
   toolbar?: ReactNode
   footer?: ReactNode
   rowHref?: (row: T) => string
@@ -498,7 +501,7 @@ export function DataTable<T extends { id: string | number }>({
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
-          <Table>
+          <Table aria-label={label}>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 {selectable ? (

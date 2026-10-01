@@ -9,7 +9,10 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { getEventOverview } from "@/lib/event-overview"
+import { discloseHeadcount } from "@/lib/disclosure"
+import { eventAttendees } from "@/lib/attendee-roster"
 
+import { EventAttendeesCount, EventAttendeesTable } from "./attendees-table"
 import { EventTabs, eventTabsFor, type EventTabKey } from "./event-tabs"
 import { Overview } from "./overview"
 import { curationSelect, curationState } from "@/lib/curation"
@@ -37,9 +40,11 @@ const FEEDBACK_WINDOW_HOURS = 24
  * and bookmarks, the command palette and the notification deep links all use
  * it. Changing the URL shape would strand every one of them for nothing.
  *
- * The panels below Overview are **not** reimplemented here. Attendees, chat and
- * feedback each have one implementation already, and this routes to them rather
- * than growing a second.
+ * Chat and feedback are **not** reimplemented here: each has one
+ * implementation already, and this routes to it rather than growing a second.
+ * Attendees renders here. It used to be routed to `/messaging?view=attendees`
+ * on the same theory, but nothing read `view` and no per-event attendee list
+ * existed, so the tab landed on the room chat (SCRUM-499).
  */
 export default async function EventDetailPage({
   params,
@@ -90,7 +95,8 @@ export default async function EventDetailPage({
    * page on canEdit locked them out of the event entirely, which is the bug the
    * operational bucket exists to prevent.
    */
-  const permissions = eventPermissions(await actorFor(session.user), event)
+  const actor = await actorFor(session.user)
+  const permissions = eventPermissions(actor, event)
   if (!permissions.canOperate) redirect("/dashboard/events")
 
   const now = new Date()
@@ -177,18 +183,39 @@ export default async function EventDetailPage({
   }
 
   if (activeTab === "feedback") redirect(`/dashboard/events/${event.id}/feedback`)
+  if (activeTab === "chat") redirect(`/dashboard/events/${event.id}/messaging`)
 
-  if (activeTab === "chat" || activeTab === "attendees") {
-    // One implementation of each, on the messaging route. Routed to rather than
-    // duplicated here.
-    redirect(
-      activeTab === "chat"
-        ? `/dashboard/events/${event.id}/messaging`
-        : `/dashboard/events/${event.id}/messaging?view=${activeTab}`
+  if (activeTab === "attendees") {
+    // Labels, never names (R1, SCRUM-383 b), for whoever runs the event; a
+    // count, never people, for the venue it is held at.
+    const attendees = await eventAttendees(actor, event.id, now)
+    if (!attendees) notFound()
+    return (
+      <div className="flex flex-col gap-5">
+        {header}
+        {attendees.view === "labels" ? (
+          <EventAttendeesTable
+            roster={attendees}
+            timezone={event.timezone}
+            startAt={event.start_time.toISOString()}
+          />
+        ) : (
+          <EventAttendeesCount started={attendees.started} came={attendees.came} />
+        )}
+      </div>
     )
   }
 
-  const overview = await getEventOverview(event.id)
+  /*
+   * The venue's view of somebody else's event: aggregates, never people, every
+   * count of people held back under the floor -- the same rule as its
+   * Attendees tab, which would mean nothing if this tab printed what that one
+   * holds back.
+   */
+  const venueView = !permissions.canEdit
+  const venueMaySee = (people: number) => !venueView || discloseHeadcount(people) !== null
+
+  const overview = await getEventOverview(event.id, venueView ? "venue" : "host")
   if (!overview) notFound()
 
   /**
@@ -199,7 +226,8 @@ export default async function EventDetailPage({
    */
   const hasRun = overview.state === "live" || overview.state === "over"
   const [attendance, connections, turnedAway] = await Promise.all([
-    hasRun ? getEventAttendance(event.id) : null,
+    // Day by day, newcomers and returning: cells of a few people. Not a venue's.
+    hasRun && !venueView ? getEventAttendance(event.id) : null,
     hasRun ? getConnectionMetrics(event.id) : null,
     /*
      * The organiser's half of the door (SCRUM-196). `refusalSummary` below is
@@ -248,7 +276,7 @@ export default async function EventDetailPage({
   return (
     <div className="flex flex-col gap-5">
       {header}
-      {refusals && refusals.attempts > 0 ? (
+      {refusals && refusals.attempts > 0 && venueMaySee(refusals.distinctPeopleRefused) ? (
         <CurationHealth state={state} refusals={refusals} />
       ) : null}
       <Overview
@@ -258,7 +286,7 @@ export default async function EventDetailPage({
         venueName={venueName}
         attendance={attendance}
         connections={connections}
-        turnedAway={turnedAway}
+        turnedAway={turnedAway && venueMaySee(turnedAway.people) ? turnedAway : null}
       />
     </div>
   )
