@@ -8,12 +8,13 @@ import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
-import { discloseStarsAcross, spreadsByEvent } from "@/lib/disclosure"
+import { discloseStarsAcross, discloseVenueCounts, spreadsByEvent } from "@/lib/disclosure"
+import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { turnUpPct } from "@/lib/counting"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
-import { activeMembership } from "@/lib/org-membership"
+import { activeMembership, actorFor } from "@/lib/org-membership"
 import { venueTypeLabel } from "@/lib/venue-types"
 
 export const dynamic = "force-dynamic"
@@ -132,7 +133,19 @@ export default async function VenueDetailPage({
     )
   }
 
-  const building = await getBuildingOccupancy(id)
+  /*
+   * The owner sees the venue from its claim on, and an admin sees all of it
+   * (SCRUM-355, SCRUM-500). Events, ratings and the live count read through
+   * the same window; no claim date on an owned venue is bad data and shows no
+   * history at all. `undefined` is the admin's "no window".
+   */
+  const since = isAdmin ? undefined : claimedWindow(venue)
+  const inRange = isAdmin
+    ? { gte: range.from, lt: range.to }
+    : claimedWindow(venue, { from: range.from, to: range.to })
+  const actor = isAdmin ? null : await actorFor(session.user)
+
+  const building = await getBuildingOccupancy(id, { asOwner: !isAdmin })
 
   /*
    * Only fetched when it can be used: an admin, looking at a venue nobody owns.
@@ -146,7 +159,7 @@ export default async function VenueDetailPage({
 
   const [events, ratingRows] = await Promise.all([
     db.events.findMany({
-      where: { venue_id: id, deleted_at: null, start_time: { gte: range.from, lt: range.to } },
+      where: inRange ? { venue_id: id, deleted_at: null, start_time: inRange } : { id: { in: [] } },
       orderBy: { start_time: "desc" },
       take: 200,
       select: {
@@ -155,6 +168,8 @@ export default async function VenueDetailPage({
         start_time: true,
         status: true,
         max_capacity: true,
+        organizer_id: true,
+        organizer_org_id: true,
         organizer_org: { select: { display_name: true } },
         organizer: { select: { name: true } },
         _count: {
@@ -167,7 +182,10 @@ export default async function VenueDetailPage({
     // Per event, so the total pools only events that could show their own.
     db.event_ratings.groupBy({
       by: ["event_id", "rating"],
-      where: { event: { venue_id: id, deleted_at: null } },
+      where:
+        since === null
+          ? { id: { in: [] } }
+          : { event: { venue_id: id, deleted_at: null, ...(since ? { start_time: since } : {}) } },
       _count: { _all: true },
     }),
   ])
@@ -184,21 +202,39 @@ export default async function VenueDetailPage({
    */
   const attended = await distinctAttendeeCounts(events.map((e) => e.id))
 
-  const rows: VenueEventRow[] = events.map((e) => ({
-    id: e.id,
-    title: e.title,
-    startAt: e.start_time.toISOString(),
-    status: e.status,
-    // The organising company, falling back to whoever created it — an event
-    // predating organisations has no org.
-    organiser: e.organizer_org?.display_name ?? e.organizer?.name ?? "—",
-    going: e._count.rsvps,
-    attended: attended.get(e.id) ?? 0,
-    fillPct: e.max_capacity ? Math.round((e._count.rsvps / e.max_capacity) * 100) : null,
-  }))
+  const rows: VenueEventRow[] = events.map((e) => {
+    const exact = {
+      going: e._count.rsvps,
+      attended: attended.get(e.id) ?? 0,
+      fillPct: e.max_capacity ? Math.round((e._count.rsvps / e.max_capacity) * 100) : null,
+    }
+    return {
+      id: e.id,
+      title: e.title,
+      startAt: e.start_time.toISOString(),
+      status: e.status,
+      // The organising company, falling back to whoever created it — an event
+      // predating organisations has no org.
+      organiser: e.organizer_org?.display_name ?? e.organizer?.name ?? "—",
+      // Another host's night, seen as the venue: counts held back under the
+      // floor, by the rule the Events list and the exports use (SCRUM-501).
+      ...(actor && !hostsEvent(actor, e)
+        ? discloseVenueCounts({ ...exact, capacity: e.max_capacity })
+        : exact),
+    }
+  })
 
-  const totalAttended = rows.reduce((sum, r) => sum + r.attended, 0)
-  const totalGoing = rows.reduce((sum, r) => sum + r.going, 0)
+  /*
+   * The tiles add up only what the rows show. A total over every night would
+   * hand back a held-back one by subtraction — the sum minus the visible
+   * cells — so a night with a blank cell is out of both sides of turn-up.
+   */
+  const shown = rows.filter(
+    (r): r is VenueEventRow & { going: number; attended: number } => r.going !== null && r.attended !== null
+  )
+  const heldBack = shown.length < rows.length
+  const totalAttended = shown.reduce((sum, r) => sum + r.attended, 0)
+  const totalGoing = shown.reduce((sum, r) => sum + r.going, 0)
   // Uncapped, now that attendance counts people. The cap was framed as absorbing
   // walk-ins and in practice absorbed the row inflation, which hid them.
   const turnUp = turnUpPct(totalAttended, totalGoing)
@@ -246,7 +282,11 @@ export default async function VenueDetailPage({
 
       <div className="flex flex-wrap gap-1">
         <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />
-        <MetricTile label="Attended" value={formatNumber(totalAttended)} hint="GPS check-ins" />
+        <MetricTile
+          label="Attended"
+          value={formatNumber(totalAttended)}
+          hint={heldBack ? "GPS check-ins · held-back nights left out" : "GPS check-ins"}
+        />
         <MetricTile
           label="Turn-up"
           value={turnUp === null ? null : formatPct(turnUp)}
