@@ -3413,6 +3413,15 @@ model board_requests {
 
   created_at DateTime  @default(now()) @db.Timestamptz(6)
   decided_at DateTime? @db.Timestamptz(6)
+  /// The asker took back an ask that had already been declined.
+  ///
+  /// A decline is never delivered to the asker, so to them it is still
+  /// waiting and they may withdraw it. Rewriting the row to `withdrawn` would
+  /// erase the author's decision and tell them the asker was still active; so
+  /// the author keeps `declined` and `decided_at`, and this is the asker's
+  /// half — they see `withdrawn`, and the ask stops counting against their
+  /// cap. Only ever set on a `declined` row (a CHECK in the migration).
+  asker_withdrawn_at DateTime? @db.Timestamptz(6)
 
   event events      @relation(fields: [event_id], references: [id], onDelete: Cascade)
   post  board_posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
@@ -3428,13 +3437,11 @@ model board_requests {
   /// unindexed foreign key makes that a sequential scan — which is what
   /// `fk-indexes.itest.ts` exists to catch, and did.
   @@index([event_id])
-  ///
-  /// NOTE: the invariant that matters is NOT here, because `schema.prisma`
-  /// cannot express it: at most ONE PENDING request per direction per post, as
-  /// a partial unique WHERE `status = 'pending'`. It lives in the migration
-  /// SQL. Without it, tapping twice on a slow connection asks the same person
-  /// the same question twice, which is exactly the pestering the cap exists to
-  /// prevent.
+  /// One ask per post, ever, whatever became of it. Refusing a re-ask only
+  /// after a decline told the asker they had been declined; so every re-ask is
+  /// refused, and the database holds the rule rather than a read-then-write.
+  /// Replaced the partial unique on pending rows (2026-10-01).
+  @@unique([post_id, from_user_id])
 }
 
 enum board_post_kind {

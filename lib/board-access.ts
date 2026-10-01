@@ -1,5 +1,7 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
+import type { board_request_status } from "@prisma/client"
+
 import { ageFrom } from "./age"
 import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
 import {
@@ -8,6 +10,7 @@ import {
   type BoardWriteDenial,
 } from "./board"
 import { BOARD } from "./constants"
+import { blockCounterparties } from "./conversations"
 import { db } from "./db"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
@@ -81,6 +84,65 @@ export function isLiveRequest(
   )
 }
 
+/**
+ * A decline is never delivered to the asker (product rule).
+ *
+ * To the person who asked, a declined ask is an unanswered one: `pending`, no
+ * decision time, live until it lapses with its event or its post like any
+ * other. Three things carry that rule, and they are pinned against each other
+ * over real rows in `board-safety.itest.ts`:
+ *
+ * - `asTheAskerSees` — the row the asker is shown;
+ * - `isLiveToTheAsker` — whether that row is still waiting, for a row read;
+ * - `outstandingAsk` — the same question as a where clause, for the cap.
+ *
+ * The cap is the one that gets missed: if a decline freed a slot, somebody at
+ * five outstanding who could suddenly ask a sixth has been told one of the five
+ * said no.
+ *
+ * And a block reads as a withdrawn post. Somebody blocked either way vanishes
+ * from the asker's board, and their post with it; an ask on it that stayed
+ * live, with the post's words, while the post itself was gone, would tell the
+ * asker the difference between "they took it down" and "they shut me out". So
+ * to the asker it lapses exactly as an ask on a withdrawn post does — no body,
+ * not live, and no longer holding a slot.
+ */
+export function outstandingAsk(now: Date = new Date(), blocked: readonly string[] = []) {
+  return {
+    ...liveRequest(now),
+    status: { in: ["pending", "declined"] as board_request_status[] },
+    // A declined ask the asker took back is withdrawn, to them.
+    asker_withdrawn_at: null,
+    to_user_id: { notIn: [...blocked] },
+  }
+}
+
+/** The row as its asker may see it. Only ever applied to the asker's own rows. */
+export function asTheAskerSees<
+  T extends { status: board_request_status; decided_at: Date | null; asker_withdrawn_at: Date | null },
+>(request: T): T {
+  if (request.status !== "declined") return request
+  return request.asker_withdrawn_at
+    ? { ...request, status: "withdrawn", decided_at: request.asker_withdrawn_at }
+    : { ...request, status: "pending", decided_at: null }
+}
+
+/** `outstandingAsk`, for a row already read. */
+export function isLiveToTheAsker(
+  request: {
+    status: board_request_status
+    decided_at: Date | null
+    asker_withdrawn_at: Date | null
+    to_user_id: string
+    event: { end_time: Date }
+    post: { deleted_at: Date | null }
+  },
+  blocked: ReadonlySet<string>,
+  now: Date = new Date()
+): boolean {
+  return isLiveRequest(asTheAskerSees(request), now) && !blocked.has(request.to_user_id)
+}
+
 /** What the viewer has done about this event. Both gates read it. */
 export async function entitlementFor(
   eventId: string,
@@ -122,7 +184,9 @@ export async function boardWriteDenial(
       select: { name: true, age: true, date_of_birth: true, intent_default: true },
     }),
     db.user_interests.count({ where: { user_id: userId } }),
-    db.board_requests.count({ where: { from_user_id: userId, ...liveRequest() } }),
+    blockCounterparties(userId).then((blocked) =>
+      db.board_requests.count({ where: { from_user_id: userId, ...outstandingAsk(new Date(), blocked) } })
+    ),
     db.board_requests.count({
       where: {
         from_user_id: userId,
