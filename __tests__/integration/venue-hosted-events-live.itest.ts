@@ -47,7 +47,8 @@ beforeAll(async () => {
   ownerOrgName = ownerOrg.display_name
   const claimantOrg = await org("vhe-claimant-org", claimantId)
 
-  venueId = (await db.venues.create({ data: { name: testId("vhe-venue"), city: "Bangalore", owner_org_id: ownerOrg.id } })).id
+  // An owned venue has a claim date (venues_owner_needs_claimed_at).
+  venueId = (await db.venues.create({ data: { name: testId("vhe-venue"), city: "Bangalore", owner_org_id: ownerOrg.id, claimed_at: new Date() } })).id
   for (const deleted_at of [null, new Date()]) {
     const eventId = await makeEvent(owner, { deleted_at })
     events.push(eventId)
