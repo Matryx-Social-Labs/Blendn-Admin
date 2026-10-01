@@ -25,7 +25,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId },
-      select: { organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } }, chat_group: { select: { id: true } } },
+      select: { kind: true, organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } }, chat_group: { select: { id: true } } },
     })
     if (!event) return errorResponse("Not found", 404)
 
@@ -182,7 +182,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId },
-      select: { organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } },
+      select: { kind: true, organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } },
     })
     if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {

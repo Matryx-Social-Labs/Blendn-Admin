@@ -126,6 +126,7 @@ export async function GET(request: NextRequest) {
               ) as rank
        FROM events
        WHERE deleted_at IS NULL
+         AND kind = 'event'
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(4)}
@@ -145,6 +146,7 @@ export async function GET(request: NextRequest) {
       `SELECT count(*) as count
        FROM events
        WHERE deleted_at IS NULL
+         AND kind = 'event'
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(2)}

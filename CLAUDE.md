@@ -151,7 +151,7 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while four exist in
+express a CHECK constraint, so `db push` creates none — while six exist in
 migration SQL and therefore in every deployed environment:
 
 | Constraint | What it enforces |
@@ -160,6 +160,14 @@ migration SQL and therefore in every deployed environment:
 | `events_capacity_non_negative` | `current_capacity >= 0` |
 | `sponsored_active_needs_sponsor` | an active placement has a sponsor |
 | `venues_owner_needs_claimed_at` | an owned venue has a claim date — the claim window every venue-owner read starts from (SCRUM-500) |
+| `venues_day_reset_hour_range` | `day_reset_hour BETWEEN 0 AND 23` — when a venue's day starts (venue days) |
+| `venues_timezone_known` | `venues.timezone` is a zone Postgres can read |
+
+Nor can it express a partial unique index or a trigger, and two more exist only
+in migration SQL: `events_one_venue_day_per_day` (one venue day per venue per
+local day — `lib/venue-day.ts` recovers a lost race by that name) and the
+`system_user_is_permanent` trigger, which refuses to delete `blendn-system`, the
+owner of every venue day. See `docs/VENUES.md` § Venue days.
 
 A `db push` database is therefore **strictly weaker than production**, and code
 tested against one can write rows the real database rejects. That is not

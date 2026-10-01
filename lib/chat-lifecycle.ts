@@ -39,6 +39,7 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
   const expired = await db.chat_groups.findMany({
     where: {
       status: "active",
+      // any-kind: every room closes the same way once its event is over; a venue day's ends at its reset.
       event: { end_time: { lt: cutoff } },
     },
     select: { id: true },

@@ -60,10 +60,13 @@ export async function loopClosure(): Promise<LoopStage[]> {
     Array<Record<"signed_up" | "onboarded" | "rsvpd" | "checked_in" | "matched" | "conversed" | "returned", bigint>>
   >`
     WITH attended AS (
-      SELECT user_id, event_id
-      FROM event_check_ins
-      WHERE status::text IN (${Prisma.join(ATTENDED)})
-        AND kind = 'attendee'
+      -- Events only: going live at a venue is not a night anybody hosted, and
+      -- two go-lives would read as "came back" (step 3).
+      SELECT c.user_id, c.event_id
+      FROM event_check_ins c
+      JOIN events e ON e.id = c.event_id AND e.kind = 'event'
+      WHERE c.status::text IN (${Prisma.join(ATTENDED)})
+        AND c.kind = 'attendee'
     ),
     /*
      * A match is a mutual pair of likes at one event. There is no matches

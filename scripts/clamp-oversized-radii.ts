@@ -59,6 +59,7 @@ async function main() {
   const apply = process.argv.includes("--apply")
 
   const rows = await db.events.findMany({
+    // any-kind: an oversized check-in radius is wrong on any row that has one.
     where: { deleted_at: null, check_in_radius: { gt: GEOFENCE_LIMITS.MAX_RADIUS } },
     select: {
       id: true,

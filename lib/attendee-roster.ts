@@ -273,8 +273,10 @@ export async function eventAttendees(
     select: { ...eventPermissionSelect, status: true, end_time: true },
   })
   if (!event) return null
-  const { canEdit, canOperate } = eventPermissions(actor, event)
-  if (!canOperate) return null
+  // `canViewAttendees`, not `canOperate`: a venue day's owner moderates its
+  // room and is told nothing about who was in it, not even a count (F1, D-1).
+  const { canEdit, canViewAttendees } = eventPermissions(actor, event)
+  if (!canViewAttendees) return null
 
   if (!canEdit) return { view: "count", started: event.start_time <= now, came: (await venueCounts(eventId)).came }
 

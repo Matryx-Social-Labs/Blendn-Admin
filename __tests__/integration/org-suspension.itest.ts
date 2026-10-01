@@ -159,8 +159,8 @@ describe("suspending an organisation", () => {
     // The member's doors: no org, no permission, nothing listed — not even the event they created.
     const actor = await actorFor({ id: f.host, role: "organizer" })
     expect(actor.orgIds).toEqual([])
-    const upcomingRow = await db.events.findUniqueOrThrow({ where: { id: f.upcoming }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
-    expect(eventPermissions(actor, upcomingRow)).toEqual({ canEdit: false, canOperate: false })
+    const upcomingRow = await db.events.findUniqueOrThrow({ where: { id: f.upcoming }, select: { kind: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
+    expect(eventPermissions(actor, upcomingRow)).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
     const visible = await db.events.findMany({ where: await visibleEventsWhere({ id: f.host, role: "organizer" }), select: { id: true } })
     const visibleIds = new Set(visible.map((e) => e.id))
     expect(visibleIds.has(f.upcoming)).toBe(false)

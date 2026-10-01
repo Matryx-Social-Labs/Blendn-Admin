@@ -49,6 +49,7 @@ export async function DELETE(request: NextRequest) {
      * would. Read before the transaction so the promotion can run after it.
      */
     const openRsvps = await db.event_rsvps.findMany({
+      // any-kind: erasure releases every seat the person held, whatever the row (PL-I22).
       where: { user_id: authUser.userId, event: { start_time: { gt: new Date() } } },
       select: { event_id: true },
     })

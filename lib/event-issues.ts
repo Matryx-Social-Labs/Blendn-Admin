@@ -6,6 +6,7 @@ import { logger } from "./logger"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { deriveAlerts, type LiveAlert } from "./live-metrics"
 import { resolveOccurrence } from "./occurrences"
+import { realEventsWhere } from "./event-kind"
 
 /**
  * Alerts, with a memory.
@@ -52,6 +53,9 @@ async function liveEventIds(now: Date): Promise<string[]> {
   const rows = await db.events.findMany({
     where: {
       deleted_at: null,
+      // Alerts are for a host running a night. A venue day has none, and every
+      // venue's would crowd real events out of the bound below (F5).
+      ...realEventsWhere,
       status: "published",
       start_time: { lte: now },
       end_time: { gte: now },

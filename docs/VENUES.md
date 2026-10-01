@@ -223,10 +223,61 @@ this and was corrected rather than the code.
 
 ---
 
+## Venue days — every venue is live (plan v2 §3, step 3)
+
+Every active venue has a live room from day one, claimed or not (owner decision
+D2). The room hangs off a **venue day**: an `events` row with
+`kind = 'venue_day'`, one per venue per local day, made by `venueDayFor` in
+`lib/venue-day.ts` the first time somebody goes live there that day (the Go
+Live route is step 4). Being an events row is the point — occurrences,
+check-ins, presence, the room, moderation and the sweepers all work unchanged —
+and also the risk, because every reader of `events` would otherwise treat it as
+a published night out.
+
+| Question | Answer | Why |
+|---|---|---|
+| When does a day start? | `venues.day_reset_hour` (default 6) in `venues.timezone` (default `Asia/Kolkata`) | 02:00 is still last night's room; the reset is what makes pseudonyms new each day. CHECKs: hour 0–23, a zone Postgres can read |
+| One per day? | Partial unique `events_one_venue_day_per_day` on `(venue_id, start_time) WHERE kind = 'venue_day'` | Migration SQL only — a `db push` database has none. A lost race is matched on that name (`lib/prisma-errors.ts`), never `meta.target` |
+| Who owns it? | `organizer_id` = the system user `blendn-system`; never a person (F2) | `organizer_id` cascades on a hard delete. The migration creates the user (no password, `.invalid` address, no profile) and a trigger refuses its deletion |
+| Which org? | The venue's owning org if claimed on or before the day's start, else null | The curated-event shape: an unclaimed venue's room is the platform's to moderate |
+| Who is shown as host? | The venue's name (`lib/event-host.ts`) | Not the owning company, not the system user, never a founder |
+| Area | Copied from the venue (owner's ruling 3) | A venue with no area gets a day with none, and Go Live refuses it there |
+| Visibility | `published`, `unlisted` | Belt and braces: an attendee feed that only asks for `public` stays blind to it even if it forgot the kind |
+
+**Who may do what** (`eventPermissions`, F1, D-1). A venue day is decided
+before the organiser branch, because its `organizer_org_id` is the venue's
+org and the default branch would hand that org edit and the roster:
+
+| Actor | edit | operate (room, moderation) | attendees |
+|---|---|---|---|
+| app_admin | yes | yes | yes |
+| venue owner (claimed, day started after the claim) | no | yes | **no** — not labels, not a count |
+| anyone else, organisers of the same org included | no | no | no |
+
+**Hidden from every reader that is not about it.** `lib/event-kind.ts` exports
+`realEventsWhere` (and `venueDaysWhere`); raw SQL says `kind = 'event'`.
+`__tests__/events-kind-boundary.test.ts` scans `app/`, `lib/`, `components/`,
+`scripts/` and `server.ts` for every events reader — `db.events.*`, relation
+filters, `_count.events`, raw SQL — and fails on one that neither filters nor
+carries an `any-kind: <reason>` comment. Excluded: the feed, search, cities,
+`/venues` counts, RSVPs, favourites, the claim page, every dashboard list,
+overview, report and export, organiser counts, demand, reminders, rating
+requests, the issue sweeper, the sponsored scheduler, the loop funnel, an
+organisation's suspension, and the seeds. Included, on purpose: a person's own
+nights (`/me/attendance`, D-6 — labelled as places by the client), a member's
+own rooms, room archival, reveals, room entry by check-in, and sentiment
+classification (an escalation is how an unclaimed room reaches the platform).
+Building occupancy excludes them until the owner's screens are redesigned
+(step 17), so the room row and its count arrive through `discloseFigure`.
+
+---
+
 ## Files
 
 | File | What lives there |
 |---|---|
+| `lib/venue-day.ts` | `venueDayFor`, `venueDayBounds`, `SYSTEM_USER_ID` — the venue day |
+| `lib/event-kind.ts` | `realEventsWhere` / `venueDaysWhere`, the fragments every events reader uses |
 | `lib/venue-types.ts` | The 35-type vocabulary, labels, default extents, OSM mapping |
 | `lib/venue-actions.ts` | `venuesNear`, `createVenue`, `updateVenue`, `assignVenueOwner`, `searchVenues`, `venueById` — all `"use server"` |
 | `lib/venue-claim-actions.ts` | `fileVenueClaim`, `getVenueClaimQueue`, `decideVenueClaim` |

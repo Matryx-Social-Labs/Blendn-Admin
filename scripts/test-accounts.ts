@@ -2,6 +2,7 @@ import { PrismaClient, type organisations, type user_role } from "@prisma/client
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { checkPassword } from "../lib/password"
+import { realEventsWhere } from "../lib/event-kind"
 
 /**
  * The four accounts people sign in as to look at the dashboard.
@@ -349,7 +350,7 @@ async function retire(db: PrismaClient, emails: readonly string[], organiserId: 
     },
   })
   const adopted = await db.events.updateMany({
-    where: { organizer_id: { in: ids }, deleted_at: null },
+    where: { organizer_id: { in: ids }, deleted_at: null, ...realEventsWhere },
     // The suspension memory belonged to the old organisation. Carried over, a
     // later reinstate of this one would republish an event it never had.
     data: { organizer_id: organiserId, organizer_org_id: orgId, pre_suspension_status: null, updated_at: new Date() },

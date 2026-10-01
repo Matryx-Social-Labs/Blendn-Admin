@@ -33,6 +33,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       where: { id: eventId, deleted_at: null },
       select: {
         id: true,
+        kind: true,
         organizer_org_id: true,
         start_time: true,
         venue: { select: { owner_org_id: true, claimed_at: true } },

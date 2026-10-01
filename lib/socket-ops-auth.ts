@@ -110,7 +110,7 @@ export async function canJoinEventOps(
 ): Promise<boolean> {
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
-    select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } },
+    select: { kind: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } },
   })
   if (!event) return false
 

@@ -19,6 +19,7 @@ import {
 import { canPublish } from "@/lib/geofence-input"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import type { user_role, event_status } from "@prisma/client"
+import { realEventsWhere } from "./event-kind"
 
 export interface RoleUser {
   id: string
@@ -122,12 +123,12 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
   const [byStatus, lastPublished] = await Promise.all([
     db.events.groupBy({
       by: ["organizer_id", "status"],
-      where: { organizer_id: { in: ids }, deleted_at: null },
+      where: { organizer_id: { in: ids }, deleted_at: null, ...realEventsWhere },
       _count: { _all: true },
     }),
     db.events.groupBy({
       by: ["organizer_id"],
-      where: { organizer_id: { in: ids }, deleted_at: null, status: "published" },
+      where: { organizer_id: { in: ids }, deleted_at: null, ...realEventsWhere, status: "published" },
       _max: { start_time: true },
     }),
   ])

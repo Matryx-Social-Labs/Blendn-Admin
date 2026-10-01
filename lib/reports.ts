@@ -6,6 +6,7 @@ import { attendeeLabel } from "./pseudonym"
 import { distinctAttendeeCounts, distinctAttendeeCountsByDay } from "./attendee-counts"
 import { discloseGuests, discloseVenueCounts } from "./disclosure"
 import { hostNotSuspended } from "./event-access"
+import { realEventsWhere } from "./event-kind"
 import { claimedVenueEventsWhere, hostsEvent } from "./event-visibility"
 import { activeMembership } from "./org-membership"
 
@@ -179,8 +180,13 @@ export interface ReportScope {
 }
 
 export async function reportScope(role: user_role, userId: string): Promise<ReportScope> {
+  /*
+   * Venue days are in no report (step 3). An export is per event, and a venue
+   * day's people are nobody's to export — its owner is told no one (F1), and
+   * a host's numbers are about the nights they run.
+   */
   if (role === "app_admin") {
-    const all = { deleted_at: null }
+    const all = { deleted_at: null, ...realEventsWhere }
     return { all, hosted: all, venueOnly: NOTHING, actor: { id: userId, orgIds: [] } }
   }
 
@@ -203,11 +209,12 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
   const venueArms = role === "venue_owner" ? await claimedVenueEventsWhere(orgIds) : []
 
   return {
-    all: { deleted_at: null, OR: [...hostedArms, ...venueArms] },
-    hosted: { deleted_at: null, OR: hostedArms },
+    all: { deleted_at: null, ...realEventsWhere, OR: [...hostedArms, ...venueArms] },
+    hosted: { deleted_at: null, ...realEventsWhere, OR: hostedArms },
     venueOnly: venueArms.length
       ? {
           deleted_at: null,
+          ...realEventsWhere,
           AND: [
             { OR: venueArms },
             // Not theirs to run. Explicit about NULL: a bare `notIn` on a
@@ -476,7 +483,7 @@ export async function buildReport(
           _count: {
             select: {
               members: true,
-              events: { where: { deleted_at: null } },
+              events: { where: { deleted_at: null, ...realEventsWhere } },
               venues: { where: { deleted_at: null } },
             },
           },
