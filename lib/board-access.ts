@@ -1,5 +1,7 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
+import type { board_request_status } from "@prisma/client"
+
 import { ageFrom } from "./age"
 import { preferredPseudonymFor } from "./anonymous-names"
 import {
@@ -81,6 +83,27 @@ export function isLiveRequest(
   )
 }
 
+/**
+ * A decline is never delivered to the asker (product rule).
+ *
+ * To the person who asked, a declined ask is an unanswered one: `pending`, no
+ * decision time, live until it lapses with its event or its post like any
+ * other. These two are that rule in its two places — the row the asker is
+ * shown, and the cap they are held to. The cap is the one that gets missed: if
+ * a decline freed a slot, somebody at five outstanding who could suddenly ask
+ * a sixth has been told one of the five said no.
+ */
+export function outstandingAsk(now: Date = new Date()) {
+  return { ...liveRequest(now), status: { in: ["pending", "declined"] as board_request_status[] } }
+}
+
+/** The row as its asker may see it. Only ever applied to the asker's own rows. */
+export function asTheAskerSees<T extends { status: board_request_status; decided_at: Date | null }>(
+  request: T
+): T {
+  return request.status === "declined" ? { ...request, status: "pending", decided_at: null } : request
+}
+
 /** What the viewer has done about this event. Both gates read it. */
 export async function entitlementFor(
   eventId: string,
@@ -122,7 +145,7 @@ export async function boardWriteDenial(
       select: { name: true, age: true, date_of_birth: true, intent_default: true },
     }),
     db.user_interests.count({ where: { user_id: userId } }),
-    db.board_requests.count({ where: { from_user_id: userId, ...liveRequest() } }),
+    db.board_requests.count({ where: { from_user_id: userId, ...outstandingAsk() } }),
     db.board_requests.count({
       where: {
         from_user_id: userId,

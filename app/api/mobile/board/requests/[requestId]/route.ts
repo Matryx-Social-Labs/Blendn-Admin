@@ -81,10 +81,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         id: true,
         status: true,
         event_id: true,
+        post_id: true,
         from_user_id: true,
         to_user_id: true,
         event: { select: { end_time: true } },
-        post: { select: { deleted_at: true } },
+        post: { select: { deleted_at: true, kind: true, spaces_left: true } },
       },
     })
     if (!boardRequest) return notFoundResponse("Request not found")
@@ -100,10 +101,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const isRecipient = boardRequest.to_user_id === user.userId
     const isAsker = boardRequest.from_user_id === user.userId
     if (!isRecipient && !isAsker) return notFoundResponse("Request not found")
-    if (action === "withdraw" && !isAsker) {
-      return forbiddenResponse("Only the person who asked can withdraw it")
+    if (action === "withdraw") {
+      if (!isAsker) return forbiddenResponse("Only the person who asked can withdraw it")
+      return withdraw(requestId)
     }
-    if (action !== "withdraw" && !isRecipient) {
+    if (!isRecipient) {
       return forbiddenResponse("Only the person who was asked can answer")
     }
     if (boardRequest.status !== "pending") {
@@ -119,9 +121,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * `isLiveRequest`, so the screen and the server cannot give two answers to
      * one question, which is the failure this codebase is mostly made of.
      *
-     * Declining and withdrawing stay open. They are record-keeping, they cost
-     * nothing, and the cap no longer depends on them: it counts live requests,
-     * so a lapsed ask has already stopped occupying a slot.
+     * Declining stays open. It is record-keeping, it costs nothing, and the
+     * cap no longer depends on it: it counts live requests, so a lapsed ask has
+     * already stopped occupying a slot.
      */
     if (action === "accept" && !isLiveRequest(boardRequest)) {
       return conflictResponse(
@@ -129,25 +131,26 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const nextStatus = action === "accept" ? "accepted" : action === "decline" ? "declined" : "withdrawn"
-
-    if (action !== "accept") {
+    if (action === "decline") {
       /*
        * `updateMany` with the status in the where clause, not `update`.
        *
-       * The read above is not a lock, so two taps — or a decline racing a
-       * withdraw — both pass it. Making `pending` part of the predicate means
+       * The read above is not a lock, so two taps — or a decline racing an
+       * accept — both pass it. Making `pending` part of the predicate means
        * exactly one of them writes, and the loser is told the truth rather than
        * silently overwriting the first answer.
+       *
+       * Nothing is sent to the asker, and nothing they read changes: to them a
+       * declined ask stays pending until it lapses (`asTheAskerSees`).
        */
       const claimed = await db.board_requests.updateMany({
         where: { id: requestId, status: "pending" },
-        data: { status: nextStatus, decided_at: new Date() },
+        data: { status: "declined", decided_at: new Date() },
       })
       if (claimed.count === 0) {
         return conflictResponse("That request has already been answered")
       }
-      return successResponse({ id: requestId, status: nextStatus })
+      return successResponse({ id: requestId, status: "declined" })
     }
 
     /*
@@ -184,11 +187,39 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return conflictResponse("This request can no longer be accepted")
     }
 
+    /*
+     * A seat, taken before the claim and in the predicate (SCRUM-514).
+     *
+     * An offer of two seats accepted three times is a car with three people
+     * promised two places. The read above is not a lock, so the guard is the
+     * write itself: `spaces_left > 0` in the where clause, so of two accepts
+     * racing for the last seat exactly one decrements and the other is told the
+     * offer is full. The CHECK on the column keeps it from going below zero
+     * even if this predicate were lost. An offer that never named a number of
+     * seats (`spaces_left` null) has none to run out of.
+     */
+    const takesASeat = boardRequest.post.kind === "offer" && boardRequest.post.spaces_left !== null
+    if (takesASeat) {
+      const seat = await db.board_posts.updateMany({
+        where: { id: boardRequest.post_id, spaces_left: { gt: 0 } },
+        data: { spaces_left: { decrement: 1 } },
+      })
+      if (seat.count === 0) return conflictResponse("That offer is full")
+    }
+    const giveTheSeatBack = async () => {
+      if (!takesASeat) return
+      await db.board_posts.updateMany({
+        where: { id: boardRequest.post_id },
+        data: { spaces_left: { increment: 1 } },
+      })
+    }
+
     const claimed = await db.board_requests.updateMany({
       where: { id: requestId, status: "pending" },
       data: { status: "accepted", decided_at: new Date() },
     })
     if (claimed.count === 0) {
+      await giveTheSeatBack()
       return conflictResponse("That request has already been answered")
     }
 
@@ -224,6 +255,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         where: { id: requestId, status: "accepted" },
         data: { status: "pending", decided_at: null },
       })
+      await giveTheSeatBack()
       if (error instanceof ConversationClosedError) {
         return conflictResponse("This request can no longer be accepted")
       }
@@ -248,4 +280,32 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     })
     return serverErrorResponse("Failed to answer the request")
   }
+}
+
+/**
+ * The asker takes their ask back — which must not be where a decline lands.
+ *
+ * To the asker a declined ask is pending (`asTheAskerSees`), so withdrawing it
+ * has to succeed exactly as withdrawing a pending one does. A 409 here was the
+ * decline delivered as an error. Withdrawing twice is not news either, so it
+ * succeeds again. Only an accepted ask is refused, and the asker was told about
+ * that one.
+ *
+ * A declined row becomes `withdrawn`, so what the asker reads afterwards
+ * agrees with what they did. The re-ask is refused on any earlier row (the
+ * send route), so this does not reopen the post to them.
+ */
+async function withdraw(requestId: string) {
+  const claimed = await db.board_requests.updateMany({
+    where: { id: requestId, status: { in: ["pending", "declined"] } },
+    data: { status: "withdrawn", decided_at: new Date() },
+  })
+  if (claimed.count === 0) {
+    const now = await db.board_requests.findUnique({
+      where: { id: requestId },
+      select: { status: true },
+    })
+    if (now?.status !== "withdrawn") return conflictResponse("That request has already been answered")
+  }
+  return successResponse({ id: requestId, status: "withdrawn" })
 }

@@ -1851,10 +1851,10 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 
 | Method | Endpoint | Gate |
 |--------|----------|------|
-| GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited |
+| GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited; before doors. Posts by anybody blocked either way are left out |
 | POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps; the text passes moderation |
 | DELETE | `/events/:eventId/board/:postId` | Your own post (anyone else's is a 404) |
-| POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked and not already declined |
+| POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked, not a `chat` post, not a full offer, and not asked before |
 | GET | `/board/requests` | Yours, both directions |
 | PATCH | `/board/requests/:requestId` | `{ action: accept \| decline \| withdraw }` |
 
@@ -1888,9 +1888,17 @@ nowhere else. `requestCount` is a number and never a list: how many have asked
 is useful, naming them would disclose who is looking for company to everyone
 browsing.
 
-**The board closes at doors.** After that the room is the place, and it is gated
-on presence rather than intent — a board that stayed open would be a second room
-with a weaker gate running beside the real one.
+**The board closes at doors** — for reading as well as posting and asking, all
+three **403** *"The board closes when the doors open — the room is open
+instead"*, judged on the event's `start_time`. After that the room is the place,
+and it is gated on presence rather than intent — a board that stayed open would
+be a second room with a weaker gate running beside the real one, and a readable
+one would be a list of who came alone, open during the night.
+
+**Blocks apply both ways.** A post by somebody who blocked you, or whom you
+blocked, is not on your board; asking on one is refused exactly as asking on a
+post that is gone; and an ask from somebody blocked either way is left out of
+your incoming list.
 
 **A post is checked before it is stored** (SCRUM-301). The text gets the room's
 checks: the keyword filter, contact details, then OpenAI within one second. A
@@ -1919,11 +1927,17 @@ rather than a check: a request is filed against a post, `board_requests.post_id`
 is required, and the recipient is read off the post. There is no field in which
 to name somebody, so there is no path that forgets the rule.
 
-Refused if they have already **declined** you on that post — the partial unique
-index only stops a second *pending* request, so without it a decline is followed
-by an identical ask a second later, for ever. `withdrawn` is deliberately not
-treated the same way: withdrawing is the asker changing their own mind, and it
-has told the other person nothing.
+**One ask per post, ever.** A second ask on a post you have asked before is
+**409** *"You have already asked — give them a moment"*, whatever became of the
+first — waiting, declined, withdrawn or accepted. It used to be refused only
+after a decline, with *"They have already answered this one"*, and that sentence
+was the decline delivered: the only answer a re-ask can be refused after is a no.
+Refusing after a decline but not after a withdrawal fails the same way one step
+later, since a declined ask can be withdrawn and re-asked. So every re-ask gets
+the sentence a double tap gets.
+
+A request on a **`chat`** post is **422** — it asks nothing of anybody, so there is
+nothing to ask to join.
 
 Blocks are consulted **in both directions**, and the refusal is the same sentence
 as a deleted post. Telling the asker they have been blocked tells them a fact
@@ -1934,6 +1948,25 @@ about somebody else's decision, which is the one thing a block should not leak.
 `accept`, `decline` and `withdraw`. The last is the asker's alone, and
 `withdrawn` is a separate status from `declined` because afterwards, which of the
 two people ended it is the thing worth knowing.
+
+**A decline is never delivered to the asker.** Nothing is pushed, and nothing the
+asker reads changes. In their `GET /board/requests` a declined ask is
+`status: "pending"`, `decidedAt: null`, `live` while its event and post are, and
+it lapses with them like any unanswered ask; it sorts with the pending ones. It
+still counts toward their five outstanding until it lapses — a decline that
+freed a slot would tell somebody at the cap that one of their asks was refused.
+Withdrawing a declined ask succeeds as withdrawing a pending one does (the row
+becomes `withdrawn`), and withdrawing twice succeeds again. Only an accepted ask
+cannot be withdrawn, and the asker was told about that one.
+
+**Accepting an offer spends a seat** (SCRUM-514). On an `offer` with a number of
+seats, `spacesLeft` drops by one, atomically: of two accepts racing for the last
+seat exactly one gets it, and the other is **409** *"That offer is full"* — said
+to the author, and the ask stays pending. A CHECK keeps it from going below zero.
+An offer that never named its seats (`spacesLeft: null`) has none to run out of.
+If the conversation then cannot be opened, the seat is given back with the ask.
+Asking on an offer already at `spacesLeft: 0` is the same **409** — the board
+already shows it full.
 
 **A decision is still possible after the doors open**, unlike everything else on
 this surface. A pending request holds a slot in the asker's outstanding cap, so
