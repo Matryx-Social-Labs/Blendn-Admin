@@ -477,6 +477,14 @@ model events {
   /// latitude/longitude/check_in_radius so no existing event needs a backfill.
   /// Circle or polygon — see lib/geofence.ts for why both, and why not PostGIS.
   geofence          Json?
+  /// `event` for everything a host runs. `venue_day` is the hidden daily room
+  /// of a venue that people Go Live in (plan v2 §3, `lib/venue-day.ts`): one
+  /// per venue per local day, owned by the system user, never listed. Every
+  /// reader of this table filters on it or says why not —
+  /// `__tests__/events-kind-boundary.test.ts`. The one-per-day rule is a
+  /// partial unique index that lives only in migration SQL
+  /// (`events_one_venue_day_per_day`).
+  kind              event_kind         @default(event)
 
   // Relations
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
@@ -701,6 +709,9 @@ model event_check_ins {
   last_seen_at          DateTime? @db.Timestamptz(6)
   left_area_at          DateTime? @db.Timestamptz(6)
   departure_prompted_at DateTime? @db.Timestamptz(6)
+  /// When a Go Live window at a venue ends (step 4). Null for an event
+  /// check-in, which ends with the event or a checkout.
+  expires_at            DateTime? @db.Timestamptz(6)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -1457,6 +1468,11 @@ model venues {
   /// claimed, the owner decides. Null for venues added before this, and for
   /// admin-added ones — those stay admin-only while unclaimed.
   created_by_org_id String? @db.Uuid
+  /// The venue's day starts at this local hour (venue days, `lib/venue-day.ts`):
+  /// somebody live at 02:00 is still in last night's room. CHECK 0–23 in SQL.
+  day_reset_hour Int          @default(6) @db.SmallInt
+  /// IANA zone the venue's day is counted in. CHECK in SQL that Postgres knows it.
+  timezone       String       @default("Asia/Kolkata")
   created_at   DateTime     @default(now()) @db.Timestamptz(6)
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at   DateTime?    @db.Timestamptz(6)
@@ -2297,6 +2313,12 @@ enum rsvp_status {
   /// Wanted to come to a full event. Promoted to `going` in the order people
   /// joined, as seats are released.
   waitlisted
+}
+
+/// What an `events` row is. See `events.kind`.
+enum event_kind {
+  event
+  venue_day
 }
 
 enum event_status {

@@ -63,6 +63,8 @@ export async function GET(request: NextRequest) {
     // only covers one deleted between the two reads.
     const events = attended.length
       ? await db.events.findMany({
+          // any-kind: your own nights include the places you went live at —
+          // venue days stay in your history, labelled as places (D-6).
           where: { id: { in: attended.map((a) => a.event_id) }, deleted_at: null },
           select: {
             id: true,

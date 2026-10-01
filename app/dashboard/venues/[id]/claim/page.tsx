@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { activeMembership } from "@/lib/org-membership"
+import { realEventsWhere } from "@/lib/event-kind"
 
 export const dynamic = "force-dynamic"
 
@@ -35,7 +36,7 @@ export default async function ClaimVenuePage({
       owner_org: { select: { display_name: true } },
       // What the owner hosted, not every row: the form calls it evidence in a
       // dispute, and QA Circle Venue read 32 while hosting 11 (SCRUM-312).
-      _count: { select: { events: { where: { deleted_at: null } } } },
+      _count: { select: { events: { where: { deleted_at: null, ...realEventsWhere } } } },
     },
   })
   if (!venue) notFound()

@@ -14,6 +14,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { SYSTEM_USER_ID } from "@/lib/event-kind"
 
 export async function GET(
   request: NextRequest,
@@ -38,6 +39,9 @@ export async function GET(
      * pseudonym they kept at another.
      */
     const { userId, room, identified } = await identityForRef(authUser.userId, ref)
+    // The owner of every venue day is not a person anyone can look at; its
+    // "events organised" would be a count of every venue day ever made.
+    if (userId === SYSTEM_USER_ID) return notFoundResponse("User not found")
 
     // Get the user's public profile
     const user = await db.user.findUnique({

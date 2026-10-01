@@ -16,6 +16,7 @@ import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
 import { activeMembership, actorFor } from "@/lib/org-membership"
 import { venueTypeLabel } from "@/lib/venue-types"
+import { realEventsWhere } from "@/lib/event-kind"
 
 export const dynamic = "force-dynamic"
 
@@ -159,7 +160,9 @@ export default async function VenueDetailPage({
 
   const [events, ratingRows] = await Promise.all([
     db.events.findMany({
-      where: inRange ? { venue_id: id, deleted_at: null, start_time: inRange } : { id: { in: [] } },
+      // The nights hosts ran here. The venue's own daily live rooms are not
+      // among them; what happens in those reaches the owner as aggregates only.
+      where: inRange ? { venue_id: id, deleted_at: null, ...realEventsWhere, start_time: inRange } : { id: { in: [] } },
       orderBy: { start_time: "desc" },
       take: 200,
       select: {
@@ -185,7 +188,7 @@ export default async function VenueDetailPage({
       where:
         since === null
           ? { id: { in: [] } }
-          : { event: { venue_id: id, deleted_at: null, ...(since ? { start_time: since } : {}) } },
+          : { event: { venue_id: id, deleted_at: null, ...realEventsWhere, ...(since ? { start_time: since } : {}) } },
       _count: { _all: true },
     }),
   ])

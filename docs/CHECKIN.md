@@ -239,6 +239,22 @@ compiles with plain `tsc`, which emits the `@/` alias verbatim into the
 
 ---
 
+## Venue days — going live at a venue
+
+Going live at a venue (step 4) is a check-in to that venue's **venue day**: an
+`events` row with `kind = 'venue_day'`, one per venue per local day, from
+`venues.day_reset_hour` (06:00) in `venues.timezone`. `lib/venue-day.ts` finds
+or creates it; the model, who owns it and who may see it are in
+`docs/VENUES.md` § Venue days. For check-in the differences are:
+
+- `event_check_ins.expires_at` — when the Go Live window ends (20/45/60 min, or
+  "stay"). Null on an event check-in. Step 4 writes it and sweeps it.
+- The occurrence is the day (`occurs_on` = the venue-local date), so the
+  per-occurrence uniqueness keeps one check-in per person per venue per day.
+- Every checkout, presence and sweeper rule above applies unchanged, except
+  where step 4 adds the venue-day pass (its own bound, F5) and the `expired`
+  departure (F6).
+
 ## Files
 
 | File | What |

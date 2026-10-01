@@ -6,6 +6,7 @@ import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
+import { realEventsWhere } from "@/lib/event-kind"
 
 export const dynamic = "force-dynamic"
 
@@ -54,6 +55,8 @@ export async function GET(request: NextRequest) {
       status: { in: ["going" as const, "waitlisted" as const] },
       event: {
         deleted_at: null,
+        // A venue day takes no RSVP; going live is the only way in (F7).
+        ...realEventsWhere,
         status: { not: "draft" as const },
         end_time: { gte: new Date() },
       },

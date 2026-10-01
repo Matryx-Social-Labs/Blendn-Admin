@@ -120,6 +120,8 @@ export async function hereCountFor(eventId: string): Promise<number> {
  * LIMIT, so a profile said 3 above a list of 1, and a page whose newest event
  * was deleted came back short. Both queries below take this.
  */
+// any-kind: a person's own nights out, the places they went live at included and
+// labelled as places (D-6). The count and the list share it, so they agree.
 const LIVE_EVENT = Prisma.sql`
   AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.deleted_at IS NULL)
 `

@@ -12,6 +12,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { boundedInt } from "@/lib/pagination"
+import { realEventsWhere } from "@/lib/event-kind"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      */
     const eventWhereClause = {
       deleted_at: null,
+      ...realEventsWhere,
       status: { not: "draft" as const },
       ...eventTimeFilter,
     }

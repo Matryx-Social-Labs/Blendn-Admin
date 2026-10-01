@@ -10,6 +10,7 @@ import { ensureOrgBrand, ensurePendingBrandClaim, findBrandByName } from "./seed
 import { describeLive, describeRefresh, refreshSeededEvent } from "./seed-occurrences"
 import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS, upsertOrg } from "./test-accounts"
+import { realEventsWhere } from "../lib/event-kind"
 
 /**
  * A world the QA team can actually test against.
@@ -412,7 +413,7 @@ async function refreshTimes() {
  */
 async function reviveCopiedCovers() {
   const events = await db.events.findMany({
-    where: { cover_image_url: { contains: RETIRED_COVER_HOST, mode: "insensitive" } },
+    where: { cover_image_url: { contains: RETIRED_COVER_HOST, mode: "insensitive" }, ...realEventsWhere },
     select: { id: true, slug: true, cover_image_url: true },
   })
   for (const e of events) {
@@ -1338,7 +1339,7 @@ async function main() {
   // ── retire the previous names ────────────────────────────────────────────
   if (APPLY) {
     const retired = await db.events.updateMany({
-      where: { slug: { in: RETIRED_SLUGS }, deleted_at: null },
+      where: { slug: { in: RETIRED_SLUGS }, deleted_at: null, ...realEventsWhere },
       data: { deleted_at: new Date(), updated_at: new Date() },
     })
     if (retired.count > 0) console.log(`Retired ${retired.count} event(s) under old QA names.`)

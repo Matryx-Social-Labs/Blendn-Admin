@@ -109,7 +109,7 @@ describe("the stats line", () => {
     const stats = await getUserStats()
     expect(stats).toEqual({ total: 119, onboarded: 76, verified: 40, suspended: 1, deleted: 2 })
     const wheres = mockDb.user.count.mock.calls.map((c) => c[0].where)
-    expect(wheres[0]).toEqual({ deletedAt: null })
+    expect(wheres[0]).toEqual({ deletedAt: null, id: { not: "blendn-system" } })
     expect(wheres[1]).toMatchObject({ deletedAt: null })
     expect(wheres[2]).toMatchObject({ deletedAt: null })
     expect(wheres[3]).toEqual({ deletedAt: { not: null } })

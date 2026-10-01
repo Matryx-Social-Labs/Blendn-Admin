@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { CURATION_PAGE, curationSelect } from "@/lib/curation"
 import { db } from "@/lib/db"
 import { likeLiteral } from "@/lib/like-literal"
+import { realEventsWhere } from "@/lib/event-kind"
 
 export interface CuratedEventRow {
   id: string
@@ -55,6 +56,7 @@ export async function getCurationQueue(city?: string): Promise<CurationQueue> {
   const where = {
     curated_at: { not: null },
     deleted_at: null,
+    ...realEventsWhere,
     ...(city ? { city: { equals: likeLiteral(city), mode: "insensitive" as const } } : {}),
   }
 

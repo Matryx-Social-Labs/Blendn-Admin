@@ -1,5 +1,6 @@
 import { cityKey } from "./address"
 import { db } from "./db"
+import { realEventsWhere } from "./event-kind"
 
 /**
  * Which city to open next.
@@ -78,7 +79,7 @@ export async function cityDemand(limit = 50): Promise<DemandRow[]> {
     }),
     db.events.groupBy({
       by: ["city"],
-      where: { deleted_at: null, status: "published", city: { not: null } },
+      where: { deleted_at: null, ...realEventsWhere, status: "published", city: { not: null } },
       _count: { _all: true },
     }),
   ])
