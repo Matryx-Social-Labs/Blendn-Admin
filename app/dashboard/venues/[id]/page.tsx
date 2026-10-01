@@ -9,6 +9,7 @@ import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
 import { discloseStarsAcross, discloseVenueCounts, spreadsByEvent } from "@/lib/disclosure"
+import { stillArriving } from "@/lib/occurrences"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { turnUpPct } from "@/lib/counting"
@@ -146,7 +147,7 @@ export default async function VenueDetailPage({
     : claimedWindow(venue, { from: range.from, to: range.to })
   const actor = isAdmin ? null : await actorFor(session.user)
 
-  const building = await getBuildingOccupancy(id, { asOwner: !isAdmin })
+  const building = await getBuildingOccupancy(id, { asOwner: actor })
 
   /*
    * Only fetched when it can be used: an admin, looking at a venue nobody owns.
@@ -169,6 +170,7 @@ export default async function VenueDetailPage({
         id: true,
         title: true,
         start_time: true,
+        end_time: true,
         status: true,
         max_capacity: true,
         organizer_id: true,
@@ -222,7 +224,7 @@ export default async function VenueDetailPage({
       // Another host's night, seen as the venue: counts held back under the
       // floor, by the rule the Events list and the exports use (SCRUM-501).
       ...(actor && !hostsEvent(actor, e)
-        ? discloseVenueCounts({ ...exact, capacity: e.max_capacity })
+        ? discloseVenueCounts({ ...exact, capacity: e.max_capacity, arriving: stillArriving(e) })
         : exact),
     }
   })

@@ -216,7 +216,8 @@ describe("a venue owner's view starts at the claim", () => {
     ["lib/building-occupancy.ts", /opts\.asOwner && venue \? claimedWindow\(venue\)/],
     ["app/dashboard/venues/[id]/page.tsx", /isAdmin \? undefined : claimedWindow\(venue\)/],
     ["app/dashboard/venues/[id]/page.tsx", /: claimedWindow\(venue, \{ from: range\.from, to: range\.to \}\)/],
-    ["app/dashboard/venues/[id]/page.tsx", /getBuildingOccupancy\(id, \{ asOwner: !isAdmin \}\)/],
+    ["app/dashboard/venues/[id]/page.tsx", /const actor = isAdmin \? null : await actorFor\(session\.user\)/],
+    ["app/dashboard/venues/[id]/page.tsx", /getBuildingOccupancy\(id, \{ asOwner: actor \}\)/],
   ])("%s goes through the claim window", (rel, shape) => {
     const src = files.find(([f]) => f === rel)?.[1]
     expect(src).toBeDefined()

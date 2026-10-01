@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation"
 
 import { LiveTab } from "@/components/dashboard/live-tab"
 import { issuesFor } from "@/lib/event-issues"
+import { alertsForVenue } from "@/lib/live-metrics"
 import { getEventAttendance } from "@/lib/attendance"
 import { getConnectionMetrics } from "@/lib/connection-metrics"
 import { getAuth } from "@/lib/auth"
@@ -163,6 +164,7 @@ export default async function EventDetailPage({
   )
 
   if (activeTab === "live") {
+    const issues = await issuesFor(event.id)
     return (
       <div className="flex flex-col gap-5">
         {header}
@@ -177,8 +179,13 @@ export default async function EventDetailPage({
            * "the queue cleared itself twenty minutes ago" does not need to
            * arrive within a second — it needs to exist at all, which is what
            * a browser-only `useMemo` could never manage.
+           *
+           * Their bodies carry the night's counts ("3 of 12 have checked out"),
+           * so a venue gets the ones it is sent live, each as its figure-free
+           * sentence (SCRUM-516), here on the server: the props are in the
+           * page's payload.
            */
-          issues={await issuesFor(event.id)}
+          issues={permissions.canEdit ? issues : alertsForVenue(issues)}
         />
       </div>
     )

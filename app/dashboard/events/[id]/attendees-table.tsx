@@ -126,13 +126,22 @@ export function EventAttendeesTable({
  * shown, because it identifies nobody; anything held back says so rather than
  * showing a blank.
  */
-export function EventAttendeesCount({ started, came }: { started: boolean; came: number | null }) {
+export function EventAttendeesCount({ started, came }: { started: boolean; came: number | string | null }) {
   return (
     <section className="flex flex-col gap-2 rounded-panel border border-border bg-card p-5">
       <MetricTile
         label="Came"
         value={started ? came : null}
-        hint={!started ? "doors not open yet" : came === null ? "held back" : "people checked in"}
+        hint={
+          !started
+            ? "doors not open yet"
+            : came === null
+              ? "held back"
+              : // A range while the night runs (SCRUM-516).
+                typeof came === "string"
+                ? "so far — a range until it ends"
+                : "people checked in"
+        }
         className="px-0 py-0"
       />
       <p className="max-w-[70ch] text-[0.8125rem] text-muted-foreground">

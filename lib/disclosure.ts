@@ -1,4 +1,6 @@
-import { SPONSORSHIP } from "@/lib/constants"
+// Relative: the live tick reaches this from server.ts, which `build:server`
+// compiles with plain tsc (see __tests__/server-import-boundary.test.ts).
+import { SPONSORSHIP } from "./constants"
 
 /**
  * When an aggregate stops being an aggregate.
@@ -156,16 +158,22 @@ export function discloseGuests(guests: number): number | null {
  * The same rule wherever those counts appear — the Events list, the venue
  * page, the Events export — so no surface prints what another blanks. Fill is
  * Going over capacity, so it goes when Going does.
+ *
+ * `arriving` (`stillArriving`): who came is held back altogether while people
+ * can still be coming in. Reloading a list or re-downloading an export is
+ * watching the number, and it moves by one with each arrival; the Live tab
+ * gives the venue the night as ranges instead (SCRUM-516).
  */
 export function discloseVenueCounts(c: {
   going: number
   attended: number
   capacity: number | null
+  arriving?: boolean
 }): { going: number | null; attended: number | null; fillPct: number | null } {
   const going = discloseFigure({ count: c.going, contributors: c.going, population: 0 }).value
   return {
     going,
-    attended: discloseGuests(c.attended),
+    attended: c.arriving ? null : discloseGuests(c.attended),
     fillPct: going !== null && c.capacity ? Math.round((going / c.capacity) * 100) : null,
   }
 }
@@ -181,6 +189,33 @@ export function discloseVenueCounts(c: {
 export function discloseHeadcount(count: number): number | null {
   if (count === 0) return 0
   return discloseFigure({ count, contributors: count, population: 0 }).value
+}
+
+/** A live count as a venue is told it: a range, never the number. In order. */
+export const LIVE_RANGES = ["0", "a few", "5–9", "10–19", "20+"] as const
+export type LiveRange = (typeof LIVE_RANGES)[number]
+
+/**
+ * A count of people that is still moving -- in the room, arrived, left, in
+ * the last ten minutes -- for a venue watching another host's night or its own
+ * venue day (SCRUM-516, D-19).
+ *
+ * The floor alone is not enough for a figure that updates. Watching "fewer
+ * than 5" turn into 5 the moment somebody walks in tells you they did (F14,
+ * cf. SCRUM-472), and every arrival after that moves an exact number by one.
+ * Ranges move only at their edges, so a single arrival is mostly invisible.
+ * "20+" is a range too: an exact count of a big room still says who just came
+ * in. Whether the room is over capacity is a separate flag, decided on the
+ * exact figure, so safety does not depend on the number being shown.
+ *
+ * Zero is shown, as everywhere: an empty room names nobody.
+ */
+export function liveRange(count: number): LiveRange {
+  if (count <= 0) return "0"
+  if (count < MIN_CELL) return "a few"
+  if (count < 10) return "5–9"
+  if (count < 20) return "10–19"
+  return "20+"
 }
 
 /**

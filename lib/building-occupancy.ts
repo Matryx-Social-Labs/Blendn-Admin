@@ -1,5 +1,6 @@
 import { db } from "@/lib/db"
-import { claimedWindow } from "@/lib/event-visibility"
+import { LIVE_RANGES, liveRange, type LiveRange } from "@/lib/disclosure"
+import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
 import { realEventsWhere } from "./event-kind"
 
@@ -33,14 +34,20 @@ import { realEventsWhere } from "./event-kind"
 export interface RoomOccupancy {
   eventId: string
   title: string
-  inside: number
-  guestsInside: number
-  staffInside: number
+  /** A range when the owner reads a room another host runs (SCRUM-516). */
+  inside: number | LiveRange
+  /** Null beside a range: the split is two more counts. */
+  guestsInside: number | null
+  staffInside: number | null
 }
 
 export interface BuildingOccupancy {
-  /** Everyone inside the building right now, across every live event. */
-  inside: number
+  /**
+   * Everyone inside the building right now, across every live event. Null when
+   * a room is a range and there are others: total minus the rooms shown exactly
+   * would be the ranged room's count.
+   */
+  inside: number | LiveRange | null
   /** The venue's licensed capacity, or null when none is stated. */
   capacity: number | null
   /** Null when the venue states no capacity. Uncapped, like the event one. */
@@ -57,9 +64,10 @@ export async function getBuildingOccupancy(
     /**
      * The venue's owner, not an admin: only rooms that opened at or after the
      * claim. A night that began before it is not theirs to see, even while it
-     * runs (SCRUM-355, SCRUM-500); with no claim date, no rooms at all.
+     * runs (SCRUM-355, SCRUM-500); with no claim date, no rooms at all. And a
+     * room their organisation does not run reads as a range (SCRUM-516).
      */
-    asOwner?: boolean
+    asOwner?: { id: string; orgIds: readonly string[] } | null
   } = {}
 ): Promise<BuildingOccupancy> {
   const now = opts.now ?? new Date()
@@ -77,9 +85,9 @@ export async function getBuildingOccupancy(
             deleted_at: null,
             /*
              * Hosts' rooms only, for now. People live at the venue are in the
-             * building too, but this panel lists each room with an exact count
-             * and a title; a venue day joins it when the owner's screens are
-             * redesigned (step 17), with its count through `discloseFigure`.
+             * building too, but this panel lists each room by title; a venue
+             * day joins it when the owner's screens are redesigned (step 17),
+             * its count a range like every room the owner does not run.
              */
             ...realEventsWhere,
             status: "published",
@@ -88,7 +96,7 @@ export async function getBuildingOccupancy(
             start_time: { lte: now, ...(window ? { gte: window.gte } : {}) },
             end_time: { gte: now },
           },
-          select: { id: true, title: true },
+          select: { id: true, title: true, organizer_id: true, organizer_org_id: true },
         })
 
   const capacity = venue?.capacity ?? null
@@ -100,27 +108,40 @@ export async function getBuildingOccupancy(
   // four concurrent rooms should not cost four round trips.
   const occupancies = await getOccupancies(live.map((e) => e.id))
 
-  const rooms: RoomOccupancy[] = live
-    .map((event) => {
-      const o = occupancies.get(event.id) ?? { inside: 0, guestsInside: 0 }
-      return {
-        eventId: event.id,
-        title: event.title,
-        inside: o.inside,
-        guestsInside: o.guestsInside,
-        staffInside: o.inside - o.guestsInside,
-      }
-    })
-    .sort((a, b) => b.inside - a.inside || a.title.localeCompare(b.title))
+  const owner = opts.asOwner
+  const counted = live.map((event) => ({
+    event,
+    ...(occupancies.get(event.id) ?? { inside: 0, guestsInside: 0 }),
+    ranged: owner ? !hostsEvent(owner, event) : false,
+  }))
+  const anyRanged = counted.some((r) => r.ranged)
+  const inside = counted.reduce((sum, r) => sum + r.inside, 0)
 
-  const inside = rooms.reduce((sum, r) => sum + r.inside, 0)
+  const rooms: RoomOccupancy[] = counted
+    /*
+     * Busiest first -- by what is shown. Ordered by the exact counts, two
+     * rooms both reading "a few" would swap places as one person walks in.
+     */
+    .sort((a, b) => {
+      const rank = (n: number) => (anyRanged ? LIVE_RANGES.indexOf(liveRange(n)) : n)
+      return rank(b.inside) - rank(a.inside) || a.event.title.localeCompare(b.event.title)
+    })
+    .map((r) => ({
+      eventId: r.event.id,
+      title: r.event.title,
+      ...(r.ranged
+        ? { inside: liveRange(r.inside), guestsInside: null, staffInside: null }
+        : { inside: r.inside, guestsInside: r.guestsInside, staffInside: r.inside - r.guestsInside }),
+    }))
 
   return {
-    inside,
+    inside: !anyRanged ? inside : rooms.length === 1 ? rooms[0].inside : null,
     capacity,
     // Uncapped, like the event figure: a building over its licence is the thing
-    // worth seeing, and clamping to 100 makes it unrepresentable.
-    fillPct: capacity === null || capacity <= 0 ? null : Math.round((inside / capacity) * 100),
+    // worth seeing, and clamping to 100 makes it unrepresentable. None beside a
+    // range: a percentage of the licence is the count again.
+    fillPct: anyRanged || capacity === null || capacity <= 0 ? null : Math.round((inside / capacity) * 100),
+    // On the exact total whatever is shown: the licence is the owner's to keep.
     overCapacity: capacity !== null && capacity > 0 && inside > capacity,
     rooms,
   }

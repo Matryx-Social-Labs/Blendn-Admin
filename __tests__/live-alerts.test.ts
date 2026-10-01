@@ -1,4 +1,4 @@
-import { deriveAlerts, type LiveSnapshot } from "@/lib/live-metrics"
+import { deriveAlerts, type LiveFigures } from "@/lib/live-metrics"
 
 /**
  * Alert rules, pinned.
@@ -13,7 +13,7 @@ import { deriveAlerts, type LiveSnapshot } from "@/lib/live-metrics"
  * night gets ignored, and then the real alert is ignored too.
  */
 
-const base: LiveSnapshot = {
+const base: LiveFigures = {
   eventId: "evt",
   at: "2026-08-05T22:45:00.000Z",
   inside: 40,
@@ -39,7 +39,7 @@ const NOW = new Date("2026-08-05T22:45:00.000Z")
 const END_LATER = new Date("2026-08-05T23:59:00.000Z")
 const END_SOON = new Date("2026-08-05T22:50:00.000Z")
 
-const kinds = (s: LiveSnapshot, end = END_LATER) =>
+const kinds = (s: LiveFigures, end = END_LATER) =>
   deriveAlerts(s, { scheduledEnd: end, now: NOW }).map((a) => a.kind)
 
 describe("a normal night fires nothing", () => {

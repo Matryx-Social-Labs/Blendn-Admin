@@ -6,7 +6,8 @@ import { EmptyState } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventClock } from "@/lib/event-phase"
-import { visibleEventsWhere } from "@/lib/event-visibility"
+import { liveRange } from "@/lib/disclosure"
+import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
 import { canAccessDashboard } from "@/lib/rbac"
 
@@ -43,7 +44,7 @@ export default async function ChatroomsPage() {
   // overviews use. This page used to hand-roll it — and got `venues.owner_id`,
   // a column nothing writes, so every venue owner saw an empty triage screen
   // during their own live event.
-  const scope = await visibleEventsWhere(session.user)
+  const { where: scope, actor } = await visibleEventsScope(session.user)
   const rooms = await db.events.findMany({
     where: {
       ...scope,
@@ -62,6 +63,8 @@ export default async function ChatroomsPage() {
       // "ends 18:30" on the event's clock, not the server's (SCRUM-496).
       timezone: true,
       organizer: { select: { name: true } },
+      organizer_id: true,
+      organizer_org_id: true,
       chat_group: { select: { id: true, _count: { select: { messages: true } } } },
     },
     orderBy: [{ end_time: "asc" }, { title: "asc" }],
@@ -88,7 +91,17 @@ export default async function ChatroomsPage() {
 
   const live = rooms.filter((r) => r.end_time > now)
   const feedback = rooms.length - live.length
-  const inside = [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
+  /*
+   * A room another host runs reads as a range for the venue it is in
+   * (SCRUM-516): the count moves with every arrival. And then no total, which
+   * minus the exact rooms would be the ranged one's count.
+   */
+  const ranged = (room: (typeof rooms)[number]) => !isPlatformAdmin && !hostsEvent(actor, room)
+  const insideOf = (room: (typeof rooms)[number]) => {
+    const n = occupancies.get(room.id)?.inside ?? 0
+    return ranged(room) ? liveRange(n) : n
+  }
+  const inside = rooms.some(ranged) ? null : [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
   const flags = [...flagsFor.values()].reduce((a, b) => a + b, 0)
 
   if (rooms.length === 0) {
@@ -110,7 +123,9 @@ export default async function ChatroomsPage() {
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
         <span><b className="font-bold text-foreground">{live.length}</b> live</span>
         <span><b className="font-bold text-foreground">{feedback}</b> in {feedback === 1 ? "its" : "their"} feedback window</span>
-        <span><b className="font-bold text-foreground">{inside}</b> {inside === 1 ? "person" : "people"} inside</span>
+        {inside !== null ? (
+          <span><b className="font-bold text-foreground">{inside}</b> {inside === 1 ? "person" : "people"} inside</span>
+        ) : null}
         {flags > 0 ? (
           <span className="font-bold text-destructive">{flags} flag{flags === 1 ? "" : "s"} waiting</span>
         ) : null}
@@ -148,7 +163,7 @@ export default async function ChatroomsPage() {
                 </span>
                 <span className="flex flex-wrap gap-x-3.5 text-[0.8125rem] text-muted-foreground @2xl/main:justify-end">
                   <span>
-                    <b className="font-bold text-foreground">{occupancies.get(room.id)?.inside ?? 0}</b> inside
+                    <b className="font-bold text-foreground">{insideOf(room)}</b> inside
                   </span>
                   <span>
                     <b className="font-bold text-foreground">{room.chat_group?._count.messages ?? 0}</b> messages

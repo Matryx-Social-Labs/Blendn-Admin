@@ -2,13 +2,16 @@
  * Live event metrics — types and alert rules.
  *
  * Deliberately free of any database import. `LiveTab` is a client component
- * and imports `deriveAlerts` from here; when this module also imported `db`,
+ * and imports from here; when this module also imported `db`,
  * Turbopack followed it into `pg` and the browser build failed on `dns`. The
  * query that produces a snapshot lives in `lib/live-snapshot.ts`, which is
  * server-only.
  */
 
-export interface LiveSnapshot {
+import { liveRange, type LiveRange } from "./disclosure"
+
+/** The exact figures, and what the alert rules read. Never sent to a venue. */
+export interface LiveFigures {
   eventId: string
   at: string
   /** Currently inside — staff included, because fire safety counts bodies. */
@@ -48,6 +51,44 @@ export interface LiveSnapshot {
   sentiment: { positive: number; neutral: number; negative: number }
   /** Negative + safety messages by category, last 30 minutes. */
   categories: Array<{ category: string; count: number }>
+}
+
+/** What whoever runs the event (or an admin) is sent: the figures, and their alerts. */
+export interface LiveSnapshot extends LiveFigures {
+  view: "host"
+  alerts: LiveAlert[]
+}
+
+/**
+ * What a venue is sent while it watches another host's night or its own venue
+ * day (SCRUM-516): every count of people as a range, and the flags that matter
+ * for the building decided on the exact figures before they were rounded.
+ *
+ * Messages per minute and open flags stay exact. The venue moderates this room:
+ * it reads every message and the flag queue, so neither tells it anything the
+ * chat does not.
+ */
+export interface VenueLiveSnapshot {
+  view: "venue"
+  eventId: string
+  at: string
+  inside: LiveRange
+  guestsInside: LiveRange
+  staffInside: LiveRange
+  checkedInTotal: LiveRange
+  checkedOutTotal: LiveRange
+  staleInside: LiveRange
+  /** `occupancyMostlyInferred`, on the exact figures. */
+  mostlyInferred: boolean
+  capacity: number | null
+  overCapacity: boolean
+  checkInRate10m: LiveRange
+  messagesPerMinute: number
+  activeChatters30m: LiveRange
+  openFlags: number
+  sentiment: { positive: LiveRange; neutral: LiveRange; negative: LiveRange }
+  categories: Array<{ category: string; count: LiveRange }>
+  alerts: LiveAlert[]
 }
 
 const MINUTE = 60 * 1000
@@ -112,7 +153,7 @@ export function occupancyMostlyInferred(snapshot: {
 }
 
 export function deriveAlerts(
-  snapshot: LiveSnapshot,
+  snapshot: LiveFigures,
   opts: { scheduledEnd: Date; scheduledStart?: Date; now?: Date }
 ): LiveAlert[] {
   const alerts: LiveAlert[] = []
@@ -237,4 +278,70 @@ export function deriveAlerts(
   }
 
   return alerts
+}
+
+/**
+ * Each alert as a venue reads it: the condition, and no figure. The bodies above
+ * carry the counts ("3 of 12 have checked out"); a venue gets the same alert,
+ * decided on the same numbers, without them. Also applied to the logged
+ * issues, whose bodies are these alerts' bodies written down.
+ *
+ * Two are not sent at all (null). Each fires at an exact count against a line
+ * the venue can work out -- nine-tenths of a stated capacity, a quarter of the
+ * arrivals -- so the moment it flips says how many, to the person. Over
+ * capacity flips the same way and is sent anyway: the building's safety is
+ * the venue's to keep. The rest turn on messages the venue moderates, on a
+ * baseline it is never shown, or at ten inside, where the range already
+ * changes.
+ */
+const FOR_THE_VENUE: Record<LiveAlertKind, string | null> = {
+  safety: "Safety messages in chat. Routed to moderation regardless of sentiment.",
+  entry_backing_up: "Arrivals well above tonight's usual pace, with entry-queue complaints in chat.",
+  over_capacity: "More guests than the event's stated capacity.",
+  approaching_capacity: null,
+  leaving_early: null,
+  mood_sliding: "Most of the recent classified messages are negative.",
+  room_died: "A busy room where nobody has posted in 30 minutes.",
+}
+
+/** Alerts, or logged issues, as a venue is sent them. An unknown kind is not sent. */
+export function alertsForVenue<T extends { kind: string; body: string }>(alerts: readonly T[]): T[] {
+  return alerts.flatMap((alert) => {
+    const body = FOR_THE_VENUE[alert.kind as LiveAlertKind]
+    return body ? [{ ...alert, body }] : []
+  })
+}
+
+/**
+ * The host's snapshot as a venue may see it.
+ *
+ * Field by field rather than a spread, so a figure added to `LiveFigures` later
+ * reaches a venue only when somebody writes it in here.
+ */
+export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
+  return {
+    view: "venue",
+    eventId: s.eventId,
+    at: s.at,
+    inside: liveRange(s.inside),
+    guestsInside: liveRange(s.guestsInside),
+    staffInside: liveRange(s.staffInside),
+    checkedInTotal: liveRange(s.checkedInTotal),
+    checkedOutTotal: liveRange(s.checkedOutTotal),
+    staleInside: liveRange(s.staleInside),
+    mostlyInferred: occupancyMostlyInferred(s),
+    capacity: s.capacity,
+    overCapacity: s.overCapacity,
+    checkInRate10m: liveRange(s.checkInRate10m),
+    messagesPerMinute: s.messagesPerMinute,
+    activeChatters30m: liveRange(s.activeChatters30m),
+    openFlags: s.openFlags,
+    sentiment: {
+      positive: liveRange(s.sentiment.positive),
+      neutral: liveRange(s.sentiment.neutral),
+      negative: liveRange(s.sentiment.negative),
+    },
+    categories: s.categories.map((c) => ({ category: c.category, count: liveRange(c.count) })),
+    alerts: alertsForVenue(s.alerts),
+  }
 }

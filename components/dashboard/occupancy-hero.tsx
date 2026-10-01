@@ -1,8 +1,22 @@
 import { IconWifiOff } from "@tabler/icons-react"
 import type { ReactNode } from "react"
 
+import type { LiveRange } from "@/lib/disclosure"
 import type { Occupancy } from "@/lib/occupancy"
 import { cn } from "@/lib/utils"
+
+/**
+ * A room as a venue is shown it while somebody else runs it, or on its venue
+ * day: ranges, and the over-capacity flag decided on the exact figures
+ * (SCRUM-516). No fill: a percentage of a stated capacity is the count again.
+ */
+export interface HeldBackOccupancy {
+  inside: LiveRange
+  guestsInside: LiveRange
+  staffInside: LiveRange
+  capacity: number | null
+  overCapacity: boolean
+}
 
 /**
  * Who is in the room, right now.
@@ -40,7 +54,7 @@ export function OccupancyHero({
    * question and demanding it here would force the live snapshot to carry a
    * number nothing on this screen renders.
    */
-  occupancy: Omit<Occupancy, "uniqueAttendance">
+  occupancy: Omit<Occupancy, "uniqueAttendance"> | HeldBackOccupancy
   /** Rendered as given — the caller owns the event's timezone, not this. */
   time: string
   /**
@@ -65,16 +79,20 @@ export function OccupancyHero({
   description?: string
   action?: ReactNode
 }) {
-  const { inside, guestsInside, staffInside, capacity, fillPct } = occupancy
+  const { inside, guestsInside, capacity } = occupancy
+  // The exact figures, or null for a venue's ranges: no bar, no fill, no "N over".
+  const exact = "fillPct" in occupancy ? occupancy : null
+  const anyStaff = exact ? exact.staffInside > 0 : occupancy.staffInside !== "0"
   // Suppressed while unreliable: flagging a breach off numbers we have just
   // said we do not trust is how a false evacuation starts.
   const over = occupancy.overCapacity && !unreliable
-  const overBy = over && capacity !== null ? guestsInside - capacity : 0
+  const overBy = over && exact && capacity !== null ? exact.guestsInside - capacity : 0
 
   // The bar's domain stretches past capacity when the room is over it, so the
   // dashed capacity marker lands inside the track rather than at its very end.
-  const domain = capacity === null ? Math.max(guestsInside, 1) : Math.max(capacity, guestsInside)
-  const guestPct = Math.min((guestsInside / domain) * 100, 100)
+  const guests = exact?.guestsInside ?? 0
+  const domain = capacity === null ? Math.max(guests, 1) : Math.max(capacity, guests)
+  const guestPct = Math.min((guests / domain) * 100, 100)
   const capacityPct = capacity === null ? null : (capacity / domain) * 100
 
   return (
@@ -118,7 +136,7 @@ export function OccupancyHero({
         {over ? (
           /* Ink on orange, never white — white on #F05423 is 3.4:1 and fails AA. */
           <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
-            {overBy} over stated capacity
+            {exact ? `${overBy} over stated capacity` : "over stated capacity"}
           </span>
         ) : null}
       </div>
@@ -140,10 +158,10 @@ export function OccupancyHero({
             an org member checks in through the attendee app, and there is no
             plan for crew to have accounts there. In practice this is zero, and
             "0 staff" beside a real number is noise pretending to be a reading. */}
-        {staffInside > 0 ? (
+        {anyStaff ? (
           <span className="inline-flex items-center gap-1.5">
             <i aria-hidden className="size-2 rounded-[2px] bg-chart-3" />
-            <b className="font-bold tabular-nums text-foreground">{staffInside}</b> staff
+            <b className="font-bold tabular-nums text-foreground">{occupancy.staffInside}</b> staff
           </span>
         ) : null}
         {unreliable && lastGood ? (
@@ -151,11 +169,17 @@ export function OccupancyHero({
         ) : null}
       </div>
 
-      {capacity !== null ? (
+      {!exact && capacity !== null ? (
+        <p className="mt-3 text-[0.75rem] tabular-nums text-faint-foreground">
+          of capacity {capacity}
+        </p>
+      ) : null}
+
+      {exact && capacity !== null ? (
         <div className="mt-3 flex flex-col gap-1">
           <div
             role="progressbar"
-            aria-valuenow={fillPct ?? 0}
+            aria-valuenow={exact.fillPct ?? 0}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-label={`Fill: ${guestsInside} guests of capacity ${capacity}`}
@@ -191,12 +215,12 @@ export function OccupancyHero({
                 <b className="font-bold">
                   {guestsInside} guests against capacity {capacity}
                 </b>{" "}
-                — fill {fillPct}%. Staff aren&rsquo;t counted toward fill.
+                — fill {exact.fillPct}%. Staff aren&rsquo;t counted toward fill.
               </>
             ) : (
               <>
                 fill {unreliable ? "~" : ""}
-                {fillPct}% — {guestsInside} guests of capacity {capacity}; staff count toward the
+                {exact.fillPct}% — {guestsInside} guests of capacity {capacity}; staff count toward the
                 room, not the fill
               </>
             )}

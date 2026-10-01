@@ -5,6 +5,7 @@ import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
 import { distinctAttendeeCounts, distinctAttendeeCountsByDay } from "./attendee-counts"
 import { discloseGuests, discloseVenueCounts } from "./disclosure"
+import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
 import { realEventsWhere } from "./event-kind"
 import { claimedVenueEventsWhere, hostsEvent } from "./event-visibility"
@@ -306,7 +307,7 @@ export async function buildReport(
           fillPct: r.max_capacity ? Math.round((r._count.rsvps / r.max_capacity) * 100) : null,
         }
         return role === "venue_owner" && !hostsEvent(scopes.actor, r)
-          ? discloseVenueCounts({ ...exact, capacity: r.max_capacity })
+          ? discloseVenueCounts({ ...exact, capacity: r.max_capacity, arriving: stillArriving(r) })
           : exact
       }
       const columns: CsvColumn<(typeof rows)[number]>[] = [
@@ -430,6 +431,8 @@ export async function buildReport(
         select: {
           id: true,
           occurs_on: true,
+          start_time: true,
+          end_time: true,
           event: { select: { id: true, title: true, start_time: true } },
         },
       })
@@ -444,7 +447,8 @@ export async function buildReport(
           {
             key: "guests",
             label: "Guests",
-            value: (d) => discloseGuests(guests.get(d.id) ?? 0),
+            // Blank while that day can still take arrivals (SCRUM-516).
+            value: (d) => (stillArriving(d) ? null : discloseGuests(guests.get(d.id) ?? 0)),
           },
         ],
         days
