@@ -1213,7 +1213,7 @@ async function main() {
   const claimantOrg = await upsertOrg(db, CLAIMANT_ORG)
   await db.organisation_members.upsert({
     where: { org_id_user_id: { org_id: claimantOrg.id, user_id: users.claimant } },
-    update: {},
+    update: { role: "owner" },
     create: { org_id: claimantOrg.id, user_id: users.claimant, role: "owner", is_primary_contact: true },
   })
   await ensurePendingBrandClaim(db, { brandId: unclaimedBrand.id, orgId: claimantOrg.id, filedBy: users.claimant })

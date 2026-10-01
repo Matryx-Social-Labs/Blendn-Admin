@@ -174,7 +174,57 @@ describe("the seeded brand claim", () => {
 
     const pending = await db.sponsor_claims.findMany({ where: { sponsor_id: target.id, status: "pending" } })
     expect(pending.map((c) => c.org_id)).toEqual([brandless])
+    expect({ brand: claim.sponsor_id, org: claim.org_id, by: claim.filed_by, status: claim.status }).toEqual({
+      brand: target.id,
+      org: brandless,
+      by: filer,
+      status: "pending",
+    })
+  })
+
+  it("clears only this brand's pending claims: a decided one, and one on another brand, stay", async () => {
+    const { filer, owner, brandless, target } = await world()
+    const otherName = `Sleepy Owl ${testId("s")}`
+    const other = await db.sponsors.create({ data: { name: otherName, name_key: normaliseSponsorName(otherName), org_id: null } })
+    brands.push(other.id)
+    const elsewhere = await db.sponsor_claims.create({ data: { sponsor_id: other.id, org_id: owner, filed_by: filer, status: "pending" } })
+    const decidedOrg = await org()
+    const decidedName = `Kapi Kottai ${testId("k")}`
+    const decidedBrand = await db.sponsors.create({ data: { name: decidedName, name_key: normaliseSponsorName(decidedName), org_id: decidedOrg } })
+    brands.push(decidedBrand.id)
+    const rejected = await db.sponsor_claims.create({ data: { sponsor_id: target.id, org_id: decidedOrg, filed_by: filer, status: "rejected" } })
+
+    await ensurePendingBrandClaim(db, { brandId: target.id, orgId: brandless, filedBy: filer })
+
+    const kept = await db.sponsor_claims.findMany({ where: { id: { in: [elsewhere.id, rejected.id] } }, select: { status: true } })
+    expect(kept.map((c) => c.status).sort()).toEqual(["pending", "rejected"])
+  })
+
+  it("lets an organisation whose only brand was deleted file, as the product does", async () => {
+    const { filer, brandless, target } = await world()
+    const goneName = `Old Brand ${testId("g")}`
+    const gone = await db.sponsors.create({
+      data: { name: goneName, name_key: normaliseSponsorName(goneName), org_id: brandless, deleted_at: new Date() },
+    })
+    brands.push(gone.id)
+
+    const claim = await ensurePendingBrandClaim(db, { brandId: target.id, orgId: brandless, filedBy: filer })
+
     expect(claim.status).toBe("pending")
+  })
+
+  it("returns the same pending claim on the next run, untouched", async () => {
+    const { filer, brandless, target } = await world()
+    const first = await ensurePendingBrandClaim(db, { brandId: target.id, orgId: brandless, filedBy: filer })
+
+    const again = await ensurePendingBrandClaim(db, { brandId: target.id, orgId: brandless, filedBy: filer })
+
+    expect({ id: again.id, status: again.status, updated: again.updated_at }).toEqual({
+      id: first.id,
+      status: "pending",
+      updated: first.updated_at,
+    })
+    expect(await db.sponsor_claims.count({ where: { sponsor_id: target.id } })).toBe(1)
   })
 
   it("is refused from an organisation that already owns a brand, as the product refuses it", async () => {
