@@ -5,13 +5,14 @@ import type { Prisma } from "@prisma/client"
 import { db } from "./db"
 import { realEventsWhere } from "./event-kind"
 import { distanceToGeofence, eventCentre, validateGeofence, type Geofence } from "./geofence"
+import { logger } from "./logger"
 
 /**
  * When a real event takes a venue over (plan v2 step 2's hiding rule, written
  * once here so Go Live, the venue-day sweeper and the Places list agree).
  *
  * From an hour before a linked event starts until it ends, the venue is the
- * event's: Places hides the venue (step 2 wires the list), Go Live there is
+ * event's: Places leaves the venue out (`venuesTakenOver`), Go Live there is
  * refused with `EVENT_LIVE_HERE` so the person checks in to the event
  * instead, and at the start the venue's open Go Live sessions are closed and
  * told the event has started (the venue-day sweeper).
@@ -28,13 +29,28 @@ import { distanceToGeofence, eventCentre, validateGeofence, type Geofence } from
 export const TAKEOVER_LEAD_MINUTES = 60
 
 /**
+ * A link nobody disputed. NULL spelled out: a bare `not: "disputed"` drops
+ * every NULL row in Prisma (memory: Prisma `not` excludes NULL), and an event
+ * linked before the status existed is linked. An `OR`, so callers put it under
+ * `AND` beside any other (F4). The one copy: `venue-visibility-one-rule.test.ts`.
+ */
+export const undisputedLinkWhere = {
+  OR: [{ venue_link_status: null }, { venue_link_status: { not: "disputed" as const } }],
+} satisfies Prisma.eventsWhereInput
+
+/** An event this viewer may attend by its own age rule (D-3). An `OR`: put it under `AND`. */
+export const mayAttendWhere = (viewerAge: number) =>
+  ({ OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }) satisfies Prisma.eventsWhereInput
+
+/**
  * The `where` for events taking their venue over at `now`; the caller adds
  * `venue_id`. `leadMinutes: 0` asks "started and not yet ended".
  *
- * The link status is spelled out with an explicit NULL branch: a bare
- * `not: "disputed"` drops every NULL row in Prisma (memory: Prisma `not`
- * excludes NULL), and an event linked before the status existed is linked.
- * Both ORs sit under `AND`, so neither replaces the other (F4).
+ * Both ORs sit under `AND`, so neither replaces the other (F4). The run's own
+ * start and end bound it as well as the day's: they are implied by the
+ * occurrence (a run starts no later than its days and ends no earlier), and
+ * they let `@@index([status, start_time])` / `[status, end_time]` narrow the
+ * scan before the occurrences are probed.
  */
 export function venueTakeoverWhere(
   now: Date,
@@ -46,12 +62,9 @@ export function venueTakeoverWhere(
     deleted_at: null,
     status: "published",
     visibility: "public",
-    AND: [
-      { OR: [{ venue_link_status: null }, { venue_link_status: { not: "disputed" } }] },
-      ...(typeof opts.viewerAge === "number"
-        ? [{ OR: [{ min_age: null }, { min_age: { lte: opts.viewerAge } }] }]
-        : []),
-    ],
+    start_time: { lte: new Date(now.getTime() + lead * 60_000) },
+    end_time: { gt: now },
+    AND: [undisputedLinkWhere, ...(typeof opts.viewerAge === "number" ? [mayAttendWhere(opts.viewerAge)] : [])],
     occurrences: {
       some: {
         cancelled_at: null,
@@ -122,6 +135,67 @@ export async function eventTakingOver(
   const event = candidates.find((e) => atTheVenue(e, venue.geofence))
   return event ? { id: event.id, title: event.title } : null
 }
+
+/**
+ * The most takeover candidates `venuesTakenOver` reads at once: the events
+ * starting within the hour or running now, at the venues one list asks about.
+ * Sized to be unreachable, and logged if it ever is, since past it a venue an
+ * event has stays listed.
+ */
+const TAKEOVER_SCAN_CEILING = 1000
+
+/**
+ * The venues among `venueWhere` that a real event has taken over at `now` —
+ * what Places leaves out (step 2). `eventTakingOver`'s rule for a whole list,
+ * in one read: the same `venueTakeoverWhere`, then `atTheVenue` against each
+ * candidate's own venue.
+ */
+export async function venuesTakenOver(
+  now: Date,
+  venueWhere: Prisma.venuesWhereInput,
+  opts: { viewerAge?: number | null } = {}
+): Promise<string[]> {
+  const candidates = await db.events.findMany({
+    where: { ...venueTakeoverWhere(now, opts), venue: venueWhere },
+    // Soonest first, so a bad night's ceiling drops the furthest-off events, never a running one.
+    orderBy: [{ start_time: "asc" }, { id: "asc" }],
+    take: TAKEOVER_SCAN_CEILING,
+    select: { ...takeoverSelect, venue: { select: { geofence: true } } },
+  })
+  if (candidates.length === TAKEOVER_SCAN_CEILING) {
+    logger.warn("Venue takeover scan hit its ceiling; some venues stay listed", { ceiling: TAKEOVER_SCAN_CEILING })
+  }
+  const taken = candidates.flatMap((e) => (e.venue_id && e.venue && atTheVenue(e, e.venue.geofence) ? [e.venue_id] : []))
+  return [...new Set(taken)]
+}
+
+/**
+ * The venue an event card names, "at The Humming Tree" (HM-U08): by the same
+ * test as the takeover — a confirmed link, or the event's own area at the
+ * venue (`atTheVenue`) — while the venue is open and nobody disputed the link.
+ * Otherwise none, and the card says the organiser's free-text `venueName`. An
+ * auto-link a kilometre away names nothing: any organiser can link any venue,
+ * and the card must not lend them a famous bar's name. `{ id, name }` only:
+ * the venue's area and owner never ride on a card (HM-I04).
+ */
+export function eventVenue(event: {
+  venue_link_status: "auto_linked" | "confirmed" | "disputed" | null
+  geofence: unknown
+  latitude: number | null
+  longitude: number | null
+  venue: { id: string; name: string; status: "active" | "archived"; deleted_at: Date | null; geofence: unknown } | null
+}): { id: string; name: string } | null {
+  const v = event.venue
+  if (!v || v.deleted_at || v.status !== "active" || event.venue_link_status === "disputed") return null
+  return atTheVenue(event, v.geofence) ? { id: v.id, name: v.name } : null
+}
+
+/** What `eventVenue` needs from an event row (the card's select already has its point). */
+export const eventVenueSelect = {
+  venue_link_status: true,
+  geofence: true,
+  venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true } },
+} as const
 
 /**
  * The area Go Live is judged against at a venue: the one today's day copied

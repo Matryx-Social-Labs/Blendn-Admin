@@ -135,6 +135,13 @@ export const EventCitiesResponseSchema = z
       z.object({
         city: z.string().openapi({ description: "Pass this back as the `city` query parameter." }),
         eventCount: z.number().int(),
+        centre: z
+          .object({ latitude: z.number(), longitude: z.number() })
+          .nullable()
+          .openapi({
+            description:
+              "Where to point a map for this city: the mean of its listed events' points (events with no point, or 0,0, left out). Null when none has a point; keep the map where it is.",
+          }),
       })
     ),
   })
@@ -317,7 +324,12 @@ export const EventDetailSchema = z
 
 export const EventListResponseSchema = z
   .object({
-    events: z.array(z.unknown().openapi({ description: "Transformed event objects" })),
+    events: z.array(
+      z.unknown().openapi({
+        description:
+          "Transformed event objects. Each carries `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named.",
+      })
+    ),
     pagination: PaginationMetaSchema,
     activeCheckins: z.array(z.unknown()).optional(),
     profile: z.unknown().optional(),

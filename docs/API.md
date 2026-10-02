@@ -541,6 +541,16 @@ to the API host. It carries the event id and nothing about the viewer. The
 page it opens is public: the claimant needs no account, filing grants nothing,
 and a person reviews every claim. Computed by `offersClaim` in `lib/curation.ts`.
 
+**`venue` on each card of `GET /events` is the place to name** — `{ id, name }`
+of the venue the event is at, by the takeover's own test: a `confirmed` link,
+or the event's own area at the venue (`atTheVenue`). `null` for a disputed
+link, an auto-link whose area is elsewhere (any organiser can link any venue,
+and a card must not lend them a famous bar's name), an archived or deleted
+venue, or none; then say the organiser's free-text `venueName`. Only those two fields: never the venue's area
+or owner. While the event has the venue (an hour before it starts until it
+ends) `GET /venues` leaves the venue out, so this card is where the app says
+"at The Humming Tree". Computed by `eventVenue` in `lib/venue-visibility.ts`.
+
 **`session` is the window "live" is judged by** — on `GET /events`,
 `GET /events/:eventId` and `GET /me/rsvps`. `startTime`/`endTime` span the
 whole run, so a three-day festival read as LIVE for three days straight,
@@ -572,12 +582,19 @@ The city picker's list — every city with events, busiest first.
 
 ```json
 { "success": true, "data": { "cities": [
-  { "city": "Bengaluru", "eventCount": 12 },
-  { "city": "Mumbai", "eventCount": 3 }
+  { "city": "Bengaluru", "eventCount": 12, "centre": { "latitude": 12.9716, "longitude": 77.5946 } },
+  { "city": "Mumbai", "eventCount": 3, "centre": null }
 ] } }
 ```
 
 Pass `city` straight back to `GET /events` or `GET /events/search`.
+
+**`centre` is where the home map goes when the city is picked** (plan v2
+step 2): the mean of the city's listed events' points, folded on the same key
+as the counts. Events with no point, or the 0,0 an unset point reads as, are
+left out; `null` when none has a point, and the app leaves its map where it
+is. A mean rather than a stored point, so it follows where the city's events
+actually are (`cityCentres`, lib/address.ts).
 
 **A city listed with N events opens with N events.** The counts apply the same
 visibility, end-time and age rules as the browse query, so the two cannot drift
@@ -641,6 +658,7 @@ vocabulary, meaning exactly what it means there.
   "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
   "distance": 1.4,
   "upcomingEventCount": 2,
+  "liveNow": "quiet",
   "nextEvent": {
     "id": "…", "title": "Friday session", "slug": "friday-session",
     "coverImageUrl": "https://…", "startTime": "…", "endTime": "…"
@@ -656,8 +674,37 @@ vocabulary, meaning exactly what it means there.
 | `venueType` | One of the 35 slugs; anything else is a 400 |
 | `sortBy` | `name` (default) or `distance` |
 
+60 a minute per person, then 429 — every row carries a live count, as on the
+venue page.
+
 **Active venues only.** `archived` is how a venue is retired without deleting
 the events that happened in it, so it never appears in discovery.
+
+**A venue a real event has taken over is not listed** (plan v2 step 2). From an
+hour before an event at it starts until that event ends, the place is the
+event's: the venue is left out of this list (and its `totalCount`), Go Live
+there answers `EVENT_LIVE_HERE`, and the event's card on `GET /events` names the
+venue (`venue`). The event must be published, public and not deleted; its link
+not `disputed` (an unset link is a link); linked by a `confirmed` link, or with
+its area at the venue; judged per day of a multi-day run (D-2), so the nights
+between days hide nothing; and one the caller may attend (D-3), so a 21+ night
+does not hide its venue from a 19-year-old. A venue's own Go Live day never
+hides it (F3). One rule, `lib/venue-visibility.ts`, for this list, the venue
+page and the door.
+
+**`liveNow` is a bucket, never a number** — `quiet` (fewer than 5, none
+included), `5-9`, `10-19` or `20+`: the same figure as `live.liveNow` on
+`GET /venues/:venueId` (both count through `liveGuestIds`: distinct guests,
+never staff), read at most once a minute per venue and slow to fall (D-19,
+F14). You are left out only when the figure counted you, so going live or
+leaving inside the minute moves nothing you see. **`null`** for a caller the
+venue page would refuse — not onboarded, or no known adult age — and the app
+hides the chip.
+
+**Order** is by name, then id (or distance, then id): two venues with one name
+keep one order, so a page boundary between them never repeats or skips one.
+A venue taken over between your page reads shifts the offsets (a venue may be
+skipped, none repeated); dedupe by `id` regardless.
 
 **The card image comes from the next event.** `venues` has no image column.
 Rather than a wall of grey cards or an invented placeholder, each venue carries
@@ -668,7 +715,8 @@ is; draw the type-based fallback.
 
 **`upcomingEventCount` and `nextEvent` are one question asked once.** Same
 filter object, so a card cannot say "3 upcoming" and then headline an event that
-is not one of them.
+is not one of them. An event whose link the venue disputed is in neither: the
+owner said it is not theirs.
 
 **The age gate applies here too.** `nextEvent` is a real event shown to a real
 person, so it passes the same `min_age` rule as the browse query — otherwise the
