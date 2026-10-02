@@ -106,7 +106,7 @@ describe("organisation-shaped overviews", () => {
     const overview = await getDashboardOverview()
     expect(overview.role).toBe("organizer")
     if (overview.role !== "organizer") return
-    expect(overview.events.map((e) => e.id)).toContain(eventId)
+    expect(overview.comingUp.map((e) => e.id)).toContain(eventId)
     expect(overview.nextEvent?.id).toBe(eventId)
   })
 
@@ -145,6 +145,6 @@ describe("organisation-shaped overviews", () => {
     as("organizer", stranger)
     const overview = await getDashboardOverview()
     if (overview.role !== "organizer") throw new Error("expected organiser overview")
-    expect(overview.events.map((e) => e.id)).not.toContain(eventId)
+    expect(overview.comingUp.map((e) => e.id)).not.toContain(eventId)
   })
 })

@@ -281,15 +281,22 @@ export function discloseStarsAcross(perEvent: StarSpread[]): ReturnType<typeof d
   return { ...stars, ratingCount: perEvent.flat().reduce((a, b) => a + b, 0) }
 }
 
+type RatingGroupRow = { event_id: string; rating: number; _count: { _all: number } }
+
 /** `groupBy(["event_id", "rating"])` rows as one star spread per event. */
-export function spreadsByEvent(rows: Array<{ event_id: string; rating: number; _count: { _all: number } }>): StarSpread[] {
+export function spreadsByEvent(rows: RatingGroupRow[]): StarSpread[] {
+  return [...spreadsByEventId(rows).values()]
+}
+
+/** The same, keyed by event, for a screen that names the event it shows. */
+export function spreadsByEventId(rows: RatingGroupRow[]): Map<string, StarSpread> {
   const byEvent = new Map<string, StarSpread>()
   for (const row of rows) {
     const spread = byEvent.get(row.event_id) ?? [0, 0, 0, 0, 0]
     if (row.rating >= 1 && row.rating <= 5) spread[row.rating - 1] = row._count._all
     byEvent.set(row.event_id, spread)
   }
-  return [...byEvent.values()]
+  return byEvent
 }
 
 /**
