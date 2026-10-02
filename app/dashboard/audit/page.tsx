@@ -7,6 +7,11 @@ import { getAuditLog } from "@/lib/audit-actions"
 
 import { AuditTimeline } from "./timeline"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/audit")
+
 export const dynamic = "force-dynamic"
 
 /**

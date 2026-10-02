@@ -1,8 +1,15 @@
+import { format } from "date-fns"
 import { notFound, redirect } from "next/navigation"
 
+import { PageHeader } from "@/components/dashboard/page-header"
 import { RoleUserDetail } from "@/components/role-user-detail"
 import { getAuth } from "@/lib/auth"
 import { getRoleUserById } from "@/lib/admin-role-actions"
+import { accountTitleFor } from "@/lib/dashboard-record-titles"
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  return { title: (await accountTitleFor((await params).id)) ?? "Organiser" }
+}
 
 export default async function OrganiserDetailPage({
   params,
@@ -18,5 +25,15 @@ export default async function OrganiserDetailPage({
   const user = await getRoleUserById(id)
   if (!user || user.role !== "organizer") notFound()
 
-  return <RoleUserDetail user={user} kind="Organiser" />
+  // Owned header (`OWNED_HEADERS`): the account, by its name.
+  return (
+    <>
+      <PageHeader
+        title={user.name ?? "Unnamed organiser"}
+        description={`organiser · joined ${format(user.createdAt, "d MMM yyyy")} · ${user.email}`}
+        back={{ href: "/dashboard/organisers", label: "Organisers" }}
+      />
+      <RoleUserDetail user={user} />
+    </>
+  )
 }

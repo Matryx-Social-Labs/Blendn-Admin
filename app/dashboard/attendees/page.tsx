@@ -7,6 +7,11 @@ import { formatNumber, formatPct } from "@/lib/dashboard-format"
 
 import { AttendeesTable } from "./attendees-table"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/attendees")
+
 export const dynamic = "force-dynamic"
 
 /**

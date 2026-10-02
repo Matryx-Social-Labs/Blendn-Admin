@@ -1,6 +1,8 @@
-import Link from "next/link"
 import { notFound } from "next/navigation"
 import { IconMessages } from "@tabler/icons-react"
+
+import { PageHeader } from "@/components/dashboard/page-header"
+import { eventTitleFor } from "@/lib/dashboard-record-titles"
 
 import { CategoryBars } from "@/components/dashboard/charts"
 import { EmptyState, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
@@ -22,6 +24,11 @@ function hoursUntil(iso: string) {
  * open after the event and catches people while they are still outside the
  * venue with an opinion. This is where that lands.
  */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const name = await eventTitleFor((await params).id)
+  return { title: name ? `Feedback · ${name}` : "Feedback" }
+}
+
 export default async function FeedbackPage({
   params,
 }: {
@@ -47,18 +54,12 @@ export default async function FeedbackPage({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* One title line. The event page owns the tabs; the title goes back. */}
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <h2 className="text-[length:var(--text-h2)] font-bold">
-          <Link href={`/dashboard/events/${id}`} className="hover:underline">
-            {digest.eventTitle}
-          </Link>
-        </h2>
-        <span className="text-[0.8125rem] text-muted-foreground">
-          {digest.ended ? "ended" : "ends"} {ended} · {window}
-          {total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""}
-        </span>
-      </div>
+      {/* Owned header (`OWNED_HEADERS`). The event page owns the tabs; this goes back. */}
+      <PageHeader
+        title={digest.eventTitle}
+        description={`${digest.ended ? "ended" : "ends"} ${ended} · ${window}${total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""}`}
+        back={{ href: `/dashboard/events/${id}`, label: "Back to event" }}
+      />
 
       {total === 0 ? (
         <EmptyState
