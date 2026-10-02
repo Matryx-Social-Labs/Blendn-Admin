@@ -120,7 +120,7 @@ export async function getBuildingOccupancy(
   const rooms: RoomOccupancy[] = counted
     /*
      * Busiest first -- by what is shown. Ordered by the exact counts, two
-     * rooms both reading "a few" would swap places as one person walks in.
+     * rooms both reading "Under 5" would swap places as one person walks in.
      */
     .sort((a, b) => {
       const rank = (n: number) => (anyRanged ? LIVE_COUNT_BUCKETS.indexOf(liveCountBucket(n)) : n)

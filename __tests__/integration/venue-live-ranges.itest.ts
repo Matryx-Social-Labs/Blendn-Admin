@@ -49,7 +49,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, tes
  * from an Overview that held the same 3 back.
  *
  * Now a venue watching a night it does not run, or its own venue day, is sent
- * every count of people as a bucket (a few / 5–9 / 10–19 / 20+, D-19), from the
+ * every count of people as a bucket (under 5 / 5–9 / 10–19 / 20+, D-19, D-x2), from the
  * server, so no exact count reaches its browser by the socket or by the page.
  * The organiser and an admin are the controls: they must still get 3 and 12,
  * or "no 3 for the venue" proves nothing.
@@ -235,7 +235,7 @@ afterAll(async () => {
 
 describe("the ops socket", () => {
   it.each([
-    ["three", () => three, "a_few"],
+    ["three", () => three, "quiet"],
     ["twelve", () => twelve, "10-19"],
   ])("sends the venue owner the %s-person room as ranges, with no count of people as a number", async (_n, id, range) => {
     const { snapshots, errors } = await watch(venueOwner, id())
@@ -246,7 +246,7 @@ describe("the ops socket", () => {
       inside: range,
       guestsInside: range,
       checkedInTotal: range,
-      checkedOutTotal: "none",
+      checkedOutTotal: "quiet",
       checkInRate10m: range,
     })
     expect(numericKeys(first).filter((k) => !VENUE_NUMBERS.includes(k))).toEqual([])
@@ -267,7 +267,7 @@ describe("the ops socket", () => {
   it("keeps ticking for a venue watching alone", async () => {
     const { snapshots } = await watch(venueOwner, three, (s) => s.snapshots.length >= 2)
     expect(snapshots.length).toBeGreaterThanOrEqual(2)
-    for (const s of snapshots) expect(s).toMatchObject({ view: "venue", inside: "a_few" })
+    for (const s of snapshots) expect(s).toMatchObject({ view: "venue", inside: "quiet" })
   }, 30_000)
 
   /** Emit one join as `userId` and collect what comes back within three seconds. */
@@ -310,7 +310,7 @@ describe("the ops socket", () => {
 
   it("on the venue day, sends its owner ranges and an admin the figures", async () => {
     const [owner] = (await watch(venueOwner, venueDay)).snapshots
-    expect(owner).toMatchObject({ view: "venue", inside: "a_few", checkedInTotal: "a_few" })
+    expect(owner).toMatchObject({ view: "venue", inside: "quiet", checkedInTotal: "quiet" })
     expect(numericKeys(owner).filter((k) => !VENUE_NUMBERS.includes(k))).toEqual([])
 
     const [adminView] = (await watch(admin, venueDay)).snapshots
@@ -398,7 +398,7 @@ describe("the event page's payload", () => {
 
   it("gives the Overview's live counts as ranges to the venue and exactly to the organiser", async () => {
     as(venueOwner, "venue_owner")
-    expect(live(find<OverviewProps>(await eventPage(three), Overview)[0])).toEqual({ now: "a few", ever: "a few" })
+    expect(live(find<OverviewProps>(await eventPage(three), Overview)[0])).toEqual({ now: "Under 5", ever: "Under 5" })
     expect(live(find<OverviewProps>(await eventPage(twelve), Overview)[0])).toEqual({ now: "10–19", ever: "10–19" })
 
     as(host, "organizer")
@@ -423,7 +423,7 @@ describe("the venue's lists", () => {
     const [panel] = find<Panel>(venuePage, BuildingOccupancyPanel)
     expect(panel.occupancy.rooms).toEqual([
       expect.objectContaining({ eventId: twelve, inside: "10-19", guestsInside: null, staffInside: null }),
-      expect.objectContaining({ eventId: three, inside: "a_few", guestsInside: null, staffInside: null }),
+      expect.objectContaining({ eventId: three, inside: "quiet", guestsInside: null, staffInside: null }),
     ])
     expect(panel.occupancy.inside).toBeNull()
     expect(numericKeys(panel.occupancy)).toEqual(["capacity"])
@@ -440,7 +440,7 @@ describe("the venue's lists", () => {
     as(venueOwner, "venue_owner")
     const venueHtml = renderToStaticMarkup(await ChatroomsPage())
     expect(venueHtml).toMatch(/>10–19<\/b> inside/)
-    expect(venueHtml).toMatch(/>a few<\/b> inside/)
+    expect(venueHtml).toMatch(/>Under 5<\/b> inside/)
     expect(venueHtml).not.toMatch(/people inside|person inside/)
 
     as(host, "organizer")
@@ -463,7 +463,7 @@ describe("the venue's lists", () => {
       return Object.fromEntries(rows.filter((r) => r.id === three || r.id === twelve).map((r) => [r.id, r.occupancy]))
     }
     as(venueOwner, "venue_owner")
-    expect(await occupancyOf()).toEqual({ [three]: "a_few", [twelve]: "10-19" })
+    expect(await occupancyOf()).toEqual({ [three]: "quiet", [twelve]: "10-19" })
     as(host, "organizer")
     expect(await occupancyOf()).toEqual({ [three]: 3, [twelve]: 12 })
     as(admin, "app_admin")
@@ -501,7 +501,7 @@ describe("the venue's lists", () => {
   })
 
   it("orders ranged rooms by what is shown, and flags a building over its licence without a total", async () => {
-    // Two rooms the owner reads as "a few": exact order would put BBB (4) first.
+    // Two rooms the owner reads as "Under 5": exact order would put BBB (4) first.
     const small = await db.venues.create({
       data: { name: testId("vlr-small"), city: "Bengaluru", capacity: 3, owner_org_id: (await db.venues.findUniqueOrThrow({ where: { id: venues[0] } })).owner_org_id, claimed_at: new Date(Date.now() - 30 * DAY) },
     })
@@ -517,8 +517,8 @@ describe("the venue's lists", () => {
 
     const owner = await getBuildingOccupancy(small.id, { asOwner: { id: venueOwner, orgIds: [small.owner_org_id!] } })
     expect(owner.rooms.map((r) => [r.eventId, r.inside])).toEqual([
-      [rooms["AAA room"], "a_few"],
-      [rooms["BBB room"], "a_few"],
+      [rooms["AAA room"], "quiet"],
+      [rooms["BBB room"], "quiet"],
     ])
     expect(owner).toMatchObject({ inside: null, fillPct: null, overCapacity: true })
 

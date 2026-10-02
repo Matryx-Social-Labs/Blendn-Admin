@@ -290,7 +290,8 @@ function hostDescription(s: LiveSnapshot): string {
 
 function venueDescription(s: VenueLiveSnapshot): string {
   return `${liveCountLabel(s.checkedInTotal)} checked in, ${liveCountLabel(s.checkedOutTotal)} left${
-    s.staleInside !== "none"
+    // "Under 5" here could be nobody: said only when it is some.
+    s.staleInside !== "quiet"
       ? `. ${liveCountLabel(s.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
       : ""
   }. Shown as ranges, so one person arriving or leaving does not show.`

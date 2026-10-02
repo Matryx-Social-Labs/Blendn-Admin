@@ -179,7 +179,7 @@ describe("the building's live count is the owner's rooms only", () => {
     const owner = await getBuildingOccupancy(w.v1, { asOwner: { id: w.owner, orgIds: [w.venueOrg] } })
     expect(owner.rooms.map((r) => r.eventId)).toEqual([n.liveAfter.id])
     // The host org's room, so the owner reads its two as a range (SCRUM-516).
-    expect(owner.inside).toBe("a_few")
+    expect(owner.inside).toBe("quiet")
 
     const admin = await getBuildingOccupancy(w.v1)
     expect(admin.rooms.map((r) => r.eventId).sort()).toEqual([n.liveAfter.id, n.liveBefore.id].sort())

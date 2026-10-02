@@ -14,9 +14,10 @@ import { alertsForVenue, forVenue, type LiveAlertKind, type LiveSnapshot } from 
 
 describe("liveCountBucket", () => {
   it.each([
-    [0, "none", "0"],
-    [1, "a_few", "a few"],
-    [4, "a_few", "a few"],
+    // Empty and a few are one bucket (D-x2): the step between them is one person.
+    [0, "quiet", "Under 5"],
+    [1, "quiet", "Under 5"],
+    [4, "quiet", "Under 5"],
     [5, "5-9", "5–9"],
     [9, "5-9", "5–9"],
     [10, "10-19", "10–19"],
@@ -85,14 +86,14 @@ describe("forVenue", () => {
       view: "venue",
       inside: "10-19",
       guestsInside: "10-19",
-      staffInside: "a_few",
+      staffInside: "quiet",
       checkedInTotal: "10-19",
-      checkedOutTotal: "a_few",
-      staleInside: "a_few",
+      checkedOutTotal: "quiet",
+      staleInside: "quiet",
       checkInRate10m: "5-9",
       activeChatters30m: "5-9",
-      sentiment: { positive: "5-9", neutral: "a_few", negative: "a_few" },
-      categories: [{ category: "entry_queue", count: "a_few" }],
+      sentiment: { positive: "5-9", neutral: "quiet", negative: "quiet" },
+      categories: [{ category: "entry_queue", count: "quiet" }],
     })
   })
 

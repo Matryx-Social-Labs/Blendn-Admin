@@ -1522,9 +1522,9 @@
       "date": "2026-10-01"
     },
     "live-ranges.test.ts": {
-      "guards": "liveCountBucket's edges (none, a_few, 5-9, 10-19, 20+ -- the helper PR #619 shares) and liveCountLabel's words for them; forVenue: every count of people a range, no number in the venue's copy but capacity, messages per minute and open flags and those holding their own values, flags decided on exact figures both ways, and only the fields it names; alertsForVenue: approaching capacity, leaving early and unknown kinds are not sent, the rest carry no figure",
-      "mutation": "M11 `inside: s.inside` in forVenue. M13 liveCountBucket returns the exact count from 20. M22 `approaching_capacity` given a sentence. M25 `capacity: s.inside` in forVenue",
-      "observed": "M11: 2 failing ('rounds every count of people', 'leaves a number only where the venue already sees it'). M13: 2 failing ('20 reads as 20+', '500 reads as 20+'). M22: 1 failing ('sends no alert that flips at an exact count…'). M25: 1 failing ('leaves a number only where the venue already sees it') -- the key-name check alone passed it; the value assertion is what caught it",
+      "guards": "liveCountBucket's edges (quiet -- under 5 including 0, D-x2 -- then 5-9, 10-19, 20+; the helper step 4 shares) and liveCountLabel's words for them (Under 5, 5–9, 10–19, 20+); forVenue: every count of people a range, no number in the venue's copy but capacity, messages per minute and open flags and those holding their own values, flags decided on exact figures both ways, and only the fields it names; alertsForVenue: approaching capacity, leaving early and unknown kinds are not sent, the rest carry no figure",
+      "mutation": "M11 `inside: s.inside` in forVenue. M13 liveCountBucket returns the exact count from 20. M27 zero given a bucket of its own again (`if (count <= 0) return \"none\"`). M22 `approaching_capacity` given a sentence. M25 `capacity: s.inside` in forVenue",
+      "observed": "M11: 2 failing ('rounds every count of people', 'leaves a number only where the venue already sees it'). M13: 2 failing ('20 reads as 20+', '500 reads as 20+'). M22: 1 failing ('sends no alert that flips at an exact count…'). M25: 1 failing ('leaves a number only where the venue already sees it') -- the key-name check alone passed it; the value assertion is what caught it. M27: 1 failing ('0 is quiet, printed Under 5'). After D-x2 (2026-10-02) M6–M11, M13, M20, M22 and M25 were re-run against the quiet bucket: each failed as recorded",
       "date": "2026-10-01"
     }
   },

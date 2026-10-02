@@ -82,7 +82,8 @@ export function OccupancyHero({
   const { inside, guestsInside, capacity } = occupancy
   // The exact figures, or null for a venue's ranges: no bar, no fill, no "N over".
   const exact = "fillPct" in occupancy ? occupancy : null
-  const anyStaff = exact ? exact.staffInside > 0 : occupancy.staffInside !== "none"
+  // "Under 5 staff" could be none, and usually is: shown from 5 up.
+  const anyStaff = exact ? exact.staffInside > 0 : occupancy.staffInside !== "quiet"
   // Suppressed while unreliable: flagging a breach off numbers we have just
   // said we do not trust is how a false evacuation starts.
   const over = occupancy.overCapacity && !unreliable

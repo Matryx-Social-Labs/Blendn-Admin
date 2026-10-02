@@ -192,20 +192,23 @@ export function discloseHeadcount(count: number): number | null {
 }
 
 /**
- * How many people are live at a venue, as the app may show it (D-19, F14).
+ * How many people are live -- at a venue, or in a room a venue watches but
+ * does not run -- as a bucket (D-19, F14, D-x2).
  *
  * Never a number. The floor alone is not enough for a figure that updates
  * while you watch: a count that goes from "a few" to 5 the moment one person
  * walks in tells the watcher that person is there (cf. SCRUM-472). Buckets
  * move only at their edges, and under the floor (`MIN_CELL`) there is no
- * number at all. Zero is its own answer, like `discloseHeadcount`'s: an empty
- * place identifies nobody.
+ * number at all.
+ *
+ * Zero is `quiet` too, unlike `discloseHeadcount`'s 0 (D-x2). An empty room
+ * names nobody, but the step from empty to "a few" is the one arrival that
+ * names somebody, and from "a few" to empty the one departure.
  */
-export type LiveCountBucket = "none" | "a_few" | "5-9" | "10-19" | "20+"
+export type LiveCountBucket = "quiet" | "5-9" | "10-19" | "20+"
 
 export function liveCountBucket(count: number): LiveCountBucket {
-  if (count <= 0) return "none"
-  if (count < MIN_CELL) return "a_few"
+  if (count < MIN_CELL) return "quiet"
   if (count < 10) return "5-9"
   if (count < 20) return "10-19"
   return "20+"
@@ -412,12 +415,11 @@ export function suppressedLabel(kind: "figure" | "poll"): string {
  * capacity is a separate flag, decided on the exact figure, so the building's
  * safety does not depend on the number being shown.
  */
-export const LIVE_COUNT_BUCKETS: readonly LiveCountBucket[] = ["none", "a_few", "5-9", "10-19", "20+"]
+export const LIVE_COUNT_BUCKETS: readonly LiveCountBucket[] = ["quiet", "5-9", "10-19", "20+"]
 
 /** A count as printed: an exact one as itself, a bucket as words. */
 export function liveCountLabel(count: number | LiveCountBucket): string {
   if (typeof count === "number") return String(count)
-  if (count === "none") return "0"
-  if (count === "a_few") return "a few"
+  if (count === "quiet") return `Under ${MIN_CELL}`
   return count.replace("-", "–")
 }
