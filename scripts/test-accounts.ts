@@ -153,6 +153,12 @@ export const SEED_PERSONAS: readonly string[] = [
   "vikram.s@blendn.app",
   "teen.tester@blendn.app",
   "rhea.kapoor@blendn.app",
+  // The dashboard shell's personas (step 14): several orgs, a suspended one, a
+  // second venue owner.
+  "ishaan.multi@blendn.app",
+  "tara.suspended@blendn.app",
+  "omar.suspended@blendn.app",
+  "kabir.venue@blendn.app",
 ]
 
 export interface TestAccountsWorld {

@@ -18,7 +18,8 @@ import {
 import type { DashboardRole } from "@/lib/dashboard-types"
 
 /**
- * What a destination is *for*, which is what a heading over it should say.
+ * Where an admin sees a destination: what it is *for*, which is what a heading
+ * over it should say.
  *
  * An admin sees eighteen destinations. Flat, under one label, that is a list
  * you read rather than scan — and the design system's own rule is that
@@ -54,14 +55,32 @@ export const NAV_GROUPS: { key: NavGroup; label: string }[] = [
   { key: "record", label: "Record" },
 ]
 
+/**
+ * Where a host (organiser, venue owner, sponsor) sees a destination.
+ *
+ * The kit's three blocks: the work itself with no heading (Overview, Events),
+ * then Community (the people at your events), then Organisation (the company
+ * running them). A host sees at most seven destinations, so the admin's six
+ * headings would put a heading over almost every item — and two of the admin's
+ * words ("Supply", "Record") describe the platform, not a host's company.
+ */
+export type HostNavGroup = "community" | "organisation"
+
+export const HOST_NAV_GROUPS: { key: HostNavGroup; label: string }[] = [
+  { key: "community", label: "Community" },
+  { key: "organisation", label: "Organisation" },
+]
+
 export interface DashboardNavItem {
   title: string
   description: string
   url: string
   icon: typeof IconDashboard
   allowedRoles: DashboardRole[]
-  /** Which heading it sits under. Absent means "above the first heading". */
+  /** Which heading an admin sees it under. Absent means "above the first heading". */
   group?: NavGroup
+  /** Which heading a host sees it under. Absent means the unheaded top block. */
+  hostGroup?: HostNavGroup
   /** Renders a count next to the item. */
   badgeKey?: "pendingFlags" | "pendingApplications" | "pendingClaims" | "pendingCreative"
   isActive?: (pathname: string) => boolean
@@ -117,7 +136,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/attendees",
     icon: IconUsers,
     allowedRoles: ["organizer"],
-    group: "people",
+    hostGroup: "community",
   },
   {
     title: "My venues",
@@ -125,7 +144,6 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/venues",
     icon: IconBuildingStore,
     allowedRoles: ["venue_owner"],
-    group: "supply",
   },
   {
     // Sponsor-side. A sponsor sees their own placements and campaigns and
@@ -135,7 +153,6 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/placements",
     icon: IconMicrophone2,
     allowedRoles: ["sponsor"],
-    group: "commercial",
   },
   {
     title: "Brand",
@@ -143,7 +160,7 @@ export const dashboardNav: DashboardNavItem[] = [
     url: "/dashboard/brand",
     icon: IconBuildingStore,
     allowedRoles: ["sponsor"],
-    group: "commercial",
+    hostGroup: "organisation",
   },
   {
     title: "Chatrooms",
@@ -156,6 +173,7 @@ export const dashboardNav: DashboardNavItem[] = [
     // the nav and the pages cannot disagree the way they did before.
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
     group: "people",
+    hostGroup: "community",
     isActive: (pathname) =>
       pathname === "/dashboard/chatrooms" || pathname.endsWith("/messaging"),
   },
@@ -276,12 +294,12 @@ export const dashboardNav: DashboardNavItem[] = [
     // branch: an admin managing the platform and an owner managing their own
     // company want different things on screen, and the audit trail should say
     // which of the two acted.
-    title: "My organisation",
+    title: "Team",
     description: "Your colleagues, invites, and domain verification.",
     url: "/dashboard/organisation",
     icon: IconBuilding,
     allowedRoles: ["organizer", "venue_owner", "sponsor"],
-    group: "setup",
+    hostGroup: "organisation",
   },
   {
     // Categories were seeded by a script and by nothing else — an admin could
@@ -311,6 +329,7 @@ export const dashboardNav: DashboardNavItem[] = [
     icon: IconFileSpreadsheet,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
     group: "record",
+    hostGroup: "organisation",
   },
   {
     // `audit_logs` was written by every sensitive action and read by nothing.
@@ -322,6 +341,7 @@ export const dashboardNav: DashboardNavItem[] = [
     icon: IconHistory,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
     group: "record",
+    hostGroup: "organisation",
   },
 ]
 
@@ -344,21 +364,25 @@ export function visibleNavFor(role: string | undefined): DashboardNavItem[] {
 /**
  * The same items, under their headings, with empty groups dropped.
  *
- * Dropping is the part that matters. A sponsor sees three destinations; four
- * empty headings above them would be worse than no headings at all, and it is
- * exactly what a static group list produces once the role gate has run.
+ * An admin gets the six admin headings; every other role gets the kit's
+ * top · Community · Organisation. Dropping empty groups is the part that
+ * matters: a sponsor sees four destinations, and empty headings above them
+ * would be worse than no headings at all.
  */
 export function groupedNavFor(
   role: string | undefined
 ): { label: string | null; items: DashboardNavItem[] }[] {
   const visible = visibleNavFor(role)
+  const isAdmin = role === "app_admin"
+  const groupOf = (i: DashboardNavItem): string | undefined => (isAdmin ? i.group : i.hostGroup)
+  const headings: { key: string; label: string }[] = isAdmin ? NAV_GROUPS : HOST_NAV_GROUPS
   const out: { label: string | null; items: DashboardNavItem[] }[] = []
 
-  const ungrouped = visible.filter((i) => !i.group)
+  const ungrouped = visible.filter((i) => !groupOf(i))
   if (ungrouped.length) out.push({ label: null, items: ungrouped })
 
-  for (const { key, label } of NAV_GROUPS) {
-    const items = visible.filter((i) => i.group === key)
+  for (const { key, label } of headings) {
+    const items = visible.filter((i) => groupOf(i) === key)
     if (items.length) out.push({ label, items })
   }
   return out

@@ -6,6 +6,11 @@ import { neverPublished } from "@/lib/dashboard-format"
 import { RoleUsersTable } from "@/components/role-users-table"
 import { Button } from "@/components/ui/button"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/venue-owners")
+
 export default async function VenueOwnersPage() {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") {

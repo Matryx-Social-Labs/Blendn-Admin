@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Slot } from "@radix-ui/react-slot"
+import { Slot, Slottable } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
@@ -27,10 +27,16 @@ const buttonVariants = cva(
         lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
         icon: "size-9",
       },
+      /** The kit's `pill`: fully rounded, for the top bar's Create event and similar. */
+      pill: {
+        true: "rounded-full",
+        false: "",
+      },
     },
     defaultVariants: {
       variant: "default",
       size: "default",
+      pill: false,
     },
   }
 )
@@ -39,11 +45,18 @@ function Button({
   className,
   variant,
   size,
+  pill,
+  icon,
+  iconRight,
   asChild = false,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    /** Drawn before the label. Works with `asChild`: it lands inside the child. */
+    icon?: React.ReactNode
+    iconRight?: React.ReactNode
   }) {
   const Comp = asChild ? Slot : "button"
 
@@ -73,13 +86,22 @@ function Button({
    */
   const typeProps = Comp === "button" ? { type: props.type ?? ("button" as const) } : {}
 
+  /*
+   * `Slottable` marks which child `asChild` renders as, so the icons become its
+   * children rather than siblings: `<Button asChild icon={…}><Link/></Button>`
+   * is one link with the icon inside, not a Slot handed three children.
+   */
   return (
     <Comp
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size, pill, className }))}
       {...props}
       {...typeProps}
-    />
+    >
+      {icon}
+      <Slottable>{children}</Slottable>
+      {iconRight}
+    </Comp>
   )
 }
 

@@ -17,7 +17,7 @@ import { statePathFor } from "./global-setup"
  * timeout.
  *
  * **"Does the body contain words the shell does not?"** was worse, and its
- * failure is the interesting one: `components/site-header.tsx` renders the
+ * failure is the interesting one: the layout's `PageHeader` renders the
  * route's own title from `routeContent`, so the word "Users" is in the response
  * for `/dashboard/users` **even when the page refuses**. Auto-derived markers
  * therefore flagged every page as leaking. A page's title is part of the shell;
@@ -34,24 +34,44 @@ import { statePathFor } from "./global-setup"
  * layout, the title, and not one row.
  */
 
-const DASHBOARD_ROLES: RoleKey[] = ["admin", "organizer", "venue", "sponsor"]
+const DASHBOARD_ROLES = ["admin", "organizer", "venue", "sponsor"] as const satisfies readonly RoleKey[]
 
 /**
  * A string that appears in a page's response only when its rows rendered.
  *
  * Taken from the seeded world, so it is data rather than markup — markup is
  * shared, and a shared marker is what made the previous version useless.
+ *
+ * Several per page, and they include the OTHER role accounts' own
+ * organisations and addresses — the rows a leak would most plausibly carry.
+ *
+ * **Except, per role, its own organisation.** Since step 14 the shell names
+ * who you act for on every page — the identity card and the first breadcrumb.
+ * "Nightshift Collective" is in every page organizer@ opens; it is not a leak
+ * there. (Measured: the account menu's name and email are not in the response
+ * — the menu's content renders only when opened — so addresses get no
+ * exception.) So each role is checked against every marker that is not part
+ * of its own `SHELL_IDENTITY` — and a test below proves that identity really
+ * is in its shell, so the exception cannot quietly widen.
+ *
  * Pages without an entry are covered by the reachability check below but not by
  * the leak check, and `uncovered` reports them rather than passing silently.
  */
-const ROW_MARKER: Record<string, string> = {
-  "/dashboard/users": "hemanth.ramesh@blendn.app",
-  "/dashboard/organisers": "organizer@blendn.app",
-  "/dashboard/venue-owners": "venue.owner@blendn.app",
-  "/dashboard/organisations": "Nightshift Collective",
-  "/dashboard/onboarding": "founder@thehummingtree.com",
-  "/dashboard/claims": "events@toit.in",
-  "/dashboard/sponsors": "Blue Tokai",
+const ROW_MARKER: Record<string, string[]> = {
+  "/dashboard/users": ["hemanth.ramesh@blendn.app"],
+  "/dashboard/organisers": ["daniel.weber@blendn.app", "organizer@blendn.app"],
+  // Two owners since step 14's seed, so venue.owner@ is checked against one
+  // that is not itself.
+  "/dashboard/venue-owners": ["kabir.venue@blendn.app", "venue.owner@blendn.app"],
+  "/dashboard/organisations": [
+    "Third Wave Coffee Roasters",
+    "Nightshift Collective",
+    "Indiranagar Hospitality Group",
+    "Blue Tokai Coffee Roasters",
+  ],
+  "/dashboard/onboarding": ["founder@thehummingtree.com"],
+  "/dashboard/claims": ["events@toit.in"],
+  "/dashboard/sponsors": ["Third Wave", "Blue Tokai"],
   /*
    * The unclaimed venue, deliberately — it is the row the admin index exists
    * to surface, and the one a venue-owner-scoped page can never show.
@@ -62,7 +82,7 @@ const ROW_MARKER: Record<string, string> = {
    * then redirected away. The index now exists and is server-rendered, so the
    * page can be asserted rather than excused.
    */
-  "/dashboard/venues": "Church Street Social",
+  "/dashboard/venues": ["Church Street Social"],
   /*
    * The subtitle, not the name. "Open Bar" is plausible markup on any screen
    * that lists what an event offers, and a marker that appears on a second
@@ -72,8 +92,22 @@ const ROW_MARKER: Record<string, string> = {
    * Seeded by the migration rather than by seed-qa, so it is present in any
    * migrated database — including a fresh CI one.
    */
-  "/dashboard/amenities": "Premium spirits",
+  "/dashboard/amenities": ["Premium spirits"],
 }
+
+/**
+ * What a role's own shell says on every page it opens: the organisation it
+ * acts for. Not a leak for that role; asserted present below. An admin acts
+ * for Blend'n, which no marker names.
+ */
+const SHELL_IDENTITY: Record<(typeof DASHBOARD_ROLES)[number], string[]> = {
+  admin: [],
+  organizer: ["Nightshift Collective"],
+  venue: ["Indiranagar Hospitality Group"],
+  sponsor: ["Blue Tokai Coffee Roasters"],
+}
+const ownIdentity = (role: (typeof DASHBOARD_ROLES)[number], marker: string) =>
+  SHELL_IDENTITY[role].some((id) => id.includes(marker))
 
 /**
  * Pages this technique cannot judge, and why — stated rather than skipped.
@@ -132,11 +166,14 @@ test.describe("a role receives only the rows it is entitled to", () => {
       })
       const allowed = new Set(visibleNavFor(ROLE_ACCOUNTS[role].role).map((i) => i.url))
 
-      for (const [url, marker] of Object.entries(ROW_MARKER)) {
+      for (const [url, markers] of Object.entries(ROW_MARKER)) {
         if (allowed.has(url)) continue
         if (UNLISTED_ENTITLEMENT[url]?.includes(ROLE_ACCOUNTS[role].role)) continue
         const body = await (await ctx.get(url)).text()
-        if (body.includes(marker)) leaked.push(`${role} sees "${marker}" on ${url}`)
+        for (const marker of markers) {
+          if (ownIdentity(role, marker)) continue
+          if (body.includes(marker)) leaked.push(`${role} sees "${marker}" on ${url}`)
+        }
       }
       await ctx.dispose()
     }
@@ -163,9 +200,11 @@ test.describe("a role receives only the rows it is entitled to", () => {
       storageState: statePathFor("admin"),
     })
     const missing: string[] = []
-    for (const [url, marker] of Object.entries(ROW_MARKER)) {
+    for (const [url, markers] of Object.entries(ROW_MARKER)) {
       const body = await (await ctx.get(url)).text()
-      if (!body.includes(marker)) missing.push(`${url} did not contain "${marker}"`)
+      for (const marker of markers) {
+        if (!body.includes(marker)) missing.push(`${url} did not contain "${marker}"`)
+      }
     }
     await ctx.dispose()
 
@@ -175,6 +214,22 @@ test.describe("a role receives only the rows it is entitled to", () => {
         "either way the denial assertions above are passing vacuously."
     ).toEqual([])
   })
+})
+
+test("each role's shell carries exactly the identity the leak check excuses", async ({ baseURL }) => {
+  /*
+   * The exception above is only honest if these strings really are in every
+   * page the role opens — otherwise it is an allowlist that hides a leak. Its
+   * own overview is the page every role can open.
+   */
+  const absent: string[] = []
+  for (const role of DASHBOARD_ROLES) {
+    const ctx = await playwrightRequest.newContext({ baseURL, storageState: statePathFor(role) })
+    const body = await (await ctx.get("/dashboard")).text()
+    for (const id of SHELL_IDENTITY[role]) if (!body.includes(id)) absent.push(`${role}: "${id}"`)
+    await ctx.dispose()
+  }
+  expect(absent).toEqual([])
 })
 
 test.describe("the roles that must not be here", () => {

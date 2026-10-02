@@ -1,5 +1,7 @@
 import { notFound, redirect } from "next/navigation"
+import { PageHeader } from "@/components/dashboard/page-header"
 import { EventEditor } from "@/components/event-editor"
+import { eventTitleFor } from "@/lib/dashboard-record-titles"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { eventPermissions } from "@/lib/rbac"
@@ -17,6 +19,11 @@ interface EventPageProps {
  * an event to see how it was doing put you in a seven-stage editor. That page
  * is now the Overview, and this is where you go to change something.
  */
+export async function generateMetadata({ params }: EventPageProps) {
+  const name = await eventTitleFor((await params).id)
+  return { title: name ? `Edit · ${name}` : "Edit event" }
+}
+
 export default async function EditEventPage({ params }: EventPageProps) {
   const session = await getAuth()
   if (!session?.user) {
@@ -106,7 +113,10 @@ export default async function EditEventPage({ params }: EventPageProps) {
   const primaryCategory = event.categories.find((entry) => entry.primary)?.category?.id
 
   return (
-    <EventEditor
+    <>
+      {/* Owned header (`OWNED_HEADERS`). No back link: the editor carries its own. */}
+      <PageHeader title={event.title} description="Changes go live as soon as you save." />
+      <EventEditor
       categories={categories}
       amenities={amenities}
       canFeature={session.user.role === "app_admin"}
@@ -154,6 +164,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
           order: item.order,
         })),
       }}
-    />
+      />
+    </>
   )
 }

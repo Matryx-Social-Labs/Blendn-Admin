@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation"
 
 import { LiveTab } from "@/components/dashboard/live-tab"
+import { PageHeader } from "@/components/dashboard/page-header"
+import { eventTitleFor } from "@/lib/dashboard-record-titles"
 import { issuesFor } from "@/lib/event-issues"
 import { alertsForVenue } from "@/lib/live-metrics"
 import { getEventAttendance } from "@/lib/attendance"
@@ -25,6 +27,10 @@ import { eventClock, eventStateFor } from "@/lib/event-phase"
 import { CHAT_WINDOW_HOURS } from "@/lib/chat-window"
 
 export const dynamic = "force-dynamic"
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  return { title: (await eventTitleFor((await params).id)) ?? "Event" }
+}
 
 /** Hours the chatroom stays open after an event for feedback. */
 const FEEDBACK_WINDOW_HOURS = 24
@@ -132,11 +138,13 @@ export default async function EventDetailPage({
     over: `feedback open ${CHAT_WINDOW_HOURS}h after`,
   }
 
+  /*
+   * This page owns its header (`OWNED_HEADERS`): the event is named by its own
+   * title, which only this page has loaded and checked the viewer may see.
+   */
   const header = (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h2 className="text-[length:var(--text-h2)] font-bold">{event.title}</h2>
+      <PageHeader title={event.title} back={{ href: "/dashboard/events", label: "Events" }}>
           {/* One line: when, where, and — for somebody who may edit a linked venue — the way out of a wrong link. */}
           <p className="flex flex-wrap items-center gap-x-1 text-[0.8125rem] text-muted-foreground">
             <span>
@@ -157,8 +165,7 @@ export default async function EventDetailPage({
             nothing to unlink from — and a venue owner reading this page has the
             dispute flow instead, which is the other side of the same question.
           */}
-        </div>
-      </div>
+      </PageHeader>
       <EventTabs eventId={event.id} active={activeTab} tabs={tabs} />
     </div>
   )

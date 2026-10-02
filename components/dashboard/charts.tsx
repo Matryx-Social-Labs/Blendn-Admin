@@ -57,7 +57,7 @@ function ChartFrame({
         {/*
           `h2`, not `h3`.
 
-          `site-header` owns the page's only `h1` and bodies start at `h2`, per
+          The layout's `PageHeader` owns the page's only `h1` and bodies start at `h2`, per
           the design system. Every chart panel rendered an `h3` — and on the
           admin overview those panels sit in the row *above* the `h2` tables, so
           the document outline read h1 → h3 → h3 → h2 → h2. A reader navigating

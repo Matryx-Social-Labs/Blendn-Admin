@@ -5,7 +5,7 @@ import { encode } from "next-auth/jwt"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 
-import { ROLE_ACCOUNTS, type RoleKey } from "./fixtures/auth"
+import { PERSONA_ACCOUNTS, ROLE_ACCOUNTS, type PersonaKey, type RoleKey } from "./fixtures/auth"
 
 /**
  * Establish one session per role, for the whole run.
@@ -34,7 +34,7 @@ import { ROLE_ACCOUNTS, type RoleKey } from "./fixtures/auth"
  */
 export const AUTH_DIR = join(__dirname, ".auth")
 
-export function statePathFor(role: RoleKey) {
+export function statePathFor(role: RoleKey | PersonaKey) {
   return join(AUTH_DIR, `${role}.json`)
 }
 
@@ -80,8 +80,9 @@ export default async function globalSetup(config: FullConfig) {
 
   const browser = await chromium.launch()
   try {
-    for (const role of Object.keys(ROLE_ACCOUNTS) as RoleKey[]) {
-      const { email, role: expected } = ROLE_ACCOUNTS[role]
+    const accounts = { ...ROLE_ACCOUNTS, ...PERSONA_ACCOUNTS }
+    for (const role of Object.keys(accounts) as (RoleKey | PersonaKey)[]) {
+      const { email, role: expected } = accounts[role]
       const user = await db.user.findUnique({
         where: { email },
         select: { id: true, role: true },

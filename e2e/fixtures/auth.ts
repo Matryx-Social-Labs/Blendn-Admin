@@ -38,6 +38,20 @@ export const ROLE_ACCOUNTS = {
 export type RoleKey = keyof typeof ROLE_ACCOUNTS
 
 /**
+ * The dashboard shell's personas (seed-qa, step 14), kept apart from
+ * ROLE_ACCOUNTS so the role sweeps do not visit every route four more times.
+ * Each belongs to organisations of its own.
+ */
+export const PERSONA_ACCOUNTS = {
+  multiOrg: { email: "ishaan.multi@blendn.app", role: "organizer" },
+  partSuspended: { email: "tara.suspended@blendn.app", role: "organizer" },
+  onlySuspended: { email: "omar.suspended@blendn.app", role: "organizer" },
+  secondVenueOwner: { email: "kabir.venue@blendn.app", role: "venue_owner" },
+} as const
+
+export type PersonaKey = keyof typeof PERSONA_ACCOUNTS
+
+/**
  * Establish a session on `page` for one seeded account.
  *
  * Returns the session the server actually issued, so a caller can assert the
