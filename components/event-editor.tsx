@@ -40,6 +40,7 @@ interface EventEditorData {
   cover_image_url?: string | null
   external_link?: string | null
   is_featured?: boolean | null
+  crews_enabled?: boolean | null
   check_in_radius?: number | null
   geofence?: unknown
   category_ids?: string[]
@@ -144,6 +145,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
       cover_image_url: initialEvent.cover_image_url ?? undefined,
       external_link: initialEvent.external_link ?? undefined,
       is_featured: initialEvent.is_featured ?? false,
+      crews_enabled: initialEvent.crews_enabled ?? true,
       check_in_radius: initialEvent.check_in_radius ?? DEFAULT_CHECK_IN_RADIUS_M,
       geofence: initialEvent.geofence ?? undefined,
       category_ids: initialEvent.category_ids ?? [],

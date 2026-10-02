@@ -8,7 +8,8 @@ import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
-import { closePostRooms } from "@/lib/room-close"
+import { closePostRooms, closeRoomSockets } from "@/lib/room-close"
+import { closeCrewBlendsLocked, dissolveCrewLocked } from "@/lib/crews/sweep"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 
@@ -46,7 +47,13 @@ export interface ReportRow {
   subjectSuspended: boolean
   /** Message reports only — a board post's body and a board ask's message included. */
   excerpt: string | null
-  messageType: "group" | "private" | "board_post" | "board_request" | null
+  messageType: "group" | "private" | "board_post" | "board_request" | "crew" | null
+  /**
+   * Crew reports only (C12): the crew's state now. The subject is the crew's
+   * card, not a person — `subjectId` stays null, so no Suspend is offered; the
+   * levers are hiding the crew and dissolving it.
+   */
+  crew: { hidden: boolean; dissolved: boolean } | null
   /** Board posts only: offer, seeking or chat — what was being arranged. */
   boardKind: string | null
   /** Taken down already: a removed room message, or a withdrawn or removed board post. */
@@ -71,7 +78,14 @@ export interface ReportRow {
   reviewedBy: string | null
 }
 
-export type ReportDecision = "dismiss" | "remove_message" | "suspend" | "reinstate" | "delist"
+export type ReportDecision =
+  | "dismiss"
+  | "remove_message"
+  | "suspend"
+  | "reinstate"
+  | "delist"
+  | "hide_crew"
+  | "dissolve_crew"
 
 /**
  * `report_status` has three values and this uses two of them.
@@ -86,6 +100,8 @@ const OUTCOME: Record<Exclude<ReportDecision, "reinstate">, report_status> = {
   remove_message: "resolved",
   suspend: "resolved",
   delist: "resolved",
+  hide_crew: "resolved",
+  dissolve_crew: "resolved",
 }
 
 function ageHours(at: Date, now: number): number {
@@ -177,15 +193,16 @@ export async function getReportQueue(status: report_status = "pending") {
    */
   const idsOf = (type: string) =>
     messageReports.filter((r) => r.message_type === type).map((r) => r.message_id)
-  const [groupIds, privateIds, boardPostIds, boardRequestIds] = [
+  const [groupIds, privateIds, boardPostIds, boardRequestIds, crewIds] = [
     idsOf("group"),
     idsOf("private"),
     idsOf("board_post"),
     idsOf("board_request"),
+    idsOf("crew"),
   ]
 
   const person = { select: { id: true, name: true, email: true, suspended_at: true } } as const
-  const [groupMessages, privateMessages, boardPosts, boardRequests] = await Promise.all([
+  const [groupMessages, privateMessages, boardPosts, boardRequests, crews] = await Promise.all([
     groupIds.length
       ? db.chat_messages.findMany({
           where: { id: { in: groupIds } },
@@ -237,12 +254,20 @@ export async function getReportQueue(status: report_status = "pending") {
           },
         })
       : [],
+    // A crew's card (C12): its name now, and whether it is still standing.
+    crewIds.length
+      ? db.crews.findMany({
+          where: { id: { in: crewIds } },
+          select: { id: true, name: true, hidden_at: true, dissolved_at: true },
+        })
+      : [],
   ])
 
   const groupById = new Map(groupMessages.map((m) => [m.id, m]))
   const privateById = new Map(privateMessages.map((m) => [m.id, m]))
   const boardPostById = new Map(boardPosts.map((p) => [p.id, p]))
   const boardRequestById = new Map(boardRequests.map((r) => [r.id, r]))
+  const crewById = new Map(crews.map((c) => [c.id, c]))
 
   /*
    * How many reports in this tab name the same thing. Grouped by subject so a
@@ -292,6 +317,7 @@ export async function getReportQueue(status: report_status = "pending") {
         eventTitle: null,
         eventId: null,
         room: false,
+        crew: null,
         reviewedBy: r.reviewed_by,
       })
     ),
@@ -306,6 +332,26 @@ export async function getReportQueue(status: report_status = "pending") {
         room: false,
         reviewedBy: r.reviewed_by,
         sameSubject: sameMessage.get(r.message_id) ?? 1,
+        crew: null,
+      }
+      if (r.message_type === "crew") {
+        const crew = crewById.get(r.message_id)
+        return {
+          ...base,
+          subjectId: null,
+          subjectName: `Crew · ${crew?.name ?? "gone"}`,
+          subjectSuspended: false,
+          // The name and bio as they read when it was reported.
+          excerpt: (r.excerpt ?? "").slice(0, 200) || null,
+          messageType: "crew",
+          boardKind: null,
+          messageDeleted: false,
+          gone: !crew,
+          removable: false,
+          eventTitle: null,
+          eventId: null,
+          crew: crew ? { hidden: crew.hidden_at !== null, dissolved: crew.dissolved_at !== null } : null,
+        }
       }
       if (r.message_type === "board_post") {
         const post = boardPostById.get(r.message_id)
@@ -398,6 +444,7 @@ export async function getReportQueue(status: report_status = "pending") {
         eventTitle: r.event?.title ?? null,
         eventId: r.event_id,
         room: r.chat_group_id !== null,
+        crew: null,
         reviewedBy: r.reviewed_by,
       })
     ),
@@ -427,6 +474,8 @@ export async function getReportQueue(status: report_status = "pending") {
  *   so an existing session dies within one 15-minute access token.
  * - **reinstate** — the reverse, on the same row. Suspension is meant to be
  *   reversible, and a screen that can only take the action is one nobody uses.
+ * - **hide_crew** / **dissolve_crew** — a reported crew's card (C12): hidden
+ *   from every surface outside the crew, or ended. Crew reports only.
  */
 export async function resolveReport(
   kind: "user" | "message" | "event",
@@ -496,6 +545,11 @@ export async function resolveReport(
   if (decision === "delist" && kind !== "event") {
     throw new Refusal("Only an event can be delisted")
   }
+  // A crew's levers are for a crew report, and only for one.
+  const crewReport = kind === "message" && (report as { message_type: string }).message_type === "crew"
+  if ((decision === "hide_crew" || decision === "dissolve_crew") && !crewReport) {
+    throw new Refusal("Only a reported crew can be hidden or dissolved")
+  }
   // A report about the room is not a report about the listing.
   if (decision === "delist" && (report as { chat_group_id: string | null }).chat_group_id) {
     throw new Refusal("This report is about the event's room, not its listing")
@@ -510,6 +564,8 @@ export async function resolveReport(
   // Whether a removal took anything down — false when the post was already
   // removed (a second report on it, or a second click), so the audit row says so.
   let removed: boolean | null = null
+  // A dissolved crew's room and its Blends' rooms, or a hidden crew's Blends, for their sockets after the commit.
+  let crewRoomIds: string[] = []
 
   await db.$transaction(async (tx) => {
     // A reinstate after the fact leaves the report's own verdict alone: the
@@ -594,6 +650,26 @@ export async function resolveReport(
       }
     }
 
+    /*
+     * A crew's card (C12). Hidden: off every surface outside the crew — no
+     * card, no like, no Blend — while its members keep their crew and its
+     * chat; reversible by a person with the database, and audited. Dissolved:
+     * as if its last member left (D-15) — room archived, everyone released.
+     * Whether either changed anything is in the audit row.
+     */
+    if (decision === "hide_crew") {
+      const crewId = (report as { message_id: string }).message_id
+      const hid = await tx.crews.updateMany({ where: { id: crewId, hidden_at: null }, data: { hidden_at: new Date() } })
+      removed = hid.count > 0
+      // Off every stranger's screen means out of the Blends it is in, too.
+      crewRoomIds = await closeCrewBlendsLocked(tx, crewId)
+    }
+    if (decision === "dissolve_crew") {
+      const dissolved = await dissolveCrewLocked(tx, (report as { message_id: string }).message_id)
+      removed = dissolved !== null
+      crewRoomIds = dissolved?.roomIds ?? []
+    }
+
     if (decision === "suspend" && subjectId) {
       await applySuspension(tx, subjectId, session.user.id)
     }
@@ -615,6 +691,8 @@ export async function resolveReport(
   if (decision === "remove_message" && subject.boardPost) {
     void closePostRooms([(report as { message_id: string }).message_id])
   }
+  // A dissolved crew's chat, a closed Blend: out with anyone still in it.
+  for (const id of crewRoomIds) closeRoomSockets(id)
 
   // After the commit, never inside it: see SUSPENSION_WRITE_CHANNELS.
   if (decision === "suspend" && subjectId) {
@@ -635,6 +713,7 @@ export async function resolveReport(
       subjectId,
       // Which board post came down, so the audit row names it without a join.
       ...(subject.boardPost && { boardPostId: (report as { message_id: string }).message_id }),
+      ...(crewReport && { crewId: (report as { message_id: string }).message_id }),
       ...(removed !== null && { removed }),
     },
   })
@@ -653,6 +732,8 @@ async function messageSubject(report: {
   message_type: string
   reporter_id: string
 }): Promise<{ userId: string | null; chatGroupId: string | null; boardPost?: true }> {
+  // A crew's card is about the crew, not a person (see the row mapping).
+  if (report.message_type === "crew") return { userId: null, chatGroupId: null }
   if (report.message_type === "board_post") {
     const p = await db.board_posts.findUnique({
       where: { id: report.message_id },

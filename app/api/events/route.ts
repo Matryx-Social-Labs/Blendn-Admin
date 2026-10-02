@@ -138,6 +138,7 @@ export async function POST(req: Request) {
       cover_image_url,
       external_link,
       is_featured,
+      crews_enabled,
       is_recurring,
       check_in_radius,
       full_description,
@@ -295,6 +296,8 @@ export async function POST(req: Request) {
         // The featured rail is the platform's, not the organiser's: any
         // organiser could put their own event on it. Ignored unless app_admin.
         ...(is_featured != null && session.user.role === "app_admin" && { is_featured }),
+        // The host's "Allow crews at this event". Null leaves it as it is.
+        ...(crews_enabled != null && { crews_enabled }),
         ...(is_recurring != null && { is_recurring }),
         ...(copiedFence
           ? {

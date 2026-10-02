@@ -161,6 +161,27 @@
       "outgoing"
     ]
   },
+  "/api/mobile/crews": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "crews",
+      "invites"
+    ]
+  },
+  "/api/mobile/blends": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "blends"
+    ]
+  },
   "/api/mobile/events/:eventId": {
     "status": 200,
     "envelope": [

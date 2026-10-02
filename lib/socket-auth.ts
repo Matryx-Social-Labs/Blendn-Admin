@@ -1,7 +1,7 @@
 import { db } from "./db"
 import { actorFor } from "./org-membership"
 import { inRoomWhere } from "./event-kind"
-import { boardPostDoor, roomReadDenialFor } from "./room-kind"
+import { ownerDoor, roomReadDenialFor } from "./room-kind"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 
 /**
@@ -42,7 +42,7 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
         select: {
           kind: true,
           event: { select: { status: true, deleted_at: true, kind: true } },
-          board_post: boardPostDoor(userId),
+          ...ownerDoor(userId),
         },
       },
     },

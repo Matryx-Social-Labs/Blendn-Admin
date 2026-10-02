@@ -848,8 +848,8 @@ Body: `{ "eventIds": ["uuid", ...] }` (max 50)
 | GET | `/chat/groups` | List user's chat groups |
 
 **Rooms of every kind (step 7).** A room has a kind: an event's room, a board
-post's (its author and the askers the author accepted), and later a crew's or a
-Blend's. The `/chat/groups/:chatGroupId/...` routes take a room of any kind and
+post's (its author and the askers the author accepted), a crew's (its members
+now — see Crews), and a Blend's (see Blends). The `/chat/groups/:chatGroupId/...` routes take a room of any kind and
 admit whoever its owner admits — for a room that is not an event's, a
 membership row alone is not enough, and a refusal reads exactly as "not a
 member". Every id they send is a handle in that room's own scope (see Room
@@ -860,7 +860,10 @@ people its owner admits, an asker in a block with the author is out, writes
 stop 12 hours after the event ends (`CHAT_CLOSED`), and a withdrawn or
 taken-down post closes the room (404). To block or report somebody there, use
 the board's own routes (by post or by ask): the user routes read a board
-room's handle as an unknown id.
+room's handle as an unknown id. In a crew's room people are named by **first
+name** (history, live messages, typing, roster, reply push) — they are there
+because a friend invited them and they said yes — and a member who leaves or is
+removed is out of the room at once, their row kept `left` for the history.
 
 ### GET /chat/groups
 Lists every **event** room the caller is still a member of: `active` and **`muted`** memberships (a mute silences, it does not banish — the room stays readable and a post is refused with the reason), in `active` and **`locked`** rooms (read-only until the organiser reopens it). Each row carries `membership.status` and the room's `status` so the client can label _Muted_ / _Locked_. Banned and left memberships, and archived rooms, are not listed.
@@ -1337,6 +1340,215 @@ forwarded — and refuses with the same 404 for a malformed, unknown or reset
 token or a deleted or suspended owner. A caller who sends a bearer token also
 gets the block rule, so the public door never shows what the signed-in one
 hides.
+
+## Crews
+
+Friends who go out together (plan v2 §6). 2–12 people, made from the friend
+graph, with a crew chat (a room of kind `crew`), "We're here", and crew cards
+at an event. `lib/crews/`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/crews` | My crews `{ crews, invites }` — open invites waiting for me, by the inviting friend's first name |
+| POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous? }` → 201 `{ crewId, chatGroupId, invited }` |
+| GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
+| PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
+| POST | `/crews/:crewId/invites` | Any member invites their own friends `{ userIds }` → `{ invited }` |
+| POST | `/crews/:crewId/join` | Accept my invite `{ revealConsent: true, keepMeAnonymous? }` → `{ chatGroupId }` |
+| DELETE | `/crews/:crewId/join` | Decline my invite — told to nobody |
+| PATCH | `/crews/:crewId/members/:userId` | My own settings (`userId` = my id): `{ keepMeAnonymous }` |
+| DELETE | `/crews/:crewId/members/:userId` | Leave (my id), or the owner removes a member (their handle) → `{ dissolved }` |
+| POST | `/crews/:crewId/here` | "We're here" `{ eventId }` → `{ notified, repeated }` |
+| POST | `/crews/:crewId/report` | Report a crew's card `{ reason, description? }` → 201 `{ reported: true }` |
+| GET | `/events/:eventId/crews` | The crews here now, as cards, a page at a time (`?limit=&offset=`) → `{ crewsEnabled, crews, myCrews, total, hasMore }` |
+
+**Made from friends.** Every invitee must be a friend of whoever invites them —
+at creation and on every later invite, by any member. Anybody else (a stranger,
+an erased account, an id nobody has) is the **same 404** and nothing is
+written, so inviting cannot be used to learn who uses the app. Crews are 18+
+with a **known** age and need a finished profile (403 otherwise, an account
+with no age included).
+
+**Who is asked, and who is skipped.** `invited` is always how many friends you
+asked for, so the answer says nothing about any of them. Each is invited, or
+skipped without a word: already in the crew, or invited and the invite still
+open; **declined in the last 30 days** (a no is not re-asked or re-pushed for a
+month; after that, asking is a new ask); **removed by the owner** (only an
+owner's invite brings them back, and clears the removal); **kept apart from
+anybody in the crew** — a block or a closed conversation, either way. An
+invite **lapses after 14 days**: it stops showing, holds no seat, and can be
+sent again. One invite push per inviter and invitee a day, whatever the crew
+(read from the invites, so it holds across restarts).
+
+**Accepting asks again**, under the crew's lock: the invite open; whoever sent
+it still in the crew and still your friend; nobody in the crew kept apart from
+you. Any of those failing is the same 404 as no invite. A block or an unfriend
+also withdraws the invites between the two people at once.
+
+**Caps.** You can own 3 standing crews and be in 10 (409 past either), and make
+3 new crews in 24 hours (429).
+
+**2–12.** `CREW.MAX_MEMBERS` is 12. An invite that would take members plus open
+invites past 12 is 409, and an accept counts the members under a row lock on
+the crew, so two accepts at once can never both take the last seat. A crew left
+with fewer than two **active** members — suspended and erased people do not
+count — **dissolves** (D-15): its chat archives and closes (404 from then on),
+the rest are let go, open invites are withdrawn. A crew without an active owner
+passes to the active member who has been in it longest — when its owner leaves,
+is erased or is suspended. The chat sweeper repairs any crew left below two or
+without an owner every 15 minutes, so a suspension (which writes no crew row)
+or a failed erasure settle is not left standing.
+
+**Joining is consent.** Creating or joining requires `revealConsent: true`. The
+app shows, beside it: *"Anyone in this crew can reveal the crew — your name and
+photos — to people you match with."* `keepMeAnonymous` is the personal override
+("Keep me anonymous even when my crew reveals"); changing it later applies from
+then on — a reveal already made can't be unseen (D-10).
+
+**The name and bio** — 2–32 characters (not unique) and ≤ 140 — are shown to
+strangers on the crew card. They are **folded** first (`lib/moderation/fold.ts`):
+compatibility forms to ordinary ones (fullwidth `９８４５`, ligatures, `․` to
+`.`), any script's digits to 0–9 (`९८४५`), Cyrillic and Greek look-alikes to
+Latin — and the folded form is what is stored. A name with an invisible
+character (zero-width space, bidi override; an emoji's own joiner aside) is
+400; a bio has them stripped. Then the moderation pipeline and a **strict**
+contact-detail check (`findProfileContactInfo`): phone numbers, any @handle,
+emails and web addresses, written out or spelled ("nine eight four…", "at
+gmail dot com", "dot in"). A refusal is 400 with a sentence naming what was
+found, and nothing is stored. Tags are curated slugs (`quiz-team`, `run-club`,
+`techno-heads`, `office-gang`, `birthday-crew`, `foodies`, `board-gamers`,
+`gig-goers`, `book-club`, `dance-floor`), at most 3. Intent is the person
+intent enum.
+
+**Reports.** `POST /crews/:crewId/report` (`reason`: `spam`, `offensive`,
+`contact_details`, `impersonation`, `other`) files a `message_reports` row
+(`message_type: "crew"`, the name and bio as they read then). Nobody in the
+crew is told. In the admin queue a moderator can **hide** the crew — off every
+surface outside it: no card, no like, no Blend; its members keep their crew and
+its chat — or **dissolve** it (D-15). Both are audited.
+
+**Inside a crew people are named** — first name and one photo, never the full
+name — on `/crews` and in the crew's room. Member ids are handles in the crew's
+room (yours is your own id); `DELETE /crews/:crewId/members/:userId` takes that
+handle back, and a raw id or another room's handle names nobody (404). Two
+members kept apart (a block or a closed conversation) are not listed to each
+other on `/crews`, and the crew chat already hides each one's messages and
+roster entry from the other; `size` still counts everybody active.
+
+**"We're here"** needs the tapper checked in at the event now (403 otherwise)
+and checks **nobody else** in: every member checks in by their own GPS. It
+writes a line in the crew chat (type `system`, `"We're here 👋"`, metadata
+`{ kind: "crew_here", eventId, occurrenceId }`) and sends `crew_here`
+(`crewId`, `chatGroupId`) to every other member who has not muted the crew
+chat or blocked the tapper — **once per person per crew per occurrence**; a
+second tap answers `repeated: true` and tells nobody. The line itself is the
+record (read and written in one transaction under a lock), so it holds across
+restarts and replicas; the next occurrence is a new night. A member who turned
+notifications off (`push_enabled`) gets the bell line, not a push. The push
+names nobody and no place: *"Someone from your crew is here 👋"*, titled with
+the crew's name. A crew invite sends `crew_invite` (`crewId`), naming nobody.
+
+**Presence is derived, never stored.** A crew is *here* when two or more of its
+active members are checked in at the same occurrence now (`checked_in`, no
+checkout; at a venue day, while live). `GET /events/:eventId/crews` is for
+people checked in there now (403 `NOT_CHECKED_IN` otherwise) and lists the
+crews here, never your own (those are `myCrews`, what a like is sent as). A
+card is the emblem seed, name, bio, `size` ("Crew of N", active members),
+`presentCount`, tags and intent — **counts, never people**: no name, photo,
+id or pseudonym of anybody on it (a list of pseudonyms beside a crew that later
+reveals would single out the ones who stayed anonymous). Most here first, then
+by id; `limit` 30 by default, at most 50, `offset`, with `total` and
+`hasMore`. Hidden from you: a hidden crew, and any crew with a member kept
+apart — a block or a closed conversation, either way — from you or from any
+member of your crews here. Here without a crew of your own, you see crews only
+after opting in ("Open to joining a crew tonight", `open_to_crews_until`: it
+lasts until the end of the occurrence you said it at), and only crews with
+"room for one more" (`openToSolo`) of 6 or fewer active members. When the host
+turns crews off (`events.crews_enabled`, the dashboard's "Allow crews at this
+event" switch), the list is `crewsEnabled: false` and "We're here" is 403.
+
+**Safety.** A suspended member is on no crew surface (cards, counts, the crew
+room). Reinstating them does not undo what the suspension did: the ban it wrote
+into the crew chat stays until a person lifts it (as in every room), and a crew
+that dissolved or passed to another owner meanwhile stays that way. Deleting
+your account takes you out of every crew — inside the erasure's transaction,
+the crews locked first — and deletes every crew invite to or from you; each of
+those crews is then settled (dissolved below two, owner handed on). Your
+messages in a crew chat stay, as in any room.
+
+### Blends — crews matching crews, or a crew and one person
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/events/:eventId/crews/:crewId/like` | Like a crew here: `{ asCrewId? }` — as one of your crews here, or as yourself → `{ liked: true, blend }` |
+| POST | `/events/:eventId/matches/likes` | With `asCrewId`: like one person on your crew's behalf → `{ liked: true, blend }` |
+| PUT | `/events/:eventId/matches/preferences` | `openToCrews` — "Open to joining a crew tonight" (until the end of your occurrence) |
+| POST | `/blends/:blendId/reveal` | One tap reveals your crew **in this Blend** → `{ revealed, keptPrivate }` |
+| GET | `/blends` | My open Blends: room, clock, both sides' people |
+
+**No voting.** Any member of a crew that is here (two or more checked in) likes
+on the crew's behalf; the crew chat gets a line, *"liked Crew Nebula for the
+crew"* (or the person's pseudonym), from the member who tapped — transparency
+instead of a quorum. Nobody else is told: no push, no bell row, and the card's
+`youLiked` is only ever about your side. Liking twice is liking once. When the
+host turned crews off, every crew like is 403.
+
+**Crew ↔ person** has guardrails (§8.3): the person turned on `openToCrews` —
+which lasts until the end of the occurrence they said it at, and `false` clears
+it (403 for their own like until they do — it is their switch); the crew has
+"Room for one more" (`openToSolo`) and 6 or fewer **active** members (403 for a
+crew member's like until it does); and if the crew is out for dating, the
+person must be too. A crew member's like of a **person** tells them nothing
+about that person: not here, not opted in, not out for dating, or kept apart
+from anybody in the crew — each answers `{ liked: true, blend: null }`, exactly
+as a like that stood, and nothing is stored. Anything about the other side of a
+like of a **crew** — not here, hidden, a guardrail, anybody on one side kept
+apart (a block or a closed conversation) from anybody on the other, two crews
+sharing a member — is the same 404 as a crew that does not exist. The block
+check is asked again inside the transaction that would write the like and the
+Blend: a block landing in between aborts both.
+
+**A Blend.** Crew A liked crew B and B liked A (any members), or a crew and a
+person liked each other: `blends` gets one row — two likes at the same instant
+still make one, under a lock on the pair and a unique per pair per occurrence —
+and a room of kind `blend`. A Blend between the pair that has closed stays
+their one row for the occurrence: liking again answers `blend: null`. Everyone
+it lets in but the person whose like made it gets `blend` (`blendId`,
+`chatGroupId`): *"It's a Blend"*, naming nobody.
+
+**Who is in it: who was here when it matched.** The room gets a member row for
+each member of either crew **checked in at the occurrence at that moment**, and
+the person — a snapshot. A crewmate who arrives later is not in it (no row, and
+every door to a room starts from the row). A member who leaves their crew
+leaves its Blends (out live, refused after); a suspended or erased one is out
+too. They speak in **tonight's pseudonyms** (the ones they carry in the event's
+room), handles scoped to the Blend's room. `GET /blends` lists the snapshot as
+its door admits it now, minus anybody kept apart from you and anybody who
+turned "show online" off. Anyone may leave on their own
+(`POST /chat/groups/:id/leave`); the room stays for the rest.
+
+**A block inside a Blend hides that pair; the room goes on** (D-9). Anybody on
+one side kept apart from anybody on the other — a block, or a closed
+conversation, either way — is refused by the Blend's door, both of them, and
+every writer of a block takes their sockets out at once; everyone else keeps
+the room. A Blend handle (from its roster) is enough to block somebody: the
+block route opens it for the people that Blend lets in, and for nobody else.
+
+**It closes** 12 hours after the occurrence ends — the door on the clock, the
+sweeper archiving it from `blends.closes_at` (`blends_open_closes_at`) — and
+earlier when either side's crew dissolves or a moderator hides it. Crew likes
+that never made a Blend are deleted 12 hours after their occurrence ends.
+
+**The crew reveal is scoped to one Blend** (owner decision (a), C2). In an open
+Blend, any member taps reveal: each member of their crew who is checked in now
+and in the Blend's room, and has not switched on "keep me anonymous" (read
+again as the reveal is written) — consent was given on joining — is revealed
+**to that Blend's people only** (`blend_reveals`): first name and one photo on
+`GET /blends`. Not to the event's room, its roster or deck, not in any DM, not
+in another Blend. The matched person in a crew ↔ person Blend reveals only
+themselves. `GET /blends` says *"N revealed · M keep it private"* per crew.
+Switching "keep me anonymous" on afterwards applies from then on (D-10): a
+reveal already made is not undone. Deleting your account deletes your reveals.
 
 ---
 
@@ -2437,6 +2649,9 @@ them any more. Rows written before that are hidden, and retention removes them.
 | An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going, maybe, waitlisted and saved | `event:{eventId}`, replaced in place: only the latest state is true |
 | An organiser announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, board, message request | The person it is about, immediately | One each |
+| A crew invite | The friend invited (`crew_invite`, `crewId`), naming nobody | One each |
+| "We're here" | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`), once per person per night; no name, no place | One each |
+| A Blend | Everyone the Blend room lets in, but the person whose like made it (`blend`, `blendId`, `chatGroupId`); no name, nothing about who liked first | One each |
 | An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
 
 A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push

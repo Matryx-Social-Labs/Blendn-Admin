@@ -1,3 +1,4 @@
+import { firstName, UNNAMED } from "./conversation-identity"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
 import { resolveUserRef } from "./room-handle"
@@ -448,4 +449,55 @@ export async function identityForRef(
   const { userId, eventId: room } = resolveUserRef(ref) ?? { userId: ref, eventId: null }
   if (userId === viewerId) return { userId, room, identified: true }
   return { userId, room, identified: await maySeeIdentity(viewerId, userId, room ? { room } : {}) }
+}
+
+/**
+ * The name each of these people goes by in a room, for every surface that
+ * prints one there — the history, the live message, typing, the roster, the
+ * reply push — so they cannot disagree (plan v2 §6/§7).
+ *
+ * - **A crew's room: their first name.** Crew members are there because a
+ *   friend invited them and they accepted, which is the friend-surface rule
+ *   (2026-09-27): both said yes, so real names. The first name only, never the
+ *   full one (SCRUM-493: a full name reaching a room was a defect).
+ * - **A Blend's room: tonight's pseudonym** — the one each person carries in
+ *   the event's own room. A reveal in the Blend shows on its people list
+ *   (`blendsOf`, lib/crews/blends.ts), never in the chat.
+ * - **Every other room: the pseudonym on their member row in it**, as before —
+ *   an event's, a venue day's, a board post's. Nobody is named in those here;
+ *   who may be recognised there is `visibleInRoom`'s question, asked by the
+ *   roster and the deck, not by the chat.
+ *
+ * Unknown people (no row, an erased account) fall back to "Attendee" in a
+ * pseudonymous room and "Someone" in a crew's, never to anything identifying.
+ */
+export async function namesInRoom(
+  room: { id: string; kind: "event" | "crew" | "blend" | "board_post" },
+  userIds: readonly string[]
+): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds)]
+  if (ids.length === 0) return new Map()
+  if (room.kind === "crew") {
+    const people = await db.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, deletedAt: true, profile: { select: { name: true } } },
+    })
+    const named = new Map(
+      people.map((p) => [p.id, p.deletedAt ? UNNAMED : firstName(p.profile?.name || p.name || UNNAMED)])
+    )
+    return new Map(ids.map((id) => [id, named.get(id) ?? UNNAMED]))
+  }
+  // A Blend's people go by their names in the event's room; anything else by its own rows.
+  const eventId =
+    room.kind === "blend"
+      ? (await db.chat_groups.findUnique({ where: { id: room.id }, select: { blend: { select: { occurrence: { select: { event_id: true } } } } } }))
+          ?.blend?.occurrence.event_id
+      : undefined
+  if (room.kind === "blend" && !eventId) return new Map(ids.map((id) => [id, "Attendee"]))
+  const rows = await db.chat_group_members.findMany({
+    where: { ...(eventId ? { chat_group: { event_id: eventId } } : { chat_group_id: room.id }), user_id: { in: ids } },
+    select: { user_id: true, anonymous_name: true },
+  })
+  const named = new Map(rows.map((r) => [r.user_id, r.anonymous_name || "Attendee"]))
+  return new Map(ids.map((id) => [id, named.get(id) ?? "Attendee"]))
 }

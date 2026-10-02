@@ -6,6 +6,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { evictUserSockets } from "@/lib/socket-server"
 import { closeRoomSockets } from "@/lib/room-close"
+import { settleCrewsAfterErasure } from "@/lib/crews/sweep"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
@@ -79,6 +80,23 @@ export async function DELETE(request: NextRequest) {
       })
     ).map((r) => r.message_id)
 
+    /*
+     * Their crews: locked, then left, INSIDE the erasure below, and settled
+     * after it (D-15: one left dissolves; an owner is handed on). Read inside,
+     * not before, so a crew they joined a moment ago is not missed: the
+     * DELETE returns exactly the rows it took. The lock comes before the
+     * room rows are touched — crew row first, then its room, the order every
+     * crew writer takes (lib/crews/sweep.ts).
+     */
+    const lockCrews = db.$queryRaw<{ id: string }[]>`
+      SELECT c.id::text FROM crews c
+      WHERE c.dissolved_at IS NULL
+        AND c.id IN (SELECT crew_id FROM crew_members WHERE user_id = ${authUser.userId})
+      ORDER BY c.id
+      FOR UPDATE OF c`
+    const leaveCrews = db.$queryRaw<{ crew_id: string }[]>`
+      DELETE FROM crew_members WHERE user_id = ${authUser.userId} RETURNING crew_id::text`
+
     // The rooms of their posts, which close with the erasure below (E1, E3).
     const postRooms = await db.chat_groups.findMany({
       where: { kind: "board_post", board_post: { author_id: authUser.userId } },
@@ -86,7 +104,7 @@ export async function DELETE(request: NextRequest) {
     })
 
     const deletedAt = new Date()
-    await db.$transaction([
+    const erasure = [
       /*
        * FIRST, before anything below scrubs it: the copy of what they
        * registered with that the IT Rules 2021, r.3(1)(h), require for 180
@@ -178,6 +196,8 @@ export async function DELETE(request: NextRequest) {
        * them still hold a conversation. The *choices* are personal and go.
        */
       db.event_match_preferences.deleteMany({ where: { user_id: authUser.userId } }),
+      // Their crews' rows locked before any room row below (see `lockCrews`).
+      lockCrews,
       /*
        * Out of every room they were in. `left`, not deleted, for the reason
        * the sweeper gives (lib/chat-lifecycle.ts): the pseudonym lives on the
@@ -211,6 +231,19 @@ export async function DELETE(request: NextRequest) {
         where: { OR: [{ sender_id: authUser.userId }, { recipient_id: authUser.userId }] },
       }),
       db.friend_invites.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * Out of every crew, and every crew invite either way goes — removal
+       * markers too: there is nobody left to keep out. Their crew chats'
+       * member rows went `left` above with every room's, and their messages
+       * stay, as in any room. Each crew is settled after the commit
+       * (`settleCrewsAfterErasure`): one left alone dissolves.
+       */
+      db.crew_invites.deleteMany({
+        where: { OR: [{ invited_user_id: authUser.userId }, { invited_by: authUser.userId }] },
+      }),
+      leaveCrews,
+      // Their reveals inside Blends: a name shown to that night's people, theirs to take back now.
+      db.blend_reveals.deleteMany({ where: { user_id: authUser.userId } }),
       /*
        * DELETED, not scrubbed, and the consequence is stated because it is
        * visible: every historical "active this week" figure drops by the days
@@ -406,7 +439,8 @@ export async function DELETE(request: NextRequest) {
           AND data->>'requestId' IN (
             SELECT id::text FROM message_requests WHERE recipient_id = ${authUser.userId}
           )`,
-    ])
+    ]
+    const erased = await db.$transaction(erasure)
 
     /*
      * After the transaction, not inside it: storage is not transactional and
@@ -425,6 +459,10 @@ export async function DELETE(request: NextRequest) {
     // Their posts' rooms are archived and their door now says hidden; whoever
     // was still in one is taken out, as from a post withdrawn (E3).
     for (const room of postRooms) closeRoomSockets(room.id)
+    // A crew they leave with one person in it dissolves; an owner is handed
+    // on. Never throws; a crew it misses, the chat sweeper repairs.
+    const leftCrews = erased[erasure.indexOf(leaveCrews)] as { crew_id: string }[]
+    await settleCrewsAfterErasure(leftCrews.map((row) => row.crew_id))
 
     // Seats they held are free now; the waitlist moves, per event.
     for (const eventId of openEventIds) {

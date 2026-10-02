@@ -223,6 +223,48 @@ async function clean() {
     await db.events.delete({ where: { id: event.id } })
   }
 
+  /*
+   * Crew rows before the people: every crew foreign key is RESTRICT, so a
+   * seeded account that made or joined a crew while the room was being
+   * driven could not be deleted. A crew one of them made goes whole — its
+   * creator is the row it cannot outlive — with its room.
+   */
+  const crews = (
+    await db.crews.findMany({
+      where: { OR: [{ created_by: { in: ids } }, { members: { some: { user_id: { in: ids } } } }] },
+      select: { id: true, created_by: true },
+    })
+  ).filter((c) => ids.includes(c.created_by)).map((c) => c.id)
+  // Their Blends and likes first: a Blend's room and its reveals hang off it, and both off the crews.
+  const blends = (
+    await db.blends.findMany({
+      where: { OR: [{ a_crew_id: { in: crews } }, { b_crew_id: { in: crews } }, { b_user_id: { in: ids } }] },
+      select: { id: true },
+    })
+  ).map((b) => b.id)
+  const rooms = { OR: [{ crew_id: { in: crews } }, { blend_id: { in: blends } }] }
+  await db.chat_messages.deleteMany({ where: { chat_group: rooms } })
+  await db.chat_group_members.deleteMany({ where: { chat_group: rooms } })
+  await db.chat_groups.deleteMany({ where: rooms })
+  await db.blend_reveals.deleteMany({ where: { OR: [{ blend_id: { in: blends } }, { user_id: { in: ids } }] } })
+  await db.blends.deleteMany({ where: { id: { in: blends } } })
+  await db.crew_likes.deleteMany({
+    where: {
+      OR: [
+        { from_crew_id: { in: crews } },
+        { to_crew_id: { in: crews } },
+        { from_user_id: { in: ids } },
+        { to_user_id: { in: ids } },
+        { liked_by_user_id: { in: ids } },
+      ],
+    },
+  })
+  await db.crew_invites.deleteMany({
+    where: { OR: [{ crew_id: { in: crews } }, { invited_user_id: { in: ids } }, { invited_by: { in: ids } }] },
+  })
+  await db.crew_members.deleteMany({ where: { OR: [{ crew_id: { in: crews } }, { user_id: { in: ids } }] } })
+  await db.crews.deleteMany({ where: { id: { in: crews } } })
+
   await db.user_interests.deleteMany({ where: { user_id: { in: ids } } })
   await db.profiles.deleteMany({ where: { id: { in: ids } } })
   await db.user.deleteMany({ where: { id: { in: ids } } })

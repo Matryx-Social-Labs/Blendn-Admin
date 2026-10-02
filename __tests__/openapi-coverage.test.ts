@@ -19,6 +19,7 @@ import "@/lib/openapi/paths/mobile-conversations"
 import "@/lib/openapi/paths/mobile-profiles"
 import "@/lib/openapi/paths/mobile-misc"
 import "@/lib/openapi/paths/mobile-friends"
+import "@/lib/openapi/paths/mobile-crews"
 import "@/lib/openapi/paths/dashboard"
 import "@/lib/openapi/paths/system"
 

@@ -61,7 +61,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups",
   tags: ["Mobile Chat"],
   summary: "List chat groups",
-  description: "List the event rooms the user is a member of, with last message and unread count. Rooms of other kinds (a board post's; a crew's or Blend's later) are not listed here, so every row keeps its `event`.",
+  description: "List the event rooms the user is a member of, with last message and unread count. Rooms of other kinds (a board post's, a crew's — see `GET /crews` — and a Blend's later) are not listed here, so every row keeps its `event`.",
   security: bearerAuth,
   request: {
     query: z.object({

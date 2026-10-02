@@ -58,6 +58,10 @@ const ROUTES = [
    * weeks.
    */
   "/api/mobile/board/requests",
+  // My crews and the invites waiting for me (step 8): `{ crews, invites }`.
+  "/api/mobile/crews",
+  // My open Blends (step 8): `{ blends }`.
+  "/api/mobile/blends",
 ]
 
 /**

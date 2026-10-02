@@ -12,10 +12,10 @@ import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
-import { boardPostDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
+import { ownerDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
 import { readableUrl } from "./tigris"
 import { isUuid } from "./api-input"
-import { recognisedInRoomBy } from "./identity"
+import { namesInRoom, recognisedInRoomBy } from "./identity"
 import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
@@ -480,7 +480,7 @@ export async function emitChatTyping(
             kind: true,
             event_id: true,
             event: { select: { status: true, deleted_at: true, kind: true } },
-            board_post: boardPostDoor(socket.data.userId),
+            ...ownerDoor(socket.data.userId),
           },
         },
       },
@@ -497,6 +497,12 @@ export async function emitChatTyping(
     // the same people `emitChatMessage` leaves out. Typing went to the whole
     // room, so a blocker watched the person they blocked type (SCRUM-338).
     const hidden = await blockCounterparties(socket.data.userId)
+    // A crew's room calls its members by first name, a Blend's by tonight's
+    // pseudonym (`namesInRoom`); an event's by the pseudonym on the row.
+    const userName =
+      membership.chat_group.kind !== "event"
+        ? ((await namesInRoom(membership.chat_group, [socket.data.userId])).get(socket.data.userId) ?? "Someone")
+        : membership.anonymous_name || "Someone"
     /*
      * Per recipient, and still not back to the typing socket: `socket.to()`
      * left out the sender's own socket, so this does too. `socket.nsp` is the
@@ -510,7 +516,7 @@ export async function emitChatTyping(
       (idFor) => ({
         chatGroupId,
         userId: idFor(socket.data.userId),
-        userName: membership.anonymous_name || "Someone",
+        userName,
         isTyping,
       }),
       socket.id

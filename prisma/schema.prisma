@@ -121,6 +121,17 @@ model User {
   received_friend_requests friend_requests[] @relation("FriendRequestRecipient")
   friend_invite            friend_invites?
 
+  // Crews — see `crews`
+  crews_created            crews[]           @relation("CrewCreator")
+  crew_memberships         crew_members[]
+  crew_invites_got         crew_invites[]    @relation("CrewInvitee")
+  crew_invites_sent        crew_invites[]    @relation("CrewInviter")
+  crew_likes_as_solo       crew_likes[]      @relation("CrewLikeFromUser")
+  crew_likes_got           crew_likes[]      @relation("CrewLikeToUser")
+  crew_likes_made          crew_likes[]      @relation("CrewLikeBy")
+  blends_as_solo           blends[]          @relation("BlendSolo")
+  blend_reveals            blend_reveals[]
+
   // Announcements
   sent_announcements event_announcements[]
 
@@ -472,6 +483,9 @@ model events {
   external_link     String?
   is_featured       Boolean            @default(false)
   is_recurring      Boolean            @default(false)
+  /// The host lets crews show up together here (plan v2 §6, the kit's "Allow
+  /// group check-in"): crew cards, "We're here" and crew likes. Default on.
+  crews_enabled     Boolean            @default(true)
   check_in_radius   Float              @default(30)
   /// Extent + buffer, superseding check_in_radius. Null falls back to
   /// latitude/longitude/check_in_radius so no existing event needs a backfill.
@@ -761,10 +775,10 @@ model event_check_ins {
 }
 
 /// A room. Every room has a kind and exactly one owner of that kind (plan v2
-/// §7): an event's room is owned by the event, a board post's by the post.
-/// `chat_groups_one_owner` (a CHECK in the migration; schema.prisma cannot say
-/// it, and `db push` drops it) holds the pairing, and refuses `crew` and
-/// `blend` rooms outright until step 8 gives them owner columns.
+/// §7): an event's room is owned by the event, a board post's by the post, a
+/// crew's chat by the crew, a Blend's by the Blend. `chat_groups_one_owner` (a
+/// CHECK in the migration; schema.prisma cannot say it, and `db push` drops
+/// it) holds the pairing.
 ///
 /// Who may enter is `roomOwnerDenial` in lib/room-kind.ts, one switch on
 /// `kind` for the socket join and every HTTP read — never "has a member row".
@@ -779,6 +793,11 @@ model chat_groups {
   /// Set exactly when `kind = board_post`. One room per post; the post cannot
   /// be hard-deleted while it has one (RESTRICT).
   board_post_id   String?           @unique @db.Uuid
+  /// Set exactly when `kind = crew`. One room per crew, made with the crew; it
+  /// outlives nights out and archives when the crew dissolves (RESTRICT).
+  crew_id         String?           @unique @db.Uuid
+  /// Set exactly when `kind = blend`. One room per Blend, made with it.
+  blend_id        String?           @unique @db.Uuid
   /// Unread since the baseline: every row is `event`. Room kinds are `kind`.
   type            chat_group_type   @default(event)
   name            String
@@ -797,6 +816,11 @@ model chat_groups {
   /// evidence, so deleting a post with a room is refused. Account erasure
   /// soft-deletes such a post and archives its room instead.
   board_post board_posts?         @relation(fields: [board_post_id], references: [id], onDelete: Restrict)
+  /// RESTRICT: a crew is never deleted, only dissolved, and its room keeps
+  /// its members' messages as evidence like every other room.
+  crew       crews?               @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  /// RESTRICT, as every owner: a Blend's room is two sides' messages.
+  blend      blends?              @relation(fields: [blend_id], references: [id], onDelete: Restrict)
   messages   chat_messages[]
   members    chat_group_members[]
 
@@ -1006,7 +1030,7 @@ model message_reports {
   id           String        @id @default(uuid()) @db.Uuid
   reporter_id  String
   message_id   String        @db.Uuid
-  message_type String // 'group' | 'private' | 'board_post' | 'board_request'
+  message_type String // 'group' | 'private' | 'board_post' | 'board_request' | 'crew' (message_id = the crew's id)
   reason       String
   description  String?
   /// What the reported words said when the report was filed — board reports
@@ -1063,6 +1087,8 @@ model event_occurrences {
   event     events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
   check_ins event_check_ins[]
   presence_sessions presence_sessions[]
+  crew_likes        crew_likes[]
+  blends            blends[]
 
   @@unique([event_id, occurs_on])
   @@index([event_id, start_time])
@@ -1160,6 +1186,12 @@ enum notification_kind {
   /// with. Sent once per event by `sendRatingRequests`; the app routes this
   /// exact string to `/rate/[eventId]`.
   rating_request
+  /// A friend invited you into a crew; joining needs your accept.
+  crew_invite
+  /// A crewmate tapped "We're here". No place in it: the crew chat says where.
+  crew_here
+  /// Two crews (or a crew and a person) liked each other: a Blend room is open.
+  blend
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.
@@ -2425,6 +2457,11 @@ model event_match_preferences {
   /// Empty falls back to `profiles.intent_default` — see `effectiveIntents`.
   intent   connection_intent[]
   revealed Boolean             @default(false)
+  /// "Open to joining a crew tonight" — a solo person's opt-in to crew cards
+  /// and crew likes (plan v2 §8.3), until the end of the occurrence they said
+  /// it at: null or past means no. A crew never appears in the deck of
+  /// somebody who did not ask for crews, and Tuesday's answer is not Wednesday's.
+  open_to_crews_until DateTime? @db.Timestamptz(6)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -3193,6 +3230,213 @@ model friend_invites {
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// ── Crews ─────────────────────────────────────────────
+
+/// Friends who go out together (plan v2 §6).
+///
+/// Made from the friend graph: every member was invited by a friend and
+/// accepted, and joining is consent to the crew reveal (`crew_members`).
+/// Never deleted — a crew that drops below two members is dissolved
+/// (`dissolved_at`, D-15) and its room archived, so other people's messages
+/// stay. Presence is never stored: "here tonight" is ≥2 members checked into
+/// the same occurrence, asked of `event_check_ins` (lib/crews/presence.ts).
+///
+/// CHECKs in the migration (schema.prisma cannot say them): a name of 2–32
+/// characters, a bio of at most 140, at most 3 tags.
+model crews {
+  id           String              @id @default(uuid()) @db.Uuid
+  /// 2–32 characters, not unique ("The Usual Suspects" can exist twice).
+  /// Through the moderation pipeline and the contact-detail detector.
+  name         String
+  /// At most 140 characters, the same checks.
+  bio          String?
+  /// What the crew is out for. Empty means "not said".
+  intent       connection_intent[]
+  /// Curated slugs only (`CREW_TAGS`), at most 3. Never free text.
+  tags         String[]
+  /// Seeds the generated emblem, so an anonymous crew has a face that is not a face.
+  emblem_seed  String
+  /// "Room for one more tonight": the crew may be matched with one person,
+  /// not only with crews. Never for a crew over `CREW.MAX_SOLO_MATCH` (§8.3).
+  open_to_solo Boolean             @default(false)
+  /// Who made it. Audit only: the owner is `crew_members.role`.
+  created_by   String
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime            @default(now()) @db.Timestamptz(6)
+  dissolved_at DateTime?           @db.Timestamptz(6)
+  /// Hidden by a platform admin after a report (the moderation queue): off
+  /// every surface outside the crew — cards, likes, Blends. Audited.
+  hidden_at    DateTime?           @db.Timestamptz(6)
+
+  creator User           @relation("CrewCreator", fields: [created_by], references: [id], onDelete: Restrict)
+  members crew_members[]
+  invites crew_invites[]
+  likes_sent     crew_likes[] @relation("CrewLikeFrom")
+  likes_got      crew_likes[] @relation("CrewLikeTo")
+  blends_as_a    blends[]     @relation("BlendSideA")
+  blends_as_b    blends[]     @relation("BlendSideB")
+  /// The crew chat (kind `crew`), made with the crew.
+  room    chat_groups?
+
+  @@index([created_by])
+}
+
+enum crew_role {
+  owner
+  member
+}
+
+/// Who is in a crew now. Leaving deletes the row; there is no "left" state to
+/// drift. At most `CREW.MAX_MEMBERS` per crew, counted under a lock on the
+/// crew row (lib/crews/crews.ts), never by a read-then-write.
+model crew_members {
+  crew_id             String    @db.Uuid
+  user_id             String
+  role                crew_role @default(member)
+  joined_at           DateTime  @default(now()) @db.Timestamptz(6)
+  /// "Keep me anonymous even when my crew reveals." A crew reveal writes the
+  /// per-event reveal of every member without this; it never undoes one
+  /// already written (D-10: a reveal can't be unseen).
+  keep_me_anonymous   Boolean   @default(false)
+  /// When they accepted "anyone in this crew can reveal the crew — your name
+  /// and photos — to people you match with". Required: no member without it.
+  consented_reveal_at DateTime  @db.Timestamptz(6)
+
+  crew crews @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  user User  @relation(fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@id([crew_id, user_id])
+  /// "My crews", and the cascade path a user's rows are found by.
+  @@index([user_id])
+  /// NOT here, because schema.prisma cannot express it: one owner per crew, a
+  /// partial unique (`crew_members_one_owner`) in the migration.
+}
+
+/// A friend asked into a crew, waiting for their accept. Only ever a friend of
+/// the person who invited them. Accepting deletes it and writes the member;
+/// declining sets `declined_at`, which hides it from the invitee and holds the
+/// slot nowhere — the inviter is not told, as a friend "Not now" is not told.
+model crew_invites {
+  id              String    @id @default(uuid()) @db.Uuid
+  crew_id         String    @db.Uuid
+  invited_user_id String
+  invited_by      String
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  declined_at     DateTime? @db.Timestamptz(6)
+  /// The owner removed this person. A marker, not an invite: only an owner
+  /// can invite them back, which clears it.
+  removed_at      DateTime? @db.Timestamptz(6)
+
+  crew    crews @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  invitee User  @relation("CrewInvitee", fields: [invited_user_id], references: [id], onDelete: Restrict)
+  inviter User  @relation("CrewInviter", fields: [invited_by], references: [id], onDelete: Restrict)
+
+  /// One invite per person per crew, whatever became of it: asking again
+  /// after a decline would re-notify somebody who said no.
+  @@unique([crew_id, invited_user_id])
+  @@index([invited_user_id])
+  @@index([invited_by])
+}
+
+/// A like between crews, or between a crew and one person, at one occurrence
+/// (plan v2 §6 "no voting", §8.3). Person ↔ person stays `event_likes`.
+///
+/// **Any member present can like on the crew's behalf**: `from_crew_id` is the
+/// crew, `liked_by_user_id` the member who tapped — shown to their own crew as
+/// "Rohan liked Crew Nebula for the crew", and to nobody else. Nobody is told
+/// who liked first; the only outcome anybody sees is a Blend.
+///
+/// Written only by lib/crews/like.ts (`crew-likes-one-writer.test.ts`), which
+/// checks presence, the guardrails and blocks across every member. CHECKs in
+/// the migration: one `from` and one `to`, at least one side a crew, never a
+/// crew liking itself, and a solo like is the solo's own.
+model crew_likes {
+  id               String   @id @default(uuid()) @db.Uuid
+  occurrence_id    String   @db.Uuid
+  from_crew_id     String?  @db.Uuid
+  from_user_id     String?
+  to_crew_id       String?  @db.Uuid
+  to_user_id       String?
+  liked_by_user_id String
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Restrict)
+  from_crew  crews?            @relation("CrewLikeFrom", fields: [from_crew_id], references: [id], onDelete: Restrict)
+  to_crew    crews?            @relation("CrewLikeTo", fields: [to_crew_id], references: [id], onDelete: Restrict)
+  from_user  User?             @relation("CrewLikeFromUser", fields: [from_user_id], references: [id], onDelete: Restrict)
+  to_user    User?             @relation("CrewLikeToUser", fields: [to_user_id], references: [id], onDelete: Restrict)
+  liked_by   User              @relation("CrewLikeBy", fields: [liked_by_user_id], references: [id], onDelete: Restrict)
+
+  /// Liking twice is liking once, per direction per occurrence. NULLs are
+  /// distinct, so each unique binds only the shape it names.
+  @@unique([occurrence_id, from_crew_id, to_crew_id])
+  @@unique([occurrence_id, from_crew_id, to_user_id])
+  @@unique([occurrence_id, from_user_id, to_crew_id])
+  @@index([from_crew_id])
+  @@index([to_crew_id])
+  @@index([from_user_id])
+  @@index([to_user_id])
+  @@index([liked_by_user_id])
+}
+
+/// A mutual like: two crews, or a crew and one person, at one occurrence.
+///
+/// Side A is always a crew. Side B is a crew with a greater id
+/// (`blends_pair_order`, uuid order — no collation applies to a uuid, so the
+/// app's ordering and the CHECK cannot disagree) or one person. One row per
+/// pair per occurrence, so two sides liking each other at the same moment
+/// make one Blend (lib/crews/like.ts serialises the pair too).
+///
+/// Its room (`chat_groups.blend_id`) holds a member row for each person who
+/// was here at match time — the present members of each side, and the person
+/// (a snapshot: a late arrival has no row and the door refuses them) — and
+/// admits those still on their side; it closes `closes_at` = the occurrence's
+/// end + 12 h, or earlier at `closed_at` (a side's crew dissolved or hidden).
+/// A block across the sides hides that pair; the room goes on for the rest.
+model blends {
+  id            String    @id @default(uuid()) @db.Uuid
+  occurrence_id String    @db.Uuid
+  a_crew_id     String    @db.Uuid
+  b_crew_id     String?   @db.Uuid
+  b_user_id     String?
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  closes_at     DateTime  @db.Timestamptz(6)
+  closed_at     DateTime? @db.Timestamptz(6)
+
+  occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Restrict)
+  a_crew     crews             @relation("BlendSideA", fields: [a_crew_id], references: [id], onDelete: Restrict)
+  b_crew     crews?            @relation("BlendSideB", fields: [b_crew_id], references: [id], onDelete: Restrict)
+  b_user     User?             @relation("BlendSolo", fields: [b_user_id], references: [id], onDelete: Restrict)
+  room       chat_groups?
+  reveals    blend_reveals[]
+
+  @@unique([occurrence_id, a_crew_id, b_crew_id])
+  @@unique([occurrence_id, a_crew_id, b_user_id])
+  @@index([a_crew_id])
+  @@index([b_crew_id])
+  @@index([b_user_id])
+  /// NOT here, because schema.prisma cannot express it: the sweeper's partial
+  /// index `blends_open_closes_at` (closes_at) WHERE closed_at IS NULL.
+}
+
+/// One person revealed inside one Blend (C2): their first name and photo shown
+/// to that Blend's people, and nowhere else — not the event's room, its deck,
+/// nor a DM. Written by a crew member's tap for their crew's members here in
+/// the Blend (minus "keep me anonymous", re-read in the writing transaction),
+/// or by the matched person for themselves. Kept (D-10); shown only while the
+/// Blend is open.
+model blend_reveals {
+  blend_id    String   @db.Uuid
+  user_id     String
+  revealed_at DateTime @default(now()) @db.Timestamptz(6)
+
+  blend blends @relation(fields: [blend_id], references: [id], onDelete: Restrict)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@id([blend_id, user_id])
+  @@index([user_id])
 }
 
 // ── Content Moderation ────────────────────────────────

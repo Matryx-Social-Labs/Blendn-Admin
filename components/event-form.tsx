@@ -72,6 +72,7 @@ export function EventForm({
       status: "draft" as const,
       visibility: "public" as const,
       is_featured: false,
+      crews_enabled: true,
       check_in_radius: DEFAULT_CHECK_IN_RADIUS_M,
       category_ids: [],
       amenity_ids: [],

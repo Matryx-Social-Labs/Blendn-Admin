@@ -24,7 +24,7 @@ const mockDb = {
   event_rsvps: { findMany: jest.fn().mockResolvedValue([{ event_id: "ev-1" }, { event_id: "ev-2" }]), deleteMany: jest.fn() },
   event_match_preferences: { deleteMany: jest.fn() },
   // Memberships are marked left, never deleted: the pseudonym lives on the row.
-  chat_group_members: { updateMany: jest.fn() },
+  chat_group_members: { updateMany: jest.fn(() => ({ op: "chat_group_members.updateMany" })) },
   mobile_refresh_tokens: { deleteMany: jest.fn() },
   push_tokens: { deleteMany: jest.fn() },
   photo_checks: { deleteMany: jest.fn() },
@@ -32,6 +32,9 @@ const mockDb = {
   friendships: { deleteMany: jest.fn() },
   friend_requests: { deleteMany: jest.fn() },
   friend_invites: { deleteMany: jest.fn() },
+  // Their crews: locked and left INSIDE the transaction (raw SQL, below), settled after.
+  crew_invites: { deleteMany: jest.fn() },
+  blend_reveals: { deleteMany: jest.fn() },
   product_events: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
@@ -53,7 +56,13 @@ const mockDb = {
   private_conversations: { updateMany: jest.fn() },
   // Returns what it was given, so a test can find a statement in the batch.
   $executeRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ sql: strings.join("?"), values })),
-  $transaction: jest.fn().mockResolvedValue([]),
+  $queryRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ sql: strings.join("?"), values })),
+  // The batch answers each statement as Postgres would; the crew DELETE returns the crew it took them out of.
+  $transaction: jest.fn(async (ops: unknown) =>
+    Array.isArray(ops)
+      ? ops.map((op: { sql?: string }) => (op?.sql?.includes("RETURNING crew_id") ? [{ crew_id: "crew-1" }] : op))
+      : []
+  ),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
@@ -67,6 +76,8 @@ const mockEvict = jest.fn()
 jest.mock("@/lib/socket-server", () => ({ evictUserSockets: (...a: unknown[]) => mockEvict(...a) }))
 const mockCloseRoom = jest.fn()
 jest.mock("@/lib/room-close", () => ({ closeRoomSockets: (...a: unknown[]) => mockCloseRoom(...a) }))
+const mockSettleCrews = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/crews/sweep", () => ({ settleCrewsAfterErasure: (...a: unknown[]) => mockSettleCrews(...a) }))
 const mockPromote = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => mockPromote(...a) }))
 
@@ -157,6 +168,22 @@ describe("deleting an account scrubs the matching inputs", () => {
       where: { OR: [{ sender_id: USER }, { recipient_id: USER }] },
     })
     expect(mockDb.friend_invites.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // Out of every crew, every crew invite either way gone; the crews are
+    // settled after the commit (one left alone dissolves, D-15).
+    expect(mockDb.crew_invites.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ invited_user_id: USER }, { invited_by: USER }] },
+    })
+    // The crews are read INSIDE the erasure — the DELETE returns the rows it
+    // took — and locked before any room row is touched (crew row first).
+    const batch = mockDb.$transaction.mock.calls[0][0] as { sql?: string; values?: unknown[] }[]
+    const lock = batch.findIndex((op) => /FROM crews[\s\S]*FOR UPDATE/.test(op?.sql ?? ""))
+    const leave = batch.findIndex((op) => /DELETE FROM crew_members[\s\S]*RETURNING crew_id/.test(op?.sql ?? ""))
+    const rooms = batch.findIndex((op) => (op as { op?: string })?.op === "chat_group_members.updateMany")
+    expect(lock).toBeGreaterThanOrEqual(0)
+    expect(batch[leave].values).toEqual([USER])
+    expect(lock).toBeLessThan(rooms)
+    expect(mockSettleCrews).toHaveBeenCalledWith(["crew-1"])
+    expect(mockSettleCrews.mock.invocationCallOrder[0]).toBeGreaterThan(mockDb.$transaction.mock.invocationCallOrder[0])
     /*
      * DELETED, not scrubbed. A scrubbed row cannot be counted as a distinct
      * person, so nulling `user_id` would keep a record of when somebody was

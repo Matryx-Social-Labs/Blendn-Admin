@@ -95,6 +95,30 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "DELETED",
     why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence. A post moderation hid is kept: it is removed content, which the IT Rules 2021 r.3(1)(g) require for 180 days. A post WITH A ROOM is kept as a row too (step 7): the room is other people's conversation and kept evidence, and board_post_id is ON DELETE RESTRICT — so the post is taken off the board (deleted_at, which closes the room's door), its body erased, and the room archived with its messages and members.",
   },
+  crew_members: {
+    how: "DELETED",
+    why: "Being in a crew is the person's own standing with their friends, and their reveal consent with it. Deleted inside the erasure (`DELETE … RETURNING`, the crews locked first); each crew they leave is settled after the commit: one left alone dissolves (D-15), an owner is handed on — and the chat sweeper repairs any that settle missed.",
+  },
+  crew_invites: {
+    how: "DELETED",
+    why: "Invites to them and from them: an invite from an erased account would put a ghost's name on somebody's screen, and one to them can never be accepted.",
+  },
+  crew_likes: {
+    how: "RETAINED",
+    why: "A like a crew made is the crew's, and a like on a person is half of somebody else's Blend: `liked_by_user_id` stays as the record of who tapped (CR-I15), on an account that is anonymised, never deleted. Nothing reads it to name anybody.",
+  },
+  blend_reveals: {
+    how: "DELETED",
+    why: "Their name and photo shown inside one Blend (a crew reveal, C2): the disclosure is theirs, and an erased account has no name to show anyway. The Blend and its other people's reveals stay.",
+  },
+  blends: {
+    how: "RETAINED",
+    why: "A Blend is two sides' shared night and the owner of a room of other people's messages (RESTRICT). An erased solo side is out of it at once — the door refuses a deleted account — and it closes 12 hours after the night anyway.",
+  },
+  crews: {
+    how: "RETAINED",
+    why: "A crew belongs to the friends still in it, not to whoever made it: its name and bio are the crew's, `created_by` is an audit field, and the crew goes on (or dissolves) without them.",
+  },
   board_requests: {
     how: "SCRUBBED",
     why: "Same as message_requests: the row survives so the recipient's board does not develop holes, and only the words they SENT are theirs to erase.",
@@ -184,7 +208,10 @@ describe("the deletion contract", () => {
         continue
       }
       const verb = how === "SCRUBBED" ? "updateMany" : "deleteMany"
-      if (!new RegExp(`db\\.${model}\\.${verb}\\(`).test(route)) {
+      // A DELETE written in SQL counts too: the crew rows are deleted with
+      // `DELETE … RETURNING`, so the erasure learns which crews to settle.
+      const sql = how === "DELETED" ? `|DELETE FROM ${model}\\b` : ""
+      if (!new RegExp(`db\\.${model}\\.${verb}\\(${sql}`).test(route)) {
         broken.push(`${model}: declared ${how} but no db.${model}.${verb} in the deletion path`)
       }
     }

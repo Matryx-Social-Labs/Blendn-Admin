@@ -203,6 +203,8 @@ export const eventWriteSchema = z
     cover_image_url: z.string().url().max(2048).nullish(),
     external_link: z.string().url().max(2048).nullish(),
     is_featured: z.boolean().nullish(),
+    /** "Allow crews at this event" — on unless the host turns it off (plan v2 §6). */
+    crews_enabled: z.boolean().nullish(),
     is_recurring: z.boolean().nullish(),
     check_in_radius: z.number().nullish(),
     full_description: z.string().max(20000).nullish(),

@@ -62,6 +62,8 @@ export const eventFormSchema = z.object({
   cover_image_url: z.string().url().optional().or(z.literal("")),
   external_link: z.string().url().optional().or(z.literal("")),
   is_featured: z.boolean().optional(),
+  /** "Allow crews at this event" (plan v2 §6). On unless the host turns it off. */
+  crews_enabled: z.boolean().optional(),
   house_rules: z.string().optional(),
   cancellation_policy: z.string().optional(),
   faq: z.array(faqItemSchema).optional(),
