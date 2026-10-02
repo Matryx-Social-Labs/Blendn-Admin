@@ -9,7 +9,7 @@ import { headcount } from "./presence-sessions"
 import { escalates } from "./sentiment/taxonomy"
 import { resolveOccurrence } from "./occurrences"
 
-import type { LiveSnapshot } from "./live-metrics"
+import { deriveAlerts, type LiveFigures, type LiveSnapshot } from "./live-metrics"
 
 const MINUTE = 60 * 1000
 
@@ -256,7 +256,7 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     }
   }
 
-  return {
+  const figures: LiveFigures = {
     eventId,
     at: now.toISOString(),
     inside: occupancy.inside,
@@ -286,6 +286,17 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     categories: Array.from(categoryCounts.entries())
       .map(([category, count]) => ({ category, count }))
       .sort((a, b) => b.count - a.count),
+  }
+
+  /*
+   * Derived here, on the exact figures, and sent with them. A venue's copy of
+   * this snapshot has its counts rounded to ranges (`forVenue`), and an alert
+   * derived from a range would fire on the wrong side of every threshold.
+   */
+  return {
+    ...figures,
+    view: "host",
+    alerts: deriveAlerts(figures, { scheduledEnd: event.end_time, scheduledStart: event.start_time, now }),
   }
 }
 

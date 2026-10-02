@@ -3,7 +3,7 @@ import type { rsvp_status, user_role } from "@prisma/client"
 
 import { distinctAttendeeCounts } from "./attendee-counts"
 import { db } from "./db"
-import { discloseVenueCounts, MIN_CELL } from "./disclosure"
+import { discloseVenueCounts, liveCountBucket, MIN_CELL, type LiveCountBucket } from "./disclosure"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { eventScopeFor, labelScopeFor, labelScoper } from "./reports"
@@ -199,7 +199,8 @@ export type EventAttendees =
       walkIns: number | null
       noShows: number | null
     }
-  | { view: "count"; started: boolean; came: number | null }
+  /** `came` is a range while the event runs: it is still moving (SCRUM-516). */
+  | { view: "count"; started: boolean; came: number | LiveCountBucket | null }
 
 const QUARTER_HOUR_MS = 15 * 60_000
 
@@ -237,11 +238,15 @@ async function eventPeople(eventId: string) {
  * the going RSVPs and the distinct guests who came -- so the Events list, the
  * venue page, the exports, this Overview and this Attendees tab cannot print
  * what another holds back (SCRUM-501). Zero is shown: it names nobody.
+ *
+ * `cameSoFar` is the same people as a range, for while the night still runs:
+ * a count that moves by one as each person arrives says who just did, floor
+ * or no floor (SCRUM-516, D-19).
  */
 export async function venueCounts(
   eventId: string,
   capacity: number | null = null
-): Promise<{ going: number | null; came: number | null; fillPct: number | null }> {
+): Promise<{ going: number | null; came: number | null; fillPct: number | null; cameSoFar: LiveCountBucket }> {
   const [going, arrivals] = await Promise.all([
     db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
     distinctAttendeeCounts([eventId]),
@@ -252,6 +257,7 @@ export async function venueCounts(
     going: going === 0 ? 0 : shown.going,
     came: came === 0 ? 0 : shown.attended,
     fillPct: shown.fillPct,
+    cameSoFar: liveCountBucket(came),
   }
 }
 
@@ -278,7 +284,11 @@ export async function eventAttendees(
   const { canEdit, canViewAttendees } = eventPermissions(actor, event)
   if (!canViewAttendees) return null
 
-  if (!canEdit) return { view: "count", started: event.start_time <= now, came: (await venueCounts(eventId)).came }
+  if (!canEdit) {
+    const counts = await venueCounts(eventId)
+    const running = event.start_time <= now && now < event.end_time
+    return { view: "count", started: event.start_time <= now, came: running ? counts.cameSoFar : counts.came }
+  }
 
   // Ids and times only. Nothing here may select a name, email, image or phone.
   const { arrived, committed } = await eventPeople(eventId)

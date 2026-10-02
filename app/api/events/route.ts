@@ -5,7 +5,8 @@ import { getAuth } from "@/lib/auth"
 import { eventWriteSchema } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { resolveEventCity } from "@/lib/location"
-import { visibleEventsWhere } from "@/lib/event-visibility"
+import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
+import { liveCountBucket } from "@/lib/disclosure"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
 import { canCreateEvents } from "@/lib/rbac"
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
      * screen asks the same question, and used to ask it through this route and
      * then answer it differently in its own actions. One module, one answer.
      */
-    const where = await visibleEventsWhere(session.user)
+    const { where, actor } = await visibleEventsScope(session.user)
 
     // Bounded so the payload can't grow without limit as events accumulate.
     // Response stays a plain array — callers can raise the window with ?limit.
@@ -67,8 +68,14 @@ export async function GET(req: NextRequest) {
     // grouped query for the whole page rather than one per row.
     const occupancies = await getOccupancies(events.map((e) => e.id))
 
+    // A venue reading a night it does not run gets the live count as a range
+    // (SCRUM-516), as on its Live tab.
+    const exact = (e: (typeof events)[number]) => session.user.role === "app_admin" || hostsEvent(actor, e)
     return NextResponse.json(
-      events.map((e) => ({ ...e, occupancy: occupancies.get(e.id)?.inside ?? 0 }))
+      events.map((e) => {
+        const inside = occupancies.get(e.id)?.inside ?? 0
+        return { ...e, occupancy: exact(e) ? inside : liveCountBucket(inside) }
+      })
     )
   } catch (error) {
     logger.error("Error fetching events", { error: error instanceof Error ? error.message : String(error) })
