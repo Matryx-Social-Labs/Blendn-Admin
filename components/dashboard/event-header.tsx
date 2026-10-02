@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { IconEdit, IconQrcode } from "@tabler/icons-react"
 
-import { EventTabs, eventTabHref, eventTabsFor, type EventTabKey } from "@/app/dashboard/events/[id]/event-tabs"
+import { EventTabs, eventTabHref, eventTabsFor, sharesLink, type EventTabKey } from "@/app/dashboard/events/[id]/event-tabs"
 import { EventVenueLink } from "@/app/dashboard/events/[id]/venue-link"
 import { EventLifecycle } from "@/components/dashboard/event-lifecycle"
 import { PageHeader } from "@/components/dashboard/page-header"
@@ -16,8 +16,9 @@ import { eventClock, eventStateFor } from "@/lib/event-phase"
  *
  * The event is named by its own title (`OWNED_HEADERS`), with the two things
  * an organiser reaches for from anywhere on it — the QR code and the editor —
- * as the header's actions. "Edit event" is `canEdit`'s; a venue owner operates
- * the night and edits nothing.
+ * as the header's actions. Both are `canEdit`'s (the code only for a published
+ * event that is not a venue day, `sharesLink`); a venue owner operates the
+ * night and hands out nobody's link.
  */
 export function EventHeader({
   data: { event, permissions },
@@ -51,7 +52,10 @@ export function EventHeader({
     canOperate: permissions.canOperate,
     canEdit: permissions.canEdit,
     canViewAttendees: permissions.canViewAttendees,
+    kind: event.kind,
+    status: event.status,
   })
+  const share = sharesLink({ canEdit: permissions.canEdit, kind: event.kind, status: event.status })
 
   return (
     <div className="flex flex-col gap-4">
@@ -60,12 +64,14 @@ export function EventHeader({
         back={{ href: "/dashboard/events", label: "Events" }}
         actions={
           <>
-            <Button asChild variant="outline" className="pointer-coarse:h-11">
-              <Link href={eventTabHref(event.id, "share")}>
-                <IconQrcode aria-hidden className="size-4" />
-                QR code
-              </Link>
-            </Button>
+            {share ? (
+              <Button asChild variant="outline" className="pointer-coarse:h-11">
+                <Link href={eventTabHref(event.id, "share")}>
+                  <IconQrcode aria-hidden className="size-4" />
+                  QR code
+                </Link>
+              </Button>
+            ) : null}
             {permissions.canEdit ? (
               <Button asChild variant="outline" className="pointer-coarse:h-11">
                 <Link href={`/dashboard/events/${event.id}/edit`}>

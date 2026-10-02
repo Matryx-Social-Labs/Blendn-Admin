@@ -20,7 +20,7 @@ import { loadEventPage } from "@/lib/event-page"
 import { EVENT_LINKS_LIVE, eventShareUrl } from "@/lib/event-share"
 
 import { EventAttendeesCount, EventAttendeesTable } from "./attendees-table"
-import { eventTabsFor, type EventTabKey } from "./event-tabs"
+import { eventTabsFor, sharesLink } from "./event-tabs"
 import { Overview } from "./overview"
 import { curationState } from "@/lib/curation"
 import { eventRefusals, refusalSummary } from "@/lib/check-in-refusals"
@@ -71,11 +71,17 @@ export default async function EventDetailPage({
     canOperate: permissions.canOperate,
     canEdit: permissions.canEdit,
     canViewAttendees: permissions.canViewAttendees,
+    kind: event.kind,
+    status: event.status,
   })
   // Room chat and Feedback are their own routes; old `?tab=` links still land there.
   if (requestedTab === "feedback") redirect(`/dashboard/events/${event.id}/feedback`)
   if (requestedTab === "chat") redirect(`/dashboard/events/${event.id}/messaging`)
-  const activeTab = (tabs.find((t) => t.key === requestedTab)?.key ?? "overview") as EventTabKey
+  const activeTab = tabs.find((t) => t.key === requestedTab)?.key
+  // A tab this viewer is not offered — the code for a draft, a venue day or a
+  // night another host runs, the composer for a venue — is a URL, not a way
+  // round the tab list: back to the overview, as an address the bar can show.
+  if (requestedTab && requestedTab !== "overview" && !activeTab) redirect(`/dashboard/events/${event.id}`)
 
   const venueName = event.venue?.name ?? event.venue_name
   const clock = eventClock(event.timezone)
@@ -85,7 +91,7 @@ export default async function EventDetailPage({
    * title, which only this page has loaded and checked the viewer may see.
    * Room chat and Feedback render the same header and tabs.
    */
-  const header = <EventHeader data={data} active={activeTab} now={now} />
+  const header = <EventHeader data={data} active={activeTab ?? "overview"} now={now} />
 
   if (activeTab === "live") {
     const issues = await issuesFor(event.id)
@@ -116,6 +122,10 @@ export default async function EventDetailPage({
   }
 
   if (activeTab === "share") {
+    // Offered only by `sharesLink`; asked again, because a URL is not a tab list.
+    if (!sharesLink({ canEdit: permissions.canEdit, kind: event.kind, status: event.status })) {
+      redirect(`/dashboard/events/${event.id}`)
+    }
     return (
       <div className="flex flex-col gap-5">
         {header}
@@ -123,7 +133,6 @@ export default async function EventDetailPage({
           url={eventShareUrl(event.id)}
           title={event.title}
           when={`${clock.dateTime(event.start_time)}${venueName ? ` · ${venueName}` : ""}`}
-          status={event.status}
           linksLive={EVENT_LINKS_LIVE}
         />
       </div>
@@ -141,13 +150,12 @@ export default async function EventDetailPage({
       <div className="flex flex-col gap-5">
         {header}
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @4xl/main:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          {/* Untitled: each carries its own heading and tabs. */}
-          <Panel>
+          <Panel title="Into the room" hint="announcements, polls and sponsored messages">
             <EventMessaging eventId={event.id} mayAuthorSponsored={mayAuthorSponsored} />
           </Panel>
           {/* A sponsored campaign is refused without a placement, and the fix
               for that refusal lives here. */}
-          <Panel>
+          <Panel title="Sponsors" hint="the brands placed at this event">
             <EventSponsors eventId={event.id} />
           </Panel>
         </div>

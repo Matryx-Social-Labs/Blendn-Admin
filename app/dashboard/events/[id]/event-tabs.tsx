@@ -20,7 +20,14 @@ export type EventTabKey = "overview" | "live" | "attendees" | "chat" | "announce
 export function eventTabsFor(
   startAt: string,
   endAt: string,
-  opts: { canOperate: boolean; canEdit: boolean; canViewAttendees: boolean }
+  opts: {
+    canOperate: boolean
+    canEdit: boolean
+    canViewAttendees: boolean
+    /** `venue_day` is a venue's hidden daily room: no feedback digest, no public link. */
+    kind: string
+    status: string
+  }
 ): Array<{ key: EventTabKey; label: string }> {
   const phase = livePhaseFor(startAt, endAt)
   const tabs: Array<{ key: EventTabKey; label: string }> = [{ key: "overview", label: "Overview" }]
@@ -39,11 +46,22 @@ export function eventTabsFor(
     // Speaking into the room and placing sponsors is whoever runs the event;
     // a venue owner announcing into a night they do not run is K3.12 (R37).
     if (opts.canEdit) tabs.push({ key: "announcements", label: "Announcements & sponsors" })
-    if (phase === "post") tabs.push({ key: "feedback", label: "Feedback" })
-    // The code is the event's public address: nothing an operator may not see.
-    tabs.push({ key: "share", label: "QR & link" })
+    if (phase === "post" && opts.kind !== "venue_day") tabs.push({ key: "feedback", label: "Feedback" })
+    if (sharesLink(opts)) tabs.push({ key: "share", label: "QR & link" })
   }
   return tabs
+}
+
+/**
+ * Whether the QR & link tab, and the header's "QR code", are offered: to
+ * whoever runs the event, for a published event that is not a venue day.
+ *
+ * Not a venue owner on another host's night — the code is the host's to hand
+ * out — and not a draft, which nobody can open yet; a venue day is a hidden
+ * room with no public page at all.
+ */
+export function sharesLink(opts: { canEdit: boolean; kind: string; status: string }): boolean {
+  return opts.canEdit && opts.kind !== "venue_day" && opts.status === "published"
 }
 
 /** Where a tab lives. Room chat and Feedback are their own routes; the rest are `?tab=`. */

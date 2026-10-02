@@ -104,7 +104,7 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      * One upset attendee posting six complaints is one person. Counting
      * messages would let them unlock their own quotes.
      */
-    const src = code("app/dashboard/events/[id]/feedback/actions.ts")
+    const src = code("lib/feedback-digest.ts")
     expect(src).toMatch(/categoryContributors = new Map<string, Set<string>>/)
     expect(src).toMatch(/people\.add\(row\.message\.user_id\)/)
   })
@@ -119,7 +119,7 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      * Third time this session a control caught a structural test asserting the
      * consumer and not the producer.
      */
-    const src = code("app/dashboard/events/[id]/feedback/actions.ts")
+    const src = code("lib/feedback-digest.ts")
     expect(src).toMatch(
       /const quotable = mayQuote\(\{\s*contributors: categoryContributors\.get\(row\.category\)\?\.size \?\? 0,\s*population,\s*\}\)/
     )
@@ -131,7 +131,7 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      * another route, so suppressing the text alone would have left the hole
      * open.
      */
-    const src = code("app/dashboard/events/[id]/feedback/actions.ts")
+    const src = code("lib/feedback-digest.ts")
     expect(src).toMatch(/at: quotable \? row\.message\.created_at\.toISOString\(\) : null/)
     expect(src).toMatch(/text: quotable \? row\.message\.content : null/)
     expect(src).toMatch(/pseudonym: quotable \?/)
@@ -139,9 +139,14 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
 
   it("suppresses the category count without hiding the category", () => {
     // An organiser still needs to know a safety concern was raised.
-    const src = code("app/dashboard/events/[id]/feedback/actions.ts")
-    expect(src).toMatch(/count: disclosure\.value/)
-    expect(src).toMatch(/suppressed: disclosure\.suppressed/)
+    const src = code("lib/feedback-digest.ts")
+    // Since step 15 the digest lives in lib/feedback-digest.ts, and a venue's
+    // view holds a count under the floor back too; the value still comes from
+    // the disclosure, and the category is still listed.
+    expect(src).toMatch(
+      /const shown = venue && disclosure\.value !== null && disclosure\.value < MIN_CELL_VENUE \? null : disclosure\.value/
+    )
+    expect(src).toMatch(/count: shown,\s*suppressed: shown === null/)
   })
 })
 

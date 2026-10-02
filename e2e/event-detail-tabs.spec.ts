@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { test, expect, chromium, type Browser, type Page } from "@playwright/test"
 
 import type { RoleKey } from "./fixtures/auth"
@@ -60,13 +61,11 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
 
     await expect(main(page).getByRole("heading", { level: 1, name: "Sunset Sessions at The Humming Tree" })).toBeVisible()
     await expect(main(page).getByRole("link", { name: "Edit event" })).toHaveAttribute("href", `/dashboard/events/${id}/edit`)
-    await expect(tabs(page).getByRole("link")).toHaveText([
-      "Overview",
-      "Attendees",
-      "Room chat",
-      "Announcements & sponsors",
-      "QR & link",
-    ])
+    // Membership, not an exact list: Live and Feedback come and go with the
+    // seed's clock.
+    for (const name of ["Overview", "Attendees", "Room chat", "Announcements & sponsors", "QR & link"]) {
+      await expect(tabs(page).getByRole("link", { name, exact: true })).toBeVisible()
+    }
     found.push(...(await axeMain(page)).map((v) => `overview@${width}: ${v}`))
 
     for (const [name, path] of [
@@ -94,25 +93,88 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
     }
     const download = page.waitForEvent("download")
     await main(page).getByRole("button", { name: "Download PNG" }).click()
-    expect((await download).suggestedFilename()).toBe("blendn-sunset-sessions-at-the-humming-tree-qr.png")
+    const png = await download
+    expect(png.suggestedFilename()).toBe("blendn-sunset-sessions-at-the-humming-tree-qr.png")
+    // The file itself, decoded in the page: exactly 1024 px, and it scans to the event.
+    const bytes = readFileSync((await png.path())!).toString("base64")
+    await page.addScriptTag({ path: require.resolve("jsqr/dist/jsQR.js") })
+    const read = await page.evaluate(async (b64) => {
+      const image = new Image()
+      image.src = `data:image/png;base64,${b64}`
+      await image.decode()
+      const canvas = document.createElement("canvas")
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext("2d")!
+      context.drawImage(image, 0, 0)
+      const data = context.getImageData(0, 0, canvas.width, canvas.height)
+      type Decode = (d: Uint8ClampedArray, w: number, h: number) => { data: string } | null
+      const lib = (window as unknown as { jsQR: Decode | { default: Decode } }).jsQR
+      const jsQR = typeof lib === "function" ? lib : lib.default
+      return { width: image.naturalWidth, height: image.naturalHeight, data: jsQR(data.data, data.width, data.height)?.data ?? null }
+    }, bytes)
+    expect(read).toEqual({ width: 1024, height: 1024, data: `https://www.blendn.app/event/${id}` })
+
+    // Printing prints the door slide and nothing else, and while the link
+    // opens nothing (SCRUM-537) the slide carries no code and no address.
+    await page.emulateMedia({ media: "print" })
+    const slide = page.locator("[data-door-slide]")
+    await expect(slide).toBeVisible()
+    await expect(page.locator('[data-slot="sidebar-container"]')).toBeHidden()
+    await expect(main(page)).toBeHidden()
+    await expect(slide).toContainText("find this event by its name")
+    await expect(slide.getByRole("img")).toHaveCount(0)
+    await expect(slide).not.toContainText("www.blendn.app")
+    await page.emulateMedia({ media: "screen" })
+    await expect(slide).toBeHidden()
     found.push(...(await axeMain(page)).map((v) => `share@${width}: ${v}`))
     await ctx.close()
   }
   expect(found).toEqual([])
 })
 
-test("the venue owner gets the room and the code on a night at their venue, and no editor or composer", async ({ baseURL }) => {
+test("the venue owner, on a night at their venue: every tab as the venue, no code, no editor, no composer", async ({
+  baseURL,
+}) => {
+  const found: string[] = []
   const { ctx, page } = await open("venue", 1440, baseURL)
   const href = await sunsetSessions(page)
   await page.goto(href, { waitUntil: "networkidle" })
-  await expect(main(page).getByRole("link", { name: "QR code" })).toBeVisible()
+
+  // The header: no QR code and no Edit event — the host's, not the building's.
+  await expect(main(page).getByRole("heading", { level: 1, name: "Sunset Sessions at The Humming Tree" })).toBeVisible()
+  await expect(main(page).getByRole("link", { name: "QR code" })).toHaveCount(0)
   await expect(main(page).getByRole("link", { name: "Edit event" })).toHaveCount(0)
-  await expect(tabs(page).getByRole("link", { name: "Room chat" })).toBeVisible()
-  await expect(tabs(page).getByRole("link", { name: "QR & link" })).toBeVisible()
+  await expect(tabs(page).getByRole("link", { name: "QR & link" })).toHaveCount(0)
   await expect(tabs(page).getByRole("link", { name: "Announcements & sponsors" })).toHaveCount(0)
-  // And the URL is not a way round the tab list: the overview, and no composer.
-  await page.goto(`${href}?tab=announcements`, { waitUntil: "networkidle" })
-  await expect(tabs(page).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page")
-  await expect(main(page).getByText("Say something to the room")).toHaveCount(0)
+
+  // Overview: the glance in ranges or a dash, never an exact count of people.
+  const glance = main(page).locator("section", { has: page.getByRole("heading", { name: "At a glance" }) })
+  await expect(glance.getByText(/^(Under 5|5–9|10–19|20\+|—)$/).first()).toBeVisible()
+  await expect(main(page).getByRole("heading", { name: "Your access to this event" })).toBeVisible()
+  found.push(...(await axeMain(page)).map((v) => `venue overview: ${v}`))
+
+  // Attendees: a count, no table of labels.
+  await tabs(page).getByRole("link", { name: "Attendees" }).click()
+  await expect(page).toHaveURL(/\?tab=attendees$/)
+  await expect(main(page).locator("table")).toHaveCount(0)
+  await expect(main(page).getByText(/attendee-[0-9a-f]{12}/)).toHaveCount(0)
+  found.push(...(await axeMain(page)).map((v) => `venue attendees: ${v}`))
+
+  // Room chat: the room and the queue, which is what the building operates.
+  await tabs(page).getByRole("link", { name: "Room chat" }).click()
+  await expect(page).toHaveURL(/\/messaging$/)
+  await expect(main(page).getByRole("heading", { name: "Moderation" })).toBeVisible()
+  await page.waitForLoadState("networkidle")
+  found.push(...(await axeMain(page)).map((v) => `venue room: ${v}`))
+
+  // And neither URL is a way round the tab list.
+  for (const tab of ["share", "announcements"]) {
+    await page.goto(`${href}?tab=${tab}`, { waitUntil: "networkidle" })
+    await expect(page).toHaveURL(new RegExp(`${href}$`))
+    await expect(main(page).getByText("Say something to the room")).toHaveCount(0)
+    await expect(main(page).getByRole("textbox", { name: "Event link" })).toHaveCount(0)
+  }
   await ctx.close()
+  expect(found).toEqual([])
 })

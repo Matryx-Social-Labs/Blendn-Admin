@@ -1,4 +1,4 @@
-import { eventTabsFor } from "@/app/dashboard/events/[id]/event-tabs"
+import { eventTabsFor, sharesLink } from "@/app/dashboard/events/[id]/event-tabs"
 /*
  * From the module that owns it, not through the component that re-exports it.
  *
@@ -25,8 +25,15 @@ const at = (iso: string) => new Date(iso)
 const keys = (
   start: string,
   end: string,
-  opts: { canOperate: boolean; canEdit?: boolean; canViewAttendees?: boolean }
-) => eventTabsFor(start, end, { canViewAttendees: opts.canOperate, canEdit: opts.canOperate, ...opts }).map((t) => t.key)
+  opts: { canOperate: boolean; canEdit?: boolean; canViewAttendees?: boolean; kind?: string; status?: string }
+) =>
+  eventTabsFor(start, end, {
+    canViewAttendees: opts.canOperate,
+    canEdit: opts.canOperate,
+    kind: "event",
+    status: "published",
+    ...opts,
+  }).map((t) => t.key)
 
 describe("livePhaseFor", () => {
   it("reads the phase from the event's own schedule", () => {
@@ -92,7 +99,7 @@ describe("tab visibility follows permissions", () => {
     jest.useRealTimers()
   })
 
-  it("gives an operator the room, the guest list and the code, but not the composer without canEdit", () => {
+  it("gives an operator the room and the guest list, but not the composer or the code without canEdit", () => {
     jest.useFakeTimers().setSystemTime(at("2026-08-05T21:00:00.000Z"))
     const tabs = keys(START, END, { canOperate: true, canEdit: false })
     // The venue-owner case: they can operate the room without being able to
@@ -100,9 +107,10 @@ describe("tab visibility follows permissions", () => {
     expect(tabs).toContain("attendees")
     expect(tabs).toContain("chat")
     expect(tabs).toContain("live")
-    expect(tabs).toContain("share")
-    // Announcing into a night they do not run is K3.12 (R37).
+    // Announcing into a night they do not run is K3.12 (R37); the code is
+    // the host's to hand out.
     expect(tabs).not.toContain("announcements")
+    expect(tabs).not.toContain("share")
     jest.useRealTimers()
   })
 
@@ -114,6 +122,27 @@ describe("tab visibility follows permissions", () => {
     for (const canOperate of [true, false]) {
       expect(keys(START, END, { canOperate })[0]).toBe("overview")
     }
+  })
+})
+
+describe("the QR & link tab (step 15)", () => {
+  it("is offered for a published event that is not a venue day, to whoever runs it", () => {
+    expect(keys(START, END, { canOperate: true, canEdit: true })).toContain("share")
+    expect(sharesLink({ canEdit: true, kind: "event", status: "published" })).toBe(true)
+  })
+
+  it("is not offered for a draft, a cancelled or a completed event, which nobody can open as it stands", () => {
+    for (const status of ["draft", "cancelled", "completed"]) {
+      expect(keys(START, END, { canOperate: true, canEdit: true, status })).not.toContain("share")
+    }
+  })
+
+  it("is not offered on a venue day, and neither is Feedback", () => {
+    jest.useFakeTimers().setSystemTime(at("2026-08-06T02:00:00.000Z"))
+    const tabs = keys(START, END, { canOperate: true, canEdit: true, kind: "venue_day" })
+    expect(tabs).not.toContain("share")
+    expect(tabs).not.toContain("feedback")
+    jest.useRealTimers()
   })
 })
 
