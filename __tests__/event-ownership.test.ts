@@ -44,7 +44,8 @@ describe("owningOrgFor", () => {
      */
     await owningOrgFor({ id: "u1", role: "organizer" })
     expect(mockDb.organisation_members.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { created_at: "asc" } })
+      // Oldest first, then org_id on a tie (step 14 review).
+      expect.objectContaining({ orderBy: [{ created_at: "asc" }, { org_id: "asc" }] })
     )
   })
 

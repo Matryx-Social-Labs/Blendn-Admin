@@ -104,7 +104,7 @@ describe("visibleNavFor", () => {
       "Events",
       "Attendees",
       "Chatrooms",
-      "My organisation",
+      "Team",
       "Reports",
       "Audit log",
     ])
@@ -113,7 +113,7 @@ describe("visibleNavFor", () => {
       "Events",
       "My venues",
       "Chatrooms",
-      "My organisation",
+      "Team",
       "Reports",
       "Audit log",
     ])
@@ -125,7 +125,7 @@ describe("visibleNavFor", () => {
      * and what is waiting on them — not attendees, not moderation, not
      * Chatrooms, not other people's events.
      *
-     * "My organisation" is included because a sponsor's team IS an
+     * "Team" (their organisation) is included because a sponsor's team IS an
      * organisation: they invite colleagues through the same
      * `organisation_invites` flow as every other company on the platform.
      */
@@ -133,7 +133,7 @@ describe("visibleNavFor", () => {
       "Overview",
       "Placements",
       "Brand",
-      "My organisation",
+      "Team",
     ])
   })
 
@@ -150,7 +150,7 @@ describe("visibleNavFor", () => {
     // A host manages their own company; an admin manages every company. Giving
     // an admin the host screen would record support actions as though the org's
     // own owner took them.
-    expect(titles("app_admin")).not.toContain("My organisation")
+    expect(titles("app_admin")).not.toContain("Team")
     for (const role of ["organizer", "venue_owner"]) {
       expect(titles(role)).not.toContain("Organisations")
       expect(titles(role)).not.toContain("Applications")

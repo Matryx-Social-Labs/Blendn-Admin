@@ -11,6 +11,11 @@ import { getModerationQueue } from "./actions"
 import { ModerationTable } from "./moderation-table"
 import { QueueSwitch } from "./queue-switch"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/moderation")
+
 export const dynamic = "force-dynamic"
 
 const TABS: Array<{ value: moderation_status_type; label: string }> = [

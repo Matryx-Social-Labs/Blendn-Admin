@@ -33,7 +33,7 @@ const CLAIMS = "app/dashboard/claims/page.tsx"
 describe("DESIGN_SYSTEM rules the docs already settled", () => {
   it("starts page bodies at h2 — the header owns the only h1", () => {
     /*
-     * `components/site-header.tsx` owns it and it holds the page NAME. The
+     * The layout's `PageHeader` owns it and it holds the page NAME. The
      * header once rendered the name as an eyebrow and the description as the
      * h1, which put the wrong string in the document's only landmark heading.
      */

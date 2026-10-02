@@ -25,6 +25,16 @@ export interface OccurrenceSlot {
 /** How far before a session's start check-in opens. Doors, not the programme. */
 export const CHECK_IN_LEAD_MINUTES = 90
 
+/**
+ * Whether people can still be arriving: from the doors, `CHECK_IN_LEAD_MINUTES`
+ * before the start, to the end. A count of who came moves by one with every
+ * arrival over that window, so a venue is not given it as a number until the
+ * window has closed (SCRUM-516). Pass a day's own times for one day of a run.
+ */
+export function stillArriving(window: { start_time: Date; end_time: Date }, now: Date = new Date()): boolean {
+  return now.getTime() >= window.start_time.getTime() - CHECK_IN_LEAD_MINUTES * 60_000 && now < window.end_time
+}
+
 /** What `pickOccurrence` decides about the door right now. */
 export type OccurrenceVerdict =
   | { ok: true; occurrence: OccurrenceSlot }

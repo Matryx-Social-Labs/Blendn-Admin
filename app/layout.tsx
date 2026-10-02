@@ -21,7 +21,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`dark ${satoshi.variable}`}>
+    // `scroll-pt-16`: the dashboard's top bar is sticky and 60px tall, so a
+    // focused element scrolled into view would otherwise sit underneath it
+    // (WCAG 2.4.11). Harmless on the pages without one.
+    <html lang="en" className={`dark scroll-pt-16 ${satoshi.variable}`}>
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>
         {/*

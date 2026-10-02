@@ -96,26 +96,39 @@ export async function authenticateDashboardSocket(
   }
 }
 
+/** Which copy of the live snapshot a watcher is sent. */
+export type OpsView = "host" | "venue"
+
+/** The room each view's snapshot is emitted to. Separate rooms, so one emit can never reach both. */
+export const opsRoom = (eventId: string, view: OpsView) =>
+  view === "host" ? `event:${eventId}:ops` : `event:${eventId}:ops:venue`
+
 /**
- * May this dashboard user watch this event's live operations?
+ * May this dashboard user watch this event's live operations, and which copy?
  *
  * Same resolver the pages and API routes use, so the socket cannot drift into
  * a different answer from the screen that opened it. Operational access is the
- * right bar: a venue owner gets the live view of an event in their building
- * without being able to edit it.
+ * bar: a venue owner gets the live view of an event in their building without
+ * being able to edit it -- and, not running it, gets it as the venue: counts
+ * as ranges (SCRUM-516). Whoever may edit it (its organisation, an admin)
+ * gets the exact figures. Null when they may not watch at all.
  */
-export async function canJoinEventOps(
+export async function eventOpsView(
   principal: DashboardPrincipal,
   eventId: string
-): Promise<boolean> {
+): Promise<OpsView | null> {
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
     select: { kind: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } },
   })
-  if (!event) return false
+  if (!event) return null
 
   // Memberships loaded through the shared helper so the socket cannot answer
   // the authorization question differently from the page that opened it.
-  return eventPermissions(await actorFor({ id: principal.userId, role: principal.role }), event)
-    .canOperate
+  const { canOperate, canEdit } = eventPermissions(
+    await actorFor({ id: principal.userId, role: principal.role }),
+    event
+  )
+  if (!canOperate) return null
+  return canEdit ? "host" : "venue"
 }

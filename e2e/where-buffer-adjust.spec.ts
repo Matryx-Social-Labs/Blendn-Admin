@@ -131,7 +131,9 @@ test("a custom buffer is saved, and the edit page reads it back as Custom", asyn
   await expect(page).toHaveURL(/\/dashboard\/events\/[0-9a-f-]{36}$/, { timeout: 30_000 })
 
   // The form loads what the row holds: 25 m, which is not the default — Custom.
-  await page.goto(`${new URL(page.url()).pathname}/edit`)
+  // `networkidle`: the edit route streams behind a loading boundary; let the
+  // streamed copy settle and hydrate before reading the form's state.
+  await page.goto(`${new URL(page.url()).pathname}/edit`, { waitUntil: "networkidle" })
   // `:visible`: a first dev-mode compile of the edit route can leave a hidden
   // copy of the section behind (never on a production server).
   const saved = page.locator('[data-area-source="saved"]:visible')

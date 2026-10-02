@@ -9,6 +9,11 @@ import { QueueSwitch } from "../queue-switch"
 import { getReportQueue } from "./actions"
 import { ReportsTable } from "./reports-table"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/moderation/reports")
+
 export const dynamic = "force-dynamic"
 
 const TABS: Array<{ value: report_status; label: string; hint: string }> = [

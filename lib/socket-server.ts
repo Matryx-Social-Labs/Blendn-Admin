@@ -8,13 +8,14 @@ import { displayNameInConversation } from "./conversation-identity"
 import { blockCounterparties } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
-import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
+import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle } from "./room-handle"
 import { readableUrl } from "./tigris"
+import { isUuid } from "./api-input"
 import { recognisedInRoomBy } from "./identity"
-import type { LiveSnapshot } from "./live-metrics"
+import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
 /*
@@ -224,8 +225,11 @@ export interface ServerToClientEvents {
   error: (data: { message: string; code?: string }) => void
   connected: (data: { userId: string }) => void
 
-  /** Live operations aggregate. Dashboard-only; carries no attendee rows. */
-  "ops:snapshot": (data: LiveSnapshot) => void
+  /**
+   * Live operations aggregate. Dashboard-only; carries no attendee rows. A venue
+   * watching a night it does not run gets the ranged copy (SCRUM-516).
+   */
+  "ops:snapshot": (data: LiveSnapshot | VenueLiveSnapshot) => void
 }
 
 export interface ClientToServerEvents {
@@ -345,15 +349,20 @@ export function startOpsBroadcast(eventId: string): void {
   const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
 
   const tick = async (): Promise<void> => {
-    const room = `event:${eventId}:ops`
     try {
-      const watchers = io ? await io.in(room).fetchSockets() : []
-      if (watchers.length === 0) {
+      // One snapshot per pass, shaped per room: the venue's copy is the host's
+      // with its counts rounded, never a second round of queries.
+      const views = (["host", "venue"] as const).map((view) => ({ view, room: opsRoom(eventId, view) }))
+      const watched = await Promise.all(
+        views.map(async (v) => ((await io.in(v.room).fetchSockets()).length > 0 ? v : null))
+      )
+      const rooms = watched.filter((v) => v !== null)
+      if (rooms.length === 0) {
         stopOpsBroadcast(eventId)
         return
       }
       const snapshot = await buildLiveSnapshot(eventId)
-      if (snapshot) io?.to(room).emit("ops:snapshot", snapshot)
+      if (snapshot) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, snapshot))
     } catch (error) {
       // A failed pass must not kill the loop or the process — the next one may
       // well succeed, and a dead loop is a silently frozen screen.
@@ -369,6 +378,11 @@ export function startOpsBroadcast(eventId: string): void {
 
   state.timer = setTimeout(() => void tick(), OPS_INTERVAL_MS)
   opsTimers.set(eventId, state)
+}
+
+/** The snapshot a watcher of this view is sent. */
+function asSeenBy(view: OpsView, snapshot: LiveSnapshot): LiveSnapshot | VenueLiveSnapshot {
+  return view === "host" ? snapshot : forVenue(snapshot)
 }
 
 export function stopOpsBroadcast(eventId: string): void {
@@ -822,6 +836,16 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     // Event room handlers
     authSocket.on("join:event", async (eventId) => {
+      /*
+       * The attendee counter, for phones. It carries the exact count in the
+       * room on every arrival and departure; the dashboard never asks for it,
+       * and a dashboard cookie in it would hand a venue the number its Live
+       * tab gives as a range (SCRUM-516).
+       */
+      if (authSocket.data.principal === "dashboard") {
+        authSocket.emit("error", { message: "Not authorized to join this event", code: "FORBIDDEN" })
+        return
+      }
       await guardJoin(
         authSocket,
         `event:${eventId}`,
@@ -864,35 +888,55 @@ export function initSocketServer(httpServer: HttpServer): Server {
      * carries attendee-facing traffic including check-in names, and a host must
      * not receive it. This one carries aggregates only.
      */
-    authSocket.on("join:eventOps", async (eventId) => {
-      if (authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
+    authSocket.on("join:eventOps", async (rawEventId) => {
+      // A uuid or nothing: the id names the room and keys the broadcast loop,
+      // so an object or a second spelling would start a loop of its own.
+      if (!isUuid(rawEventId) || authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
         // An attendee token must never reach ops aggregates, even if the user
         // behind it also happens to hold a dashboard role.
         authSocket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
         return
       }
+      const eventId = rawEventId.toLowerCase()
       const principal = {
         userId: authSocket.data.userId,
         email: authSocket.data.email,
         role: authSocket.data.role,
       }
-      await guardJoin(
-        authSocket,
-        `event:${eventId}:ops`,
-        "Not authorized to watch this event",
-        () => canJoinEventOps(principal, eventId)
-      )
-      // Send one snapshot immediately so the screen is populated on open
-      // rather than blank until the first tick.
-      if (authSocket.rooms.has(`event:${eventId}:ops`)) {
-        const snapshot = await buildLiveSnapshot(eventId).catch(() => null)
-        if (snapshot) authSocket.emit("ops:snapshot", snapshot)
-        startOpsBroadcast(eventId)
+      /*
+       * Not `guardJoin`: which room is decided by who is asking. Whoever runs
+       * the event and the venue it is held at are sent different copies of the
+       * snapshot, to different rooms (SCRUM-516). Fails closed the same way --
+       * a throw (a malformed id from a hostile client) denies -- and with the
+       * code the dashboard hook reads as "denied" rather than "connection lost".
+       */
+      const view = await eventOpsView(principal, eventId).catch((error: unknown) => {
+        logger.warn("Socket join authorization check failed", {
+          room: `event:${eventId}:ops`,
+          userId: authSocket.data.userId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return null
+      })
+      // Out of both first: a socket asking again after its access changed keeps
+      // neither copy it had, whatever the answer is now.
+      authSocket.leave(opsRoom(eventId, "host"))
+      authSocket.leave(opsRoom(eventId, "venue"))
+      if (!view) {
+        authSocket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+        return
       }
+      authSocket.join(opsRoom(eventId, view))
+      // One snapshot now, so the screen is populated on open rather than blank
+      // until the first tick.
+      const snapshot = await buildLiveSnapshot(eventId).catch(() => null)
+      if (snapshot) authSocket.emit("ops:snapshot", asSeenBy(view, snapshot))
+      startOpsBroadcast(eventId)
     })
 
     authSocket.on("leave:eventOps", (eventId) => {
-      authSocket.leave(`event:${eventId}:ops`)
+      authSocket.leave(opsRoom(eventId, "host"))
+      authSocket.leave(opsRoom(eventId, "venue"))
     })
 
     // Chat room handlers

@@ -16,7 +16,7 @@ below used to say otherwise, it has been rewritten.
 | R2 | **No "Waved".** | A wave is a socket event with no row, so nothing can count it. Funnels run RSVP, then checked in, then chatted, then mutual yes. Never design a stage the schema cannot produce. |
 | R3 | **Bordered panels.** | This replaces "hierarchy comes from type, not boxes". See *Panels* below. |
 | R4 | **The plan-card stripe is allowed.** | One gradient element per screen, plus the sidebar plan card's `--gradient-brand` stripe, which is a brand constant on every screen. See *Gradients* below. |
-| R5 | **The h1 lives in the content area.** | An in-content `PageHeader` (26px title, one sentence, actions on the right) owns the h1, and the top bar carries breadcrumbs. Step 14 moves it. Until then `site-header` owns it. See *One `h1` per page*. |
+| R5 | **The h1 lives in the content area.** | An in-content `PageHeader` (26px title, one sentence, actions on the right) owns the h1, and the top bar carries breadcrumbs. Moved in step 14. See *One `h1` per page*. |
 | R6 | **Applications stay person-reviewed.** | No self-serve "Set up your organisation" straight into the dashboard. "Get started" is a nicer `/apply`, and event creation stays gated by `mayCreateEvents` (SCRUM-145). |
 | R7 | **The crews switch on the event form lands with crews. Chat-at-doors stays out.** | The kit's "In the room" switches have no fields. Each one ships with its feature or not at all. "Room chat opens at doors" waits for the pre-event chat decision. |
 
@@ -83,8 +83,8 @@ tokens are decided here:
 | `--brand-ink` | `oklch(0.156 0.002 17.3)` (`#0D0C0C`) | The kit's `var(--brand-ink)`. `text-brand-ink` reads it, so the two are one value. |
 | `--gradient-ember` | see *Gradients* | The interface gradient (ProTag, the organiser's chat bubble). |
 | `--radius-panel` → `rounded-panel` | 12px | The Panel (R3). `--radius` stays 10px for tiles, tables and the hero. |
-| `--text-page-title` → `text-page-title` | 26px | The in-content PageHeader title (R5). Unused until step 14. |
-| `--text-panel-title` → `text-panel-title` | 15px | A Panel's title. Unused until the components land. `SectionTitle` is still 17px. |
+| `--text-page-title` → `text-page-title` | 26px | The in-content PageHeader title (R5). |
+| `--text-panel-title` → `text-panel-title` | 15px | A Panel's title (`components/dashboard/kit.tsx`). `SectionTitle` is still 17px until the screens move to Panels (step 15). |
 
 ### Charts
 
@@ -133,7 +133,7 @@ The dashboard content sits inside `@container/main` (`app/dashboard/layout.tsx`)
 Grids there must use `@sm/main:`, `@5xl/main:` and so on — **not** `md:` or
 `xl:`.
 
-This is not stylistic. The sidebar is 288px and collapsible, so viewport width
+This is not stylistic. The sidebar is 248px and collapsible, so viewport width
 and content width differ by a large, changing amount. The KPI grid and the
 spotlight grid directly below it once used different systems, and collapsing the
 sidebar reflowed them at different widths — they visibly fell out of step.
@@ -145,14 +145,32 @@ The header used to render the page name as a 0.68rem uppercase eyebrow with the
 description sentence as the `h1`, which put the wrong string in the document's
 only landmark heading.
 
-**Where it lives is changing (R5).** Today `components/site-header.tsx` owns it,
-at 20px in the 56px header, and `__tests__/dashboard-header-title.test.ts` holds
-every route to an entry in its `routeContent` map. The kit puts it in the
-content area: an in-content `PageHeader` with a 26px title
-(`text-page-title`), one sentence, and the page's actions on the right, while
-the top bar shows breadcrumbs built from the same `routeContent` map. Step 14
-makes that move and updates `dashboard-header-title.test.ts` with it. Until
-then, do not add an h1 anywhere else.
+**It lives in the content area (R5, step 14).** The layout renders
+`RoutePageHeader` as the first thing in `<main>`. That renders `PageHeader`
+(`components/dashboard/page-header.tsx`): a 26px title (`text-page-title`),
+one sentence, and the page's actions on the right. The 60px top bar shows
+breadcrumbs and no heading. The title, the sentence and every crumb come from
+`routeContent` in `lib/dashboard-route-content.ts`, so the last crumb and the
+`h1` are always the same word. `__tests__/dashboard-header-title.test.ts` holds
+every static route to an entry there, and fails on an `h1` or a `<PageHeader>`
+in any page or in the components it imports. `e2e/dashboard-shell.spec.ts`
+counts the h1s in a browser for every role.
+
+**Owned headers.** A record's page is named by the record: an event by its
+title, a venue by its name, an account by the person's. The routes in
+`OWNED_HEADERS` (`lib/dashboard-route-content.ts`: the event, its edit, room and
+feedback pages, a venue and its claim page, an organiser, a venue owner) get
+nothing from `RoutePageHeader`; the page renders `<PageHeader title actions
+back>` server-side as its first child, with the record's own actions. The
+breadcrumbs keep the route's kind ("Events › Event › Room"). Each owned route
+has a `loading.tsx` holding the header's place. The guard holds both halves:
+an owned page renders exactly one `PageHeader`, every other page none.
+
+**The tab says the same thing (WCAG 2.4.2).** Every dashboard page exports
+`metadata` (`routeMetadata(path)`, the h1's word) or, on an owned route,
+`generateMetadata` with the record's name — read through
+`lib/dashboard-record-titles.ts`, which applies the page's own access rule so
+a name never reaches the tab of someone the page will refuse.
 
 ### Panels: bordered, and still one priority per screen (R3)
 
@@ -257,6 +275,27 @@ venue and its owner never sees it. See `docs/CLAUDE_DESIGN_BRIEF.md` §2.4.
 
 `lib/dashboard-nav.ts` holds the nav config and `visibleNavFor(role)`, outside
 the sidebar component so the role gate is testable without a NextAuth session.
+
+**Two sets of headings.** An admin's eighteen destinations sit under six
+headings (`group`: Needs a decision, Supply, People, Commercial, Setup,
+Record). A host's sit in the kit's three blocks (`hostGroup`): the work itself
+with no heading, then Community, then Organisation. Analytics and Plan join the
+organiser's nav when their pages exist (step 16), not before.
+
+**The shell** (step 14, the kit's `shell.jsx`): a flush 248px sidebar with the
+identity card on top, which names the home organisation (the oldest live
+membership, where a new event is created) and the role. It has no switcher,
+because every read is scoped to the union of a person's memberships and there
+is no current organisation to switch. Then a 60px sticky top bar with
+breadcrumbs, a visible ⌘K field (hosts are offered "Search events…", never
+people), a Create event pill gated on `mayCreateEvents`, and the account menu.
+The content is at most 1200px wide, with 28/32/56 padding and 24px between
+blocks. Below 768 the sidebar is a sheet, which closes on every route change
+and returns focus to the trigger; collapsed on a desktop, the sidebar is
+`inert`. The first Tab is a "Skip to content" link to `main#main`, and
+`html` has `scroll-pt-16` so the sticky bar never covers a focused element.
+⌘K (Ctrl K off Apple keyboards) is a Radix dialog portalled to `<body>`: a
+combobox over a listbox, with the result count in a live region.
 
 **The nav gate must agree with `lib/rbac.ts`.** It drifted once: the nav hid
 Chatrooms from `venue_owner` while `canModerateChat` granted venue owners

@@ -16,7 +16,7 @@ import {
 } from "@/lib/date-range"
 
 /**
- * The global date range, in the top bar.
+ * The page's date range, among its PageHeader actions.
  *
  * This replaces a chip that displayed today's date and did nothing — not a
  * control, not a filter, and computed with `new Date()` during client render,

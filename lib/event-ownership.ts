@@ -2,7 +2,7 @@ import type { user_role } from "@prisma/client"
 
 import { db } from "./db"
 import { canCreateEvents } from "./rbac"
-import { activeMembership } from "./org-membership"
+import { HOME_ORG_ORDER, activeMembership } from "./org-membership"
 
 /**
  * Which organisation owns an event.
@@ -56,7 +56,7 @@ export async function homeOrgIdFor(user: { id: string; role: user_role }): Promi
   if (user.role === "app_admin") return null
   const membership = await db.organisation_members.findFirst({
     where: { user_id: user.id, ...activeMembership },
-    orderBy: { created_at: "asc" },
+    orderBy: HOME_ORG_ORDER,
     select: { org_id: true },
   })
   return membership?.org_id ?? null
@@ -97,7 +97,17 @@ export async function owningOrgFor(user: {
  * one, was offered the whole form and refused at the end of it.
  */
 export async function mayCreateEvents(user: { id: string; role: user_role }): Promise<boolean> {
-  if (!canCreateEvents(user.role)) return false
-  if (user.role === "app_admin") return true
-  return (await homeOrgIdFor(user)) !== null
+  return mayCreateEventsWith(user.role, user.role !== "app_admin" && (await homeOrgIdFor(user)) !== null)
+}
+
+/**
+ * The same answer from facts already loaded: the role, and whether this person
+ * has a live home organisation. The dashboard layout has the memberships in
+ * hand (for the sidebar's card) and asks this rather than querying again; the
+ * rule itself stays here, in one place (SCRUM-145).
+ */
+export function mayCreateEventsWith(role: user_role, hasLiveOrg: boolean): boolean {
+  if (!canCreateEvents(role)) return false
+  if (role === "app_admin") return true
+  return hasLiveOrg
 }

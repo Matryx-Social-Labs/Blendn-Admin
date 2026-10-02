@@ -1,5 +1,9 @@
+import { Suspense } from "react"
 import { notFound, redirect } from "next/navigation"
 
+import { DateRangeControl } from "@/components/date-range-control"
+import { PageHeader } from "@/components/dashboard/page-header"
+import { venueTitleFor } from "@/lib/dashboard-record-titles"
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
 import { MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
@@ -9,6 +13,7 @@ import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
 import { discloseStarsAcross, discloseVenueCounts, spreadsByEvent } from "@/lib/disclosure"
+import { stillArriving } from "@/lib/occurrences"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { turnUpPct } from "@/lib/counting"
@@ -20,6 +25,9 @@ import { realEventsWhere } from "@/lib/event-kind"
 
 export const dynamic = "force-dynamic"
 
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  return { title: (await venueTitleFor((await params).id)) ?? "Venue" }
+}
 
 /**
  * One venue.
@@ -109,20 +117,14 @@ export default async function VenueDetailPage({
     if (!creator) redirect("/dashboard/venues")
     return (
       <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-0.5">
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
-            <span className="text-[0.8125rem] text-muted-foreground">
-              {[venueTypeLabel(venue.venue_type), venue.city, "unclaimed — added by your organisation"]
-                .filter(Boolean)
-                .join(" · ")}
-            </span>
-          </div>
-          <p className="text-[0.8125rem] text-muted-foreground">
-            You can correct this place until someone claims it. The events held here stay with the
-            organisers who hold them.
-          </p>
-        </div>
+        {/* No date range: this view has no numbers. */}
+        <VenueHeader
+          name={venue.name}
+          meta={[venueTypeLabel(venue.venue_type), venue.city, "unclaimed — added by your organisation"]
+            .filter(Boolean)
+            .join(" · ")}
+          line="You can correct this place until someone claims it. The events held here stay with the organisers who hold them."
+        />
         <VenueManage
           key={venue.updated_at.toISOString()}
           orgs={{ rows: [], total: 0 }}
@@ -146,7 +148,7 @@ export default async function VenueDetailPage({
     : claimedWindow(venue, { from: range.from, to: range.to })
   const actor = isAdmin ? null : await actorFor(session.user)
 
-  const building = await getBuildingOccupancy(id, { asOwner: !isAdmin })
+  const building = await getBuildingOccupancy(id, { asOwner: actor })
 
   /*
    * Only fetched when it can be used: an admin, looking at a venue nobody owns.
@@ -169,6 +171,7 @@ export default async function VenueDetailPage({
         id: true,
         title: true,
         start_time: true,
+        end_time: true,
         status: true,
         max_capacity: true,
         organizer_id: true,
@@ -222,7 +225,7 @@ export default async function VenueDetailPage({
       // Another host's night, seen as the venue: counts held back under the
       // floor, by the rule the Events list and the exports use (SCRUM-501).
       ...(actor && !hostsEvent(actor, e)
-        ? discloseVenueCounts({ ...exact, capacity: e.max_capacity })
+        ? discloseVenueCounts({ ...exact, capacity: e.max_capacity, arriving: stillArriving(e) })
         : exact),
     }
   })
@@ -271,15 +274,7 @@ export default async function VenueDetailPage({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-0.5">
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
-          <span className="text-[0.8125rem] text-muted-foreground">{titleMeta.join(" · ")}</span>
-        </div>
-        <p className="text-[0.8125rem] text-muted-foreground">
-          {address || "No address recorded"}
-        </p>
-      </div>
+      <VenueHeader name={venue.name} meta={titleMeta.join(" · ")} line={address || "No address recorded"} ranged />
 
       {/* Above the window metrics, deliberately: everything below is about a
           date range someone chose, and this is about right now. */}
@@ -340,5 +335,39 @@ export default async function VenueDetailPage({
         isAdmin={isAdmin}
       />
     </div>
+  )
+}
+
+/**
+ * The venue's own header (`OWNED_HEADERS`), for both views of this page. The
+ * owner's view carries the date range — this is one of the three routes whose
+ * numbers read it (`showsRange`) — and the adding organisation's does not.
+ */
+function VenueHeader({
+  name,
+  meta,
+  line,
+  ranged = false,
+}: {
+  name: string
+  meta: string
+  line: string
+  ranged?: boolean
+}) {
+  return (
+    <PageHeader
+      title={name}
+      description={meta}
+      actions={
+        ranged ? (
+          // useSearchParams needs a Suspense boundary.
+          <Suspense fallback={<div className="h-9 w-[250px]" />}>
+            <DateRangeControl />
+          </Suspense>
+        ) : undefined
+      }
+    >
+      <p className="text-[0.8125rem] text-muted-foreground">{line}</p>
+    </PageHeader>
   )
 }

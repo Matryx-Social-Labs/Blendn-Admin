@@ -1,6 +1,7 @@
 import Link from "next/link"
 
 import type { BuildingOccupancy } from "@/lib/building-occupancy"
+import { liveCountLabel } from "@/lib/disclosure"
 import { cn } from "@/lib/utils"
 
 /**
@@ -21,6 +22,8 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
   if (occupancy.rooms.length === 0) return null
 
   const { inside, capacity, fillPct, overCapacity, rooms } = occupancy
+  // Rooms another host runs read as ranges for the owner (SCRUM-516).
+  const ranged = rooms.some((r) => typeof r.inside === "string")
 
   return (
     <section
@@ -43,16 +46,20 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
       </div>
 
       <div className="mt-1.5 flex flex-wrap items-baseline gap-3">
-        <span className="text-[1.625rem] font-bold leading-[1.1] tabular-nums">{inside}</span>
+        {inside !== null ? (
+          <span className="text-[1.625rem] font-bold leading-[1.1] tabular-nums">{liveCountLabel(inside)}</span>
+        ) : null}
         <span className="text-sm text-muted-foreground">
-          {capacity === null
-            ? "people, no licensed capacity on file"
-            : `of ${capacity} licensed`}
+          {inside === null
+            ? `no total: rooms other hosts run are shown as ranges${capacity === null ? "" : ` · ${capacity} licensed`}`
+            : capacity === null
+              ? "people, no licensed capacity on file"
+              : `of ${capacity} licensed`}
         </span>
         {overCapacity && capacity !== null ? (
           /* Ink on orange, never white — 3.4:1 fails AA. */
           <span className="rounded-full bg-primary px-2.5 py-0.5 text-[0.8125rem] font-bold tabular-nums text-primary-foreground">
-            {inside - capacity} over
+            {typeof inside === "number" ? `${inside - capacity} over` : "over licence"}
           </span>
         ) : null}
         {fillPct !== null && !overCapacity ? (
@@ -70,10 +77,10 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
               {room.title}
             </Link>
             <span className="shrink-0 tabular-nums text-muted-foreground">
-              <b className="font-bold text-foreground">{room.inside}</b>
+              <b className="font-bold text-foreground">{liveCountLabel(room.inside)}</b>
               {/* The split only when there is one to show — see the note in
                   occupancy-hero.tsx. */}
-              {room.staffInside > 0 ? ` — ${room.guestsInside} guests, ${room.staffInside} staff` : null}
+              {room.staffInside ? ` — ${room.guestsInside} guests, ${room.staffInside} staff` : null}
             </span>
           </li>
         ))}
@@ -83,6 +90,7 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
         Everyone checked in and not yet out, staff included. Measured against the
         venue&rsquo;s own capacity rather than the sum of the events&rsquo; — two rooms can each
         be under their number while the building is over its.
+        {ranged ? " Rooms another host runs are shown as ranges, so one arrival does not show." : ""}
       </p>
     </section>
   )
