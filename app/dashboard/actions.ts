@@ -28,7 +28,7 @@ import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/d
 import { normaliseVenueName } from "@/lib/venue-name"
 import { repeatAttendees, noShowPct, noShows } from "@/lib/counting"
 import { eventClock } from "@/lib/event-phase"
-import { comingUpFor, latestFeedbackFor, liveEventFor, setupFactsFor } from "@/lib/organiser-overview"
+import { comingUpFor, latestFeedbackFrom, liveEventFor, recentRatedEvents, setupFactsFor } from "@/lib/organiser-overview"
 import type {
   AdminOverview,
   CityRow,
@@ -128,7 +128,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
   const priorStart = new Date(now.getTime() - 60 * DAY_MS)
   const pastEvents = { ...scope, start_time: { lt: now } }
 
-  const [next, previous, ratingRows, live, setup, comingUp] = await Promise.all([
+  const [next, previous, ratingRows, live, setup, comingUp, rated] = await Promise.all([
     db.events.findFirst({
       where: { ...scope, status: "published", start_time: { gte: now } },
       orderBy: { start_time: "asc" },
@@ -166,6 +166,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
     liveEventFor(scope, now),
     setupFactsFor(userId, scope),
     comingUpFor(scope, now),
+    recentRatedEvents(scope, now),
   ])
   const spreads = spreadsByEventId(ratingRows)
 
@@ -251,22 +252,25 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
       }
     }
 
+    const clock = eventClock(next.timezone)
     nextEvent = {
       id: next.id,
       title: next.title,
       startAt: next.start_time.toISOString(),
-      dayLabel: eventClock(next.timezone).format(next.start_time, { weekday: "short", day: "numeric", month: "short" }),
+      dayLabel: clock.format(next.start_time, { weekday: "short", day: "numeric", month: "short" }),
       venue: next.venue_name ?? "Venue TBD",
       city: next.city ?? "",
-      daysOut,
+      // "2 days to go" by the event's calendar, not by 24-hour blocks: an
+      // event tomorrow at 09:00, seen at 22:00, is one day away, not "today".
+      daysOut: Math.max(0, clock.daysUntil(next.start_time, now)),
       going,
       maybe,
       favourites: next._count.favorites,
       capacity: next.max_capacity,
+      // Going only, the number the hero's caption and every row's bar count.
+      // Maybe stays in the pacing curve, where it is intent over time.
       fillPct:
-        next.max_capacity && next.max_capacity > 0
-          ? Math.min(100, (committed.length / next.max_capacity) * 100)
-          : null,
+        next.max_capacity && next.max_capacity > 0 ? Math.min(100, (going / next.max_capacity) * 100) : null,
       pacingNote,
     }
   }
@@ -287,7 +291,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
     noShowDelta:
       noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
     repeatAttendees: repeatAttendees(repeatRows),
-    latestFeedback: await latestFeedbackFor(spreads, now),
+    latestFeedback: latestFeedbackFrom(rated, spreads),
     comingUp,
   }
 }

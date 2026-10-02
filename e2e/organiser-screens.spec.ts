@@ -53,6 +53,12 @@ test("the organiser overview: setup, the last 30 days, and a row per upcoming ev
     await expect(comingUp.locator('a[href^="/dashboard/events/"]').first()).toBeVisible()
     // The hosts' overview reads fixed windows, so it is offered no range control.
     await expect(main(page).getByRole("button", { name: "90d" })).toHaveCount(0)
+    // Getting set up, from the seed's rows: Nightshift exists and has published;
+    // it has verified no domain and invited nobody, so the panel is there.
+    const setup = main(page).locator("section", { has: page.getByRole("heading", { name: "Getting set up" }) })
+    await expect(setup.getByRole("link", { name: /^Set up Nightshift Collective \(done\)$/ })).toBeVisible()
+    await expect(setup.getByRole("link", { name: /^Publish an event \(done\)$/ })).toBeVisible()
+    await expect(setup.getByRole("link", { name: /\(to do\)$/ }).first()).toBeVisible()
     found.push(...(await axeMain(page)).map((v) => `overview@${width}: ${v}`))
     await ctx.close()
   }
@@ -68,6 +74,9 @@ test("the Events list: Upcoming, Drafts and Past tabs with counts, no second Cre
     await page.goto("/dashboard/events", { waitUntil: "networkidle" })
     const tabs = main(page).getByRole("tablist", { name: "Events by state" })
     await expect(tabs.getByRole("tab")).toHaveText([/^Upcoming · \d+$/, /^Drafts · \d+$/, /^Past · \d+$/])
+    // An organiser's list names no creator: organizer@ is Arjun Rao in the seed
+    // (scripts/test-accounts.ts), and every Nightshift night is his.
+    await expect(main(page).getByText("Arjun Rao")).toHaveCount(0)
     // The top bar's pill is the one Create event; the page draws none of its own.
     await expect(main(page).getByRole("link", { name: "Create event" })).toHaveCount(0)
     await expect(main(page).getByRole("button", { name: "Create event" })).toHaveCount(0)

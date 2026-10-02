@@ -32,6 +32,7 @@ export default async function EventsPage() {
    * cannot have changed in between.
    */
   const { where, actor } = await visibleEventsScope(session.user)
+  const names = session.user.role !== "organizer"
 
   /*
    * The rows and the total start together; only the attendance counts wait.
@@ -67,7 +68,12 @@ export default async function EventsPage() {
       claimed_at: true,
       organizer_id: true,
       organizer_org_id: true,
-      organizer: { select: { name: true, email: true } },
+      /*
+       * Whose night it is: for an admin and for a venue, never for an
+       * organiser, whose list is their own organisation's — so it is not even
+       * selected for them, and never an email.
+       */
+      organizer: names ? { select: { name: true } } : false,
       // Going, as every other screen counts it: `not_going` is a decline, and
       // "maybe" is not a seat (the overview's hero names it separately).
       _count: { select: { rsvps: { where: { status: "going" } } } },
@@ -115,9 +121,12 @@ export default async function EventsPage() {
   const rows: EventRow[] = events.map((event) => ({
     ...eventRowFields(event, now),
     startTime: event.start_time.toISOString(),
-    // Whose night it is matters to an admin and to a venue; an organiser's list
-    // is all their own organisation's, and the kit drops the name.
-    host: session.user.role === "organizer" ? null : (event.organizer?.name ?? null),
+    /*
+     * Null for a curated listing nobody has claimed: `organizer_id` there is
+     * the admin who curated it, and the founder's name must not reach the page
+     * payload as its host (T83). The row says "Listed by us" instead.
+     */
+    host: curationState(event) === "curated_open" ? null : (event.organizer?.name ?? null),
     ...counts(event),
     curation: curationState(event),
   }))

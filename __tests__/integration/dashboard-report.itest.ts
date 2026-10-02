@@ -109,8 +109,9 @@ describe("organiser overview", () => {
     expect(overview.nextEvent?.going).toBe(1)
     expect(overview.nextEvent?.maybe).toBe(1)
     expect(overview.nextEvent?.capacity).toBe(10)
-    // 2 committed of 10, not 3 of 10.
-    expect(overview.nextEvent?.fillPct).toBe(20)
+    // Going over capacity: 1 of 10. Not the maybe (it is intent, in the
+    // pacing curve), and never the decline.
+    expect(overview.nextEvent?.fillPct).toBe(10)
     expect(overview.pacingCapacity).toBe(10)
   })
 

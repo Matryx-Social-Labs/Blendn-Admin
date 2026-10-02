@@ -156,9 +156,10 @@ export function EventsTable({
 
   return (
     <Tabs defaultValue="upcoming" className="gap-4">
-      <TabsList aria-label="Events by state" className="pointer-coarse:h-11">
+      {/* 44px targets on a touch screen; the list grows to hold them. */}
+      <TabsList aria-label="Events by state" className="pointer-coarse:h-auto">
         {TABS.map((tab) => (
-          <TabsTrigger key={tab.key} value={tab.key} className="px-3 tabular-nums">
+          <TabsTrigger key={tab.key} value={tab.key} className="px-3 tabular-nums pointer-coarse:h-11">
             {tab.label} · {counts[tab.key]}
           </TabsTrigger>
         ))}
