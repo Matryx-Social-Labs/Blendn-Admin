@@ -5,12 +5,11 @@ import { EventHeader } from "@/components/dashboard/event-header"
 import { Panel } from "@/components/dashboard/kit"
 import { loadEventPage } from "@/lib/event-page"
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
-import { liveCountLabel } from "@/lib/disclosure"
 
 import { eventTabsFor } from "../event-tabs"
 
-/** What a venue reads where a count of people is under the floor. */
-const HELD_BACK = liveCountLabel("quiet")
+/** What a venue reads where a count is held back: not "under 5", which a lone survivor may not be. */
+const HELD_BACK = "held back"
 import { eventTitleFor } from "@/lib/dashboard-record-titles"
 
 import { CategoryBars } from "@/components/dashboard/charts"
@@ -85,7 +84,7 @@ export default async function FeedbackPage({
       <EventHeader data={data} active="feedback" />
       <p className="text-[0.8125rem] text-muted-foreground">
         {`${digest.ended ? "Ended" : "Ends"} ${ended} · ${window}${
-          total === null ? " · fewer than five messages" : total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""
+          total === null ? " · counts held back" : total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""
         }`}
       </p>
 
@@ -130,7 +129,7 @@ export default async function FeedbackPage({
                 chart — the point of classifying by category at all. */}
             <p className="max-w-[60ch] text-[0.8125rem] leading-relaxed text-muted-foreground">
               {digest.counts.negative === null ? (
-                "Fewer than five said anything negative, or nothing was said at all — held back, so it cannot point at anybody."
+                "The split is held back: in a room this size it could point at somebody."
               ) : digest.counts.negative === 0 ? (
                 "Nothing negative was classified. Read the messages anyway — the classifier is cautious, not omniscient."
               ) : topIssue?.suppressed ? (
@@ -161,9 +160,18 @@ export default async function FeedbackPage({
           </Panel>
 
           <div className="grid gap-5 @4xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] @4xl/main:items-start">
-            <Panel title="What people said" hint="tap a label to correct it — the classifier misses sarcasm">
-              <FeedbackFeed messages={digest.messages} timezone={digest.timezone} />
-            </Panel>
+            {digest.view === "venue" ? (
+              <Panel title="What people said">
+                <p className="text-[0.8125rem] leading-5 text-muted-foreground">
+                  The labelled messages are the organiser&apos;s digest. You read what was said where it was said, in
+                  the Room chat you moderate.
+                </p>
+              </Panel>
+            ) : (
+              <Panel title="What people said" hint="tap a label to correct it — the classifier misses sarcasm">
+                <FeedbackFeed messages={digest.messages} timezone={digest.timezone} />
+              </Panel>
+            )}
 
             <div className="flex flex-col gap-5">
               {digest.categories.length > 0 ? (
