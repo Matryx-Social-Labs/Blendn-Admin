@@ -163,3 +163,27 @@ describe("no host surface reads a person's identity without an admin gate", () =
     expect(open).toEqual([])
   })
 })
+
+describe("the organiser overview and the Events list rows reach no attendee (step 15)", () => {
+  /*
+   * The live banner, the setup checklist, Coming up and the latest feedback
+   * read counts, an organisation's own name and domain, and a venue's name — a
+   * place. Never an attendee.
+   */
+  const SOURCES = [
+    "lib/organiser-overview.ts",
+    "lib/setup-checklist.ts",
+    "lib/event-row.ts",
+    "components/dashboard/overview-organizer.tsx",
+    "components/dashboard/event-row.tsx",
+  ]
+
+  it.each(SOURCES)("%s selects no user, profile, name, email, image or phone", (rel) => {
+    // A venue's name is a place, not a person: the one name these may read.
+    const src = code(rel).replace(/venue:\s*\{\s*select:\s*\{[^{}]*\}\s*\}/g, "")
+    expect(src).not.toMatch(/db\.user\b/)
+    expect(src).not.toMatch(/\b(user|profile|organizer|attendees?)\s*:\s*\{/)
+    expect(src).not.toMatch(new RegExp(`\\b(${IDENTITY})\\s*:\\s*true`))
+    expect(src).not.toMatch(/\.(email|image|phone|photos)\b/)
+  })
+})
