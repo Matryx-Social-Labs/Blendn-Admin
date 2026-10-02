@@ -52,6 +52,8 @@ const tabs = (page: Page) => main(page).getByRole("navigation", { name: "Event s
 test("the organiser walks every tab under one header, and the QR & link tab hands over the event's address", async ({
   baseURL,
 }) => {
+  // Two widths, every tab, a download and a print: past the default on a cold server.
+  test.setTimeout(150_000)
   const found: string[] = []
   for (const width of [375, 1440]) {
     const { ctx, page } = await open("organizer", width, baseURL)
