@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { Panel } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -65,7 +66,9 @@ export function OrgPanel({
   permissions: OrgPermissions
 }) {
   return (
-    <section className="flex flex-col gap-5">
+    // 44px targets on a touch screen, for every control in the team's panels:
+    // the role selects and the icon buttons are 32–36px otherwise.
+    <section className="flex flex-col gap-5 pointer-coarse:[&_button]:min-h-11 pointer-coarse:[&_button]:min-w-11 pointer-coarse:[&_input]:min-h-11">
       {/* One title line. Status and your role are words beside the name, not
           chips — neither is an action, and the card around all of it is gone. */}
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
@@ -76,21 +79,26 @@ export function OrgPanel({
         </span>
       </div>
 
-      <Members
-        orgId={org.id}
-        members={members}
-        canManage={permissions.canManageMembers}
-        myRole={org.myRole}
-      />
+      {/* The kit's Team: the people as the main column, the domain beside them. */}
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @4xl/main:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-5">
+          <Members
+            orgId={org.id}
+            members={members}
+            canManage={permissions.canManageMembers}
+            myRole={org.myRole}
+          />
 
-      {permissions.canManageMembers ? (
-        <>
-          <JoinRequests orgId={org.id} requests={joinRequests} />
-          <Invites orgId={org.id} invites={invites} verifiedDomains={org.domains.filter((d) => d.verified)} myRole={org.myRole} />
-        </>
-      ) : null}
+          {permissions.canManageMembers ? (
+            <>
+              <JoinRequests orgId={org.id} requests={joinRequests} />
+              <Invites orgId={org.id} invites={invites} verifiedDomains={org.domains.filter((d) => d.verified)} myRole={org.myRole} />
+            </>
+          ) : null}
+        </div>
 
-      {permissions.canVerifyDomain ? <Domains orgId={org.id} domains={org.domains} /> : null}
+        {permissions.canVerifyDomain ? <Domains orgId={org.id} domains={org.domains} /> : null}
+      </div>
     </section>
   )
 }
@@ -133,8 +141,7 @@ function Members({
   }
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border pt-5">
-      <h3 className="text-[0.9375rem] font-bold">Members</h3>
+    <Panel title="Members" hint={`${members.length} ${members.length === 1 ? "person" : "people"}`}>
       <div className="flex flex-col divide-y divide-border">
         {members.map((m) => (
           <div
@@ -160,7 +167,7 @@ function Members({
                   onValueChange={(v) => change(m.id, v as org_role)}
                   disabled={pending || (m.role === "owner" && myRole !== "owner")}
                 >
-                  <SelectTrigger className="w-32" size="sm">
+                  <SelectTrigger className="w-32" size="sm" aria-label={`Role for ${m.name ?? m.email}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -192,7 +199,7 @@ function Members({
           Admin: {ROLE_BLURB.admin} Staff: {ROLE_BLURB.staff}
         </p>
       ) : null}
-    </div>
+    </Panel>
   )
 }
 
@@ -237,8 +244,7 @@ function Invites({
   }
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border pt-5">
-      <h3 className="text-[0.9375rem] font-bold">Invite someone</h3>
+    <Panel title="Invite someone">
       <p className="text-[0.8125rem] leading-6 text-muted-foreground">
         {verifiedDomains.length > 0
           ? `Invites go to ${verifiedDomains.map((d) => d.domain).join(", ")} without ceremony. Anyone else needs a reason, which is recorded.`
@@ -257,7 +263,7 @@ function Invites({
           className="h-9 min-w-56 flex-1 rounded-lg"
         />
         <Select value={role} onValueChange={(v) => setRole(v as org_role)}>
-          <SelectTrigger className="w-32" size="sm">
+          <SelectTrigger className="w-32" size="sm" aria-label="Role for the person invited">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -313,7 +319,7 @@ function Invites({
           ))}
         </div>
       ) : null}
-    </div>
+    </Panel>
   )
 }
 
@@ -367,8 +373,7 @@ function JoinRequests({ orgId, requests }: { orgId: string; requests: OrgJoinReq
   }
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border pt-5">
-      <h3 className="text-[0.9375rem] font-bold">Requests to join</h3>
+    <Panel title="Requests to join">
       <p className="text-[0.8125rem] leading-6 text-muted-foreground">
         People with an address on your verified domain. Approving adds them as staff — promote them
         afterwards if they need more.
@@ -392,7 +397,7 @@ function JoinRequests({ orgId, requests }: { orgId: string; requests: OrgJoinReq
           </div>
         </div>
       ))}
-    </div>
+    </Panel>
   )
 }
 
@@ -421,8 +426,7 @@ function Domains({ orgId, domains }: { orgId: string; domains: MyOrg["domains"] 
   }
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border pt-5">
-      <h3 className="text-[0.9375rem] font-bold">Domain</h3>
+    <Panel title="Email domain">
       <p className="text-[0.8125rem] leading-6 text-muted-foreground">
         Verifying a domain proves you control it, which is what lets invites be restricted to it.
         Add the TXT record at your DNS provider, then check.
@@ -460,7 +464,7 @@ function Domains({ orgId, domains }: { orgId: string; domains: MyOrg["domains"] 
           </div>
         </dl>
       ) : null}
-    </div>
+    </Panel>
   )
 }
 

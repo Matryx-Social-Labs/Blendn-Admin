@@ -81,13 +81,20 @@ describe("the range control renders only where a range is read", () => {
     expect(spurious).toEqual([])
   })
 
+  it("offers it on the overview to the admin only: the hosts' overviews read fixed windows (step 15)", () => {
+    expect(showsRange("/dashboard", "app_admin")).toBe(true)
+    for (const role of ["organizer", "venue_owner", "sponsor"]) expect(showsRange("/dashboard", role)).toBe(false)
+    // Every other ranged route is the same for everyone who reaches it.
+    expect(showsRange("/dashboard/reports", "organizer")).toBe(true)
+  })
+
   it("and the page header is what asks — the layout's, or an owned route's own", () => {
     // The lists above agree with each other; this is what makes them the
     // control's rule rather than a rule nothing reads.
     const routeHeader = stripComments(
       readFileSync(join(ROOT, "components", "dashboard", "route-page-header.tsx"), "utf8")
     )
-    expect(routeHeader).toMatch(/showsRange\(pathname\) \?\s*\(?\s*(?:\/\/[^\n]*\n\s*)*<Suspense[\s\S]*?<DateRangeControl/)
+    expect(routeHeader).toMatch(/showsRange\(pathname, role\) \?\s*\(?\s*(?:\/\/[^\n]*\n\s*)*<Suspense[\s\S]*?<DateRangeControl/)
     expect(routeHeader).toMatch(/if \(ownsHeader\(pathname\)\) return null/)
 
     // An owned route gets no header from the layout, so its page carries the

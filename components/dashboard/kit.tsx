@@ -50,7 +50,7 @@ export function Panel({
         <div className="flex items-center justify-between gap-3 px-5 pt-4">
           <div className="flex min-w-0 items-baseline gap-2.5">
             {title ? (
-              <h2 className="whitespace-nowrap text-panel-title font-bold">{title}</h2>
+              <h2 className="min-w-0 truncate whitespace-nowrap text-panel-title font-bold">{title}</h2>
             ) : null}
             {hint ? <span className="min-w-0 text-[0.75rem] text-faint-foreground">{hint}</span> : null}
           </div>
@@ -338,7 +338,7 @@ export function PillTabs({
           href={tab.href}
           aria-current={tab.key === active ? "page" : undefined}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[0.8125rem] transition-colors",
+            "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[0.8125rem] transition-colors pointer-coarse:min-h-11",
             tab.key === active
               ? "bg-accent text-foreground"
               : "text-muted-foreground hover:bg-accent hover:text-foreground"

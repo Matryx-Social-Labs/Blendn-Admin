@@ -23,6 +23,7 @@ export function QR({
   value,
   label,
   size = 180,
+  fill = false,
 }: {
   value: string
   /**
@@ -32,11 +33,13 @@ export function QR({
    */
   label: string
   size?: number
+  /** Fill the parent instead of a fixed size: the door slide, sized to the screen. */
+  fill?: boolean
 }) {
   return (
     <div
       className="shrink-0 overflow-hidden rounded-panel bg-white"
-      style={{ width: size, height: size }}
+      style={fill ? { width: "100%", height: "100%" } : { width: size, height: size }}
     >
       <QRCodeSVG
         value={value}
