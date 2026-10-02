@@ -83,20 +83,29 @@ describe("the feedback digest, as a venue reads another host's night (step 15)",
     return eventId
   }
 
-  it("holds back the split, the total and the issue count under five", async () => {
+  it("holds back the split, the total, the issue count and the labelled list under five", async () => {
     const eventId = await night(["negative", "negative", "positive"])
     const venue = await digest(eventId, "venue")
     expect(venue).toMatchObject({ view: "venue", total: null, counts: { positive: null, neutral: null, negative: null } })
     expect(venue.categories.every((c) => c.count === null && c.suppressed)).toBe(true)
-    // The organiser reads the same night exactly.
+    expect(venue.messages).toEqual([])
+    // The organiser reads the same night exactly, row by row.
     const host = await digest(eventId, "host")
     expect(host).toMatchObject({ view: "host", total: 3, counts: { positive: 1, neutral: 0, negative: 2 } })
+    expect(host.messages).toHaveLength(3)
   })
 
-  it("shows a venue a total from five, each mood under five still held back, and zero as zero", async () => {
-    const venue = await digest(await night(["negative", "negative", "negative", "negative", "negative", "positive"]), "venue")
-    expect(venue.total).toBe(6)
-    expect(venue.counts).toEqual({ positive: null, neutral: 0, negative: 5 })
+  it("never lets the total give a held-back mood back: 19 neutral and 1 positive show no total and no lone 19", async () => {
+    // The staging drive's night: total minus the shown moods was the positive one.
+    const venue = await digest(await night([...Array(19).fill("neutral"), "positive"]), "venue")
+    expect(venue.total).toBeNull()
+    expect(venue.counts).toEqual({ positive: null, neutral: null, negative: null })
+  })
+
+  it("shows a venue two moods at five and over, and still no total once a third is held back", async () => {
+    const venue = await digest(await night([...Array(5).fill("positive"), ...Array(6).fill("neutral")]), "venue")
+    expect(venue.counts).toEqual({ positive: 5, neutral: 6, negative: null })
+    expect(venue.total).toBeNull()
   })
 })
 
