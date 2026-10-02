@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventClock } from "@/lib/event-phase"
-import { liveRange } from "@/lib/disclosure"
+import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
 import { canAccessDashboard } from "@/lib/rbac"
@@ -99,7 +99,7 @@ export default async function ChatroomsPage() {
   const ranged = (room: (typeof rooms)[number]) => !isPlatformAdmin && !hostsEvent(actor, room)
   const insideOf = (room: (typeof rooms)[number]) => {
     const n = occupancies.get(room.id)?.inside ?? 0
-    return ranged(room) ? liveRange(n) : n
+    return ranged(room) ? liveCountLabel(liveCountBucket(n)) : n
   }
   const inside = rooms.some(ranged) ? null : [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
   const flags = [...flagsFor.values()].reduce((a, b) => a + b, 0)

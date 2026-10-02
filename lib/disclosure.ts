@@ -191,30 +191,23 @@ export function discloseHeadcount(count: number): number | null {
   return discloseFigure({ count, contributors: count, population: 0 }).value
 }
 
-/** A live count as a venue is told it: a range, never the number. In order. */
-export const LIVE_RANGES = ["0", "a few", "5–9", "10–19", "20+"] as const
-export type LiveRange = (typeof LIVE_RANGES)[number]
-
 /**
- * A count of people that is still moving -- in the room, arrived, left, in
- * the last ten minutes -- for a venue watching another host's night or its own
- * venue day (SCRUM-516, D-19).
+ * How many people are live at a venue, as the app may show it (D-19, F14).
  *
- * The floor alone is not enough for a figure that updates. Watching "fewer
- * than 5" turn into 5 the moment somebody walks in tells you they did (F14,
- * cf. SCRUM-472), and every arrival after that moves an exact number by one.
- * Ranges move only at their edges, so a single arrival is mostly invisible.
- * "20+" is a range too: an exact count of a big room still says who just came
- * in. Whether the room is over capacity is a separate flag, decided on the
- * exact figure, so safety does not depend on the number being shown.
- *
- * Zero is shown, as everywhere: an empty room names nobody.
+ * Never a number. The floor alone is not enough for a figure that updates
+ * while you watch: a count that goes from "a few" to 5 the moment one person
+ * walks in tells the watcher that person is there (cf. SCRUM-472). Buckets
+ * move only at their edges, and under the floor (`MIN_CELL`) there is no
+ * number at all. Zero is its own answer, like `discloseHeadcount`'s: an empty
+ * place identifies nobody.
  */
-export function liveRange(count: number): LiveRange {
-  if (count <= 0) return "0"
-  if (count < MIN_CELL) return "a few"
-  if (count < 10) return "5–9"
-  if (count < 20) return "10–19"
+export type LiveCountBucket = "none" | "a_few" | "5-9" | "10-19" | "20+"
+
+export function liveCountBucket(count: number): LiveCountBucket {
+  if (count <= 0) return "none"
+  if (count < MIN_CELL) return "a_few"
+  if (count < 10) return "5-9"
+  if (count < 20) return "10-19"
   return "20+"
 }
 
@@ -407,4 +400,24 @@ export function suppressedLabel(kind: "figure" | "poll"): string {
   return kind === "poll"
     ? "Results appear once more people vote"
     : `Fewer than ${FLOOR} people — not reported`
+}
+
+/**
+ * The buckets in order, smallest first, and each as the dashboard prints it.
+ *
+ * On the dashboard they are what a venue is told of a night it does not run,
+ * or its own venue day, while it is still moving (SCRUM-516): in the room,
+ * arrived, left, the last ten minutes. "20+" is a bucket too: an exact count
+ * of a big room still says who just came in. Whether the room is over its
+ * capacity is a separate flag, decided on the exact figure, so the building's
+ * safety does not depend on the number being shown.
+ */
+export const LIVE_COUNT_BUCKETS: readonly LiveCountBucket[] = ["none", "a_few", "5-9", "10-19", "20+"]
+
+/** A count as printed: an exact one as itself, a bucket as words. */
+export function liveCountLabel(count: number | LiveCountBucket): string {
+  if (typeof count === "number") return String(count)
+  if (count === "none") return "0"
+  if (count === "a_few") return "a few"
+  return count.replace("-", "–")
 }

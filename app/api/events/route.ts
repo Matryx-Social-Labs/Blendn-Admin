@@ -6,7 +6,7 @@ import { eventWriteSchema } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { resolveEventCity } from "@/lib/location"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
-import { liveRange } from "@/lib/disclosure"
+import { liveCountBucket } from "@/lib/disclosure"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
 import { canCreateEvents } from "@/lib/rbac"
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       events.map((e) => {
         const inside = occupancies.get(e.id)?.inside ?? 0
-        return { ...e, occupancy: exact(e) ? inside : liveRange(inside) }
+        return { ...e, occupancy: exact(e) ? inside : liveCountBucket(inside) }
       })
     )
   } catch (error) {

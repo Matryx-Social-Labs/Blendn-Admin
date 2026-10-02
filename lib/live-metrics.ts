@@ -8,7 +8,7 @@
  * server-only.
  */
 
-import { liveRange, type LiveRange } from "./disclosure"
+import { liveCountBucket, type LiveCountBucket } from "./disclosure"
 
 /** The exact figures, and what the alert rules read. Never sent to a venue. */
 export interface LiveFigures {
@@ -72,22 +72,22 @@ export interface VenueLiveSnapshot {
   view: "venue"
   eventId: string
   at: string
-  inside: LiveRange
-  guestsInside: LiveRange
-  staffInside: LiveRange
-  checkedInTotal: LiveRange
-  checkedOutTotal: LiveRange
-  staleInside: LiveRange
+  inside: LiveCountBucket
+  guestsInside: LiveCountBucket
+  staffInside: LiveCountBucket
+  checkedInTotal: LiveCountBucket
+  checkedOutTotal: LiveCountBucket
+  staleInside: LiveCountBucket
   /** `occupancyMostlyInferred`, on the exact figures. */
   mostlyInferred: boolean
   capacity: number | null
   overCapacity: boolean
-  checkInRate10m: LiveRange
+  checkInRate10m: LiveCountBucket
   messagesPerMinute: number
-  activeChatters30m: LiveRange
+  activeChatters30m: LiveCountBucket
   openFlags: number
-  sentiment: { positive: LiveRange; neutral: LiveRange; negative: LiveRange }
-  categories: Array<{ category: string; count: LiveRange }>
+  sentiment: { positive: LiveCountBucket; neutral: LiveCountBucket; negative: LiveCountBucket }
+  categories: Array<{ category: string; count: LiveCountBucket }>
   alerts: LiveAlert[]
 }
 
@@ -323,25 +323,25 @@ export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
     view: "venue",
     eventId: s.eventId,
     at: s.at,
-    inside: liveRange(s.inside),
-    guestsInside: liveRange(s.guestsInside),
-    staffInside: liveRange(s.staffInside),
-    checkedInTotal: liveRange(s.checkedInTotal),
-    checkedOutTotal: liveRange(s.checkedOutTotal),
-    staleInside: liveRange(s.staleInside),
+    inside: liveCountBucket(s.inside),
+    guestsInside: liveCountBucket(s.guestsInside),
+    staffInside: liveCountBucket(s.staffInside),
+    checkedInTotal: liveCountBucket(s.checkedInTotal),
+    checkedOutTotal: liveCountBucket(s.checkedOutTotal),
+    staleInside: liveCountBucket(s.staleInside),
     mostlyInferred: occupancyMostlyInferred(s),
     capacity: s.capacity,
     overCapacity: s.overCapacity,
-    checkInRate10m: liveRange(s.checkInRate10m),
+    checkInRate10m: liveCountBucket(s.checkInRate10m),
     messagesPerMinute: s.messagesPerMinute,
-    activeChatters30m: liveRange(s.activeChatters30m),
+    activeChatters30m: liveCountBucket(s.activeChatters30m),
     openFlags: s.openFlags,
     sentiment: {
-      positive: liveRange(s.sentiment.positive),
-      neutral: liveRange(s.sentiment.neutral),
-      negative: liveRange(s.sentiment.negative),
+      positive: liveCountBucket(s.sentiment.positive),
+      neutral: liveCountBucket(s.sentiment.neutral),
+      negative: liveCountBucket(s.sentiment.negative),
     },
-    categories: s.categories.map((c) => ({ category: c.category, count: liveRange(c.count) })),
+    categories: s.categories.map((c) => ({ category: c.category, count: liveCountBucket(c.count) })),
     alerts: alertsForVenue(s.alerts),
   }
 }

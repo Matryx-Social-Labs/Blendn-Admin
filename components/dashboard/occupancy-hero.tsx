@@ -1,7 +1,7 @@
 import { IconWifiOff } from "@tabler/icons-react"
 import type { ReactNode } from "react"
 
-import type { LiveRange } from "@/lib/disclosure"
+import { liveCountLabel, type LiveCountBucket } from "@/lib/disclosure"
 import type { Occupancy } from "@/lib/occupancy"
 import { cn } from "@/lib/utils"
 
@@ -11,9 +11,9 @@ import { cn } from "@/lib/utils"
  * (SCRUM-516). No fill: a percentage of a stated capacity is the count again.
  */
 export interface HeldBackOccupancy {
-  inside: LiveRange
-  guestsInside: LiveRange
-  staffInside: LiveRange
+  inside: LiveCountBucket
+  guestsInside: LiveCountBucket
+  staffInside: LiveCountBucket
   capacity: number | null
   overCapacity: boolean
 }
@@ -82,7 +82,7 @@ export function OccupancyHero({
   const { inside, guestsInside, capacity } = occupancy
   // The exact figures, or null for a venue's ranges: no bar, no fill, no "N over".
   const exact = "fillPct" in occupancy ? occupancy : null
-  const anyStaff = exact ? exact.staffInside > 0 : occupancy.staffInside !== "0"
+  const anyStaff = exact ? exact.staffInside > 0 : occupancy.staffInside !== "none"
   // Suppressed while unreliable: flagging a breach off numbers we have just
   // said we do not trust is how a false evacuation starts.
   const over = occupancy.overCapacity && !unreliable
@@ -128,7 +128,7 @@ export function OccupancyHero({
           )}
         >
           {unreliable ? "~" : ""}
-          {inside}
+          {liveCountLabel(inside)}
         </span>
         <span className="text-base text-muted-foreground">
           {unreliable ? "in the room, roughly" : "in the room"}
@@ -150,7 +150,7 @@ export function OccupancyHero({
       >
         <span className="inline-flex items-center gap-1.5">
           <i aria-hidden className="size-2 rounded-[2px] bg-chart-1" />
-          <b className="font-bold tabular-nums text-foreground">{guestsInside}</b> guests
+          <b className="font-bold tabular-nums text-foreground">{liveCountLabel(guestsInside)}</b> guests
         </span>
         {/* Only when there are any.
             Staff are told from guests by organisation membership at check-in,
@@ -161,7 +161,7 @@ export function OccupancyHero({
         {anyStaff ? (
           <span className="inline-flex items-center gap-1.5">
             <i aria-hidden className="size-2 rounded-[2px] bg-chart-3" />
-            <b className="font-bold tabular-nums text-foreground">{occupancy.staffInside}</b> staff
+            <b className="font-bold tabular-nums text-foreground">{liveCountLabel(occupancy.staffInside)}</b> staff
           </span>
         ) : null}
         {unreliable && lastGood ? (

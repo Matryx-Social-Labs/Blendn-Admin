@@ -3,7 +3,7 @@ import type { rsvp_status, user_role } from "@prisma/client"
 
 import { distinctAttendeeCounts } from "./attendee-counts"
 import { db } from "./db"
-import { discloseVenueCounts, liveRange, MIN_CELL, type LiveRange } from "./disclosure"
+import { discloseVenueCounts, liveCountBucket, MIN_CELL, type LiveCountBucket } from "./disclosure"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { eventScopeFor, labelScopeFor, labelScoper } from "./reports"
@@ -200,7 +200,7 @@ export type EventAttendees =
       noShows: number | null
     }
   /** `came` is a range while the event runs: it is still moving (SCRUM-516). */
-  | { view: "count"; started: boolean; came: number | LiveRange | null }
+  | { view: "count"; started: boolean; came: number | LiveCountBucket | null }
 
 const QUARTER_HOUR_MS = 15 * 60_000
 
@@ -246,7 +246,7 @@ async function eventPeople(eventId: string) {
 export async function venueCounts(
   eventId: string,
   capacity: number | null = null
-): Promise<{ going: number | null; came: number | null; fillPct: number | null; cameSoFar: LiveRange }> {
+): Promise<{ going: number | null; came: number | null; fillPct: number | null; cameSoFar: LiveCountBucket }> {
   const [going, arrivals] = await Promise.all([
     db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
     distinctAttendeeCounts([eventId]),
@@ -257,7 +257,7 @@ export async function venueCounts(
     going: going === 0 ? 0 : shown.going,
     came: came === 0 ? 0 : shown.attended,
     fillPct: shown.fillPct,
-    cameSoFar: liveRange(came),
+    cameSoFar: liveCountBucket(came),
   }
 }
 

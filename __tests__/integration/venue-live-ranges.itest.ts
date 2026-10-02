@@ -49,7 +49,7 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, tes
  * from an Overview that held the same 3 back.
  *
  * Now a venue watching a night it does not run, or its own venue day, is sent
- * every count of people as a range (a few / 5–9 / 10–19 / 20+, D-19), from the
+ * every count of people as a bucket (a few / 5–9 / 10–19 / 20+, D-19), from the
  * server, so no exact count reaches its browser by the socket or by the page.
  * The organiser and an admin are the controls: they must still get 3 and 12,
  * or "no 3 for the venue" proves nothing.
@@ -235,8 +235,8 @@ afterAll(async () => {
 
 describe("the ops socket", () => {
   it.each([
-    ["three", () => three, "a few"],
-    ["twelve", () => twelve, "10–19"],
+    ["three", () => three, "a_few"],
+    ["twelve", () => twelve, "10-19"],
   ])("sends the venue owner the %s-person room as ranges, with no count of people as a number", async (_n, id, range) => {
     const { snapshots, errors } = await watch(venueOwner, id())
     expect(errors).toEqual([])
@@ -246,7 +246,7 @@ describe("the ops socket", () => {
       inside: range,
       guestsInside: range,
       checkedInTotal: range,
-      checkedOutTotal: "0",
+      checkedOutTotal: "none",
       checkInRate10m: range,
     })
     expect(numericKeys(first).filter((k) => !VENUE_NUMBERS.includes(k))).toEqual([])
@@ -267,7 +267,7 @@ describe("the ops socket", () => {
   it("keeps ticking for a venue watching alone", async () => {
     const { snapshots } = await watch(venueOwner, three, (s) => s.snapshots.length >= 2)
     expect(snapshots.length).toBeGreaterThanOrEqual(2)
-    for (const s of snapshots) expect(s).toMatchObject({ view: "venue", inside: "a few" })
+    for (const s of snapshots) expect(s).toMatchObject({ view: "venue", inside: "a_few" })
   }, 30_000)
 
   /** Emit one join as `userId` and collect what comes back within three seconds. */
@@ -310,7 +310,7 @@ describe("the ops socket", () => {
 
   it("on the venue day, sends its owner ranges and an admin the figures", async () => {
     const [owner] = (await watch(venueOwner, venueDay)).snapshots
-    expect(owner).toMatchObject({ view: "venue", inside: "a few", checkedInTotal: "a few" })
+    expect(owner).toMatchObject({ view: "venue", inside: "a_few", checkedInTotal: "a_few" })
     expect(numericKeys(owner).filter((k) => !VENUE_NUMBERS.includes(k))).toEqual([])
 
     const [adminView] = (await watch(admin, venueDay)).snapshots
@@ -324,7 +324,7 @@ describe("the ops socket", () => {
     expect(venueSeen.snapshots.length).toBeGreaterThanOrEqual(2)
     expect(hostSeen.snapshots.length).toBeGreaterThanOrEqual(2)
     for (const s of venueSeen.snapshots) {
-      expect(s).toMatchObject({ view: "venue", inside: "10–19" })
+      expect(s).toMatchObject({ view: "venue", inside: "10-19" })
       expect(numericKeys(s).filter((k) => !VENUE_NUMBERS.includes(k))).toEqual([])
     }
     for (const s of hostSeen.snapshots) expect(s).toMatchObject({ view: "host", inside: 12 })
@@ -409,8 +409,8 @@ describe("the event page's payload", () => {
   it("gives the Attendees tab's count as a range while the night runs", async () => {
     as(venueOwner, "venue_owner")
     const [count] = find<{ came: unknown }>(await eventPage(twelve, "attendees"), EventAttendeesCount)
-    expect(count.came).toBe("10–19")
-    expect(renderToStaticMarkup(EventAttendeesCount({ started: true, came: "10–19" }))).toMatch(/a range until it ends/)
+    expect(count.came).toBe("10-19")
+    expect(renderToStaticMarkup(EventAttendeesCount({ started: true, came: "10-19" }))).toMatch(/10–19.*a range until it ends/)
   })
 })
 
@@ -422,8 +422,8 @@ describe("the venue's lists", () => {
     const venuePage = await VenueDetailPage({ params: Promise.resolve({ id: venues[0] }), searchParams: Promise.resolve({}) })
     const [panel] = find<Panel>(venuePage, BuildingOccupancyPanel)
     expect(panel.occupancy.rooms).toEqual([
-      expect.objectContaining({ eventId: twelve, inside: "10–19", guestsInside: null, staffInside: null }),
-      expect.objectContaining({ eventId: three, inside: "a few", guestsInside: null, staffInside: null }),
+      expect.objectContaining({ eventId: twelve, inside: "10-19", guestsInside: null, staffInside: null }),
+      expect.objectContaining({ eventId: three, inside: "a_few", guestsInside: null, staffInside: null }),
     ])
     expect(panel.occupancy.inside).toBeNull()
     expect(numericKeys(panel.occupancy)).toEqual(["capacity"])
@@ -463,7 +463,7 @@ describe("the venue's lists", () => {
       return Object.fromEntries(rows.filter((r) => r.id === three || r.id === twelve).map((r) => [r.id, r.occupancy]))
     }
     as(venueOwner, "venue_owner")
-    expect(await occupancyOf()).toEqual({ [three]: "a few", [twelve]: "10–19" })
+    expect(await occupancyOf()).toEqual({ [three]: "a_few", [twelve]: "10-19" })
     as(host, "organizer")
     expect(await occupancyOf()).toEqual({ [three]: 3, [twelve]: 12 })
     as(admin, "app_admin")
@@ -517,8 +517,8 @@ describe("the venue's lists", () => {
 
     const owner = await getBuildingOccupancy(small.id, { asOwner: { id: venueOwner, orgIds: [small.owner_org_id!] } })
     expect(owner.rooms.map((r) => [r.eventId, r.inside])).toEqual([
-      [rooms["AAA room"], "a few"],
-      [rooms["BBB room"], "a few"],
+      [rooms["AAA room"], "a_few"],
+      [rooms["BBB room"], "a_few"],
     ])
     expect(owner).toMatchObject({ inside: null, fillPct: null, overCapacity: true })
 

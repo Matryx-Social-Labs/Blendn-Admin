@@ -1,6 +1,7 @@
 import Link from "next/link"
 
 import type { BuildingOccupancy } from "@/lib/building-occupancy"
+import { liveCountLabel } from "@/lib/disclosure"
 import { cn } from "@/lib/utils"
 
 /**
@@ -46,7 +47,7 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
 
       <div className="mt-1.5 flex flex-wrap items-baseline gap-3">
         {inside !== null ? (
-          <span className="text-[1.625rem] font-bold leading-[1.1] tabular-nums">{inside}</span>
+          <span className="text-[1.625rem] font-bold leading-[1.1] tabular-nums">{liveCountLabel(inside)}</span>
         ) : null}
         <span className="text-sm text-muted-foreground">
           {inside === null
@@ -76,7 +77,7 @@ export function BuildingOccupancyPanel({ occupancy }: { occupancy: BuildingOccup
               {room.title}
             </Link>
             <span className="shrink-0 tabular-nums text-muted-foreground">
-              <b className="font-bold text-foreground">{room.inside}</b>
+              <b className="font-bold text-foreground">{liveCountLabel(room.inside)}</b>
               {/* The split only when there is one to show — see the note in
                   occupancy-hero.tsx. */}
               {room.staffInside ? ` — ${room.guestsInside} guests, ${room.staffInside} staff` : null}

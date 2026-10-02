@@ -1522,8 +1522,8 @@
       "date": "2026-10-01"
     },
     "live-ranges.test.ts": {
-      "guards": "liveRange's edges (0, a few, 5–9, 10–19, 20+); forVenue: every count of people a range, no number in the venue's copy but capacity, messages per minute and open flags and those holding their own values, flags decided on exact figures both ways, and only the fields it names; alertsForVenue: approaching capacity, leaving early and unknown kinds are not sent, the rest carry no figure",
-      "mutation": "M11 `inside: s.inside` in forVenue. M13 liveRange returns the exact count from 20. M22 `approaching_capacity` given a sentence. M25 `capacity: s.inside` in forVenue",
+      "guards": "liveCountBucket's edges (none, a_few, 5-9, 10-19, 20+ -- the helper PR #619 shares) and liveCountLabel's words for them; forVenue: every count of people a range, no number in the venue's copy but capacity, messages per minute and open flags and those holding their own values, flags decided on exact figures both ways, and only the fields it names; alertsForVenue: approaching capacity, leaving early and unknown kinds are not sent, the rest carry no figure",
+      "mutation": "M11 `inside: s.inside` in forVenue. M13 liveCountBucket returns the exact count from 20. M22 `approaching_capacity` given a sentence. M25 `capacity: s.inside` in forVenue",
       "observed": "M11: 2 failing ('rounds every count of people', 'leaves a number only where the venue already sees it'). M13: 2 failing ('20 reads as 20+', '500 reads as 20+'). M22: 1 failing ('sends no alert that flips at an exact count…'). M25: 1 failing ('leaves a number only where the venue already sees it') -- the key-name check alone passed it; the value assertion is what caught it",
       "date": "2026-10-01"
     }

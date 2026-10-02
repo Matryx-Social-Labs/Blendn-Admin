@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { LIVE_RANGES, liveRange, type LiveRange } from "@/lib/disclosure"
+import { LIVE_COUNT_BUCKETS, liveCountBucket, type LiveCountBucket } from "@/lib/disclosure"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
 import { realEventsWhere } from "./event-kind"
@@ -35,7 +35,7 @@ export interface RoomOccupancy {
   eventId: string
   title: string
   /** A range when the owner reads a room another host runs (SCRUM-516). */
-  inside: number | LiveRange
+  inside: number | LiveCountBucket
   /** Null beside a range: the split is two more counts. */
   guestsInside: number | null
   staffInside: number | null
@@ -47,7 +47,7 @@ export interface BuildingOccupancy {
    * a room is a range and there are others: total minus the rooms shown exactly
    * would be the ranged room's count.
    */
-  inside: number | LiveRange | null
+  inside: number | LiveCountBucket | null
   /** The venue's licensed capacity, or null when none is stated. */
   capacity: number | null
   /** Null when the venue states no capacity. Uncapped, like the event one. */
@@ -123,14 +123,14 @@ export async function getBuildingOccupancy(
      * rooms both reading "a few" would swap places as one person walks in.
      */
     .sort((a, b) => {
-      const rank = (n: number) => (anyRanged ? LIVE_RANGES.indexOf(liveRange(n)) : n)
+      const rank = (n: number) => (anyRanged ? LIVE_COUNT_BUCKETS.indexOf(liveCountBucket(n)) : n)
       return rank(b.inside) - rank(a.inside) || a.event.title.localeCompare(b.event.title)
     })
     .map((r) => ({
       eventId: r.event.id,
       title: r.event.title,
       ...(r.ranged
-        ? { inside: liveRange(r.inside), guestsInside: null, staffInside: null }
+        ? { inside: liveCountBucket(r.inside), guestsInside: null, staffInside: null }
         : { inside: r.inside, guestsInside: r.guestsInside, staffInside: r.inside - r.guestsInside }),
     }))
 

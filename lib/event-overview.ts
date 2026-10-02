@@ -1,6 +1,6 @@
 import { venueCounts } from "@/lib/attendee-roster"
 import { db } from "@/lib/db"
-import { discloseHeadcount, discloseRating, liveRange, MIN_CELL } from "@/lib/disclosure"
+import { discloseHeadcount, discloseRating, liveCountBucket, liveCountLabel, MIN_CELL } from "@/lib/disclosure"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
@@ -164,7 +164,7 @@ export async function getEventOverview(
           ? {
               label: "Checked in now",
               // A range for the venue: it moves with every arrival (SCRUM-516).
-              value: venue ? liveRange(checkedIn) : fmt(checkedIn),
+              value: venue ? liveCountLabel(liveCountBucket(checkedIn)) : fmt(checkedIn),
               hint: going === 0 ? "Nobody RSVP'd" : `${say(goingN)} said they were coming`,
             }
           : going === 0
@@ -195,7 +195,7 @@ export async function getEventOverview(
             {
               label: "Checked in",
               // Check-in opens before the doors, so it can already be moving.
-              value: venue ? venue.cameSoFar : fmt(attendedPeople),
+              value: venue ? liveCountLabel(venue.cameSoFar) : fmt(attendedPeople),
               hint: "before the doors, usually zero",
             },
             {
@@ -214,7 +214,7 @@ export async function getEventOverview(
           ]
         : state === "live"
           ? [
-              { label: "Ever checked in", value: venue ? venue.cameSoFar : fmt(attendedPeople) },
+              { label: "Ever checked in", value: venue ? liveCountLabel(venue.cameSoFar) : fmt(attendedPeople) },
               { label: "Going", value: fmt(goingN) },
               { label: "Capacity", value: capacity === null ? null : String(capacity) },
             ]

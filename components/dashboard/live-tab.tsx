@@ -24,6 +24,7 @@ import { earlierIssues } from "@/lib/issue-timestamp"
 import { IssueLog } from "@/components/dashboard/issue-log"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
+import { liveCountLabel } from "@/lib/disclosure"
 import { cn } from "@/lib/utils"
 import { eventClock, livePhaseFor } from "@/lib/event-phase"
 
@@ -186,7 +187,7 @@ export function LiveTab({
           <div className="flex flex-wrap gap-1">
             <MetricTile
               label="Check-in rate"
-              value={snapshot.checkInRate10m}
+              value={liveCountLabel(snapshot.checkInRate10m)}
               hint={
                 snapshot.view === "host" && snapshot.medianRate10m > 0
                   ? `per 10 min · ×${(snapshot.checkInRate10m / snapshot.medianRate10m).toFixed(1)} median`
@@ -195,13 +196,13 @@ export function LiveTab({
             />
             <MetricTile
               label="Checked out"
-              value={snapshot.checkedOutTotal}
+              value={liveCountLabel(snapshot.checkedOutTotal)}
               hint="before scheduled end"
             />
             <MetricTile label="Msgs/min" value={snapshot.messagesPerMinute} />
             <MetricTile
               label="Active chatters"
-              value={snapshot.activeChatters30m}
+              value={liveCountLabel(snapshot.activeChatters30m)}
               hint="distinct, last 30 min"
             />
             <MetricTile label="Open flags" value={snapshot.openFlags} />
@@ -288,9 +289,9 @@ function hostDescription(s: LiveSnapshot): string {
 }
 
 function venueDescription(s: VenueLiveSnapshot): string {
-  return `${s.checkedInTotal} checked in, ${s.checkedOutTotal} left${
-    s.staleInside !== "0"
-      ? `. ${s.staleInside} not seen in the last few minutes — phones sleep, so they are still counted`
+  return `${liveCountLabel(s.checkedInTotal)} checked in, ${liveCountLabel(s.checkedOutTotal)} left${
+    s.staleInside !== "none"
+      ? `. ${liveCountLabel(s.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
       : ""
   }. Shown as ranges, so one person arriving or leaving does not show.`
 }
@@ -302,7 +303,7 @@ function VenueMood({ snapshot }: { snapshot: VenueLiveSnapshot }) {
     <div className="flex flex-col gap-1.5">
       <h3 className="text-sm font-bold">Mood — last 30 min</h3>
       <p className="text-[0.78rem] text-muted-foreground">
-        {positive} positive · {neutral} neutral · {negative} negative
+        {liveCountLabel(positive)} positive · {liveCountLabel(neutral)} neutral · {liveCountLabel(negative)} negative
       </p>
       <h3 className="mt-2 text-sm font-bold">Complaints — last 30 min</h3>
       {snapshot.categories.length === 0 ? (
@@ -312,7 +313,7 @@ function VenueMood({ snapshot }: { snapshot: VenueLiveSnapshot }) {
           {snapshot.categories.map((c) => (
             <li key={c.category} className="flex justify-between gap-3">
               <span>{c.category.replaceAll("_", " ")}</span>
-              <b className="font-bold tabular-nums text-foreground">{c.count}</b>
+              <b className="font-bold tabular-nums text-foreground">{liveCountLabel(c.count)}</b>
             </li>
           ))}
         </ul>

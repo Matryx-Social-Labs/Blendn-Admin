@@ -1,29 +1,35 @@
-import { liveRange } from "@/lib/disclosure"
+import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
 import { alertsForVenue, forVenue, type LiveAlertKind, type LiveSnapshot } from "@/lib/live-metrics"
 
 /**
- * A venue watching a night it does not run gets its live counts as ranges
+ * A venue watching a night it does not run gets its live counts as buckets
  * (SCRUM-516, D-19).
  *
  * The floor alone is beaten by watching: "fewer than 5" turning into 5 the
  * moment somebody walks in says they did (F14). Ranges move only at their
- * edges. These pin the edges, and that the venue's copy of the snapshot
+ * edges. These pin the edges (the same `liveCountBucket` the app's Go Live
+ * answer uses), the dashboard's words for them, and that the venue's copy of the snapshot
  * carries no count of people as a number at all.
  */
 
-describe("liveRange", () => {
+describe("liveCountBucket", () => {
   it.each([
-    [0, "0"],
-    [1, "a few"],
-    [4, "a few"],
-    [5, "5–9"],
-    [9, "5–9"],
-    [10, "10–19"],
-    [19, "10–19"],
-    [20, "20+"],
-    [500, "20+"],
-  ])("%i reads as %s", (n, range) => {
-    expect(liveRange(n)).toBe(range)
+    [0, "none", "0"],
+    [1, "a_few", "a few"],
+    [4, "a_few", "a few"],
+    [5, "5-9", "5–9"],
+    [9, "5-9", "5–9"],
+    [10, "10-19", "10–19"],
+    [19, "10-19", "10–19"],
+    [20, "20+", "20+"],
+    [500, "20+", "20+"],
+  ])("%i is %s, printed %s", (n, bucket, label) => {
+    expect(liveCountBucket(n)).toBe(bucket)
+    expect(liveCountLabel(liveCountBucket(n))).toBe(label)
+  })
+
+  it("prints an exact count as itself, for the host's copy of the same screen", () => {
+    expect(liveCountLabel(7)).toBe("7")
   })
 })
 
@@ -77,16 +83,16 @@ describe("forVenue", () => {
   it("rounds every count of people to a range", () => {
     expect(venue).toMatchObject({
       view: "venue",
-      inside: "10–19",
-      guestsInside: "10–19",
-      staffInside: "a few",
-      checkedInTotal: "10–19",
-      checkedOutTotal: "a few",
-      staleInside: "a few",
-      checkInRate10m: "5–9",
-      activeChatters30m: "5–9",
-      sentiment: { positive: "5–9", neutral: "a few", negative: "a few" },
-      categories: [{ category: "entry_queue", count: "a few" }],
+      inside: "10-19",
+      guestsInside: "10-19",
+      staffInside: "a_few",
+      checkedInTotal: "10-19",
+      checkedOutTotal: "a_few",
+      staleInside: "a_few",
+      checkInRate10m: "5-9",
+      activeChatters30m: "5-9",
+      sentiment: { positive: "5-9", neutral: "a_few", negative: "a_few" },
+      categories: [{ category: "entry_queue", count: "a_few" }],
     })
   })
 
