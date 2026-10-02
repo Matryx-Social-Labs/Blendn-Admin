@@ -56,7 +56,8 @@ export async function GET(request: NextRequest) {
 
     const [attended, totalCount] = await Promise.all([
       attendedEventIds(authUser.userId, { limit, skip: paginationSkip(page, limit) }),
-      distinctEventsAttended(authUser.userId),
+      // Places included: the list below includes them (D-6).
+      distinctEventsAttended(authUser.userId, { places: true }),
     ])
 
     // Deleted events are already out of both queries (SCRUM-432). This filter
@@ -68,6 +69,9 @@ export async function GET(request: NextRequest) {
           where: { id: { in: attended.map((a) => a.event_id) }, deleted_at: null },
           select: {
             id: true,
+            // `event` or `venue_day`: the app labels a venue day as a place
+            // (D-6) — its title is bookkeeping, its `venue_name` is the place.
+            kind: true,
             slug: true,
             title: true,
             cover_image_url: true,

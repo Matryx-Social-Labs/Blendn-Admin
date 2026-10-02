@@ -7,6 +7,7 @@ import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
 import { blockCounterparties } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
+import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
@@ -64,6 +65,14 @@ export interface ServerToClientEvents {
    * to `user:{id}`.
    */
   "notification:new": (data: { kind: string }) => void
+  /**
+   * Your Go Live at a venue ended, and your sockets have left its rooms (the
+   * chat, the roster, the counter). `reason` is the checkout's: `expired` when
+   * the window ran out (or the day reset), `event_started` when a real event
+   * took the venue over (the push says which), otherwise how you left. To
+   * `user:{id}` only.
+   */
+  "live:ended": (data: { eventId: string; reason: string }) => void
   // Event-related
   /**
    * A check-in happened. Deliberately carries no name.
@@ -460,10 +469,17 @@ export async function emitChatTyping(
           user_id: socket.data.userId,
         },
       },
-      select: { anonymous_name: true, status: true, chat_group: { select: { event_id: true } } },
+      select: {
+        anonymous_name: true,
+        status: true,
+        last_allowed_at: true,
+        chat_group: { select: { event_id: true, event: { select: { kind: true } } } },
+      },
     })
 
     if (!membership || membership.status !== "active") return
+    // A venue day's room is the people live in it: an ended Go Live types into nothing.
+    if (!liveInVenueDay(membership.chat_group.event, membership)) return
 
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
@@ -1047,6 +1063,40 @@ type Payload<E extends keyof ServerToClientEvents> = Parameters<ServerToClientEv
  * person, so send the handled copy as one broadcast `except` that person's
  * `user:` room and fetch only their own sockets for the real-id copy.
  */
+/** Event kinds never change, so one lookup per event is enough. Bounded. */
+const eventKinds = new Map<string, string>()
+
+/**
+ * Who in this audience may still hear a venue day's room: null for an event
+ * (everyone the room let in), else the members whose Go Live is open now.
+ *
+ * The eviction at a window's end (`evictFromVenueDay`) takes a socket out of
+ * the rooms, but it runs when the checkout runs; between the window's end and
+ * that moment — a timer that slipped, a sweep still to come, a replica that
+ * never heard — a socket still in `chat:<room>` would go on receiving it.
+ * Asking here, per emit, makes the window the rule rather than the timer
+ * (step 4 review).
+ */
+async function liveAudienceOf(eventId: string, viewers: string[]): Promise<Set<string> | null> {
+  let kind = eventKinds.get(eventId)
+  if (!kind) {
+    kind = (await db.events.findUnique({ where: { id: eventId }, select: { kind: true } }))?.kind ?? "event"
+    if (eventKinds.size > 5_000) eventKinds.clear()
+    eventKinds.set(eventId, kind)
+  }
+  if (kind !== "venue_day") return null
+  const rows = await db.chat_group_members.findMany({
+    where: {
+      chat_group: { event_id: eventId },
+      user_id: { in: viewers },
+      status: { not: "banned" },
+      last_allowed_at: { gt: new Date() },
+    },
+    select: { user_id: true },
+  })
+  return new Set(rows.map((r) => r.user_id))
+}
+
 async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   audience: { fetchSockets(): Promise<RemoteSocket<ServerToClientEvents, Partial<SocketData> | undefined>[]> },
   eventId: string,
@@ -1057,6 +1107,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
 ): Promise<void> {
   const sockets = await audience.fetchSockets()
   const viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
+  const live = await liveAudienceOf(eventId, viewers)
   const recognising = about ? await recognisedInRoomBy(eventId, about, viewers) : new Set<string>()
   const handles = new Map<string, string>()
   const handleOf = (userId: string) => {
@@ -1069,6 +1120,8 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
     if (recipient.id === skipSocketId) continue
     // No user on the socket means nobody is "own": every id goes out handled.
     const viewer = recipient.data?.userId ?? ""
+    // A venue day's room: only the people live in it now.
+    if (live && !live.has(viewer)) continue
     let copy = copies.get(viewer)
     if (!copy) {
       const idFor = (userId: string) => (userId === viewer ? userId : handleOf(userId))
@@ -1353,6 +1406,21 @@ export function evictUserSockets(userId: string): void {
   const io = currentIo()
   if (!io) return
   io.in(`user:${userId}`).disconnectSockets(true)
+}
+
+/**
+ * Out of a venue day's rooms, on every instance (`liveInVenueDay`).
+ *
+ * The joins are refused once a Go Live ends, but a socket already in
+ * `chat:<room>` keeps receiving until it disconnects — the SCRUM-205 shape.
+ * Told first, on their own `user:` room, so the app can say why.
+ */
+export function evictFromVenueDay(eventId: string, chatGroupId: string | null, userId: string, reason: string): void {
+  const io = currentIo()
+  if (!io) return
+  io.to(`user:${userId}`).emit("live:ended", { eventId, reason })
+  const rooms = [`event:${eventId}`, `event:room:${eventId}`, ...(chatGroupId ? [`chat:${chatGroupId}`] : [])]
+  io.in(`user:${userId}`).socketsLeave(rooms)
 }
 
 /**

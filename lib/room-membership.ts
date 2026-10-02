@@ -27,7 +27,7 @@ export async function roomForMember(
       id: true,
       event_id: true,
       status: true,
-      event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
+      event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
     },
   })
   if (!group) return null

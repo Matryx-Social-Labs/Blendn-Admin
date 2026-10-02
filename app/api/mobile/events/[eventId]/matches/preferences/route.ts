@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-response"
 import { ageFrom, datingAgeRefusal } from "@/lib/age"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { intentsAreCoherent } from "@/lib/validations/profile"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -90,7 +91,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const rememberReveal = parsed.data.rememberReveal ?? remember ?? false
 
     const checkIn = await db.event_check_ins.findFirst({
-      where: { event_id: eventId, user_id: authUser.userId },
+      where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
       select: { id: true },
     })
     if (!checkIn) return forbiddenResponse("Check in to this event first")

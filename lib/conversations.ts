@@ -258,22 +258,44 @@ export async function mayConverse(a: string, b: string): Promise<boolean> {
  *
  * `check_in_time: not null` matters: an RSVP is not attendance, and someone who
  * merely intended to come was never in the room with anyone.
+ *
+ * At a venue's day the windows must have overlapped (below).
  */
 export async function haveSharedAnEvent(a: string, b: string): Promise<boolean> {
   const mine = await db.event_check_ins.findMany({
     where: { user_id: a, check_in_time: { not: null } },
-    select: { event_id: true },
+    select: { event_id: true, event: { select: { kind: true } } },
     distinct: ["event_id"],
   })
   if (mine.length === 0) return false
 
-  const overlap = await db.event_check_ins.findFirst({
-    where: {
-      user_id: b,
-      check_in_time: { not: null },
-      event_id: { in: mine.map((m) => m.event_id) },
-    },
-    select: { id: true },
-  })
-  return overlap !== null
+  const events = mine.filter((m) => m.event.kind !== "venue_day").map((m) => m.event_id)
+  const days = mine.filter((m) => m.event.kind === "venue_day").map((m) => m.event_id)
+
+  const overlap = events.length
+    ? await db.event_check_ins.findFirst({
+        where: { user_id: b, check_in_time: { not: null }, event_id: { in: events } },
+        select: { id: true },
+      })
+    : null
+  if (overlap) return true
+  if (days.length === 0) return false
+
+  /*
+   * A venue's day is not an evening: two people live there at noon and at
+   * midnight never met. So at a venue day, sharing the room means windows
+   * that overlapped — two presence sessions on the same day, each arriving
+   * before the other left (D-x4).
+   */
+  const met = await db.$queryRaw<{ one: number }[]>`
+    SELECT 1 AS one
+      FROM presence_sessions pa
+      JOIN presence_sessions pb ON pb.occurrence_id = pa.occurrence_id AND pb.user_id = ${b}
+     WHERE pa.user_id = ${a}
+       AND pa.event_id = ANY(${days}::uuid[])
+       AND pa.arrived_at < COALESCE(pb.departed_at, now())
+       AND pb.arrived_at < COALESCE(pa.departed_at, now())
+     LIMIT 1
+  `
+  return met.length > 0
 }

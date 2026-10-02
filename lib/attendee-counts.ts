@@ -126,6 +126,11 @@ const LIVE_EVENT = Prisma.sql`
   AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.deleted_at IS NULL)
 `
 
+/** `LIVE_EVENT`, real events only: what anybody but the person sees of them. */
+const LIVE_REAL_EVENT = Prisma.sql`
+  AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.deleted_at IS NULL AND e.kind = 'event')
+`
+
 /**
  * How many distinct *events* this person has attended.
  *
@@ -133,14 +138,23 @@ const LIVE_EVENT = Prisma.sql`
  * only outing was a three-day conference was told they had attended three
  * events. It is rendered to the user as "events attended" on their own profile.
  */
-export async function distinctEventsAttended(userId: string): Promise<number> {
+export async function distinctEventsAttended(
+  userId: string,
+  /**
+   * Whether the places they went live at count (D-6). Yes for their own
+   * profile and `/me/attendance`, whose list includes them; never for anybody
+   * else's view of them — how many venue days somebody has is a trail of where
+   * they go out, for nothing a stranger needs (step 4 review).
+   */
+  opts: { places: boolean } = { places: false }
+): Promise<number> {
   const [row] = await db.$queryRaw<{ events: bigint }[]>`
     SELECT COUNT(DISTINCT event_id) AS events
     FROM event_check_ins
     WHERE user_id = ${userId}
       AND status::text IN (${Prisma.join(ATTENDED)})
       AND kind = 'attendee'
-      ${LIVE_EVENT}
+      ${opts.places ? LIVE_EVENT : LIVE_REAL_EVENT}
   `
   return Number(row?.events ?? 0)
 }

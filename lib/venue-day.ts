@@ -107,6 +107,23 @@ function toVenueDay(row: Row): VenueDay {
 }
 
 /**
+ * The venue's day containing `at`, if anybody has made it — never creates one.
+ *
+ * For the reads that must not leave a row behind: the venue page, and Go
+ * Live's refusals, which are decided before the day is made so that somebody
+ * standing elsewhere never creates it (step 4 review). `geofence` is the area
+ * the day copied, the one Go Live judges; `deleted_at` because a deleted day
+ * still holds its slot.
+ */
+export async function venueDayAt(venueId: string, at: Date) {
+  return db.events.findFirst({
+    where: { ...venueDaysWhere, venue_id: venueId, start_time: { lte: at }, end_time: { gt: at } },
+    orderBy: { start_time: "desc" },
+    select: { id: true, start_time: true, end_time: true, geofence: true, deleted_at: true },
+  })
+}
+
+/**
  * The venue's day at `now`, created if this is the first time anybody needs it.
  *
  * Null when the venue does not exist, is deleted or archived — nothing to go

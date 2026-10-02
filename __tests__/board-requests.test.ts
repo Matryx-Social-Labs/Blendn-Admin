@@ -127,8 +127,10 @@ describe("the board handle at check-in", () => {
      * has promised this continuity since it was written; until this line it
      * described behaviour the code did not have.
      */
-    const src = codeOnly(read("app", "api", "mobile", "events", "[eventId]", "checkin", "route.ts"))
-    expect(src).toContain("{ eventId, userId: authUser.userId }")
+    // The door's seat moved to lib/check-in-core.ts (step 4), shared by Go Live.
+    const src = codeOnly(read("lib", "check-in-core.ts"))
+    expect(src).toContain("claimAnonymousName(chatGroupId, rejoin, { eventId, userId })")
+    expect(src).toMatch(/\{ eventId, userId \}\s*\)\s*\n\s*\n\s*await db\.chat_groups\.update/)
   })
 })
 

@@ -17,9 +17,11 @@ const code = (rel: string) =>
     .replace(/\/\/.*$/gm, "")
 
 const DOOR = "app/api/mobile/events/[eventId]/checkin/route.ts"
+/** The rules both doors share — the person and the fence (step 4, PL-G03). */
+const CORE = "lib/check-in-core.ts"
 
 describe("every refusal at the door is recorded", () => {
-  const src = code(DOOR)
+  const src = code(DOOR) + code(CORE)
 
   it("records all six ways to be turned away", () => {
     /*
@@ -41,7 +43,7 @@ describe("every refusal at the door is recorded", () => {
      * without the number.
      */
     expect(src).toMatch(/shortfallMetres: verdict\.shortfall/)
-    expect(src).toMatch(/accuracyMetres: gpsAccuracy/)
+    expect(src).toMatch(/accuracyMetres: input\.gpsAccuracy/)
   })
 
   it("never records coordinates", () => {
