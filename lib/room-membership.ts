@@ -29,7 +29,7 @@ export async function roomForMember(
       kind: true,
       event_id: true,
       status: true,
-      event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
+      event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
       board_post: boardPostDoor(userId),
     },
   })

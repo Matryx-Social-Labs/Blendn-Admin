@@ -79,11 +79,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         kind: true,
         status: true,
         board_post: boardPostDoor(user.userId),
-        members: { where: { user_id: user.userId }, select: { status: true, muted_by: true, banned_by: true } },
+        members: { where: { user_id: user.userId }, select: { status: true, muted_by: true, banned_by: true, last_allowed_at: true } },
         // Spread of both bounds, not just `end_time`: `chatWindowState` reads a
         // missing start as "no lower bound", which would open a room that has
         // not opened yet.
-        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
+        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
       },
     })
     if (!chatGroup) return notFoundResponse("Chat group not found")
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(
         chatClosedMessage(denial.reason),
         403,
-        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
       )
     }
 

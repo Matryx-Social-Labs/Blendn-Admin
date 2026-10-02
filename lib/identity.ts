@@ -1,4 +1,5 @@
 import { db } from "./db"
+import { inRoomWhere } from "./event-kind"
 import { resolveUserRef } from "./room-handle"
 
 /**
@@ -142,7 +143,9 @@ export async function maySeeIdentityFor(
           user_id: { in: others },
           revealed: true,
           // any-kind: a reveal is seen by whoever shared that room, a venue day's included.
-          event: { check_ins: { some: { user_id: viewerId } } },
+          // At a venue day, only while the viewer is live there (`inRoomWhere`):
+          // a past window is not a seat from which to watch later reveals.
+          event: { check_ins: { some: { user_id: viewerId, ...inRoomWhere(viewerId) } } },
         },
         select: { user_id: true },
       })
@@ -381,7 +384,8 @@ async function roomIdentity(
      * counter room hands them out), so this refuses them too.
      */
     db.event_check_ins
-      .findMany({ where: { event_id: eventId, user_id: { in: viewers } }, select: { user_id: true } })
+      // `inRoomWhere`: at a venue day, a viewer is in the room only while live.
+      .findMany({ where: { event_id: eventId, user_id: { in: viewers }, ...inRoomWhere() }, select: { user_id: true } })
       .then((rows) => new Set(rows.map((r) => r.user_id))),
     // "Show who I am" in this event — one row per person per event.
     db.event_match_preferences

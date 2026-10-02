@@ -20,8 +20,8 @@ const read = (f: string) => readFileSync(join(ROOT, f), "utf8")
 const AUTHOR = "u_author"
 const ASKER = "u_asker"
 const STRANGER = "u_stranger"
-const published = { status: "published", deleted_at: null }
-const active = { status: "active", left_at: null }
+const published = { status: "published", deleted_at: null, kind: "event" as const }
+const active = { status: "active", left_at: null, last_allowed_at: null }
 
 const END = new Date("2026-10-02T18:00:00Z")
 
@@ -61,13 +61,13 @@ function boardRoom(
 const BEFORE_CLOSE = new Date(END.getTime() + 60 * 60 * 1000)
 
 describe("an event's room is today's rule, unchanged", () => {
-  const room = (event: { status: string; deleted_at: Date | null } | null) => ({ kind: "event" as const, event, board_post: null })
+  const room = (event: { status: string; deleted_at: Date | null; kind: "event" } | null) => ({ kind: "event" as const, event, board_post: null })
 
   it("admits a member and refuses a stranger, a ban and a hidden event", () => {
     expect(roomReadDenialFor(room(published), active, STRANGER)).toBeNull()
     expect(roomReadDenialFor(room(published), null, STRANGER)).toBe("not_member")
-    expect(roomReadDenialFor(room(published), { status: "banned", left_at: null }, STRANGER)).toBe("banned")
-    expect(roomReadDenialFor(room({ status: "draft", deleted_at: null }), active, STRANGER)).toBe("hidden")
+    expect(roomReadDenialFor(room(published), { status: "banned", left_at: null, last_allowed_at: null }, STRANGER)).toBe("banned")
+    expect(roomReadDenialFor(room({ status: "draft", deleted_at: null, kind: "event" }), active, STRANGER)).toBe("hidden")
   })
 
   it("refuses an event room whose event is missing, rather than inventing one", () => {
@@ -85,7 +85,7 @@ describe("a board post's room: the author, or an asker the author accepted", () 
 
   it("refuses somebody with a member row and no accepted ask — the row is not the key", () => {
     expect(roomReadDenialFor(boardRoom(), active, ASKER)).toBe("not_member")
-    expect(mayWriteToRoomFor(boardRoom(), { status: "active" }, ASKER, BEFORE_CLOSE)).toEqual({ reason: "not_member" })
+    expect(mayWriteToRoomFor(boardRoom(), { status: "active", last_allowed_at: null }, ASKER, BEFORE_CLOSE)).toEqual({ reason: "not_member" })
   })
 
   it("refuses a stranger with no row", () => {
@@ -98,17 +98,17 @@ describe("a board post's room: the author, or an asker the author accepted", () 
   })
 
   it("still honours the member row: a ban, and leaving by choice", () => {
-    expect(roomReadDenialFor(boardRoom({ accepted: true }), { status: "banned", left_at: null }, ASKER)).toBe("banned")
-    expect(roomReadDenialFor(boardRoom({ accepted: true }), { status: "left", left_at: new Date() }, ASKER)).toBe("not_member")
+    expect(roomReadDenialFor(boardRoom({ accepted: true }), { status: "banned", left_at: null, last_allowed_at: null }, ASKER)).toBe("banned")
+    expect(roomReadDenialFor(boardRoom({ accepted: true }), { status: "left", left_at: new Date(), last_allowed_at: null }, ASKER)).toBe("not_member")
   })
 
   it("takes writes until it is locked or archived, and never from the muted", () => {
     const author = { viewer: AUTHOR }
-    expect(mayWriteToRoomFor(boardRoom(author), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toBeNull()
-    expect(mayWriteToRoomFor(boardRoom({ ...author, status: "locked" }), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "locked" })
-    expect(mayWriteToRoomFor(boardRoom({ ...author, status: "archived" }), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "archived" })
-    expect(mayWriteToRoomFor(boardRoom(author), { status: "muted" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "muted" })
-    expect(mayWriteToRoomFor(boardRoom({ ...author, deleted: true }), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "hidden" })
+    expect(mayWriteToRoomFor(boardRoom(author), { status: "active", last_allowed_at: null }, AUTHOR, BEFORE_CLOSE)).toBeNull()
+    expect(mayWriteToRoomFor(boardRoom({ ...author, status: "locked" }), { status: "active", last_allowed_at: null }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "locked" })
+    expect(mayWriteToRoomFor(boardRoom({ ...author, status: "archived" }), { status: "active", last_allowed_at: null }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "archived" })
+    expect(mayWriteToRoomFor(boardRoom(author), { status: "muted", last_allowed_at: null }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "muted" })
+    expect(mayWriteToRoomFor(boardRoom({ ...author, deleted: true }), { status: "active", last_allowed_at: null }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "hidden" })
   })
 
   it("closes twelve hours after its event ends, on the clock, whether or not the sweeper has run (E2)", () => {
@@ -117,13 +117,13 @@ describe("a board post's room: the author, or an asker the author accepted", () 
     const room = boardRoom({ viewer: AUTHOR })
     expect(roomWindowFor(room, new Date(closes.getTime() - 1))).toEqual({ open: true })
     expect(roomWindowFor(room, closes)).toEqual({ open: false, reason: "window_closed" })
-    expect(mayWriteToRoomFor(room, { status: "active" }, AUTHOR, closes)).toEqual({ reason: "window_closed" })
+    expect(mayWriteToRoomFor(room, { status: "active", last_allowed_at: null }, AUTHOR, closes)).toEqual({ reason: "window_closed" })
   })
 
   it("closes for an asker in a block with the author, either way — the board reads a block as a withdrawn post (E4)", () => {
     expect(roomReadDenialFor(boardRoom({ accepted: true, authorBlocked: true }), active, ASKER)).toBe("hidden")
     expect(roomReadDenialFor(boardRoom({ accepted: true, blockedAuthor: true }), active, ASKER)).toBe("hidden")
-    expect(mayWriteToRoomFor(boardRoom({ accepted: true, blockedAuthor: true }), { status: "active" }, ASKER, BEFORE_CLOSE)).toEqual({
+    expect(mayWriteToRoomFor(boardRoom({ accepted: true, blockedAuthor: true }), { status: "active", last_allowed_at: null }, ASKER, BEFORE_CLOSE)).toEqual({
       reason: "hidden",
     })
   })
@@ -140,7 +140,7 @@ describe("crew and Blend rooms have no owner yet, so nobody is in one", () => {
   it.each(["crew", "blend"] as const)("a %s room refuses even an active member row", (kind) => {
     const room = { kind, status: "active" as const, event: null, board_post: null }
     expect(roomReadDenialFor(room, active, AUTHOR)).toBe("hidden")
-    expect(mayWriteToRoomFor(room, { status: "active" }, AUTHOR)).toEqual({ reason: "hidden" })
+    expect(mayWriteToRoomFor(room, { status: "active", last_allowed_at: null }, AUTHOR)).toEqual({ reason: "hidden" })
   })
 
   it("an unknown kind is refused", () => {

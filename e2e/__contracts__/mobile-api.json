@@ -136,7 +136,19 @@
     ],
     "data": [
       "checkIns"
-    ]
+    ],
+    "nested": {
+      "checkIns[]": [
+        "checkInTime",
+        "event",
+        "eventId",
+        "expiresAt",
+        "id",
+        "kind",
+        "revealed",
+        "stay"
+      ]
+    }
   },
   "/api/mobile/board/requests": {
     "status": 200,
@@ -347,6 +359,42 @@
         "show_orientation",
         "updated_at",
         "work_field"
+      ]
+    }
+  },
+  "/api/mobile/venues/:venueId": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "live",
+      "tonight",
+      "venue"
+    ],
+    "nested": {
+      "venue": [
+        "address",
+        "city",
+        "claimed",
+        "id",
+        "latitude",
+        "longitude",
+        "name",
+        "venueType",
+        "venueTypeLabel"
+      ],
+      "live": [
+        "chatGroupId",
+        "closedReason",
+        "eventId",
+        "expiresAt",
+        "liveNow",
+        "open",
+        "stay",
+        "venueDayId",
+        "youAreLive"
       ]
     }
   }

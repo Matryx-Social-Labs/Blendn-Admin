@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
+import { NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { boardPostDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         id: true,
         kind: true,
         event_id: true,
-        event: { select: { status: true, deleted_at: true } },
+        event: { select: { status: true, deleted_at: true, kind: true } },
         board_post: boardPostDoor(authUser.userId),
       },
     })
@@ -70,6 +71,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (denial === "hidden") return notFoundResponse("Chat group not found")
     if (denial === "not_member") return errorResponse("You are not a member of this chat group", 403)
     if (denial === "banned") return errorResponse(bannedRefusal(membership!), 403, ErrorCode.USER_BANNED)
+    if (denial === "not_live") return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
 
     /*
      * A block is a safety promise, not a mute.

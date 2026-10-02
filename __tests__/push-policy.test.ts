@@ -77,6 +77,13 @@ import { resetMemoryStore } from "@/lib/rate-limit-store"
 
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 
+/** An event's room: `last_allowed_at` is read only in a venue day's (`liveInVenueDay`). */
+// The room's door reads its kind and owner too (step 7): an event room, published.
+const eventRoom = {
+  last_allowed_at: null,
+  chat_group: { kind: "event", event: { kind: "event", status: "published", deleted_at: null }, board_post: null },
+}
+
 beforeEach(() => {
   mockSent.length = 0
   resetMemoryStore()
@@ -86,7 +93,7 @@ beforeEach(() => {
   created.mockResolvedValue({})
   blocks.mockResolvedValue([])
   parentOf.mockResolvedValue({ user_id: "author" })
-  membershipOf.mockResolvedValue({ status: "active" })
+  membershipOf.mockResolvedValue({ status: "active", ...eventRoom })
 })
 
 describe("where each kind lands", () => {
@@ -349,13 +356,24 @@ describe("a room pushes replies, and only to the person replied to", () => {
   })
 
   it.each(["left", "banned"])("never reaches an author who has %s", async (status) => {
-    membershipOf.mockResolvedValue({ status })
+    membershipOf.mockResolvedValue({ status, ...eventRoom })
     await send("p1")
     expect(mockSent).toHaveLength(0)
   })
 
+  it("never reaches an author whose Go Live at the venue has ended, and does while it is open", async () => {
+    // A venue day's room is the people live in it (`liveInVenueDay`, F6).
+    const venueDay = (until: number) => ({ status: "active", last_allowed_at: new Date(until), chat_group: { kind: "event", event: { kind: "venue_day", status: "published", deleted_at: null }, board_post: null } })
+    membershipOf.mockResolvedValue(venueDay(Date.now() - 60_000))
+    await send("p1")
+    expect(mockSent).toHaveLength(0)
+    membershipOf.mockResolvedValue(venueDay(Date.now() + 60_000))
+    await send("p2")
+    expect(mockSent).toHaveLength(1)
+  })
+
   it("still reaches a muted author: muted cannot post, and still reads", async () => {
-    membershipOf.mockResolvedValue({ status: "muted" })
+    membershipOf.mockResolvedValue({ status: "muted", ...eventRoom })
     await send("p1")
     expect(mockSent).toHaveLength(1)
   })

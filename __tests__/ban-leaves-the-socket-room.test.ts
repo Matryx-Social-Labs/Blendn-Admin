@@ -1,7 +1,11 @@
 process.env.NEXTAUTH_SECRET = "ban-leaves-the-socket-room-secret-32ch"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/db", () => ({
-  db: { chat_groups: { findUnique: async () => ({ id: "c0000000-0000-4000-8000-000000000001", kind: "event", event_id: "e0000000-0000-4000-8000-000000000001" }) } },
+  db: {
+    chat_groups: { findUnique: async () => ({ id: "c0000000-0000-4000-8000-000000000001", kind: "event", event_id: "e0000000-0000-4000-8000-000000000001" }) },
+    // The emitter asks a room's kind: a venue day's goes only to the people live in it.
+    events: { findUnique: async () => ({ kind: "event" }) },
+  },
 }))
 
 import { emitChatMemberBanned } from "@/lib/socket-server"

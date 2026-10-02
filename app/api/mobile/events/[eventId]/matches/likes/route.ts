@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-response"
 import { blockedEitherWay, pairIsClosed } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import { likeAtEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -74,8 +75,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * from an event neither of them shared.
      */
     const [mine, theirs] = await Promise.all([
+      // Both in the room — at a venue day, both live there now (`inRoomWhere`).
       db.event_check_ins.findFirst({
-        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null } },
+        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null }, ...inRoomWhere(authUser.userId) },
         select: { id: true },
       }),
       likedId && db.event_check_ins.findFirst({
@@ -83,6 +85,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           event_id: eventId,
           user_id: likedId,
           check_in_time: { not: null },
+          ...inRoomWhere(),
           // Staff are working. They are not in the match list, so they cannot be
           // liked through it either.
           kind: "attendee",

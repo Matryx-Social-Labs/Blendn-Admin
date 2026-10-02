@@ -1,6 +1,7 @@
 import type { refusal_reason } from "@prisma/client"
 
 import { db } from "@/lib/db"
+import { realEventsWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 
 /**
@@ -172,7 +173,9 @@ export async function refusalsByReason(range: {
   to: Date
 }): Promise<RefusalBreakdown> {
   const rows = await db.check_in_refusals.findMany({
-    where: { created_at: { gte: range.from, lt: range.to } },
+    // Events' doors. A Go Live refused at a venue is not somebody turned away
+    // from a night out, and this panel sits under turn-up (venue days, TQ-X06).
+    where: { created_at: { gte: range.from, lt: range.to }, event: realEventsWhere },
     select: { user_id: true, reason: true },
     // Bounded like its sibling. Ten thousand refusals in a window says the same
     // thing as one thousand, and neither should be pulled into a page render.

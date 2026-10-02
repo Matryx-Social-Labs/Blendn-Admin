@@ -25,6 +25,7 @@ import {
   LEFT_ROOM_MESSAGE,
   leftByChoice,
   mayWriteToRoom,
+  NOT_LIVE_MESSAGE,
   roomEntitlement,
   roomReadDenial,
   type RoomEntitlement,
@@ -39,6 +40,7 @@ import { roomMuteState } from "@/lib/room-mute"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { readJson, isUuid } from "@/lib/api-input"
+import { createRoom } from "@/lib/check-in-core"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -107,7 +109,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // rejected after the user has typed.
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
-      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
     })
 
     if (!chatGroup) {
@@ -123,7 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
       const event = await db.events.findUnique({
         where: { id: eventId, deleted_at: null },
-        select: { title: true, status: true },
+        select: { title: true, status: true, kind: true, venue_name: true },
       })
       // No room is ever made for a missing or hidden event — refusing it only
       // after creation left a row the 404 concealed (SCRUM-205).
@@ -131,15 +133,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         return notFoundResponse("Chat not available for this event")
       }
 
-      chatGroup = await db.chat_groups.create({
-        data: {
-          event_id: eventId,
-          name: `${event.title || "Event"} Chat`,
-          description: `Chat for ${event.title || "Event"}`,
-          status: "active",
-          member_count: 0,
-        },
-        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } } },
+      // The one room writer, which reads back a room somebody made a moment ago.
+      const room = await createRoom(event, eventId)
+      chatGroup = await db.chat_groups.findUniqueOrThrow({
+        where: { id: room.id },
+        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
       })
     }
 
@@ -169,6 +167,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (readDenial === "hidden") return notFoundResponse("Chat not available for this event")
     if (readDenial === "banned" && membership) {
       return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+    }
+    /*
+     * A venue day's room has one door, Go Live, which writes the membership
+     * and its window; there is no auto-join below for it (F7). Not live — never
+     * joined, or the window ended — is refused, never re-joined.
+     */
+    if (readDenial === "not_live" || (!membership && roomEvent.kind === "venue_day")) {
+      return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
     }
     /*
      * Somebody who left the room themselves stays out of it. Without this the
@@ -409,7 +415,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Null only when the auto-join above just created the row, which creates
       // it `active`. A banned or muted row is never replaced, so it arrives here
       // intact and `mayWriteToRoom` sees the truth.
-      membership ?? { status: "active" },
+      membership ?? { status: "active", last_allowed_at: null },
       roomEvent,
       chatGroup
     )
@@ -511,7 +517,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // undefined here, so the pre-event floor added in #262 silently did not
       // apply on this path while it did on the GET twin above: one room, two
       // endpoints, opposite answers about whether chat is open.
-      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
     })
 
     if (!chatGroup) {
@@ -534,21 +540,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // pulled anyway because `chatWindowState` treats a missing start as "no
         // floor" rather than erroring, so an event object in this file that
         // lacks it is one edit away from silently opening a room early.
-        select: { title: true, start_time: true, end_time: true, status: true },
+        select: { title: true, start_time: true, end_time: true, status: true, kind: true, venue_name: true },
       })
       if (!event || event.status === "draft") {
         return notFoundResponse("Chat not available for this event")
       }
 
-      chatGroup = await db.chat_groups.create({
-        data: {
-          event_id: eventId,
-          name: `${event.title || "Event"} Chat`,
-          description: `Chat for ${event.title || "Event"}`,
-          status: "active",
-          member_count: 0,
-        },
-        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
+      const room = await createRoom(event, eventId)
+      chatGroup = await db.chat_groups.findUniqueOrThrow({
+        where: { id: room.id },
+        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
       })
     }
 
@@ -609,6 +610,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * is on the read: the user was told they could write. One resolver, both
      * handlers, is the only version of this that stays fixed.
      */
+    // Go Live is a venue day's only door (see the GET).
+    if (!membership && roomEvent.kind === "venue_day") {
+      return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
+    }
     if (!membership) {
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
       const window = chatWindowState(roomEvent, chatGroup)
@@ -693,7 +698,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return errorResponse(
           chatClosedMessage(denial.reason),
           403,
-          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
         )
       }
     }

@@ -17,6 +17,7 @@ import {
   ActiveCheckinSchema,
 } from "@/lib/openapi/schemas/profile"
 import { MessageResponseSchema } from "@/lib/openapi/schemas/auth"
+import { CheckinRequestSchema } from "@/lib/openapi/schemas/event"
 
 const bearerAuth = [{ BearerAuth: [] }]
 const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
@@ -125,6 +126,138 @@ registry.registerPath({
         },
       },
     },
+    ...standardErrors,
+  },
+})
+
+const LiveCountBucketSchema = z
+  .enum(["none", "a_few", "5-9", "10-19", "20+"])
+  .describe(
+    "How many are live here, never as a number (D-19): a count that moved from 4 to 5 as you watched " +
+      "would tell you somebody just walked in. `a_few` is 1 to 4."
+  )
+
+const VenueDetailSchema = z
+  .object({
+    venue: z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      address: z.string().nullable(),
+      city: z.string().nullable(),
+      latitude: z.number().nullable(),
+      longitude: z.number().nullable(),
+      venueType: z.string().nullable(),
+      venueTypeLabel: z.string(),
+      claimed: z.boolean().describe("False: the app may offer \"Own this place? Claim it\"."),
+    }),
+    live: z.object({
+      open: z.boolean().describe("Whether `POST .../live` would be accepted here now (the fence aside)."),
+      closedReason: z
+        .enum(["event_live_here", "no_check_in_area"])
+        .nullable()
+        .describe("`event_live_here`: a real event has the venue — check in to `eventId` instead."),
+      eventId: z.string().uuid().nullable(),
+      liveNow: LiveCountBucketSchema,
+      youAreLive: z.boolean(),
+      expiresAt: z
+        .string()
+        .datetime()
+        .nullable()
+        .describe("When your window here ends. Count down from this, not from the tap."),
+      stay: z.boolean(),
+      venueDayId: z.string().uuid().nullable().describe("Today's room here, when you are live in it."),
+      chatGroupId: z.string().uuid().nullable(),
+    }),
+    tonight: z
+      .object({
+        id: z.string().uuid(),
+        title: z.string(),
+        slug: z.string(),
+        coverImageUrl: z.string().nullable(),
+        startTime: z.string().datetime(),
+        endTime: z.string().datetime(),
+      })
+      .nullable()
+      .describe("The next public event here before the venue's day resets, age-filtered for you."),
+  })
+  .openapi("VenueDetail")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/venues/{venueId}",
+  tags: ["Mobile Venues"],
+  summary: "One venue, for Go Live",
+  description:
+    PARTICIPATION_GATE +
+    "404 for an unknown, archived or deleted venue. Whether you could go live here now, how many " +
+    "are live (a bucket), your own window, and tonight's event. Never the check-in area, and never " +
+    "who is live: that is the venue day's roster, which only somebody live here may read.",
+  security: bearerAuth,
+  request: { params: z.object({ venueId: z.string().uuid() }) },
+  responses: {
+    200: { description: "The venue", content: { "application/json": { schema: wrap(VenueDetailSchema) } } },
+    ...standardErrors,
+  },
+})
+
+const GoLiveRequestSchema = z
+  .union([
+    CheckinRequestSchema.extend({ minutes: z.union([z.literal(20), z.literal(45), z.literal(60)]) }),
+    CheckinRequestSchema.extend({ stay: z.literal(true) }),
+  ])
+  .openapi("GoLiveRequest")
+
+const GoLiveResponseSchema = z
+  .object({
+    venueDayId: z.string().uuid().describe("Today's room at this venue: its roster, grid and presence pings use this id."),
+    chatGroupId: z.string().uuid(),
+    expiresAt: z.string().datetime().describe("When this window ends. Never past the venue's daily reset."),
+    stay: z.boolean(),
+    stayUntil: z
+      .string()
+      .datetime()
+      .nullable()
+      .describe("For `stay`: the furthest in-fence pings may carry `expiresAt` (four hours, or the reset)."),
+    checkIn: z.object({ id: z.string().uuid(), status: z.string(), checkInTime: z.string().datetime() }),
+    revealSuggestion: z.boolean(),
+    intentNeeded: z.boolean(),
+  })
+  .openapi("GoLiveResponse")
+
+const EventLiveHereSchema = z
+  .object({
+    success: z.literal(false),
+    error: z.string(),
+    errorCode: z.literal("EVENT_LIVE_HERE"),
+    eventId: z.string().uuid().describe("The event to check in to instead."),
+  })
+  .openapi("EventLiveHere")
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/venues/{venueId}/live",
+  tags: ["Mobile Venues"],
+  summary: "Go Live at a venue",
+  description:
+    "Be visible at this venue for a window you choose: `minutes` 20, 45 or 60, or `stay: true` " +
+    "(60 minutes, then carried on by each presence ping inside the area, up to four hours). No window " +
+    "runs past the venue's daily reset (06:00 local by default). Going live again while live extends " +
+    "the window, never shortens it; going live elsewhere, or checking in to an event, ends it as a " +
+    "switch. When it ends you are checked out (`expired`) and the venue's room closes to you.\n\n" +
+    "Refusals, in order: 403 `PLUS_REQUIRED` for `stay` while Plus gating is on; 404 unknown, " +
+    "archived or deleted venue; " +
+    PARTICIPATION_GATE +
+    "409 `EVENT_LIVE_HERE` with `eventId` when a public event linked to this venue is on or starts " +
+    "within the hour — check in to it instead; 400 `OUT_OF_RANGE` for a fix worse than 150 m, a venue " +
+    "with no check-in area, or a position outside it.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ venueId: z.string().uuid() }),
+    body: { content: { "application/json": { schema: GoLiveRequestSchema } } },
+  },
+  responses: {
+    200: { description: "Live", content: { "application/json": { schema: wrap(GoLiveResponseSchema) } } },
+    409: { description: "A real event has the venue", content: { "application/json": { schema: EventLiveHereSchema } } },
     ...standardErrors,
   },
 })

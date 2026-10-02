@@ -55,6 +55,8 @@ const READERS: Record<string, string> = {
   "lib/polls.ts#getPollResults": "polls are an event room's: the URL's event must be the room's, else not found",
   "lib/polls.ts#castVote": "polls are an event room's: the URL's event must be the room's, else not found",
   "lib/sentiment-sweeper.ts#sweepSentiment": "selects event rooms only (kind = 'event')",
+  "lib/socket-server.ts#emitChatTyping": "a venue day's liveness, asked only when there is an event; the door (roomOwnerDenial) runs first",
+  "lib/room-delivery.ts#deliverToRoom": "a venue day's liveness for the reply push, asked only when there is an event; the door runs first",
 }
 
 interface Read {

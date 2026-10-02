@@ -4,7 +4,9 @@ import { blockCounterparties } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
 import { roomHandle, type RoomScope } from "@/lib/room-handle"
+import { boardPostDoor, roomOwnerDenial } from "@/lib/room-kind"
 import { isRoomMuted } from "@/lib/room-mute"
+import { liveInVenueDay } from "@/lib/chat-window"
 
 /**
  * Getting a message to the room. One implementation, because there were two
@@ -118,9 +120,24 @@ export async function deliverToRoom(input: {
     // Still in the room: `left` and `banned` are gone, `muted` still reads.
     const membership = await db.chat_group_members.findUnique({
       where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: recipientId } },
-      select: { status: true, notification_preferences: true },
+      select: {
+        status: true,
+        notification_preferences: true,
+        last_allowed_at: true,
+        chat_group: {
+          select: {
+            kind: true,
+            event: { select: { status: true, deleted_at: true, kind: true } },
+            board_post: boardPostDoor(recipientId),
+          },
+        },
+      },
     })
     if (membership?.status !== "active" && membership?.status !== "muted") return
+    // The room's door, for every kind: nobody its owner no longer admits is pushed from it.
+    if (roomOwnerDenial(membership.chat_group, recipientId)) return
+    // A venue day's room is the people live in it: an ended Go Live hears nothing from it.
+    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
     // And they have not silenced the room (`POST /chat/groups/:id/mute`).
     if (isRoomMuted(membership.notification_preferences)) return
 

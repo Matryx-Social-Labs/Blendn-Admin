@@ -5,7 +5,7 @@ import { touchSession } from "@/lib/presence-sessions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { successResponse, errorResponse, unauthorizedResponse } from "@/lib/api-response"
-import { resolveFence, fenceSelect } from "@/lib/geofence"
+import { evaluateCheckIn, resolveFence, fenceSelect } from "@/lib/geofence"
 import { performCheckout } from "@/lib/checkout"
 import {
   evaluatePresence,
@@ -15,6 +15,8 @@ import {
   type PresenceState,
 } from "@/lib/presence"
 import { isUuid } from "@/lib/api-input"
+import { stayExtension } from "@/lib/go-live"
+import { scheduleLiveEnd } from "@/lib/live-timers"
 
 export const dynamic = "force-dynamic"
 
@@ -68,6 +70,10 @@ export async function POST(
       last_seen_at: true,
       left_area_at: true,
       departure_prompted_at: true,
+      // A Go Live's window (venue days only; null at an event).
+      expires_at: true,
+      stay_until: true,
+      stay: true,
       // `id` is needed to move the presence session's heartbeat. Without it
       // the session goes stale PRESENCE_CUTOFF_MINUTES after arrival and the
       // room reads empty while everyone is still in it.
@@ -96,6 +102,18 @@ export async function POST(
    * while looking like it worked, and it is the only thing between a check-in
    * and an occupancy number.
    */
+  const now = new Date()
+
+  /*
+   * A Go Live window that has run out ends here as well as in the sweeper, so
+   * a phone pinging past its own expiry is told at once rather than counted
+   * for up to one more sweep. Stamped at `expires_at` (PL-U04).
+   */
+  if (checkIn.expires_at && checkIn.expires_at <= now) {
+    await performCheckout(checkIn.id, "expired", checkIn.expires_at)
+    return successResponse({ status: "checked_out", reason: "expired" })
+  }
+
   const fence = resolveFence(checkIn.event)
   if (!fence) {
     // Genuinely nothing to judge against -- no fence, no venue fence, and no
@@ -103,7 +121,6 @@ export async function POST(
     return successResponse({ status: "inside", reason: "no_geofence" })
   }
 
-  const now = new Date()
   const state: PresenceState = {
     kind: checkIn.kind,
     leftAreaAt: checkIn.left_area_at,
@@ -146,6 +163,45 @@ export async function POST(
     })
   }
 
+  /*
+   * "Stay": a ping that puts them inside the fence carries the window on
+   * (`stayExtension`, up to four hours or the reset). The room's cut-off moves
+   * with it — it is the same instant (`liveInVenueDay`).
+   */
+  const inside =
+    decision.reason === "inside" ||
+    decision.reason === "returned" ||
+    // Staff skip the fence in `evaluatePresence` (never auto-checked-out), so
+    // their "stay" asks it here.
+    (decision.reason === "staff_exempt" &&
+      evaluateCheckIn({ lat: latitude, lng: longitude }, fence, body.accuracy ?? null).ok)
+  const proposed =
+    inside && checkIn.expires_at
+      ? stayExtension({ expiresAt: checkIn.expires_at, stay: checkIn.stay, stayUntil: checkIn.stay_until }, now)
+      : null
+  let extended: Date | null = null
+  if (proposed && checkIn.expires_at) {
+    /*
+     * Only the window this ping read: still checked in, still ending when it
+     * did. Between the read and this write the sweeper (or a timer) may have
+     * expired it, and an unguarded write would reopen the room to somebody
+     * already checked out. The membership's cut-off moves only when the
+     * window did (step 4 review).
+     */
+    const { count } = await db.event_check_ins.updateMany({
+      where: { id: checkIn.id, status: "checked_in", expires_at: checkIn.expires_at },
+      data: { expires_at: proposed, updated_at: now },
+    })
+    if (count === 1) {
+      extended = proposed
+      await db.chat_group_members.updateMany({
+        where: { user_id: authUser.userId, chat_group: { event_id: eventId } },
+        data: { last_allowed_at: proposed, updated_at: now },
+      })
+      scheduleLiveEnd(checkIn.id, proposed)
+    }
+  }
+
   const leftAt = decision.action === "record_departure" ? now : checkIn.left_area_at
   /*
    * When they stop being counted, not when the grace ends.
@@ -172,6 +228,8 @@ export async function POST(
     reason: decision.reason,
     shortfallMetres: decision.shortfall ? Math.round(decision.shortfall) : null,
     graceEndsAt,
+    // When a Go Live ends, as extended by this ping. Null at an event.
+    expiresAt: (extended ?? checkIn.expires_at)?.toISOString() ?? null,
     nextPingInSeconds: PING_INTERVAL_MINUTES * 60,
   })
 }
