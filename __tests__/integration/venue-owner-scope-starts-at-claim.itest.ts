@@ -273,8 +273,11 @@ describe("other hosts' counts are held back wherever a venue owner sees them", (
   })
 
   it("blanks them on the Events screen", async () => {
-    const page = (await EventsPage()) as { props: { rows: Array<{ id: string; rsvps: number | null; arrivals: number | null }> } }
+    const page = (await EventsPage()) as { props: { rows: Array<{ id: string; going: number | null; arrivals: number | null }> } }
     const row = (id: string) => page.props.rows.find((r) => r.id === id)
+    // Going too: two going is held back for the venue, ten is shown.
+    expect(row(n.walkIn.id)?.going).toBeNull()
+    expect(row(n.small.id)?.going).toBe(10)
     expect(row(n.small.id)?.arrivals).toBeNull()
     expect(row(n.five.id)?.arrivals).toBe(5)
     expect(row(n.complete.id)?.arrivals).toBe(6)

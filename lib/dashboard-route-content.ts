@@ -178,7 +178,7 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
         role === "app_admin"
           ? "What is waiting on you, whether the loop closes, and who is supplying it."
           : role === "organizer"
-            ? "Your next event first — pacing, then what your past events say."
+            ? "What is live, whether the next event is filling, and what is left to set up."
             : role === "sponsor"
               ? "What is running, what is waiting on you, and who your sends reached."
               : "Each venue on its own terms — utilisation, ratings, bookings.",
@@ -192,8 +192,8 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
       title: "Events",
       description:
         role === "venue_owner"
-          ? "Every event at your venues — search, filter, and drill in."
-          : "Every event your organisation runs — search, filter, and drill in.",
+          ? "Every event at your venues. Open one for its live view and its room."
+          : "Everything your organisation runs. Open one for its live view, attendees, room and feedback.",
     }
   }
 
@@ -326,7 +326,13 @@ export const RANGED = new Set(["/dashboard", "/dashboard/reports"])
 /** `/dashboard/venues/<id>`, which scopes its event list to the range. */
 export const RANGED_VENUE_DETAIL = /^\/dashboard\/venues\/[^/]+$/
 
-export function showsRange(pathname: string): boolean {
+export function showsRange(pathname: string, role?: string): boolean {
+  /*
+   * Only the admin's overview reads the range. The organiser, venue and sponsor
+   * overviews are built on fixed windows ("Last 30 days"), and offered them a
+   * 7d / 90d control that changed nothing (step 15).
+   */
+  if (pathname === "/dashboard" && role !== undefined && role !== "app_admin") return false
   return (
     RANGED.has(pathname) ||
     // `/dashboard/venues/new` matches the shape and is a form, not a report.

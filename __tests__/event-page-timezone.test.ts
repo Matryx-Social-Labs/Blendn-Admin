@@ -93,7 +93,12 @@ describe("the sponsor's Placements and the Chatrooms list use the event's clock 
     // The Events list labels every row on its own event's clock.
     const list = read("app/dashboard/events/page.tsx")
     expect(list).toMatch(/timezone: true/)
-    expect(list).toMatch(/whenLabel\(event\.start_time, event\.end_time, now, event\.timezone\)/)
+    expect(list).toMatch(/eventRowFields\(event, now\)/)
+    // And the row builder it shares with the overview's Coming up: the label
+    // and the date tile, both on the event's clock.
+    const row = read("lib/event-row.ts")
+    expect(row).toMatch(/whenLabel\(event\.start_time, event\.end_time, now, event\.timezone\)/)
+    expect(row).toMatch(/const clock = eventClock\(event\.timezone\)/)
   })
 })
 

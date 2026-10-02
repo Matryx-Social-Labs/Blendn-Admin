@@ -164,15 +164,70 @@ describe("no host surface reads a person's identity without an admin gate", () =
   })
 })
 
-describe("the event's header, loader and QR & link tab reach no person (step 15)", () => {
+describe("the Events list names a host only where a host is the point (step 15)", () => {
+  /*
+   * The row's host is the event's creator — a colleague or a founder, never
+   * an attendee — and still a person. It is selected for an admin and for a
+   * venue, never for an organiser (whose list is their own organisation's),
+   * never with an email, and never for an unclaimed listing, where the
+   * creator is the founder who curated it (T83).
+   */
+  const page = code("app/dashboard/events/page.tsx")
+  const table = code("app/dashboard/events/events-table.tsx")
+
+  it("selects the creator's name only when the viewer is not an organiser, and no email", () => {
+    expect(page).toMatch(/const names = session\.user\.role !== "organizer"/)
+    expect(page).toMatch(/organizer: names \? \{ select: \{ name: true \} \} : false,/)
+    expect(page).not.toMatch(/\bemail\s*:\s*true/)
+    expect(page).not.toMatch(/db\.user\b/)
+  })
+
+  it("sends no host for an unclaimed listing", () => {
+    expect(page).toMatch(/host: curationState\(event\) === "curated_open" \? null : \(event\.organizer\?\.name \?\? null\)/)
+  })
+
+  it("renders no person but the host it was given", () => {
+    expect(table).not.toMatch(/\.(email|image|phone|photos)\b/)
+    expect(table).not.toMatch(/organizer/)
+  })
+})
+
+describe("the organiser overview and the Events list rows reach no attendee (step 15)", () => {
+  /*
+   * The live banner, the setup checklist, Coming up and the latest feedback
+   * read counts, an organisation's own name and domain, and a venue's name — a
+   * place. Never an attendee.
+   */
+  const SOURCES = [
+    "lib/organiser-overview.ts",
+    "lib/setup-checklist.ts",
+    "lib/event-row.ts",
+    "components/dashboard/overview-organizer.tsx",
+    "components/dashboard/event-row.tsx",
+  ]
+
+  it.each(SOURCES)("%s selects no user, profile, name, email, image or phone", (rel) => {
+    // A venue's name is a place, not a person: the one name these may read.
+    const src = code(rel).replace(/venue:\s*\{\s*select:\s*\{[^{}]*\}\s*\}/g, "")
+    expect(src).not.toMatch(/db\.user\b/)
+    // A select of a person, not a filter on one (`members: { where: { user: … } } }`).
+    expect(src).not.toMatch(/\b(user|profile|organizer|attendees?)\s*:\s*(true|\{\s*select\b)/)
+    expect(src).not.toMatch(new RegExp(`\\b(${IDENTITY})\\s*:\\s*true`))
+    expect(src).not.toMatch(/\.(email|image|phone|photos)\b/)
+  })
+})
+
+describe("the event's header, loader, Room chat, feedback digest and QR & link tab reach no person (step 15)", () => {
   /*
    * The pieces step 15 put on every event page. They read the event, the
-   * venue's name (a place) and the viewer's permissions, and the QR encodes the
-   * event's id — never an attendee, and never who is looking.
+   * venue's name (a place), the room's handles (pseudonyms) and the viewer's
+   * permissions, and the QR encodes the event's id — never an attendee, and
+   * never who is looking.
    */
   const SOURCES = [
     "lib/event-page.ts",
     "lib/event-share.ts",
+    "lib/feedback-digest.ts",
     "components/dashboard/event-header.tsx",
     "components/dashboard/event-share.tsx",
     "app/dashboard/events/[id]/messaging/page.tsx",
@@ -182,7 +237,8 @@ describe("the event's header, loader and QR & link tab reach no person (step 15)
     // A venue's name is a place, not a person: the one name these may read.
     const src = code(rel).replace(/venue:\s*\{\s*select:\s*\{[^{}]*\}\s*\}/g, "")
     expect(src).not.toMatch(/db\.user\b/)
-    expect(src).not.toMatch(/\b(user|profile|organizer|attendees?)\s*:\s*\{/)
+    // A select of a person, not a filter on one.
+    expect(src).not.toMatch(/\b(user|profile|organizer|attendees?)\s*:\s*(true|\{\s*select\b)/)
     expect(src).not.toMatch(new RegExp(`\\b(${IDENTITY})\\s*:\\s*true`))
     expect(src).not.toMatch(/\.(email|image|phone|photos)\b/)
   })
