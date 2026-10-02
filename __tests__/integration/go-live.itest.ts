@@ -10,6 +10,7 @@ jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) 
 import { refusalsByReason, refusalSummary } from "@/lib/check-in-refusals"
 import { haveSharedAnEvent } from "@/lib/conversations"
 import { db as appDb } from "@/lib/db"
+import { maySeeIdentityFor, visibleInRoom } from "@/lib/identity"
 import { sweepVenueDays } from "@/lib/presence-sweeper"
 import { canJoinChat, canJoinEvent, canJoinEventRoom } from "@/lib/socket-auth"
 import { SYSTEM_USER_ID } from "@/lib/venue-day"
@@ -596,14 +597,43 @@ describe("GET /venues/:id (PL-I18, D-19, D-x2)", () => {
       const viewer = await person()
       expect(JSON.parse((await venueDetail(viewer.token, v)).text).data.live.liveNow).toBe("quiet")
       const five = await Promise.all(Array.from({ length: 5 }, () => person("glb")))
-      for (const p of five) await goLive(p.token, v)
+      let day = ""
+      for (const p of five) day = (await goLive(p.token, v)).json.data.venueDayId
       jest.setSystemTime(Date.now() + 61_000)
       expect(JSON.parse((await venueDetail(viewer.token, v)).text).data.live.liveNow).toBe("5-9")
-      // One of the five asks: four others, held at 5-9 by the hysteresis, never "4".
-      expect(JSON.parse((await venueDetail(five[0].token, v)).text).data.live.liveNow).toBe("5-9")
+      // One of the five asks: four others, and never themselves.
+      expect(JSON.parse((await venueDetail(five[0].token, v)).text).data.live.liveNow).toBe("quiet")
+      // One of them leaves: still 5-9 to a watcher until one more goes (hysteresis).
+      await routes.checkout.POST(req(`/api/mobile/events/${day}/checkout`, five[1].token, "POST"), eventParams(day))
+      jest.setSystemTime(Date.now() + 61_000)
+      expect(JSON.parse((await venueDetail(viewer.token, v)).text).data.live.liveNow).toBe("5-9")
+      await routes.checkout.POST(req(`/api/mobile/events/${day}/checkout`, five[2].token, "POST"), eventParams(day))
+      jest.setSystemTime(Date.now() + 61_000)
+      expect(JSON.parse((await venueDetail(viewer.token, v)).text).data.live.liveNow).toBe("quiet")
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  it("never counts the caller in the figure they are shown", async () => {
+    // Four others and you: five live, but you are shown four — "quiet".
+    const v = await venue()
+    for (let i = 0; i < 4; i++) await goLive((await person("glx")).token, v)
+    const me = await person()
+    await goLive(me.token, v)
+    expect(JSON.parse((await venueDetail(me.token, v)).text).data.live.liveNow).toBe("quiet")
+  })
+
+  it("never counts the venue's staff as people here", async () => {
+    const org = await db.organisations.create({ data: { display_name: testId("gl_staff_org"), kind: "company", status: "verified" } })
+    world.orgs.push(org.id)
+    const v = await venue({ ownerOrg: org.id })
+    for (let i = 0; i < 4; i++) await goLive((await person("glg")).token, v)
+    const staffer = await person("glstaff")
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: staffer.id, role: "staff" } })
+    await goLive(staffer.token, v)
+    const viewer = await person()
+    expect(JSON.parse((await venueDetail(viewer.token, v)).text).data.live.liveNow).toBe("quiet")
   })
 
   it("says why going live is closed, judged against the same area as the door", async () => {
@@ -650,6 +680,20 @@ describe("what others see, and erasure", () => {
     expect((await profileOf(me.token)).stats.eventsAttended).toBe(1)
     const seen = await profileOf(viewer.token)
     if (seen?.stats) expect(seen.stats.eventsAttended).toBe(0)
+  })
+
+  it("shows a reveal at a venue day only while the viewer is live there (step 4 review)", async () => {
+    const v = await venue()
+    const [a, b] = [await person(), await person()]
+    const day = (await goLive(a.token, v)).json.data.venueDayId
+    await goLive(b.token, v)
+    await db.event_match_preferences.update({ where: { event_id_user_id: { event_id: day, user_id: b.id } }, data: { revealed: true } })
+    expect((await visibleInRoom(a.id, day, [b.id])).has(b.id)).toBe(true)
+    expect((await maySeeIdentityFor(a.id, [b.id])).has(b.id)).toBe(true)
+    // a's window ends: a past seat is no seat from which to see who revealed.
+    await rewind(day, a.id, 25)
+    expect((await visibleInRoom(a.id, day, [b.id])).has(b.id)).toBe(false)
+    expect((await maySeeIdentityFor(a.id, [b.id])).has(b.id)).toBe(false)
   })
 
   it("erases a deleted account's Go Live as it does an event's (PL-I22)", async () => {

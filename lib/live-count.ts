@@ -53,5 +53,12 @@ export async function venueLiveBucket(
     if (cache.size > 10_000) cache.clear()
     cache.set(venueId, entry)
   }
-  return steadyBucket(entry.bucket, Math.max(0, entry.total - (viewerIsLive ? 1 : 0)))
+  /*
+   * Somebody live here reads the room's roster anyway, so their figure needs
+   * no smoothing — only to leave them out: the venue's steady figure counts
+   * them, and showing it to them would say, by the edge their own arrival
+   * crossed, how many others there are.
+   */
+  if (viewerIsLive) return liveCountBucket(Math.max(0, entry.total - 1))
+  return entry.bucket
 }
