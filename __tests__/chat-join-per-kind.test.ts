@@ -195,8 +195,16 @@ const A1 = "u_a1"
 const A2 = "u_a2"
 const B1 = "u_b1"
 const SOLO = "u_solo"
-type Blocks = { blocked_users: { blocked_id: string }[]; blocked_by: { blocker_id: string }[] }
-const none: Blocks = { blocked_users: [], blocked_by: [] }
+type Blocks = {
+  blocked_users: { blocked_id: string }[]
+  blocked_by: { blocker_id: string }[]
+  conversations_as_user1: { user2_id: string }[]
+  conversations_as_user2: { user1_id: string }[]
+}
+const none: Blocks = { blocked_users: [], blocked_by: [], conversations_as_user1: [], conversations_as_user2: [] }
+/** How a row that keeps `viewer` apart reads: a block, or a closed conversation between them (C6). */
+const apartFrom = (viewer: string, how: "block" | "closed" = "block"): Blocks =>
+  how === "block" ? { ...none, blocked_users: [{ blocked_id: viewer }] } : { ...none, conversations_as_user1: [{ user2_id: viewer }] }
 
 /**
  * A Blend's room as `blendDoor(viewer)` reads it: the viewer's own side rows,
@@ -212,13 +220,13 @@ function blendRoom(
     here?: boolean
     closesAt?: Date
     closed?: boolean
-    blockedBy?: { id: string; side: "a" | "b" | "solo" }
+    blockedBy?: { id: string; side: "a" | "b" | "solo"; how?: "block" | "closed" }
     status?: "active" | "archived" | "locked"
   } = {}
 ) {
   const member = (id: string, side: "a" | "b") => ({
     user_id: id,
-    user: over.blockedBy?.id === id && over.blockedBy.side === side ? { blocked_users: [{ blocked_id: viewer }], blocked_by: [] } : none,
+    user: over.blockedBy?.id === id && over.blockedBy.side === side ? apartFrom(viewer, over.blockedBy.how) : none,
   })
   const sideRows = (ids: string[], side: "a" | "b") =>
     ids.filter((id) => id === viewer || over.blockedBy?.id === id).map((id) => member(id, side))
@@ -239,7 +247,7 @@ function blendRoom(
         ? {
             suspended_at: null,
             deletedAt: null,
-            ...(over.blockedBy?.side === "solo" ? { blocked_users: [{ blocked_id: viewer }], blocked_by: [] } : none),
+            ...(over.blockedBy?.side === "solo" ? apartFrom(viewer, over.blockedBy.how) : none),
           }
         : null,
     },
@@ -277,6 +285,15 @@ describe("a Blend's room: the people of either side who are here, until it close
     expect(roomReadDenialFor(blendRoom(A1, { solo: SOLO, blockedBy: { id: SOLO, side: "solo" } }), active, A1)).toBe("hidden")
     // A block inside one's own side is not across the sides.
     expect(roomReadDenialFor(blendRoom(A1, { blockedBy: { id: A2, side: "a" } }), active, A1)).toBeNull()
+  })
+
+  it("reads a closed conversation across the sides as a block (C6)", () => {
+    expect(roomReadDenialFor(blendRoom(A1, { blockedBy: { id: B1, side: "b", how: "closed" } }), active, A1)).toBe("hidden")
+    expect(roomReadDenialFor(blendRoom(A1, { solo: SOLO, blockedBy: { id: SOLO, side: "solo", how: "closed" } }), active, A1)).toBe("hidden")
+  })
+
+  it("refuses somebody with no row: the room is the snapshot of who was here when it matched (C3)", () => {
+    expect(roomReadDenialFor(blendRoom(A2), null, A2)).toBe("not_member")
   })
 
   it("still honours the member row: leaving alone (CR-I14) and a ban", () => {

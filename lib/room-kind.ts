@@ -29,10 +29,12 @@ import type { RoomScope } from "./room-handle"
  *               event, and for writes `OWNER_ROOM_HOURS` after the event ends
  *   crew        a member of the crew now — not suspended, the crew not
  *               dissolved. Real names inside (`namesInRoom`, lib/identity.ts)
- *   blend       a member of either side's crew who is at the occurrence, or the
+ *   blend       one of the people here when it matched (its member rows, a
+ *               snapshot) still on their side — a member of that crew, or the
  *               person matched — until the Blend closes (12 h after the
- *               occurrence ends, or at a block across the sides), and never
- *               somebody in a block with anyone on the other side
+ *               occurrence ends, or when a side dissolves or is hidden), and
+ *               never somebody kept apart from anyone on the other side: that
+ *               pair is hidden, the room goes on for the rest (D-9)
  *
  * A member row is never enough on its own for a room that is not an event's:
  * it records a pseudonym, a mute, a ban or a leave, and the owner says whether
@@ -125,10 +127,17 @@ interface CrewOwner {
 }
 
 /** A block either way between a person and any of these viewers. */
+/**
+ * Kept apart from any of these viewers: a block either way, or a closed
+ * conversation (an unmatch is permanent — C6, lib/crews/blocks.ts).
+ */
 function blocksWith(viewerIds: string[]) {
+  const closed = { closed_at: { not: null } }
   return {
     blocked_users: { where: { blocked_id: { in: viewerIds } }, select: { blocked_id: true } },
     blocked_by: { where: { blocker_id: { in: viewerIds } }, select: { blocker_id: true } },
+    conversations_as_user1: { where: { user2_id: { in: viewerIds }, ...closed }, select: { user2_id: true } },
+    conversations_as_user2: { where: { user1_id: { in: viewerIds }, ...closed }, select: { user1_id: true } },
   }
 }
 
@@ -151,6 +160,8 @@ function blendSideSelect(viewerIds: string[]) {
                 OR: [
                   { blocked_users: { some: { blocked_id: { in: viewerIds } } } },
                   { blocked_by: { some: { blocker_id: { in: viewerIds } } } },
+                  { conversations_as_user1: { some: { user2_id: { in: viewerIds }, closed_at: { not: null } } } },
+                  { conversations_as_user2: { some: { user1_id: { in: viewerIds }, closed_at: { not: null } } } },
                 ],
               },
             },
@@ -188,6 +199,8 @@ export function blendDoor(viewerId: string) {
 interface Blocks {
   blocked_users: { blocked_id: string }[]
   blocked_by: { blocker_id: string }[]
+  conversations_as_user1: { user2_id: string }[]
+  conversations_as_user2: { user1_id: string }[]
 }
 interface BlendSide {
   dissolved_at: Date | null
@@ -222,7 +235,10 @@ interface RoomOwners<E> {
 }
 
 const blocksUser = (b: Blocks, userId: string) =>
-  b.blocked_users.some((x) => x.blocked_id === userId) || b.blocked_by.some((x) => x.blocker_id === userId)
+  b.blocked_users.some((x) => x.blocked_id === userId) ||
+  b.blocked_by.some((x) => x.blocker_id === userId) ||
+  b.conversations_as_user1.some((x) => x.user2_id === userId) ||
+  b.conversations_as_user2.some((x) => x.user1_id === userId)
 
 const onSide = (side: BlendSide | null, userId: string) =>
   !!side && !side.dissolved_at && side.members.some((m) => m.user_id === userId)
@@ -232,9 +248,14 @@ const sideBlocks = (side: BlendSide | null, userId: string) =>
 
 /**
  * The Blend door (plan v2 §6). Gone for everyone once it closes — on its clock,
- * whether or not the sweeper has run, or early at a block across the sides.
- * For one person: on a side (a member of that crew now, or the matched
- * person), at the occurrence, and in no block with anybody on the other side.
+ * whether or not the sweeper has run, or early when a side's crew dissolved or
+ * was hidden. For one person: on a side (a member of that crew now, or the
+ * matched person), at the occurrence, and kept apart (a block or a closed
+ * conversation, C6) from nobody on the other side. A block across the sides
+ * hides THAT PAIR — each is refused here — and the room goes on for everyone
+ * else (D-9). Who is in it at all is the room's member rows: a snapshot of who
+ * was here when it matched (C3), so the routes' "no row, no room" refuses a
+ * late arrival before this is asked.
  */
 function blendDenial(blend: BlendOwner | null | undefined, userId: string, now: Date = new Date()): "hidden" | "not_member" | null {
   if (!blend || blend.closed_at || blend.closes_at <= now) return "hidden"
@@ -350,7 +371,7 @@ export function mayWriteToRoomFor<E extends Parameters<typeof mayWriteToRoom>[1]
  * and before that when locked or archived. A crew's has no clock: it is open
  * until it is locked or archived (a dissolved crew's is). A Blend's closes at
  * its `closes_at` (the occurrence's end + `OWNER_ROOM_HOURS`), or earlier when
- * a block across the sides closed it.
+ * a side's crew dissolved or was hidden.
  */
 export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
   room: {
@@ -417,9 +438,23 @@ export async function ownerAdmits(chatGroupId: string, candidates: string[]): Pr
 }
 
 /**
+ * `ownerAdmits` for many Blend rooms at once — one read however many — for a
+ * screen that lists a person's Blends (`blendsOf`): which of `candidates` each
+ * room's door lets in now. A room that is not a Blend's admits nobody here.
+ */
+export async function blendAdmitsMany(roomIds: readonly string[], candidates: readonly string[]): Promise<Map<string, Set<string>>> {
+  if (roomIds.length === 0 || candidates.length === 0) return new Map()
+  const rooms = await db.chat_groups.findMany({
+    where: { id: { in: [...roomIds] }, kind: "blend" },
+    select: { id: true, blend: blendSelect([...candidates]) },
+  })
+  return new Map(rooms.map((r) => [r.id, new Set(candidates.filter((id) => blendDenial(r.blend, id) === null))]))
+}
+
+/**
  * Everybody a room that is not an event's admits, for its roster: a board
- * post's author and the accepted askers, a crew's members, a Blend's people at
- * the occurrence on either side. Null for an event's room.
+ * post's author and the accepted askers, a crew's members, a Blend's snapshot
+ * of the people here when it matched. Null for an event's room.
  */
 export async function ownerRoster(chatGroupId: string): Promise<Set<string> | null> {
   const room = await db.chat_groups.findUnique({
@@ -428,26 +463,16 @@ export async function ownerRoster(chatGroupId: string): Promise<Set<string> | nu
       kind: true,
       board_post: { select: { author_id: true, requests: { where: { status: "accepted" }, select: { from_user_id: true } } } },
       crew: { select: { members: { select: { user_id: true } } } },
-      blend: {
-        select: {
-          b_user_id: true,
-          a_crew: { select: { members: { select: { user_id: true } } } },
-          b_crew: { select: { members: { select: { user_id: true } } } },
-        },
-      },
+      // A Blend's people are its snapshot: the member rows made at match time (C3).
+      members: { select: { user_id: true } },
     },
   })
   if (!room) return new Set()
   if (room.kind === "event") return null
-  const blend = room.blend
   const candidates = room.board_post
     ? [room.board_post.author_id, ...room.board_post.requests.map((r) => r.from_user_id)]
-    : blend
-      ? [
-          ...blend.a_crew.members.map((m) => m.user_id),
-          ...(blend.b_crew?.members.map((m) => m.user_id) ?? []),
-          ...(blend.b_user_id ? [blend.b_user_id] : []),
-        ]
+    : room.kind === "blend"
+      ? room.members.map((m) => m.user_id)
       : (room.crew?.members.map((m) => m.user_id) ?? [])
   return candidates.length ? ownerAdmits(chatGroupId, candidates) : new Set()
 }

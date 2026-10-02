@@ -24,7 +24,7 @@ export const routes = {
   join: require("@/app/api/mobile/crews/[crewId]/join/route") as typeof import("@/app/api/mobile/crews/[crewId]/join/route"),
   member: require("@/app/api/mobile/crews/[crewId]/members/[userId]/route") as typeof import("@/app/api/mobile/crews/[crewId]/members/[userId]/route"),
   here: require("@/app/api/mobile/crews/[crewId]/here/route") as typeof import("@/app/api/mobile/crews/[crewId]/here/route"),
-  reveal: require("@/app/api/mobile/crews/[crewId]/reveal/route") as typeof import("@/app/api/mobile/crews/[crewId]/reveal/route"),
+  reveal: require("@/app/api/mobile/blends/[blendId]/reveal/route") as typeof import("@/app/api/mobile/blends/[blendId]/reveal/route"),
   eventCrews: require("@/app/api/mobile/events/[eventId]/crews/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/route"),
   crewLike: require("@/app/api/mobile/events/[eventId]/crews/[crewId]/like/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/[crewId]/like/route"),
   personLike: require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route"),
@@ -35,6 +35,7 @@ export const routes = {
   leave: require("@/app/api/mobile/chat/groups/[chatGroupId]/leave/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/leave/route"),
   block: require("@/app/api/mobile/users/[userId]/block/route") as typeof import("@/app/api/mobile/users/[userId]/block/route"),
   account: require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route"),
+  checkins: require("@/app/api/mobile/events/[eventId]/checkins/route") as typeof import("@/app/api/mobile/events/[eventId]/checkins/route"),
 }
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -100,8 +101,8 @@ export const api = {
     }),
   here: (as: Person, crewId: string, eventId: string) =>
     call(routes.here.POST, `/api/mobile/crews/${crewId}/here`, as, { method: "POST", body: { eventId }, params: { crewId } }),
-  reveal: (as: Person, crewId: string, eventId: string) =>
-    call(routes.reveal.POST, `/api/mobile/crews/${crewId}/reveal`, as, { method: "POST", body: { eventId }, params: { crewId } }),
+  reveal: (as: Person, blendId: string) =>
+    call(routes.reveal.POST, `/api/mobile/blends/${blendId}/reveal`, as, { method: "POST", params: { blendId } }),
   atEvent: (as: Person, eventId: string) => call(routes.eventCrews.GET, `/api/mobile/events/${eventId}/crews`, as, { params: { eventId } }),
   likeCrew: (as: Person, eventId: string, crewId: string, asCrewId?: string) =>
     call(routes.crewLike.POST, `/api/mobile/events/${eventId}/crews/${crewId}/like`, as, {
@@ -127,6 +128,10 @@ export const api = {
     call(routes.leave.POST, `/api/mobile/chat/groups/${g}/leave`, as, { method: "POST", params: { chatGroupId: g } }),
   block: (as: Person, userId: string) =>
     call(routes.block.POST, `/api/mobile/users/${userId}/block`, as, { method: "POST", params: { userId } }),
+  /** The event's roster: who is here, named only where the room's identity rule says so. */
+  checkins: (as: Person, eventId: string) =>
+    call(routes.checkins.GET, `/api/mobile/events/${eventId}/checkins?limit=100`, as, { params: { eventId } }),
+  erase: (as: Person) => call(routes.account.DELETE, "/api/mobile/account", as, { method: "DELETE" }),
 }
 
 /** A crew made through the route, everyone in it a friend of the creator and joined through the route. */
@@ -236,6 +241,7 @@ export async function cleanupCrewWorld() {
   await db.chat_messages.deleteMany({ where: rooms })
   await db.chat_group_members.deleteMany({ where: rooms })
   await db.chat_groups.deleteMany({ where: { OR: [{ crew_id: { in: crews } }, { blend_id: { in: blends } }] } })
+  await db.blend_reveals.deleteMany({ where: { OR: [{ blend_id: { in: blends } }, { user_id: { in: users } }] } })
   await db.blends.deleteMany({ where: { id: { in: blends } } })
   await db.crew_likes.deleteMany({
     where: { OR: [{ from_crew_id: { in: crews } }, { to_crew_id: { in: crews } }, { liked_by_user_id: { in: users } }] },

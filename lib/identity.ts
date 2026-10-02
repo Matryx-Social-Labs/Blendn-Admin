@@ -461,9 +461,8 @@ export async function identityForRef(
  *   (2026-09-27): both said yes, so real names. The first name only, never the
  *   full one (SCRUM-493: a full name reaching a room was a defect).
  * - **A Blend's room: tonight's pseudonym** — the one each person carries in
- *   the event's own room, so two crews meet as the menagerie they saw on the
- *   card. A reveal shows on the Blend's people list (`blendView`, through
- *   `visibleInRoom`, the event room's one rule), never in the chat.
+ *   the event's own room. A reveal in the Blend shows on its people list
+ *   (`blendsOf`, lib/crews/blends.ts), never in the chat.
  * - **Every other room: the pseudonym on their member row in it**, as before —
  *   an event's, a venue day's, a board post's. Nobody is named in those here;
  *   who may be recognised there is `visibleInRoom`'s question, asked by the

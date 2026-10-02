@@ -242,6 +242,8 @@ export async function DELETE(request: NextRequest) {
         where: { OR: [{ invited_user_id: authUser.userId }, { invited_by: authUser.userId }] },
       }),
       leaveCrews,
+      // Their reveals inside Blends: a name shown to that night's people, theirs to take back now.
+      db.blend_reveals.deleteMany({ where: { user_id: authUser.userId } }),
       /*
        * DELETED, not scrubbed, and the consequence is stated because it is
        * visible: every historical "active this week" figure drops by the days

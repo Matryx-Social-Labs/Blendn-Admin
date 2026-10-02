@@ -326,10 +326,13 @@ registry.registerPath({
   description:
     "You must be checked in here now (403). With `asCrewId` (one of your crews here — two of you checked in, 403 otherwise) it is crew → crew, " +
     "on your crew's behalf: no vote, and your crew chat says \"liked <crew> for the crew\". Without it, it is you → crew: you must have opted in " +
-    "to crews for this event (403), and the crew must have room for one more, be 6 or fewer, and not be out for dating unless you are. " +
-    "A crew not here, a block between any member of one side and any of the other, two crews sharing a member, or a guardrail about the " +
-    "other side is the same 404. If they liked you back, `blend` is the one Blend room it made — two likes at the same instant still make one. " +
-    "Liking twice is liking once. Nothing anywhere says who liked first.",
+    "to crews tonight (403), and the crew must have room for one more, be 6 or fewer active members, and not be out for dating unless you are. " +
+    "403 when the host turned crews off. A crew not here (or hidden), anybody on one side kept apart from anybody on the other (a block or a " +
+    "closed conversation — asked again inside the transaction that would write the like, so nothing is stored), two crews sharing a member, " +
+    "or a guardrail about the other side is the same 404. If they liked you back, `blend` is the one Blend room it made — two likes at the " +
+    "same instant still make one; a Blend between you that has closed answers `blend: null`. Liking twice is liking once. Nothing anywhere " +
+    "says who liked first. The Blend's room is the people checked in on either side at that moment (and the person): somebody who arrives " +
+    "later is not in it.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid(), crewId: z.string().uuid() }),
@@ -343,17 +346,16 @@ registry.registerPath({
 
 registry.registerPath({
   method: "post",
-  path: "/api/mobile/crews/{crewId}/reveal",
+  path: "/api/mobile/blends/{blendId}/reveal",
   tags,
-  summary: "Reveal my crew at an event",
+  summary: "Reveal my crew in this Blend",
   description:
-    CREW_404 +
-    "One tap reveals the crew where it was done (owner decision (a)): every member at this event who has not switched on " +
-    "\"keep me anonymous\" — consent was taken when they joined — is written as their own per-event reveal, so the event's room and its " +
-    "Blends name them exactly as if each had revealed. Members keeping themselves anonymous stay pseudonyms. You must be in the event's " +
-    "room (403). Nothing is ever un-revealed by it (D-10).",
+    "One tap, in an open Blend I am in: each member of my crew who is checked in now and in this Blend's room, except anybody who has " +
+    "switched on \"keep me anonymous\" (read again as it is written) — consent was taken when they joined. The matched person in a crew ↔ " +
+    "person Blend reveals only themselves. Shown to this Blend's people, by first name and one photo, and to nobody else: not the event's " +
+    "room or its deck, not a DM, not another Blend. Never un-revealed by anything later (D-10). 404 for a Blend that is not open or not mine.",
   security: bearerAuth,
-  request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
+  request: { params: z.object({ blendId: z.string().uuid() }) },
   responses: {
     200: {
       description: "Revealed",
@@ -367,7 +369,7 @@ const BlendPersonSchema = z
   .object({
     userId: z.string().describe("Yours is your own id; anyone else's is their handle in the Blend's room"),
     pseudonym: z.string().describe("Tonight's pseudonym"),
-    name: z.string().nullable().describe("First name, only where the event's room would name them (a reveal)"),
+    name: z.string().nullable().describe("First name, only when revealed in this Blend, or recognised in the event's room"),
     photo: z.string().nullable(),
   })
   .openapi("BlendPerson")
@@ -378,9 +380,11 @@ registry.registerPath({
   tags,
   summary: "My open Blends",
   description:
-    "Each Blend I am let into now: its room (`chatGroupId`, a room of kind `blend`), when it closes (the occurrence's end + 12 h), and its two " +
-    "sides — the people here on each by tonight's pseudonym, named only where the event's room would name them, with \"N revealed · M keep " +
-    "it private\" per crew. A Blend closes early when somebody on one side blocks somebody on the other. Anyone may leave it on their own " +
+    "Each Blend I am let into now: its room (`chatGroupId`, a room of kind `blend`), when it closes (the occurrence's end + 12 h, or earlier " +
+    "when a side's crew dissolves or is hidden), and its two sides — the people who were here when it matched, by tonight's pseudonym, " +
+    "named only when revealed in this Blend (or recognised in the event's room), with \"N revealed · M keep it private\" per crew. Never " +
+    "somebody kept apart from me (a block or a closed conversation), nor anybody who turned \"show online\" off. A block across the " +
+    "sides takes that pair out of the Blend; it goes on for everyone else. Anyone may leave it on their own " +
     "(`POST /chat/groups/{chatGroupId}/leave`).",
   security: bearerAuth,
   responses: {

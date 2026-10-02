@@ -5,8 +5,9 @@ import { lockPair, severFriendship } from "@/lib/friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { closeBlendsBetween } from "@/lib/crews/like"
-import { blockIdFromRef, userIdFromRef } from "@/lib/room-handle"
+import { evictBlockedFromBlends } from "@/lib/crews/like"
+import { blockIdFromRef, openRoomHandle, userIdFromRef } from "@/lib/room-handle"
+import { ownerAdmits } from "@/lib/room-kind"
 import { isUuid } from "@/lib/api-input"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -21,6 +22,21 @@ interface RouteParams {
   params: Promise<{ userId: string }>
 }
 
+/**
+ * Who a block names. A raw id or an event room's handle as `userIdFromRef`
+ * reads them. A handle from a room that is not an event's — a Blend, a crew's
+ * chat, a board post's room — names somebody only to a caller that room's
+ * door lets in now: blocking somebody from inside a Blend is the one thing a
+ * Blend handle may do outside the Blend, and only for the people in it. For
+ * anybody else it stays the handle, which names nobody (404, as for an id
+ * nobody has).
+ */
+async function blockTargetFromRef(viewerId: string, ref: string): Promise<string> {
+  const opened = openRoomHandle(ref)
+  if (!opened || typeof opened.scope === "string") return userIdFromRef(ref)
+  return (await ownerAdmits(opened.scope.groupId, [viewerId]))?.has(viewerId) ? opened.userId : ref
+}
+
 // POST /api/mobile/users/[userId]/block — Block a user
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -33,7 +49,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.
-    const targetId = userIdFromRef((await params).userId)
+    const targetId = await blockTargetFromRef(authUser.userId, (await params).userId)
 
     if (targetId === authUser.userId) {
       return errorResponse("Cannot block yourself", 400)
@@ -160,8 +176,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (closedConversationId) {
       closeConversationRoom(closedConversationId)
     }
-    // And any Blend with one of them on each side (§6 Safety): closed, emptied.
-    await closeBlendsBetween(authUser.userId, targetId)
+    // Out of any Blend room that now refuses them: the pair is hidden from each
+    // other there, and the Blend goes on for everyone else (D-9).
+    await evictBlockedFromBlends(authUser.userId, targetId)
 
     return successResponse({ blocked: true })
   } catch (error) {

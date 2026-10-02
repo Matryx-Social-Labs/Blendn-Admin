@@ -9,7 +9,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
 import { closePostRooms, closeRoomSockets } from "@/lib/room-close"
-import { dissolveCrewLocked } from "@/lib/crews/sweep"
+import { closeCrewBlendsLocked, dissolveCrewLocked } from "@/lib/crews/sweep"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 
@@ -564,8 +564,8 @@ export async function resolveReport(
   // Whether a removal took anything down — false when the post was already
   // removed (a second report on it, or a second click), so the audit row says so.
   let removed: boolean | null = null
-  // A dissolved crew's room, for its sockets after the commit.
-  let crewRoomId: string | null = null
+  // A dissolved crew's room and its Blends' rooms, or a hidden crew's Blends, for their sockets after the commit.
+  let crewRoomIds: string[] = []
 
   await db.$transaction(async (tx) => {
     // A reinstate after the fact leaves the report's own verdict alone: the
@@ -658,16 +658,16 @@ export async function resolveReport(
      * Whether either changed anything is in the audit row.
      */
     if (decision === "hide_crew") {
-      const hid = await tx.crews.updateMany({
-        where: { id: (report as { message_id: string }).message_id, hidden_at: null },
-        data: { hidden_at: new Date() },
-      })
+      const crewId = (report as { message_id: string }).message_id
+      const hid = await tx.crews.updateMany({ where: { id: crewId, hidden_at: null }, data: { hidden_at: new Date() } })
       removed = hid.count > 0
+      // Off every stranger's screen means out of the Blends it is in, too.
+      crewRoomIds = await closeCrewBlendsLocked(tx, crewId)
     }
     if (decision === "dissolve_crew") {
       const dissolved = await dissolveCrewLocked(tx, (report as { message_id: string }).message_id)
       removed = dissolved !== null
-      crewRoomId = dissolved?.roomId ?? null
+      crewRoomIds = dissolved?.roomIds ?? []
     }
 
     if (decision === "suspend" && subjectId) {
@@ -691,8 +691,8 @@ export async function resolveReport(
   if (decision === "remove_message" && subject.boardPost) {
     void closePostRooms([(report as { message_id: string }).message_id])
   }
-  // A dissolved crew's chat: out with anyone still in it.
-  if (crewRoomId) closeRoomSockets(crewRoomId)
+  // A dissolved crew's chat, a closed Blend: out with anyone still in it.
+  for (const id of crewRoomIds) closeRoomSockets(id)
 
   // After the commit, never inside it: see SUSPENSION_WRITE_CHANNELS.
   if (decision === "suspend" && subjectId) {

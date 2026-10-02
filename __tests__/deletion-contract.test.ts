@@ -107,6 +107,10 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "RETAINED",
     why: "A like a crew made is the crew's, and a like on a person is half of somebody else's Blend: `liked_by_user_id` stays as the record of who tapped (CR-I15), on an account that is anonymised, never deleted. Nothing reads it to name anybody.",
   },
+  blend_reveals: {
+    how: "DELETED",
+    why: "Their name and photo shown inside one Blend (a crew reveal, C2): the disclosure is theirs, and an erased account has no name to show anyway. The Blend and its other people's reveals stay.",
+  },
   blends: {
     how: "RETAINED",
     why: "A Blend is two sides' shared night and the owner of a room of other people's messages (RESTRICT). An erased solo side is out of it at once — the door refuses a deleted account — and it closes 12 hours after the night anyway.",

@@ -12,8 +12,9 @@ import { ownerRoomClosesAt } from "@/lib/room-kind"
  * The rules are pure and pinned here. The writer rule is structural: every
  * like and every Blend goes through lib/crews/like.ts, which checks presence,
  * the guardrails and blocks across every member first — a like written from a
- * route would skip all three. And every writer of a block closes the Blends
- * it lands across, or a block would leave two people in a room together.
+ * route would skip all three. And every writer of a block takes the pair out
+ * of the Blends that now refuse them, or a socket that joined before would
+ * keep two people who blocked each other in a room together.
  */
 
 const ROOT = join(__dirname, "..")
@@ -78,14 +79,29 @@ describe("one writer (CR-G03)", () => {
     expect(like && WRITE("blends").test(like.src)).toBe(true)
   })
 
-  it("crew_likes and blends are written only by lib/crews/like.ts", () => {
+  it("crew_likes and blends are created only by lib/crews/like.ts", () => {
+    const CREATE = (table: string) => new RegExp(`\\b${table}\\.(?:create|createMany|upsert)\\(|INSERT INTO "?${table}\\b`)
     const elsewhere = SOURCES.filter((s) => s.file !== "lib/crews/like.ts")
-      .filter((s) => WRITE("crew_likes").test(s.src) || WRITE("blends").test(s.src))
+      .filter((s) => CREATE("crew_likes").test(s.src) || CREATE("blends").test(s.src))
       .map((s) => s.file)
     expect(elsewhere).toEqual([])
   })
 
-  it("every writer of a block closes the Blends it lands across", () => {
+  it("and changed or removed only where it was decided: closing on the clock, a crew ending, the purge, the fixture clean-up", () => {
+    const decided: Record<string, string> = {
+      "lib/crews/like.ts": "the writer",
+      "lib/crews/sweep.ts": "a dissolved or hidden crew's Blends closed; lapsed likes purged",
+      "lib/chat-lifecycle.ts": "a Blend closed on its clock",
+      "scripts/seed-room.ts": "--clean removes the fixture's rows",
+    }
+    const PURGE = /DELETE FROM "?(crew_likes|blends)\b/
+    const writers = SOURCES.filter((s) => WRITE("crew_likes").test(s.src) || WRITE("blends").test(s.src) || PURGE.test(s.src)).map((s) => s.file)
+    expect(writers.filter((f) => !(f in decided))).toEqual([])
+    // The control: the decided writers are still found, so the list stays true.
+    expect(writers.sort()).toEqual(Object.keys(decided).sort())
+  })
+
+  it("every writer of a block takes the pair out of the Blends that now refuse them", () => {
     const writers = SOURCES.filter((s) => /\bblocked_users\.(?:create|createMany|upsert)\(/.test(s.src))
     // The control: the writers this was written against are still found.
     expect(writers.map((w) => w.file).sort()).toEqual([
@@ -93,7 +109,15 @@ describe("one writer (CR-G03)", () => {
       "app/api/mobile/message-requests/[requestId]/respond/route.ts",
       "app/api/mobile/users/[userId]/block/route.ts",
     ])
-    const silent = writers.filter((w) => !/\bcloseBlendsBetween\(/.test(w.src)).map((w) => w.file)
+    const silent = writers.filter((w) => !/\bevictBlockedFromBlends\(/.test(w.src)).map((w) => w.file)
     expect(silent).toEqual([])
+  })
+
+  it("asks the sides again for a block inside the transaction that writes the like (MUST)", () => {
+    const like = SOURCES.find((s) => s.file === "lib/crews/like.ts")!.src
+    const tx = like.slice(like.indexOf("db.$transaction(async (tx) =>"))
+    const recheck = tx.indexOf("blocksBetween(sides.a, sides.b, tx)")
+    expect(recheck).toBeGreaterThan(0)
+    expect(recheck).toBeLessThan(tx.indexOf("crew_likes.createMany("))
   })
 })

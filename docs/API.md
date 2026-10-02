@@ -1434,48 +1434,73 @@ messages in a crew chat stay, as in any room.
 |--------|----------|-------------|
 | POST | `/events/:eventId/crews/:crewId/like` | Like a crew here: `{ asCrewId? }` — as one of your crews here, or as yourself → `{ liked: true, blend }` |
 | POST | `/events/:eventId/matches/likes` | With `asCrewId`: like one person on your crew's behalf → `{ liked: true, blend }` |
-| PUT | `/events/:eventId/matches/preferences` | `openToCrews` — "Open to joining a crew tonight" |
-| POST | `/crews/:crewId/reveal` | One tap reveals the crew at `{ eventId }` → `{ revealed, keptPrivate }` |
+| PUT | `/events/:eventId/matches/preferences` | `openToCrews` — "Open to joining a crew tonight" (until the end of your occurrence) |
+| POST | `/blends/:blendId/reveal` | One tap reveals your crew **in this Blend** → `{ revealed, keptPrivate }` |
 | GET | `/blends` | My open Blends: room, clock, both sides' people |
 
 **No voting.** Any member of a crew that is here (two or more checked in) likes
 on the crew's behalf; the crew chat gets a line, *"liked Crew Nebula for the
 crew"* (or the person's pseudonym), from the member who tapped — transparency
 instead of a quorum. Nobody else is told: no push, no bell row, and the card's
-`youLiked` is only ever about your side. Liking twice is liking once.
+`youLiked` is only ever about your side. Liking twice is liking once. When the
+host turned crews off, every crew like is 403.
 
-**Crew ↔ person** has guardrails (§8.3): the person turned on `openToCrews` for
-this event (403 for their own like until they do — it is their switch); the
-crew has "Room for one more" (`openToSolo`) and 6 or fewer members (403 for a
+**Crew ↔ person** has guardrails (§8.3): the person turned on `openToCrews` —
+which lasts until the end of the occurrence they said it at, and `false` clears
+it (403 for their own like until they do — it is their switch); the crew has
+"Room for one more" (`openToSolo`) and 6 or fewer **active** members (403 for a
 crew member's like until it does); and if the crew is out for dating, the
-person must be too. Anything about the *other* side — not here, a guardrail, a
-block between **any** member of one side and **any** member of the other, two
-crews sharing a member — is the same 404 as a crew that does not exist.
+person must be too. A crew member's like of a **person** tells them nothing
+about that person: not here, not opted in, not out for dating, or kept apart
+from anybody in the crew — each answers `{ liked: true, blend: null }`, exactly
+as a like that stood, and nothing is stored. Anything about the other side of a
+like of a **crew** — not here, hidden, a guardrail, anybody on one side kept
+apart (a block or a closed conversation) from anybody on the other, two crews
+sharing a member — is the same 404 as a crew that does not exist. The block
+check is asked again inside the transaction that would write the like and the
+Blend: a block landing in between aborts both.
 
 **A Blend.** Crew A liked crew B and B liked A (any members), or a crew and a
 person liked each other: `blends` gets one row — two likes at the same instant
 still make one, under a lock on the pair and a unique per pair per occurrence —
-and a room of kind `blend`. Everyone it lets in but the person whose like made
-it gets `blend` (`blendId`, `chatGroupId`): *"It's a Blend"*, naming nobody.
-The room is the members of either crew **who are at the occurrence** (a
-crewmate who arrives later walks in), and the person; they speak in **tonight's
-pseudonyms** (the menagerie on the card), handles scoped to the Blend's room.
-Anyone may leave on their own (`POST /chat/groups/:id/leave`); the room stays
-for the rest. It closes **12 hours after the occurrence ends** — the door on
-the clock, the sweeper archiving it — and earlier when somebody on one side
-blocks somebody on the other: the Blend closes for both sides and its sockets
-are emptied (every writer of a block does this).
+and a room of kind `blend`. A Blend between the pair that has closed stays
+their one row for the occurrence: liking again answers `blend: null`. Everyone
+it lets in but the person whose like made it gets `blend` (`blendId`,
+`chatGroupId`): *"It's a Blend"*, naming nobody.
 
-**The crew reveal** (owner decision (a)). Any member taps reveal, in the Blend
-or the event's room: every member of that crew at the event who has not
-switched on "keep me anonymous" — consent was given on joining — is written as
-their **own per-event reveal** (`event_match_preferences.revealed`, and their
-DMs from that event), so every surface names them exactly as if each had
-revealed. A member keeping themselves anonymous stays a pseudonym; `GET /blends`
-says *"N revealed · M keep it private"* per crew and gives first names (never
-full names) and a photo only where the event's room would. Switching "keep me
-anonymous" on afterwards applies from then on (D-10): a reveal already made is
-not undone.
+**Who is in it: who was here when it matched.** The room gets a member row for
+each member of either crew **checked in at the occurrence at that moment**, and
+the person — a snapshot. A crewmate who arrives later is not in it (no row, and
+every door to a room starts from the row). A member who leaves their crew
+leaves its Blends (out live, refused after); a suspended or erased one is out
+too. They speak in **tonight's pseudonyms** (the ones they carry in the event's
+room), handles scoped to the Blend's room. `GET /blends` lists the snapshot as
+its door admits it now, minus anybody kept apart from you and anybody who
+turned "show online" off. Anyone may leave on their own
+(`POST /chat/groups/:id/leave`); the room stays for the rest.
+
+**A block inside a Blend hides that pair; the room goes on** (D-9). Anybody on
+one side kept apart from anybody on the other — a block, or a closed
+conversation, either way — is refused by the Blend's door, both of them, and
+every writer of a block takes their sockets out at once; everyone else keeps
+the room. A Blend handle (from its roster) is enough to block somebody: the
+block route opens it for the people that Blend lets in, and for nobody else.
+
+**It closes** 12 hours after the occurrence ends — the door on the clock, the
+sweeper archiving it from `blends.closes_at` (`blends_open_closes_at`) — and
+earlier when either side's crew dissolves or a moderator hides it. Crew likes
+that never made a Blend are deleted 12 hours after their occurrence ends.
+
+**The crew reveal is scoped to one Blend** (owner decision (a), C2). In an open
+Blend, any member taps reveal: each member of their crew who is checked in now
+and in the Blend's room, and has not switched on "keep me anonymous" (read
+again as the reveal is written) — consent was given on joining — is revealed
+**to that Blend's people only** (`blend_reveals`): first name and one photo on
+`GET /blends`. Not to the event's room, its roster or deck, not in any DM, not
+in another Blend. The matched person in a crew ↔ person Blend reveals only
+themselves. `GET /blends` says *"N revealed · M keep it private"* per crew.
+Switching "keep me anonymous" on afterwards applies from then on (D-10): a
+reveal already made is not undone. Deleting your account deletes your reveals.
 
 ---
 

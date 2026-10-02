@@ -130,6 +130,7 @@ model User {
   crew_likes_got           crew_likes[]      @relation("CrewLikeToUser")
   crew_likes_made          crew_likes[]      @relation("CrewLikeBy")
   blends_as_solo           blends[]          @relation("BlendSolo")
+  blend_reveals            blend_reveals[]
 
   // Announcements
   sent_announcements event_announcements[]
@@ -3388,10 +3389,12 @@ model crew_likes {
 /// pair per occurrence, so two sides liking each other at the same moment
 /// make one Blend (lib/crews/like.ts serialises the pair too).
 ///
-/// Its room (`chat_groups.blend_id`) admits the members of either side who are
-/// at the occurrence, and the person; it closes `closes_at` = the
-/// occurrence's end + 12 h, or earlier at `closed_at` — a block between any
-/// member of one side and any of the other closes it.
+/// Its room (`chat_groups.blend_id`) holds a member row for each person who
+/// was here at match time — the present members of each side, and the person
+/// (a snapshot: a late arrival has no row and the door refuses them) — and
+/// admits those still on their side; it closes `closes_at` = the occurrence's
+/// end + 12 h, or earlier at `closed_at` (a side's crew dissolved or hidden).
+/// A block across the sides hides that pair; the room goes on for the rest.
 model blends {
   id            String    @id @default(uuid()) @db.Uuid
   occurrence_id String    @db.Uuid
@@ -3407,14 +3410,33 @@ model blends {
   b_crew     crews?            @relation("BlendSideB", fields: [b_crew_id], references: [id], onDelete: Restrict)
   b_user     User?             @relation("BlendSolo", fields: [b_user_id], references: [id], onDelete: Restrict)
   room       chat_groups?
+  reveals    blend_reveals[]
 
   @@unique([occurrence_id, a_crew_id, b_crew_id])
   @@unique([occurrence_id, a_crew_id, b_user_id])
   @@index([a_crew_id])
   @@index([b_crew_id])
   @@index([b_user_id])
-  /// The sweeper: open Blends past their clock.
-  @@index([closes_at])
+  /// NOT here, because schema.prisma cannot express it: the sweeper's partial
+  /// index `blends_open_closes_at` (closes_at) WHERE closed_at IS NULL.
+}
+
+/// One person revealed inside one Blend (C2): their first name and photo shown
+/// to that Blend's people, and nowhere else — not the event's room, its deck,
+/// nor a DM. Written by a crew member's tap for their crew's members here in
+/// the Blend (minus "keep me anonymous", re-read in the writing transaction),
+/// or by the matched person for themselves. Kept (D-10); shown only while the
+/// Blend is open.
+model blend_reveals {
+  blend_id    String   @db.Uuid
+  user_id     String
+  revealed_at DateTime @default(now()) @db.Timestamptz(6)
+
+  blend blends @relation(fields: [blend_id], references: [id], onDelete: Restrict)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@id([blend_id, user_id])
+  @@index([user_id])
 }
 
 // ── Content Moderation ────────────────────────────────

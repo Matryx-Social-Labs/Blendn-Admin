@@ -7,7 +7,7 @@ import { namesInRoom } from "../identity"
 import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
-import { closeRoomSockets } from "../room-close"
+import { leaveRoomSockets } from "../room-close"
 import { ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import type { CrewRefusal } from "./crews"
 import { blocksBetween, blocksExclude } from "./blocks"
@@ -37,10 +37,16 @@ import {
  *   vote. Nobody else is told, and nobody learns who liked first: the only
  *   outcome anybody outside the crew sees is a Blend.
  * - **Crew ↔ person has guardrails** (`crewMayMeetSolo`): the person opted in
- *   for this event, the crew has room for one more, crews over 6 match crews
+ *   for tonight, the crew has room for one more, crews over 6 match crews
  *   only, and dating only if both chose it.
- * - **A block between any member of one side and any member of the other**
- *   refuses the like — the same 404 as a crew that is not there.
+ * - **Anybody on one side kept apart from anybody on the other** — a block or
+ *   a closed conversation, either way (C6) — refuses the like: the same 404
+ *   as a crew that is not here, asked again inside the transaction that
+ *   would write the like and the Blend, so a block landing in between aborts
+ *   both and stores nothing.
+ * - **A like of one person tells the liker nothing about them** (C7): not
+ *   here, not opted in, not open to dating, kept apart — each is the same
+ *   `{ liked: true, blend: null }` as a like that stood, and none is stored.
  *
  * ## One Blend per pair, however the likes land
  *
@@ -49,10 +55,20 @@ import {
  * two simultaneous likes always sees the first, and the unique on
  * (occurrence, side A, side B) makes the Blend exactly one row. The pair is
  * ordered by uuid — compared bytewise, so this and `blends_pair_order` agree.
+ * A Blend that has closed stays the pair's one row for the occurrence: a like
+ * after it answers `blend: null`, never a closed room.
+ *
+ * ## Who is in a Blend: who was here when it matched (C3)
+ *
+ * Its room gets a member row for each person on either side checked in at the
+ * occurrence at that moment, and the matched person — a snapshot. Somebody who
+ * arrives later has no row, and every door to the room starts from the row.
  */
 
 const NO_CREW: CrewRefusal = { refusal: "Crew not found", status: 404 }
 const NO_PERSON: CrewRefusal = { refusal: "User not found", status: 404 }
+/** Every person-level refusal of a crew → person like (C7): what a like that stood answers. */
+const NOTHING_TOLD = { liked: true, blend: null } as const
 const NO_EVENT: CrewRefusal = { refusal: "Event not found", status: 404 }
 const CREWS_OFF: CrewRefusal = { refusal: "The host has turned crews off for this event.", status: 403 }
 const NOT_IN: CrewRefusal = { refusal: "Check in before liking anyone here.", status: 403 }
@@ -96,6 +112,12 @@ async function hereFor(likerId: string, eventId: string): Promise<Here | CrewRef
 
 const refused = (v: unknown): v is CrewRefusal => typeof v === "object" && v !== null && "refusal" in v
 
+/** The people on each side of a like, as the in-transaction block check reads them. */
+interface Sides {
+  a: readonly string[]
+  b: readonly string[]
+}
+
 /** A crew here now: its row, its active members, and those of them here. Null if it is not here. */
 async function crewHereNow(crewId: string, occurrenceId: string) {
   const present = (await presentMembersAt(occurrenceId, [crewId])).get(crewId) ?? []
@@ -132,20 +154,28 @@ export async function likeCrew(
     if (mine.members.some((id) => target.members.includes(id))) return NO_CREW
     if (blocksExclude(mine.members, target.members, await blocksBetween(mine.members, target.members))) return NO_CREW
     const [a, b] = mine.id < target.id ? [mine.id, target.id] : [target.id, mine.id]
-    return like(here, likerId, { crewId: mine.id }, { crewId: target.id }, { a_crew_id: a, b_crew_id: b }, mine.room, target.name)
+    const sides = { a: mine.members, b: target.members }
+    const outcome = await like(here, likerId, { crewId: mine.id }, { crewId: target.id }, { a_crew_id: a, b_crew_id: b }, sides, mine.room, target.name)
+    return outcome ?? NO_CREW
   }
 
   const me = await intentsAt(eventId, likerId)
   if (!me.openToCrews) return NOT_OPTED_IN
   if (!crewMayMeetSolo(target, target.members.length, me.intents)) return NO_CREW
   if (blocksExclude([likerId], target.members, await blocksBetween([likerId], target.members))) return NO_CREW
-  return like(here, likerId, { userId: likerId }, { crewId: target.id }, { a_crew_id: target.id, b_user_id: likerId }, null, null)
+  const sides = { a: target.members, b: [likerId] }
+  const outcome = await like(here, likerId, { userId: likerId }, { crewId: target.id }, { a_crew_id: target.id, b_user_id: likerId }, sides, null, null)
+  return outcome ?? NO_CREW
 }
 
 /**
  * Like one person here now on your crew's behalf (crew → person). The person
- * must have opted in for this event and be somebody the crew may meet
- * (`crewMayMeetSolo`); every refusal about them is the same 404 as nobody.
+ * must be here, have opted in for tonight, be somebody the crew may meet
+ * (`crewMayMeetSolo`) and be kept apart from nobody in it. Every refusal about
+ * THEM answers exactly as a like that stood — `{ liked: true, blend: null }`,
+ * nothing stored (C7) — so the like cannot be used to learn whether somebody
+ * is here, opted in, out for dating, or blocked one of you. Refusals about
+ * the liker's own crew (not here, no room for one more) say so.
  */
 export async function likePersonAsCrew(
   likerId: string,
@@ -164,8 +194,8 @@ export async function likePersonAsCrew(
     db.event_check_ins.findFirst({ where: { user_id: personId, kind: "attendee", ...hereNowAt(here.occurrenceId) }, select: { id: true } }),
     intentsAt(eventId, personId),
   ])
-  if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return NO_PERSON
-  if (blocksExclude(mine.members, [personId], await blocksBetween(mine.members, [personId]))) return NO_PERSON
+  if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return { ...NOTHING_TOLD }
+  if (blocksExclude(mine.members, [personId], await blocksBetween(mine.members, [personId]))) return { ...NOTHING_TOLD }
 
   const pseudonym = (
     await db.chat_group_members.findFirst({
@@ -173,15 +203,17 @@ export async function likePersonAsCrew(
       select: { anonymous_name: true },
     })
   )?.anonymous_name
-  return like(
+  const outcome = await like(
     here,
     likerId,
     { crewId: mine.id },
     { userId: personId },
     { a_crew_id: mine.id, b_user_id: personId },
+    { a: mine.members, b: [personId] },
     mine.room,
     pseudonym ?? "someone here"
   )
+  return outcome ?? { ...NOTHING_TOLD }
 }
 
 /** The where for a like, by its two sides. */
@@ -195,9 +227,11 @@ function likeWhere(occurrenceId: string, from: Side, to: Side): Prisma.crew_like
 
 /**
  * Record the like, and if the other side liked back, the Blend and its room —
- * in one transaction holding the pair's lock. Then, outside it: the line in
- * the liker's crew chat, and the "It's a Blend" push to everyone the room now
- * admits but the liker.
+ * in one transaction holding the pair's lock. First, under that lock, the
+ * sides are asked again whether anybody across them is kept apart: a block
+ * that landed since the checks above aborts the whole thing, like and all
+ * (null). Then, outside it: the line in the liker's crew chat, and the "It's
+ * a Blend" push to everyone the room admits but the liker.
  */
 async function like(
   here: Here,
@@ -205,12 +239,15 @@ async function like(
   from: Side,
   to: Side,
   pair: { a_crew_id: string; b_crew_id?: string; b_user_id?: string },
+  sides: Sides,
   likerCrewRoom: { id: string; name: string } | null,
   likedLabel: string | null
-): Promise<LikeOutcome> {
+): Promise<LikeOutcome | null> {
   const pairKey = `${pair.a_crew_id}:${pair.b_crew_id ?? pair.b_user_id}`
   const result = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`blend:${here.occurrenceId}:${pairKey}`}, 0))`
+    if ((await blocksBetween(sides.a, sides.b, tx)).size > 0) return null
+
     const { count: fresh } = await tx.crew_likes.createMany({
       data: [
         {
@@ -227,14 +264,14 @@ async function like(
 
     const existing = await tx.blends.findFirst({
       where: { occurrence_id: here.occurrenceId, a_crew_id: pair.a_crew_id, b_crew_id: pair.b_crew_id ?? null, b_user_id: pair.b_user_id ?? null },
-      select: { id: true, room: { select: { id: true } } },
+      select: { id: true, closed_at: true, closes_at: true, room: { select: { id: true } } },
     })
-    if (existing?.room) return { fresh: fresh > 0, blend: { blendId: existing.id, chatGroupId: existing.room.id, created: false } }
+    if (existing) {
+      // One Blend per pair per occurrence: a closed one is not reopened, and is not handed back.
+      const open = !existing.closed_at && existing.closes_at > new Date() ? existing.room : null
+      return { fresh: fresh > 0, blend: open ? { blendId: existing.id, chatGroupId: open.id, created: false } : null }
+    }
 
-    const sides = await tx.crews.findMany({
-      where: { id: { in: [pair.a_crew_id, ...(pair.b_crew_id ? [pair.b_crew_id] : [])] } },
-      select: { id: true, name: true, members: { select: { user_id: true } } },
-    })
     const blend = await tx.blends.create({
       data: {
         occurrence_id: here.occurrenceId,
@@ -245,10 +282,20 @@ async function like(
       },
       select: { id: true },
     })
-    // Every member of both sides holds a row; the door admits those at the
-    // occurrence (`roomOwnerDenial`), so a crewmate who arrives later walks in.
-    const people = [...new Set([...sides.flatMap((c) => c.members.map((m) => m.user_id)), ...(pair.b_user_id ? [pair.b_user_id] : [])])]
-    const name = sides.map((c) => c.name).join(" × ") + (pair.b_user_id ? " + 1" : "")
+    // The snapshot (C3): each side's active members checked in here now, and the person.
+    const crewIds = [pair.a_crew_id, ...(pair.b_crew_id ? [pair.b_crew_id] : [])]
+    const [present, crews] = await Promise.all([
+      tx.crew_members.findMany({
+        where: {
+          crew_id: { in: crewIds },
+          user: { suspended_at: null, deletedAt: null, event_check_ins: { some: hereNowAt(here.occurrenceId) } },
+        },
+        select: { user_id: true },
+      }),
+      tx.crews.findMany({ where: { id: { in: crewIds } }, select: { id: true, name: true } }),
+    ])
+    const people = [...new Set([...present.map((m) => m.user_id), ...(pair.b_user_id ? [pair.b_user_id] : [])])]
+    const name = crewIds.map((id) => crews.find((c) => c.id === id)?.name ?? "Crew").join(" × ") + (pair.b_user_id ? " + 1" : "")
     const room = await tx.chat_groups.create({
       data: {
         kind: "blend",
@@ -260,6 +307,7 @@ async function like(
     })
     return { fresh: fresh > 0, blend: { blendId: blend.id, chatGroupId: room.id, created: true } }
   })
+  if (!result) return null
 
   if (result.fresh && likerCrewRoom && likedLabel) await sayInCrew(likerCrewRoom, likerId, likedLabel)
   if (result.blend?.created) await announceBlend(result.blend, likerId)
@@ -318,37 +366,34 @@ async function announceBlend(blend: { blendId: string; chatGroupId: string }, li
 }
 
 /**
- * A block between `a` and `b` closes every open Blend with one of them on
- * each side (§6 Safety, CR-I10): `closed_at`, the room archived and emptied,
- * every socket in it taken out. Called by every writer of `blocked_users`
- * after its block commits (`crew-matching-boundary.test.ts`). Never throws:
- * the block has committed, and the door already refuses the blocked pair
- * (`roomOwnerDenial`) whether or not this lands.
+ * A block (or a closed conversation) between `a` and `b`, in the Blends they
+ * are in: the door now refuses that pair (`blendDenial`: anybody kept apart
+ * from somebody across the sides), and this takes their sockets out of every
+ * open Blend room that now refuses them, so a socket that joined before stops
+ * hearing it too. Nobody else is touched: the Blend goes on for everyone else
+ * (D-9). Called by every writer of `blocked_users` after its block commits
+ * (`crew-matching.test.ts`). Never throws: the block has committed, and the
+ * door refuses the pair on their next read whether or not this lands.
  */
-export async function closeBlendsBetween(a: string, b: string): Promise<void> {
+export async function evictBlockedFromBlends(a: string, b: string): Promise<void> {
   try {
-    const onSide = (userId: string) => ({ members: { some: { user_id: userId } } })
-    const across = (x: string, y: string): Prisma.blendsWhereInput => ({
-      a_crew: onSide(x),
-      OR: [{ b_crew: onSide(y) }, { b_user_id: y }],
+    const rooms = await db.chat_groups.findMany({
+      where: {
+        kind: "blend",
+        status: "active",
+        blend: { closed_at: null, closes_at: { gt: new Date() } },
+        members: { some: { user_id: { in: [a, b] } } },
+      },
+      select: { id: true, members: { where: { user_id: { in: [a, b] } }, select: { user_id: true } } },
     })
-    const now = new Date()
-    const open = await db.blends.findMany({
-      where: { closed_at: null, closes_at: { gt: now }, OR: [across(a, b), across(b, a)] },
-      select: { id: true, room: { select: { id: true } } },
-    })
-    if (open.length === 0) return
-    const roomIds = open.flatMap((o) => (o.room ? [o.room.id] : []))
-    await db.$transaction([
-      db.blends.updateMany({ where: { id: { in: open.map((o) => o.id) }, closed_at: null }, data: { closed_at: now } }),
-      db.chat_groups.updateMany({ where: { id: { in: roomIds }, status: "active" }, data: { status: "archived" } }),
-      db.chat_group_members.updateMany({
-        where: { chat_group_id: { in: roomIds }, status: { in: ["active", "muted"] } },
-        data: { status: "left" },
-      }),
-    ])
-    for (const id of roomIds) closeRoomSockets(id)
+    for (const room of rooms) {
+      const inIt = room.members.map((m) => m.user_id)
+      const admitted = (await ownerAdmits(room.id, inIt)) ?? new Set<string>()
+      for (const id of inIt) if (!admitted.has(id)) leaveRoomSockets(room.id, id)
+    }
   } catch (error) {
-    logger.error("Closing Blends after a block failed", { error: error instanceof Error ? error.message : String(error) })
+    logger.error("Taking a blocked pair out of their Blends failed", {
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
 }

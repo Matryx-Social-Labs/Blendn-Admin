@@ -542,12 +542,22 @@ export async function removeFromCrew(
         update: marker,
       })
     }
+    // The open Blends they were in for this crew: their door now refuses them (no longer on the side).
+    const blendRooms = await tx.chat_groups.findMany({
+      where: {
+        kind: "blend",
+        status: "active",
+        blend: { closed_at: null, OR: [{ a_crew_id: crewId }, { b_crew_id: crewId }] },
+        members: { some: { user_id: memberId } },
+      },
+      select: { id: true },
+    })
     const settled = await settleLocked(tx, crewId)
-    return { dissolved: settled.dissolved, roomId: room.id }
+    return { dissolved: settled.dissolved, closed: settled.roomIds, left: [room.id, ...blendRooms.map((r) => r.id)] }
   })
   if (isRefusal(result)) return result
-  if (result.dissolved) closeRoomSockets(result.roomId)
-  else leaveRoomSockets(result.roomId, memberId)
+  for (const id of result.closed) closeRoomSockets(id)
+  for (const id of result.left) leaveRoomSockets(id, memberId)
   return { dissolved: result.dissolved }
 }
 

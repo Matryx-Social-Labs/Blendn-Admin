@@ -654,23 +654,3 @@ export async function revealConversationsFrom(eventId: string, userIds: readonly
     }),
   ])
 }
-
-/**
- * These people's reveal at this event — `event_match_preferences.revealed`,
- * the one flag every room surface reads through `visibleInRoom` — and the
- * DMs from it. For the crew reveal (lib/crews/blends.ts), which writes each
- * consenting member's own per-event reveal: there is no other identity path.
- */
-export async function revealAt(eventId: string, userIds: readonly string[]): Promise<void> {
-  if (userIds.length === 0) return
-  await db.$transaction(
-    userIds.map((id) =>
-      db.event_match_preferences.upsert({
-        where: { event_id_user_id: { event_id: eventId, user_id: id } },
-        create: { event_id: eventId, user_id: id, intent: [], revealed: true },
-        update: { revealed: true, updated_at: new Date() },
-      })
-    )
-  )
-  await revealConversationsFrom(eventId, userIds)
-}

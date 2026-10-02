@@ -5,7 +5,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { closeConversationRoom } from "@/lib/socket-server"
-import { closeBlendsBetween } from "@/lib/crews/like"
+import { evictBlockedFromBlends } from "@/lib/crews/like"
 import {
   successResponse,
   validationErrorResponse,
@@ -193,8 +193,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * that is still open. Repeating it is harmless.
      */
     closeConversationRoom(conversationId)
-    // A block also closes any Blend with one of them on each side (§6 Safety).
-    if (action === "block") await closeBlendsBetween(authUser.userId, otherId)
+    // A block also takes the pair out of any Blend room that now refuses them;
+    // the Blend goes on for everyone else (D-9).
+    if (action === "block") await evictBlockedFromBlends(authUser.userId, otherId)
 
     return successResponse({
       closed: true,

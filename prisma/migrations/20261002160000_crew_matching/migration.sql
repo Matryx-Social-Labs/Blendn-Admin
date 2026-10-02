@@ -21,7 +21,7 @@
 -- staging or production. In order: export any Blend room's messages (kept
 -- evidence); DELETE FROM chat_groups WHERE kind = 'blend'; restore
 -- `chat_groups_one_owner` to its crews-migration form; DROP COLUMN
--- chat_groups.blend_id; DROP TABLE blends, crew_likes. The `blend` notification
+-- chat_groups.blend_id; DROP TABLE blend_reveals, blends, crew_likes. The `blend` notification
 -- kind stays (Postgres cannot drop an enum value). A rollback of the CODE alone
 -- leaves Blend rooms its door refuses (no blend arm), which is safe.
 
@@ -83,7 +83,23 @@ CREATE UNIQUE INDEX "blends_occurrence_id_a_crew_id_b_user_id_key" ON "blends"("
 CREATE INDEX "blends_a_crew_id_idx" ON "blends"("a_crew_id");
 CREATE INDEX "blends_b_crew_id_idx" ON "blends"("b_crew_id");
 CREATE INDEX "blends_b_user_id_idx" ON "blends"("b_user_id");
-CREATE INDEX "blends_closes_at_idx" ON "blends"("closes_at");
+-- The sweeper's read: open Blends past their clock. Partial, so it holds only
+-- the open ones (schema.prisma cannot say it; CLAUDE.md lists it).
+CREATE INDEX "blends_open_closes_at" ON "blends"("closes_at") WHERE "closed_at" IS NULL;
+
+-- A crew reveal is scoped to ONE Blend (orchestrator decision C2): the people
+-- a member's tap named, to the other side of that Blend and nobody else —
+-- never the event's room, its deck or a DM. Read only by the Blend's people
+-- list (lib/crews/blends.ts). Once written it stays (D-10: a face can't be
+-- unseen); the Blend closing ends where it is shown.
+CREATE TABLE "blend_reveals" (
+    "blend_id" UUID NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "revealed_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "blend_reveals_pkey" PRIMARY KEY ("blend_id", "user_id")
+);
+CREATE INDEX "blend_reveals_user_id_idx" ON "blend_reveals"("user_id");
 
 ALTER TABLE "crew_likes" ADD CONSTRAINT "crew_likes_occurrence_id_fkey"
   FOREIGN KEY ("occurrence_id") REFERENCES "event_occurrences"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -106,6 +122,11 @@ ALTER TABLE "blends" ADD CONSTRAINT "blends_b_crew_id_fkey"
   FOREIGN KEY ("b_crew_id") REFERENCES "crews"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "blends" ADD CONSTRAINT "blends_b_user_id_fkey"
   FOREIGN KEY ("b_user_id") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+ALTER TABLE "blend_reveals" ADD CONSTRAINT "blend_reveals_blend_id_fkey"
+  FOREIGN KEY ("blend_id") REFERENCES "blends"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "blend_reveals" ADD CONSTRAINT "blend_reveals_user_id_fkey"
+  FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- The Blend room: owned by its Blend, one per Blend.
 ALTER TABLE "chat_groups" ADD COLUMN "blend_id" UUID;
