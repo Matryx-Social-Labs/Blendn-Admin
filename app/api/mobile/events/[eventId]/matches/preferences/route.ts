@@ -99,9 +99,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const checkIn = await db.event_check_ins.findFirst({
       where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
-      select: { id: true },
+      select: { id: true, occurrence: { select: { end_time: true } } },
+      orderBy: { check_in_time: "desc" },
     })
     if (!checkIn) return forbiddenResponse("Check in to this event first")
+    /*
+     * "Open to joining a crew tonight" means tonight: it lasts until the end of
+     * the occurrence they are checked in at, and lapses by itself — the row is
+     * per event, and a multi-day event's Tuesday answer is not Wednesday's.
+     */
+    const openToCrewsUntil = openToCrews === undefined ? undefined : openToCrews ? checkIn.occurrence.end_time : null
 
     /*
      * The other place dating intent can be written, and the reason the rule
@@ -140,15 +147,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         user_id: authUser.userId,
         intent: intent ?? [],
         revealed: revealed ?? false,
-        open_to_crews: openToCrews ?? false,
+        open_to_crews_until: openToCrewsUntil ?? null,
       },
       update: {
         ...(intent !== undefined ? { intent } : {}),
         ...(revealed !== undefined ? { revealed } : {}),
-        ...(openToCrews !== undefined ? { open_to_crews: openToCrews } : {}),
+        ...(openToCrewsUntil !== undefined ? { open_to_crews_until: openToCrewsUntil } : {}),
         updated_at: new Date(),
       },
-      select: { intent: true, revealed: true, open_to_crews: true },
+      select: { intent: true, revealed: true, open_to_crews_until: true },
     })
 
     /*
@@ -176,7 +183,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       })
     }
 
-    return successResponse({ intent: updated.intent, revealed: updated.revealed, openToCrews: updated.open_to_crews })
+    return successResponse({
+      intent: updated.intent,
+      revealed: updated.revealed,
+      openToCrews: !!updated.open_to_crews_until && updated.open_to_crews_until > new Date(),
+    })
   } catch (error) {
     logger.error("Match preferences error", {
       error: error instanceof Error ? error.message : String(error),

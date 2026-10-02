@@ -145,6 +145,7 @@ export default async function EditEventPage({ params }: EventPageProps) {
         cover_image_url: event.cover_image_url,
         external_link: event.external_link,
         is_featured: event.is_featured,
+        crews_enabled: event.crews_enabled,
         check_in_radius: event.check_in_radius,
         geofence: event.geofence ?? undefined,
         category_ids: categoryIds,

@@ -7,14 +7,20 @@ import { z } from "zod"
 import { ageFrom, isAdult, mayParticipate } from "../age"
 import { errorResponse } from "../api-response"
 import { CREW } from "../constants"
+import { conversationPair } from "../conversations"
 import { db } from "../db"
 import { friendIdsOf } from "../friends"
 import { logger } from "../logger"
 import { findProfileContactInfo } from "../moderation/contact-info"
+import { foldText, hasInvisibleChars } from "../moderation/fold"
 import { checkKeywords } from "../moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "../moderation/openai-moderation"
 import { sendPushNotification } from "../push-notifications"
 import { closeRoomSockets, leaveRoomSockets } from "../room-close"
+import { blocksBetween } from "./blocks"
+import { activeMemberWhere, lockCrew, settleLocked } from "./sweep"
+
+export { activeMemberWhere } from "./sweep"
 
 /**
  * Crews: friends who go out together (plan v2 §6).
@@ -32,9 +38,18 @@ import { closeRoomSockets, leaveRoomSockets } from "../room-close"
  *   so two accepts at once cannot both take the last seat. Below
  *   `CREW.MIN_MEMBERS` the crew dissolves (D-15): its room archives and its
  *   last member is let go.
- * - **The name and bio are a card strangers see**, so they go through the
- *   moderation pipeline and the strict contact-detail reading
- *   (`findProfileContactInfo`), and are refused on write, never stored.
+ * - **The name and bio are a card strangers see**, so they are folded
+ *   (lib/moderation/fold.ts), go through the moderation pipeline and the
+ *   strict contact-detail reading (`findProfileContactInfo`), and are refused
+ *   on write, never stored. A card can be reported (`reportCrew`); a moderator
+ *   can hide or dissolve the crew (app/dashboard/moderation/reports).
+ * - **Nobody kept apart shares a crew** (C5/C6): a block or a closed
+ *   conversation between an invitee and anybody in the crew means no invite
+ *   and no accept, and a block or an unfriend withdraws the invites between
+ *   the pair (`dropCrewInvitesBetween`, lib/crews/blocks.ts).
+ * - **Caps** (C10, `CREW`): crews owned, joined and made per day; one invite
+ *   push per inviter and invitee a day; invites lapse after 14 days; a no is
+ *   not re-asked for 30; an owner's removal sticks.
  *
  * The crew chat is a room of kind `crew` made with the crew; who may enter it
  * is the crew's membership (`roomOwnerDenial` in lib/room-kind.ts), never a
@@ -62,16 +77,25 @@ const TAG_SLUGS = Object.keys(CREW_TAGS) as [CrewTag, ...CrewTag[]]
 /** Characters as a person counts them — and as Postgres's `char_length` does. */
 export const characters = (text: string): number => [...text].length
 
+/*
+ * Folded before anything reads them (lib/moderation/fold.ts): the keyword
+ * filter, the contact-detail reading and OpenAI all see what the screen will
+ * show, and the folded form is what is stored. A name with an invisible
+ * character in it is refused outright — nobody types one by accident into a
+ * name, and it is how a name smuggles a number past a filter. A bio has them
+ * stripped instead: pasted text carries them innocently.
+ */
 const crewName = z
   .string()
-  .transform((s) => s.trim().replace(/\s+/g, " "))
+  .refine((s) => !hasInvisibleChars(s), { message: "A crew name can't contain invisible characters" })
+  .transform((s) => foldText(s).trim().replace(/\s+/g, " "))
   .refine((s) => characters(s) >= CREW.NAME_MIN && characters(s) <= CREW.NAME_MAX, {
     message: `A crew name is ${CREW.NAME_MIN}–${CREW.NAME_MAX} characters`,
   })
 
 const crewBio = z
   .string()
-  .transform((s) => s.trim())
+  .transform((s) => foldText(s).trim())
   .refine((s) => characters(s) <= CREW.BIO_MAX, { message: `A crew bio is at most ${CREW.BIO_MAX} characters` })
 
 const crewFields = {
@@ -117,7 +141,7 @@ export const inviteSchema = z.object({
 /** A refusal a route answers as-is: the status and the sentence. */
 export interface CrewRefusal {
   refusal: string
-  status: 400 | 403 | 404 | 409
+  status: 400 | 403 | 404 | 409 | 429
 }
 
 export const isRefusal = (value: unknown): value is CrewRefusal =>
@@ -133,6 +157,9 @@ const FULL: CrewRefusal = { refusal: `A crew has at most ${CREW.MAX_MEMBERS} peo
  */
 const NOT_FRIENDS: CrewRefusal = { refusal: "You can only invite your friends into a crew.", status: 404 }
 const ADULTS: CrewRefusal = { refusal: "Crews are for people 18 and over who have finished setting up.", status: 403 }
+const OWNS_ENOUGH: CrewRefusal = { refusal: `You can own up to ${CREW.MAX_OWNED} crews at a time.`, status: 409 }
+const IN_ENOUGH: CrewRefusal = { refusal: `You can be in up to ${CREW.MAX_JOINED} crews at a time.`, status: 409 }
+const MADE_ENOUGH: CrewRefusal = { refusal: "That's enough new crews for today — try again tomorrow.", status: 429 }
 
 /* -------------------------------------------------------------------------- */
 /* Name and bio                                                               */
@@ -190,9 +217,10 @@ async function textRefusal(fields: { name?: string; bio?: string | null }): Prom
 
 /**
  * Crews are 18+ (the owner's 2026-09-27 ruling) and for people who finished
- * onboarding (`mayParticipate`). An account with a known age under 18 is
- * refused even if onboarded before the ruling: a crew is new, so nothing that
- * existed is taken away.
+ * onboarding (`mayParticipate`). The age must be **known** to be 18 or over: an
+ * account with no age is refused too (C9), because a crew puts its members on
+ * a card in front of adult strangers, and "we never asked" is not "18+". A
+ * crew is new, so nothing that existed is taken away.
  */
 export async function mayJoinCrews(userId: string): Promise<boolean> {
   const profile = await db.profiles.findUnique({
@@ -201,21 +229,7 @@ export async function mayJoinCrews(userId: string): Promise<boolean> {
   })
   if (!profile || profile.user.suspended_at || profile.user.deletedAt || !mayParticipate(profile)) return false
   const age = ageFrom(profile)
-  return age === null || isAdult(age)
-}
-
-/** Active members of a crew that has not dissolved. The suspended are not on any crew surface. */
-export const activeMemberWhere = { user: { suspended_at: null, deletedAt: null } } as const
-
-/**
- * Serialise every change to one crew's membership for the caller's
- * transaction: a row lock on the crew. Counting members after this cannot race
- * another accept, leave or remove. Null for no such crew, or a dissolved one.
- */
-async function lockCrew(tx: Prisma.TransactionClient, crewId: string): Promise<{ id: string; name: string } | null> {
-  const rows = await tx.$queryRaw<{ id: string; name: string }[]>`
-    SELECT id, name FROM crews WHERE id = ${crewId}::uuid AND dissolved_at IS NULL FOR UPDATE`
-  return rows[0] ?? null
+  return age !== null && isAdult(age)
 }
 
 /** The ids among `userIds` that are not friends of `inviterId` — must be none. */
@@ -223,6 +237,37 @@ async function strangersTo(inviterId: string, userIds: string[]): Promise<string
   const friends = new Set(await friendIdsOf(inviterId))
   return userIds.filter((id) => !friends.has(id))
 }
+
+/**
+ * One person's crew-joining serialised: their own advisory lock, so two
+ * creates or two accepts at once cannot both pass a cap. Taken after any crew
+ * lock (never before), so it cannot form a cycle with one.
+ */
+async function lockPerson(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`crew-person:${userId}`}, 0))`
+}
+
+/** Standing crews this person is in (owned included), and owns. */
+async function crewCounts(tx: Prisma.TransactionClient, userId: string): Promise<{ joined: number; owned: number }> {
+  const rows = await tx.crew_members.groupBy({
+    by: ["role"],
+    where: { user_id: userId, crew: { dissolved_at: null } },
+    _count: { _all: true },
+  })
+  const of = (role: string) => rows.find((r) => r.role === role)?._count._all ?? 0
+  return { joined: of("owner") + of("member"), owned: of("owner") }
+}
+
+/**
+ * An invite somebody can still say yes to: not declined, not a removal
+ * marker, not lapsed (`CREW.INVITE_TTL_MS`). Spread into a `crew_invites` filter.
+ */
+export function openInviteWhere(now: Date = new Date()) {
+  return { declined_at: null, removed_at: null, created_at: { gt: new Date(now.getTime() - CREW.INVITE_TTL_MS) } }
+}
+
+const isOpen = (i: { declined_at: Date | null; removed_at: Date | null; created_at: Date }, now: Date) =>
+  !i.declined_at && !i.removed_at && i.created_at.getTime() > now.getTime() - CREW.INVITE_TTL_MS
 
 /* -------------------------------------------------------------------------- */
 /* Create, invite, accept, decline                                            */
@@ -233,20 +278,33 @@ export type CreateCrewInput = z.infer<typeof createCrewSchema>
 /**
  * A new crew: the creator as its owner (consented), its room, and an invite
  * to each friend named. Every invitee must be the creator's friend, or
- * nothing is written.
+ * nothing is written; one kept apart from the creator (C6) is left out
+ * without a word. Within the caps (C10): crews owned, crews joined, crews
+ * made today — counted under the creator's own lock.
  */
 export async function createCrew(
   creatorId: string,
   input: CreateCrewInput
 ): Promise<{ crewId: string; chatGroupId: string; invited: number } | CrewRefusal> {
   if (!(await mayJoinCrews(creatorId))) return ADULTS
-  const invitees = [...new Set(input.inviteUserIds)].filter((id) => id !== creatorId)
-  if ((await strangersTo(creatorId, invitees)).length > 0) return NOT_FRIENDS
+  const wanted = [...new Set(input.inviteUserIds)].filter((id) => id !== creatorId)
+  if ((await strangersTo(creatorId, wanted)).length > 0) return NOT_FRIENDS
   const text = await textRefusal({ name: input.name, bio: input.bio })
   if (text) return text
+  const apart = await blocksBetween([creatorId], wanted)
+  const invitees = wanted.filter((id) => !apart.has(`${creatorId}|${id}`))
 
   const now = new Date()
-  const { crewId, chatGroupId } = await db.$transaction(async (tx) => {
+  const made = await db.$transaction(async (tx) => {
+    await lockPerson(tx, creatorId)
+    const counts = await crewCounts(tx, creatorId)
+    if (counts.owned >= CREW.MAX_OWNED) return OWNS_ENOUGH
+    if (counts.joined >= CREW.MAX_JOINED) return IN_ENOUGH
+    const today = await tx.crews.count({
+      where: { created_by: creatorId, created_at: { gt: new Date(now.getTime() - CREW.CREATE_WINDOW_MS) } },
+    })
+    if (today >= CREW.MAX_CREATED_PER_WINDOW) return MADE_ENOUGH
+
     const crew = await tx.crews.create({
       data: {
         name: input.name,
@@ -274,17 +332,28 @@ export async function createCrew(
     })
     return { crewId: crew.id, chatGroupId: room.id }
   })
+  if (isRefusal(made)) return made
 
-  for (const id of invitees) notifyCrewInvite(id, crewId)
-  return { crewId, chatGroupId, invited: invitees.length }
+  await notifyCrewInvites(creatorId, made.crewId, invitees)
+  return { ...made, invited: wanted.length }
 }
 
 /**
- * Invite friends into a crew you are in. Already a member, or already
- * invited (whatever became of it), is skipped without a word: asking again
- * after a decline would re-notify somebody who said no. Refused whole if any
- * of them is not the inviter's friend, or if the crew would pass 12 with the
- * invites still open.
+ * Invite friends into a crew you are in. Refused whole if any of them is not
+ * the inviter's friend (one 404, whoever they are), or if the crew would pass
+ * 12 with the invites still open. Otherwise each is invited — or skipped
+ * without a word, and the answer is the same either way (`invited` is how
+ * many were asked for, C8), so the inviter learns nothing about anybody:
+ *
+ * - already in the crew, or already invited and the invite still open;
+ * - declined in the last 30 days (`CREW.REINVITE_AFTER_DECLINE_MS`): a no is
+ *   not re-asked, nor re-pushed, for a month; after that it is a new ask;
+ * - removed by the crew's owner (`removed_at`), unless the owner is the one
+ *   asking — their invite clears the marker;
+ * - kept apart (a block or a closed conversation, C5/C6) from anybody in the
+ *   crew.
+ *
+ * A lapsed invite (`CREW.INVITE_TTL_MS`) is asked again as new.
  */
 export async function inviteToCrew(
   inviterId: string,
@@ -292,36 +361,73 @@ export async function inviteToCrew(
   userIds: string[]
 ): Promise<{ invited: number } | CrewRefusal> {
   const wanted = [...new Set(userIds)].filter((id) => id !== inviterId)
+  // Before the transaction: a read of the global pool inside it would hold the
+  // crew lock while waiting for a second connection.
+  if ((await strangersTo(inviterId, wanted)).length > 0) return NOT_FRIENDS
+  const now = new Date()
+
   const result = await db.$transaction(async (tx) => {
     if (!(await lockCrew(tx, crewId))) return NO_CREW
-    const me = await tx.crew_members.findFirst({ where: { crew_id: crewId, user_id: inviterId, ...activeMemberWhere }, select: { user_id: true } })
+    const members = await tx.crew_members.findMany({
+      where: { crew_id: crewId },
+      select: { user_id: true, role: true, user: { select: { suspended_at: true, deletedAt: true } } },
+    })
+    const me = members.find((m) => m.user_id === inviterId && !m.user.suspended_at && !m.user.deletedAt)
     if (!me) return NO_CREW
-    if ((await strangersTo(inviterId, wanted)).length > 0) return NOT_FRIENDS
+    const active = members.filter((m) => !m.user.suspended_at && !m.user.deletedAt).map((m) => m.user_id)
 
-    const [members, invites] = await Promise.all([
-      tx.crew_members.findMany({ where: { crew_id: crewId }, select: { user_id: true } }),
-      tx.crew_invites.findMany({ where: { crew_id: crewId }, select: { invited_user_id: true, declined_at: true } }),
+    const [invites, apart] = await Promise.all([
+      tx.crew_invites.findMany({
+        where: { crew_id: crewId },
+        select: { invited_user_id: true, declined_at: true, removed_at: true, created_at: true },
+      }),
+      blocksBetween(wanted, active, tx),
     ])
-    const taken = new Set([...members.map((m) => m.user_id), ...invites.map((i) => i.invited_user_id)])
-    const fresh = wanted.filter((id) => !taken.has(id))
-    const open = invites.filter((i) => !i.declined_at).length
-    if (members.length + open + fresh.length > CREW.MAX_MEMBERS) return FULL
+    const rowOf = new Map(invites.map((i) => [i.invited_user_id, i]))
+    const inCrew = new Set(members.map((m) => m.user_id))
+    const declineCutoff = now.getTime() - CREW.REINVITE_AFTER_DECLINE_MS
+
+    const ask = wanted.filter((id) => {
+      if (inCrew.has(id) || active.some((m) => apart.has(`${id}|${m}`))) return false
+      const row = rowOf.get(id)
+      if (!row) return true
+      if (row.removed_at) return me.role === "owner"
+      if (row.declined_at) return row.declined_at.getTime() <= declineCutoff
+      return !isOpen(row, now) // lapsed: ask again
+    })
+    const open = invites.filter((i) => isOpen(i, now)).length
+    if (members.length + open + ask.length > CREW.MAX_MEMBERS) return FULL
+
+    const fresh = ask.filter((id) => !rowOf.has(id))
+    const renewed = ask.filter((id) => rowOf.has(id))
     if (fresh.length > 0) {
       await tx.crew_invites.createMany({
-        data: fresh.map((id) => ({ crew_id: crewId, invited_user_id: id, invited_by: inviterId })),
+        data: fresh.map((id) => ({ crew_id: crewId, invited_user_id: id, invited_by: inviterId, created_at: now })),
         skipDuplicates: true,
       })
     }
-    return { invited: fresh }
+    if (renewed.length > 0) {
+      await tx.crew_invites.updateMany({
+        where: { crew_id: crewId, invited_user_id: { in: renewed } },
+        data: { invited_by: inviterId, created_at: now, declined_at: null, removed_at: null },
+      })
+    }
+    return { asked: ask }
   })
   if (isRefusal(result)) return result
-  for (const id of result.invited) notifyCrewInvite(id, crewId)
-  return { invited: result.invited.length }
+  await notifyCrewInvites(inviterId, crewId, result.asked)
+  return { invited: wanted.length }
 }
 
 /**
  * Accept an invite: the member row (with the reveal consent), the crew room's
  * member row, and the invite gone — under the crew lock, so the cap holds.
+ *
+ * Asked again here, under the lock, because the invite is only as good as
+ * what made it (C5): the invite open; whoever sent it still in the crew and
+ * still this person's friend; nobody in the crew kept apart from them (a block
+ * or a closed conversation either way). Any of those failing is the same 404
+ * as no invite — the invitee learns nothing about who.
  */
 export async function acceptCrewInvite(
   userId: string,
@@ -329,17 +435,32 @@ export async function acceptCrewInvite(
   opts: { keepMeAnonymous: boolean }
 ): Promise<{ chatGroupId: string } | CrewRefusal> {
   if (!(await mayJoinCrews(userId))) return ADULTS
+  const now = new Date()
   return db.$transaction(async (tx) => {
     if (!(await lockCrew(tx, crewId))) return NO_CREW
     const invite = await tx.crew_invites.findUnique({
       where: { crew_id_invited_user_id: { crew_id: crewId, invited_user_id: userId } },
-      select: { id: true, declined_at: true },
+      select: { id: true, invited_by: true, declined_at: true, removed_at: true, created_at: true },
     })
-    if (!invite || invite.declined_at) return NO_CREW
-    if ((await tx.crew_members.count({ where: { crew_id: crewId } })) >= CREW.MAX_MEMBERS) return FULL
+    if (!invite || !isOpen(invite, now)) return NO_CREW
+
+    const members = await tx.crew_members.findMany({
+      where: { crew_id: crewId },
+      select: { user_id: true, user: { select: { suspended_at: true, deletedAt: true } } },
+    })
+    const active = members.filter((m) => !m.user.suspended_at && !m.user.deletedAt).map((m) => m.user_id)
+    const [user1_id, user2_id] = conversationPair(userId, invite.invited_by)
+    const [friends, apart] = await Promise.all([
+      tx.friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
+      blocksBetween([userId], active, tx),
+    ])
+    if (!active.includes(invite.invited_by) || !friends || apart.size > 0) return NO_CREW
+    if (members.length >= CREW.MAX_MEMBERS) return FULL
+    await lockPerson(tx, userId)
+    if ((await crewCounts(tx, userId)).joined >= CREW.MAX_JOINED) return IN_ENOUGH
 
     await tx.crew_members.create({
-      data: { crew_id: crewId, user_id: userId, consented_reveal_at: new Date(), keep_me_anonymous: opts.keepMeAnonymous },
+      data: { crew_id: crewId, user_id: userId, consented_reveal_at: now, keep_me_anonymous: opts.keepMeAnonymous },
     })
     await tx.crew_invites.delete({ where: { id: invite.id } })
     const room = await tx.chat_groups.findUniqueOrThrow({ where: { crew_id: crewId }, select: { id: true } })
@@ -360,11 +481,12 @@ export async function acceptCrewInvite(
 
 /**
  * Decline: hidden from the invitee, told to nobody. The row stays so a second
- * invite cannot re-notify them, and it no longer holds a seat.
+ * invite within `CREW.REINVITE_AFTER_DECLINE_MS` cannot re-notify them, and it
+ * no longer holds a seat.
  */
 export async function declineCrewInvite(userId: string, crewId: string): Promise<boolean> {
   const { count } = await db.crew_invites.updateMany({
-    where: { crew_id: crewId, invited_user_id: userId, declined_at: null },
+    where: { crew_id: crewId, invited_user_id: userId, declined_at: null, removed_at: null },
     data: { declined_at: new Date() },
   })
   return count > 0
@@ -380,9 +502,12 @@ export async function declineCrewInvite(userId: string, crewId: string): Promise
  *
  * - their member row goes, and their room row is `left` (kept: the room's
  *   history names its senders through it);
- * - an owner who leaves hands the crew to whoever has been in it longest;
- * - below two members the crew dissolves (D-15): `dissolved_at`, its room
- *   archived, the last member released, open invites withdrawn.
+ * - removed by the owner, they get a removal marker (`removed_at`): nobody but
+ *   an owner can invite them back (C10);
+ * - then the crew is settled (`settleLocked`, lib/crews/sweep.ts): below two
+ *   ACTIVE members it dissolves (D-15) — its room archived, the last member
+ *   released, open invites withdrawn — and an owner who left hands the crew to
+ *   the active member who has been in it longest.
  *
  * After the commit, their sockets leave the room (all of them, if it
  * dissolved). The door already refuses them; this stops a socket that joined
@@ -395,13 +520,11 @@ export async function removeFromCrew(
 ): Promise<{ dissolved: boolean } | CrewRefusal> {
   const result = await db.$transaction(async (tx) => {
     if (!(await lockCrew(tx, crewId))) return NO_CREW
-    const members = await tx.crew_members.findMany({
-      where: { crew_id: crewId },
-      select: { user_id: true, role: true, joined_at: true },
-      orderBy: { joined_at: "asc" },
-    })
-    const by = members.find((m) => m.user_id === byId)
-    const target = members.find((m) => m.user_id === memberId)
+    const [by, target] = await Promise.all(
+      [byId, memberId].map((id) =>
+        tx.crew_members.findUnique({ where: { crew_id_user_id: { crew_id: crewId, user_id: id } }, select: { role: true } })
+      )
+    )
     // Somebody else's removal is the owner's alone; anybody may leave.
     if (!by || !target || (byId !== memberId && by.role !== "owner")) return NO_CREW
 
@@ -411,79 +534,21 @@ export async function removeFromCrew(
       where: { chat_group_id: room.id, user_id: memberId, status: { not: "banned" } },
       data: { status: "left", ...(byId === memberId && { left_at: new Date() }) },
     })
-
-    const rest = members.filter((m) => m.user_id !== memberId)
-    if (rest.length < CREW.MIN_MEMBERS) {
-      await dissolve(tx, crewId, room.id)
-      return { dissolved: true, roomId: room.id }
-    }
-    if (target.role === "owner") {
-      await tx.crew_members.update({
-        where: { crew_id_user_id: { crew_id: crewId, user_id: rest[0].user_id } },
-        data: { role: "owner" },
+    if (byId !== memberId) {
+      const marker = { removed_at: new Date(), declined_at: null, invited_by: byId }
+      await tx.crew_invites.upsert({
+        where: { crew_id_invited_user_id: { crew_id: crewId, invited_user_id: memberId } },
+        create: { crew_id: crewId, invited_user_id: memberId, ...marker },
+        update: marker,
       })
     }
-    return { dissolved: false, roomId: room.id }
+    const settled = await settleLocked(tx, crewId)
+    return { dissolved: settled.dissolved, roomId: room.id }
   })
   if (isRefusal(result)) return result
   if (result.dissolved) closeRoomSockets(result.roomId)
   else leaveRoomSockets(result.roomId, memberId)
   return { dissolved: result.dissolved }
-}
-
-/** D-15. Inside the caller's transaction, holding the crew lock. */
-async function dissolve(tx: Prisma.TransactionClient, crewId: string, roomId: string): Promise<void> {
-  const now = new Date()
-  await tx.crews.update({ where: { id: crewId }, data: { dissolved_at: now, updated_at: now } })
-  await tx.crew_members.deleteMany({ where: { crew_id: crewId } })
-  await tx.crew_invites.deleteMany({ where: { crew_id: crewId } })
-  await tx.chat_groups.update({ where: { id: roomId }, data: { status: "archived" } })
-  await tx.chat_group_members.updateMany({
-    where: { chat_group_id: roomId, status: { in: ["active", "muted"] } },
-    data: { status: "left" },
-  })
-}
-
-/**
- * Account erasure's second half (app/api/mobile/account). The erasure's own
- * transaction deletes the person's member rows and every invite to or from
- * them; this then settles each crew they were in, under its lock: below two
- * members it dissolves (D-15), and a crew whose owner was the erased person
- * gets the longest-standing member as its owner. Never throws — the erasure
- * has committed, and a crew left unsettled is logged; its erased member is
- * already off every crew surface.
- */
-export async function settleCrewsAfterErasure(crewIds: readonly string[]): Promise<void> {
-  for (const crewId of crewIds) {
-    try {
-      const roomId = await db.$transaction(async (tx) => {
-        if (!(await lockCrew(tx, crewId))) return null
-        const rest = await tx.crew_members.findMany({
-          where: { crew_id: crewId },
-          select: { user_id: true, role: true },
-          orderBy: { joined_at: "asc" },
-        })
-        const room = await tx.chat_groups.findUniqueOrThrow({ where: { crew_id: crewId }, select: { id: true } })
-        if (rest.length < CREW.MIN_MEMBERS) {
-          await dissolve(tx, crewId, room.id)
-          return room.id
-        }
-        if (!rest.some((m) => m.role === "owner")) {
-          await tx.crew_members.update({
-            where: { crew_id_user_id: { crew_id: crewId, user_id: rest[0].user_id } },
-            data: { role: "owner" },
-          })
-        }
-        return null
-      })
-      if (roomId) closeRoomSockets(roomId)
-    } catch (error) {
-      logger.error("Settling a crew after an erasure failed", {
-        crewId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -534,6 +599,50 @@ export async function setKeepMeAnonymous(userId: string, crewId: string, keep: b
 }
 
 /* -------------------------------------------------------------------------- */
+/* Report                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const reportCrewSchema = z.object({
+  reason: z.enum(["spam", "offensive", "contact_details", "impersonation", "other"]),
+  description: z.string().trim().max(500).optional(),
+})
+
+/**
+ * Report a crew's card — its name or bio (C12). Filed into `message_reports`
+ * as `message_type: "crew"` so it reaches the admin queue beside every other
+ * report, with the name and bio as they read now (`excerpt`): the owner can
+ * edit them before anyone looks, and the evidence should not move. Who
+ * reported is never told to the crew. A second report of the same crew by the
+ * same person while the first waits is the same report. An unknown or
+ * dissolved crew is the same 404 as any crew you have no business with.
+ */
+export async function reportCrew(
+  reporterId: string,
+  crewId: string,
+  input: z.infer<typeof reportCrewSchema>
+): Promise<{ reported: true } | CrewRefusal> {
+  const crew = await db.crews.findFirst({ where: { id: crewId, dissolved_at: null }, select: { name: true, bio: true } })
+  if (!crew) return NO_CREW
+  const waiting = await db.message_reports.findFirst({
+    where: { reporter_id: reporterId, message_type: "crew", message_id: crewId, status: "pending" },
+    select: { id: true },
+  })
+  if (!waiting) {
+    await db.message_reports.create({
+      data: {
+        reporter_id: reporterId,
+        message_id: crewId,
+        message_type: "crew",
+        reason: input.reason,
+        ...(input.description && { description: input.description }),
+        excerpt: [crew.name, crew.bio].filter(Boolean).join("\n"),
+      },
+    })
+  }
+  return { reported: true }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Pushes                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -541,6 +650,29 @@ export async function setKeepMeAnonymous(userId: string, crewId: string, keep: b
  * Neither names a person: a lock screen is read by whoever holds the phone,
  * the rule every push here keeps (lib/friends.ts). The app says who.
  */
+
+/**
+ * The invite push, to each invitee who has not had one from this inviter in
+ * the last `CREW.INVITE_PUSH_WINDOW_MS` for another crew (C10) — read from the
+ * invites themselves, so it holds across restarts and replicas. The invite is
+ * written either way and shows in the app; only the push (and its bell line)
+ * is spared. Never throws: the invites have committed.
+ */
+async function notifyCrewInvites(inviterId: string, crewId: string, inviteeIds: readonly string[]): Promise<void> {
+  if (inviteeIds.length === 0) return
+  try {
+    const since = new Date(Date.now() - CREW.INVITE_PUSH_WINDOW_MS)
+    const recent = await db.crew_invites.findMany({
+      where: { invited_by: inviterId, invited_user_id: { in: [...inviteeIds] }, crew_id: { not: crewId }, created_at: { gt: since } },
+      select: { invited_user_id: true },
+    })
+    const pushed = new Set(recent.map((r) => r.invited_user_id))
+    for (const id of inviteeIds) if (!pushed.has(id)) notifyCrewInvite(id, crewId)
+  } catch (error) {
+    logger.warn("Crew invite pushes failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
 function notifyCrewInvite(recipientId: string, crewId: string): void {
   sendPushNotification({
     userId: recipientId,

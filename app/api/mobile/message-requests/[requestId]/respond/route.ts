@@ -18,6 +18,7 @@ import {
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
 import { closeBlendsBetween } from "@/lib/crews/like"
+import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 
 interface RouteParams {
   params: Promise<{ requestId: string }>
@@ -152,15 +153,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * Idempotent: blocking someone who is already blocked is not an error.
      */
     if (action === "block") {
-      await db.blocked_users.upsert({
-        where: {
-          blocker_id_blocked_id: {
-            blocker_id: authUser.userId,
-            blocked_id: messageRequest.sender_id,
+      await db.$transaction(async (tx) => {
+        await tx.blocked_users.upsert({
+          where: {
+            blocker_id_blocked_id: {
+              blocker_id: authUser.userId,
+              blocked_id: messageRequest.sender_id,
+            },
           },
-        },
-        create: { blocker_id: authUser.userId, blocked_id: messageRequest.sender_id },
-        update: {},
+          create: { blocker_id: authUser.userId, blocked_id: messageRequest.sender_id },
+          update: {},
+        })
+        // And any crew invite between them (C5), with the block.
+        await dropCrewInvitesBetween(tx, authUser.userId, messageRequest.sender_id)
       })
       // And any Blend with one of them on each side (§6 Safety).
       await closeBlendsBetween(authUser.userId, messageRequest.sender_id)

@@ -150,7 +150,7 @@ describe("the breadcrumbs and the heading are one source", () => {
 
   it.each([
     ["/dashboard", "organizer", ["Org", "Overview"]],
-    ["/dashboard/events/e1/messaging", "organizer", ["Org", "Events", "Event", "Room"]],
+    ["/dashboard/events/e1/messaging", "organizer", ["Org", "Events", "Event", "Room chat"]],
     ["/dashboard/events/e1/edit", "organizer", ["Org", "Events", "Event", "Edit event"]],
     ["/dashboard/events/e1/feedback", "venue_owner", ["Org", "Events", "Event", "Feedback"]],
     ["/dashboard/venues/v1/claim", "venue_owner", ["Org", "Venues", "Venue", "Claim a venue"]],

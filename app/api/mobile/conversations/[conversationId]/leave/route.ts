@@ -16,6 +16,7 @@ import {
   errorResponse,
 } from "@/lib/api-response"
 import { isUuid, readOptionalJson } from "@/lib/api-input"
+import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>
@@ -152,6 +153,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           data: { status: "blocked" },
         })
       }
+      // Leaving is permanent either way, so a crew invite between them goes
+      // too (C5/C6): a closed pair is kept apart on every crew surface.
+      await dropCrewInvitesBetween(tx, authUser.userId, otherId)
 
       if (report) {
         if (report.messageId) {

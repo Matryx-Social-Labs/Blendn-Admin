@@ -2,7 +2,9 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { IconMessage2 } from "@tabler/icons-react"
 
+import { LiveDot, Panel } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
+import { Button } from "@/components/ui/button"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventClock } from "@/lib/event-phase"
@@ -10,6 +12,7 @@ import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
 import { canAccessDashboard } from "@/lib/rbac"
+import { cn } from "@/lib/utils"
 
 import { routeMetadata } from "@/lib/dashboard-route-content"
 
@@ -106,8 +109,15 @@ export default async function ChatroomsPage() {
     const n = occupancies.get(room.id)?.inside ?? 0
     return ranged(room) ? liveCountLabel(liveCountBucket(n)) : n
   }
-  const inside = rooms.some(ranged) ? null : [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
-  const flags = [...flagsFor.values()].reduce((a, b) => a + b, 0)
+  /*
+   * The room's other figures go the same way for that venue: its messages and
+   * its waiting flags as ranges, and no totals across rooms, which minus the
+   * exact ones would give the ranged one back (step 15 review).
+   */
+  const ranges = (room: (typeof rooms)[number], n: number) => (ranged(room) ? liveCountLabel(liveCountBucket(n)) : n)
+  const anyRanged = rooms.some(ranged)
+  const inside = anyRanged ? null : [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
+  const flags = anyRanged ? null : [...flagsFor.values()].reduce((a, b) => a + b, 0)
 
   if (rooms.length === 0) {
     return (
@@ -120,7 +130,7 @@ export default async function ChatroomsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
       {/* The pulse across every room. Flags waiting read first, in the
           destructive colour, because that is the one thing needing a human. */}
       {/* Gap-separated, no dots: a dot inside a span starts the next line
@@ -131,55 +141,67 @@ export default async function ChatroomsPage() {
         {inside !== null ? (
           <span><b className="font-bold text-foreground">{inside}</b> {inside === 1 ? "person" : "people"} inside</span>
         ) : null}
-        {flags > 0 ? (
+        {flags !== null && flags > 0 ? (
           <span className="font-bold text-destructive">{flags} flag{flags === 1 ? "" : "s"} waiting</span>
         ) : null}
       </p>
 
-      <ul className="flex flex-col divide-y divide-border">
+      {/* A card per open room (the kit's), in the order their state changes. */}
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))] gap-5">
         {rooms.map((room) => {
           const isLive = room.end_time > now
           const roomFlags = room.chat_group ? flagsFor.get(room.chat_group.id) ?? 0 : 0
           const closesAt = new Date(room.end_time.getTime() + FEEDBACK_WINDOW_HOURS * 3_600_000)
           return (
-            <li key={room.id}>
-              {/* The row is the link. One place to click, no button. */}
-              <Link
-                href={`/dashboard/events/${room.id}/messaging`}
-                className="grid gap-x-4 gap-y-1 py-4 @2xl/main:grid-cols-[minmax(0,1fr)_200px_260px] @2xl/main:items-baseline hover:bg-accent/40 -mx-2 px-2 rounded-md"
-              >
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate font-bold">{room.title}</span>
-                  <span className="truncate text-[0.8125rem] text-muted-foreground">
-                    {[room.venue_name, room.city].filter(Boolean).join(" · ") || "Location pending"}
-                    {isPlatformAdmin && room.organizer.name ? ` · ${room.organizer.name}` : ""}
-                  </span>
-                </span>
-                <span className="text-[0.8125rem]">
-                  {isLive ? (
-                    <>
-                      <b className="font-bold text-success">Live</b> · ends {eventClock(room.timezone).time(room.end_time)}
-                    </>
-                  ) : (
-                    <>
-                      <b className="font-bold">Feedback</b> · closes in {hoursUntil(closesAt, now)}h
-                    </>
-                  )}
-                </span>
-                <span className="flex flex-wrap gap-x-3.5 text-[0.8125rem] text-muted-foreground @2xl/main:justify-end">
-                  <span>
-                    <b className="font-bold text-foreground">{insideOf(room)}</b> inside
-                  </span>
-                  <span>
-                    <b className="font-bold text-foreground">{room.chat_group?._count.messages ?? 0}</b> messages
-                  </span>
-                  {roomFlags > 0 ? (
-                    <span className="font-bold text-destructive">
-                      {roomFlags} flag{roomFlags === 1 ? "" : "s"}
+            <li key={room.id} className="flex">
+              <Panel
+                className="flex-1"
+                title={room.title}
+                action={
+                  isLive ? (
+                    <span className="inline-flex shrink-0 items-center gap-1.5 text-[0.75rem] font-bold">
+                      <LiveDot />
+                      Live · ends {eventClock(room.timezone).time(room.end_time)}
                     </span>
-                  ) : null}
-                </span>
-              </Link>
+                  ) : (
+                    <span className="shrink-0 text-[0.75rem] text-muted-foreground">
+                      Feedback · closes in {hoursUntil(closesAt, now)}h
+                    </span>
+                  )
+                }
+              >
+                <p className="-mt-2 truncate text-[0.8125rem] text-muted-foreground">
+                  {[room.venue_name, room.city].filter(Boolean).join(" · ") || "Location pending"}
+                  {isPlatformAdmin && room.organizer.name ? ` · ${room.organizer.name}` : ""}
+                </p>
+                <dl className="flex gap-6">
+                  {(
+                    [
+                      [insideOf(room), "inside"],
+                      [ranges(room, room.chat_group?._count.messages ?? 0), "messages"],
+                      [ranges(room, roomFlags), "flags"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <div key={label} className="flex flex-col-reverse">
+                      <dt className="text-[0.75rem] text-faint-foreground">{label}</dt>
+                      <dd
+                        className={cn(
+                          "text-[1.375rem] font-bold leading-[1.1] tabular-nums",
+                          // Red only where the number is the room's own to see.
+                          label === "flags" && !ranged(room) && roomFlags > 0 && "text-destructive"
+                        )}
+                      >
+                        {value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <Button asChild variant="secondary" className="self-start pointer-coarse:h-11">
+                  <Link href={`/dashboard/events/${room.id}/messaging`}>
+                    Open room<span className="sr-only">: {room.title}</span>
+                  </Link>
+                </Button>
+              </Panel>
             </li>
           )
         })}

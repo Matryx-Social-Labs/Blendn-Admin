@@ -1029,7 +1029,7 @@ model message_reports {
   id           String        @id @default(uuid()) @db.Uuid
   reporter_id  String
   message_id   String        @db.Uuid
-  message_type String // 'group' | 'private' | 'board_post' | 'board_request'
+  message_type String // 'group' | 'private' | 'board_post' | 'board_request' | 'crew' (message_id = the crew's id)
   reason       String
   description  String?
   /// What the reported words said when the report was filed — board reports
@@ -2457,9 +2457,10 @@ model event_match_preferences {
   intent   connection_intent[]
   revealed Boolean             @default(false)
   /// "Open to joining a crew tonight" — a solo person's opt-in to crew cards
-  /// and crew likes at this event (plan v2 §8.3). Off unless they say so: a
-  /// crew never appears in the deck of somebody who did not ask for crews.
-  open_to_crews Boolean        @default(false)
+  /// and crew likes (plan v2 §8.3), until the end of the occurrence they said
+  /// it at: null or past means no. A crew never appears in the deck of
+  /// somebody who did not ask for crews, and Tuesday's answer is not Wednesday's.
+  open_to_crews_until DateTime? @db.Timestamptz(6)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -3264,6 +3265,9 @@ model crews {
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
   updated_at   DateTime            @default(now()) @db.Timestamptz(6)
   dissolved_at DateTime?           @db.Timestamptz(6)
+  /// Hidden by a platform admin after a report (the moderation queue): off
+  /// every surface outside the crew — cards, likes, Blends. Audited.
+  hidden_at    DateTime?           @db.Timestamptz(6)
 
   creator User           @relation("CrewCreator", fields: [created_by], references: [id], onDelete: Restrict)
   members crew_members[]
@@ -3305,6 +3309,8 @@ model crew_members {
   @@id([crew_id, user_id])
   /// "My crews", and the cascade path a user's rows are found by.
   @@index([user_id])
+  /// NOT here, because schema.prisma cannot express it: one owner per crew, a
+  /// partial unique (`crew_members_one_owner`) in the migration.
 }
 
 /// A friend asked into a crew, waiting for their accept. Only ever a friend of
@@ -3318,6 +3324,9 @@ model crew_invites {
   invited_by      String
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
   declined_at     DateTime? @db.Timestamptz(6)
+  /// The owner removed this person. A marker, not an invite: only an owner
+  /// can invite them back, which clears it.
+  removed_at      DateTime? @db.Timestamptz(6)
 
   crew    crews @relation(fields: [crew_id], references: [id], onDelete: Restrict)
   invitee User  @relation("CrewInvitee", fields: [invited_user_id], references: [id], onDelete: Restrict)

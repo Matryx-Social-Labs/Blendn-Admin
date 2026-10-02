@@ -1,13 +1,21 @@
-import { notFound } from "next/navigation"
+import { redirect } from "next/navigation"
 import { IconMessages } from "@tabler/icons-react"
 
-import { PageHeader } from "@/components/dashboard/page-header"
+import { EventHeader } from "@/components/dashboard/event-header"
+import { Panel } from "@/components/dashboard/kit"
+import { loadEventPage } from "@/lib/event-page"
+import { buildFeedbackDigest } from "@/lib/feedback-digest"
+import { liveCountLabel } from "@/lib/disclosure"
+
+import { eventTabsFor } from "../event-tabs"
+
+/** What a venue reads where a count of people is under the floor. */
+const HELD_BACK = liveCountLabel("quiet")
 import { eventTitleFor } from "@/lib/dashboard-record-titles"
 
 import { CategoryBars } from "@/components/dashboard/charts"
-import { EmptyState, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
+import { EmptyState, RatingBars } from "@/components/dashboard/primitives"
 
-import { getFeedbackDigest } from "./actions"
 import { FeedbackFeed } from "./feedback-feed"
 import { eventClock } from "@/lib/event-phase"
 
@@ -35,11 +43,30 @@ export default async function FeedbackPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const digest = await getFeedbackDigest(id)
-  if (!digest) notFound()
+  /*
+   * The same door as every route under an event: a missing event is a 404, an
+   * event this person may not operate sends them to the events list
+   * (`loadEventPage`, tested in `event-feedback-page.test.tsx`).
+   */
+  const data = await loadEventPage(id)
+  const { event, permissions } = data
+  // A tab only once the event is over, and never on a venue day; the URL is
+  // not a way round that.
+  const offered = eventTabsFor(event.start_time.toISOString(), event.end_time.toISOString(), {
+    canOperate: permissions.canOperate,
+    canEdit: permissions.canEdit,
+    canViewAttendees: permissions.canViewAttendees,
+    kind: event.kind,
+    status: event.status,
+  }).some((t) => t.key === "feedback")
+  if (!offered) redirect(`/dashboard/events/${event.id}`)
+  // Built from the event the loader read: one read, not two. A venue sees
+  // every count of people held back under the floor.
+  const digest = await buildFeedbackDigest(event, permissions.canEdit ? "host" : "venue")
 
-  const total = digest.counts.positive + digest.counts.neutral + digest.counts.negative
-  const share = (n: number) => (total === 0 ? 0 : (n / total) * 100)
+  const total = digest.total
+  const share = (n: number | null) => (!total || n === null ? 0 : (n / total) * 100)
+  const figure = (n: number | null) => (n === null ? HELD_BACK : n)
   const topIssue = digest.categories[0]
 
   const ended = eventClock(digest.timezone).format(new Date(digest.endedAt), {
@@ -54,12 +81,13 @@ export default async function FeedbackPage({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Owned header (`OWNED_HEADERS`). The event page owns the tabs; this goes back. */}
-      <PageHeader
-        title={digest.eventTitle}
-        description={`${digest.ended ? "ended" : "ends"} ${ended} · ${window}${total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""}`}
-        back={{ href: `/dashboard/events/${id}`, label: "Back to event" }}
-      />
+      {/* Owned header (`OWNED_HEADERS`): the event's own, with its tabs. */}
+      <EventHeader data={data} active="feedback" />
+      <p className="text-[0.8125rem] text-muted-foreground">
+        {`${digest.ended ? "Ended" : "Ends"} ${ended} · ${window}${
+          total === null ? " · fewer than five messages" : total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""
+        }`}
+      </p>
 
       {total === 0 ? (
         <EmptyState
@@ -78,28 +106,32 @@ export default async function FeedbackPage({
             a full-width bar above everything, because "was it good" is the
             question, and this answers it before a single word is read.
           */}
-          <section className="flex flex-col gap-2.5">
+          <Panel bodyClassName="gap-2.5">
+            {total === null ? null : (
             <div className="flex h-3 overflow-hidden rounded-full bg-surface-raised">
               <div className="bg-success" style={{ width: `${share(digest.counts.positive)}%` }} />
               <div className="bg-border-strong" style={{ width: `${share(digest.counts.neutral)}%` }} />
               <div className="bg-destructive" style={{ width: `${share(digest.counts.negative)}%` }} />
             </div>
+            )}
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
               <span>
-                <b className="font-bold tabular-nums text-success">{digest.counts.positive}</b> positive
+                <b className="font-bold tabular-nums text-success">{figure(digest.counts.positive)}</b> positive
               </span>
               <span>
-                <b className="font-bold tabular-nums text-foreground">{digest.counts.neutral}</b> neutral
+                <b className="font-bold tabular-nums text-foreground">{figure(digest.counts.neutral)}</b> neutral
               </span>
               <span>
-                <b className="font-bold tabular-nums text-destructive">{digest.counts.negative}</b>{" "}
+                <b className="font-bold tabular-nums text-destructive">{figure(digest.counts.negative)}</b>{" "}
                 negative
               </span>
             </div>
             {/* The takeaway, stated rather than left to be inferred from a
                 chart — the point of classifying by category at all. */}
             <p className="max-w-[60ch] text-[0.8125rem] leading-relaxed text-muted-foreground">
-              {digest.counts.negative === 0 ? (
+              {digest.counts.negative === null ? (
+                "Fewer than five said anything negative, or nothing was said at all — held back, so it cannot point at anybody."
+              ) : digest.counts.negative === 0 ? (
                 "Nothing negative was classified. Read the messages anyway — the classifier is cautious, not omniscient."
               ) : topIssue?.suppressed ? (
                 /* Below the disclosure floor the count is null and the quotes
@@ -126,41 +158,35 @@ export default async function FeedbackPage({
                 "Negatives were recorded without a clear category. Read them directly."
               )}
             </p>
-          </section>
+          </Panel>
 
-          <div className="grid gap-8 @4xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] @4xl/main:items-start">
-            <section className="flex flex-col gap-3 border-t border-border pt-5">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <SectionTitle>What people said</SectionTitle>
-                <span className="text-[0.75rem] text-faint-foreground">
-                  tap a label to correct it — the classifier misses sarcasm
-                </span>
-              </div>
+          <div className="grid gap-5 @4xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] @4xl/main:items-start">
+            <Panel title="What people said" hint="tap a label to correct it — the classifier misses sarcasm">
               <FeedbackFeed messages={digest.messages} timezone={digest.timezone} />
-            </section>
+            </Panel>
 
             <div className="flex flex-col gap-5">
               {digest.categories.length > 0 ? (
-                <section className="border-t border-border pt-5">
+                <Panel>
                   <CategoryBars
                     title="What went wrong"
                     hint="negative + safety messages"
                     data={digest.categories}
                   />
-                </section>
+                </Panel>
               ) : null}
 
               {/* Stars only when somebody gave one. Five empty bars under
                   "No ratings" is a chart of nothing. */}
-              {ratingCount > 0 ? (
-                <section className="flex flex-col gap-2.5 border-t border-border pt-5">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <SectionTitle>Stars</SectionTitle>
-                    <span className="text-[0.75rem] text-faint-foreground">
-                      {digest.averageRating === null ? "" : `${digest.averageRating} · `}
-                      {ratingCount} rating{ratingCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
+              {ratingCount === null || ratingCount > 0 ? (
+                <Panel
+                  title="Stars"
+                  hint={
+                    ratingCount === null
+                      ? "fewer than five ratings"
+                      : `${digest.averageRating === null ? "" : `${digest.averageRating} · `}${ratingCount} rating${ratingCount === 1 ? "" : "s"}`
+                  }
+                >
                   {/* Withheld under five raters: each score is somebody's (SCRUM-437). */}
                   {digest.averageRating === null ? (
                     <p className="text-[0.8125rem] text-muted-foreground">
@@ -174,7 +200,7 @@ export default async function FeedbackPage({
                       </p>
                     </>
                   )}
-                </section>
+                </Panel>
               ) : null}
             </div>
           </div>

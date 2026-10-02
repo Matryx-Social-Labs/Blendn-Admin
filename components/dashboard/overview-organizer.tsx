@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { IconArrowRight, IconCheck, IconChevronRight, IconPlus } from "@tabler/icons-react"
+import { IconArrowRight, IconCheck, IconChevronRight, IconPlus, IconQrcode } from "@tabler/icons-react"
 
 import { PacingChart } from "@/components/dashboard/charts"
 import { EventRow } from "@/components/dashboard/event-row"
@@ -67,9 +67,19 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
               .join(" · ")
               .concat(nextEvent.pacingNote ? `. ${nextEvent.pacingNote}` : "")}
             action={
-              <Button asChild size="sm" variant="secondary" className="pointer-coarse:h-11">
-                <Link href={`/dashboard/events/${nextEvent.id}`}>Open event</Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="secondary" className="pointer-coarse:h-11">
+                  <Link href={`/dashboard/events/${nextEvent.id}`}>Open event</Link>
+                </Button>
+                {/* Next up is always a published night of the organisation's own:
+                    the QR & link tab is theirs (`sharesLink`). */}
+                <Button asChild size="sm" variant="ghost" className="pointer-coarse:h-11">
+                  <Link href={`/dashboard/events/${nextEvent.id}?tab=share`}>
+                    <IconQrcode aria-hidden className="size-4" />
+                    Get the QR code
+                  </Link>
+                </Button>
+              </div>
             }
           />
         ) : (

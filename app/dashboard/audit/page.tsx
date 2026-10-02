@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { IconHistory } from "@tabler/icons-react"
 
+import { Panel } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
 import { getAuditLog } from "@/lib/audit-actions"
@@ -68,7 +69,9 @@ export default async function AuditPage({
           description="Role changes, suspensions, moderation decisions, invites and approvals are written here as they happen."
         />
       ) : (
-        <AuditTimeline page={page} action={filter ?? "all"} />
+        <Panel>
+          <AuditTimeline page={page} action={filter ?? "all"} />
+        </Panel>
       )}
     </div>
   )

@@ -6,6 +6,7 @@ import { logger } from "./logger"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { OWNER_ROOM_HOURS } from "./room-kind"
 import { closeRoomSockets } from "./room-close"
+import { repairCrews } from "./crews/sweep"
 
 /** Bounded so one pass cannot hold locks for an unbounded period. */
 const SWEEP_BATCH = 500
@@ -141,6 +142,18 @@ async function runSweep(): Promise<void> {
     logger.error("Chat lifecycle sweep failed", {
       error: error instanceof Error ? error.message : String(error),
     })
+  }
+  /*
+   * Crews left below two active members or without an active owner — by an
+   * erasure whose settle failed after its commit, or by a suspension, which
+   * writes no crew row — are settled here (lib/crews/sweep.ts). Its own
+   * catch, so one arm failing never stops the other.
+   */
+  try {
+    const crews = await repairCrews()
+    if (crews.repaired > 0) logger.info("Repaired crews", { ...crews })
+  } catch (error) {
+    logger.error("Crew repair sweep failed", { error: error instanceof Error ? error.message : String(error) })
   }
 }
 

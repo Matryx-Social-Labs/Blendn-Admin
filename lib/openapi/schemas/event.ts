@@ -527,7 +527,7 @@ export const MatchPreferencesSchema = z
   .object({
     intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).optional(),
     revealed: z.boolean().optional(),
-    /** "Open to joining a crew tonight": crews are shown to you, and may like you, only with this on. */
+    /** "Open to joining a crew tonight": crews are shown to you, and may like you, only with this on — until the end of the occurrence you are checked in at; `false` clears it. */
     openToCrews: z.boolean().optional(),
     /** Writes `profiles.intent_default`. */
     rememberIntent: z.boolean().optional(),

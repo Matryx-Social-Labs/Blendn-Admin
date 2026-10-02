@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import {
   Popover,
   PopoverAnchor,
@@ -69,29 +69,65 @@ export function zoneForEnter(query: string, value: string): string {
   return timezoneOptions(query, value)[0] ?? value
 }
 
+/**
+ * Where the active option goes for a key, in a list of `count`. Arrow keys
+ * wrap; Home and End jump; anything else leaves it. -1 is "none yet".
+ */
+export function moveActive(current: number, key: string, count: number): number {
+  if (count === 0) return -1
+  if (key === "ArrowDown") return current < 0 || current >= count - 1 ? 0 : current + 1
+  if (key === "ArrowUp") return current <= 0 ? count - 1 : current - 1
+  if (key === "Home") return 0
+  if (key === "End") return count - 1
+  return current
+}
+
+/**
+ * A searchable timezone picker, as the ARIA combobox pattern: a text box that
+ * owns a listbox (`aria-controls`), names the option the arrow keys are on
+ * (`aria-activedescendant`) while focus stays in the box, and picks it with
+ * Enter. Escape and a click outside close it without changing the value.
+ *
+ * `FormControl` hands its `id`, `aria-describedby` and `aria-invalid` to its
+ * child; they land on the text box, so the label points at it and an error is
+ * announced with it.
+ */
 export function TimezoneSelect({
   value,
   onChange,
+  ...control
 }: {
   value: string
   onChange: (v: string) => void
+  id?: string
+  "aria-describedby"?: string
+  "aria-invalid"?: boolean
 }) {
   const [query, setQuery] = useState(value)
   const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(-1)
+  const listId = useId()
 
   const filtered = useMemo(() => timezoneOptions(query, value), [query, value])
+  // Clamped while rendering, so a shorter list never points past its end.
+  const activeIndex = active < filtered.length ? active : -1
+  const optionId = (i: number) => `${listId}-option-${i}`
 
   const select = (tz: string) => {
     onChange(tz)
     setQuery(tz)
     setOpen(false)
+    setActive(-1)
   }
 
   // Closing without a pick puts the box back to the value the form holds, so
   // it never shows a zone that will not be saved.
   const onOpenChange = (next: boolean) => {
     setOpen(next)
-    if (!next) setQuery(value)
+    if (!next) {
+      setQuery(value)
+      setActive(-1)
+    }
   }
 
   return (
@@ -103,20 +139,34 @@ export function TimezoneSelect({
        */}
       <PopoverAnchor asChild>
         <Input
+          {...control}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)
+            setActive(-1)
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
           onKeyDown={(e) => {
+            if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+              e.preventDefault()
+              setOpen(true)
+              const next = moveActive(activeIndex, e.key, filtered.length)
+              setActive(next)
+              document.getElementById(optionId(next))?.scrollIntoView({ block: "nearest" })
+              return
+            }
             if (e.key !== "Enter") return
             // Enter in a text box submits the form, with the old zone. Here it picks.
             e.preventDefault()
-            select(zoneForEnter(query, value))
+            select(open && activeIndex >= 0 ? filtered[activeIndex] : zoneForEnter(query, value))
           }}
+          role="combobox"
+          aria-autocomplete="list"
           aria-expanded={open}
+          aria-controls={listId}
+          aria-activedescendant={open && activeIndex >= 0 ? optionId(activeIndex) : undefined}
           data-timezone-search=""
           placeholder="Search timezone…"
         />
@@ -138,17 +188,26 @@ export function TimezoneSelect({
         {filtered.length === 0 && (
           <p className="px-3 py-2 text-sm text-muted-foreground">No timezone matches “{query}”.</p>
         )}
-        {filtered.map((tz) => (
-          <Button
-            key={tz}
-            type="button"
-            variant="ghost"
-            className={`w-full justify-start rounded-none px-3 py-1.5 h-auto text-left text-sm font-normal hover:bg-muted ${tz === value ? "font-medium" : ""}`}
-            onClick={() => select(tz)}
-          >
-            {tz}
-          </Button>
-        ))}
+        <ul role="listbox" id={listId} aria-label="Timezones">
+          {filtered.map((tz, i) => (
+            <li
+              key={tz}
+              id={optionId(i)}
+              role="option"
+              aria-selected={tz === value}
+              // Keeps focus in the text box, where the combobox lives.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => select(tz)}
+              className={cn(
+                "cursor-pointer px-3 py-1.5 text-sm hover:bg-muted pointer-coarse:py-3",
+                tz === value && "font-medium",
+                i === activeIndex && "bg-muted"
+              )}
+            >
+              {tz}
+            </li>
+          ))}
+        </ul>
       </PopoverContent>
     </Popover>
   )

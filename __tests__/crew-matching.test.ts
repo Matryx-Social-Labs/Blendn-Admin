@@ -2,7 +2,8 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 jest.mock("@/lib/db", () => ({ db: {} }))
 import { readdirSync, readFileSync, statSync } from "fs"
 import { join, relative } from "path"
-import { blocksExclude, crewMayMeetSolo } from "@/lib/crews/presence"
+import { blocksExclude } from "@/lib/crews/blocks"
+import { crewMayMeetSolo } from "@/lib/crews/presence"
 import { ownerRoomClosesAt } from "@/lib/room-kind"
 
 /**

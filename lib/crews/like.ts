@@ -10,9 +10,8 @@ import { deliverToRoom } from "../room-delivery"
 import { closeRoomSockets } from "../room-close"
 import { ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import type { CrewRefusal } from "./crews"
+import { blocksBetween, blocksExclude } from "./blocks"
 import {
-  blocksBetween,
-  blocksExclude,
   crewEvent,
   crewMayMeetSolo,
   hereNowAt,

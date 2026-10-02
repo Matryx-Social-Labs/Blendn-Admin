@@ -2,7 +2,8 @@
 import { firstName, UNNAMED } from "../conversation-identity"
 import { db } from "../db"
 import { idForViewer } from "../room-handle"
-import { CREW_TAGS, type CrewTag } from "./crews"
+import { blocksBetween } from "./blocks"
+import { CREW_TAGS, openInviteWhere, type CrewTag } from "./crews"
 
 /**
  * Crews as their own members see them (`GET /crews`, `GET /crews/:id`).
@@ -13,6 +14,10 @@ import { CREW_TAGS, type CrewTag } from "./crews"
  * account id — the same id rule as every room (SCRUM-371) — and the removal
  * route takes that handle back. Nobody outside the crew learns anything here:
  * a crew you are not in is the same 404 as one that does not exist.
+ *
+ * Two members kept apart (a block or a closed conversation either way, C5)
+ * are not listed to each other; `size` still counts everybody active, because
+ * it is the crew's size, not a list of who.
  */
 
 const memberSelect = {
@@ -62,7 +67,7 @@ type CrewRow = {
 const tagsOf = (tags: string[]) =>
   tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] }))
 
-function crewView(viewerId: string, crew: CrewRow) {
+function crewView(viewerId: string, crew: CrewRow, apart: ReadonlySet<string>) {
   const roomId = crew.room?.id
   const me = crew.members.find((m) => m.user_id === viewerId)
   return {
@@ -77,7 +82,7 @@ function crewView(viewerId: string, crew: CrewRow) {
     chatGroupId: roomId ?? null,
     size: crew.members.length,
     you: me ? { role: me.role, keepMeAnonymous: me.keep_me_anonymous } : null,
-    members: crew.members.map((m) => ({
+    members: crew.members.filter((m) => !apart.has(`${viewerId}|${m.user_id}`)).map((m) => ({
       // Yours real; everyone else's as their handle in the crew's room.
       userId: roomId ? idForViewer(viewerId, { kind: "crew", groupId: roomId }, m.user_id) : m.user_id,
       name: firstName(m.user.profile?.name || m.user.name || UNNAMED),
@@ -97,7 +102,7 @@ export async function crewsOf(userId: string) {
       orderBy: { created_at: "desc" },
     }),
     db.crew_invites.findMany({
-      where: { invited_user_id: userId, declined_at: null, crew: { dissolved_at: null } },
+      where: { invited_user_id: userId, ...openInviteWhere(), crew: { dissolved_at: null } },
       select: {
         created_at: true,
         inviter: { select: { name: true, profile: { select: { name: true } } } },
@@ -115,8 +120,9 @@ export async function crewsOf(userId: string) {
       orderBy: { created_at: "desc" },
     }),
   ])
+  const apart = await blocksBetween([userId], [...new Set(crews.flatMap((c) => c.members.map((m) => m.user_id)))])
   return {
-    crews: crews.map((c) => crewView(userId, c)),
+    crews: crews.map((c) => crewView(userId, c, apart)),
     invites: invites.map((i) => ({
       crewId: i.crew.id,
       name: i.crew.name,
@@ -137,5 +143,6 @@ export async function crewDetail(userId: string, crewId: string) {
     where: { id: crewId, dissolved_at: null, members: { some: { user_id: userId, user: { suspended_at: null } } } },
     select: crewSelect,
   })
-  return crew ? crewView(userId, crew) : null
+  if (!crew) return null
+  return crewView(userId, crew, await blocksBetween([userId], crew.members.map((m) => m.user_id)))
 }

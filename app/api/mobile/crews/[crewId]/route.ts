@@ -27,6 +27,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    const limited = await rateLimit(request, userLimit("read", "crew-detail", authUser.userId))
+    if (limited) return limited
     const { crewId } = await params
     const crew = isUuid(crewId) ? await crewDetail(authUser.userId, crewId) : null
     return crew ? successResponse(crew) : notFoundResponse("Crew not found")

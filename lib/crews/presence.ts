@@ -6,9 +6,9 @@ import { inRoomWhere } from "../event-kind"
 import { namesInRoom } from "../identity"
 import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
-import { hit } from "../rate-limit-store"
 import { deliverToRoom } from "../room-delivery"
 import { isRoomMuted } from "../room-mute"
+import { blocksBetween, blocksExclude } from "./blocks"
 import { CREW_TAGS, NO_CREW, type CrewRefusal, type CrewTag } from "./crews"
 
 /**
@@ -31,12 +31,16 @@ export function hereNowAt(occurrenceId: string, now: Date = new Date()) {
   return { occurrence_id: occurrenceId, status: "checked_in" as const, check_out_time: null, ...inRoomWhere(undefined, now) }
 }
 
-/** The members of each crew who are checked in at this occurrence now, by crew. */
+/**
+ * The members of each crew who are checked in at this occurrence now, by crew.
+ * A crew a moderator hid (`hidden_at`) is here for nobody: its own members
+ * still have their crew, but no card, like or Blend comes of it (C12).
+ */
 export async function presentMembersAt(occurrenceId: string, crewIds?: readonly string[]): Promise<Map<string, string[]>> {
   const rows = await db.crew_members.findMany({
     where: {
       ...(crewIds && { crew_id: { in: [...crewIds] } }),
-      crew: { dissolved_at: null },
+      crew: { dissolved_at: null, hidden_at: null },
       user: { suspended_at: null, deletedAt: null, event_check_ins: { some: hereNowAt(occurrenceId) } },
     },
     select: { crew_id: true, user_id: true },
@@ -77,38 +81,12 @@ export async function membersOf(crewIds: readonly string[]): Promise<Map<string,
 }
 
 /**
- * Pairs (a, b) with a block between them either way, as `a|b` keys both ways,
- * for these two sets. One read however large the sets.
- */
-export async function blocksBetween(as: readonly string[], bs: readonly string[]): Promise<Set<string>> {
-  if (as.length === 0 || bs.length === 0) return new Set()
-  const rows = await db.blocked_users.findMany({
-    where: {
-      OR: [
-        { blocker_id: { in: [...as] }, blocked_id: { in: [...bs] } },
-        { blocker_id: { in: [...bs] }, blocked_id: { in: [...as] } },
-      ],
-    },
-    select: { blocker_id: true, blocked_id: true },
-  })
-  return new Set(rows.flatMap((r) => [`${r.blocker_id}|${r.blocked_id}`, `${r.blocked_id}|${r.blocker_id}`]))
-}
-
-/**
- * Whether any member of one side is in a block with any member of the other
- * (CR-U04): either direction, any pair, not only the person asking. Pure.
- */
-export function blocksExclude(sideA: readonly string[], sideB: readonly string[], blocked: ReadonlySet<string>): boolean {
-  return sideA.some((a) => sideB.some((b) => blocked.has(`${a}|${b}`)))
-}
-
-/**
  * Whether a crew and one person may match at all (§8.3, the research's
  * guardrails): the crew has room for one more, is no bigger than
- * `CREW.MAX_SOLO_MATCH`, and dating is out unless both chose it — a group
- * approaching one person romantically is the scenario women report as
- * unsafe. The person's own opt-in ("Open to joining a crew tonight") is asked
- * separately, because it is theirs to give. Pure.
+ * `CREW.MAX_SOLO_MATCH` active members, and dating is out unless both chose it
+ * — a group approaching one person romantically is the scenario women report
+ * as unsafe. The person's own opt-in ("Open to joining a crew tonight") is
+ * asked separately, because it is theirs to give. Pure.
  */
 export function crewMayMeetSolo(
   crew: { open_to_solo: boolean; intent: readonly string[] },
@@ -119,18 +97,22 @@ export function crewMayMeetSolo(
   return !crew.intent.includes("dating") || personIntents.includes("dating")
 }
 
-/** A person's intents at this event: what they chose here, else their profile's default. */
+/**
+ * A person's intents at this event — what they chose here, else their
+ * profile's default — and whether they are open to crews **now**: the opt-in
+ * lasts until the end of the occurrence they gave it at (`open_to_crews_until`).
+ */
 export async function intentsAt(eventId: string, userId: string): Promise<{ intents: string[]; openToCrews: boolean }> {
   const [pref, profile] = await Promise.all([
     db.event_match_preferences.findUnique({
       where: { event_id_user_id: { event_id: eventId, user_id: userId } },
-      select: { intent: true, open_to_crews: true },
+      select: { intent: true, open_to_crews_until: true },
     }),
     db.profiles.findUnique({ where: { id: userId }, select: { intent_default: true } }),
   ])
   return {
     intents: pref?.intent.length ? pref.intent : (profile?.intent_default ?? []),
-    openToCrews: pref?.open_to_crews ?? false,
+    openToCrews: !!pref?.open_to_crews_until && pref.open_to_crews_until > new Date(),
   }
 }
 
@@ -139,57 +121,78 @@ export interface CrewCard {
   name: string
   bio: string | null
   emblemSeed: string
-  /** "Crew of N": the members it has. */
+  /** "Crew of N": its active members. */
   size: number
   /** "Here now · N of size". Always ≥ 2: a crew with fewer here is not shown. */
   presentCount: number
   tags: { slug: string; label: string }[]
   intent: string[]
-  /**
-   * The menagerie: tonight's room pseudonyms of the members here now — new
-   * every night, never a name or a photo. A member who turned "show online"
-   * off is counted in `presentCount` and not listed, as on the roster.
-   */
-  menagerie: string[]
   /** Whether your side has liked them tonight. Never whether they liked you. */
   youLiked: boolean
 }
 
+/**
+ * Counts, never people (C4): no pseudonym, name or photo of anybody on a
+ * card. A list of tonight's pseudonyms, beside a crew whose members later
+ * reveal, lets a stranger eliminate the ones who kept themselves anonymous —
+ * and a pseudonym that recurs with the same crew across nights links them.
+ * Inside a Blend its people are shown (lib/crews/blends.ts); out here, a card.
+ */
+
+/** A page of cards: at most `CREW.CARDS_MAX`, `CREW.CARDS_DEFAULT` unless asked. */
+export interface CardPage {
+  limit: number
+  offset: number
+}
+
 export type CrewsAtEvent =
-  | { crewsEnabled: false; crews: []; myCrews: [] }
+  | { crewsEnabled: false; crews: []; myCrews: []; total: 0; hasMore: false }
   | {
       crewsEnabled: true
       crews: CrewCard[]
       /** The caller's own crews that are here now: what a like is sent "as". */
       myCrews: { crewId: string; name: string; presentCount: number }[]
+      /** Every crew the caller may see here now, across pages. */
+      total: number
+      hasMore: boolean
     }
 
 /**
  * The crews here now, as a checked-in person sees them (`GET /events/:id/crews`).
  *
- * - Only crews with two or more members here now.
+ * - Only crews with two or more active members here now, never a hidden one.
  * - Not the caller's own crews (those are `myCrews`).
- * - Never a crew with any member in a block, either way, with the caller or
- *   with any member of the caller's crews here now: a block between any two
- *   members hides the crews from each other (§6 Safety).
+ * - Never a crew with any member kept apart (a block, or a closed
+ *   conversation, either way) from the caller or from any member of the
+ *   caller's crews here now: a block between any two members hides the crews
+ *   from each other (§6 Safety, C6).
  * - A caller here without a crew of their own sees crews only after opting
- *   in ("Open to joining a crew tonight"), and then only crews they may meet
- *   (`crewMayMeetSolo`: room for one more, ≤ 6, dating only if both chose it).
+ *   in ("Open to joining a crew tonight", until the end of the occurrence they
+ *   said it at), and then only crews they may meet (`crewMayMeetSolo`: room
+ *   for one more, ≤ 6, dating only if both chose it — §8.3).
+ * - Most here first, then by id, a page at a time.
  *
- * `null` for an event that is not there; `"not_here"` for a caller who is not
- * checked in now — the room's own reciprocity.
+ * A fixed handful of set-based reads however many crews are here (the PR
+ * body has the EXPLAIN ANALYZE on a seeded 300-crew night). `null` for an
+ * event that is not there; `"not_here"` for a caller who is not checked in
+ * now — the room's own reciprocity.
  */
-export async function crewsAtEvent(eventId: string, viewerId: string): Promise<CrewsAtEvent | null | "not_here"> {
+export async function crewsAtEvent(
+  eventId: string,
+  viewerId: string,
+  page: CardPage = { limit: CREW.CARDS_DEFAULT, offset: 0 }
+): Promise<CrewsAtEvent | null | "not_here"> {
   const event = await crewEvent(eventId)
   if (!event) return null
   const occurrenceId = await occurrenceHereNow(eventId, viewerId)
   if (!occurrenceId) return "not_here"
-  if (!event.crews_enabled) return { crewsEnabled: false, crews: [], myCrews: [] }
+  if (!event.crews_enabled) return { crewsEnabled: false, crews: [], myCrews: [], total: 0, hasMore: false }
 
   const present = new Map([...(await presentMembersAt(occurrenceId))].filter(([, ids]) => ids.length >= CREW.MIN_MEMBERS))
-  if (present.size === 0) return { crewsEnabled: true, crews: [], myCrews: [] }
+  if (present.size === 0) return { crewsEnabled: true, crews: [], myCrews: [], total: 0, hasMore: false }
 
   const crews = await db.crews.findMany({
+    // Standing and not hidden already: `presentMembersAt` reads only those.
     where: { id: { in: [...present.keys()] } },
     select: { id: true, name: true, bio: true, emblem_seed: true, tags: true, intent: true, open_to_solo: true },
   })
@@ -208,13 +211,17 @@ export async function crewsAtEvent(eventId: string, viewerId: string): Promise<C
       : []
   }
 
-  // What your side liked tonight: your crews here, or you.
+  const presentCount = (id: string) => present.get(id)?.length ?? 0
+  visible.sort((a, b) => presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1))
+  const shown = visible.slice(page.offset, page.offset + page.limit)
+
+  // What your side liked tonight, of this page: your crews here, or you.
   const liked = new Set(
     (
       await db.crew_likes.findMany({
         where: {
           occurrence_id: occurrenceId,
-          to_crew_id: { in: visible.map((c) => c.id) },
+          to_crew_id: { in: shown.map((c) => c.id) },
           ...(mine.length ? { from_crew_id: { in: mine.map((c) => c.id) } } : { from_user_id: viewerId }),
         },
         select: { to_crew_id: true },
@@ -222,33 +229,22 @@ export async function crewsAtEvent(eventId: string, viewerId: string): Promise<C
     ).map((l) => l.to_crew_id)
   )
 
-  // Tonight's pseudonyms, from the event's room; "show online" off is counted, not listed.
-  const presentIds = visible.flatMap((c) => present.get(c.id) ?? [])
-  const seats = presentIds.length
-    ? await db.chat_group_members.findMany({
-        where: { chat_group: { event_id: eventId }, user_id: { in: presentIds }, anonymous_name: { not: null } },
-        select: { user_id: true, anonymous_name: true, user: { select: { profile: { select: { show_online: true } } } } },
-      })
-    : []
-  const pseudonymOf = new Map(
-    seats.filter((s) => s.user.profile?.show_online !== false).map((s) => [s.user_id, s.anonymous_name as string])
-  )
-
   return {
     crewsEnabled: true,
-    crews: visible.map((c) => ({
+    crews: shown.map((c) => ({
       crewId: c.id,
       name: c.name,
       bio: c.bio,
       emblemSeed: c.emblem_seed,
       size: members.get(c.id)?.length ?? 0,
-      presentCount: present.get(c.id)?.length ?? 0,
+      presentCount: presentCount(c.id),
       tags: c.tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] })),
       intent: c.intent,
-      menagerie: (present.get(c.id) ?? []).flatMap((id) => pseudonymOf.get(id) ?? []).sort(),
       youLiked: liked.has(c.id),
     })),
-    myCrews: mine.map((c) => ({ crewId: c.id, name: c.name, presentCount: present.get(c.id)?.length ?? 0 })),
+    myCrews: mine.map((c) => ({ crewId: c.id, name: c.name, presentCount: presentCount(c.id) })),
+    total: visible.length,
+    hasMore: page.offset + shown.length < visible.length,
   }
 }
 
@@ -262,10 +258,18 @@ const NO_EVENT: CrewRefusal = { refusal: "Event not found", status: 404 }
 
 /**
  * "We're here" (§6): a line in the crew chat, and a push to every other
- * member — once per person per night (`CREW.HERE_WINDOW_MS`), never to the
- * person who tapped it, never to a member who muted the crew chat or is in a
- * block with them, and never to someone who turned notifications off
- * (`sendBulkPushNotifications` reads `push_enabled`).
+ * member — once per person per crew per occurrence, never to the person who
+ * tapped it, never to a member who muted the crew chat or is in a block with
+ * them. A member who turned notifications off (`push_enabled`) gets no push
+ * but does get the bell line, as every bulk send writes one
+ * (`sendBulkPushNotifications`).
+ *
+ * Once means once: the line itself is the record. Whether this person already
+ * said it in this crew's room for this occurrence is read, and the line
+ * written, in one transaction under an advisory lock on (room, person,
+ * occurrence) — so it holds across restarts and replicas, and a double tap
+ * cannot write two. Keyed on the crew as the database knows it, never on the
+ * id as the path spelled it (an upper-case uuid is the same crew).
  *
  * The tapper must be checked in here now, by their own GPS. Nobody else is
  * checked in by it: each member checks in at their own door (CR-I04).
@@ -281,32 +285,44 @@ export async function crewHere(
 ): Promise<{ notified: number; repeated: boolean } | CrewRefusal> {
   const crew = await db.crews.findFirst({
     where: { id: crewId, dissolved_at: null, members: { some: { user_id: userId, user: { suspended_at: null } } } },
-    select: { name: true, room: { select: { id: true, kind: true, name: true } } },
+    select: { id: true, name: true, room: { select: { id: true, kind: true, name: true } } },
   })
   if (!crew?.room) return NO_CREW
   const event = await crewEvent(eventId)
   if (!event) return NO_EVENT
   if (!event.crews_enabled) return CREWS_OFF
-  const occurrenceId = await occurrenceHereNow(eventId, userId)
+  const occurrenceId = await occurrenceHereNow(event.id, userId)
   if (!occurrenceId) return NOT_IN
 
-  // Once per person per night out: a second tap changes nothing.
-  const { count } = await hit(`crew-here:${crewId}:${occurrenceId}:${userId}`, CREW.HERE_WINDOW_MS)
-  if (count > 1) return { notified: 0, repeated: true }
-
   const room = crew.room
-  const message = await db.chat_messages.create({
-    data: {
-      chat_group_id: room.id,
-      user_id: userId,
-      type: "system",
-      // No name in the words: the room names the sender (`namesInRoom`), and
-      // stored text outlives an account erasure where a name must not.
-      content: "We're here 👋",
-      metadata: { kind: "crew_here", eventId },
-    },
+  const message = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`crew-here:${room.id}:${userId}:${occurrenceId}`}, 0))`
+    const said = await tx.chat_messages.findFirst({
+      where: {
+        chat_group_id: room.id,
+        user_id: userId,
+        type: "system",
+        AND: [{ metadata: { path: ["kind"], equals: "crew_here" } }, { metadata: { path: ["occurrenceId"], equals: occurrenceId } }],
+      },
+      select: { id: true },
+    })
+    if (said) return null
+    const line = await tx.chat_messages.create({
+      data: {
+        chat_group_id: room.id,
+        user_id: userId,
+        type: "system",
+        // No name in the words: the room names the sender (`namesInRoom`), and
+        // stored text outlives an account erasure where a name must not.
+        content: "We're here 👋",
+        metadata: { kind: "crew_here", eventId: event.id, occurrenceId },
+      },
+    })
+    await tx.chat_groups.update({ where: { id: room.id }, data: { last_message_at: line.created_at } })
+    return line
   })
-  await db.chat_groups.update({ where: { id: room.id }, data: { last_message_at: message.created_at } })
+  if (!message) return { notified: 0, repeated: true }
+
   const senderName = (await namesInRoom(room, [userId])).get(userId) ?? "Someone"
   await deliverToRoom({
     chatGroupId: room.id,
@@ -324,7 +340,7 @@ export async function crewHere(
         chat_group_id: room.id,
         user_id: { not: userId },
         status: { in: ["active", "muted"] },
-        user: { suspended_at: null, deletedAt: null, crew_memberships: { some: { crew_id: crewId } } },
+        user: { suspended_at: null, deletedAt: null, crew_memberships: { some: { crew_id: crew.id } } },
       },
       select: { user_id: true, notification_preferences: true },
     }),
@@ -338,7 +354,7 @@ export async function crewHere(
       userIds: recipients,
       title: crew.name,
       body: "Someone from your crew is here 👋",
-      data: { type: "crew_here", crewId, chatGroupId: room.id },
+      data: { type: "crew_here", crewId: crew.id, chatGroupId: room.id },
     }).catch((error: unknown) => logger.warn("Push notification failed", { context: "crew here", error: String(error) }))
   }
   return { notified: recipients.length, repeated: false }
