@@ -66,7 +66,9 @@ export function OrgPanel({
   permissions: OrgPermissions
 }) {
   return (
-    <section className="flex flex-col gap-5">
+    // 44px targets on a touch screen, for every control in the team's panels:
+    // the role selects and the icon buttons are 32–36px otherwise.
+    <section className="flex flex-col gap-5 pointer-coarse:[&_button]:min-h-11 pointer-coarse:[&_button]:min-w-11 pointer-coarse:[&_input]:min-h-11">
       {/* One title line. Status and your role are words beside the name, not
           chips — neither is an action, and the card around all of it is gone. */}
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">

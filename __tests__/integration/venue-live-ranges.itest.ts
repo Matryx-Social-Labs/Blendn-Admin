@@ -444,11 +444,20 @@ describe("the venue's lists", () => {
     expect(venueHtml).toMatch(inside("10–19"))
     expect(venueHtml).toMatch(inside("Under 5"))
     expect(venueHtml).not.toMatch(/people inside|person inside/)
+    // Its messages and flags as ranges too, on every card, and no flag total.
+    const figure = (label: string, value: string) => new RegExp(`<dt[^>]*>${label}</dt><dd[^>]*>${value}</dd>`)
+    expect(venueHtml).toMatch(figure("messages", "(Under 5|5–9|10–19|20\\+)"))
+    expect(venueHtml).not.toMatch(figure("messages", "\\d+"))
+    expect(venueHtml).not.toMatch(figure("flags", "\\d+"))
+    expect(venueHtml).not.toMatch(/flags? waiting/)
 
     as(host, "organizer")
     const hostHtml = renderToStaticMarkup(await ChatroomsPage())
     expect(hostHtml).toMatch(inside("12"))
     expect(hostHtml).toMatch(/>15<\/b> people inside/)
+    // The host reads its own rooms' messages and flags exactly.
+    expect(hostHtml).toMatch(new RegExp(`<dt[^>]*>messages</dt><dd[^>]*>\\d+</dd>`))
+    expect(hostHtml).toMatch(new RegExp(`<dt[^>]*>flags</dt><dd[^>]*>\\d+</dd>`))
 
     as(admin, "app_admin")
     const adminHtml = renderToStaticMarkup(await ChatroomsPage())

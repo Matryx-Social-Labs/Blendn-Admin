@@ -31,6 +31,9 @@ export function ReportBuilder({
   const [downloading, setDownloading] = useState<string | null>(null)
 
   async function download(report: ReportDef) {
+    // One at a time, without disabling the button somebody is on: a disabled
+    // button drops keyboard focus to the page.
+    if (downloading !== null) return
     setDownloading(report.key)
     try {
       // A plain navigation would work, but then a 403 or a 500 renders as a
@@ -78,7 +81,8 @@ export function ReportBuilder({
                 size="sm"
                 variant="outline"
                 onClick={() => void download(report)}
-                disabled={downloading !== null}
+                aria-busy={downloading === report.key}
+                aria-disabled={downloading !== null}
                 // Every row's button says "CSV"; the name says which.
                 aria-label={`Download ${report.label} CSV`}
                 className="pointer-coarse:h-11"

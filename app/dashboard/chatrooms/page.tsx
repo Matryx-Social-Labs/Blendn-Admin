@@ -109,8 +109,15 @@ export default async function ChatroomsPage() {
     const n = occupancies.get(room.id)?.inside ?? 0
     return ranged(room) ? liveCountLabel(liveCountBucket(n)) : n
   }
-  const inside = rooms.some(ranged) ? null : [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
-  const flags = [...flagsFor.values()].reduce((a, b) => a + b, 0)
+  /*
+   * The room's other figures go the same way for that venue: its messages and
+   * its waiting flags as ranges, and no totals across rooms, which minus the
+   * exact ones would give the ranged one back (step 15 review).
+   */
+  const ranges = (room: (typeof rooms)[number], n: number) => (ranged(room) ? liveCountLabel(liveCountBucket(n)) : n)
+  const anyRanged = rooms.some(ranged)
+  const inside = anyRanged ? null : [...occupancies.values()].reduce((sum, o) => sum + o.inside, 0)
+  const flags = anyRanged ? null : [...flagsFor.values()].reduce((a, b) => a + b, 0)
 
   if (rooms.length === 0) {
     return (
@@ -134,7 +141,7 @@ export default async function ChatroomsPage() {
         {inside !== null ? (
           <span><b className="font-bold text-foreground">{inside}</b> {inside === 1 ? "person" : "people"} inside</span>
         ) : null}
-        {flags > 0 ? (
+        {flags !== null && flags > 0 ? (
           <span className="font-bold text-destructive">{flags} flag{flags === 1 ? "" : "s"} waiting</span>
         ) : null}
       </p>
@@ -149,7 +156,7 @@ export default async function ChatroomsPage() {
             <li key={room.id} className="flex">
               <Panel
                 className="flex-1"
-                title={<span className="block truncate">{room.title}</span>}
+                title={room.title}
                 action={
                   isLive ? (
                     <span className="inline-flex shrink-0 items-center gap-1.5 text-[0.75rem] font-bold">
@@ -171,8 +178,8 @@ export default async function ChatroomsPage() {
                   {(
                     [
                       [insideOf(room), "inside"],
-                      [room.chat_group?._count.messages ?? 0, "messages"],
-                      [roomFlags, roomFlags === 1 ? "flag" : "flags"],
+                      [ranges(room, room.chat_group?._count.messages ?? 0), "messages"],
+                      [ranges(room, roomFlags), "flags"],
                     ] as const
                   ).map(([value, label]) => (
                     <div key={label} className="flex flex-col-reverse">
@@ -180,7 +187,8 @@ export default async function ChatroomsPage() {
                       <dd
                         className={cn(
                           "text-[1.375rem] font-bold leading-[1.1] tabular-nums",
-                          label.startsWith("flag") && roomFlags > 0 && "text-destructive"
+                          // Red only where the number is the room's own to see.
+                          label === "flags" && !ranged(room) && roomFlags > 0 && "text-destructive"
                         )}
                       >
                         {value}

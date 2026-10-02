@@ -1,4 +1,6 @@
 import { test, expect, chromium, type Browser, type Page } from "@playwright/test"
+import { PrismaClient } from "@prisma/client"
+import { PrismaPg } from "@prisma/adapter-pg"
 
 import type { RoleKey } from "./fixtures/auth"
 import { statePathFor } from "./global-setup"
@@ -106,4 +108,103 @@ test("a report downloads from its own row", async ({ baseURL }) => {
   await main(page).getByRole("button", { name: /^Download Events CSV$/ }).click()
   expect((await download).suggestedFilename()).toMatch(/\.csv$/)
   await ctx.close()
+})
+
+/* -------------------------------------------------------------------------- */
+/* The venue owner and the admin on the same screens                           */
+/* -------------------------------------------------------------------------- */
+
+const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL, max: 1 }) })
+
+test.describe("the venue owner and the admin", () => {
+  let roomId = ""
+  let roomTitle = ""
+
+  /*
+   * A live room another organisation runs at the venue owner's building: what
+   * the venue sees as ranges. Made here, not borrowed from the seed, whose
+   * live nights move with its clock; removed after.
+   */
+  test.beforeAll(async () => {
+    const venue = await db.venues.findFirst({ where: { name: "The Humming Tree", claimed_at: { not: null } }, select: { id: true, claimed_at: true } })
+    const host = await db.organisations.findFirst({ where: { display_name: "Nightshift Collective" }, select: { id: true } })
+    const organiser = await db.user.findUnique({ where: { email: "organizer@blendn.app" }, select: { id: true } })
+    expect(venue && host && organiser, "the seed's venue, host and organiser").toBeTruthy()
+    roomTitle = `Room for the venue ${Date.now()}`
+    const start = new Date(Date.now() - 60 * 60_000)
+    const event = await db.events.create({
+      data: {
+        slug: `e2e-venue-room-${Date.now()}`,
+        title: roomTitle,
+        description: "e2e fixture",
+        start_time: start,
+        end_time: new Date(start.getTime() + 4 * 60 * 60_000),
+        timezone: "Asia/Kolkata",
+        status: "published",
+        organizer_id: organiser!.id,
+        organizer_org_id: host!.id,
+        venue_id: venue!.id,
+        venue_name: "The Humming Tree",
+      },
+    })
+    roomId = event.id
+    await db.event_occurrences.create({
+      data: { event_id: event.id, occurs_on: new Date(start.toISOString().slice(0, 10)), start_time: start, end_time: event.end_time },
+    })
+    await db.chat_groups.create({ data: { event_id: event.id, name: roomTitle } })
+  })
+
+  test.afterAll(async () => {
+    if (roomId) {
+      await db.chat_groups.deleteMany({ where: { event_id: roomId } })
+      await db.event_occurrences.deleteMany({ where: { event_id: roomId } })
+      await db.events.deleteMany({ where: { id: roomId } })
+    }
+    await db.$disconnect()
+  })
+
+  test("venue owner: no Attendees screen, another host's room in ranges, the venue's reports, clean under axe", async ({
+    baseURL,
+  }) => {
+    const found: string[] = []
+    const { ctx, page } = await open("venue", 1440, baseURL)
+
+    // Attendees is the organiser's: the venue is sent home.
+    await page.goto("/dashboard/attendees", { waitUntil: "networkidle" })
+    await expect(page).toHaveURL(/\/dashboard$/)
+
+    await page.goto("/dashboard/chatrooms", { waitUntil: "networkidle" })
+    const card = main(page).locator("section", { has: page.getByRole("heading", { name: roomTitle }) })
+    await expect(card).toBeVisible()
+    for (const label of ["inside", "messages", "flags"]) {
+      const value = await card.locator("dt", { hasText: new RegExp(`^${label}$`) }).locator("xpath=following-sibling::dd").innerText()
+      expect(value, `${label} is a range for the venue`).toMatch(/^(Under 5|5–9|10–19|20\+)$/)
+    }
+    await expect(main(page).getByText(/flags? waiting|people inside|person inside/)).toHaveCount(0)
+    found.push(...(await axeMain(page)).map((v) => `venue chatrooms: ${v}`))
+
+    await page.goto("/dashboard/reports", { waitUntil: "networkidle" })
+    for (const name of ["Download Events CSV", "Download Check-ins CSV", "Download Venue check-ins CSV"]) {
+      await expect(main(page).getByRole("button", { name })).toBeVisible()
+    }
+    for (const name of ["Download Attendees CSV", "Download Ratings CSV", "Download Moderation CSV"]) {
+      await expect(main(page).getByRole("button", { name })).toHaveCount(0)
+    }
+    found.push(...(await axeMain(page)).map((v) => `venue reports: ${v}`))
+    await ctx.close()
+    expect(found).toEqual([])
+  })
+
+  test("admin: the same room exactly, and the platform's reports", async ({ baseURL }) => {
+    const { ctx, page } = await open("admin", 1440, baseURL)
+    await page.goto("/dashboard/chatrooms", { waitUntil: "networkidle" })
+    const card = main(page).locator("section", { has: page.getByRole("heading", { name: roomTitle }) })
+    const inside = await card.locator("dt", { hasText: /^inside$/ }).locator("xpath=following-sibling::dd").innerText()
+    expect(inside).toMatch(/^\d+$/)
+    await page.goto("/dashboard/reports", { waitUntil: "networkidle" })
+    for (const name of ["Download Ratings CSV", "Download Organisations CSV", "Download Moderation CSV"]) {
+      await expect(main(page).getByRole("button", { name })).toBeVisible()
+    }
+    await ctx.close()
+  })
 })

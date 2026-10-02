@@ -241,9 +241,12 @@ export function PublishRail(props: PublishRailProps) {
       {/* The kit's rail panel: the list empties as the form fills, and the
           buttons that act on it sit under it. */}
       <section className="flex flex-col gap-3.5 rounded-panel border border-border bg-card p-5">
-        <div role="status" aria-live="polite" className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
+          {/* The heading outside the live region: announcing it on every keystroke is noise. */}
           <h2 className="text-panel-title font-bold">{label}</h2>
-          <ReadinessList readiness={readiness} />
+          <div role="status" aria-live="polite">
+            <ReadinessList readiness={readiness} />
+          </div>
         </div>
         <Actions {...props} />
       </section>
