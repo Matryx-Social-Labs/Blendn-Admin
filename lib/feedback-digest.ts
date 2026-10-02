@@ -3,7 +3,7 @@ import type { feedback_sentiment, issue_category } from "@prisma/client"
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseFigure, discloseHeadcount, discloseStars, mayQuote, type SuppressionReason } from "./disclosure"
+import { discloseBreakdown, discloseFigure, discloseHeadcount, discloseStars, mayQuote, type SuppressionReason } from "./disclosure"
 import { escalates } from "./sentiment/taxonomy"
 
 /*
@@ -51,9 +51,9 @@ export interface FeedbackDigest {
   ended: boolean
   windowClosesAt: string
   windowOpen: boolean
-  /** Null under the floor for a venue. Zero is shown: it identifies nobody. */
+  /** Null where held back for a venue: the breakdown rule (`discloseBreakdown`). */
   counts: { positive: number | null; neutral: number | null; negative: number | null }
-  /** Messages classified, or null under the floor for a venue. */
+  /** Messages classified, or null for a venue once any mood is held back. */
   total: number | null
   categories: Array<{
     category: string
@@ -147,8 +147,15 @@ export async function buildFeedbackDigest(
   const closesAt = chatClosesAt({ end_time: event.end_time })
 
   const venue = view === "venue"
-  const total = counts.positive + counts.neutral + counts.negative
-  const shownTotal = venue ? discloseHeadcount(total) : total
+  /*
+   * A venue's split is a breakdown with a shared total, so it goes through the
+   * breakdown rule: every mood under five held back, a lone survivor held back
+   * with them, and no total once anything is. Flooring each mood alone was not
+   * enough — the total minus the shown moods gave the held-back one back, which
+   * the staging drive of step 15 read off the page ("20 messages", "19
+   * neutral", "0 negative": one positive).
+   */
+  const split = venue ? discloseBreakdown([counts.positive, counts.neutral, counts.negative]) : null
   const stars = discloseStars(ratings)
 
   return {
@@ -159,14 +166,8 @@ export async function buildFeedbackDigest(
     windowClosesAt: closesAt.toISOString(),
     windowOpen: Date.now() < closesAt.getTime(),
     ended: Date.now() >= event.end_time.getTime(),
-    // Under the floor the split is a few people's moods; a venue gets none of it.
-    counts:
-      venue && shownTotal === null
-        ? { positive: null, neutral: null, negative: null }
-        : venue
-          ? { positive: discloseHeadcount(counts.positive), neutral: discloseHeadcount(counts.neutral), negative: discloseHeadcount(counts.negative) }
-          : counts,
-    total: shownTotal,
+    counts: split ? { positive: split.cells[0], neutral: split.cells[1], negative: split.cells[2] } : counts,
+    total: split ? split.total : counts.positive + counts.neutral + counts.negative,
     /*
      * Counts, suppressed below the disclosure floor.
      *
@@ -210,7 +211,13 @@ export async function buildFeedbackDigest(
      * "22:14" plus a room-stable pseudonym is the same identification by
      * another route.
      */
-    messages: feedback.map((row) => {
+    /*
+     * None for a venue. Each row carries its mood and its category even when
+     * the quote is held back, so a list of them is the split again, row by
+     * row. The venue reads what was said where it was said: the Room chat it
+     * moderates.
+     */
+    messages: venue ? [] : feedback.map((row) => {
       const quotable = mayQuote({
         contributors: categoryContributors.get(row.category)?.size ?? 0,
         population,
