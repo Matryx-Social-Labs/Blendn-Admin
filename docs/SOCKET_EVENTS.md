@@ -29,7 +29,7 @@ the database before the socket is added to the room (`lib/socket-auth.ts`):
 
 | Room | Who may join |
 |------|--------------|
-| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` and anyone who left by choice — **and** whoever the room's owner admits (`lib/room-kind.ts`, step 7). An event's room: as before. A board post's: its author, or an asker the author accepted; a member row alone is not enough. A crew's or Blend's: nobody yet (no owner until step 8). An unknown kind or a missing owner: nobody |
+| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` and anyone who left by choice — **and** whoever the room's owner admits (`lib/room-kind.ts`, step 7). An event's room: as before. A board post's: its author, or an asker the author accepted and not in a block with the author either way; a member row alone is not enough. Closed with its post, its event, and 12 h after the event ends. A crew's or Blend's: nobody yet (no owner until step 8). An unknown kind or a missing owner: nobody |
 | `conversation:{conversationId}` | The two participants only |
 | `event:{eventId}` | Anyone, for `public`/`unlisted` events. For `private`: the organizer, or a user with an RSVP |
 
@@ -48,6 +48,14 @@ malformed ID, and a room you simply lack access to all return the same
 
 Authorization is re-checked on every join, including the automatic rejoins the
 client performs after a reconnect.
+
+**A room that is not an event's is re-checked on every delivery, too** (step 7).
+Every `chat:*` event into such a room asks the owner again for each recipient:
+whoever it no longer admits (the post withdrawn or taken down, the ask undone,
+a block with the author) gets nothing and is taken out of the room. And every
+writer that closes one — withdraw, moderation takedown, account erasure, the
+12-hour sweep — empties the room at once (`lib/room-close.ts`). A rejoin meets
+the door. An event's room is unchanged: its door is the join.
 
 ## Client → Server Events
 

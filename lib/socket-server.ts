@@ -11,7 +11,7 @@ import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
-import { boardPostDoor, roomOwnerDenial, roomScope } from "./room-kind"
+import { boardPostDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
 import { readableUrl } from "./tigris"
 import { isUuid } from "./api-input"
 import { recognisedInRoomBy } from "./identity"
@@ -1072,8 +1072,21 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   skipSocketId?: string,
   about?: string
 ): Promise<void> {
-  const sockets = await audience.fetchSockets()
-  const viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
+  let sockets = await audience.fetchSockets()
+  let viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
+  /*
+   * A room that is not an event's asks its owner again on every delivery
+   * (E3): a post withdrawn, taken down or blocked between two of its people
+   * closes the room for them, and a socket that joined before it closed must
+   * not keep hearing it. Whoever the owner no longer admits is left out and
+   * taken out of the room. An event's room is unchanged: its door is the join.
+   */
+  if (typeof scope !== "string") {
+    const admitted = (await ownerAdmits(scope.groupId, viewers)) ?? new Set(viewers)
+    for (const s of sockets) if (!admitted.has(s.data?.userId ?? "")) s.leave(`chat:${scope.groupId}`)
+    sockets = sockets.filter((s) => admitted.has(s.data?.userId ?? ""))
+    viewers = viewers.filter((v) => admitted.has(v))
+  }
   // Recognition is an event room's rule (the roster's); `about` is only ever an arrival there.
   const recognising =
     about && typeof scope === "string" ? await recognisedInRoomBy(scope, about, viewers) : new Set<string>()

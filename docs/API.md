@@ -699,7 +699,12 @@ membership row alone is not enough, and a refusal reads exactly as "not a
 member". Every id they send is a handle in that room's own scope (see Room
 handles). `GET /chat/groups` still lists event rooms only, so every row keeps
 its `event`; other kinds get their place in the list with the app that shows
-them.
+them. In a board post's room the roster (`/participants`) lists only the
+people its owner admits, an asker in a block with the author is out, writes
+stop 12 hours after the event ends (`CHAT_CLOSED`), and a withdrawn or
+taken-down post closes the room (404). To block or report somebody there, use
+the board's own routes (by post or by ask): the user routes read a board
+room's handle as an unknown id.
 
 ### GET /chat/groups
 Lists every **event** room the caller is still a member of: `active` and **`muted`** memberships (a mute silences, it does not banish — the room stays readable and a post is refused with the reason), in `active` and **`locked`** rooms (read-only until the organiser reopens it). Each row carries `membership.status` and the room's `status` so the client can label _Muted_ / _Locked_. Banned and left memberships, and archived rooms, are not listed.

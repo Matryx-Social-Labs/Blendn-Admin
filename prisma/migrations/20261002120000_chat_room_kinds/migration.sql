@@ -23,7 +23,8 @@
 --      IN (the chat_messages of rooms whose kind <> 'event'). No foreign key:
 --      they would be left pointing at nothing.
 --   2. DELETE FROM chat_groups WHERE kind <> 'event' (cascades their
---      messages, reactions and members -- export first if any exist).
+--      messages, reactions and members -- export first if any exist; these
+--      are kept evidence, so check moderation_flags and message_reports).
 --   3. ALTER TABLE chat_groups DROP CONSTRAINT chat_groups_one_owner,
 --      DROP COLUMN board_post_id, DROP COLUMN kind,
 --      ALTER COLUMN event_id SET NOT NULL; DROP TYPE chat_group_kind.
@@ -38,12 +39,20 @@ ALTER TABLE "chat_groups"
   ADD COLUMN "board_post_id" UUID,
   ALTER COLUMN "event_id" DROP NOT NULL;
 
--- One room per post. Also the index the foreign key's cascade seeks on
+-- One room per post. Also the index the foreign key's check seeks on
 -- (fk-indexes.itest.ts).
 CREATE UNIQUE INDEX "chat_groups_board_post_id_key" ON "chat_groups"("board_post_id");
 
+-- RESTRICT, not CASCADE: a post's room holds other people's messages, and
+-- whatever moderation hid or somebody reported in it is kept 180 days (IT
+-- Rules 2021 r.3(1)(g)). A cascade would let deleting the post -- account
+-- erasure deleted posts outright -- take all of it, its flags with it, and
+-- leave reports pointing at nothing. So a post with a room cannot be deleted:
+-- erasure soft-deletes it and archives the room (app/api/mobile/account).
+-- A hard delete of an EVENT that has such a post is refused too; events are
+-- soft-deleted (deleted_at), and a hard delete must drop the room first.
 ALTER TABLE "chat_groups" ADD CONSTRAINT "chat_groups_board_post_id_fkey"
-  FOREIGN KEY ("board_post_id") REFERENCES "board_posts"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  FOREIGN KEY ("board_post_id") REFERENCES "board_posts"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- Exactly one owner, and the one the kind names. Schema.prisma cannot express
 -- it and `db push` drops it (CLAUDE.md), so lib/room-kind.ts also fails closed

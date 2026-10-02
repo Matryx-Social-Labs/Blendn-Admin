@@ -1,6 +1,7 @@
+jest.mock("@/lib/db", () => ({ db: {} }))
 import { readFileSync } from "fs"
 import { join } from "path"
-import { mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { mayWriteToRoomFor, ownerRoomClosesAt, roomOwnerDenial, roomReadDenialFor, roomScope, roomWindowFor } from "@/lib/room-kind"
 
 /**
  * The door of a room of every kind (CR-G01, F8, plan v2 §7).
@@ -22,7 +23,25 @@ const STRANGER = "u_stranger"
 const published = { status: "published", deleted_at: null }
 const active = { status: "active", left_at: null }
 
-function boardRoom(over: { accepted?: boolean; deleted?: boolean; eventStatus?: string; status?: "active" | "locked" | "archived" } = {}) {
+const END = new Date("2026-10-02T18:00:00Z")
+
+/**
+ * A board post's room as `boardPostDoor(viewer)` reads it: the viewer's
+ * accepted ask, and a block either way between the author and the viewer,
+ * each row naming the viewer it was read for.
+ */
+function boardRoom(
+  over: {
+    viewer?: string
+    accepted?: boolean
+    deleted?: boolean
+    eventStatus?: string
+    status?: "active" | "locked" | "archived"
+    authorBlocked?: boolean
+    blockedAuthor?: boolean
+  } = {}
+) {
+  const viewer = over.viewer ?? ASKER
   return {
     kind: "board_post" as const,
     status: over.status ?? ("active" as const),
@@ -30,12 +49,16 @@ function boardRoom(over: { accepted?: boolean; deleted?: boolean; eventStatus?: 
     board_post: {
       author_id: AUTHOR,
       deleted_at: over.deleted ? new Date() : null,
-      event: { status: over.eventStatus ?? "published", deleted_at: null },
-      // `boardPostDoor` reads only the caller's accepted ask.
-      requests: over.accepted ? [{ id: "r1" }] : [],
+      event: { status: over.eventStatus ?? "published", deleted_at: null, end_time: END },
+      requests: over.accepted ? [{ from_user_id: viewer }] : [],
+      author: {
+        blocked_users: over.authorBlocked ? [{ blocked_id: viewer }] : [],
+        blocked_by: over.blockedAuthor ? [{ blocker_id: viewer }] : [],
+      },
     },
   }
 }
+const BEFORE_CLOSE = new Date(END.getTime() + 60 * 60 * 1000)
 
 describe("an event's room is today's rule, unchanged", () => {
   const room = (event: { status: string; deleted_at: Date | null } | null) => ({ kind: "event" as const, event, board_post: null })
@@ -56,22 +79,22 @@ describe("an event's room is today's rule, unchanged", () => {
 
 describe("a board post's room: the author, or an asker the author accepted", () => {
   it("admits the author and an accepted asker", () => {
-    expect(roomReadDenialFor(boardRoom(), active, AUTHOR)).toBeNull()
+    expect(roomReadDenialFor(boardRoom({ viewer: AUTHOR }), active, AUTHOR)).toBeNull()
     expect(roomReadDenialFor(boardRoom({ accepted: true }), active, ASKER)).toBeNull()
   })
 
   it("refuses somebody with a member row and no accepted ask — the row is not the key", () => {
     expect(roomReadDenialFor(boardRoom(), active, ASKER)).toBe("not_member")
-    expect(mayWriteToRoomFor(boardRoom(), { status: "active" }, ASKER)).toEqual({ reason: "not_member" })
+    expect(mayWriteToRoomFor(boardRoom(), { status: "active" }, ASKER, BEFORE_CLOSE)).toEqual({ reason: "not_member" })
   })
 
   it("refuses a stranger with no row", () => {
-    expect(roomReadDenialFor(boardRoom(), null, STRANGER)).toBe("not_member")
+    expect(roomReadDenialFor(boardRoom({ viewer: STRANGER }), null, STRANGER)).toBe("not_member")
   })
 
   it("closes with its post and with its event", () => {
-    expect(roomReadDenialFor(boardRoom({ deleted: true }), active, AUTHOR)).toBe("hidden")
-    expect(roomReadDenialFor(boardRoom({ eventStatus: "draft" }), active, AUTHOR)).toBe("hidden")
+    expect(roomReadDenialFor(boardRoom({ viewer: AUTHOR, deleted: true }), active, AUTHOR)).toBe("hidden")
+    expect(roomReadDenialFor(boardRoom({ viewer: AUTHOR, eventStatus: "draft" }), active, AUTHOR)).toBe("hidden")
   })
 
   it("still honours the member row: a ban, and leaving by choice", () => {
@@ -80,11 +103,36 @@ describe("a board post's room: the author, or an asker the author accepted", () 
   })
 
   it("takes writes until it is locked or archived, and never from the muted", () => {
-    expect(mayWriteToRoomFor(boardRoom(), { status: "active" }, AUTHOR)).toBeNull()
-    expect(mayWriteToRoomFor(boardRoom({ status: "locked" }), { status: "active" }, AUTHOR)).toEqual({ reason: "locked" })
-    expect(mayWriteToRoomFor(boardRoom({ status: "archived" }), { status: "active" }, AUTHOR)).toEqual({ reason: "archived" })
-    expect(mayWriteToRoomFor(boardRoom(), { status: "muted" }, AUTHOR)).toEqual({ reason: "muted" })
-    expect(mayWriteToRoomFor(boardRoom({ deleted: true }), { status: "active" }, AUTHOR)).toEqual({ reason: "hidden" })
+    const author = { viewer: AUTHOR }
+    expect(mayWriteToRoomFor(boardRoom(author), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toBeNull()
+    expect(mayWriteToRoomFor(boardRoom({ ...author, status: "locked" }), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "locked" })
+    expect(mayWriteToRoomFor(boardRoom({ ...author, status: "archived" }), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "archived" })
+    expect(mayWriteToRoomFor(boardRoom(author), { status: "muted" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "muted" })
+    expect(mayWriteToRoomFor(boardRoom({ ...author, deleted: true }), { status: "active" }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "hidden" })
+  })
+
+  it("closes twelve hours after its event ends, on the clock, whether or not the sweeper has run (E2)", () => {
+    const closes = ownerRoomClosesAt({ end_time: END })
+    expect(closes.toISOString()).toBe("2026-10-03T06:00:00.000Z")
+    const room = boardRoom({ viewer: AUTHOR })
+    expect(roomWindowFor(room, new Date(closes.getTime() - 1))).toEqual({ open: true })
+    expect(roomWindowFor(room, closes)).toEqual({ open: false, reason: "window_closed" })
+    expect(mayWriteToRoomFor(room, { status: "active" }, AUTHOR, closes)).toEqual({ reason: "window_closed" })
+  })
+
+  it("closes for an asker in a block with the author, either way — the board reads a block as a withdrawn post (E4)", () => {
+    expect(roomReadDenialFor(boardRoom({ accepted: true, authorBlocked: true }), active, ASKER)).toBe("hidden")
+    expect(roomReadDenialFor(boardRoom({ accepted: true, blockedAuthor: true }), active, ASKER)).toBe("hidden")
+    expect(mayWriteToRoomFor(boardRoom({ accepted: true, blockedAuthor: true }), { status: "active" }, ASKER, BEFORE_CLOSE)).toEqual({
+      reason: "hidden",
+    })
+  })
+
+  it("never answers for somebody other than the viewer it was read for (no double-id mismatch)", () => {
+    // Read for the accepted asker, asked about a stranger: refused, not admitted on their row.
+    expect(roomOwnerDenial(boardRoom({ viewer: ASKER, accepted: true }), STRANGER)).toBe("hidden")
+    // Read for a blocked viewer, asked about the author: refused rather than trusted.
+    expect(roomOwnerDenial(boardRoom({ viewer: STRANGER, authorBlocked: true }), AUTHOR)).toBe("hidden")
   })
 })
 
@@ -125,11 +173,12 @@ describe("every door goes through the one rule (structural)", () => {
     expect(owner).toMatch(/const \w+: never = room\.kind/)
   })
 
-  it("no route under /chat/groups reads a room by the event-only rules", () => {
+  it("no route that takes a room by id reads it by the event-only rules", () => {
     const routes = [
       "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts",
       "app/api/mobile/chat/groups/[chatGroupId]/messages/[messageId]/reactions/route.ts",
       "app/api/mobile/chat/groups/[chatGroupId]/participants/route.ts",
+      "app/api/mobile/messages/[messageId]/report/route.ts",
       "lib/room-membership.ts",
     ]
     for (const file of routes) {

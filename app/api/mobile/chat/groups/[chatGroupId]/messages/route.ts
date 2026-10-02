@@ -24,7 +24,7 @@ import {
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE } from "@/lib/chat-window"
-import { boardPostDoor, mayWriteToRoomFor, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { boardPostDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { clientMessageMetadata, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -337,6 +337,14 @@ export async function POST(
     if (!membership) {
       return forbiddenResponse("You are not a member of this chat group")
     }
+    /*
+     * The owner's door before anything with a side effect: the auto-unmute
+     * below writes, and must not run for somebody the room no longer admits
+     * (a board post's ask that is not accepted, a post taken down).
+     */
+    const owner = roomOwnerDenial(chatGroup, user.userId)
+    if (owner === "not_member") return forbiddenResponse("You are not a member of this chat group")
+    if (owner === "hidden") return errorResponse(chatClosedMessage("hidden"), 403, ErrorCode.CHAT_CLOSED)
 
     // Check if user is muted or banned
     let effectiveStatus: string = membership.status

@@ -153,9 +153,30 @@ describe("handles across kinds of room", () => {
     expect(roomMemberFromRef(POST_ROOM, inEvent, VIEWER)).toBeNull()
   })
 
+  it("a board post room's handle is pinned too, so step 8 cannot shift the encoding under it", () => {
+    // Minted by this code under this file's key: group id, then the kind byte 3.
+    const GOLDEN_POST = "rh_i46ieb8enqKew-gws4TyU9tVmS_4I9QJhq90naiow9gFaRoWSX3sEdSyXJCJX9d35I_BCzt5MXAVYYiABWSdHJ3-JftmRw"
+    expect(roomHandle(POST_ROOM, USER)).toBe(GOLDEN_POST)
+    expect(roomMemberFromRef(POST_ROOM, GOLDEN_POST, VIEWER)).toBe(USER)
+  })
+
+  it("resolves in exactly one room of every room × kind pair (N×N)", () => {
+    const ROOMS = [EVENT, OTHER_EVENT].flatMap((id) => [
+      id,
+      ...(["crew", "blend", "board_post"] as const).map((kind) => ({ kind, groupId: id })),
+    ])
+    const name = (r: (typeof ROOMS)[number]) => (typeof r === "string" ? `event:${r.slice(0, 4)}` : `${r.kind}:${r.groupId.slice(0, 4)}`)
+    const hits = ROOMS.flatMap((minted) =>
+      ROOMS.filter((asked) => roomMemberFromRef(asked, roomHandle(minted, USER), VIEWER) === USER).map((asked) => `${name(minted)}→${name(asked)}`)
+    )
+    expect(hits).toEqual(ROOMS.map((r) => `${name(r)}→${name(r)}`))
+  })
+
   it("names nobody outside its own room — no profile, friend or block route resolves it", () => {
-    const inPost = roomHandle(POST_ROOM, USER)
-    expect(resolveUserRef(inPost)).toBeNull()
-    expect(userIdFromRef(inPost)).toBe(inPost)
+    for (const kind of ["crew", "blend", "board_post"] as const) {
+      const handle = roomHandle({ kind, groupId: EVENT }, USER)
+      expect(resolveUserRef(handle)).toBeNull()
+      expect(userIdFromRef(handle)).toBe(handle)
+    }
   })
 })

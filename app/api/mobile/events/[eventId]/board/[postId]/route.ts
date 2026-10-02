@@ -12,6 +12,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
+import { closePostRooms } from "@/lib/room-close"
 
 interface RouteParams {
   params: Promise<{ eventId: string; postId: string }>
@@ -42,6 +43,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       data: { deleted_at: now, updated_at: now },
     })
     if (count === 0) return notFoundResponse("Post not found")
+    // Withdrawn, so its room is closed: out with anyone still in it (E3).
+    void closePostRooms([postId])
 
     return successResponse({ id: postId, withdrawn: true })
   } catch (error) {

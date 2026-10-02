@@ -764,7 +764,8 @@ model chat_groups {
   /// event — the partial unique `WHERE kind = 'event'` would say, given the
   /// CHECK, and Prisma keeps its by-event lookups.
   event_id        String?           @unique @db.Uuid
-  /// Set exactly when `kind = board_post`. One room per post.
+  /// Set exactly when `kind = board_post`. One room per post; the post cannot
+  /// be hard-deleted while it has one (RESTRICT).
   board_post_id   String?           @unique @db.Uuid
   /// Unread since the baseline: every row is `event`. Room kinds are `kind`.
   type            chat_group_type   @default(event)
@@ -780,7 +781,10 @@ model chat_groups {
 
   // Relations
   event      events?              @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  board_post board_posts?         @relation(fields: [board_post_id], references: [id], onDelete: Cascade)
+  /// RESTRICT, not cascade: a room is other people's conversation and kept
+  /// evidence, so deleting a post with a room is refused. Account erasure
+  /// soft-deletes such a post and archives its room instead.
+  board_post board_posts?         @relation(fields: [board_post_id], references: [id], onDelete: Restrict)
   messages   chat_messages[]
   members    chat_group_members[]
 

@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
-import { boardPostDoor, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { boardPostDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
 import {
@@ -85,11 +85,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * says "50 members" over 49 rows, which is its own quiet tell.
      */
     const hidden = await blockCounterparties(authUser.userId)
+    /*
+     * In a room that is not an event's, only the people its owner admits: a
+     * member row is not membership there (F8). Null for an event's room.
+     */
+    const admitted = await ownerRoster(chatGroupId)
 
     const visibleMembers = {
       chat_group_id: chatGroupId,
       status: "active" as const,
       ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
+      // Under AND, so it never replaces the block filter's `user_id` above.
+      ...(admitted && { AND: [{ user_id: { in: [...admitted] } }] }),
     }
 
     // Get total count

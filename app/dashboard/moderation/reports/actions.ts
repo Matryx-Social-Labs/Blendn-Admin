@@ -8,6 +8,7 @@ import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
+import { closePostRooms } from "@/lib/room-close"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 
@@ -609,6 +610,10 @@ export async function resolveReport(
    */
   if (decision === "remove_message" && subject.chatGroupId && subjectId) {
     emitChatMessageHidden(subject.chatGroupId, (report as { message_id: string }).message_id, subjectId)
+  }
+  // A post taken down closes its room: out with anyone still in it (E3).
+  if (decision === "remove_message" && subject.boardPost) {
+    void closePostRooms([(report as { message_id: string }).message_id])
   }
 
   // After the commit, never inside it: see SUSPENSION_WRITE_CHANNELS.
