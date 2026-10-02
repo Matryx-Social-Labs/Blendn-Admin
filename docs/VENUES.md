@@ -316,7 +316,7 @@ venue day count as having shared an event for message requests
 |---|---|
 | `lib/venue-day.ts` | `venueDayFor`, `venueDayBounds`, `SYSTEM_USER_ID` — the venue day |
 | `lib/event-kind.ts` | `realEventsWhere` / `venueDaysWhere`, the fragments every events reader uses; `inRoomWhere`, "in this room" for a check-in lookup |
-| `lib/venue-visibility.ts` | `venueTakeoverWhere`: when a real event takes its venue over (Go Live refused, sessions closed at its start; step 2's Places list) |
+| `lib/venue-visibility.ts` | `venueTakeoverWhere`: when a real event takes its venue over (Go Live refused, sessions closed at its start, the venue left out of Places by `venuesTakenOver`); `eventVenue`: the venue an event card names |
 | `lib/venue-types.ts` | The 35-type vocabulary, labels, default extents, OSM mapping |
 | `lib/venue-actions.ts` | `venuesNear`, `createVenue`, `updateVenue`, `assignVenueOwner`, `searchVenues`, `venueById` — all `"use server"` |
 | `lib/venue-claim-actions.ts` | `fileVenueClaim`, `getVenueClaimQueue`, `decideVenueClaim` |

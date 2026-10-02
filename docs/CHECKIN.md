@@ -294,7 +294,7 @@ page answers from the same area.
 ### When an event has the venue
 
 `lib/venue-visibility.ts` — written once for Go Live, the venue page, the
-sweeper and (step 2) the Places list. A real event takes its venue over from
+sweeper and the Places list (`GET /venues` leaves the venue out, `venuesTakenOver`). A real event takes its venue over from
 **an hour before it starts until it ends** if it is published, **public**, not
 deleted, linked with a link nobody disputed (a NULL status counts, spelled out
 because Prisma's `not` drops NULL), on a day that was not called off (per

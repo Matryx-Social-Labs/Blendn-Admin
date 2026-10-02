@@ -8,7 +8,7 @@ import { db } from "@/lib/db"
 import { venueDaysWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { venueLiveBucket } from "@/lib/live-count"
+import { liveGuestsWhere, venueLiveBucket } from "@/lib/live-count"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { venueDayAt, venueDayBounds } from "@/lib/venue-day"
 import { venueTypeLabel } from "@/lib/venue-types"
@@ -79,13 +79,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const now = new Date()
     const viewerAge = ageFrom(person.profile)
     const dayEnd = venueDayBounds(venue.timezone, venue.day_reset_hour, now).end
-    // Guests, not staff: the venue's own people at work are not "people here".
-    const liveHere = {
-      status: "checked_in" as const,
-      kind: "attendee" as const,
-      expires_at: { gt: now },
-      event: { ...venueDaysWhere, venue_id: venueId },
-    }
+    const liveHere = { ...liveGuestsWhere(now), event: { ...venueDaysWhere, venue_id: venueId } }
 
     const [takeover, tonight, mine, today] = await Promise.all([
       eventTakingOver(venueId, now, { viewerAge }),

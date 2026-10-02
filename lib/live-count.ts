@@ -22,6 +22,19 @@ import { LIVE_COUNT_BUCKETS, liveCountBucket, type LiveCountBucket } from "@/lib
 /** How long one venue's count is kept before it is read again. */
 export const LIVE_COUNT_TTL_MS = 60_000
 
+/**
+ * The check-ins that are guests live at a venue now: a Go Live window still
+ * open, by a guest — the venue's own people at work are not "people here".
+ * The caller adds the venue day (`event: { ...venueDaysWhere, venue_id }`).
+ * One definition for the venue page and the Places list, so the two never
+ * count differently.
+ */
+export const liveGuestsWhere = (now: Date) => ({
+  status: "checked_in" as const,
+  kind: "attendee" as const,
+  expires_at: { gt: now },
+})
+
 const rank = (b: LiveCountBucket) => LIVE_COUNT_BUCKETS.indexOf(b)
 
 /** The bucket for `count`, falling below `prev` only when one more person would not hold it there. */

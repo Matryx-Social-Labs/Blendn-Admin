@@ -16,7 +16,10 @@ import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
-import { realEventsWhere } from "@/lib/event-kind"
+import { realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
+import { liveGuestsWhere, venueLiveBucket } from "@/lib/live-count"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { venuesTakenOver } from "@/lib/venue-visibility"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -57,6 +60,22 @@ const DISTANCE_SORT_CEILING = 5000
  * As in the events feed, an **unknown** age hides nothing: most OAuth accounts
  * are created without one, and failing closed would empty the screen to punish
  * a missing field.
+ *
+ * ## A venue an event has taken over is not listed
+ *
+ * From an hour before a real event at it starts until that event ends, the
+ * place is the event's (plan v2 step 2): Places leaves the venue out, and the
+ * event's own card says "at <Venue>" instead. The rule is step 4's, written
+ * once in `lib/venue-visibility.ts` — the same one that refuses Go Live there
+ * with `EVENT_LIVE_HERE` — so the list, the venue page and the door cannot
+ * disagree. Per viewer: a 21+ night does not hide its venue from somebody it
+ * would turn away (D-3).
+ *
+ * ## `liveNow` is a bucket, never a number
+ *
+ * How many guests are live at each venue, exactly as the venue page says it
+ * (`lib/live-count.ts`): a bucket, steady for a minute, slow to fall, never
+ * counting the caller (D-19, F14).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -64,6 +83,9 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    // Every row carries a live count; the venue page's limit, for the same reason.
+    const limited = await rateLimit(request, userLimit("read", "venues", authUser.userId))
+    if (limited) return limited
 
     const parsed = venueQuerySchema.safeParse(
       Object.fromEntries(request.nextUrl.searchParams)
@@ -90,6 +112,7 @@ export async function GET(request: NextRequest) {
      * drift on the events side, a card could say "3 upcoming" and then headline
      * an event that was not one of them.
      */
+    const now = new Date()
     const upcomingEventFilter = {
       deleted_at: null,
       // A venue's own live room is not an event at it: counted, it would make
@@ -97,13 +120,21 @@ export async function GET(request: NextRequest) {
       ...realEventsWhere,
       status: "published" as const,
       visibility: "public" as const,
-      end_time: { gte: new Date() },
-      ...(typeof viewerAge === "number"
-        ? { OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }
-        : {}),
+      end_time: { gte: now },
+      /*
+       * Two ORs, so under `AND`: spread into one object, the second would
+       * replace the first (F4). A link the venue's owner disputed is the owner
+       * saying the event is not here, so it is no headline here either — the
+       * same reading as the card's "at <Venue>" (`eventVenue`). NULL spelled
+       * out: a bare `not` drops it, and an unset link is a link.
+       */
+      AND: [
+        { OR: [{ venue_link_status: null }, { venue_link_status: { not: "disputed" as const } }] },
+        ...(typeof viewerAge === "number" ? [{ OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }] : []),
+      ],
     }
 
-    const where: Record<string, unknown> = {
+    const where: Prisma.venuesWhereInput = {
       deleted_at: null,
       // `archived` is how a venue is retired without deleting the events that
       // happened in it, so it must not appear in discovery.
@@ -136,6 +167,10 @@ export async function GET(request: NextRequest) {
       where.latitude = { gte: bbox.minLat, lte: bbox.maxLat }
       where.longitude = { gte: bbox.minLon, lte: bbox.maxLon }
     }
+
+    // Last, so it is asked of exactly the venues the filters above chose.
+    const taken = await venuesTakenOver(now, where, { viewerAge })
+    if (taken.length > 0) where.id = { notIn: taken }
 
     const venueSelect = {
       id: true,
@@ -230,6 +265,8 @@ export async function GET(request: NextRequest) {
       totalCount = await db.venues.count({ where })
     }
 
+    const liveNow = await liveBuckets(venues.map((v) => v.id), authUser.userId, now)
+
     const items = venues.map((venue) => {
       const next = venue.events[0]
       const distance =
@@ -256,6 +293,7 @@ export async function GET(request: NextRequest) {
         // it — `formatDistance` there already owns km-versus-miles.
         distance,
         upcomingEventCount: venue._count.events,
+        liveNow: liveNow.get(venue.id) ?? "quiet",
         nextEvent: next
           ? {
               id: next.id,
@@ -283,4 +321,38 @@ export async function GET(request: NextRequest) {
     logger.error("List venues error", { error: String(error) })
     return serverErrorResponse("Failed to list venues")
   }
+}
+
+/**
+ * `liveNow` for a page of venues, as `GET /venues/:id` reads it for one
+ * (`venueLiveBucket`: the same per-venue minute cache, the caller left out).
+ *
+ * One read whatever the page holds, never one per venue (HM-I05): the guests
+ * live at each venue's day, as ids, so the count is of people (DISTINCT, not
+ * check-in rows — `count-people-boundary.test.ts`) and whether the caller is
+ * one of them needs no second query. The ids never leave this function.
+ */
+async function liveBuckets(venueIds: string[], viewerId: string, now: Date) {
+  const live = liveGuestsWhere(now)
+  const rows =
+    venueIds.length === 0
+      ? []
+      : await db.venues.findMany({
+          where: { id: { in: venueIds } },
+          select: {
+            id: true,
+            events: {
+              where: { ...venueDaysWhere, check_ins: { some: live } },
+              select: { check_ins: { where: live, select: { user_id: true } } },
+            },
+          },
+        })
+  const guests = new Map(rows.map((v) => [v.id, new Set(v.events.flatMap((d) => d.check_ins.map((c) => c.user_id)))]))
+  const buckets = await Promise.all(
+    venueIds.map((id) => {
+      const here = guests.get(id) ?? new Set<string>()
+      return venueLiveBucket(id, here.has(viewerId), async () => here.size, now.getTime())
+    })
+  )
+  return new Map(venueIds.map((id, i) => [id, buckets[i]]))
 }

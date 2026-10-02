@@ -5,13 +5,14 @@ import type { Prisma } from "@prisma/client"
 import { db } from "./db"
 import { realEventsWhere } from "./event-kind"
 import { distanceToGeofence, eventCentre, validateGeofence, type Geofence } from "./geofence"
+import { logger } from "./logger"
 
 /**
  * When a real event takes a venue over (plan v2 step 2's hiding rule, written
  * once here so Go Live, the venue-day sweeper and the Places list agree).
  *
  * From an hour before a linked event starts until it ends, the venue is the
- * event's: Places hides the venue (step 2 wires the list), Go Live there is
+ * event's: Places leaves the venue out (`venuesTakenOver`), Go Live there is
  * refused with `EVENT_LIVE_HERE` so the person checks in to the event
  * instead, and at the start the venue's open Go Live sessions are closed and
  * told the event has started (the venue-day sweeper).
@@ -122,6 +123,60 @@ export async function eventTakingOver(
   const event = candidates.find((e) => atTheVenue(e, venue.geofence))
   return event ? { id: event.id, title: event.title } : null
 }
+
+/**
+ * The most takeover candidates `venuesTakenOver` reads at once: the events
+ * starting within the hour or running now, at the venues one list asks about.
+ * Sized to be unreachable, and logged if it ever is, since past it a venue an
+ * event has stays listed.
+ */
+const TAKEOVER_SCAN_CEILING = 1000
+
+/**
+ * The venues among `venueWhere` that a real event has taken over at `now` —
+ * what Places leaves out (step 2). `eventTakingOver`'s rule for a whole list,
+ * in one read: the same `venueTakeoverWhere`, then `atTheVenue` against each
+ * candidate's own venue.
+ */
+export async function venuesTakenOver(
+  now: Date,
+  venueWhere: Prisma.venuesWhereInput,
+  opts: { viewerAge?: number | null } = {}
+): Promise<string[]> {
+  const candidates = await db.events.findMany({
+    where: { ...venueTakeoverWhere(now, opts), venue: venueWhere },
+    take: TAKEOVER_SCAN_CEILING,
+    select: { ...takeoverSelect, venue: { select: { geofence: true } } },
+  })
+  if (candidates.length === TAKEOVER_SCAN_CEILING) {
+    logger.warn("Venue takeover scan hit its ceiling; some venues stay listed", { ceiling: TAKEOVER_SCAN_CEILING })
+  }
+  const taken = candidates.flatMap((e) => (e.venue_id && e.venue && atTheVenue(e, e.venue.geofence) ? [e.venue_id] : []))
+  return [...new Set(taken)]
+}
+
+/**
+ * The venue an event card names, "at The Humming Tree" (HM-U08): the linked
+ * venue while it is open and nobody disputed the link, else none — the card
+ * then says the organiser's free-text `venueName`. A disputed link is the
+ * venue's owner saying the event is not theirs; an archived or deleted venue
+ * is not a place anybody can go. `{ id, name }` only: the venue's area and
+ * owner never ride on a card (HM-I04).
+ */
+export function eventVenue(event: {
+  venue_link_status: "auto_linked" | "confirmed" | "disputed" | null
+  venue: { id: string; name: string; status: "active" | "archived"; deleted_at: Date | null } | null
+}): { id: string; name: string } | null {
+  const v = event.venue
+  if (!v || v.deleted_at || v.status !== "active" || event.venue_link_status === "disputed") return null
+  return { id: v.id, name: v.name }
+}
+
+/** What `eventVenue` needs from an event row. */
+export const eventVenueSelect = {
+  venue_link_status: true,
+  venue: { select: { id: true, name: true, status: true, deleted_at: true } },
+} as const
 
 /**
  * The area Go Live is judged against at a venue: the one today's day copied

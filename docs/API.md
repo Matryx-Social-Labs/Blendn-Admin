@@ -541,6 +541,14 @@ to the API host. It carries the event id and nothing about the viewer. The
 page it opens is public: the claimant needs no account, filing grants nothing,
 and a person reviews every claim. Computed by `offersClaim` in `lib/curation.ts`.
 
+**`venue` on each card of `GET /events` is the place to name** — `{ id, name }`
+of the venue the event is linked to, or `null` when the venue's owner disputed
+the link, the venue is archived or deleted, or there is none; then say the
+organiser's free-text `venueName`. Only those two fields: never the venue's area
+or owner. While the event has the venue (an hour before it starts until it
+ends) `GET /venues` leaves the venue out, so this card is where the app says
+"at The Humming Tree". Computed by `eventVenue` in `lib/venue-visibility.ts`.
+
 **`session` is the window "live" is judged by** — on `GET /events`,
 `GET /events/:eventId` and `GET /me/rsvps`. `startTime`/`endTime` span the
 whole run, so a three-day festival read as LIVE for three days straight,
@@ -641,6 +649,7 @@ vocabulary, meaning exactly what it means there.
   "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
   "distance": 1.4,
   "upcomingEventCount": 2,
+  "liveNow": "quiet",
   "nextEvent": {
     "id": "…", "title": "Friday session", "slug": "friday-session",
     "coverImageUrl": "https://…", "startTime": "…", "endTime": "…"
@@ -659,6 +668,23 @@ vocabulary, meaning exactly what it means there.
 **Active venues only.** `archived` is how a venue is retired without deleting
 the events that happened in it, so it never appears in discovery.
 
+**A venue a real event has taken over is not listed** (plan v2 step 2). From an
+hour before an event at it starts until that event ends, the place is the
+event's: the venue is left out of this list (and its `totalCount`), Go Live
+there answers `EVENT_LIVE_HERE`, and the event's card on `GET /events` names the
+venue (`venue`). The event must be published, public and not deleted; its link
+not `disputed` (an unset link is a link); linked by a `confirmed` link, or with
+its area at the venue; judged per day of a multi-day run (D-2), so the nights
+between days hide nothing; and one the caller may attend (D-3), so a 21+ night
+does not hide its venue from a 19-year-old. A venue's own Go Live day never
+hides it (F3). One rule, `lib/venue-visibility.ts`, for this list, the venue
+page and the door.
+
+**`liveNow` is a bucket, never a number** — `quiet` (fewer than 5, none
+included), `5-9`, `10-19` or `20+`: the same figure as `live.liveNow` on
+`GET /venues/:venueId`, guests only, never counting you, read at most once a
+minute per venue and slow to fall (D-19, F14).
+
 **The card image comes from the next event.** `venues` has no image column.
 Rather than a wall of grey cards or an invented placeholder, each venue carries
 the soonest public event it is hosting — which supplies the artwork and doubles
@@ -668,7 +694,8 @@ is; draw the type-based fallback.
 
 **`upcomingEventCount` and `nextEvent` are one question asked once.** Same
 filter object, so a card cannot say "3 upcoming" and then headline an event that
-is not one of them.
+is not one of them. An event whose link the venue disputed is in neither: the
+owner said it is not theirs.
 
 **The age gate applies here too.** `nextEvent` is a real event shown to a real
 person, so it passes the same `min_age` rule as the browse query — otherwise the
