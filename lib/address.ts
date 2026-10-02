@@ -167,6 +167,28 @@ export interface CityCount {
  * returns rows in no particular order, and without it two loads of the same
  * screen could show the same cities in different positions.
  */
+/**
+ * Where to point the map for each city the picker lists: the mean of its
+ * events' points, keyed by `cityKey` like the counts. Events with no point, or
+ * the 0,0 an unset point reads as, are left out; a city with none has no
+ * centre and the app keeps its map where it is. A mean, not a stored point:
+ * a city's centre is where its events are, and moves with them.
+ */
+export function cityCentres(
+  rows: readonly { city: string | null; latitude: number | null; longitude: number | null }[]
+): Map<string, { latitude: number; longitude: number }> {
+  const sums = new Map<string, { lat: number; lon: number; n: number }>()
+  for (const row of rows) {
+    const key = cityKey(row.city)
+    if (!key || row.latitude === null || row.longitude === null) continue
+    if (row.latitude === 0 && row.longitude === 0) continue
+    const sum = sums.get(key) ?? { lat: 0, lon: 0, n: 0 }
+    sums.set(key, { lat: sum.lat + row.latitude, lon: sum.lon + row.longitude, n: sum.n + 1 })
+  }
+  const round = (x: number) => Math.round(x * 1e4) / 1e4
+  return new Map([...sums].map(([key, s]) => [key, { latitude: round(s.lat / s.n), longitude: round(s.lon / s.n) }]))
+}
+
 export function groupCities(cities: readonly (string | null)[]): CityCount[] {
   const buckets = new Map<string, { labels: Map<string, number>; count: number }>()
 

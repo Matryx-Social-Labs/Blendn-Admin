@@ -135,6 +135,13 @@ export const EventCitiesResponseSchema = z
       z.object({
         city: z.string().openapi({ description: "Pass this back as the `city` query parameter." }),
         eventCount: z.number().int(),
+        centre: z
+          .object({ latitude: z.number(), longitude: z.number() })
+          .nullable()
+          .openapi({
+            description:
+              "Where to point a map for this city: the mean of its listed events' points (events with no point, or 0,0, left out). Null when none has a point; keep the map where it is.",
+          }),
       })
     ),
   })

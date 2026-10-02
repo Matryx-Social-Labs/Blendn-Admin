@@ -582,12 +582,19 @@ The city picker's list — every city with events, busiest first.
 
 ```json
 { "success": true, "data": { "cities": [
-  { "city": "Bengaluru", "eventCount": 12 },
-  { "city": "Mumbai", "eventCount": 3 }
+  { "city": "Bengaluru", "eventCount": 12, "centre": { "latitude": 12.9716, "longitude": 77.5946 } },
+  { "city": "Mumbai", "eventCount": 3, "centre": null }
 ] } }
 ```
 
 Pass `city` straight back to `GET /events` or `GET /events/search`.
+
+**`centre` is where the home map goes when the city is picked** (plan v2
+step 2): the mean of the city's listed events' points, folded on the same key
+as the counts. Events with no point, or the 0,0 an unset point reads as, are
+left out; `null` when none has a point, and the app leaves its map where it
+is. A mean rather than a stored point, so it follows where the city's events
+actually are (`cityCentres`, lib/address.ts).
 
 **A city listed with N events opens with N events.** The counts apply the same
 visibility, end-time and age rules as the browse query, so the two cannot drift

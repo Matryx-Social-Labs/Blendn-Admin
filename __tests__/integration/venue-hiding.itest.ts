@@ -13,6 +13,7 @@ import { cleanupWorld, goLive, LAT, LNG, person, realEvent, req, venue, world } 
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const venueRoute = require("@/app/api/mobile/venues/[venueId]/route") as typeof import("@/app/api/mobile/venues/[venueId]/route")
+const citiesRoute = require("@/app/api/mobile/events/cities/route") as typeof import("@/app/api/mobile/events/cities/route")
 const venuesRoute = require("@/app/api/mobile/venues/route") as typeof import("@/app/api/mobile/venues/route")
 const eventsRoute = require("@/app/api/mobile/events/route") as typeof import("@/app/api/mobile/events/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -403,5 +404,19 @@ describe("GET /venues is limited per person", () => {
     for (let i = 0; i < 61; i++) statuses.push((await venuesRoute.GET(req(`/api/mobile/venues?search=${TOKEN}zzz&limit=1`, me.token))).status)
     expect(statuses.slice(0, 60).every((s) => s === 200)).toBe(true)
     expect(statuses[60]).toBe(429)
+  })
+})
+
+describe("GET /events/cities carries where to point the map (step 2 review)", () => {
+  it("gives each city the mean of its events' points", async () => {
+    const city = `Itest${TOKEN}`
+    const v = await place("city centre")
+    for (const [startsInMin, lat] of [[120, LAT], [180, LAT + 0.002]] as const) {
+      const id = await realEvent(v, { startsInMin })
+      await db.events.update({ where: { id }, data: { city, latitude: lat, longitude: LNG } })
+    }
+    const res = await citiesRoute.GET(req("/api/mobile/events/cities", (await person()).token))
+    const row = (JSON.parse(await res.text()).data.cities as Array<{ city: string; centre: unknown }>).find((c) => c.city === city)
+    expect(row?.centre).toEqual({ latitude: Math.round((LAT + 0.001) * 1e4) / 1e4, longitude: LNG })
   })
 })
