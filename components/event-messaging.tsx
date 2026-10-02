@@ -235,7 +235,7 @@ function SponsoredMessagesPanel({ eventId, mayAuthor }: { eventId: string; mayAu
 
       {/* Form */}
       {mayAuthor && showForm && (
-        <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+        <div className="space-y-3 border-t border-border pt-4">
           <p className="text-sm font-medium">{editingId ? "Edit message" : "New sponsored message"}</p>
           <Textarea
             placeholder="Your sponsored message…"
@@ -307,7 +307,7 @@ function SponsoredMessagesPanel({ eventId, mayAuthor }: { eventId: string; mayAu
           Those messages did not load. Nothing was changed — try again.
         </p>
       ) : messages.length === 0 ? (
-        <div className="rounded-lg border-2 border-dashed p-6 text-center text-sm text-muted-foreground">
+        <div className="text-sm text-muted-foreground">
           {mayAuthor ? "No sponsored messages yet. Add one to get started." : "No sponsored messages in this room."}
         </div>
       ) : (
@@ -355,7 +355,7 @@ export function SponsoredMessageRow({
 }) {
   return (
       <div
-        className="rounded-lg border bg-background p-3 flex items-start gap-3"
+        className="flex items-start gap-3 border-t border-border pt-3"
       >
         <div className="flex-1 min-w-0">
           <p className="text-sm leading-snug">{msg.content}</p>

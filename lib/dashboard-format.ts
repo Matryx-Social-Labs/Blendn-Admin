@@ -62,11 +62,6 @@ export function formatSince(iso: string | null) {
   return `${Math.floor(days / 30)}mo ago`
 }
 
-export function statusTone(status: string): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "published") return "default"
-  if (status === "cancelled") return "destructive"
-  return "secondary"
-}
 
 /* -------------------------------------------------------------------------- */
 
