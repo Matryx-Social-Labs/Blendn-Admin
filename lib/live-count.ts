@@ -1,4 +1,4 @@
-import { liveCountBucket, type LiveCountBucket } from "@/lib/disclosure"
+import { LIVE_COUNT_BUCKETS, liveCountBucket, type LiveCountBucket } from "@/lib/disclosure"
 
 /**
  * How many are live at a venue, as a watcher may see it (D-19, D-x2).
@@ -22,8 +22,7 @@ import { liveCountBucket, type LiveCountBucket } from "@/lib/disclosure"
 /** How long one venue's count is kept before it is read again. */
 export const LIVE_COUNT_TTL_MS = 60_000
 
-const ORDER: readonly LiveCountBucket[] = ["quiet", "5-9", "10-19", "20+"]
-const rank = (b: LiveCountBucket) => ORDER.indexOf(b)
+const rank = (b: LiveCountBucket) => LIVE_COUNT_BUCKETS.indexOf(b)
 
 /** The bucket for `count`, falling below `prev` only when one more person would not hold it there. */
 export function steadyBucket(prev: LiveCountBucket | null, count: number): LiveCountBucket {
