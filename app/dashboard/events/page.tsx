@@ -4,7 +4,7 @@ import { EventsTable, type EventRow } from "./events-table"
 import { getAuth } from "@/lib/auth"
 import { mayCreateEvents } from "@/lib/event-ownership"
 import { curationState } from "@/lib/curation"
-import { whenLabel } from "@/lib/dashboard-format"
+import { eventRowFields } from "@/lib/event-row"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { db } from "@/lib/db"
 import { discloseVenueCounts } from "@/lib/disclosure"
@@ -32,6 +32,7 @@ export default async function EventsPage() {
    * cannot have changed in between.
    */
   const { where, actor } = await visibleEventsScope(session.user)
+  const names = session.user.role !== "organizer"
 
   /*
    * The rows and the total start together; only the attendance counts wait.
@@ -62,12 +63,20 @@ export default async function EventsPage() {
       venue_name: true,
       latitude: true,
       geofence: true,
+      max_capacity: true,
       curated_at: true,
       claimed_at: true,
       organizer_id: true,
       organizer_org_id: true,
-      organizer: { select: { name: true, email: true } },
-      _count: { select: { rsvps: true } },
+      /*
+       * Whose night it is: for an admin and for a venue, never for an
+       * organiser, whose list is their own organisation's — so it is not even
+       * selected for them, and never an email.
+       */
+      organizer: names ? { select: { name: true } } : false,
+      // Going, as every other screen counts it: `not_going` is a decline, and
+      // "maybe" is not a seat (the overview's hero names it separately).
+      _count: { select: { rsvps: { where: { status: "going" } } } },
     },
     }),
     db.events.count({ where }),
@@ -98,37 +107,28 @@ export default async function EventsPage() {
       : []
   )
   const counts = (event: (typeof events)[number]) => {
-    const exact = { rsvps: event._count.rsvps, arrivals: arrivals.get(event.id) ?? 0 }
+    const exact = { going: event._count.rsvps, arrivals: arrivals.get(event.id) ?? 0 }
     if (!throughBuilding.has(event.id)) return exact
     const shown = discloseVenueCounts({
-      going: exact.rsvps,
+      going: exact.going,
       attended: exact.arrivals,
       capacity: null,
       arriving: stillArriving(event, now),
     })
-    return { rsvps: shown.going, arrivals: shown.attended }
+    return { going: shown.going, arrivals: shown.attended }
   }
 
   const rows: EventRow[] = events.map((event) => ({
-    id: event.id,
-    title: event.title,
-    status: event.status,
+    ...eventRowFields(event, now),
     startTime: event.start_time.toISOString(),
-    when: whenLabel(event.start_time, event.end_time, now, event.timezone),
-    where: event.venue_name ?? event.city ?? null,
-    city: event.city,
-    host: event.organizer?.name ?? null,
+    /*
+     * Null for a curated listing nobody has claimed: `organizer_id` there is
+     * the admin who curated it, and the founder's name must not reach the page
+     * payload as its host (T83). The row says "Listed by us" instead.
+     */
+    host: curationState(event) === "curated_open" ? null : (event.organizer?.name ?? null),
     ...counts(event),
     curation: curationState(event),
-    /*
-     * The one thing that decides whether the door works.
-     *
-     * `canPublish` refuses an event with no coordinates and no fence, and it
-     * only reached a caller recently — so published events predating that exist
-     * and 400 at the door with nothing on any screen saying why. Surfacing it
-     * on the list is how you find them without opening 200 events.
-     */
-    checkInReady: event.latitude !== null || event.geofence !== null,
   }))
 
   // Only an account that could save the event is offered the button (SCRUM-145).

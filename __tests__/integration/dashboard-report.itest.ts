@@ -14,7 +14,7 @@ const as = (role: DashboardRole, id = "no-user") => {
 }
 
 import { getDashboardOverview } from "@/app/dashboard/actions"
-import { db, cleanup, closeDb, makeUser, testId , occurrenceOf } from "./helpers"
+import { db, cleanup, closeDb, makeUser, testId , occurrenceOf, putInRoom } from "./helpers"
 
 /**
  * The three overviews are ~20 parallel Prisma calls between them, several of
@@ -109,8 +109,9 @@ describe("organiser overview", () => {
     expect(overview.nextEvent?.going).toBe(1)
     expect(overview.nextEvent?.maybe).toBe(1)
     expect(overview.nextEvent?.capacity).toBe(10)
-    // 2 committed of 10, not 3 of 10.
-    expect(overview.nextEvent?.fillPct).toBe(20)
+    // Going over capacity: 1 of 10. Not the maybe (it is intent, in the
+    // pacing curve), and never the decline.
+    expect(overview.nextEvent?.fillPct).toBe(10)
     expect(overview.pacingCapacity).toBe(10)
   })
 
@@ -270,6 +271,108 @@ describe("organiser overview", () => {
     expect(overview.averageRating).toBeNull()
     expect(overview.ratings).toEqual([0, 0, 0, 0, 0])
     expect(overview.ratingCount).toBe(2)
+  })
+
+  it("puts the night running now in a banner, with its waiting flags, who is inside and who came (step 15)", async () => {
+    const owner = await makeUser("ovw_live", "organizer")
+    users.push(owner)
+    const tonight = await makeScheduledEvent(owner, { startsInDays: 0, capacity: 50 })
+    await db.events.update({
+      where: { id: tonight },
+      data: { start_time: new Date(Date.now() - 60 * 60 * 1000), end_time: new Date(Date.now() + 3 * 60 * 60 * 1000) },
+    })
+    // A later night is not the live one, and is next up.
+    const later = await makeScheduledEvent(owner, { startsInDays: 3, capacity: 40 })
+    const [inside, left] = await Promise.all([makeUser("ovw_in"), makeUser("ovw_left")])
+    users.push(inside, left)
+    const occ = await occurrenceOf(tonight)
+    await putInRoom({ eventId: tonight, occurrenceId: occ, userId: inside })
+    await putInRoom({ eventId: tonight, occurrenceId: occ, userId: left })
+    await db.event_check_ins.updateMany({ where: { event_id: tonight, user_id: left }, data: { status: "checked_out" } })
+    await db.presence_sessions.updateMany({ where: { event_id: tonight, user_id: left }, data: { departed_at: new Date() } })
+    const room = await db.chat_groups.create({ data: { event_id: tonight, name: "room" } })
+    const message = await db.chat_messages.create({ data: { chat_group_id: room.id, user_id: inside, content: "hello" } })
+    await db.moderation_flags.createMany({
+      data: [
+        { message_id: message.id, chat_group_id: room.id, user_id: inside, source: "auto_keyword", categories: {}, confidence: 0.9 },
+        // Decided already: nothing waits on anybody.
+        { message_id: message.id, chat_group_id: room.id, user_id: inside, source: "user_report", categories: {}, confidence: 1, status: "approved" },
+      ],
+    })
+
+    const overview = (as("organizer", owner), await getDashboardOverview())
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+    try {
+      expect(overview.live).toMatchObject({ id: tonight, flags: 1, inside: 1, checkedIn: 2, messages: 1 })
+      expect(overview.nextEvent?.id).toBe(later)
+      // Coming up is ahead of now: the running night is the banner, not a row.
+      expect(overview.comingUp.map((e) => e.id)).toEqual([later])
+      expect(overview.comingUp[0]).toMatchObject({ phase: "upcoming", tab: "upcoming", capacity: 40, going: 0 })
+      // Tonight started in the last 30 days: two people, one check-in each.
+      expect(overview.checkIns.current).toBe(2)
+    } finally {
+      await db.moderation_flags.deleteMany({ where: { chat_group_id: room.id } })
+      await db.presence_sessions.deleteMany({ where: { event_id: tonight } })
+    }
+  })
+
+  it("derives Getting set up from the organisation's rows: domain unverified, nobody invited, one published (step 15)", async () => {
+    const owner = await makeUser("ovw_setup", "organizer")
+    users.push(owner)
+    const org = await db.organisations.create({ data: { display_name: `Setup ${testId("o")}`, kind: "company" } })
+    try {
+      await db.organisation_members.create({ data: { org_id: org.id, user_id: owner, role: "owner" } })
+      const domain = `${testId("d").replace(/_/g, "-")}.example`
+      await db.organisation_domains.create({ data: { org_id: org.id, domain, verification_token: "t" } })
+
+      let overview = (as("organizer", owner), await getDashboardOverview())
+      if (overview.role !== "organizer") throw new Error("wrong overview role")
+      expect(overview.setup).toEqual({
+        org: { name: org.display_name, kind: "company", domain: { name: domain, verified: false }, colleagues: false },
+        published: false,
+      })
+
+      const draft = await makeScheduledEvent(owner, { startsInDays: 5, status: "draft" })
+      await db.events.update({ where: { id: draft }, data: { organizer_org_id: org.id } })
+      overview = (as("organizer", owner), await getDashboardOverview())
+      if (overview.role !== "organizer") throw new Error("wrong overview role")
+      // A draft is not a published event; it is in Coming up, in Drafts.
+      expect(overview.setup.published).toBe(false)
+      expect(overview.comingUp.find((e) => e.id === draft)?.tab).toBe("drafts")
+
+      await db.events.update({ where: { id: draft }, data: { status: "published" } })
+      await db.organisation_invites.create({
+        data: { org_id: org.id, email: "colleague@itest.invalid", token_hash: testId("h"), expires_at: new Date(Date.now() + DAY), invited_by: owner },
+      })
+      overview = (as("organizer", owner), await getDashboardOverview())
+      if (overview.role !== "organizer") throw new Error("wrong overview role")
+      expect(overview.setup.published).toBe(true)
+      expect(overview.setup.org?.colleagues).toBe(true)
+    } finally {
+      await db.organisations.delete({ where: { id: org.id } })
+    }
+  })
+
+  it("shows the latest event whose own ratings clear the floor, never a newer one under it (step 15)", async () => {
+    const owner = await makeUser("ovw_latest", "organizer")
+    users.push(owner)
+    const [older, newer] = await Promise.all([
+      makeScheduledEvent(owner, { startsInDays: -6 }),
+      makeScheduledEvent(owner, { startsInDays: -1 }),
+    ])
+    const raters = await Promise.all([1, 2, 3, 4, 5, 6].map((n) => makeUser(`ovw_l${n}`)))
+    users.push(...raters)
+    await db.event_ratings.createMany({
+      data: [
+        ...[4, 4, 5, 3, 4].map((rating, i) => ({ event_id: older, user_id: raters[i], rating })),
+        // Four raters on the newer night: under the floor, so it is not "latest".
+        ...[1, 1, 2, 5].map((rating, i) => ({ event_id: newer, user_id: raters[i + 1], rating })),
+      ],
+    })
+
+    const overview = (as("organizer", owner), await getDashboardOverview())
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+    expect(overview.latestFeedback).toMatchObject({ eventId: older, ratings: [0, 0, 1, 3, 1], averageRating: 4 })
   })
 
   it("pools only events that pass alone: the org's bars minus a visible event are never a withheld one's (SCRUM-437)", async () => {

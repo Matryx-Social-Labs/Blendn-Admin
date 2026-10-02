@@ -53,6 +53,9 @@ jest.mock("@/lib/connection-metrics", () => ({ getConnectionMetrics: jest.fn() }
 jest.mock("@/lib/event-overview", () => ({ getEventOverview: jest.fn() }))
 jest.mock("@/lib/check-in-refusals", () => ({ eventRefusals: jest.fn(), refusalSummary: jest.fn() }))
 jest.mock("@/components/dashboard/live-tab", () => ({ LiveTab: () => null }))
+// The Announcements & sponsors tab's; their actions reach the socket server.
+jest.mock("@/components/event-messaging", () => ({ EventMessaging: () => null }))
+jest.mock("@/components/event-sponsors", () => ({ EventSponsors: () => null }))
 // Needs a mounted app router; it is the venue link in the header, not the tab.
 jest.mock("@/app/dashboard/events/[id]/venue-link", () => ({ EventVenueLink: () => null }))
 

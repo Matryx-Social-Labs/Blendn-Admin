@@ -338,7 +338,7 @@ export function PillTabs({
           href={tab.href}
           aria-current={tab.key === active ? "page" : undefined}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[0.8125rem] transition-colors",
+            "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[0.8125rem] transition-colors pointer-coarse:min-h-11",
             tab.key === active
               ? "bg-accent text-foreground"
               : "text-muted-foreground hover:bg-accent hover:text-foreground"
