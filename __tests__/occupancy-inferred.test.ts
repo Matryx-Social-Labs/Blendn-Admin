@@ -56,6 +56,10 @@ describe("occupancy says when it is mostly inferred", () => {
       join(__dirname, "..", "components", "dashboard", "live-tab.tsx"),
       "utf8"
     )
-    expect(tab).toMatch(/unreliable=\{occupancyMostlyInferred\(snapshot\)\}/)
+    // Both copies: the host's computes it here, the venue's was computed on the
+    // exact figures by `forVenue` before they were rounded (SCRUM-516).
+    expect(tab).toMatch(
+      /unreliable=\{snapshot\.view === "host" \? occupancyMostlyInferred\(snapshot\) : snapshot\.mostlyInferred\}/
+    )
   })
 })

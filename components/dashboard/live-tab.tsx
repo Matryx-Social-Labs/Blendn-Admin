@@ -13,12 +13,18 @@ import {
 import { ArrivalCurve, CategoryBars, type ArrivalPoint } from "@/components/dashboard/charts"
 import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
-import { deriveAlerts, occupancyMostlyInferred, type LiveAlert } from "@/lib/live-metrics"
+import {
+  occupancyMostlyInferred,
+  type LiveAlert,
+  type LiveSnapshot,
+  type VenueLiveSnapshot,
+} from "@/lib/live-metrics"
 import type { IssueRow } from "@/lib/event-issues"
 import { earlierIssues } from "@/lib/issue-timestamp"
 import { IssueLog } from "@/components/dashboard/issue-log"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
+import { liveCountLabel } from "@/lib/disclosure"
 import { cn } from "@/lib/utils"
 import { eventClock, livePhaseFor } from "@/lib/event-phase"
 
@@ -59,9 +65,10 @@ function AlertCard({ alert }: { alert: LiveAlert }) {
 /**
  * The event as an operation, while it runs.
  *
- * Everything here comes from `event:{id}:ops`, which carries aggregates only —
- * no attendee row, id or name crosses that channel, so pseudonymity holds on
- * the wire and not merely in the REST payload.
+ * Everything here comes from `event:{id}:ops` (or `:ops:venue`, the ranged
+ * copy a venue is sent), which carries aggregates only — no attendee row, id or
+ * name crosses that channel, so pseudonymity holds on the wire and not merely
+ * in the REST payload.
  */
 export function LiveTab({
   eventId,
@@ -91,16 +98,9 @@ export function LiveTab({
   // the live window would keep it querying for a screen showing an empty state.
   const { snapshot, status } = useOpsSnapshot(eventId, phase === "live")
 
-  const alerts = useMemo(
-    () =>
-      snapshot
-        ? deriveAlerts(snapshot, {
-            scheduledEnd: new Date(endAt),
-            scheduledStart: new Date(startAt),
-          })
-        : [],
-    [snapshot, endAt, startAt]
-  )
+  // Derived on the server, on the exact figures -- a venue's ranges could not
+  // be thresholded -- and sent with the snapshot (SCRUM-516).
+  const alerts = useMemo(() => snapshot?.alerts ?? [], [snapshot])
 
   // The log drops whatever Alerts is already showing — see `earlierIssues`.
   const earlier = useMemo(
@@ -109,7 +109,7 @@ export function LiveTab({
   )
 
   const arrival: ArrivalPoint[] = useMemo(() => {
-    if (!snapshot) return []
+    if (!snapshot || snapshot.view === "venue") return []
     // One point per snapshot is not a history — the series is rebuilt from the
     // totals the server sends, which is honest about being a current reading
     // rather than pretending to a resolution we do not store.
@@ -167,56 +167,56 @@ export function LiveTab({
     )
   }
 
+  /*
+   * Two copies of one screen. Whoever runs the event (or an admin) gets the
+   * figures; the venue it is held at, watching a night it does not run or its
+   * own venue day, gets ranges -- and no curve, fill or ratio, each of which
+   * would hand the count back (SCRUM-516).
+   */
   return (
     <div className="flex flex-col gap-5">
       <div className="grid gap-5 @3xl/main:grid-cols-[3fr_2fr]">
         <div className="flex flex-col gap-4">
           <OccupancyHero
             occupancy={snapshot}
-            unreliable={occupancyMostlyInferred(snapshot)}
+            unreliable={snapshot.view === "host" ? occupancyMostlyInferred(snapshot) : snapshot.mostlyInferred}
             time={clock.time(new Date(snapshot.at))}
-            description={`${formatNumber(snapshot.checkedInTotal)} checked in, ${formatNumber(snapshot.checkedOutTotal)} left${
-              snapshot.staleInside > 0
-                ? `. ${formatNumber(snapshot.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
-                : ""
-            }${
-              snapshot.medianRate10m > 0
-                ? `. Arrival rate ${snapshot.checkInRate10m}/10min — ×${(snapshot.checkInRate10m / snapshot.medianRate10m).toFixed(1)} tonight's median.`
-                : "."
-            }`}
+            description={snapshot.view === "host" ? hostDescription(snapshot) : venueDescription(snapshot)}
           />
 
           <div className="flex flex-wrap gap-1">
             <MetricTile
               label="Check-in rate"
-              value={snapshot.checkInRate10m}
+              value={liveCountLabel(snapshot.checkInRate10m)}
               hint={
-                snapshot.medianRate10m > 0
+                snapshot.view === "host" && snapshot.medianRate10m > 0
                   ? `per 10 min · ×${(snapshot.checkInRate10m / snapshot.medianRate10m).toFixed(1)} median`
                   : "per 10 min"
               }
             />
             <MetricTile
               label="Checked out"
-              value={snapshot.checkedOutTotal}
+              value={liveCountLabel(snapshot.checkedOutTotal)}
               hint="before scheduled end"
             />
             <MetricTile label="Msgs/min" value={snapshot.messagesPerMinute} />
             <MetricTile
               label="Active chatters"
-              value={snapshot.activeChatters30m}
+              value={liveCountLabel(snapshot.activeChatters30m)}
               hint="distinct, last 30 min"
             />
             <MetricTile label="Open flags" value={snapshot.openFlags} />
           </div>
 
-          <ArrivalCurve
-            data={arrival}
-            capacity={snapshot.capacity}
-            doorsLabel={clock.time(new Date(startAt))}
-            endLabel={clock.time(new Date(endAt))}
-            empty={snapshot.checkedInTotal === 0}
-          />
+          {snapshot.view === "host" ? (
+            <ArrivalCurve
+              data={arrival}
+              capacity={snapshot.capacity}
+              doorsLabel={clock.time(new Date(startAt))}
+              endLabel={clock.time(new Date(endAt))}
+              empty={snapshot.checkedInTotal === 0}
+            />
+          ) : null}
         </div>
 
         <div className="flex flex-col gap-5">
@@ -250,15 +250,20 @@ export function LiveTab({
             <IssueLog issues={earlier} timezone={timezone} />
           </div>
 
-          <SentimentBar snapshot={snapshot} />
-
-          <CategoryBars
-            title="Complaints — last 30 min"
-            hint="negative + safety messages"
-            data={snapshot.categories}
-            empty={snapshot.categories.length === 0}
-            emptyText="Nothing negative classified yet in this window."
-          />
+          {snapshot.view === "host" ? (
+            <>
+              <SentimentBar snapshot={snapshot} />
+              <CategoryBars
+                title="Complaints — last 30 min"
+                hint="negative + safety messages"
+                data={snapshot.categories}
+                empty={snapshot.categories.length === 0}
+                emptyText="Nothing negative classified yet in this window."
+              />
+            </>
+          ) : (
+            <VenueMood snapshot={snapshot} />
+          )}
         </div>
       </div>
 
@@ -267,6 +272,53 @@ export function LiveTab({
         This channel carries aggregates only — no attendee rows cross it, so pseudonymity holds
         even on the wire.
       </p>
+    </div>
+  )
+}
+
+function hostDescription(s: LiveSnapshot): string {
+  return `${formatNumber(s.checkedInTotal)} checked in, ${formatNumber(s.checkedOutTotal)} left${
+    s.staleInside > 0
+      ? `. ${formatNumber(s.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
+      : ""
+  }${
+    s.medianRate10m > 0
+      ? `. Arrival rate ${s.checkInRate10m}/10min — ×${(s.checkInRate10m / s.medianRate10m).toFixed(1)} tonight's median.`
+      : "."
+  }`
+}
+
+function venueDescription(s: VenueLiveSnapshot): string {
+  return `${liveCountLabel(s.checkedInTotal)} checked in, ${liveCountLabel(s.checkedOutTotal)} left${
+    // "Under 5" here could be nobody: said only when it is some.
+    s.staleInside !== "quiet"
+      ? `. ${liveCountLabel(s.staleInside)} not seen in the last few minutes — phones sleep, so they are still counted`
+      : ""
+  }. Shown as ranges, so one person arriving or leaving does not show.`
+}
+
+/** The mood and the complaints as ranges: bars would draw the counts back. */
+function VenueMood({ snapshot }: { snapshot: VenueLiveSnapshot }) {
+  const { positive, neutral, negative } = snapshot.sentiment
+  return (
+    <div className="flex flex-col gap-1.5">
+      <h3 className="text-sm font-bold">Mood — last 30 min</h3>
+      <p className="text-[0.78rem] text-muted-foreground">
+        {liveCountLabel(positive)} positive · {liveCountLabel(neutral)} neutral · {liveCountLabel(negative)} negative
+      </p>
+      <h3 className="mt-2 text-sm font-bold">Complaints — last 30 min</h3>
+      {snapshot.categories.length === 0 ? (
+        <p className="text-[0.78rem] text-muted-foreground">Nothing negative classified yet in this window.</p>
+      ) : (
+        <ul className="flex flex-col gap-1 text-[0.78rem] text-muted-foreground">
+          {snapshot.categories.map((c) => (
+            <li key={c.category} className="flex justify-between gap-3">
+              <span>{c.category.replaceAll("_", " ")}</span>
+              <b className="font-bold tabular-nums text-foreground">{liveCountLabel(c.count)}</b>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
