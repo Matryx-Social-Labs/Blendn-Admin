@@ -33,7 +33,13 @@ const member = (anonymous_name: string | null, status: string, venueDayWindow?: 
   anonymous_name,
   status,
   last_allowed_at: venueDayWindow ?? null,
-  chat_group: { event_id: EVENT_ID, event: { kind: venueDayWindow === undefined ? "event" : "venue_day" } },
+  chat_group: {
+    id: CHAT_ID,
+    kind: "event",
+    event_id: EVENT_ID,
+    event: { status: "published", deleted_at: null, kind: venueDayWindow === undefined ? "event" : "venue_day" },
+    board_post: null,
+  },
 })
 // Deliberately shares no substring with USER, so the leak assertion below
 // can only fail on a genuine email leak.

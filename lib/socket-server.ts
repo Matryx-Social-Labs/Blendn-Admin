@@ -11,7 +11,8 @@ import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
-import { roomHandle } from "./room-handle"
+import { roomHandle, type RoomScope } from "./room-handle"
+import { boardPostDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
 import { readableUrl } from "./tigris"
 import { isUuid } from "./api-input"
 import { recognisedInRoomBy } from "./identity"
@@ -473,13 +474,24 @@ export async function emitChatTyping(
         anonymous_name: true,
         status: true,
         last_allowed_at: true,
-        chat_group: { select: { event_id: true, event: { select: { kind: true } } } },
+        chat_group: {
+          select: {
+            id: true,
+            kind: true,
+            event_id: true,
+            event: { select: { status: true, deleted_at: true, kind: true } },
+            board_post: boardPostDoor(socket.data.userId),
+          },
+        },
       },
     })
 
     if (!membership || membership.status !== "active") return
+    // The room's door, for every kind: a member row whose owner no longer
+    // admits them (a board post's ask that is not accepted) types to nobody.
+    if (roomOwnerDenial(membership.chat_group, socket.data.userId)) return
     // A venue day's room is the people live in it: an ended Go Live types into nothing.
-    if (!liveInVenueDay(membership.chat_group.event, membership)) return
+    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
 
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
@@ -493,7 +505,7 @@ export async function emitChatTyping(
      */
     await emitAsSeenBy(
       socket.nsp.in(`chat:${chatGroupId}`).except(hidden.map((id) => `user:${id}`)),
-      membership.chat_group.event_id,
+      roomScope(membership.chat_group),
       "chat:typing",
       (idFor) => ({
         chatGroupId,
@@ -1099,20 +1111,37 @@ async function liveAudienceOf(eventId: string, viewers: string[]): Promise<Set<s
 
 async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   audience: { fetchSockets(): Promise<RemoteSocket<ServerToClientEvents, Partial<SocketData> | undefined>[]> },
-  eventId: string,
+  /** The room the handles are minted in: an event id, or a room of another kind (`RoomScope`). */
+  scope: RoomScope,
   event: E,
   build: (idFor: (userId: string) => string, recognises: boolean) => Payload<E>,
   skipSocketId?: string,
   about?: string
 ): Promise<void> {
-  const sockets = await audience.fetchSockets()
-  const viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
-  const live = await liveAudienceOf(eventId, viewers)
-  const recognising = about ? await recognisedInRoomBy(eventId, about, viewers) : new Set<string>()
+  let sockets = await audience.fetchSockets()
+  let viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
+  /*
+   * A room that is not an event's asks its owner again on every delivery
+   * (E3): a post withdrawn, taken down or blocked between two of its people
+   * closes the room for them, and a socket that joined before it closed must
+   * not keep hearing it. Whoever the owner no longer admits is left out and
+   * taken out of the room. An event's room keeps its own rule: a venue day's
+   * is asked per emit too (`liveAudienceOf`), any other's door is the join.
+   */
+  if (typeof scope !== "string") {
+    const admitted = (await ownerAdmits(scope.groupId, viewers)) ?? new Set(viewers)
+    for (const s of sockets) if (!admitted.has(s.data?.userId ?? "")) s.leave(`chat:${scope.groupId}`)
+    sockets = sockets.filter((s) => admitted.has(s.data?.userId ?? ""))
+    viewers = viewers.filter((v) => admitted.has(v))
+  }
+  const live = typeof scope === "string" ? await liveAudienceOf(scope, viewers) : null
+  // Recognition is an event room's rule (the roster's); `about` is only ever an arrival there.
+  const recognising =
+    about && typeof scope === "string" ? await recognisedInRoomBy(scope, about, viewers) : new Set<string>()
   const handles = new Map<string, string>()
   const handleOf = (userId: string) => {
     let handle = handles.get(userId)
-    if (!handle) handles.set(userId, (handle = roomHandle(eventId, userId)))
+    if (!handle) handles.set(userId, (handle = roomHandle(scope, userId)))
     return handle
   }
   const copies = new Map<string, Payload<E>>()
@@ -1132,13 +1161,14 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
 }
 
 /**
- * `emitAsSeenBy` for a chat room, which knows its group and not always its event.
+ * `emitAsSeenBy` for a chat room, which knows its group and not always its scope.
  *
- * The handle is per event (`chat_groups.event_id`, one room per event). A
- * caller that already holds the event passes it — room delivery, the announce
- * routes, polls and the organiser moderation routes all do — and the rest are
- * looked up here rather than asked for, since a handle minted from the wrong
- * id would be a different person. Never rejects, like the rest of this file's
+ * The handle is per room: an event's room by its event (one room per event),
+ * a room of another kind by its own id and kind (`roomScope`). A caller that
+ * already holds the scope passes it — room delivery, the announce routes,
+ * polls and the organiser moderation routes all do — and the rest are looked
+ * up here rather than asked for, since a handle minted from the wrong id
+ * would be a different person. Never rejects, like the rest of this file's
  * emitters: the write it reports has already committed.
  */
 async function toChatRoom<E extends keyof ServerToClientEvents>(
@@ -1146,14 +1176,16 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
   audience: Parameters<typeof emitAsSeenBy<E>>[0],
   event: E,
   build: Parameters<typeof emitAsSeenBy<E>>[3],
-  knownEventId?: string
+  knownScope?: RoomScope
 ): Promise<void> {
   try {
-    const eventId =
-      knownEventId ??
-      (await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { event_id: true } }))?.event_id
-    if (!eventId) return
-    await emitAsSeenBy(audience, eventId, event, build)
+    let scope = knownScope
+    if (!scope) {
+      const room = await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { id: true, kind: true, event_id: true } })
+      if (!room) return
+      scope = roomScope(room)
+    }
+    await emitAsSeenBy(audience, scope, event, build)
   } catch (error) {
     logger.error("Room emit failed", {
       chatGroupId,
@@ -1456,8 +1488,8 @@ export function emitChatMessage(
     parentId?: string
   },
   excludeUserIds: readonly string[] = [],
-  /** The room's event, when the caller has it — saves `toChatRoom` a lookup. */
-  eventId?: string
+  /** The room's handle scope, when the caller has it — saves `toChatRoom` a lookup. */
+  scope?: RoomScope
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1467,7 +1499,7 @@ export function emitChatMessage(
     io.in(`chat:${chatGroupId}`).except(excludeUserIds.map((id) => `user:${id}`)),
     "chat:message",
     (idFor) => ({ chatGroupId, message: { ...message, userId: idFor(message.userId) } }),
-    eventId
+    scope
   )
 }
 
@@ -1519,7 +1551,7 @@ export function emitChatMessageDeleted(chatGroupId: string, messageId: string): 
  * Includes userId and moderation flag so the client can show a
  * "message removed" placeholder to the sender instead of just deleting it.
  */
-export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string, eventId?: string): void {
+export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string, scope?: RoomScope): void {
   const io = currentIo()
   if (!io) return
   // The author still sees their own id and draws the placeholder; the rest of
@@ -1529,14 +1561,14 @@ export function emitChatMessageHidden(chatGroupId: string, messageId: string, us
     io.in(`chat:${chatGroupId}`),
     "chat:messageDeleted",
     (idFor) => ({ chatGroupId, messageId, moderation: true, userId: idFor(userId) }),
-    eventId
+    scope
   )
 }
 
 /**
  * Emit a member ban/unban to the chat room
  */
-export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean, eventId?: string): void {
+export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean, scope?: RoomScope): void {
   const io = currentIo()
   if (!io) return
   /*
@@ -1557,7 +1589,7 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
     io.in(`chat:${chatGroupId}`),
     "chat:memberBanned",
     (idFor) => ({ chatGroupId, userId: idFor(userId), banned }),
-    eventId
+    scope
   ).then(() => {
     if (banned) io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
   })
@@ -1583,7 +1615,7 @@ export function emitChatMemberLeft(
   chatGroupId: string,
   userId: string,
   excludeUserIds: readonly string[] | null,
-  eventId?: string
+  scope?: RoomScope
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1596,7 +1628,7 @@ export function emitChatMemberLeft(
     io.in(`chat:${chatGroupId}`).except(excludeUserIds.map((id) => `user:${id}`)),
     "chat:memberLeft",
     (idFor) => ({ chatGroupId, userId: idFor(userId) }),
-    eventId
+    scope
   ).then(() => {
     io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
   })
@@ -1610,7 +1642,7 @@ export function emitChatMemberMuted(
   userId: string,
   muted: boolean,
   reason?: string,
-  eventId?: string
+  scope?: RoomScope
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1619,7 +1651,7 @@ export function emitChatMemberMuted(
     io.in(`chat:${chatGroupId}`),
     "chat:memberMuted",
     (idFor) => ({ chatGroupId, userId: idFor(userId), muted, reason }),
-    eventId
+    scope
   )
 }
 

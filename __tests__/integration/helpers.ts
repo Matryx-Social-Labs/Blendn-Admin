@@ -45,6 +45,13 @@ export const testId = (label: string) =>
  * would race the other suites, since jest shares one database here.
  */
 export async function cleanup(userIds: string[], eventIds: string[]) {
+  // A board post's room first: `board_post_id` is ON DELETE RESTRICT, so the
+  // post (cascaded from its event or its author below) cannot go while it has one.
+  if (eventIds.length || userIds.length) {
+    await db.chat_groups.deleteMany({
+      where: { board_post: { OR: [{ event_id: { in: eventIds } }, { author_id: { in: userIds } }] } },
+    })
+  }
   if (eventIds.length) {
     await db.chat_messages.deleteMany({ where: { chat_group: { event_id: { in: eventIds } } } })
     await db.chat_group_members.deleteMany({ where: { chat_group: { event_id: { in: eventIds } } } })

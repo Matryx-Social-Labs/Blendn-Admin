@@ -1,13 +1,14 @@
 import { db } from "@/lib/db"
 import { isUuid } from "@/lib/api-input"
-import { chatWindowState, eventHidesRoom } from "@/lib/chat-window"
+import { boardPostDoor, roomOwnerDenial, roomWindowFor } from "@/lib/room-kind"
 
 /**
  * A room and the caller's own row in it, for the routes a member acts on
  * themselves: leave, mute, report.
  *
  * Null for every way the caller has no business with the room — a malformed
- * id, no such room, a draft or deleted event (SCRUM-8, SCRUM-303), no
+ * id, no such room, a draft or deleted event (SCRUM-8, SCRUM-303), an owner
+ * that does not admit them (`roomOwnerDenial`, for a room of any kind), no
  * membership row — so each route answers all of them with one 404 and cannot
  * be used to learn which rooms exist.
  *
@@ -25,13 +26,16 @@ export async function roomForMember(
     where: { id: chatGroupId },
     select: {
       id: true,
+      kind: true,
       event_id: true,
       status: true,
       event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
+      board_post: boardPostDoor(userId),
     },
   })
   if (!group) return null
-  if (!opts.allowHidden && eventHidesRoom(group.event)) return null
+  const owner = roomOwnerDenial(group, userId)
+  if (owner === "not_member" || (owner === "hidden" && !opts.allowHidden)) return null
 
   const membership = await db.chat_group_members.findUnique({
     where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
@@ -47,7 +51,7 @@ export async function roomForMember(
   if (!membership) return null
 
   /** Whether the room takes writes now — read here, beside the select it needs. */
-  const window = chatWindowState(group.event, group)
+  const window = roomWindowFor(group)
 
   return { group, membership, window }
 }

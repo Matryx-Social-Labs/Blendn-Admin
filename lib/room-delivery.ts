@@ -3,7 +3,8 @@ import { db } from "@/lib/db"
 import { blockCounterparties } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
-import { roomHandle } from "@/lib/room-handle"
+import { roomHandle, type RoomScope } from "@/lib/room-handle"
+import { boardPostDoor, roomOwnerDenial } from "@/lib/room-kind"
 import { isRoomMuted } from "@/lib/room-mute"
 import { liveInVenueDay } from "@/lib/chat-window"
 
@@ -39,8 +40,8 @@ import { liveInVenueDay } from "@/lib/chat-window"
  */
 export async function deliverToRoom(input: {
   chatGroupId: string
-  /** The room's event: the push names the sender by their handle in it. */
-  eventId: string
+  /** The room's handle scope (`roomScope`): the push names the sender by their handle in it. */
+  scope: RoomScope
   groupName: string | null
   senderId: string
   senderAnonName: string
@@ -90,7 +91,7 @@ export async function deliverToRoom(input: {
         parentId: message.parent_id || undefined,
       },
       senderBlocked,
-      input.eventId
+      input.scope
     )
   } catch (error) {
     logger.error("Room socket emit failed", {
@@ -123,12 +124,20 @@ export async function deliverToRoom(input: {
         status: true,
         notification_preferences: true,
         last_allowed_at: true,
-        chat_group: { select: { event: { select: { kind: true } } } },
+        chat_group: {
+          select: {
+            kind: true,
+            event: { select: { status: true, deleted_at: true, kind: true } },
+            board_post: boardPostDoor(recipientId),
+          },
+        },
       },
     })
     if (membership?.status !== "active" && membership?.status !== "muted") return
+    // The room's door, for every kind: nobody its owner no longer admits is pushed from it.
+    if (roomOwnerDenial(membership.chat_group, recipientId)) return
     // A venue day's room is the people live in it: an ended Go Live hears nothing from it.
-    if (!liveInVenueDay(membership.chat_group.event, membership)) return
+    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
     // And they have not silenced the room (`POST /chat/groups/:id/mute`).
     if (isRoomMuted(membership.notification_preferences)) return
 
@@ -138,7 +147,7 @@ export async function deliverToRoom(input: {
       groupName: input.groupName || "Group Chat",
       preview: input.preview,
       chatGroupId,
-      senderHandle: roomHandle(input.eventId, senderId),
+      senderHandle: roomHandle(input.scope, senderId),
     })
   } catch (error) {
     logger.error("Room push notification failed", {

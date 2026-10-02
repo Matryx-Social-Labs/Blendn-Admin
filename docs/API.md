@@ -241,6 +241,12 @@ an opaque, url-safe string. Field names and shapes did not change.
   found`, waves `403 RECIPIENT_NOT_HERE`): these two answer from who is in the
   room right now, so a raw id asked "is this account here", and the per-pair
   wave window turned one raw-id wave into a way to find which handle it was.
+- **A handle belongs to one room, of one kind.** An event's room scopes its
+  handles by the event, exactly as before. A room of another kind scopes them
+  by its own id and kind, so its handles are refused in every other room (an
+  event's likes and waves included) and are not accepted by the profile,
+  friend, block, report or message-request routes above: there they read as an
+  unknown id, until those rooms say who may recognise whom.
 - **A handle is not a lookup key for what the room hides.** The friends routes
   and `POST /conversations` resolve a handle only for someone you may already
   see (`identityVisible`); otherwise they answer exactly as for a stranger. A
@@ -793,8 +799,23 @@ Body: `{ "eventIds": ["uuid", ...] }` (max 50)
 |--------|----------|-------------|
 | GET | `/chat/groups` | List user's chat groups |
 
+**Rooms of every kind (step 7).** A room has a kind: an event's room, a board
+post's (its author and the askers the author accepted), and later a crew's or a
+Blend's. The `/chat/groups/:chatGroupId/...` routes take a room of any kind and
+admit whoever its owner admits — for a room that is not an event's, a
+membership row alone is not enough, and a refusal reads exactly as "not a
+member". Every id they send is a handle in that room's own scope (see Room
+handles). `GET /chat/groups` still lists event rooms only, so every row keeps
+its `event`; other kinds get their place in the list with the app that shows
+them. In a board post's room the roster (`/participants`) lists only the
+people its owner admits, an asker in a block with the author is out, writes
+stop 12 hours after the event ends (`CHAT_CLOSED`), and a withdrawn or
+taken-down post closes the room (404). To block or report somebody there, use
+the board's own routes (by post or by ask): the user routes read a board
+room's handle as an unknown id.
+
 ### GET /chat/groups
-Lists every room the caller is still a member of: `active` and **`muted`** memberships (a mute silences, it does not banish — the room stays readable and a post is refused with the reason), in `active` and **`locked`** rooms (read-only until the organiser reopens it). Each row carries `membership.status` and the room's `status` so the client can label _Muted_ / _Locked_. Banned and left memberships, and archived rooms, are not listed.
+Lists every **event** room the caller is still a member of: `active` and **`muted`** memberships (a mute silences, it does not banish — the room stays readable and a post is refused with the reason), in `active` and **`locked`** rooms (read-only until the organiser reopens it). Each row carries `membership.status` and the room's `status` so the client can label _Muted_ / _Locked_. Banned and left memberships, and archived rooms, are not listed.
 
 ### POST /message-requests
 **`message` is required.** A request with no message is indistinguishable from a
@@ -926,8 +947,11 @@ Same moderation pipeline and error codes apply.
 | POST | `/chat/groups/:chatGroupId/report` | Body `{ reason, description? }` → 201 `{ reported: true }` |
 
 All five answer one `404 NOT_FOUND` for a malformed id, an unknown room, a draft
-or deleted event's room, or a room you have no membership in (report alone
-still accepts a room whose event was taken down).
+or deleted event's room, a room whose owner does not admit you, or a room you
+have no membership in (report alone still accepts a room whose event was taken
+down). **Reporting a room is an event room's only** — it is filed against the
+event — so it answers 404 for a room of any other kind; report its messages one
+by one (`POST /messages/:messageId/report`), which works in every room.
 
 **Leaving** marks the membership `left` with `left_at` — kept, not deleted,
 because your pseudonym on past messages resolves through it. Until you come

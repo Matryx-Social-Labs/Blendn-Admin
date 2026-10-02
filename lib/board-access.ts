@@ -12,6 +12,7 @@ import {
 import { BOARD } from "./constants"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
+import { closePostRooms } from "./room-close"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
@@ -306,10 +307,12 @@ export async function hideBoardPostIfFlagged(postId: string, body: string): Prom
   if (!check.checked || check.result?.action !== "hide") return
   // Only a post still up: one its author withdrew meanwhile keeps its own
   // timestamp and reads as a withdrawal, not as something we caught.
-  await db.board_posts.updateMany({
+  const { count } = await db.board_posts.updateMany({
     where: { id: postId, deleted_at: null },
     data: { deleted_at: new Date(), moderation_status: "hidden", updated_at: new Date() },
   })
+  // Down, so its room is closed: out with anyone still in it (E3).
+  if (count > 0) await closePostRooms([postId])
 }
 
 /*

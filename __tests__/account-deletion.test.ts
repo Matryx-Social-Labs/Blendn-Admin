@@ -45,6 +45,8 @@ const mockDb = {
   password_reset_tokens: { deleteMany: jest.fn() },
   message_requests: { updateMany: jest.fn() },
   board_posts: { deleteMany: jest.fn(), updateMany: jest.fn() },
+  // The rooms of their posts: read before the transaction, archived inside it (step 7, E1).
+  chat_groups: { findMany: jest.fn().mockResolvedValue([{ id: "room-1" }]), updateMany: jest.fn() },
   // Their asks, read before the transaction to keep any with an open report.
   board_requests: { updateMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   message_reports: { findMany: jest.fn().mockResolvedValue([]) },
@@ -63,6 +65,8 @@ jest.mock("@/lib/mobile-auth", () => ({
 jest.mock("@/lib/account-blocklist", () => ({ blockAccountNow: (...a: unknown[]) => mockBlockNow(...a) }))
 const mockEvict = jest.fn()
 jest.mock("@/lib/socket-server", () => ({ evictUserSockets: (...a: unknown[]) => mockEvict(...a) }))
+const mockCloseRoom = jest.fn()
+jest.mock("@/lib/room-close", () => ({ closeRoomSockets: (...a: unknown[]) => mockCloseRoom(...a) }))
 const mockPromote = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => mockPromote(...a) }))
 
@@ -259,8 +263,28 @@ describe("deleting an account scrubs the matching inputs", () => {
     // `not: "hidden"`, which in Prisma would also skip every unmoderated post.
     await del()
     expect(mockDb.board_posts.deleteMany).toHaveBeenCalledWith({
-      where: { author_id: USER, moderation_status: null },
+      where: { author_id: USER, moderation_status: null, room: { is: null } },
     })
+  })
+
+  it("keeps a post that has a room, off the board and without its words, and archives the room (E1)", async () => {
+    // board_post_id is ON DELETE RESTRICT: the room is other people's
+    // conversation and kept evidence, so only a roomless post is deleted.
+    await del()
+    expect(mockDb.chat_groups.updateMany).toHaveBeenCalledWith({
+      where: { kind: "board_post", board_post: { author_id: USER }, status: { not: "archived" } },
+      data: { status: "archived" },
+    })
+    expect(mockDb.board_posts.updateMany).toHaveBeenCalledWith({
+      where: { author_id: USER, moderation_status: null, room: { isNot: null }, deleted_at: null },
+      data: { deleted_at: expect.any(Date) },
+    })
+    expect(mockDb.board_posts.updateMany).toHaveBeenCalledWith({
+      where: { author_id: USER, moderation_status: null, room: { isNot: null } },
+      data: { body: "" },
+    })
+    // And whoever was still in the room is taken out once it has committed.
+    expect(mockCloseRoom).toHaveBeenCalledWith("room-1")
   })
 
   it("refuses an unauthenticated caller", async () => {

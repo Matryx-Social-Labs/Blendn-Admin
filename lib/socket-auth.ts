@@ -1,7 +1,7 @@
 import { db } from "./db"
-import { roomReadDenial } from "./chat-window"
 import { actorFor } from "./org-membership"
 import { inRoomWhere } from "./event-kind"
+import { boardPostDoor, roomReadDenialFor } from "./room-kind"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 
 /**
@@ -18,8 +18,11 @@ import { eventPermissionSelect, eventPermissions } from "./rbac"
  */
 
 /**
- * Chat rooms: the same read rule as every HTTP read of the room —
- * `roomReadDenial` in lib/chat-window.ts (SCRUM-205).
+ * Chat rooms: the same read rule as every HTTP read of the room, for every
+ * kind of room — `roomReadDenialFor` in lib/room-kind.ts, which is
+ * `roomReadDenial` (lib/chat-window.ts, SCRUM-205) for an event's room and the
+ * owner's rule for any other (F8). A member row alone never opens a room that
+ * is not an event's.
  */
 export async function canJoinChat(userId: string, chatGroupId: string): Promise<boolean> {
   const membership = await db.chat_group_members.findUnique({
@@ -28,17 +31,24 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
     },
     // A hidden event has no room (SCRUM-8): its organiser's suspension flips
     // it to `draft`, and a draft never legitimately has a joinable chat.
-    // `kind` and `last_allowed_at`: a venue day's room takes only the people
-    // live in it now (`liveInVenueDay`), so an ended Go Live cannot rejoin.
+    // The event's `kind` and the row's `last_allowed_at`: a venue day's room
+    // takes only the people live in it now (`liveInVenueDay`), so an ended Go
+    // Live cannot rejoin. The room's own `kind` and owner: every other door (F8).
     select: {
       status: true,
       left_at: true,
       last_allowed_at: true,
-      chat_group: { select: { event: { select: { status: true, deleted_at: true, kind: true } } } },
+      chat_group: {
+        select: {
+          kind: true,
+          event: { select: { status: true, deleted_at: true, kind: true } },
+          board_post: boardPostDoor(userId),
+        },
+      },
     },
   })
   if (!membership) return false
-  return roomReadDenial(membership, membership.chat_group.event) === null
+  return roomReadDenialFor(membership.chat_group, membership, userId) === null
 }
 
 /**

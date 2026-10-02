@@ -84,7 +84,8 @@ export async function getPollResults(
    * a poll outside the event named in the URL does not exist there.
    */
   const room = poll?.message.chat_group
-  if (!poll || poll.message.deleted_at || room?.event_id !== reader.eventId) {
+  // Polls are an event room's: a room of any other kind has no event to match.
+  if (!poll || poll.message.deleted_at || room?.event_id !== reader.eventId || !room.event) {
     throw new Refusal("Poll not found")
   }
   const membership = room.members[0]
@@ -191,6 +192,9 @@ export async function castVote(
   if (!poll || poll.message.deleted_at || poll.message.chat_group.event_id !== eventId) {
     throw new Refusal("Poll not found")
   }
+  // Polls are an event room's; the match above already proves this one is.
+  const roomEvent = poll.message.chat_group.event
+  if (!roomEvent) throw new Refusal("Poll not found")
 
   // Scoped to this poll, so an option id from another poll cannot be smuggled
   // in — the composite foreign key would reject it, but a clear refusal beats a
@@ -201,7 +205,7 @@ export async function castVote(
     throw new Refusal("This poll has closed")
   }
 
-  const window = chatWindowState(poll.message.chat_group.event, poll.message.chat_group)
+  const window = chatWindowState(roomEvent, poll.message.chat_group)
   if (!window.open) throw new Refusal("The chatroom is not open")
 
   /*
@@ -220,7 +224,7 @@ export async function castVote(
     select: { id: true, last_allowed_at: true },
   })
   if (!member) throw new Refusal("You are not in this chatroom")
-  if (!liveInVenueDay(poll.message.chat_group.event, member)) throw new Refusal(NOT_LIVE_MESSAGE)
+  if (!liveInVenueDay(roomEvent, member)) throw new Refusal(NOT_LIVE_MESSAGE)
 
   await db.chat_poll_votes.upsert({
     where: { poll_id_user_id: { poll_id: pollId, user_id: userId } },

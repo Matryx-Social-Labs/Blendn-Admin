@@ -65,7 +65,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockAuth.mockResolvedValue({ userId: ME, email: "me@b.com" })
   mockBlocks.mockResolvedValue(["user_blocked"])
-  group = { id: ROOM, event_id: EVENT, status: "active", event: openEvent() }
+  group = { id: ROOM, kind: "event", event_id: EVENT, status: "active", event: openEvent(), board_post: null }
   membership = {
     id: "m1",
     status: "active",

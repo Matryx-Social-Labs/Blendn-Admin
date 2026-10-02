@@ -56,7 +56,11 @@ import { isRoomMuted, roomMuteState, withMute, withoutMute } from "@/lib/room-mu
 
 const NOW = new Date("2026-09-28T20:00:00Z")
 /** An event's room: `last_allowed_at` is read only in a venue day's (`liveInVenueDay`). */
-const EVENT_ROOM = { last_allowed_at: null, chat_group: { event: { kind: "event" } } }
+// The room's door reads its kind and owner too (step 7): an event room, published.
+const EVENT_ROOM = {
+  last_allowed_at: null,
+  chat_group: { kind: "event", event: { kind: "event", status: "published", deleted_at: null }, board_post: null },
+}
 const HOUR = 60 * 60 * 1000
 
 beforeEach(() => {
@@ -105,7 +109,7 @@ describe("a muted room does not ring", () => {
   const reply = () =>
     deliverToRoom({
       chatGroupId: "g1",
-      eventId: "e1",
+      scope: "e1",
       groupName: "Friday at Toit",
       senderId: "sender",
       senderAnonName: "Cosmic Panda",
