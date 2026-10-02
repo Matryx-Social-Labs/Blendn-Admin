@@ -3,6 +3,11 @@ import { redirect } from "next/navigation"
 import { VenueCreateForm } from "@/components/venue-create-form"
 import { getAuth } from "@/lib/auth"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/venues/new")
+
 export const dynamic = "force-dynamic"
 
 /**

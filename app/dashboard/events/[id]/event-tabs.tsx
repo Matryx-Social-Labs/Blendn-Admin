@@ -1,6 +1,4 @@
-import Link from "next/link"
-
-import { cn } from "@/lib/utils"
+import { PillTabs } from "@/components/dashboard/kit"
 import { livePhaseFor } from "@/lib/event-phase"
 
 export type EventTabKey = "overview" | "live" | "attendees" | "chat" | "feedback"
@@ -55,36 +53,22 @@ export function EventTabs({
   tabs: Array<{ key: EventTabKey; label: string }>
 }) {
   return (
-    <nav className="flex flex-wrap gap-1.5" aria-label="Event sections">
-      {tabs.map((tab) => (
-        <Link
-          key={tab.key}
-          href={
-            tab.key === "overview"
-              ? `/dashboard/events/${eventId}`
-              : // Feedback is a real page, not a tab rendered inline — it has
-                // its own data shape and is worth linking to directly.
-                tab.key === "feedback"
-                ? `/dashboard/events/${eventId}/feedback`
-                : `/dashboard/events/${eventId}?tab=${tab.key}`
-          }
-          aria-current={tab.key === active ? "page" : undefined}
-          className={cn(
-            "rounded-full border border-border px-3 py-1.5 text-[0.8125rem] transition-colors",
-            tab.key === active
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-          )}
-        >
-          {tab.label}
-          {tab.key === "live" ? (
-            <span
-              aria-hidden
-              className="ml-1.5 inline-block size-1.5 animate-pulse rounded-full bg-destructive align-middle"
-            />
-          ) : null}
-        </Link>
-      ))}
-    </nav>
+    <PillTabs
+      label="Event sections"
+      active={active}
+      tabs={tabs.map((tab) => ({
+        key: tab.key,
+        label: tab.label,
+        href:
+          tab.key === "overview"
+            ? `/dashboard/events/${eventId}`
+            : // Feedback is a real page, not a tab rendered inline — it has
+              // its own data shape and is worth linking to directly.
+              tab.key === "feedback"
+              ? `/dashboard/events/${eventId}/feedback`
+              : `/dashboard/events/${eventId}?tab=${tab.key}`,
+        live: tab.key === "live",
+      }))}
+    />
   )
 }

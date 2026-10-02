@@ -4,6 +4,11 @@ import { SponsorRegisterView } from "@/components/sponsor-register"
 import { getAuth } from "@/lib/auth"
 import { getSponsorRegister } from "@/lib/sponsor-actions"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/sponsors")
+
 export const dynamic = "force-dynamic"
 
 /**

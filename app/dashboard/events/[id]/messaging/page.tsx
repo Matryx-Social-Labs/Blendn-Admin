@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation"
-import Link from "next/link"
+import { PageHeader } from "@/components/dashboard/page-header"
 import { getAuth } from "@/lib/auth"
+import { eventTitleFor } from "@/lib/dashboard-record-titles"
 import { db } from "@/lib/db"
 import { canBroadcast, eventPermissions } from "@/lib/rbac"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
@@ -13,6 +14,11 @@ import { eventClock, eventStateFor, STATE_LABEL } from "@/lib/event-phase"
 
 interface Props {
   params: Promise<{ id: string }>
+}
+
+export async function generateMetadata({ params }: Props) {
+  const name = await eventTitleFor((await params).id)
+  return { title: name ? `Room · ${name}` : "Room" }
 }
 
 export default async function EventMessagingPage({ params }: Props) {
@@ -75,22 +81,14 @@ export default async function EventMessagingPage({ params }: Props) {
   return (
     <div className="flex flex-col gap-5">
       {/*
-        One title line, then the room. The site header owns the h1; the event
-        page owns navigation back. What this page used to add — a second h1,
-        two outline buttons and "Manage announcements and sponsored messages
-        for X" — described the screen instead of being it.
+        The event's name, then the room. Owned header (`OWNED_HEADERS`): the
+        layout's would say "Room" and nothing about which one.
       */}
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <h2 className="text-[length:var(--text-h2)] font-bold">
-          <Link href={`/dashboard/events/${eventId}`} className="hover:underline">
-            {event.title}
-          </Link>
-        </h2>
-        <span className="text-[0.8125rem] text-muted-foreground">
-          {STATE_LABEL[state]} · {when}
-          {event.venue_name ? ` · ${event.venue_name}` : ""}
-        </span>
-      </div>
+      <PageHeader
+        title={event.title}
+        description={`${STATE_LABEL[state]} · ${when}${event.venue_name ? ` · ${event.venue_name}` : ""}`}
+        back={{ href: `/dashboard/events/${eventId}`, label: "Back to event" }}
+      />
 
       <div className="grid gap-8 @4xl/main:grid-cols-[minmax(0,1fr)_380px] @4xl/main:items-start">
         {/* The room, and what is waiting on a human. */}
@@ -109,10 +107,11 @@ export default async function EventMessagingPage({ params }: Props) {
 
         {/*
           What `canEdit` buys: the composer and the sponsors. A venue owner
-          gets the room and nothing to say into it — K3.12, R37.
+          gets the room and nothing to say into it — K3.12, R37. Sticky clear
+          of the 60px top bar (60 + the page's 24px gap).
         */}
         {permissions.canEdit ? (
-          <div className="flex flex-col gap-6 @4xl/main:sticky @4xl/main:top-5">
+          <div className="flex flex-col gap-6 @4xl/main:sticky @4xl/main:top-[84px]">
             <EventMessaging eventId={event.id} mayAuthorSponsored={mayAuthorSponsored} />
             {/*
               Sponsors after the composer. A sponsored campaign is refused

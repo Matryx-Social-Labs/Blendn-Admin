@@ -94,6 +94,23 @@ const CITY = {
 /** The claimant's organisation: a sponsor with no brand yet (SCRUM-465). */
 const CLAIMANT_ORG = "Third Wave Coffee Roasters"
 
+/**
+ * Organisations for the shell's personas (step 14), each belonging to nobody
+ * else, so a persona never changes what the role accounts see.
+ *
+ * The sidebar names the organisation you act for — the oldest live membership
+ * — and counts the rest; a member of a suspended organisation is told on every
+ * page. Neither is visible on the role accounts, who each belong to exactly
+ * one live organisation.
+ */
+const PERSONA_ORGS = {
+  older: "Lantern Lane Events",
+  newer: "Monsoon Club",
+  live: "Sunday Supper Club",
+  suspended: "Retired Rooms Co",
+  secondVenue: "Koramangala Social House",
+} as const
+
 const ACCOUNTS = [
   /*
    * The three product owners, by name — their own admin accounts, so the audit
@@ -146,6 +163,38 @@ const ACCOUNTS = [
      * cannot be the claimant: its organisation owns Blue Tokai (SCRUM-465).
      */
     note: "Sponsor, org with no brand. Filed the pending Third Wave claim.",
+  },
+  /*
+   * Personas for the dashboard shell (step 14). Each is in organisations of
+   * its own; see PERSONA_ORGS.
+   */
+  {
+    key: "multiOrg",
+    email: "ishaan.multi@blendn.app",
+    name: "Ishaan Mehta",
+    role: "organizer" as user_role,
+    note: `Organiser in two live orgs: ${PERSONA_ORGS.older} (joined first) and ${PERSONA_ORGS.newer}. The card names the first, "+1 more".`,
+  },
+  {
+    key: "partSuspended",
+    email: "tara.suspended@blendn.app",
+    name: "Tara Nair",
+    role: "organizer" as user_role,
+    note: `Organiser in ${PERSONA_ORGS.live} (live) and ${PERSONA_ORGS.suspended} (suspended). The card names the live one; the suspension notice shows.`,
+  },
+  {
+    key: "onlySuspended",
+    email: "omar.suspended@blendn.app",
+    name: "Omar Siddiqui",
+    role: "organizer" as user_role,
+    note: `Organiser only in ${PERSONA_ORGS.suspended} (suspended). The card still names it; no Create event.`,
+  },
+  {
+    key: "secondVenueOwner",
+    email: "kabir.venue@blendn.app",
+    name: "Kabir Shah",
+    role: "venue_owner" as user_role,
+    note: `A second venue owner (${PERSONA_ORGS.secondVenue}, no venues): the venue-owners list has a row that is not venue.owner@'s own.`,
   },
 ] as const
 
@@ -1218,6 +1267,44 @@ async function main() {
     create: { org_id: claimantOrg.id, user_id: users.claimant, role: "owner", is_primary_contact: true },
   })
   await ensurePendingBrandClaim(db, { brandId: unclaimedBrand.id, orgId: claimantOrg.id, filedBy: users.claimant })
+
+  // ── the shell's personas: several orgs, a suspended one ──────────────────
+  const personaOrg = async (name: string, status: "verified" | "suspended") => {
+    const org = await upsertOrg(db, name)
+    return status === org.status
+      ? org
+      : db.organisations.update({
+          where: { id: org.id },
+          data: {
+            status,
+            suspension_reason: status === "suspended" ? "QA persona: a suspended organisation." : null,
+          },
+        })
+  }
+  const [older, newer, live, suspendedOrg, secondVenue] = await Promise.all([
+    personaOrg(PERSONA_ORGS.older, "verified"),
+    personaOrg(PERSONA_ORGS.newer, "verified"),
+    personaOrg(PERSONA_ORGS.live, "verified"),
+    personaOrg(PERSONA_ORGS.suspended, "suspended"),
+    personaOrg(PERSONA_ORGS.secondVenue, "verified"),
+  ])
+  // created_at is set, not left to the clock: which membership is oldest is the
+  // thing under test, and two upserts a millisecond apart would decide it.
+  const PERSONA_MEMBERSHIPS = [
+    { user: users.multiOrg, org: older.id, joined: hoursFromNow(-24 * 90) },
+    { user: users.multiOrg, org: newer.id, joined: hoursFromNow(-24 * 10) },
+    { user: users.partSuspended, org: live.id, joined: hoursFromNow(-24 * 60) },
+    { user: users.partSuspended, org: suspendedOrg.id, joined: hoursFromNow(-24 * 120) },
+    { user: users.onlySuspended, org: suspendedOrg.id, joined: hoursFromNow(-24 * 30) },
+    { user: users.secondVenueOwner, org: secondVenue.id, joined: hoursFromNow(-24 * 45) },
+  ]
+  for (const m of PERSONA_MEMBERSHIPS) {
+    await db.organisation_members.upsert({
+      where: { org_id_user_id: { org_id: m.org, user_id: m.user } },
+      update: { created_at: m.joined },
+      create: { org_id: m.org, user_id: m.user, role: "owner", created_at: m.joined },
+    })
+  }
 
   // ── onboarding applications, both paths and every state ──────────────────
   /*

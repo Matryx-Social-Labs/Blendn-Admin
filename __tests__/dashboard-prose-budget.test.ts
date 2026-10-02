@@ -6,7 +6,7 @@ import { join, relative, sep } from "path"
  *
  * ## Why there is a budget at all
  *
- * `components/site-header.tsx` already renders every page's title and a
+ * The layout's `PageHeader` already renders every page's title and a
  * one-line description. A paragraph at the top of the page is therefore a
  * *second* explanation of the same screen, and the ones here had drifted into
  * restating the first in longer words:
@@ -101,7 +101,7 @@ describe("dashboard pages do not re-explain themselves", () => {
       over,
       hint:
         over.length > 0
-          ? `Over ${MAX_CHARS} characters. site-header already says what this screen is — ` +
+          ? `Over ${MAX_CHARS} characters. the PageHeader already says what this screen is — ` +
             "keep only the rule a reader cannot infer, and say only the rule."
           : "",
     }).toEqual({ over: [], hint: "" })

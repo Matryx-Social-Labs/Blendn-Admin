@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from "fs"
+import { existsSync } from "fs"
 import { join } from "path"
 
 import { dashboardNav, unlistedRoutes } from "@/lib/dashboard-nav"
+import { routeContent } from "@/lib/dashboard-route-content"
 
 /**
  * Every nav entry points at a page that exists, and has a title.
@@ -22,15 +23,14 @@ import { dashboardNav, unlistedRoutes } from "@/lib/dashboard-nav"
  * Two rules, because a link can be broken in two directions:
  *
  *   1. the nav url must resolve to a `page.tsx`
- *   2. the url must have an entry in `components/site-header.tsx`, which owns
- *      the page's only `h1` and falls through to the title "Overview" for
- *      anything it does not know
+ *   2. the url must have an entry in `routeContent`
+ *      (`lib/dashboard-route-content.ts`), which names the page's only `h1`
+ *      and falls through to the title "Overview" for anything it does not know
  *
  * Rule 2 is the quieter failure: the page loads, and it is called Overview.
  */
 
 const ROOT = join(__dirname, "..")
-const HEADER = readFileSync(join(ROOT, "components", "site-header.tsx"), "utf8")
 
 /** `/dashboard/foo/bar` -> `app/dashboard/foo/bar/page.tsx`. */
 function pageFileFor(url: string): string {
@@ -54,13 +54,14 @@ describe("nav targets resolve", () => {
 })
 
 describe("nav targets have a title", () => {
-  it.each(navUrls)("%s is named in site-header", (url) => {
+  it.each(navUrls)("%s is named in routeContent", (url) => {
     /*
      * `routeContent` is a hard-coded map that falls through to "Overview". A
      * missing entry does not error — the page renders with the wrong name in
      * the document's only landmark heading, which is worse than a 404 because
      * nobody reports it.
      */
-    expect(HEADER).toContain(`"${url}"`)
+    // The overview is named in code, per role, above the lookup.
+    expect(url === "/dashboard" || url in routeContent).toBe(true)
   })
 })

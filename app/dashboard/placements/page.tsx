@@ -11,6 +11,11 @@ import { getSponsorOverview } from "@/lib/sponsor-actions"
 
 import { PlacementDecision } from "./decision"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/placements")
+
 export const dynamic = "force-dynamic"
 
 /** How long until doors, in the coarsest unit that is still useful. */
@@ -135,7 +140,7 @@ export default async function PlacementsPage() {
       </div>
 
       <section className="flex flex-col gap-3">
-        {/* h2, not h1 — components/site-header.tsx owns the page's only h1. */}
+        {/* h2, not h1 — the layout's PageHeader owns the page's only h1. */}
         <h2 className="text-[length:var(--text-h2)] font-bold">Placements</h2>
 
         {overview.placements.length === 0 ? (
