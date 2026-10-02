@@ -67,13 +67,13 @@ let viewer: { id: string; token: string }
 let day: { id: string; occurrenceId: string }
 let control: string
 
-async function realEvent(data: { start: Date; end: Date; title?: string }) {
+async function realEvent(data: { start: Date; end: Date; title?: string; venue?: string }) {
   const row = await db.events.create({
     data: {
       slug: testId("vdh"),
       title: data.title ?? `${TOKEN} night`,
       description: `${TOKEN} night`,
-      venue_id: venueId,
+      venue_id: data.venue ?? venueId,
       venue_name: `${TOKEN} Hall`,
       city: CITY,
       latitude: 12.9716,
@@ -196,14 +196,25 @@ describe("a venue day never reaches an attendee's discovery (PL-I16)", () => {
   })
 
   it("is not its own venue's upcoming event (F3)", async () => {
-    const list = (await rows(await get(venuesRoute, `/api/mobile/venues?search=${TOKEN}%20Hall&limit=50`), "venues")) as unknown as Array<{
+    /*
+     * A venue of its own: `control` runs now at the Hall, which takes the Hall
+     * over and leaves it out of Places (step 2). Here the real event is later
+     * tonight, so the venue is listed and only the day could be miscounted.
+     */
+    const v = await db.venues.create({
+      data: { name: `${TOKEN} Loft ${testId("f3")}`, city: CITY, latitude: 12.9716, longitude: 77.5946 },
+    })
+    venues.push(v.id)
+    events.push((await venueDayFor(v.id))!.id)
+    const later = await realEvent({ start: new Date(Date.now() + 3 * HOUR), end: new Date(Date.now() + 5 * HOUR), venue: v.id })
+    const list = (await rows(await get(venuesRoute, `/api/mobile/venues?search=${TOKEN}%20Loft&limit=50`), "venues")) as unknown as Array<{
       id: string
       upcomingEventCount: number
       nextEvent: { id: string } | null
     }>
-    const venue = list.find((v) => v.id === venueId)
+    const venue = list.find((r) => r.id === v.id)
     expect(venue?.upcomingEventCount).toBe(1)
-    expect(venue?.nextEvent?.id).toBe(control)
+    expect(venue?.nextEvent?.id).toBe(later)
   })
 
   it("takes no RSVP into 'my plans', and stays in 'my nights' as a place (D-6)", async () => {

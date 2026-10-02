@@ -5,6 +5,7 @@ import { haversineDistance } from "@/lib/geo"
 import { eventHost } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
+import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
 
 export const eventListSelect = {
   id: true,
@@ -18,6 +19,8 @@ export const eventListSelect = {
   occurrences: sessionOccurrencesSelect,
   timezone: true,
   venue_name: true,
+  // The only fragment here that claims `venue`, so nothing can narrow it.
+  ...eventVenueSelect,
   address: true,
   city: true,
   state: true,
@@ -166,6 +169,13 @@ async function transformEvent(
     session: eventSession(event),
     timezone: event.timezone,
     venueName: event.venue_name,
+    /*
+     * The venue the card says it is at, `{ id, name }` or null (`eventVenue`):
+     * while a venue is taken over by this event, Places leaves the venue out
+     * and this card is where the place is still named. Null falls back to
+     * `venueName`, the organiser's free text.
+     */
+    venue: eventVenue(event),
     address: event.address,
     city: await resolveEventCity(event.city, event.latitude, event.longitude, ctx.geocodes),
     state: event.state,

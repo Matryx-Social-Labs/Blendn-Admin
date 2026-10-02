@@ -64,6 +64,15 @@ const VenueListItemSchema = z
       .nullable()
       .describe("Kilometres from the supplied lat/lon, or null when either side has no fix."),
     upcomingEventCount: z.number().int(),
+    liveNow: z
+      .enum(["quiet", "5-9", "10-19", "20+"])
+      .nullable()
+      .describe(
+        "How many guests are live here (Go Live), as a bucket and never a number: `quiet` is under 5, " +
+          "none included. Steady for a minute per venue, slow to fall, and leaving the caller out only when " +
+          "the figure counted them — the same figure as `live.liveNow` on `GET /api/mobile/venues/{venueId}`. " +
+          "`null` for a caller the venue page would refuse (not onboarded, or no known adult age): hide the chip."
+      ),
     nextEvent: z
       .object({
         id: z.string().uuid(),
@@ -93,7 +102,13 @@ registry.registerPath({
     "between them.\n\n" +
     "Returns active, non-deleted venues only. Each item carries `upcomingEventCount` and its " +
     "`nextEvent`, both computed with the **same** filter — published, public, not yet ended, " +
-    "and within the caller's `min_age` where their age is known.\n\n" +
+    "not disputed by the venue, and within the caller's `min_age` where their age is known.\n\n" +
+    "**A venue a real event has taken over is left out**: from an hour before a published, public " +
+    "event at it starts until that event ends (per day of a multi-day run), when its link is confirmed " +
+    "or its area is at the venue, and never for a disputed link, a venue's own Go Live day, or an event " +
+    "the caller is too young for. The event's card on `GET /api/mobile/events` names the venue instead " +
+    "(`venue`). Each item's `liveNow` is a bucket, never a count, or null for a caller who may not go live. " +
+    "Ordered by name then id, so equal names keep one order across pages. 60 reads a minute per person.\n\n" +
     "`radius` has no default: sending coordinates means *sort by distance*, never *hide " +
     "anything further than N km*. `sortBy` offers `name` and `distance` only — ranking by " +
     "\"most going on\" would need a filtered relation count Prisma cannot order by.",
