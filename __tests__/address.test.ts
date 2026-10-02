@@ -1,4 +1,4 @@
-import { cityFrom, cityKey, extractAddress, fillFromSearch, groupCities } from "@/lib/address"
+import { cityCentres, cityFrom, cityKey, extractAddress, fillFromSearch, groupCities } from "@/lib/address"
 
 /**
  * Reading a geocoder response.
@@ -221,5 +221,28 @@ describe("the venue wizard goes through fillFromSearch, and only its newest sear
     const search = read("../components/event-form/where-search.tsx")
     expect(search).toMatch(/const mine = \+\+seq\.current/)
     expect(search).toMatch(/if \(mine !== seq\.current\) return/)
+  })
+})
+
+describe("cityCentres", () => {
+  it("is the mean of a city's event points, folded on cityKey like the counts", () => {
+    const centres = cityCentres([
+      { city: "Bengaluru", latitude: 12.9, longitude: 77.5 },
+      { city: " bengaluru ", latitude: 13.1, longitude: 77.7 },
+      { city: "Mumbai", latitude: 19.0, longitude: 72.8 },
+    ])
+    expect(centres.get(cityKey("Bengaluru")!)).toEqual({ latitude: 13, longitude: 77.6 })
+    expect(centres.get(cityKey("Mumbai")!)).toEqual({ latitude: 19, longitude: 72.8 })
+  })
+
+  it("leaves out events with no point, or the 0,0 an unset point reads as, and gives a city with none no centre", () => {
+    const centres = cityCentres([
+      { city: "Pune", latitude: null, longitude: null },
+      { city: "Pune", latitude: 0, longitude: 0 },
+      { city: "Goa", latitude: 15.5, longitude: 73.8 },
+      { city: "Goa", latitude: 0, longitude: 0 },
+    ])
+    expect(centres.has(cityKey("Pune")!)).toBe(false)
+    expect(centres.get(cityKey("Goa")!)).toEqual({ latitude: 15.5, longitude: 73.8 })
   })
 })

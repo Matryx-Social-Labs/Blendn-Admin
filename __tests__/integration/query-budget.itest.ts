@@ -9,6 +9,7 @@ import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 
 import { signAccessToken } from "@/lib/mobile-auth"
+import { venueDayFor } from "@/lib/venue-day"
 
 import { db, closeDb, makeUser, testId } from "./helpers"
 
@@ -123,9 +124,13 @@ const groupMessagesRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/m
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventsRoute = require("@/app/api/mobile/events/route") as
   typeof import("@/app/api/mobile/events/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const venuesRoute = require("@/app/api/mobile/venues/route") as
+  typeof import("@/app/api/mobile/venues/route")
 
 const users: string[] = []
 const events: string[] = []
+const venues: string[] = []
 const HOUR = 60 * 60 * 1000
 
 afterAll(async () => {
@@ -147,6 +152,11 @@ afterAll(async () => {
       await db.chat_groups.deleteMany({ where: { id: { in: ids } } })
     }
     await db.events.deleteMany({ where: { id: { in: events } } })
+  }
+  if (venues.length) {
+    // Their venue days, whose check-ins go with them.
+    await db.events.deleteMany({ where: { venue_id: { in: venues } } })
+    await db.venues.deleteMany({ where: { id: { in: venues } } })
   }
   if (users.length) await db.user.deleteMany({ where: { id: { in: users } } })
 
@@ -407,6 +417,99 @@ describe("the feed's cost does not grow with the catalogue", () => {
         two.calls.length === ten.calls.length
           ? ""
           : `The feed's round trips grew with the number of events: ${JSON.stringify(ten.calls)}`,
+    }).toEqual({ atTwo: two.calls.length, atTen: two.calls.length, hint: "" })
+  })
+})
+
+describe("the Places list's cost does not grow with the page", () => {
+  it("costs the same for 2 venues and for 10, each with people live and half taken over (HM-I05)", async () => {
+    /*
+     * Every row carries `liveNow` and passes the hiding rule, and both are the
+     * shape that drifts into one lookup per venue: a count per venue day, an
+     * `eventTakingOver` per venue. Each venue here has somebody live and every
+     * other one an event taking it over, so a per-venue read would show.
+     */
+    const viewerId = await makeUser(testId("qb_places"))
+    users.push(viewerId)
+    // An onboarded adult: `liveNow` is read only for somebody the venue page would answer.
+    await db.profiles.upsert({
+      where: { id: viewerId },
+      create: { id: viewerId, name: "Test", onboarded: true, date_of_birth: new Date(Date.now() - 30 * 365.25 * 86_400_000) },
+      update: { onboarded: true, date_of_birth: new Date(Date.now() - 30 * 365.25 * 86_400_000) },
+    })
+    const viewer = await db.user.findUniqueOrThrow({ where: { id: viewerId }, select: { email: true } })
+    const token = signAccessToken(viewerId, viewer.email)
+    const list = (tag: string) =>
+      venuesRoute.GET(
+        new NextRequest(`http://localhost/api/mobile/venues?limit=50&search=${tag}`, {
+          headers: { authorization: `Bearer ${token}` },
+        })
+      ) as unknown as Promise<Response>
+
+    const make = async (tag: string, i: number) => {
+      const venue = await db.venues.create({
+        data: {
+          name: `${tag} place ${i}`,
+          latitude: 12.97,
+          longitude: 77.64,
+          geofence: { type: "circle", lat: 12.97, lng: 77.64, radius: 60, buffer: 20 },
+          timezone: "UTC",
+          day_reset_hour: (new Date().getUTCHours() + 12) % 24,
+        },
+      })
+      venues.push(venue.id)
+      const day = await venueDayFor(venue.id)
+      const guest = await makeUser(testId("qb_live"))
+      users.push(guest)
+      await db.event_check_ins.create({
+        data: {
+          event_id: day!.id,
+          occurrence_id: day!.occurrenceId,
+          user_id: guest,
+          status: "checked_in",
+          check_in_time: new Date(),
+          expires_at: new Date(Date.now() + HOUR),
+        },
+      })
+      if (i % 2 === 1) return
+      const start = new Date(Date.now() + HOUR / 2)
+      const end = new Date(start.getTime() + 3 * HOUR)
+      const event = await db.events.create({
+        data: {
+          slug: testId("qbp"),
+          title: `${tag} night`,
+          description: "integration fixture",
+          start_time: start,
+          end_time: end,
+          timezone: "UTC",
+          status: "published",
+          visibility: "public",
+          organizer_id: viewerId,
+          venue_id: venue.id,
+          venue_link_status: "confirmed",
+          occurrences: { create: { occurs_on: new Date(start.toISOString().slice(0, 10)), start_time: start, end_time: end } },
+        },
+      })
+      events.push(event.id)
+    }
+
+    const smallTag = `qbpa${Date.now().toString(36).replace(/\d/g, "")}z`
+    const largeTag = `qbpb${Date.now().toString(36).replace(/\d/g, "")}z`
+    for (let i = 0; i < 2; i++) await make(smallTag, i)
+    for (let i = 0; i < 10; i++) await make(largeTag, i)
+
+    await list(`qbpwarm${Date.now().toString(36).replace(/\d/g, "")}z`)
+    const two = await measure(() => list(smallTag))
+    const ten = await measure(() => list(largeTag))
+
+    expect(two.calls.length).toBeGreaterThan(0)
+    expect({
+      atTwo: two.calls.length,
+      atTen: ten.calls.length,
+      hint:
+        two.calls.length === ten.calls.length
+          ? ""
+          : `The Places list's round trips grew with the page: ${JSON.stringify(ten.calls)}`,
     }).toEqual({ atTwo: two.calls.length, atTen: two.calls.length, hint: "" })
   })
 })

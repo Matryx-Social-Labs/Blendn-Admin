@@ -23,6 +23,10 @@
 const mockDb = {
   profiles: { findUnique: jest.fn() },
   venues: { findMany: jest.fn(), count: jest.fn() },
+  // The hiding rule's one read (`venuesTakenOver`); nothing takes a venue over here.
+  events: { findMany: jest.fn() },
+  // `liveGuestIds`: nobody live.
+  event_check_ins: { findMany: jest.fn() },
 }
 
 const mockAuth = jest.fn()
@@ -65,12 +69,15 @@ const venueRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockAuth.mockResolvedValue({ userId: VIEWER })
   mockDb.profiles.findUnique.mockResolvedValue({ age: null, date_of_birth: null })
   mockDb.venues.findMany.mockResolvedValue([venueRow()])
   mockDb.venues.count.mockResolvedValue(1)
+  mockDb.events.findMany.mockResolvedValue([])
+  mockDb.event_check_ins.findMany.mockResolvedValue([])
 })
 
 /** The `select` the route handed Prisma on its one full fetch. */
@@ -101,7 +108,8 @@ describe("GET /api/mobile/venues", () => {
     await GET(req())
 
     const nested = selectArg().events.where
-    expect(nested.OR).toEqual([{ min_age: null }, { min_age: { lte: 16 } }])
+    // Beside the link's OR, under `AND`, so neither replaces the other (F4).
+    expect(nested.AND).toContainEqual({ OR: [{ min_age: null }, { min_age: { lte: 16 } }] })
     expect(nested).toMatchObject({ status: "published", visibility: "public" })
   })
 
@@ -123,7 +131,7 @@ describe("GET /api/mobile/venues", () => {
     // Most OAuth accounts have no age. Failing closed would empty the screen to
     // punish a missing field — the events feed made this decision first.
     await GET(req())
-    expect(selectArg().events.where.OR).toBeUndefined()
+    expect(JSON.stringify(selectArg().events.where)).not.toContain("min_age")
   })
 
   it("does not filter by radius unless a radius was asked for", async () => {
@@ -165,6 +173,33 @@ describe("GET /api/mobile/venues", () => {
     const body = await res.json()
     expect(body.data.venues[0].nextEvent).toBeNull()
     expect(body.data.venues[0].upcomingEventCount).toBe(0)
+  })
+
+  it("leaves out the venues an event has taken over, and says liveNow as a bucket to an adult", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 30, date_of_birth: null, onboarded: true })
+    // A confirmed link takes the venue over wherever the event's area is
+    // (`atTheVenue`); the integration suite walks every other link state.
+    const taken = "44444444-4444-4444-4444-444444444444"
+    mockDb.events.findMany.mockResolvedValue([
+      { id: "e", title: "t", venue_id: taken, venue_link_status: "confirmed", geofence: null, latitude: null, longitude: null, venue: { geofence: null } },
+    ])
+    const res = await GET(req())
+    expect(mockDb.venues.findMany.mock.calls[0][0].where.id).toEqual({ notIn: [taken] })
+    expect((await res.json()).data.venues[0].liveNow).toBe("quiet")
+  })
+
+  it("tells nobody the venue page would refuse how many are live: unknown age, under 18, not onboarded", async () => {
+    for (const viewer of [
+      { age: null, date_of_birth: null, onboarded: true },
+      { age: 16, date_of_birth: null, onboarded: true },
+      { age: null, date_of_birth: null, onboarded: false },
+    ]) {
+      mockDb.profiles.findUnique.mockResolvedValue(viewer)
+      const res = await GET(req())
+      expect((await res.json()).data.venues[0].liveNow).toBeNull()
+    }
+    // And never asked: the count is not read for somebody it is not for.
+    expect(mockDb.event_check_ins.findMany).not.toHaveBeenCalled()
   })
 
   it("rejects a venue type outside the vocabulary", async () => {
