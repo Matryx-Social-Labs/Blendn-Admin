@@ -32,6 +32,23 @@ User sends message
 
 If any layer returns `hide`, the pipeline **stops early** — no further checks run.
 
+### Rooms of every kind (step 7)
+
+A room has a kind — `event`, `board_post`, and `crew` / `blend` once step 8
+gives them owners (`chat_groups.kind`, `lib/room-kind.ts`). What applies where:
+
+| Feature | Event room | Any other kind | Why |
+|---|---|---|---|
+| The pipeline above (spam, keywords, OpenAI, pre-emit) | yes | yes | It runs on `POST /chat/groups/:id/messages`, which every room uses; a message is never emitted before it passes |
+| Auto-mute / unmute, organiser ban and mute | yes | yes | They live on the member row, which every room has |
+| Reporting a message (`POST /messages/:id/report`) | yes | yes | Keyed by the message; any member may report what they could see |
+| Reporting the whole room (`POST /chat/groups/:id/report`) | yes | no — 404 | It is filed against the room's event (`event_reports.event_id`), and only an event's room has one. Report the messages instead |
+| Muting the room's pushes (`/chat/groups/:id/mute`) | yes | yes | Per member |
+| Reactions | yes | yes | Same write rule as a message (`mayWriteToRoomFor`) |
+| Polls, announcements, sponsored messages | yes | no | Written only through `/events/:eventId/...` routes, which find the room by its event; a poll outside the event in its URL does not exist (`lib/polls.ts`) |
+| Sentiment (the live Mood bar, the digest) | yes | no | It is how people feel about an event; `lib/sentiment-sweeper.ts` reads `kind = 'event'` only |
+| Organiser review (`/api/events/{eventId}/chat/moderation`) | yes | no | Scoped to the event's room. Flags from other rooms reach the platform queue (`/dashboard/moderation`, admins only), labelled "Unknown event" until those rooms ship |
+
 ---
 
 ## Layer 1: Spam Detector

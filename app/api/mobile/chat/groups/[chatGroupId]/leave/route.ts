@@ -6,6 +6,7 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { blockCounterparties } from "@/lib/conversations"
 import { bannedRefusal, chatClosedMessage, leftByChoice } from "@/lib/chat-window"
 import { roomForMember } from "@/lib/room-membership"
+import { roomScope } from "@/lib/room-kind"
 import { emitChatMemberLeft } from "@/lib/socket-server"
 import {
   successResponse,
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (count === 1) {
       // Null when blocks cannot be read: then only the eviction runs (see the emitter).
       const blocked = await blockCounterparties(authUser.userId).catch(() => null)
-      emitChatMemberLeft(room.group.id, authUser.userId, blocked, room.group.event_id)
+      emitChatMemberLeft(room.group.id, authUser.userId, blocked, roomScope(room.group))
       logger.info("Left room", { chatGroupId: room.group.id })
     }
 

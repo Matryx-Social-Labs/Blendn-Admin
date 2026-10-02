@@ -103,7 +103,7 @@ describe("a muted room does not ring", () => {
   const reply = () =>
     deliverToRoom({
       chatGroupId: "g1",
-      eventId: "e1",
+      scope: "e1",
       groupName: "Friday at Toit",
       senderId: "sender",
       senderAnonName: "Cosmic Panda",

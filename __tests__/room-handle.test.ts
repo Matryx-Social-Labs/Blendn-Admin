@@ -118,3 +118,44 @@ describe("roomMemberFromRef — who a like or a wave may name", () => {
     expect(roomMemberFromRef(EVENT, "rh_forged", VIEWER)).toBeNull()
   })
 })
+
+/*
+ * Rooms of every kind (step 7, F9, CR-I12, SEC-06). A handle is scoped to one
+ * room, and a room that is not an event's is named by its own id AND its kind,
+ * so the same uuid as an event room or as another kind's room is still a
+ * different room.
+ */
+describe("handles across kinds of room", () => {
+  const VIEWER = "cmg1viewer0000ab12cd34ef5"
+  const POST_ROOM = { kind: "board_post" as const, groupId: EVENT }
+  const CREW_ROOM = { kind: "crew" as const, groupId: EVENT }
+
+  it("an event room's handle is byte-for-byte what installed clients hold", () => {
+    // Minted by the pre-step-7 code (origin/dev 5c2fd86) under this file's key.
+    const GOLDEN = "rh_4uHpmiMrQAPGRjVd8mihwhb9FzoMQw-4QNFX0Vvu7UE6t3ojPujNjKx77sHNVoKlVYuONIbmpHlwzX4Ou22WeRi5Drxw"
+    expect(roomHandle(EVENT, USER)).toBe(GOLDEN)
+    expect(resolveUserRef(GOLDEN)).toEqual({ userId: USER, eventId: EVENT })
+    expect(roomMemberFromRef(EVENT, GOLDEN, VIEWER)).toBe(USER)
+  })
+
+  it("resolves in its own room only", () => {
+    expect(roomMemberFromRef(POST_ROOM, roomHandle(POST_ROOM, USER), VIEWER)).toBe(USER)
+    expect(roomMemberFromRef({ ...POST_ROOM, groupId: EVENT.toUpperCase() }, roomHandle(POST_ROOM, USER), VIEWER)).toBe(USER)
+    expect(roomMemberFromRef({ ...POST_ROOM, groupId: OTHER_EVENT }, roomHandle(POST_ROOM, USER), VIEWER)).toBeNull()
+  })
+
+  it("is refused across kinds, even for the same uuid", () => {
+    const inPost = roomHandle(POST_ROOM, USER)
+    const inEvent = roomHandle(EVENT, USER)
+    expect(new Set([inPost, inEvent, roomHandle(CREW_ROOM, USER)]).size).toBe(3)
+    expect(roomMemberFromRef(EVENT, inPost, VIEWER)).toBeNull()
+    expect(roomMemberFromRef(CREW_ROOM, inPost, VIEWER)).toBeNull()
+    expect(roomMemberFromRef(POST_ROOM, inEvent, VIEWER)).toBeNull()
+  })
+
+  it("names nobody outside its own room — no profile, friend or block route resolves it", () => {
+    const inPost = roomHandle(POST_ROOM, USER)
+    expect(resolveUserRef(inPost)).toBeNull()
+    expect(userIdFromRef(inPost)).toBe(inPost)
+  })
+})

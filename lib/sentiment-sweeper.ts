@@ -68,13 +68,17 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
    * Bounded by the same limit as the fetch below, so this cannot become an
    * unbounded id list on a busy night.
    */
-  // Every open room, a venue day's included: an escalation here is how an
+  // Every open event room, a venue day's included: an escalation here is how an
   // unclaimed venue's room, with no host watching, reaches the platform's queue.
+  // Event rooms only: what is classified is how people feel about an event
+  // (`event_feedback.event_id`), and a crew's or a Blend's chat has no event to
+  // feel about. Left in, its messages would be selected on every pass for ever.
   const eligible = await db.$queryRaw<{ id: string }[]>`
     SELECT m.id
       FROM chat_messages m
       JOIN chat_groups g ON g.id = m.chat_group_id
      WHERE g.status = 'active'
+       AND g.kind = 'event'
        AND m.type = 'text'
        AND m.deleted_at IS NULL
        AND (m.moderation_status IS NULL OR m.moderation_status <> 'hidden')
@@ -91,7 +95,7 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
       // `status: "active"` is already the state machine for "this room is open"
       // — live event or post-event feedback window. The chat lifecycle sweeper
       // archives it afterwards, so this needs no time arithmetic of its own.
-      chat_group: { status: "active" },
+      chat_group: { status: "active", kind: "event" },
       type: "text",
       deleted_at: null,
       /*

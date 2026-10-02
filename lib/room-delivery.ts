@@ -3,7 +3,7 @@ import { db } from "@/lib/db"
 import { blockCounterparties } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
-import { roomHandle } from "@/lib/room-handle"
+import { roomHandle, type RoomScope } from "@/lib/room-handle"
 import { isRoomMuted } from "@/lib/room-mute"
 
 /**
@@ -38,8 +38,8 @@ import { isRoomMuted } from "@/lib/room-mute"
  */
 export async function deliverToRoom(input: {
   chatGroupId: string
-  /** The room's event: the push names the sender by their handle in it. */
-  eventId: string
+  /** The room's handle scope (`roomScope`): the push names the sender by their handle in it. */
+  scope: RoomScope
   groupName: string | null
   senderId: string
   senderAnonName: string
@@ -89,7 +89,7 @@ export async function deliverToRoom(input: {
         parentId: message.parent_id || undefined,
       },
       senderBlocked,
-      input.eventId
+      input.scope
     )
   } catch (error) {
     logger.error("Room socket emit failed", {
@@ -130,7 +130,7 @@ export async function deliverToRoom(input: {
       groupName: input.groupName || "Group Chat",
       preview: input.preview,
       chatGroupId,
-      senderHandle: roomHandle(input.eventId, senderId),
+      senderHandle: roomHandle(input.scope, senderId),
     })
   } catch (error) {
     logger.error("Room push notification failed", {

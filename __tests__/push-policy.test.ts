@@ -301,7 +301,7 @@ describe("a room pushes replies, and only to the person replied to", () => {
   const send = (parentId: string | null, senderId = "sender") =>
     deliverToRoom({
       chatGroupId: "g1",
-      eventId: "e1",
+      scope: "e1",
       groupName: "Friday at Toit",
       senderId,
       senderAnonName: "Cosmic Panda",
