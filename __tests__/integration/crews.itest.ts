@@ -386,6 +386,27 @@ describe("the crew room: real first names inside, its members now and nobody els
     expect((await api.detail(stranger, crewId)).status).toBe(404)
   })
 
+  it("a ban in the crew room survives leaving and coming back", async () => {
+    const owner = await person("ban-owner")
+    const banned = await person("ban-member")
+    const third = await person("ban-third")
+    const { crewId, roomId } = await crewOf(owner, [banned, third])
+    // A suspension writes a ban into every room the person is in.
+    await db.chat_group_members.update({
+      where: { chat_group_id_user_id: { chat_group_id: roomId, user_id: banned.id } },
+      data: { status: "banned", banned_at: new Date() },
+    })
+    expect((await api.remove(banned, crewId, banned.id)).status).toBe(200)
+    expect((await api.invite(owner, crewId, [banned.id])).status).toBe(200)
+    expect((await api.join(banned, crewId)).status).toBe(200)
+    const row = await db.chat_group_members.findUniqueOrThrow({
+      where: { chat_group_id_user_id: { chat_group_id: roomId, user_id: banned.id } },
+      select: { status: true },
+    })
+    expect(row.status).toBe("banned")
+    expect(await canJoinChat(banned.id, roomId)).toBe(false)
+  })
+
   it("a suspended member is on no crew surface", async () => {
     const owner = await person("susp-owner")
     const a = await person("susp-a", "Imran Qureshi")

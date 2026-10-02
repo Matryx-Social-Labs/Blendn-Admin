@@ -343,11 +343,16 @@ export async function acceptCrewInvite(
     })
     await tx.crew_invites.delete({ where: { id: invite.id } })
     const room = await tx.chat_groups.findUniqueOrThrow({ where: { crew_id: crewId }, select: { id: true } })
-    // A member who left and came back: the same row, open again.
+    // A member who left and came back: the same row, open again — unless it
+    // carries a ban (a suspension writes one), which only a person lifts.
     await tx.chat_group_members.upsert({
       where: { chat_group_id_user_id: { chat_group_id: room.id, user_id: userId } },
       create: { chat_group_id: room.id, user_id: userId },
-      update: { status: "active", left_at: null },
+      update: {},
+    })
+    await tx.chat_group_members.updateMany({
+      where: { chat_group_id: room.id, user_id: userId, status: { not: "banned" } },
+      data: { status: "active", left_at: null },
     })
     return { chatGroupId: room.id }
   })
