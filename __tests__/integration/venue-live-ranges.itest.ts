@@ -438,20 +438,22 @@ describe("the venue's lists", () => {
 
   it("ranges the same rooms on the Chatrooms list, without a total", async () => {
     as(venueOwner, "venue_owner")
+    // Each room is a card (step 15): its "inside" figure, then the pulse's total.
+    const inside = (value: string) => new RegExp(`<dt[^>]*>inside</dt><dd[^>]*>${value}</dd>`)
     const venueHtml = renderToStaticMarkup(await ChatroomsPage())
-    expect(venueHtml).toMatch(/>10–19<\/b> inside/)
-    expect(venueHtml).toMatch(/>Under 5<\/b> inside/)
+    expect(venueHtml).toMatch(inside("10–19"))
+    expect(venueHtml).toMatch(inside("Under 5"))
     expect(venueHtml).not.toMatch(/people inside|person inside/)
 
     as(host, "organizer")
     const hostHtml = renderToStaticMarkup(await ChatroomsPage())
-    expect(hostHtml).toMatch(/>12<\/b> inside/)
+    expect(hostHtml).toMatch(inside("12"))
     expect(hostHtml).toMatch(/>15<\/b> people inside/)
 
     as(admin, "app_admin")
     const adminHtml = renderToStaticMarkup(await ChatroomsPage())
-    expect(adminHtml).toMatch(/>12<\/b> inside/)
-    expect(adminHtml).toMatch(/>3<\/b> inside/)
+    expect(adminHtml).toMatch(inside("12"))
+    expect(adminHtml).toMatch(inside("3"))
   })
 
   it("ranges the live count in GET /api/events for the venue, not for the organiser", async () => {

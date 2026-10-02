@@ -116,6 +116,10 @@ export function TimezoneSelect({
             e.preventDefault()
             select(zoneForEnter(query, value))
           }}
+          // A text box that opens a list is a combobox; `aria-expanded` is
+          // not allowed on a plain textbox, and axe calls that critical.
+          role="combobox"
+          aria-autocomplete="list"
           aria-expanded={open}
           data-timezone-search=""
           placeholder="Search timezone…"

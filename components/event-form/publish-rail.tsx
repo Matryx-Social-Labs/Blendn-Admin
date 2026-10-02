@@ -224,7 +224,7 @@ export function PublishRail(props: PublishRailProps) {
       ? "Published"
       : isEditing && status === "cancelled"
         ? "Cancelled"
-        : "Before it can publish"
+        : "Before it can go out"
   return (
     <aside
       aria-label="Publish"
@@ -238,13 +238,15 @@ export function PublishRail(props: PublishRailProps) {
         </p>
         <CardPreview {...card} />
       </div>
-      <div role="status" aria-live="polite">
-        <p className="mb-2 text-[0.75rem] font-medium uppercase tracking-[0.06em] text-faint-foreground">
-          {label}
-        </p>
-        <ReadinessList readiness={readiness} />
-      </div>
-      <Actions {...props} />
+      {/* The kit's rail panel: the list empties as the form fills, and the
+          buttons that act on it sit under it. */}
+      <section className="flex flex-col gap-3.5 rounded-panel border border-border bg-card p-5">
+        <div role="status" aria-live="polite" className="flex flex-col gap-2">
+          <h2 className="text-panel-title font-bold">{label}</h2>
+          <ReadinessList readiness={readiness} />
+        </div>
+        <Actions {...props} />
+      </section>
     </aside>
   )
 }

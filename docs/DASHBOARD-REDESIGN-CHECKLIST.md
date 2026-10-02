@@ -69,15 +69,17 @@ gates, the specialists, and a drive, before the next one starts.
 |---|---|---|---|
 | `/dashboard` (organiser overview) | ✅ ea82077 (mockup `overview-organizer-20260911`) | ✅ 2026-09-11 as Arjun Rao | pacing vs last event, days-to-go, ratings only when rated |
 | `/dashboard/events` | ✅ shared with admin | ✅ | organiser scope = org membership |
-| `/dashboard/events/new` | ✅ 081bd48 | ✅ 2026-09-11 | shared with admin |
-| `/dashboard/events/[id]/edit` | ✅ 081bd48 | ✅ 2026-09-11 | |
+| `/dashboard/events/new` | ✅ 081bd48; step 15 to the kit's panels (mockup: kit `screens-home.jsx` NewEvent) | ✅ 2026-09-11; step 15 local seed, 375/1440, axe clean in `main` (`e2e/organiser-org-screens.spec.ts`) | shared with admin; each section a bordered panel (01 Basics, When, Where, Who can come, More), the rail's readiness + actions in a "Before it can go out" panel under the card; no behaviour change; kit's chat-at-doors switch out (R7), crews switch is step 8; timezone search is a combobox (axe: `aria-expanded` on a textbox) |
+| `/dashboard/events/[id]/edit` | ✅ 081bd48; step 15 panels (same form) | ✅ 2026-09-11 | |
 | `/dashboard/events/[id]` + tabs | ✅ 8d6f547 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/messaging` | ✅ d1096f7 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/feedback` | ✅ d1096f7 | ✅ 2026-09-11 | shared with admin |
-| `/dashboard/attendees` | ✅ 2026-09-11 (repeat chip cut; mockup skipped — one column); ✅ 2026-09-28 SCRUM-383 (mockup `attendees-labels-20260928`) | ✅ E4; 2026-09-11; 2026-09-28 as organiser + admin, local seed | the 2026-09-11 "pseudonymous roster" note was wrong: the Person column showed real names. Now the Attendee column is the export's label in mono, and the query selects no name (`lib/attendee-roster.ts`) |
-| `/dashboard/chatrooms` | ✅ 2026-09-11 (mockup `chatrooms-20260911`) | ✅ 2026-09-11 | a list with state + when it changes; scope via visibleEventsWhere |
-| `/dashboard/organisation` (my organisation) | ✅ 2026-09-11 (chrome cut; mockup skipped) | ✅ E4, #322 domain verification | title line, divided lists |
-| `/dashboard/reports`, `/dashboard/audit`, `/dashboard/settings` | — | ✅ | shared |
+| `/dashboard/attendees` | ✅ 2026-09-11 (repeat chip cut; mockup skipped — one column); ✅ 2026-09-28 SCRUM-383 (mockup `attendees-labels-20260928`) | ✅ E4; 2026-09-11; 2026-09-28 as organiser + admin, local seed | the 2026-09-11 "pseudonymous roster" note was wrong: the Person column showed real names. Now the Attendee column is the export's label in mono, and the query selects no name (`lib/attendee-roster.ts`); step 15: the three figures as a KpiStrip over the label table (mockup: kit `screens-org.jsx` Attendees; names/avatars and the header CSV cut — R1, and Reports holds the export) |
+| `/dashboard/chatrooms` | ✅ 2026-09-11 (mockup `chatrooms-20260911`); step 15 cards (mockup: kit `screens-org.jsx` Chatrooms) | ✅ 2026-09-11; step 15 local seed 375/1440, axe clean | a card per open room: live/feedback + when it changes, inside / messages / flags (red when any), Open room; the venue's ranged counts kept (SCRUM-516); the kit's message preview cut (the pseudonym rules live in ChatFeed) |
+| `/dashboard/organisation` (my organisation) | ✅ 2026-09-11 (chrome cut; mockup skipped); step 15 panels (mockup: kit `screens-org.jsx` Team) | ✅ E4, #322 domain verification; step 15 local seed, axe clean (role selects named) | Members / Requests / Invite in the main column, Email domain beside; owner/admin/staff kept; no auto-approve switch (no setting) |
+| `/dashboard/reports` | ✅ step 15 (mockup: kit `screens-org.jsx` Reports) | ✅ step 15: a row's CSV downloaded locally | one row per report with its own CSV button ("Download <report> CSV"); same set and endpoint; no Analytics tags (step 16) |
+| `/dashboard/audit` | ✅ step 15 (mockup: kit `screens-org.jsx` Audit) | ✅ | the day-grouped timeline in a panel |
+| `/dashboard/settings` | — | ✅ | shared |
 
 ## venue_owner
 
