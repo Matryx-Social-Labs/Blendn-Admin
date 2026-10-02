@@ -1,4 +1,6 @@
-import { SPONSORSHIP } from "@/lib/constants"
+// Relative: the live tick reaches this from server.ts, which `build:server`
+// compiles with plain tsc (see __tests__/server-import-boundary.test.ts).
+import { SPONSORSHIP } from "./constants"
 
 /**
  * When an aggregate stops being an aggregate.
@@ -156,16 +158,22 @@ export function discloseGuests(guests: number): number | null {
  * The same rule wherever those counts appear — the Events list, the venue
  * page, the Events export — so no surface prints what another blanks. Fill is
  * Going over capacity, so it goes when Going does.
+ *
+ * `arriving` (`stillArriving`): who came is held back altogether while people
+ * can still be coming in. Reloading a list or re-downloading an export is
+ * watching the number, and it moves by one with each arrival; the Live tab
+ * gives the venue the night as ranges instead (SCRUM-516).
  */
 export function discloseVenueCounts(c: {
   going: number
   attended: number
   capacity: number | null
+  arriving?: boolean
 }): { going: number | null; attended: number | null; fillPct: number | null } {
   const going = discloseFigure({ count: c.going, contributors: c.going, population: 0 }).value
   return {
     going,
-    attended: discloseGuests(c.attended),
+    attended: c.arriving ? null : discloseGuests(c.attended),
     fillPct: going !== null && c.capacity ? Math.round((going / c.capacity) * 100) : null,
   }
 }
@@ -181,6 +189,29 @@ export function discloseVenueCounts(c: {
 export function discloseHeadcount(count: number): number | null {
   if (count === 0) return 0
   return discloseFigure({ count, contributors: count, population: 0 }).value
+}
+
+/**
+ * How many people are live -- at a venue, or in a room a venue watches but
+ * does not run -- as a bucket (D-19, F14, D-x2).
+ *
+ * Never a number. The floor alone is not enough for a figure that updates
+ * while you watch: a count that goes from "a few" to 5 the moment one person
+ * walks in tells the watcher that person is there (cf. SCRUM-472). Buckets
+ * move only at their edges, and under the floor (`MIN_CELL`) there is no
+ * number at all.
+ *
+ * Zero is `quiet` too, unlike `discloseHeadcount`'s 0 (D-x2). An empty room
+ * names nobody, but the step from empty to "a few" is the one arrival that
+ * names somebody, and from "a few" to empty the one departure.
+ */
+export type LiveCountBucket = "quiet" | "5-9" | "10-19" | "20+"
+
+export function liveCountBucket(count: number): LiveCountBucket {
+  if (count < MIN_CELL) return "quiet"
+  if (count < 10) return "5-9"
+  if (count < 20) return "10-19"
+  return "20+"
 }
 
 /**
@@ -372,4 +403,23 @@ export function suppressedLabel(kind: "figure" | "poll"): string {
   return kind === "poll"
     ? "Results appear once more people vote"
     : `Fewer than ${FLOOR} people — not reported`
+}
+
+/**
+ * The buckets in order, smallest first, and each as the dashboard prints it.
+ *
+ * On the dashboard they are what a venue is told of a night it does not run,
+ * or its own venue day, while it is still moving (SCRUM-516): in the room,
+ * arrived, left, the last ten minutes. "20+" is a bucket too: an exact count
+ * of a big room still says who just came in. Whether the room is over its
+ * capacity is a separate flag, decided on the exact figure, so the building's
+ * safety does not depend on the number being shown.
+ */
+export const LIVE_COUNT_BUCKETS: readonly LiveCountBucket[] = ["quiet", "5-9", "10-19", "20+"]
+
+/** A count as printed: an exact one as itself, a bucket as words. */
+export function liveCountLabel(count: number | LiveCountBucket): string {
+  if (typeof count === "number") return String(count)
+  if (count === "quiet") return `Under ${MIN_CELL}`
+  return count.replace("-", "–")
 }
