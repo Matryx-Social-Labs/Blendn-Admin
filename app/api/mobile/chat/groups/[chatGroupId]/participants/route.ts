@@ -4,9 +4,10 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { NOT_LIVE_MESSAGE } from "@/lib/chat-window"
-import { boardPostDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { ownerDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
+import { namesInRoom } from "@/lib/identity"
 import {
   successResponse,
   unauthorizedResponse,
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         kind: true,
         event_id: true,
         event: { select: { status: true, deleted_at: true, kind: true } },
-        board_post: boardPostDoor(authUser.userId),
+        ...ownerDoor(authUser.userId),
       },
     })
 
@@ -124,11 +125,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     const scope = roomScope(chatGroup)
+    // A crew's room names its members (first names); every other room by pseudonym (`namesInRoom`).
+    const names =
+      chatGroup.kind === "crew" ? await namesInRoom(chatGroup, members.map((m) => m.user.id)) : null
     return successResponse({
       participants: members.map((m) => ({
         // Yours real; everyone else's as their handle in this room (SCRUM-371).
         userId: idForViewer(authUser.userId, scope, m.user.id),
-        name: m.anonymous_name || "Anonymous",
+        name: names?.get(m.user.id) ?? (m.anonymous_name || "Anonymous"),
         avatar: null,
         role: m.role,
         status: m.status,

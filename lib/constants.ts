@@ -193,3 +193,50 @@ export const BOARD = {
   /** Longest an ask may be. "Can I join?" needs no essay. */
   MAX_REQUEST_LENGTH: 300,
 } as const
+
+/**
+ * Crews (plan v2 §6, §8.3). Product decisions, so they live here where they
+ * can be argued with, not in a route.
+ */
+export const CREW = {
+  /**
+   * Room for a birthday or an office table, small enough that a crew card is
+   * not a mob in a room of 80. Counted under a lock on the crew row, so two
+   * accepts at once cannot both take the last seat (lib/crews/crews.ts).
+   */
+  MAX_MEMBERS: 12,
+  /** Below this a crew dissolves (D-15): one person is not a crew. */
+  MIN_MEMBERS: 2,
+  /**
+   * Crews larger than this match crews only, never one person: one stranger
+   * facing a big group is a bad night and a safety concern (§8.3).
+   */
+  MAX_SOLO_MATCH: 6,
+  NAME_MIN: 2,
+  NAME_MAX: 32,
+  BIO_MAX: 140,
+  MAX_TAGS: 3,
+  /** Crew cards per page at an event (`GET /events/:id/crews`), and the most one page may ask for. */
+  CARDS_DEFAULT: 30,
+  CARDS_MAX: 50,
+  /*
+   * Caps (C10), so a crew cannot be a way to push strangers' phones: an
+   * invite is a push, and a crew is a way to send ten of them.
+   */
+  /** Standing crews one person may own at once. */
+  MAX_OWNED: 3,
+  /** Standing crews one person may be in at once, owned ones included. */
+  MAX_JOINED: 10,
+  /** Crews one person may create in `CREATE_WINDOW_MS`. */
+  MAX_CREATED_PER_WINDOW: 3,
+  CREATE_WINDOW_MS: 24 * 60 * 60 * 1000,
+  /** One invite push per inviter and invitee in this window, whatever the crew. */
+  INVITE_PUSH_WINDOW_MS: 24 * 60 * 60 * 1000,
+  /** An invite nobody answered lapses: it stops showing and can be sent again. */
+  INVITE_TTL_MS: 14 * 24 * 60 * 60 * 1000,
+  /**
+   * A declined invite is not re-sent — nor its push — for this long; after it,
+   * asking again is a new ask.
+   */
+  REINVITE_AFTER_DECLINE_MS: 30 * 24 * 60 * 60 * 1000,
+} as const

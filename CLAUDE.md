@@ -153,7 +153,7 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while eight exist in
+express a CHECK constraint, so `db push` creates none — while twelve exist in
 migration SQL and therefore in every deployed environment:
 
 | Constraint | What it enforces |
@@ -165,12 +165,17 @@ migration SQL and therefore in every deployed environment:
 | `venues_day_reset_hour_range` | `day_reset_hour BETWEEN 0 AND 23` — when a venue's day starts (venue days) |
 | `venues_timezone_known` | `venues.timezone` has the shape of an IANA name (`Area/Location`, or `UTC`) — whether it exists is the app's check |
 | `events_venue_day_shape` | a venue day has its venue, is `unlisted` and has no `organizer_org_id` — a hard delete of a venue with days is refused rather than orphaning them, and no org-scoped reader can reach one |
-| `chat_groups_one_owner` | a room has exactly the one owner its `kind` names: `event` → `event_id` only, `board_post` → `board_post_id` only. No arm for `crew` / `blend` until step 8 adds their owner columns, so no such room can be written. Who may enter is `lib/room-kind.ts` |
+| `chat_groups_one_owner` | a room has exactly the one owner its `kind` names: `event` → `event_id` only, `board_post` → `board_post_id` only, `crew` → `crew_id` only. No arm for `blend` until `blends` adds its owner column, so no such room can be written. Who may enter is `lib/room-kind.ts` |
+| `crews_name_length` | a crew name is 2–32 characters (`char_length`, so an emoji is one) |
+| `crews_bio_length` | a crew bio is at most 140 characters |
+| `crews_tags_max` | at most 3 crew tags (the slugs themselves are `CREW_TAGS`) |
+| `crew_invites_not_self` | nobody invites themselves into a crew |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
 venue per local day — `lib/venue-day.ts` recovers a lost race by that name),
-`event_check_ins_expires_at_idx`, the system user `blendn-system` that owns
+`event_check_ins_expires_at_idx`, `crew_members_one_owner` (one owner per
+crew), the system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its
 deletion. On a `db push` database `venueDayFor` fails for want of that user,
 and says so. See `docs/VENUES.md` § Venue days.

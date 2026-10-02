@@ -27,8 +27,9 @@ import type { RoomScope } from "./room-handle"
  *               in a block with the author either way (the board reads a block
  *               as a withdrawn post); closed with the post, with a hidden
  *               event, and for writes `OWNER_ROOM_HOURS` after the event ends
- *   crew        a member of the crew            — step 8; no owner column yet
- *   blend       a present member of either side — step 8; no owner column yet
+ *   crew        a member of the crew now — not suspended, the crew not
+ *               dissolved. Real names inside (`namesInRoom`, lib/identity.ts)
+ *   blend       a present member of either side — no owner column yet
  *
  * A member row is never enough on its own for a room that is not an event's:
  * it records a pseudonym, a mute, a ban or a leave, and the owner says whether
@@ -46,8 +47,9 @@ import type { RoomScope } from "./room-handle"
 
 /**
  * How long after its event ends a room owned by something AT that event stays
- * open for writes: a board post's now, a Blend's in step 8 (plan v2 §6, "closes
- * 12 h after the event"). The chat sweeper archives it then (`chat-lifecycle`).
+ * open for writes: a board post's now, a Blend's once it has an owner (plan v2
+ * §6, "closes 12 h after the event"). The chat sweeper archives it then
+ * (`chat-lifecycle`).
  */
 export const OWNER_ROOM_HOURS = 12
 
@@ -94,10 +96,52 @@ interface BoardPostOwner {
   author: { blocked_users: { blocked_id: string }[]; blocked_by: { blocker_id: string }[] }
 }
 
+/** Everything the crew door reads, for these viewers: their own member rows, if the crew still stands. */
+function crewSelect(viewerIds: string[]) {
+  return {
+    select: {
+      dissolved_at: true,
+      // The suspended and the erased are on no crew surface (§6 Safety).
+      members: {
+        where: { user_id: { in: viewerIds }, user: { suspended_at: null, deletedAt: null } },
+        select: { user_id: true },
+      },
+    },
+  }
+}
+
+/** The crew behind a room, as its door reads it for one caller. */
+export function crewDoor(viewerId: string) {
+  return crewSelect([viewerId])
+}
+
+interface CrewOwner {
+  dissolved_at: Date | null
+  /** The caller's member row, if they are in the crew (`crewDoor`). */
+  members: { user_id: string }[]
+}
+
+/**
+ * Every owner's door for one caller, to spread into a room's select: whatever
+ * the room's kind, the row its door needs is read, and a kind added without
+ * one fails closed (`roomOwnerDenial` reads a missing owner as "hidden").
+ */
+export function ownerDoor(viewerId: string) {
+  return { board_post: boardPostDoor(viewerId), crew: crewDoor(viewerId) }
+}
+
 interface RoomOwners<E> {
   kind: chat_group_kind
   event: E | null
   board_post: BoardPostOwner | null
+  /** Optional so an older select fails closed rather than failing to compile into an open door. */
+  crew?: CrewOwner | null
+}
+
+function crewDenial(crew: CrewOwner | null | undefined, userId: string): "hidden" | "not_member" | null {
+  // A dissolved crew's room is archived and gone for everyone (D-15).
+  if (!crew || crew.dissolved_at) return "hidden"
+  return crew.members.some((m) => m.user_id === userId) ? null : "not_member"
 }
 
 function boardPostDenial(post: BoardPostOwner | null, userId: string): "hidden" | "not_member" | null {
@@ -132,8 +176,9 @@ export function roomOwnerDenial(
       return !room.event || eventHidesRoom(room.event) ? "hidden" : null
     case "board_post":
       return boardPostDenial(room.board_post, userId)
-    // No owner column until step 8, and `chat_groups_one_owner` refuses the row.
     case "crew":
+      return crewDenial(room.crew, userId)
+    // No owner column yet, and `chat_groups_one_owner` refuses the row.
     case "blend":
       return "hidden"
     default: {
@@ -192,7 +237,8 @@ export function mayWriteToRoomFor<E extends Parameters<typeof mayWriteToRoom>[1]
  * Whether the room takes writes now. An event's room has its calendar window
  * (`chatWindowState`). A board post's closes `OWNER_ROOM_HOURS` after its
  * event ends — on the clock, whether or not the sweeper has archived it yet —
- * and before that when locked or archived. Crew and Blend: no owner yet.
+ * and before that when locked or archived. A crew's has no clock: it is open
+ * until it is locked or archived (a dissolved crew's is). Blend: no owner yet.
  */
 export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
   room: {
@@ -204,6 +250,7 @@ export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
   now: Date = new Date()
 ): ChatWindowState {
   if (room.kind === "event") return room.event ? chatWindowState(room.event, room, now) : { open: false, reason: "hidden" }
+  if (room.kind === "crew") return room.status === "active" ? { open: true } : { open: false, reason: room.status }
   if (room.kind !== "board_post" || !room.board_post) return { open: false, reason: "hidden" }
   if (room.status !== "active") return { open: false, reason: room.status }
   if (now >= ownerRoomClosesAt(room.board_post.event)) return { open: false, reason: "window_closed" }
@@ -222,10 +269,11 @@ export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
 export async function ownerAdmits(chatGroupId: string, candidates: string[]): Promise<Set<string> | null> {
   const room = await db.chat_groups.findUnique({
     where: { id: chatGroupId },
-    select: { kind: true, board_post: boardPostSelect(candidates) },
+    select: { kind: true, board_post: boardPostSelect(candidates), crew: crewSelect(candidates) },
   })
   if (!room) return new Set()
   if (room.kind === "event") return null
+  if (room.kind === "crew") return new Set(candidates.filter((id) => crewDenial(room.crew, id) === null))
   const post = room.board_post
   return new Set(
     candidates.filter(
@@ -250,9 +298,9 @@ export async function ownerAdmits(chatGroupId: string, candidates: string[]): Pr
 }
 
 /**
- * Everybody a board post's room admits — the author and the accepted askers
- * its door lets in — for the roster of a room that is not an event's. Null for
- * an event's room. Crew and Blend: nobody, until step 8.
+ * Everybody a room that is not an event's admits, for its roster: a board
+ * post's author and the accepted askers, a crew's members. Null for an event's
+ * room. Blend: nobody, until it has an owner.
  */
 export async function ownerRoster(chatGroupId: string): Promise<Set<string> | null> {
   const room = await db.chat_groups.findUnique({
@@ -260,13 +308,15 @@ export async function ownerRoster(chatGroupId: string): Promise<Set<string> | nu
     select: {
       kind: true,
       board_post: { select: { author_id: true, requests: { where: { status: "accepted" }, select: { from_user_id: true } } } },
+      crew: { select: { members: { select: { user_id: true } } } },
     },
   })
   if (!room) return new Set()
   if (room.kind === "event") return null
-  const post = room.board_post
-  if (!post) return new Set()
-  return ownerAdmits(chatGroupId, [post.author_id, ...post.requests.map((r) => r.from_user_id)])
+  const candidates = room.board_post
+    ? [room.board_post.author_id, ...room.board_post.requests.map((r) => r.from_user_id)]
+    : (room.crew?.members.map((m) => m.user_id) ?? [])
+  return candidates.length ? ownerAdmits(chatGroupId, candidates) : new Set()
 }
 
 /**

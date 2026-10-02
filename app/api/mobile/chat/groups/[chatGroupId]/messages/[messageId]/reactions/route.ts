@@ -5,7 +5,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE } from "@/lib/chat-window"
-import { boardPostDoor, mayWriteToRoomFor } from "@/lib/room-kind"
+import { ownerDoor, mayWriteToRoomFor } from "@/lib/room-kind"
 import { bannedRefusal, mutedRefusal } from "@/lib/moderation/actions"
 import { emitChatReaction } from "@/lib/socket-server"
 import {
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         id: true,
         kind: true,
         status: true,
-        board_post: boardPostDoor(user.userId),
+        ...ownerDoor(user.userId),
         members: { where: { user_id: user.userId }, select: { status: true, muted_by: true, banned_by: true, last_allowed_at: true } },
         // Spread of both bounds, not just `end_time`: `chatWindowState` reads a
         // missing start as "no lower bound", which would open a room that has

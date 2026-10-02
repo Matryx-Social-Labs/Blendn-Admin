@@ -17,6 +17,14 @@ export function closeRoomSockets(chatGroupId: string): void {
   globalThis.__blendnSocketIo?.in(`chat:${chatGroupId}`).socketsLeave(`chat:${chatGroupId}`)
 }
 
+/**
+ * One person out of a room their door no longer opens for — a crew member who
+ * left or was removed. Every socket they hold, on every instance.
+ */
+export function leaveRoomSockets(chatGroupId: string, userId: string): void {
+  globalThis.__blendnSocketIo?.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
+}
+
 /** `closeRoomSockets` for the rooms of these board posts, if they have any. Never rejects: the close has committed. */
 export async function closePostRooms(postIds: string[]): Promise<void> {
   if (postIds.length === 0) return

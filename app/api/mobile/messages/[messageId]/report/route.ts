@@ -13,7 +13,7 @@ import {
   errorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
-import { boardPostDoor, roomOwnerDenial } from "@/lib/room-kind"
+import { ownerDoor, roomOwnerDenial } from "@/lib/room-kind"
 
 interface RouteParams {
   params: Promise<{ messageId: string }>
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               select: {
                 id: true,
                 chat_group: {
-                  select: { kind: true, event: { select: { status: true, deleted_at: true } }, board_post: boardPostDoor(authUser.userId) },
+                  select: { kind: true, event: { select: { status: true, deleted_at: true } }, ...ownerDoor(authUser.userId) },
                 },
               },
             })

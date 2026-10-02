@@ -136,6 +136,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       cover_image_url,
       external_link,
       is_featured,
+      crews_enabled,
       is_recurring,
       check_in_radius,
       full_description,
@@ -328,6 +329,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
         // The featured rail is the platform's, not the organiser's: any
         // organiser could put their own event on it. Ignored unless app_admin.
         ...(is_featured != null && session.user.role === "app_admin" && { is_featured }),
+        // The host's "Allow crews at this event". Null leaves it as it is.
+        ...(crews_enabled != null && { crews_enabled }),
         ...(is_recurring != null && { is_recurring }),
         /*
          * From the pin this row keeps, not the area's centre (#458 review).

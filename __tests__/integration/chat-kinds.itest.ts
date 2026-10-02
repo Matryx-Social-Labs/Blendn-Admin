@@ -6,10 +6,10 @@ import { NextRequest } from "next/server"
  * `initSocketServer` with its own auth and `join:chat` handler, clients that
  * sign in with a mobile token.
  *
- * A room now has a kind and one owner. Only `event` and `board_post` rooms can
- * exist yet: `crew` and `blend` have no owner column until step 8, and the
- * CHECK refuses them — so their row of the probe matrix is "cannot be made",
- * proven below, and their door is pinned in chat-join-per-kind.test.ts.
+ * A room now has a kind and one owner. A crew's room has its own suite
+ * (crews.itest.ts, step 8); a `blend` room has no owner column yet and the
+ * CHECK refuses it — so its row of the probe matrix is "cannot be made",
+ * proven below, and its door is pinned in chat-join-per-kind.test.ts.
  *
  * The board-post room is the one that matters here: it is the first room
  * whose door is not the event's. Its people are the post's author and the
@@ -356,7 +356,8 @@ describe("the database holds the shape (CR-I01, on a migrate-deploy database)", 
     await expect(insert("event", null, null)).rejects.toThrow(oneOwner)
     await expect(insert("board_post", null, null)).rejects.toThrow(oneOwner)
     await expect(insert("board_post", eventId, null)).rejects.toThrow(oneOwner)
-    // No owner column yet (step 8), so no crew or Blend room can exist to be joined.
+    // A crew room without its crew is refused (crews.itest.ts proves the crew
+    // arm); a Blend room has no owner column yet, so none can exist to be joined.
     await expect(insert("crew", null, null)).rejects.toThrow(oneOwner)
     await expect(insert("blend", null, null)).rejects.toThrow(oneOwner)
   })

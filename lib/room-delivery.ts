@@ -4,7 +4,7 @@ import { blockCounterparties } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
 import { roomHandle, type RoomScope } from "@/lib/room-handle"
-import { boardPostDoor, roomOwnerDenial } from "@/lib/room-kind"
+import { ownerDoor, roomOwnerDenial } from "@/lib/room-kind"
 import { isRoomMuted } from "@/lib/room-mute"
 import { liveInVenueDay } from "@/lib/chat-window"
 
@@ -128,7 +128,7 @@ export async function deliverToRoom(input: {
           select: {
             kind: true,
             event: { select: { status: true, deleted_at: true, kind: true } },
-            board_post: boardPostDoor(recipientId),
+            ...ownerDoor(recipientId),
           },
         },
       },

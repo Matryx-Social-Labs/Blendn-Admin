@@ -56,10 +56,10 @@ import type { chat_group_kind } from "@prisma/client"
  * and the refusal does not rest on two random uuids happening to differ.
  *
  * Only an event room's handle resolves outside its room (`resolveUserRef`, for
- * the profile, friends and block routes). Who may recognise whom in a crew or
- * a Blend is the owner's rule, and those rooms do not have one yet; until they
- * do, their handles name somebody only inside the room that minted them
- * (`roomMemberFromRef`).
+ * the profile, friends and block routes). A crew's, a Blend's or a board
+ * post's handle names somebody only inside the room that minted them
+ * (`roomMemberFromRef`) — the crew routes take a crew member's handle back
+ * that way (`DELETE /crews/:id/members/:userId`).
  */
 
 const PREFIX = "rh_"

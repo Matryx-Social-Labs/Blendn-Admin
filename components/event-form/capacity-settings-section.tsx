@@ -181,6 +181,30 @@ export function CapacitySettingsSection({
             )}
           />
         ) : null}
+
+        {/*
+          The kit's "Allow group check-in" (organiser/screens-home.jsx, NewEvent
+          · In the room). On by default; off means no crew cards, crew likes or
+          Blends at this event — each person still checks in on their own.
+        */}
+        <FormField
+          control={form.control}
+          name="crews_enabled"
+          render={({ field }) => (
+            <FormItem className="flex items-center justify-between gap-4 @2xl/main:pt-6">
+              <div className="space-y-0.5">
+                <FormLabel>Allow crews at this event</FormLabel>
+                <div className="text-[0.8125rem] text-muted-foreground">
+                  Friends who come together show up as one crew and can meet other crews. Off: everyone is here on
+                  their own.
+                </div>
+              </div>
+              <FormControl>
+                <Switch checked={field.value ?? true} onCheckedChange={field.onChange} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
       </div>
     </FormSection>
   )
