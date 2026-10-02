@@ -131,7 +131,10 @@ test.describe("the venue owner and the admin", () => {
     const organiser = await db.user.findUnique({ where: { email: "organizer@blendn.app" }, select: { id: true } })
     expect(venue && host && organiser, "the seed's venue, host and organiser").toBeTruthy()
     roomTitle = `Room for the venue ${Date.now()}`
-    const start = new Date(Date.now() - 60 * 60_000)
+    // Live now, and after the claim: a venue sees no night that began before
+    // it owned the place (SCRUM-355), and CI's seed approves the claim minutes
+    // before this runs.
+    const start = new Date(Math.max(Date.now() - 60 * 60_000, venue!.claimed_at!.getTime() + 1_000))
     const event = await db.events.create({
       data: {
         slug: `e2e-venue-room-${Date.now()}`,
