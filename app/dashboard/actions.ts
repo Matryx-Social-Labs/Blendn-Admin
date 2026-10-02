@@ -14,7 +14,7 @@ import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
-import { discloseStarsAcross, spreadsByEvent } from "@/lib/disclosure"
+import { discloseStarsAcross, spreadsByEventId } from "@/lib/disclosure"
 import { actorFor } from "@/lib/org-membership"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
@@ -26,8 +26,9 @@ import { logger } from "@/lib/logger"
 import { tileDelta } from "@/lib/metric-delta"
 import { previousRange, rangeLabel, resolveRange, type DateRange } from "@/lib/date-range"
 import { normaliseVenueName } from "@/lib/venue-name"
-import { repeatAttendees, turnUpPct, noShowPct, noShows } from "@/lib/counting"
-import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { repeatAttendees, noShowPct, noShows } from "@/lib/counting"
+import { eventClock } from "@/lib/event-phase"
+import { comingUpFor, latestFeedbackFor, liveEventFor, setupFactsFor } from "@/lib/organiser-overview"
 import type {
   AdminOverview,
   CityRow,
@@ -125,11 +126,9 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
   const now = new Date()
   const windowStart = new Date(now.getTime() - 30 * DAY_MS)
   const priorStart = new Date(now.getTime() - 60 * DAY_MS)
-  const todayStart = new Date(now)
-  todayStart.setHours(0, 0, 0, 0)
   const pastEvents = { ...scope, start_time: { lt: now } }
 
-  const [next, previous, ratingRows, chatToday, eventRows] = await Promise.all([
+  const [next, previous, ratingRows, live, setup, comingUp] = await Promise.all([
     db.events.findFirst({
       where: { ...scope, status: "published", start_time: { gte: now } },
       orderBy: { start_time: "asc" },
@@ -137,6 +136,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
         id: true,
         title: true,
         start_time: true,
+        timezone: true,
         city: true,
         venue_name: true,
         max_capacity: true,
@@ -163,37 +163,11 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
       where: { event: scope },
       _count: { _all: true },
     }),
-    db.chat_messages.count({
-      where: {
-        deleted_at: null,
-        created_at: { gte: todayStart },
-        chat_group: { event: scope },
-      },
-    }),
-    db.events.findMany({
-      where: scope,
-      orderBy: { start_time: "desc" },
-      take: 25,
-      select: {
-        id: true,
-        title: true,
-        start_time: true,
-        city: true,
-        venue_name: true,
-        status: true,
-        max_capacity: true,
-        _count: {
-          select: {
-            rsvps: { where: { status: "going" } },
-          },
-        },
-      },
-    }),
+    liveEventFor(scope, now),
+    setupFactsFor(userId, scope),
+    comingUpFor(scope, now),
   ])
-
-  // Turn-up per event, in one grouped query rather than 25 `_count`s that
-  // cannot say DISTINCT.
-  const attendedPerEvent = await distinctAttendeeCounts(eventRows.map((e) => e.id))
+  const spreads = spreadsByEventId(ratingRows)
 
   // No-show rate over the last 30 days, and the 30 before it, so the delta says
   // whether it is getting better rather than just what it is.
@@ -281,6 +255,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
       id: next.id,
       title: next.title,
       startAt: next.start_time.toISOString(),
+      dayLabel: eventClock(next.timezone).format(next.start_time, { weekday: "short", day: "numeric", month: "short" }),
       venue: next.venue_name ?? "Venue TBD",
       city: next.city ?? "",
       daysOut,
@@ -298,35 +273,28 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
 
   return {
     role: "organizer",
+    live,
     nextEvent,
     pacing,
     pacingCapacity,
     benchmark,
+    setup,
+    // A check-in is a person at an event: one row per person per day, folded.
+    checkIns: { current: pairCount(attendedNow), previous: pairCount(attendedPrior) },
     // Withheld under five raters, like every rating a host sees (SCRUM-437).
-    ...discloseStarsAcross(spreadsByEvent(ratingRows)),
+    ...discloseStarsAcross([...spreads.values()]),
     noShowRatePct: round1(noShowNow),
     noShowDelta:
       noShowNow === null || noShowPrior === null ? null : Math.round(noShowNow - noShowPrior),
     repeatAttendees: repeatAttendees(repeatRows),
-    chatToday,
-    events: eventRows.map((event) => ({
-      id: event.id,
-      name: event.title,
-      startAt: event.start_time.toISOString(),
-      city: event.city ?? "",
-      venue: event.venue_name ?? "—",
-      status: event.status,
-      going: event._count.rsvps,
-      fillPct:
-        event.max_capacity && event.max_capacity > 0
-          ? Math.min(100, (event._count.rsvps / event.max_capacity) * 100)
-          : null,
-      turnUpPct:
-        event.start_time >= now
-          ? null
-          : turnUpPct(attendedPerEvent.get(event.id) ?? 0, event._count.rsvps),
-    })),
+    latestFeedback: await latestFeedbackFor(spreads, now),
+    comingUp,
   }
+}
+
+/** Distinct (person, event) pairs among check-in rows. */
+function pairCount(rows: Array<{ user_id: string; event_id: string }>): number {
+  return new Set(rows.map((r) => `${r.user_id}|${r.event_id}`)).size
 }
 
 /* -------------------------------------------------------------------------- */
