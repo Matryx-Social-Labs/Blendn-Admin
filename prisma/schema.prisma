@@ -760,9 +760,26 @@ model event_check_ins {
   @@index([user_id, status])
 }
 
+/// A room. Every room has a kind and exactly one owner of that kind (plan v2
+/// §7): an event's room is owned by the event, a board post's by the post.
+/// `chat_groups_one_owner` (a CHECK in the migration; schema.prisma cannot say
+/// it, and `db push` drops it) holds the pairing, and refuses `crew` and
+/// `blend` rooms outright until step 8 gives them owner columns.
+///
+/// Who may enter is `roomOwnerDenial` in lib/room-kind.ts, one switch on
+/// `kind` for the socket join and every HTTP read — never "has a member row".
 model chat_groups {
   id              String            @id @default(uuid()) @db.Uuid
-  event_id        String            @unique @db.Uuid
+  kind            chat_group_kind   @default(event)
+  /// Set exactly when `kind = event`. Still `@unique`: NULLs are distinct in
+  /// Postgres, so this is one room per event and any number of rooms with no
+  /// event — the partial unique `WHERE kind = 'event'` would say, given the
+  /// CHECK, and Prisma keeps its by-event lookups.
+  event_id        String?           @unique @db.Uuid
+  /// Set exactly when `kind = board_post`. One room per post; the post cannot
+  /// be hard-deleted while it has one (RESTRICT).
+  board_post_id   String?           @unique @db.Uuid
+  /// Unread since the baseline: every row is `event`. Room kinds are `kind`.
   type            chat_group_type   @default(event)
   name            String
   description     String?
@@ -775,9 +792,13 @@ model chat_groups {
   deleted_at      DateTime?         @db.Timestamptz(6)
 
   // Relations
-  event    events               @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  messages chat_messages[]
-  members  chat_group_members[]
+  event      events?              @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  /// RESTRICT, not cascade: a room is other people's conversation and kept
+  /// evidence, so deleting a post with a room is refused. Account erasure
+  /// soft-deletes such a post and archives its room instead.
+  board_post board_posts?         @relation(fields: [board_post_id], references: [id], onDelete: Restrict)
+  messages   chat_messages[]
+  members    chat_group_members[]
 
   @@index([status])
 }
@@ -2638,6 +2659,14 @@ enum chat_group_type {
   announcement
 }
 
+/// What a room belongs to (plan v2 §7). See `chat_groups`.
+enum chat_group_kind {
+  event
+  crew
+  blend
+  board_post
+}
+
 enum chat_group_status {
   active
   archived
@@ -3403,6 +3432,8 @@ model board_posts {
   event    events          @relation(fields: [event_id], references: [id], onDelete: Cascade)
   author   User            @relation("BoardAuthor", fields: [author_id], references: [id], onDelete: Cascade)
   requests board_requests[]
+  /// The post's room, once its author and accepted askers have one.
+  room     chat_groups?
 
   /// The board itself: this event's live posts, newest first.
   @@index([event_id, deleted_at, created_at])

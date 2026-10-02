@@ -53,7 +53,7 @@ describe("every group-chat surface consults blocked_users", () => {
     const src = read("lib/room-delivery.ts")
     // The exclusion list is the third argument; the room's event may follow it
     // (SCRUM-371 — it saves the emitter a lookup, and changes nobody's filter).
-    expect(src).toMatch(/emitChatMessage\(\s*\n?\s*chatGroupId,[\s\S]{0,600}\},\s*senderBlocked(,\s*input\.eventId)?\s*\n?\s*\)/)
+    expect(src).toMatch(/emitChatMessage\(\s*\n?\s*chatGroupId,[\s\S]{0,600}\},\s*senderBlocked(,\s*input\.(?:eventId|scope))?\s*\n?\s*\)/)
   })
 
   it("every chat write path delivers through the one place that filters", () => {

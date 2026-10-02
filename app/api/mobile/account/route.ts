@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { evictUserSockets } from "@/lib/socket-server"
+import { closeRoomSockets } from "@/lib/room-close"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
@@ -77,6 +78,12 @@ export async function DELETE(request: NextRequest) {
         select: { message_id: true },
       })
     ).map((r) => r.message_id)
+
+    // The rooms of their posts, which close with the erasure below (E1, E3).
+    const postRooms = await db.chat_groups.findMany({
+      where: { kind: "board_post", board_post: { author_id: authUser.userId } },
+      select: { id: true },
+    })
 
     const deletedAt = new Date()
     await db.$transaction([
@@ -300,7 +307,29 @@ export async function DELETE(request: NextRequest) {
        * be the way to destroy the evidence. It is already hidden, so nobody
        * is left holding an offer they cannot take.
        */
-      db.board_posts.deleteMany({ where: { author_id: authUser.userId, moderation_status: null } }),
+      db.board_posts.deleteMany({ where: { author_id: authUser.userId, moderation_status: null, room: { is: null } } }),
+
+      /*
+       * EXCEPT a post with a room (step 7, E1). The room is other people's
+       * conversation — the accepted askers' messages, anything moderation hid
+       * or somebody reported, which the IT Rules keep for 180 days — and a
+       * room cannot outlive its post (`board_post_id` is ON DELETE RESTRICT).
+       * So the post stays as a row: off the board (`deleted_at`, which also
+       * closes the room's door), its words erased like an ask's, and its room
+       * archived with every message and member kept.
+       */
+      db.chat_groups.updateMany({
+        where: { kind: "board_post", board_post: { author_id: authUser.userId }, status: { not: "archived" } },
+        data: { status: "archived" },
+      }),
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, moderation_status: null, room: { isNot: null }, deleted_at: null },
+        data: { deleted_at: deletedAt },
+      }),
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, moderation_status: null, room: { isNot: null } },
+        data: { body: "" },
+      }),
 
       /*
        * And a post somebody REPORTED, still waiting for a reviewer. Filing the
@@ -393,6 +422,9 @@ export async function DELETE(request: NextRequest) {
     // a new one, but a second phone's live connection kept its rooms and DMs
     // coming after the erasure (SCRUM-449). Suspension does the same.
     evictUserSockets(authUser.userId)
+    // Their posts' rooms are archived and their door now says hidden; whoever
+    // was still in one is taken out, as from a post withdrawn (E3).
+    for (const room of postRooms) closeRoomSockets(room.id)
 
     // Seats they held are free now; the waitlist moves, per event.
     for (const eventId of openEventIds) {

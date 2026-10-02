@@ -23,7 +23,8 @@ import {
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
-import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, NOT_LIVE_MESSAGE, roomReadDenial } from "@/lib/chat-window"
+import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
+import { boardPostDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { clientMessageMetadata, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -67,6 +68,7 @@ export async function GET(
           where: { user_id: user.userId },
         },
         event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
+        board_post: boardPostDoor(user.userId),
       },
     })
 
@@ -74,9 +76,10 @@ export async function GET(
       return notFoundResponse("Chat group not found")
     }
 
-    // Any membership row used to pass, `banned` included (SCRUM-205).
+    // Any membership row used to pass, `banned` included (SCRUM-205); and a
+    // room that is not an event's asks its owner too (F8).
     const membership = chatGroup.members[0]
-    const denial = roomReadDenial(membership, chatGroup.event)
+    const denial = roomReadDenialFor(chatGroup, membership, user.userId)
     if (denial === "hidden") return notFoundResponse("Chat group not found")
     if (denial === "not_member") return forbiddenResponse("You are not a member of this chat group")
     if (denial === "banned") return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
@@ -199,7 +202,8 @@ export async function GET(
      * straight out of the table, beside `user.id` — so both are overridden,
      * not just the one the client reads.
      */
-    const idFor = (userId: string) => idForViewer(user.userId, chatGroup.event_id, userId)
+    const scope = roomScope(chatGroup)
+    const idFor = (userId: string) => idForViewer(user.userId, scope, userId)
 
     return successResponse({
       messages: messagesToReturn.map((m) => {
@@ -321,6 +325,7 @@ export async function POST(
         // `chatWindowState` treats a missing start as "no lower bound", which
         // is the right default for old callers and the wrong one here.
         event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
+        board_post: boardPostDoor(user.userId),
       },
     })
 
@@ -333,6 +338,14 @@ export async function POST(
     if (!membership) {
       return forbiddenResponse("You are not a member of this chat group")
     }
+    /*
+     * The owner's door before anything with a side effect: the auto-unmute
+     * below writes, and must not run for somebody the room no longer admits
+     * (a board post's ask that is not accepted, a post taken down).
+     */
+    const owner = roomOwnerDenial(chatGroup, user.userId)
+    if (owner === "not_member") return forbiddenResponse("You are not a member of this chat group")
+    if (owner === "hidden") return errorResponse(chatClosedMessage("hidden"), 403, ErrorCode.CHAT_CLOSED)
 
     // Check if user is muted or banned
     let effectiveStatus: string = membership.status
@@ -359,12 +372,15 @@ export async function POST(
      * recovery, not a predicate — `mayWriteToRoom` sees the status it leaves
      * behind.
      */
-    const denial = mayWriteToRoom(
+    const denial = mayWriteToRoomFor(
+      chatGroup,
       { status: effectiveStatus, last_allowed_at: membership.last_allowed_at },
-      chatGroup.event,
-      chatGroup
+      user.userId
     )
     if (denial) {
+      if (denial.reason === "not_member") {
+        return forbiddenResponse("You are not a member of this chat group")
+      }
       if (denial.reason === "banned") {
         return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
       }
@@ -679,7 +695,7 @@ export async function POST(
      */
     await deliverToRoom({
       chatGroupId,
-      eventId: chatGroup.event_id,
+      scope: roomScope(chatGroup),
       groupName: chatGroup.name,
       senderId: user.userId,
       senderAnonName,
@@ -715,7 +731,7 @@ export async function POST(
         ? {
             ...quoted,
             user: {
-              id: idForViewer(user.userId, chatGroup.event_id, quoted.user.id),
+              id: idForViewer(user.userId, roomScope(chatGroup), quoted.user.id),
               name: roomSenderName(quoted, quotedAuthor?.anonymous_name || undefined, chatGroup.event),
             },
           }

@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, timingSafeEqual } from "crypto"
+import type { chat_group_kind } from "@prisma/client"
 
 /**
  * The id a room shows for somebody else (SCRUM-371).
@@ -43,6 +44,22 @@ import { createCipheriv, createDecipheriv, createHmac, hkdfSync, timingSafeEqual
  * MAC and the cipher, as `lib/pseudonym.ts` reasons: `lib/env.ts` already
  * requires it at 32+ characters, and the mobile JWT key should not double as
  * an encryption key.
+ *
+ * ## Rooms of every kind (step 7, F9)
+ *
+ * A handle is scoped to one room, not to one event. An event's room is named
+ * by its event id, exactly as before, so every handle an installed client
+ * holds still resolves. A room of another kind (a crew, a Blend, a board
+ * post) is named by its own group id **and its kind**: one byte after the id
+ * that no account id can begin with, authenticated with the rest. So a handle
+ * from one room never resolves in another, of the same kind or across kinds,
+ * and the refusal does not rest on two random uuids happening to differ.
+ *
+ * Only an event room's handle resolves outside its room (`resolveUserRef`, for
+ * the profile, friends and block routes). Who may recognise whom in a crew or
+ * a Blend is the owner's rule, and those rooms do not have one yet; until they
+ * do, their handles name somebody only inside the room that minted them
+ * (`roomMemberFromRef`).
  */
 
 const PREFIX = "rh_"
@@ -50,6 +67,33 @@ const IV_BYTES = 12
 const TAG_BYTES = 16
 const EVENT_BYTES = 16
 const UUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i
+
+/**
+ * The room a handle belongs to: an event's room by its event id (the encoding
+ * every installed client holds), or a room of another kind by its group id.
+ * `roomScope` in lib/room-kind.ts says which, from the room's row.
+ */
+export type RoomScope = string | { kind: Exclude<chat_group_kind, "event">; groupId: string }
+
+/** After the id, for a room that is not an event's. Never the first byte of an account id (printable). */
+const KIND_BYTE: Record<Exclude<chat_group_kind, "event">, number> = { crew: 1, blend: 2, board_post: 3 }
+const KIND_OF_BYTE = new Map(Object.entries(KIND_BYTE).map(([kind, byte]) => [byte, kind as Exclude<chat_group_kind, "event">]))
+
+function scopeBytes(scope: RoomScope): Buffer {
+  const id = typeof scope === "string" ? scope : scope.groupId
+  if (!UUID.test(id)) throw new Error("roomHandle needs a room uuid")
+  const bytes = Buffer.from(id.replace(/-/g, ""), "hex")
+  return typeof scope === "string" ? bytes : Buffer.concat([bytes, Buffer.from([KIND_BYTE[scope.kind]])])
+}
+
+const uuidOf = (hex: string) => `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+
+function sameScope(a: RoomScope, b: RoomScope): boolean {
+  if (typeof a === "string" || typeof b === "string") {
+    return typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase()
+  }
+  return a.kind === b.kind && a.groupId.toLowerCase() === b.groupId.toLowerCase()
+}
 
 let derived: { secret: string; mac: Buffer; enc: Buffer } | null = null
 
@@ -71,11 +115,10 @@ function syntheticIv(mac: Buffer, plaintext: Buffer): Buffer {
   return createHmac("sha256", mac).update(plaintext).digest().subarray(0, IV_BYTES)
 }
 
-/** Another person's id as `eventId`'s room shows it. Throws on a non-uuid event. */
-export function roomHandle(eventId: string, userId: string): string {
-  if (!UUID.test(eventId)) throw new Error("roomHandle needs an event uuid")
+/** Another person's id as `scope`'s room shows it. Throws on a non-uuid room. */
+export function roomHandle(scope: RoomScope, userId: string): string {
   const { mac, enc } = keys()
-  const plaintext = Buffer.concat([Buffer.from(eventId.replace(/-/g, ""), "hex"), Buffer.from(userId, "utf8")])
+  const plaintext = Buffer.concat([scopeBytes(scope), Buffer.from(userId, "utf8")])
   const iv = syntheticIv(mac, plaintext)
   const cipher = createCipheriv("aes-256-gcm", enc, iv)
   const body = Buffer.concat([cipher.update(plaintext), cipher.final()])
@@ -86,13 +129,8 @@ export function isRoomHandle(ref: string): boolean {
   return ref.startsWith(PREFIX)
 }
 
-/**
- * The person behind a ref: a handle is decrypted and verified; anything else
- * is a raw id (the contract before handles, still accepted). Null for a handle
- * that does not verify — malformed, truncated, tampered or from another key.
- */
-export function resolveUserRef(ref: string): { userId: string; eventId: string | null } | null {
-  if (!isRoomHandle(ref)) return { userId: ref, eventId: null }
+/** A handle's person and room, whatever kind of room. Null for anything that does not verify. */
+function openHandle(ref: string): { userId: string; scope: RoomScope } | null {
   try {
     const raw = Buffer.from(ref.slice(PREFIX.length), "base64url")
     // base64url decoding skips what it cannot read, so re-encode to refuse
@@ -108,16 +146,28 @@ export function resolveUserRef(ref: string): { userId: string; eventId: string |
     // The IV must be the one `roomHandle` would have chosen — SIV's check.
     if (!timingSafeEqual(iv, syntheticIv(mac, plaintext))) return null
 
-    const hex = plaintext.subarray(0, EVENT_BYTES).toString("hex")
-    const userId = plaintext.subarray(EVENT_BYTES).toString("utf8")
+    const id = uuidOf(plaintext.subarray(0, EVENT_BYTES).toString("hex"))
+    const kind = KIND_OF_BYTE.get(plaintext[EVENT_BYTES])
+    const userId = plaintext.subarray(kind ? EVENT_BYTES + 1 : EVENT_BYTES).toString("utf8")
     if (!userId) return null
-    return {
-      userId,
-      eventId: `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`,
-    }
+    return { userId, scope: kind ? { kind, groupId: id } : id }
   } catch {
     return null
   }
+}
+
+/**
+ * The person behind a ref: a handle is decrypted and verified; anything else
+ * is a raw id (the contract before handles, still accepted). Null for a handle
+ * that does not verify — malformed, truncated, tampered or from another key —
+ * and for one from a room that is not an event's, which names nobody outside
+ * its own room (see the note at the top).
+ */
+export function resolveUserRef(ref: string): { userId: string; eventId: string | null } | null {
+  if (!isRoomHandle(ref)) return { userId: ref, eventId: null }
+  const opened = openHandle(ref)
+  if (!opened || typeof opened.scope !== "string") return null
+  return { userId: opened.userId, eventId: opened.scope }
 }
 
 /**
@@ -134,11 +184,12 @@ export function userIdFromRef(ref: string): string {
 }
 
 /**
- * Who a room-only action — a like, a wave — may name: somebody this event's
- * room showed the caller, by the handle it showed, or the caller by their own
- * id (the roster lists you as yourself, and "you cannot wave at yourself" is
- * the honest answer to that). Null for anything else — a raw id, another
- * event's handle, a forged one — which the route answers as an unknown person.
+ * Who a room-only action — a like, a wave — may name: somebody this room
+ * showed the caller, by the handle it showed, or the caller by their own id
+ * (the roster lists you as yourself, and "you cannot wave at yourself" is the
+ * honest answer to that). Null for anything else — a raw id, another room's
+ * handle of any kind, a forged one — which the route answers as an unknown
+ * person. An event route passes its event id as the scope.
  *
  * Stricter than `userIdFromRef` because these two answer from the room's live
  * state. A raw id there asked "is this account checked in here right now", and
@@ -147,19 +198,19 @@ export function userIdFromRef(ref: string): string {
  * and the one refused as too soon was them. Every legitimate caller holds a
  * handle for these, because the roster and the deck are all that name anyone.
  */
-export function roomMemberFromRef(eventId: string, ref: string, viewerId: string): string | null {
+export function roomMemberFromRef(scope: RoomScope, ref: string, viewerId: string): string | null {
   if (ref === viewerId) return viewerId
-  const resolved = resolveUserRef(ref)
-  if (!resolved?.eventId || resolved.eventId !== eventId.toLowerCase()) return null
-  return resolved.userId
+  const opened = isRoomHandle(ref) ? openHandle(ref) : null
+  if (!opened || !sameScope(opened.scope, scope)) return null
+  return opened.userId
 }
 
 /**
- * One person's id as `viewerId` should see it in `eventId`'s room: their own
+ * One person's id as `viewerId` should see it in `scope`'s room: their own
  * stays real, everyone else's is the handle.
  */
-export function idForViewer(viewerId: string, eventId: string, userId: string): string {
-  return userId === viewerId ? userId : roomHandle(eventId, userId)
+export function idForViewer(viewerId: string, scope: RoomScope, userId: string): string {
+  return userId === viewerId ? userId : roomHandle(scope, userId)
 }
 
 /**

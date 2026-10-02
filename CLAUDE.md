@@ -128,6 +128,8 @@ Historical note, because this paragraph used to say otherwise: `canManageEvent` 
 
 `lib/socket-server.ts` initializes Socket.io on the shared HTTP server. Rooms are scoped per event/conversation. Handles group chat (`chat_groups`/`chat_messages`), private DMs (`private_conversations`/`private_messages`), typing indicators, check-in/check-out, and presence. See `docs/SOCKET_EVENTS.md` for the event catalog and `docs/chat-moderation.md` / `docs/client-chat-moderation-guide.md` for how moderation integrates with the socket flow from the client's perspective.
 
+**A chat room has a kind** (`chat_groups.kind`: `event`, `board_post`, and `crew` / `blend` from step 8) and one owner of that kind. Who may enter — socket join, every `/chat/groups/:id` read and write, typing — is `lib/room-kind.ts` (`roomOwnerDenial`, `roomReadDenialFor`, `mayWriteToRoomFor`): an event's room is today's rule unchanged; any other asks its owner, and a member row alone is never enough. A room's handles are minted in `roomScope(room)` — its event for an event's room (unchanged for installed clients), its own id and kind otherwise — so a handle never resolves in another room. A room that is not an event's is re-asked on every delivery, and a writer that closes its owner empties it (`lib/room-close.ts`). `board_post_id` is ON DELETE RESTRICT: a post with a room is never deleted, only taken off the board. A new reader of `chat_group.event` must decide what it does for a room with none: `__tests__/chat-group-event-readers.test.ts` counts them.
+
 ### Mobile API conventions
 
 Mobile-facing routes live under `app/api/mobile/*` and follow a consistent shape: JWT auth via `lib/mobile-auth.ts`, responses normalized through `lib/api-response.ts`, pagination via `lib/pagination.ts`. OpenAPI spec generation lives in `lib/openapi/`; served at `app/api/docs` and `app/api-docs` (Swagger UI). When adding or changing a mobile endpoint, update the OpenAPI schema and `docs/API.md` together — both are checked into the repo and expected to stay in sync with actual route behavior.
@@ -151,7 +153,7 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while seven exist in
+express a CHECK constraint, so `db push` creates none — while eight exist in
 migration SQL and therefore in every deployed environment:
 
 | Constraint | What it enforces |
@@ -163,6 +165,7 @@ migration SQL and therefore in every deployed environment:
 | `venues_day_reset_hour_range` | `day_reset_hour BETWEEN 0 AND 23` — when a venue's day starts (venue days) |
 | `venues_timezone_known` | `venues.timezone` has the shape of an IANA name (`Area/Location`, or `UTC`) — whether it exists is the app's check |
 | `events_venue_day_shape` | a venue day has its venue, is `unlisted` and has no `organizer_org_id` — a hard delete of a venue with days is refused rather than orphaning them, and no org-scoped reader can reach one |
+| `chat_groups_one_owner` | a room has exactly the one owner its `kind` names: `event` → `event_id` only, `board_post` → `board_post_id` only. No arm for `crew` / `blend` until step 8 adds their owner columns, so no such room can be written. Who may enter is `lib/room-kind.ts` |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per

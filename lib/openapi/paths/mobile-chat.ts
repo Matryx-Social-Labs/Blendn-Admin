@@ -61,7 +61,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups",
   tags: ["Mobile Chat"],
   summary: "List chat groups",
-  description: "List all chat groups the user is a member of, with last message and unread count.",
+  description: "List the event rooms the user is a member of, with last message and unread count. Rooms of other kinds (a board post's; a crew's or Blend's later) are not listed here, so every row keeps its `event`.",
   security: bearerAuth,
   request: {
     query: z.object({
@@ -132,7 +132,7 @@ const MuteResultSchema = z.object({
   mute: z.object({ muted: z.boolean(), until: z.string().datetime().nullable() }),
 })
 const ROOM_404 =
-  "404 `NOT_FOUND` for a malformed id, an unknown room, a draft or deleted event's room, or a room you have no membership in — one answer for all, so this cannot be used to learn which rooms exist. "
+  "404 `NOT_FOUND` for a malformed id, an unknown room, a draft or deleted event's room, a room whose owner does not admit you (a room of any kind — `chat_groups.kind`), or a room you have no membership in — one answer for all, so this cannot be used to learn which rooms exist. "
 
 // POST + DELETE /api/mobile/chat/groups/{chatGroupId}/leave
 registry.registerPath({
@@ -224,7 +224,7 @@ registry.registerPath({
   description:
     "For what no single message shows — a pile-on, a room gone hostile. Same body as the other reports. Members only, any status: somebody who left or was " +
     "banned may need this most. A room whose event was taken down is still reportable. Lands in the admin reports queue as \"Room\". " +
-    "404 `NOT_FOUND` for a malformed id, an unknown room, or a room you were never in.",
+    "404 `NOT_FOUND` for a malformed id, an unknown room, a room you were never in, or a room that is not an event's (a report is filed against the room's event; report its messages instead).",
   security: bearerAuth,
   request: {
     params: RoomParams,
@@ -248,7 +248,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/participants",
   tags: ["Mobile Chat"],
   summary: "List group participants",
-  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
+  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies. In a room that is not an event's (a board post's), only the people its owner admits are listed.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),

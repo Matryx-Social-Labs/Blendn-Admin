@@ -78,7 +78,11 @@ import { resetMemoryStore } from "@/lib/rate-limit-store"
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 
 /** An event's room: `last_allowed_at` is read only in a venue day's (`liveInVenueDay`). */
-const eventRoom = { last_allowed_at: null, chat_group: { event: { kind: "event" } } }
+// The room's door reads its kind and owner too (step 7): an event room, published.
+const eventRoom = {
+  last_allowed_at: null,
+  chat_group: { kind: "event", event: { kind: "event", status: "published", deleted_at: null }, board_post: null },
+}
 
 beforeEach(() => {
   mockSent.length = 0
@@ -304,7 +308,7 @@ describe("a room pushes replies, and only to the person replied to", () => {
   const send = (parentId: string | null, senderId = "sender") =>
     deliverToRoom({
       chatGroupId: "g1",
-      eventId: "e1",
+      scope: "e1",
       groupName: "Friday at Toit",
       senderId,
       senderAnonName: "Cosmic Panda",
@@ -359,7 +363,7 @@ describe("a room pushes replies, and only to the person replied to", () => {
 
   it("never reaches an author whose Go Live at the venue has ended, and does while it is open", async () => {
     // A venue day's room is the people live in it (`liveInVenueDay`, F6).
-    const venueDay = (until: number) => ({ status: "active", last_allowed_at: new Date(until), chat_group: { event: { kind: "venue_day" } } })
+    const venueDay = (until: number) => ({ status: "active", last_allowed_at: new Date(until), chat_group: { kind: "event", event: { kind: "venue_day", status: "published", deleted_at: null }, board_post: null } })
     membershipOf.mockResolvedValue(venueDay(Date.now() - 60_000))
     await send("p1")
     expect(mockSent).toHaveLength(0)
